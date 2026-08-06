@@ -3,7 +3,6 @@ package abuse
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
@@ -26,6 +25,14 @@ import (
 //
 // Built on the proven Redis fixed-window limiter (same infra as throughput +
 // velocity); no new store. Everything is generic money amount accounting — no host concepts.
+//
+// or#903: these windows are a CACHE, never the once-only claim for a report.
+// The claim is the durable usage_events row every report writes (see
+// service.ReportWastedSpend); these counters are only advanced once that row
+// has been APPLIED. The guard therefore exposes grading (PayerGraceOverage)
+// separately from consumption (ConsumePayerGrace), and has no idempotency
+// primitive of its own — a Redis key is not a durable idempotency key
+// (DESIGN-RULINGS §4.23).
 type WastedSpendGuard struct {
 	lim *ratelimit.Limiter
 }
@@ -65,25 +72,16 @@ func invokerBase(merchant, payer, invoker, currency string) string {
 	return fmt.Sprintf("wa:%s:%s:%s:%s", merchant, payer, invoker, currency)
 }
 
-// ClaimReport records short-lived idempotency for a host-reported wasted-spend
-// event. The TTL should be the largest active wasted-spend window so retries do
-// not double-add hot counters while the report can affect enforcement.
-func (g *WastedSpendGuard) ClaimReport(ctx context.Context, merchant, payer, currency, source, sourceID string, ttl time.Duration) (bool, error) {
-	if !g.Enabled() {
-		return false, nil
-	}
-	source = strings.TrimSpace(source)
-	sourceID = strings.TrimSpace(sourceID)
-	if source == "" || sourceID == "" {
-		return false, fmt.Errorf("wasted-spend source and source_id required")
-	}
-	return g.lim.ClaimOnce(ctx, fmt.Sprintf("wasted:%s:%s:%s:%s:%s", merchant, payer, currency, source, sourceID), ttl)
-}
-
-// RecordPayerGrace records direct-payer wasted spend against payer grace windows
-// and returns the amount that exceeds the strictest remaining grace window. No
-// windows means no configured grace policy and no chargeable overage.
-func (g *WastedSpendGuard) RecordPayerGrace(ctx context.Context, merchant, payer, currency string, amount int64, windows []WastedWindow) (int64, error) {
+// PayerGraceOverage GRADES a direct-payer report against the payer's grace
+// windows WITHOUT mutating them: it returns the part of amount that exceeds the
+// strictest remaining window. No configured window means no grace policy and no
+// chargeable overage.
+//
+// or#903 split grading from recording. The caller must be able to compute the
+// chargeable number, commit it durably, and only then consume grace — because
+// the durable commit is what decides whether this report has been counted
+// before. Grading and consuming in one call made that ordering unexpressible.
+func (g *WastedSpendGuard) PayerGraceOverage(ctx context.Context, merchant, payer, currency string, amount int64, windows []WastedWindow) (int64, error) {
 	if !g.Enabled() || amount <= 0 || payer == "" {
 		return 0, nil
 	}
@@ -107,18 +105,30 @@ func (g *WastedSpendGuard) RecordPayerGrace(ctx context.Context, merchant, payer
 			hasWindow = true
 		}
 	}
+	if !hasWindow || amount <= freeRemaining {
+		return 0, nil
+	}
+	return amount - freeRemaining, nil
+}
+
+// ConsumePayerGrace adds a graded report's amount to every payer grace window.
+// Call it only after the report's durable record has been APPLIED (not
+// replayed): these counters are a cache, so they must be derived from the
+// durable decision rather than be the decision.
+func (g *WastedSpendGuard) ConsumePayerGrace(ctx context.Context, merchant, payer, currency string, amount int64, windows []WastedWindow) error {
+	if !g.Enabled() || amount <= 0 || payer == "" {
+		return nil
+	}
+	base := payerBase(merchant, payer, currency)
 	for _, w := range windows {
 		if w.Window <= 0 {
 			continue
 		}
 		if _, err := g.lim.AddWindowValue(ctx, base, w.Key, w.Window, amount); err != nil {
-			return 0, err
+			return err
 		}
 	}
-	if !hasWindow || amount <= freeRemaining {
-		return 0, nil
-	}
-	return amount - freeRemaining, nil
+	return nil
 }
 
 // RecordInvokerCutoff records delegated-invoker wasted spend against the flat

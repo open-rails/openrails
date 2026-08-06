@@ -45,9 +45,15 @@ type RecordUsageParams struct {
 // RecordUsage durably records a metered usage event AND debits the credit ledger
 // in ONE transaction (issue #289). Idempotent on
 // (merchant, payer, event_type, source, source_id): a replayed request returns the
-// existing event and never double-charges. Concurrency-safe: the balance row is
-// locked FOR UPDATE before the idempotency check, so two concurrent identical
-// records serialize and the second sees the first's event.
+// existing event with Replayed set and never double-charges, while a replay
+// carrying a CHANGED amount is refused (ErrIdempotencyKeyReused).
+// Concurrency-safe: the balance row is locked FOR UPDATE before the idempotency
+// check, so two concurrent identical records serialize and the second sees the
+// first's event.
+//
+// A zero Amount is a legitimate use: it records the event durably (metering
+// dimensions, and or#903's once-only claim for a report whose money outcome is
+// nothing) without touching the ledger.
 //
 // This is the DURABLE side. In FAST mode (#298) it runs write-behind, off the
 // per-request hot path; the synchronous admission decision is the Redis headroom
@@ -111,6 +117,10 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 					Field: "amount", Committed: ev.Amount, Retried: params.Amount,
 				}
 			}
+			// or#903: say so. A caller that must not repeat a NON-ledger side
+			// effect (a cache counter, a host notification) cannot tell an
+			// applied write from a replayed one without this.
+			ev.Replayed = true
 			return nil
 		}
 		if !errors.Is(gerr, pgx.ErrNoRows) {
@@ -185,6 +195,63 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			OccurredAt:       ev.OccurredAt,
 			CreatedAt:        ev.CreatedAt,
 		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return ev, nil
+}
+
+// FindUsageEvent returns the durable event already recorded at these
+// idempotency coordinates, or (nil, nil) when the key is unclaimed.
+//
+// or#903: this is how a caller asks "has my write already happened?" BEFORE
+// deciding what to write. It exists because some callers derive the amount they
+// are about to record from mutable state (wasted-spend grace), so re-deriving it
+// on a replay produces a different number and RecordUsage's changed-amount
+// refusal would fire on an IDENTICAL retry. The read is not a lock — RecordUsage
+// remains the atomic decision — it only lets the caller stop before it grades.
+func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.CustomerID, currency, eventType string, key IdempotencyKey) (*models.UsageEvent, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	eventType = strings.TrimSpace(eventType)
+	if eventType == "" {
+		return nil, fmt.Errorf("event_type required")
+	}
+	if err := key.RequireOperation(UsageOperation(eventType)); err != nil {
+		return nil, err
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
+		return nil, err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var ev *models.UsageEvent
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		row, gerr := s.db.Gen(ctx).GetUsageEventByCoords(ctx, gen.GetUsageEventByCoordsParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(),
+			Currency:  cur,
+			EventType: eventType, Source: key.Source(), SourceID: key.SourceID(),
+		})
+		if errors.Is(gerr, pgx.ErrNoRows) {
+			return nil
+		}
+		if gerr != nil {
+			return gerr
+		}
+		ev, gerr = usageEventFromGen(row)
+		if gerr != nil {
+			return gerr
+		}
+		ev.Replayed = true
+		return nil
 	})
 	if err != nil {
 		return nil, err
