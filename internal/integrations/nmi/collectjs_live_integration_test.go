@@ -108,7 +108,7 @@ waitToken:
 	// gateway — the exact production vault-creation wire shape.
 	client, err := NewClient("live-collectjs", &config.NMIProviderSettings{SecurityKey: securityKey}, true)
 	require.NoError(t, err)
-	require.Equal(t, DefaultV5BaseURL, client.V5BaseURL, "must hit the real v5 gateway, not a stub")
+	require.Equal(t, SandboxV5BaseURL, client.V5BaseURL, "must hit the real sandbox v5 gateway, not a stub")
 
 	created, err := client.CreateCustomerVault(ctx, CreateCustomerVaultData{
 		PaymentToken: token,

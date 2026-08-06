@@ -98,6 +98,15 @@ type CheckoutRailOption struct {
 	Mode     string
 }
 
+// CheckoutCustomerIdentity is the host-resolved customer identity used by
+// checkout rails that require verified account attributes in addition to the
+// stable customer ID.
+type CheckoutCustomerIdentity struct {
+	ID            string
+	VerifiedEmail string
+	Username      string
+}
+
 // CreateCheckoutSessionRequest specifies checkout session creation parameters.
 type CreateCheckoutSessionRequest struct {
 	PriceID        string

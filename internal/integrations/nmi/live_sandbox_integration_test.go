@@ -33,7 +33,7 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 
 	client, err := NewClient("live-sandbox", &config.NMIProviderSettings{SecurityKey: key}, true)
 	require.NoError(t, err)
-	require.Equal(t, DefaultV5BaseURL, client.V5BaseURL, "must hit the real v5 gateway, not a stub")
+	require.Equal(t, SandboxV5BaseURL, client.V5BaseURL, "must hit the real sandbox v5 gateway, not a stub")
 
 	runID := fmt.Sprintf("%d", time.Now().UnixNano())
 
@@ -181,7 +181,9 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 	require.NotEmpty(t, entry2)
 
 	// Billing-TARGETED sale (classic lane) must charge the SECOND card.
-	targetAmount := moneyutil.Cents(110 + (time.Now().UnixNano()/13)%80)
+	// Keep this amount in a disjoint range from amountCents above. NMI's
+	// duplicate guard keys on card + amount even when the order id differs.
+	targetAmount := moneyutil.Cents(210 + (time.Now().UnixNano()/13)%80)
 	targeted, err := client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID:  vaultID,
 		BillingID:        entry2,

@@ -27,7 +27,10 @@ import (
 // Auth: the classic security key IS the v5 credential ("no need to generate new
 // API keys"), sent as the ENTIRE Authorization header value — no Bearer/scheme.
 
-const DefaultV5BaseURL = "https://secure.nmi.com/api/v5"
+const (
+	DefaultV5BaseURL = "https://secure.nmi.com/api/v5"
+	SandboxV5BaseURL = "https://sandbox.nmi.com/api/v5"
+)
 
 // ErrV5NotFound marks a v5 404 — the resource does not exist at NMI.
 var ErrV5NotFound = errors.New("nmi: resource not found")
