@@ -133,6 +133,27 @@ type schemaIndex struct {
 	// counts as its first argument, so 0017/0020's total-index technique is
 	// recognised as scoping by that column.
 	cols []string
+	// pos is the declaration's byte offset in the concatenated schema — i.e.
+	// its position in apply order. RENAME/DROP are replayed against it so a
+	// name can be reused by a later migration; see indexEvent.
+	pos int
+}
+
+// indexEvent is a RENAME or a DROP of an index, with the file-order position it
+// happens at. These are replayed IN ORDER against declarations that PRECEDE
+// them, which is the one place this derivation cannot be set-based.
+//
+// or#902 found why: correcting a bad index means dropping it and recreating it
+// under the same name in a later migration. A set-based drop matches on name
+// alone, so it deletes the recreation too and the guard sees NO index — the
+// unique-scope check then passes vacuously on the very edit it exists to
+// review, and the RLS index-backing check fails on an index that is really
+// there. Ordering by position makes "drop the old shape, create the corrected
+// one" mean what it says.
+type indexEvent struct {
+	pos      int
+	drop     bool
+	from, to string
 }
 
 // scopedBy reports whether the index constrains uniqueness within col.
@@ -203,7 +224,16 @@ func leadingColumn(colList string) string {
 	return ""
 }
 
-func parseIndex(name, colsAndTail string, unique bool) schemaIndex {
+// group returns submatch n of a FindAllStringSubmatchIndex result, or "" when
+// that group did not participate (reInlineKey's CONSTRAINT name is optional).
+func group(s string, m []int, n int) string {
+	if 2*n+1 >= len(m) || m[2*n] < 0 {
+		return ""
+	}
+	return s[m[2*n]:m[2*n+1]]
+}
+
+func parseIndex(name, colsAndTail string, unique bool, pos int) schemaIndex {
 	cols, tail := splitTopLevel(colsAndTail)
 	names := make([]string, 0, len(cols))
 	for _, c := range cols {
@@ -217,6 +247,7 @@ func parseIndex(name, colsAndTail string, unique bool) schemaIndex {
 		partial: strings.Contains(strings.ToUpper(tail), "WHERE"),
 		unique:  unique,
 		cols:    names,
+		pos:     pos,
 	}
 }
 
@@ -271,37 +302,52 @@ func deriveSchemaTables(t *testing.T, schema string) schemaTables {
 		rlsExemptMarked: map[string]bool{},
 		indexes:         map[string][]schemaIndex{},
 	}
-	for _, m := range reCreateTable.FindAllStringSubmatch(schema, -1) {
-		s.blocks[m[1]] = m[2]
-		if reMerchantIDCol.MatchString(m[2]) {
-			s.merchantScoped[m[1]] = true
+	for _, m := range reCreateTable.FindAllStringSubmatchIndex(schema, -1) {
+		tbl, body := schema[m[2]:m[3]], schema[m[4]:m[5]]
+		s.blocks[tbl] = body
+		if reMerchantIDCol.MatchString(body) {
+			s.merchantScoped[tbl] = true
 		}
-		for _, k := range reInlineKey.FindAllStringSubmatch(m[2], -1) {
-			s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(k[1], k[2], isUniqueDecl(k[0])))
-		}
-	}
-	for _, m := range reCreateIndex.FindAllStringSubmatch(schema, -1) {
-		s.indexes[m[2]] = append(s.indexes[m[2]], parseIndex(m[1], m[3], isUniqueDecl(m[0][:strings.Index(strings.ToUpper(m[0]), "INDEX")])))
-	}
-	for _, m := range reAlterKey.FindAllStringSubmatch(schema, -1) {
-		s.indexes[m[1]] = append(s.indexes[m[1]], parseIndex(m[2], m[3], isUniqueDecl(m[0])))
-	}
-	// Renames before drops: 0003's psps hardcut renames indexes that a later
-	// migration drops by their NEW name.
-	for _, m := range reRenameIndex.FindAllStringSubmatch(schema, -1) {
-		for _, ixs := range s.indexes {
-			for i := range ixs {
-				if ixs[i].name == m[1] {
-					ixs[i].name = m[2]
-				}
-			}
+		for _, k := range reInlineKey.FindAllStringSubmatchIndex(body, -1) {
+			// Offsets are body-relative; rebase onto the whole schema so an
+			// in-body key sorts against CREATE/DROP INDEX statements correctly.
+			s.indexes[tbl] = append(s.indexes[tbl],
+				parseIndex(group(body, k, 1), group(body, k, 2), isUniqueDecl(group(body, k, 0)), m[4]+k[0]))
 		}
 	}
-	for _, m := range reDropIndex.FindAllStringSubmatch(schema, -1) {
+	for _, m := range reCreateIndex.FindAllStringSubmatchIndex(schema, -1) {
+		decl := group(schema, m, 0)
+		s.indexes[group(schema, m, 2)] = append(s.indexes[group(schema, m, 2)],
+			parseIndex(group(schema, m, 1), group(schema, m, 3),
+				isUniqueDecl(decl[:strings.Index(strings.ToUpper(decl), "INDEX")]), m[0]))
+	}
+	for _, m := range reAlterKey.FindAllStringSubmatchIndex(schema, -1) {
+		s.indexes[group(schema, m, 1)] = append(s.indexes[group(schema, m, 1)],
+			parseIndex(group(schema, m, 2), group(schema, m, 3), isUniqueDecl(group(schema, m, 0)), m[0]))
+	}
+	// RENAME/DROP replayed in FILE ORDER against the declarations before them.
+	// A rename retains its declaration's position, so a later drop by the NEW
+	// name still finds it — which is what the psps hardcut needed — while a
+	// migration that drops an index and recreates it under the same name keeps
+	// the recreation (or#902; see indexEvent).
+	var events []indexEvent
+	for _, m := range reRenameIndex.FindAllStringSubmatchIndex(schema, -1) {
+		events = append(events, indexEvent{pos: m[0], from: group(schema, m, 1), to: group(schema, m, 2)})
+	}
+	for _, m := range reDropIndex.FindAllStringSubmatchIndex(schema, -1) {
+		events = append(events, indexEvent{pos: m[0], drop: true, from: group(schema, m, 1)})
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].pos < events[j].pos })
+	for _, ev := range events {
 		for tbl, ixs := range s.indexes {
 			kept := ixs[:0]
 			for _, ix := range ixs {
-				if ix.name != m[1] {
+				if ix.name != ev.from || ix.pos > ev.pos {
+					kept = append(kept, ix)
+					continue
+				}
+				if !ev.drop {
+					ix.name = ev.to
 					kept = append(kept, ix)
 				}
 			}
@@ -671,6 +717,86 @@ func TestUniqueIndexesAreMerchantScoped(t *testing.T) {
 			"so one merchant can block another's insert and squat its provider reference (GAP-10 / SEC-24). "+
 			"Lead the index with merchant_id (COALESCE a nullable PSP dimension to the nil uuid, as 0017/0020 do), "+
 			"or add it to CrossMerchantUniqueExemptions with a reason.", v)
+	}
+}
+
+// TestIndexLifecycleIsReplayedInFileOrder pins the derivation's one ordered
+// step. Everything else here is set-based on purpose; index RENAME/DROP cannot
+// be, and 0003 is the migration that shows why: correcting a bad index means
+// dropping it and recreating it under the SAME name in a later file.
+//
+// A name-only drop pass deletes the recreation too. That is not a cosmetic
+// miss — it is a guard reporting a pass it did not earn, because
+// TestUniqueIndexesAreMerchantScoped only ever sees indexes that exist, so an
+// index it cannot see is an index it cannot fault.
+func TestIndexLifecycleIsReplayedInFileOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		schema string
+		want   []string // "indexname:col,col" per surviving index on `widgets`
+	}{
+		{
+			name: "drop then recreate under the same name keeps the recreation",
+			schema: `CREATE TABLE openrails.widgets (
+    id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    code text NOT NULL
+);
+CREATE UNIQUE INDEX uq_widgets_code ON openrails.widgets USING btree (code);
+DROP INDEX openrails.uq_widgets_code;
+CREATE UNIQUE INDEX uq_widgets_code ON openrails.widgets USING btree (merchant_id, code);
+`,
+			want: []string{"uq_widgets_code:merchant_id,code"},
+		},
+		{
+			name: "a plain drop still removes the index",
+			schema: `CREATE TABLE openrails.widgets (
+    id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    code text NOT NULL
+);
+CREATE UNIQUE INDEX uq_widgets_code ON openrails.widgets USING btree (code);
+DROP INDEX openrails.uq_widgets_code;
+`,
+			want: nil,
+		},
+		{
+			name: "a drop by the NEW name still finds a renamed index",
+			schema: `CREATE TABLE openrails.widgets (
+    id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    code text NOT NULL
+);
+CREATE UNIQUE INDEX uq_widgets_old ON openrails.widgets USING btree (code);
+ALTER INDEX openrails.uq_widgets_old RENAME TO uq_widgets_new;
+DROP INDEX openrails.uq_widgets_new;
+`,
+			want: nil,
+		},
+		{
+			name: "a drop BEFORE the declaration does not reach forward",
+			schema: `CREATE TABLE openrails.widgets (
+    id uuid NOT NULL,
+    merchant_id uuid NOT NULL,
+    code text NOT NULL
+);
+DROP INDEX IF EXISTS openrails.uq_widgets_code;
+CREATE UNIQUE INDEX uq_widgets_code ON openrails.widgets USING btree (merchant_id, code);
+`,
+			want: []string{"uq_widgets_code:merchant_id,code"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := deriveSchemaTables(t, tc.schema)
+			var got []string
+			for _, ix := range s.indexes["widgets"] {
+				got = append(got, ix.name+":"+strings.Join(ix.cols, ","))
+			}
+			sort.Strings(got)
+			if strings.Join(got, " | ") != strings.Join(tc.want, " | ") {
+				t.Fatalf("index inventory = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
