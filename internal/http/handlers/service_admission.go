@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -124,6 +126,16 @@ func serviceAdmitBatchVerdicts(
 		}
 		res, err := admit(ctx, admitInputFromRequest(item, *payer))
 		if err != nil {
+			// th#1627: the wire string stays stable and non-leaky (it reaches the
+			// host's tenant boundary), but the CAUSE must not be discarded — a 500
+			// whose only content is the constant "admission check failed" cost a
+			// cross-stack bisect to attribute. Operators read this log.
+			log.WithError(err).WithFields(log.Fields{
+				"customer_id": item.CustomerID,
+				"invoker":     item.Invoker,
+				"request_id":  item.RequestID,
+				"source":      item.Source,
+			}).Error("admission check failed")
 			out[i] = serviceAdmitVerdict{Status: http.StatusInternalServerError, Error: "admission check failed"}
 			continue
 		}
@@ -156,7 +168,7 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.InternalError("billing service unavailable", err)
 		return
 	}
 	verdicts := serviceAdmitBatchVerdicts(
@@ -192,12 +204,12 @@ func ServiceGetTrustLevel(r *httprequest.Request) {
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.InternalError("billing service unavailable", err)
 		return
 	}
 	trustLevel, err := svc.GetTrustLevel(r.Request.Context(), *payer, currency)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "trust level lookup failed")
+		r.InternalError("trust level lookup failed", err)
 		return
 	}
 	r.SuccessJSON(map[string]any{"currency": currency, "trust_level": trustLevel})
@@ -245,7 +257,7 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.InternalError("billing service unavailable", err)
 		return
 	}
 	res, err := svc.ReportWastedSpend(r.Request.Context(), billingservice.WastedSpendInput{
@@ -262,7 +274,7 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 		if serviceIdempotencyConflict(r, err) {
 			return
 		}
-		r.ErrorJSON(http.StatusInternalServerError, "report wasted spend failed")
+		r.InternalError("report wasted spend failed", err)
 		return
 	}
 	r.JSON(http.StatusOK, res)
@@ -301,7 +313,7 @@ func ServiceSetCreditLimit(r *httprequest.Request) {
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.InternalError("billing service unavailable", err)
 		return
 	}
 	if err := svc.SetCreditLimit(r.Request.Context(), *payer, currency, req.CreditLimitAmount); err != nil {
@@ -325,7 +337,7 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.InternalError("billing service unavailable", err)
 		return
 	}
 	currency, ok := serviceRequiredCurrency(r, r.Query("currency"))
@@ -399,22 +411,22 @@ type serviceMerchantProfileConfiguration struct {
 func ServiceGetMerchantSettings(r *httprequest.Request) {
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.InternalError("billing service unavailable", err)
 		return
 	}
 	cfg, _, err := svc.GetMerchantConfiguration(r.Request.Context())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		r.InternalError("get merchant settings failed", err)
 		return
 	}
 	policies, err := svc.ListBillingPolicies(r.Request.Context())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		r.InternalError("get merchant settings failed", err)
 		return
 	}
 	bindings, err := svc.ListBillingPolicyBindings(r.Request.Context())
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "get merchant settings failed")
+		r.InternalError("get merchant settings failed", err)
 		return
 	}
 	r.SuccessJSON(serviceMerchantSettingsRequest{
@@ -447,7 +459,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 	}
 	svc, err := billingservice.New(r.State)
 	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		r.InternalError("billing service unavailable", err)
 		return
 	}
 
@@ -491,7 +503,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		CheckoutRouting:                    req.CheckoutRouting,
 		DelegatedInvokerWastedSpendWindows: windows,
 	}); err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "set merchant settings failed")
+		r.InternalError("set merchant settings failed", err)
 		return
 	}
 
@@ -505,7 +517,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 			return
 		}
 		if err := svc.SetTrustLevelSchedule(r.Request.Context(), billingidentity.CustomerID{}, currency, schedule.Schedule); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "set trust level schedule failed")
+			r.InternalError("set trust level schedule failed", err)
 			return
 		}
 	}
@@ -513,7 +525,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 	// the bindings FK refuses a name that does not exist yet.
 	for _, policy := range req.BillingPolicies {
 		if err := svc.SetBillingPolicy(r.Request.Context(), policy); err != nil {
-			r.ErrorJSON(http.StatusInternalServerError, "set billing policy failed")
+			r.InternalError("set billing policy failed", err)
 			return
 		}
 	}
@@ -523,7 +535,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 				r.ErrorJSON(http.StatusBadRequest, err.Error())
 				return
 			}
-			r.ErrorJSON(http.StatusInternalServerError, "bind billing policy failed")
+			r.InternalError("bind billing policy failed", err)
 			return
 		}
 	}

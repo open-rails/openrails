@@ -118,6 +118,32 @@ func (e *OrphanedMigrationsError) Error() string {
 		e.Schema, strings.Join(e.Orphaned, ", "), strings.Join(e.Embedded, ", "))
 }
 
+// AssertNoOrphanedPostgresMigrations is the drift fence at the seam EVERY
+// runtime crosses — not just the one the CLI takes.
+//
+// or#901 installed the check inside RunPostgres, which only the standalone
+// binary calls. An embedded host applies the migratekit chain itself
+// (tensorhub's runOpenRailsMigrations) and relies on the engine's own
+// init-time validation, so the fence protected exactly the deployment that
+// was never frozen. th#1627 is the bill: tensorhub's dev stack sat on the
+// pre-squash schema, `billing_policies` did not exist, and every billed
+// admission answered 500 while both ValidatePostgresMigrations and
+// ApplyMigrations reported success.
+//
+// sqlDB is any handle on the target database; schema is the effective
+// OpenRails schema (cfg.DB.SchemaName()).
+func AssertNoOrphanedPostgresMigrations(ctx context.Context, sqlDB *sql.DB, schema string) error {
+	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
+	if err != nil {
+		return fmt.Errorf("openrails: load migrations: %w", err)
+	}
+	// Names are filename prefixes, so the schema rewrite (DDL text only) is
+	// irrelevant here — only WithSchema matters, since migratekit filters the
+	// ledger by it.
+	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(schema)
+	return assertNoOrphanedMigrations(ctx, m, schema, migrations)
+}
+
 // assertNoOrphanedMigrations refuses when the database records an applied
 // OpenRails migration that no longer exists in the embedded set.
 //

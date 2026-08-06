@@ -1,12 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
@@ -89,4 +91,39 @@ func TestAdmitInputFromRequest_UsesTrustLevel(t *testing.T) {
 
 	got := admitInputFromRequest(serviceAdmitRequest{TrustLevel: "trusted"}, payer)
 	require.Equal(t, "trusted", got.TrustLevel)
+}
+
+// TestServiceAdmitBatchVerdicts_LogsTheCause is th#1627's regression gate. The
+// verdict's wire string is a deliberate constant — it crosses into the host's
+// tenant-facing error — but the CAUSE must reach the operator log. It did not:
+// `403 credit_authorize_failed ... status=500 admission check failed` was the
+// ONLY signal a billed-invoke outage produced, so attributing it cost a bisect
+// across two standing stacks instead of one grep.
+func TestServiceAdmitBatchVerdicts_LogsTheCause(t *testing.T) {
+	cause := fmt.Errorf(`ERROR: relation "openrails.billing_policy_bindings" does not exist (SQLSTATE 42P01)`)
+
+	var buf bytes.Buffer
+	prevOut, prevLevel := log.StandardLogger().Out, log.GetLevel()
+	log.SetOutput(&buf)
+	log.SetLevel(log.ErrorLevel)
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetLevel(prevLevel) })
+
+	payer := uuid.NewString()
+	out := serviceAdmitBatchVerdicts(context.Background(),
+		[]serviceAdmitRequest{{CustomerID: payer, Invoker: "user:a", RequestID: "r1", Source: "tensorhub"}},
+		func(billingidentity.CustomerID) bool { return true },
+		func(context.Context, billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
+			return nil, cause
+		},
+	)
+
+	require.Equal(t, http.StatusInternalServerError, out[0].Status)
+	require.Equal(t, "admission check failed", out[0].Error, "the wire string stays stable and non-leaky")
+
+	logged := buf.String()
+	require.Contains(t, logged, "admission check failed")
+	// logrus escapes quotes in the text formatter, so match the payload, not the framing.
+	require.Contains(t, logged, "billing_policy_bindings", "the cause must reach the operator log")
+	require.Contains(t, logged, "42P01", "including the SQLSTATE that names the failure class")
+	require.Contains(t, logged, payer, "and be attributable to a payer")
 }

@@ -98,9 +98,15 @@ Recreating one:
 | Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
 | A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
 | A long-lived hand-rolled test pool | Drop `public.migrations` along with the schema — migratekit reads its ledger there, and a surviving ledger makes it *skip* re-applying the baseline. (The integration suite is unaffected: it creates a fresh per-run database every time.) |
+| An EMBEDDED host's database (one schema inside the host's DB) | `DROP SCHEMA openrails CASCADE` + `DELETE FROM public.migrations WHERE app = 'openrails'`, then restart the host so it re-applies the chain. |
 
-The symptom if you skip this is not a migration error — it is a schema that
-silently lacks whatever the squash folded in.
+You will not have to notice this yourself: the engine REFUSES to start when the
+ledger records migrations the build no longer carries (`OrphanedMigrationsError`,
+or#901/th#1627), on both the standalone `migrate up` path and the embedded
+runtime-init path. Before that fence existed the symptom was not a migration
+error but a schema that silently lacked whatever the squash folded in — th#1627
+was an embedded host answering 500 on every billed admission for hours while
+both of migratekit's checks reported success.
 
 ## Repo layout
 
