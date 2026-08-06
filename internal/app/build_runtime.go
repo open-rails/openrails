@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/pyth"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/alerting"
@@ -36,7 +37,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -44,6 +44,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -512,10 +513,23 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 	// Schema must mirror the apply step's WithSchema (#731): migratekit v1.2.0
 	// filters the ledger by schema, so a schema-less source stops matching rows
 	// applied via WithSchema.
+	//
+	// Never Fatal here: this runs inside embed.New, so os.Exit would take the
+	// HOST process down on a library precondition. Return the error and let the
+	// host refuse to boot with it.
 	if err := migratekit.ValidatePostgresMigrations(context.Background(), sqlDB,
 		migratekit.MigrationSource{App: config.MigratekitApp, FS: postgresmigrations.FS, Schema: cfg.DB.SchemaName()},
 	); err != nil {
-		log.WithError(err).Fatal("Postgres migrations validation failed")
+		log.WithError(err).Error("Postgres migrations validation failed")
+		return err
+	}
+
+	// th#1627/or#901: the CONVERSE check — a database recording migrations this
+	// build no longer carries. migratekit only asks "embedded ⊆ applied", which a
+	// re-squashed chain satisfies while applying nothing, freezing the schema at
+	// the old shape. This is the only migration seam an embedded host cannot skip.
+	if err := migrate.AssertNoOrphanedPostgresMigrations(context.Background(), sqlDB, cfg.DB.SchemaName()); err != nil {
+		log.WithError(err).Error("OpenRails migration drift: refusing to start")
 		return err
 	}
 

@@ -97,6 +97,20 @@ func (r *Request) ErrorJSON(code int, msg string) {
 	r.t.WriteJSON(code, api.SimpleErrorResponse(code, msg))
 }
 
+// InternalError answers 500 with a STABLE, non-leaky msg and logs the cause
+// verbatim against the request id.
+//
+// ErrorJSON(500, "...") drops whatever error the handler was holding, so an
+// internal failure reaches the operator as a bare constant. th#1627: three
+// boot-time `set billing policy failed` lines and a 500 on every billed
+// admission carried no cause at all, and attributing them cost a bisect across
+// two standing stacks. Every 500 that has an error in hand should use this.
+func (r *Request) InternalError(msg string, cause error) {
+	requestID := r.RequestID()
+	logrus.WithError(cause).WithField("request_id", requestID).Error(msg)
+	r.t.WriteJSON(http.StatusInternalServerError, api.SimpleErrorResponse(http.StatusInternalServerError, msg))
+}
+
 func (r *Request) APIError(err *api.APIError) {
 	requestID := r.RequestID()
 	err.WithRequestID(requestID)
