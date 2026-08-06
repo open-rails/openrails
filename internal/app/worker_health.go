@@ -35,14 +35,18 @@ func (r *Runtime) workerHealthRegistrations() *riverjobs.WorkerRegistrations {
 // healthTrackedWorker wraps an OpenRails worker so its health bookkeeping
 // travels with the worker itself rather than with whoever built the client.
 type healthTrackedWorker[T river.JobArgs] struct {
-	inner  river.Worker[T]
-	health rivertype.WorkerMiddleware
+	inner      river.Worker[T]
+	health     rivertype.WorkerMiddleware
+	structural rivertype.WorkerMiddleware
 }
 
+// Middleware order matters. `health` is OUTERMOST so its bookkeeping records the
+// error the queue actually acts on — i.e. the structural refusal, not the raw
+// driver error underneath it (or#901).
 func (w *healthTrackedWorker[T]) Middleware(job *rivertype.JobRow) []rivertype.WorkerMiddleware {
 	inner := w.inner.Middleware(job)
-	out := make([]rivertype.WorkerMiddleware, 0, len(inner)+1)
-	out = append(out, w.health)
+	out := make([]rivertype.WorkerMiddleware, 0, len(inner)+2)
+	out = append(out, w.health, w.structural)
 	return append(out, inner...)
 }
 
@@ -64,8 +68,9 @@ func addTrackedWorker[T river.JobArgs](r *Runtime, workers *river.Workers, worke
 	var args T
 	r.workerHealthRegistrations().NoteKind(args.Kind())
 	return river.AddWorkerSafely[T](workers, &healthTrackedWorker[T]{
-		inner:  worker,
-		health: riverjobs.NewWorkerHealthMiddleware(r.DB),
+		inner:      worker,
+		health:     riverjobs.NewWorkerHealthMiddleware(r.DB),
+		structural: riverjobs.NewStructuralFailureMiddleware(),
 	})
 }
 
