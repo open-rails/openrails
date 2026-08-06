@@ -44,17 +44,27 @@ import type {
 
 // --- Customers ---
 
-export const listCustomers = (q: string, limit: number, offset: number) =>
+export const listCustomers = (
+  q: string,
+  limit: number,
+  offset: number,
+  signal?: AbortSignal
+) =>
   api<ListEnvelope<CustomerSummary>>("/merchant/customers", {
     query: { q, limit, offset },
+    signal,
   })
 
-export const getCustomerProfile = (customerId: string) =>
-  api<CustomerBillingProfile>(`/merchant/customers/${customerId}`)
+export const getCustomerProfile = (customerId: string, signal?: AbortSignal) =>
+  api<CustomerBillingProfile>(`/merchant/customers/${customerId}`, { signal })
 
-export const getCustomerPaymentMethods = (customerId: string) =>
+export const getCustomerPaymentMethods = (
+  customerId: string,
+  signal?: AbortSignal
+) =>
   api<{ object: "list"; data: PaymentMethodResponse[] }>(
-    `/merchant/customers/${customerId}/payment-methods`
+    `/merchant/customers/${customerId}/payment-methods`,
+    { signal }
   )
 
 export const grantEntitlement = (
@@ -128,14 +138,16 @@ export interface SubscriptionFilters {
 export const listSubscriptions = (
   filters: SubscriptionFilters,
   limit: number,
-  offset: number
+  offset: number,
+  signal?: AbortSignal
 ) =>
   api<ListEnvelope<AdminSubscription>>("/merchant/subscriptions", {
     query: { ...filters, limit, offset },
+    signal,
   })
 
-export const getSubscription = (id: string) =>
-  api<AdminSubscription>(`/merchant/subscriptions/${id}`)
+export const getSubscription = (id: string, signal?: AbortSignal) =>
+  api<AdminSubscription>(`/merchant/subscriptions/${id}`, { signal })
 
 export const cancelSubscription = (
   id: string,
@@ -180,14 +192,16 @@ export interface PaymentFilters {
 export const listPayments = (
   filters: PaymentFilters,
   limit: number,
-  offset: number
+  offset: number,
+  signal?: AbortSignal
 ) =>
   api<ListEnvelope<PaymentObject>>("/merchant/payments", {
     query: { ...filters, limit, offset },
+    signal,
   })
 
-export const getPayment = (id: string) =>
-  api<PaymentObject>(`/merchant/payments/${id}`)
+export const getPayment = (id: string, signal?: AbortSignal) =>
+  api<PaymentObject>(`/merchant/payments/${id}`, { signal })
 
 export const refundPayment = (
   id: string,
@@ -209,14 +223,16 @@ export const REFUNDABLE_RAILS = ["nmi", "ccbill", "stripe"]
 export const listProducts = (
   limit: number,
   offset: number,
-  activeOnly?: boolean
+  activeOnly?: boolean,
+  signal?: AbortSignal
 ) =>
   api<ItemsEnvelope<CatalogProduct>>("/merchant/catalog/products", {
     query: { limit, offset, active_only: activeOnly },
+    signal,
   })
 
-export const getProduct = (id: string) =>
-  api<CatalogProduct>(`/merchant/catalog/products/${id}`)
+export const getProduct = (id: string, signal?: AbortSignal) =>
+  api<CatalogProduct>(`/merchant/catalog/products/${id}`, { signal })
 
 export interface ProductRequest {
   key: string
@@ -249,9 +265,10 @@ export const deactivateProduct = (id: string) =>
     method: "POST",
   })
 
-export const listPrices = (productId?: string) =>
+export const listPrices = (productId?: string, signal?: AbortSignal) =>
   api<ItemsEnvelope<CatalogPrice>>("/merchant/catalog/prices", {
     query: productId ? { product_id: productId } : { limit: 1000 },
+    signal,
   })
 
 export interface PriceRequest {
@@ -279,9 +296,10 @@ export const createPrice = (body: PriceRequest) =>
 // verify=true additionally performs a LIVE retrieve against every attached
 // provider and fills in sync_status/drift — a read, never a write, and slow
 // enough that it stays opt-in (or#812).
-export const getPrice = (id: string, verify = false) =>
+export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
   api<CatalogPrice>(`/merchant/catalog/prices/${id}`, {
     query: verify ? { verify: true } : undefined,
+    signal,
   })
 
 export const getPriceByKey = (key: string) =>
@@ -302,9 +320,10 @@ export const deactivatePrice = (id: string) =>
 // getPriceKeyHistory returns a price key's version chain (most-recent-first),
 // resolved server-side from the #774 pointer-movement log — the price
 // detail page's "version chain with dates" (#777).
-export const getPriceKeyHistory = (key: string) =>
+export const getPriceKeyHistory = (key: string, signal?: AbortSignal) =>
   api<ItemsEnvelope<PriceKeyHistoryEntry>>(
-    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}/history`
+    `/merchant/catalog/prices/by-key/${encodeURIComponent(key)}/history`,
+    { signal }
   )
 
 // --- Repricing / migration (#773 primitive, #777 console wizard) ---
@@ -334,9 +353,14 @@ export const repriceAllPriorVersions = (
 // listRepriceBatchesByKey finds a price key's bulk reprice operations
 // (most recent first) — the price page's pending-migration lookup, without
 // already knowing a batch id.
-export const listRepriceBatchesByKey = (priceKey: string, limit = 20) =>
+export const listRepriceBatchesByKey = (
+  priceKey: string,
+  limit = 20,
+  signal?: AbortSignal
+) =>
   api<ItemsEnvelope<RepriceBatch>>("/merchant/reprices/batches", {
     query: { price_key: priceKey, limit },
+    signal,
   })
 
 export interface RepriceFilters {
@@ -348,10 +372,12 @@ export interface RepriceFilters {
 export const listReprices = (
   filters: RepriceFilters,
   limit = 100,
-  offset = 0
+  offset = 0,
+  signal?: AbortSignal
 ) =>
   api<ItemsEnvelope<SubscriptionReprice>>("/merchant/reprices", {
     query: { ...filters, limit, offset },
+    signal,
   })
 
 export const cancelReprice = (id: string) =>
@@ -373,9 +399,14 @@ export const publishCatalog = (
     body: { catalog: manifest, ...opts },
   })
 
-export const listCatalogDrift = (limit: number, offset: number) =>
+export const listCatalogDrift = (
+  limit: number,
+  offset: number,
+  signal?: AbortSignal
+) =>
   api<ItemsEnvelope<CatalogDriftEvent>>("/merchant/catalog/drift", {
     query: { limit, offset },
+    signal,
   })
 
 export const refreshCatalogDrift = () =>
@@ -386,10 +417,12 @@ export const refreshCatalogDrift = () =>
 export const listFindings = (
   filters: { status?: string; severity?: string },
   limit: number,
-  offset: number
+  offset: number,
+  signal?: AbortSignal
 ) =>
   api<FindingsListResponse>("/merchant/findings", {
     query: { ...filters, limit, offset },
+    signal,
   })
 
 export const getFinding = (id: string) =>
@@ -405,27 +438,32 @@ export const resolveFinding = (
     { method: "POST", body: { outcome, notes } }
   )
 
-export const listRepairAlerts = (limit: number, offset: number) =>
+export const listRepairAlerts = (
+  limit: number,
+  offset: number,
+  signal?: AbortSignal
+) =>
   api<ListEnvelope<RepairAlert>>("/merchant/repair-alerts", {
     query: { limit, offset },
+    signal,
   })
 
-export const listWorkerHealth = () =>
-  api<WorkerHealth[]>("/merchant/worker-health")
+export const listWorkerHealth = (signal?: AbortSignal) =>
+  api<WorkerHealth[]>("/merchant/worker-health", { signal })
 
 // --- Settings ---
 
-export const getMerchantSettings = () =>
-  api<MerchantSettings>("/merchant/settings")
+export const getMerchantSettings = (signal?: AbortSignal) =>
+  api<MerchantSettings>("/merchant/settings", { signal })
 
 export const putMerchantSettings = (body: MerchantSettings) =>
   api<{ message: string }>("/merchant/settings", { method: "PUT", body })
 
-export const listPaymentProviders = () =>
+export const listPaymentProviders = (signal?: AbortSignal) =>
   api<{
     data: PaymentProviderConfig[]
     provider_definitions: PaymentProviderDefinition[]
-  }>("/merchant/payment-providers")
+  }>("/merchant/payment-providers", { signal })
 
 // #882: no `environment` — it is derived from the deployment's test_mode.
 export interface UpsertProviderRequest {
@@ -446,14 +484,18 @@ export const putPaymentProvider = (rail: string, body: UpsertProviderRequest) =>
 // dryRunCheckoutRouting (or#288) explains which PSP a checkout for this price
 // would land on and why each other candidate was passed over. Read-only: it
 // runs the production decision path without creating a session.
-export const dryRunCheckoutRouting = (body: {
-  price_id: string
-  country?: string
-  selector?: string
-}) =>
+export const dryRunCheckoutRouting = (
+  body: {
+    price_id: string
+    country?: string
+    selector?: string
+  },
+  signal?: AbortSignal
+) =>
   api<CheckoutRoutingDecision>("/merchant/payment-providers/routing/dry-run", {
     method: "POST",
     body,
+    signal,
   })
 
 export const deletePaymentProvider = (rail: string, environment?: string) =>
@@ -467,8 +509,8 @@ export const deletePaymentProvider = (rail: string, environment?: string) =>
 
 // --- API keys (#757) ---
 
-export const listApiKeys = () =>
-  api<{ data: MerchantAPIKey[] | null }>("/merchant/api-keys")
+export const listApiKeys = (signal?: AbortSignal) =>
+  api<{ data: MerchantAPIKey[] | null }>("/merchant/api-keys", { signal })
 
 export const createApiKey = (name: string, role: string) =>
   api<MintedAPIKey>("/merchant/api-keys", {
@@ -483,12 +525,13 @@ export const revokeApiKey = (id: string) =>
 
 // --- Team management (#760) ---
 
-export const listTeam = () =>
-  api<{ data: TeamMember[] | null }>("/merchant/team")
+export const listTeam = (signal?: AbortSignal) =>
+  api<{ data: TeamMember[] | null }>("/merchant/team", { signal })
 
-export const listTeamInvites = () =>
+export const listTeamInvites = (signal?: AbortSignal) =>
   api<{ data: TeamInvite[] | null; invites_enabled: boolean }>(
-    "/merchant/team/invites"
+    "/merchant/team/invites",
+    { signal }
   )
 
 export const inviteTeamMember = (email: string, role: string) =>
@@ -540,8 +583,8 @@ export const getTrustLevel = (customerId: string, currency: string) =>
 
 // listAlertTemplates fetches the in-code template registry (key, param schema,
 // defaults) the create/edit dialog renders its fields from.
-export const listAlertTemplates = () =>
-  api<{ data: AlertTemplateInfo[] }>("/merchant/alerts/templates")
+export const listAlertTemplates = (signal?: AbortSignal) =>
+  api<{ data: AlertTemplateInfo[] }>("/merchant/alerts/templates", { signal })
 
 // --- Alerting: rules (#736) ---
 
@@ -553,8 +596,8 @@ export interface AlertRuleRequest {
   enabled: boolean
 }
 
-export const listAlertRules = () =>
-  api<{ data: AlertRule[] | null }>("/merchant/alerts/rules")
+export const listAlertRules = (signal?: AbortSignal) =>
+  api<{ data: AlertRule[] | null }>("/merchant/alerts/rules", { signal })
 
 export const createAlertRule = (body: AlertRuleRequest) =>
   api<AlertRule>("/merchant/alerts/rules", { method: "POST", body })
@@ -584,8 +627,8 @@ export interface WebhookRequest {
   enabled?: boolean
 }
 
-export const listWebhooks = () =>
-  api<{ data: MerchantWebhook[] | null }>("/merchant/webhooks")
+export const listWebhooks = (signal?: AbortSignal) =>
+  api<{ data: MerchantWebhook[] | null }>("/merchant/webhooks", { signal })
 
 export const createWebhook = (body: WebhookRequest) =>
   api<MerchantWebhook>("/merchant/webhooks", { method: "POST", body })
@@ -597,9 +640,10 @@ export const deleteWebhook = (id: string) =>
 
 // --- Alerting: notifications (in_app store / header bell, #736) ---
 
-export const listNotifications = (unread?: boolean) =>
+export const listNotifications = (unread?: boolean, signal?: AbortSignal) =>
   api<{ data: MerchantNotification[] | null }>("/merchant/notifications", {
     query: unread !== undefined ? { unread } : undefined,
+    signal,
   })
 
 export const markNotificationRead = (id: string) =>
@@ -608,5 +652,5 @@ export const markNotificationRead = (id: string) =>
     body: {},
   })
 
-export const getUnreadCount = () =>
-  api<{ unread: number }>("/merchant/notifications/unread-count")
+export const getUnreadCount = (signal?: AbortSignal) =>
+  api<{ unread: number }>("/merchant/notifications/unread-count", { signal })

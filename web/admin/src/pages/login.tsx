@@ -2,6 +2,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Key02Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Navigate, useNavigate } from "react-router-dom"
+import { useMutation } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -15,6 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { useAuth } from "@/lib/auth"
+import { authMutations } from "@/lib/auth-mutations"
 
 export function LoginPage() {
   const { ready, bootError, me, capabilities, loginWithPassword, startOIDC } =
@@ -22,8 +24,12 @@ export function LoginPage() {
   const navigate = useNavigate()
   const [login, setLogin] = React.useState("")
   const [password, setPassword] = React.useState("")
-  const [error, setError] = React.useState<string>()
-  const [busy, setBusy] = React.useState(false)
+  const passwordLogin = useMutation(authMutations.login(loginWithPassword))
+  const error = passwordLogin.error
+    ? passwordLogin.error instanceof Error
+      ? passwordLogin.error.message
+      : String(passwordLogin.error)
+    : undefined
 
   if (!ready) {
     return (
@@ -41,18 +47,12 @@ export function LoginPage() {
   )
   const passwordEnabled = capabilities?.password?.login !== false
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = (e: React.FormEvent) => {
     e.preventDefault()
-    setBusy(true)
-    setError(undefined)
-    try {
-      await loginWithPassword(login, password)
-      navigate("/", { replace: true })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setBusy(false)
-    }
+    passwordLogin.mutate(
+      { login, password },
+      { onSuccess: () => navigate("/", { replace: true }) }
+    )
   }
 
   return (
@@ -67,7 +67,7 @@ export function LoginPage() {
         </CardHeader>
         <CardContent className="grid gap-4">
           {bootError && (
-            <p className="text-sm text-destructive">
+            <p className="text-sm text-destructive" role="alert">
               Console bootstrap failed: {bootError}
             </p>
           )}
@@ -94,10 +94,14 @@ export function LoginPage() {
                   required
                 />
               </div>
-              {error && <p className="text-sm text-destructive">{error}</p>}
-              <Button type="submit" disabled={busy}>
+              {error && (
+                <p className="text-sm text-destructive" role="alert">
+                  {error}
+                </p>
+              )}
+              <Button type="submit" disabled={passwordLogin.isPending}>
                 <HugeiconsIcon icon={Key02Icon} className="size-4" />
-                {busy ? "Signing in…" : "Sign in"}
+                {passwordLogin.isPending ? "Signing in…" : "Sign in"}
               </Button>
             </form>
           )}

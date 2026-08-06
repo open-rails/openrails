@@ -7,8 +7,11 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { toast } from "sonner"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
+import { FormFieldErrors } from "@/components/form-field-errors"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,12 +33,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import { createApiKey, listApiKeys, revokeApiKey } from "@/lib/api/endpoints"
 import type { MerchantAPIKey, MintedAPIKey } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 
 // Fixed merchant catalog roles (#567) a key can hold, least privilege first.
 // The API validates against the same catalog; these descriptions are the
@@ -67,10 +70,7 @@ const ROLES: { value: string; label: string; description: string }[] = [
 ]
 
 export function ApiKeysTab() {
-  const { data, loading, error, reload } = useApiData(() => listApiKeys(), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load API keys")
-  }, [error])
+  const { data, isPending: loading } = useQuery(adminQueries.apiKeys())
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
 
@@ -87,7 +87,7 @@ export function ApiKeysTab() {
               once.
             </p>
           </div>
-          <CreateKeyDialog onDone={reload} />
+          <CreateKeyDialog />
         </div>
         {keys.length === 0 ? (
           <p className="py-2 text-sm text-muted-foreground">
@@ -112,7 +112,7 @@ export function ApiKeysTab() {
             </TableHeader>
             <TableBody>
               {keys.map((k) => (
-                <KeyRow key={k.id} apiKey={k} onDone={reload} />
+                <KeyRow key={k.id} apiKey={k} />
               ))}
             </TableBody>
           </Table>
@@ -129,14 +129,10 @@ function keyStatus(k: MerchantAPIKey): "active" | "revoked" | "expired" {
   return "active"
 }
 
-function KeyRow({
-  apiKey,
-  onDone,
-}: {
-  apiKey: MerchantAPIKey
-  onDone: () => void
-}) {
+function KeyRow({ apiKey }: { apiKey: MerchantAPIKey }) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const queryClient = useQueryClient()
+  const revokeKey = useMutation(adminMutations.revokeApiKey(queryClient))
   const status = keyStatus(apiKey)
   return (
     <TableRow className={status !== "active" ? "opacity-60" : undefined}>
@@ -186,9 +182,8 @@ function KeyRow({
               actionLabel="Revoke key"
               onConfirm={async () => {
                 try {
-                  await revokeApiKey(apiKey.id)
+                  await revokeKey.mutateAsync(apiKey.id)
                   toast.success("API key revoked")
-                  onDone()
                 } catch (err) {
                   toastApiError(err, "Revoke API key")
                 }
@@ -201,18 +196,30 @@ function KeyRow({
   )
 }
 
-function CreateKeyDialog({ onDone }: { onDone: () => void }) {
+function CreateKeyDialog() {
   const [open, setOpen] = React.useState(false)
-  const [name, setName] = React.useState("")
-  const [role, setRole] = React.useState("viewer")
-  const [busy, setBusy] = React.useState(false)
   const [minted, setMinted] = React.useState<MintedAPIKey | null>(null)
+  const queryClient = useQueryClient()
+  const createKey = useMutation(adminMutations.createApiKey(queryClient))
+  const form = useForm({
+    defaultValues: { name: "", role: "viewer" },
+    onSubmit: async ({ value }) => {
+      try {
+        const created = await createKey.mutateAsync({
+          name: value.name.trim(),
+          role: value.role,
+        })
+        setMinted(created)
+      } catch (err) {
+        toastApiError(err, "Create API key")
+      }
+    },
+  })
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (!next) {
-      setName("")
-      setRole("viewer")
+      form.reset()
       setMinted(null)
     }
   }
@@ -235,60 +242,89 @@ function CreateKeyDialog({ onDone }: { onDone: () => void }) {
                 always mint another key with more authority later.
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="ak-name">Name</Label>
-                <Input
-                  id="ak-name"
-                  placeholder="e.g. metrics-agent"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void form.handleSubmit()
+              }}
+              className="grid gap-4"
+            >
+              <div className="grid gap-3">
+                <form.Field
+                  name="name"
+                  validators={{
+                    onChange: ({ value }) =>
+                      value.trim() ? undefined : "Enter a key name",
+                  }}
+                >
+                  {(field) => (
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="ak-name">Name</Label>
+                      <Input
+                        id="ak-name"
+                        placeholder="e.g. metrics-agent"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        aria-invalid={field.state.meta.errors.length > 0}
+                      />
+                      <FormFieldErrors errors={field.state.meta.errors} />
+                    </div>
+                  )}
+                </form.Field>
+                <form.Field name="role">
+                  {(field) => (
+                    <div className="grid gap-1.5">
+                      <Label>Role</Label>
+                      <div className="grid gap-2">
+                        {ROLES.map((role) => (
+                          <button
+                            key={role.value}
+                            type="button"
+                            onClick={() => field.handleChange(role.value)}
+                            aria-pressed={field.state.value === role.value}
+                            className={cn(
+                              "rounded-md border p-3 text-left transition-colors",
+                              field.state.value === role.value
+                                ? "border-primary bg-primary/5"
+                                : "hover:bg-muted/50"
+                            )}
+                          >
+                            <p className="text-sm font-medium">{role.label}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {role.description}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </form.Field>
               </div>
-              <div className="grid gap-1.5">
-                <Label>Role</Label>
-                <div className="grid gap-2">
-                  {ROLES.map((r) => (
-                    <button
-                      key={r.value}
-                      type="button"
-                      onClick={() => setRole(r.value)}
-                      aria-pressed={role === r.value}
-                      className={cn(
-                        "rounded-md border p-3 text-left transition-colors",
-                        role === r.value
-                          ? "border-primary bg-primary/5"
-                          : "hover:bg-muted/50"
-                      )}
-                    >
-                      <p className="text-sm font-medium">{r.label}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {r.description}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                disabled={busy || !name.trim()}
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    const created = await createApiKey(name.trim(), role)
-                    setMinted(created)
-                    onDone()
-                  } catch (err) {
-                    toastApiError(err, "Create API key")
-                  } finally {
-                    setBusy(false)
+              <DialogFooter>
+                <form.Subscribe
+                  selector={(state) =>
+                    [
+                      state.values.name,
+                      state.canSubmit,
+                      state.isSubmitting,
+                    ] as const
                   }
-                }}
-              >
-                {busy ? "Creating…" : "Create key"}
-              </Button>
-            </DialogFooter>
+                >
+                  {([name, canSubmit, isSubmitting]) => (
+                    <Button
+                      type="submit"
+                      disabled={!name.trim() || !canSubmit || isSubmitting}
+                    >
+                      {isSubmitting ? "Creating…" : "Create key"}
+                    </Button>
+                  )}
+                </form.Subscribe>
+              </DialogFooter>
+            </form>
           </>
         )}
       </DialogContent>

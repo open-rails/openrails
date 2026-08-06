@@ -3,6 +3,7 @@ import { ArrowLeft01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "@/components/fact-card"
 import { Badge } from "@/components/ui/badge"
@@ -16,20 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import {
-  cancelReprice,
-  getPrice,
-  getPriceKeyHistory,
-  getProduct,
-  listRepriceBatchesByKey,
-  listReprices,
-} from "@/lib/api/endpoints"
 import { formatDate, formatMicros, shortId } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 import { CheckoutReadinessCard, PSPLinksCard } from "@/pages/catalog/psp-links"
+import { adminQueries } from "@/lib/queries"
 
 // PriceDetailPage (#777): the version chain (from the #774 pointer-movement
 // log, with dates) and any pending scheduled migration (progress + cancel)
@@ -43,41 +37,19 @@ export function PriceDetailPage() {
   const [verify, setVerify] = React.useState(false)
   const {
     data: price,
-    loading,
-    error,
-    reload,
-  } = useApiData(() => getPrice(id, verify), [id, verify])
-  const { data: product } = useApiData(
-    () => (price ? getProduct(price.product_id) : Promise.resolve(null)),
-    [price?.product_id]
-  )
-  const { data: history, reload: reloadHistory } = useApiData(
-    () => (price ? getPriceKeyHistory(price.key) : Promise.resolve(null)),
-    [price?.key]
-  )
-  const { data: batches, reload: reloadBatches } = useApiData(
-    () =>
-      price ? listRepriceBatchesByKey(price.key, 5) : Promise.resolve(null),
-    [price?.key]
-  )
+    isPending: loading,
+    isFetching,
+    refetch: reload,
+  } = useQuery(adminQueries.price(id, { verify, errorAction: "Load price" }))
+  const { data: product } = useQuery(adminQueries.product(price?.product_id))
+  const { data: history } = useQuery(adminQueries.priceHistory(price?.key))
+  const { data: batches } = useQuery(adminQueries.repriceBatches(price?.key))
   const latestBatch = batches?.items?.[0]
-  const { data: batchReprices, reload: reloadBatchReprices } = useApiData(
-    () =>
-      latestBatch
-        ? listReprices({ reprice_batch_id: latestBatch.id }, 1000)
-        : Promise.resolve(null),
-    [latestBatch?.id]
+  const { data: batchReprices } = useQuery(
+    adminQueries.reprices(
+      latestBatch ? { reprice_batch_id: latestBatch.id } : undefined
+    )
   )
-
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load price")
-  }, [error])
-
-  const reloadAll = () => {
-    reload()
-    reloadHistory()
-    reloadBatches()
-  }
 
   // Only the FIRST load blanks the page; a verify refetch keeps the rendered
   // price in place so the button can show its own in-flight state.
@@ -118,7 +90,6 @@ export function PriceDetailPage() {
           <PriceChangeWizard
             price={price}
             productName={product?.display_name ?? "…"}
-            onDone={reloadAll}
           />
         </div>
       </div>
@@ -140,9 +111,9 @@ export function PriceDetailPage() {
 
       <PSPLinksCard
         price={price}
-        verifying={verify && loading}
+        verifying={verify && isFetching}
         verified={verify}
-        onVerify={() => (verify ? reload() : setVerify(true))}
+        onVerify={() => (verify ? void reload() : setVerify(true))}
       />
 
       <CheckoutReadinessCard price={price} />
@@ -206,13 +177,7 @@ export function PriceDetailPage() {
               {isPending ? "Pending migration" : "Last migration"}
             </CardTitle>
             {isPending && (
-              <CancelMigrationButton
-                repriceIds={scheduled.map((r) => r.id)}
-                onDone={() => {
-                  reloadBatchReprices()
-                  reloadAll()
-                }}
-              />
+              <CancelMigrationButton repriceIds={scheduled.map((r) => r.id)} />
             )}
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
@@ -235,35 +200,26 @@ export function PriceDetailPage() {
   )
 }
 
-function CancelMigrationButton({
-  repriceIds,
-  onDone,
-}: {
-  repriceIds: string[]
-  onDone: () => void
-}) {
-  const [busy, setBusy] = React.useState(false)
+function CancelMigrationButton({ repriceIds }: { repriceIds: string[] }) {
+  const queryClient = useQueryClient()
+  const cancelReprices = useMutation(adminMutations.cancelReprices(queryClient))
   return (
     <Button
       variant="destructive"
       size="sm"
-      disabled={busy || !repriceIds.length}
+      disabled={cancelReprices.isPending || !repriceIds.length}
       onClick={async () => {
-        setBusy(true)
         try {
-          await Promise.all(repriceIds.map((id) => cancelReprice(id)))
+          await cancelReprices.mutateAsync(repriceIds)
           toast.success(
             `Canceled ${repriceIds.length} pending reprice${repriceIds.length === 1 ? "" : "s"}. Already-migrated subscribers stay migrated.`
           )
-          onDone()
         } catch (err) {
           toastApiError(err, "Cancel migration")
-        } finally {
-          setBusy(false)
         }
       }}
     >
-      {busy ? "Canceling…" : "Cancel migration"}
+      {cancelReprices.isPending ? "Canceling…" : "Cancel migration"}
     </Button>
   )
 }

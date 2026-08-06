@@ -1,6 +1,9 @@
 import * as React from "react"
 import { toast } from "sonner"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { FormFieldErrors } from "@/components/form-field-errors"
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
@@ -31,19 +34,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import {
-  changeTeamRole,
-  inviteTeamMember,
-  listTeam,
-  listTeamInvites,
-  removeTeamMember,
-  revokeTeamInvite,
-} from "@/lib/api/endpoints"
 import type { TeamInvite, TeamInviteResult, TeamMember } from "@/lib/api/types"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 
 // Fixed merchant catalog roles (#567) a teammate can hold, least privilege
 // first. The API validates against the same catalog; these descriptions are the
@@ -77,21 +73,10 @@ function roleLabel(role: string): string {
 }
 
 export function TeamTab() {
-  const members = useApiData(() => listTeam(), [])
-  const invites = useApiData(() => listTeamInvites(), [])
-  React.useEffect(() => {
-    if (members.error) toastApiError(members.error, "Load team")
-  }, [members.error])
-  React.useEffect(() => {
-    if (invites.error) toastApiError(invites.error, "Load invites")
-  }, [invites.error])
+  const members = useQuery(adminQueries.team())
+  const invites = useQuery(adminQueries.teamInvites())
 
-  const reload = () => {
-    members.reload()
-    invites.reload()
-  }
-
-  if (members.loading)
+  if (members.isPending)
     return <p className="text-sm text-muted-foreground">Loading…</p>
 
   const team = members.data?.data ?? []
@@ -112,7 +97,6 @@ export function TeamTab() {
           </div>
           <InviteDialog
             invitesEnabled={invites.data?.invites_enabled ?? false}
-            onDone={reload}
           />
         </div>
         {team.length === 0 ? (
@@ -136,7 +120,6 @@ export function TeamTab() {
                   key={m.user_id}
                   member={m}
                   isLastOwner={m.role === "owner" && ownerCount <= 1}
-                  onDone={reload}
                 />
               ))}
             </TableBody>
@@ -165,7 +148,7 @@ export function TeamTab() {
             </TableHeader>
             <TableBody>
               {pending.map((inv) => (
-                <InviteRow key={inv.id} invite={inv} onDone={reload} />
+                <InviteRow key={inv.id} invite={inv} />
               ))}
             </TableBody>
           </Table>
@@ -178,13 +161,14 @@ export function TeamTab() {
 function MemberRow({
   member,
   isLastOwner,
-  onDone,
 }: {
   member: TeamMember
   isLastOwner: boolean
-  onDone: () => void
 }) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const queryClient = useQueryClient()
+  const changeRole = useMutation(adminMutations.changeTeamRole(queryClient))
+  const removeMember = useMutation(adminMutations.removeTeamMember(queryClient))
   const label = member.email || member.username || member.user_id
   const initials = (member.username || member.email || "Member")
     .slice(0, 2)
@@ -211,15 +195,14 @@ function MemberRow({
       <TableCell className="py-3">
         <RoleSelect
           value={member.role}
-          disabled={isLastOwner}
+          disabled={isLastOwner || changeRole.isPending}
           disabledTitle={
             isLastOwner ? "The last owner cannot be demoted" : undefined
           }
           onChange={async (role) => {
             try {
-              await changeTeamRole(member.user_id, role)
+              await changeRole.mutateAsync({ userId: member.user_id, role })
               toast.success(`${label} is now ${roleLabel(role)}`)
-              onDone()
             } catch (err) {
               toastApiError(err, "Change role")
             }
@@ -230,7 +213,7 @@ function MemberRow({
         <Button
           variant="destructive"
           size="sm"
-          disabled={isLastOwner}
+          disabled={isLastOwner || removeMember.isPending}
           title={isLastOwner ? "The last owner cannot be removed" : undefined}
           onClick={() => setConfirmOpen(true)}
         >
@@ -245,9 +228,8 @@ function MemberRow({
           actionLabel="Remove member"
           onConfirm={async () => {
             try {
-              await removeTeamMember(member.user_id)
+              await removeMember.mutateAsync(member.user_id)
               toast.success(`${label} removed`)
-              onDone()
             } catch (err) {
               toastApiError(err, "Remove member")
             }
@@ -291,14 +273,9 @@ function RoleSelect({
   )
 }
 
-function InviteRow({
-  invite,
-  onDone,
-}: {
-  invite: TeamInvite
-  onDone: () => void
-}) {
-  const [busy, setBusy] = React.useState(false)
+function InviteRow({ invite }: { invite: TeamInvite }) {
+  const queryClient = useQueryClient()
+  const revokeInvite = useMutation(adminMutations.revokeTeamInvite(queryClient))
   return (
     <TableRow>
       <TableCell className="py-3">
@@ -314,17 +291,13 @@ function InviteRow({
         <Button
           variant="destructive"
           size="sm"
-          disabled={busy}
+          disabled={revokeInvite.isPending}
           onClick={async () => {
-            setBusy(true)
             try {
-              await revokeTeamInvite(invite.id)
+              await revokeInvite.mutateAsync(invite.id)
               toast.success("Invite revoked")
-              onDone()
             } catch (err) {
               toastApiError(err, "Revoke invite")
-            } finally {
-              setBusy(false)
             }
           }}
         >
@@ -335,24 +308,37 @@ function InviteRow({
   )
 }
 
-function InviteDialog({
-  invitesEnabled,
-  onDone,
-}: {
-  invitesEnabled: boolean
-  onDone: () => void
-}) {
+function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
   const [open, setOpen] = React.useState(false)
-  const [email, setEmail] = React.useState("")
-  const [role, setRole] = React.useState("viewer")
-  const [busy, setBusy] = React.useState(false)
   const [minted, setMinted] = React.useState<TeamInviteResult | null>(null)
+  const queryClient = useQueryClient()
+  const inviteMember = useMutation(adminMutations.inviteTeamMember(queryClient))
+  const form = useForm({
+    defaultValues: { email: "", role: "viewer" },
+    onSubmit: async ({ value }) => {
+      const email = value.email.trim()
+      try {
+        const result = await inviteMember.mutateAsync({
+          email,
+          role: value.role,
+        })
+        if (result.added) {
+          toast.success(`${result.member?.email || email} added to the team`)
+          handleOpenChange(false)
+        } else {
+          // A link was minted — show it once for the owner to share.
+          setMinted(result)
+        }
+      } catch (err) {
+        toastApiError(err, "Invite member")
+      }
+    },
+  })
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
     if (!next) {
-      setEmail("")
-      setRole("viewer")
+      form.reset()
       setMinted(null)
     }
   }
@@ -378,70 +364,90 @@ function InviteDialog({
                   : " New emails without an account can't be invited on this deployment — the account must be provisioned first."}
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-3">
-              <div className="grid gap-1.5">
-                <Label htmlFor="team-email">Email</Label>
-                <Input
-                  id="team-email"
-                  type="email"
-                  placeholder="teammate@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                />
+            <form
+              onSubmit={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void form.handleSubmit()
+              }}
+              className="grid gap-4"
+            >
+              <div className="grid gap-3">
+                <form.Field
+                  name="email"
+                  validators={{
+                    onChange: ({ value }) =>
+                      value.trim() ? undefined : "Enter an email address",
+                  }}
+                >
+                  {(field) => (
+                    <div className="grid gap-1.5">
+                      <Label htmlFor="team-email">Email</Label>
+                      <Input
+                        id="team-email"
+                        type="email"
+                        placeholder="teammate@example.com"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        aria-invalid={field.state.meta.errors.length > 0}
+                      />
+                      <FormFieldErrors errors={field.state.meta.errors} />
+                    </div>
+                  )}
+                </form.Field>
+                <form.Field name="role">
+                  {(field) => (
+                    <div className="grid gap-1.5">
+                      <Label>Role</Label>
+                      <div className="grid gap-2">
+                        {ROLES.map((role) => (
+                          <button
+                            key={role.value}
+                            type="button"
+                            onClick={() => field.handleChange(role.value)}
+                            aria-pressed={field.state.value === role.value}
+                            className={cn(
+                              "rounded-md border p-3 text-left transition-colors",
+                              field.state.value === role.value
+                                ? "border-primary bg-primary/5"
+                                : "hover:bg-muted/50"
+                            )}
+                          >
+                            <p className="text-sm font-medium">{role.label}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {role.description}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </form.Field>
               </div>
-              <div className="grid gap-1.5">
-                <Label>Role</Label>
-                <div className="grid gap-2">
-                  {ROLES.map((r) => (
-                    <button
-                      key={r.value}
-                      type="button"
-                      onClick={() => setRole(r.value)}
-                      aria-pressed={role === r.value}
-                      className={cn(
-                        "rounded-md border p-3 text-left transition-colors",
-                        role === r.value
-                          ? "border-primary bg-primary/5"
-                          : "hover:bg-muted/50"
-                      )}
-                    >
-                      <p className="text-sm font-medium">{r.label}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {r.description}
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                disabled={busy || !email.trim()}
-                onClick={async () => {
-                  setBusy(true)
-                  try {
-                    const result = await inviteTeamMember(email.trim(), role)
-                    if (result.added) {
-                      toast.success(
-                        `${result.member?.email || email.trim()} added to the team`
-                      )
-                      onDone()
-                      handleOpenChange(false)
-                    } else {
-                      // A link was minted — show it once for the owner to share.
-                      setMinted(result)
-                      onDone()
-                    }
-                  } catch (err) {
-                    toastApiError(err, "Invite member")
-                  } finally {
-                    setBusy(false)
+              <DialogFooter>
+                <form.Subscribe
+                  selector={(state) =>
+                    [
+                      state.values.email,
+                      state.canSubmit,
+                      state.isSubmitting,
+                    ] as const
                   }
-                }}
-              >
-                {busy ? "Inviting…" : "Send invite"}
-              </Button>
-            </DialogFooter>
+                >
+                  {([email, canSubmit, isSubmitting]) => (
+                    <Button
+                      type="submit"
+                      disabled={!email.trim() || !canSubmit || isSubmitting}
+                    >
+                      {isSubmitting ? "Inviting…" : "Send invite"}
+                    </Button>
+                  )}
+                </form.Subscribe>
+              </DialogFooter>
+            </form>
           </>
         )}
       </DialogContent>

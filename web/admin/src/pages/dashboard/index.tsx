@@ -6,6 +6,7 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { GridLayout, type Layout } from "react-grid-layout"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import "react-grid-layout/css/styles.css"
 
@@ -18,17 +19,16 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useApiData } from "@/hooks/use-api-data"
 import { getBootstrap } from "@/lib/api/client"
 import {
-  getDashboard,
-  putDashboard,
   type MetricsQuery,
   type MetricsRange,
   type Widget,
   type WidgetViz,
 } from "@/lib/api/metrics"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 
 import { AskPanel } from "./ask-panel"
 import { newWidgetId } from "./lib"
@@ -110,8 +110,14 @@ function defaultSize(viz: WidgetViz): { w: number; h: number } {
 }
 
 export function DashboardPage() {
-  const { data, loading, error } = useApiData(getDashboard, [])
-  const [widgets, setWidgets] = React.useState<Widget[] | null>(null)
+  const queryClient = useQueryClient()
+  const { mutate: saveDashboard } = useMutation(
+    adminMutations.saveDashboard(queryClient)
+  )
+  const dashboardOptions = adminQueries.dashboard()
+  const { data, isPending: loading } = useQuery(dashboardOptions)
+  const [draftWidgets, setDraftWidgets] = React.useState<Widget[] | null>(null)
+  const widgets = draftWidgets ?? data?.widgets ?? null
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<Widget | null>(null)
   // seed pre-fills the editor for a NEW widget (ask evidence → add-as-widget).
@@ -125,14 +131,6 @@ export function DashboardPage() {
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const range: MetricsRange = { last: rangeLast }
 
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load dashboard")
-  }, [error])
-  React.useEffect(() => {
-    // Adopt the server copy (saved layout or seeded default) once per load.
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: sync server state into the editable draft
-    if (data) setWidgets(data.widgets)
-  }, [data])
   React.useEffect(
     () => () => {
       if (saveTimer.current) clearTimeout(saveTimer.current)
@@ -141,16 +139,21 @@ export function DashboardPage() {
   )
 
   // Debounced persistence: drags/resizes coalesce into one PUT.
-  const persist = React.useCallback((next: Widget[]) => {
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(() => {
-      putDashboard(next).catch((err) => toastApiError(err, "Save dashboard"))
-    }, 800)
-  }, [])
+  const persist = React.useCallback(
+    (next: Widget[]) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => {
+        saveDashboard(next, {
+          onError: (err) => toastApiError(err, "Save dashboard"),
+        })
+      }, 800)
+    },
+    [saveDashboard]
+  )
 
   const update = React.useCallback(
     (next: Widget[]) => {
-      setWidgets(next)
+      setDraftWidgets(next)
       persist(next)
     },
     [persist]
@@ -355,16 +358,17 @@ export function DashboardPage() {
         )}
       </div>
 
-      <WidgetEditor
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        initial={editing}
-        seed={seed}
-        nlEnabled={nlWidgetsEnabled()}
-        onSave={(draft) =>
-          editing ? editWidget(editing.id, draft) : addWidget(draft)
-        }
-      />
+      {editorOpen ? (
+        <WidgetEditor
+          onOpenChange={setEditorOpen}
+          initial={editing}
+          seed={seed}
+          nlEnabled={nlWidgetsEnabled()}
+          onSave={(draft) =>
+            editing ? editWidget(editing.id, draft) : addWidget(draft)
+          }
+        />
+      ) : null}
     </div>
   )
 }

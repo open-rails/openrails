@@ -9,6 +9,7 @@
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Loading02Icon, SparklesIcon } from "@hugeicons/core-free-icons"
 import * as React from "react"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -30,14 +31,13 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/client"
 import {
-  generateWidget,
-  metricsQuery,
   WIDGET_VIZ,
   type MetricsQuery,
-  type MetricsResult,
   type Widget,
   type WidgetViz,
 } from "@/lib/api/metrics"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 
 import { WidgetVizView } from "./widget-viz"
 
@@ -45,14 +45,12 @@ const KEYLESS_MESSAGE =
   "Widget creation needs an LLM key: set llm.api_key (env LLM_API_KEY) — see docs/admin-console.md"
 
 export function WidgetEditor({
-  open,
   onOpenChange,
   initial,
   seed,
   nlEnabled,
   onSave,
 }: {
-  open: boolean
   onOpenChange: (open: boolean) => void
   initial: Widget | null
   // seed pre-fills a NEW widget draft (#756 ask evidence → add-as-widget):
@@ -62,79 +60,56 @@ export function WidgetEditor({
   nlEnabled: boolean
   onSave: (data: { title: string; viz: WidgetViz; query: MetricsQuery }) => void
 }) {
-  const [title, setTitle] = React.useState("")
-  const [viz, setViz] = React.useState<WidgetViz>("line")
-  const [query, setQuery] = React.useState<MetricsQuery | null>(null)
+  const source = initial ?? seed
+  const [title, setTitle] = React.useState(source?.title ?? "")
+  const [viz, setViz] = React.useState<WidgetViz>(source?.viz ?? "line")
+  const [query, setQuery] = React.useState<MetricsQuery | null>(
+    source?.query ?? null
+  )
   const [prompt, setPrompt] = React.useState("")
-  const [generating, setGenerating] = React.useState(false)
-  const [genError, setGenError] = React.useState<string | null>(null)
-  const [preview, setPreview] = React.useState<MetricsResult | null>(null)
-  const [previewError, setPreviewError] = React.useState<string | null>(null)
-  const [previewing, setPreviewing] = React.useState(false)
+  const generateDashboardWidget = useMutation(
+    adminMutations.generateDashboardWidget()
+  )
+  const generating = generateDashboardWidget.isPending
+  const genError = generateDashboardWidget.error
+    ? generateDashboardWidget.error instanceof ApiError
+      ? generateDashboardWidget.error.message
+      : "generation failed"
+    : null
+  const {
+    data: preview,
+    error: previewQueryError,
+    isFetching: previewing,
+    refetch: refreshPreview,
+  } = useQuery(adminQueries.widgetMetrics(query ?? undefined))
+  const previewError = previewQueryError
+    ? previewQueryError instanceof ApiError
+      ? previewQueryError.message
+      : "query failed"
+    : null
 
-  const runPreview = React.useCallback(async (q: MetricsQuery) => {
-    setPreviewing(true)
-    setPreviewError(null)
-    try {
-      setPreview(await metricsQuery(q))
-    } catch (err) {
-      setPreview(null)
-      setPreviewError(err instanceof ApiError ? err.message : "query failed")
-    } finally {
-      setPreviewing(false)
-    }
-  }, [])
-
-  // Reset per open; editing seeds the widget's current state and previews it.
-  React.useEffect(() => {
-    if (!open) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- deliberate: reset the dialog's draft state each time it opens
-    setPrompt("")
-    setGenError(null)
-    setPreview(null)
-    setPreviewError(null)
-    if (initial) {
-      setTitle(initial.title)
-      setViz(initial.viz)
-      setQuery(initial.query)
-      void runPreview(initial.query)
-    } else if (seed) {
-      setTitle(seed.title)
-      setViz(seed.viz)
-      setQuery(seed.query)
-      void runPreview(seed.query)
-    } else {
-      setTitle("")
-      setViz("line")
-      setQuery(null)
-    }
-  }, [open, initial, seed, runPreview])
-
-  const generate = async () => {
+  const generate = () => {
     if (!prompt.trim()) return
-    setGenerating(true)
-    setGenError(null)
-    try {
-      // The current query (saved or freshly generated) rides as base_query so
-      // the prompt refines it; absent, the LLM starts fresh.
-      const res = await generateWidget(prompt.trim(), query ?? undefined)
-      setTitle(res.title)
-      setViz(res.viz)
-      setQuery(res.query)
-      setPrompt("")
-      void runPreview(res.query)
-    } catch (err) {
-      setGenError(err instanceof ApiError ? err.message : "generation failed")
-    } finally {
-      setGenerating(false)
-    }
+    // The current query (saved or freshly generated) rides as base_query so
+    // the prompt refines it; absent, the LLM starts fresh.
+    generateDashboardWidget.mutate(
+      { prompt: prompt.trim(), baseQuery: query ?? undefined },
+      {
+        onSuccess: (res) => {
+          setTitle(res.title)
+          setViz(res.viz)
+          setQuery(res.query)
+          setPrompt("")
+        },
+      }
+    )
   }
 
   const canSave = query !== null && title.trim().length > 0
   const keylessCreate = !nlEnabled && !initial
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit widget" : "Add widget"}</DialogTitle>
@@ -188,7 +163,10 @@ export function WidgetEditor({
                   </span>
                 </div>
                 {genError ? (
-                  <p className="text-xs whitespace-pre-wrap text-destructive">
+                  <p
+                    className="text-xs whitespace-pre-wrap text-destructive"
+                    role="alert"
+                  >
                     {genError}
                   </p>
                 ) : null}
@@ -239,7 +217,7 @@ export function WidgetEditor({
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => void runPreview(query)}
+                      onClick={() => void refreshPreview()}
                       disabled={previewing}
                     >
                       {previewing ? (
@@ -253,7 +231,10 @@ export function WidgetEditor({
                   </div>
                   <div className="min-h-0 flex-1">
                     {previewError ? (
-                      <p className="text-xs whitespace-pre-wrap text-destructive">
+                      <p
+                        className="text-xs whitespace-pre-wrap text-destructive"
+                        role="alert"
+                      >
                         {previewError}
                       </p>
                     ) : preview ? (

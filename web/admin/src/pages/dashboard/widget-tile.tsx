@@ -11,6 +11,7 @@ import {
   Refresh01Icon,
 } from "@hugeicons/core-free-icons"
 import { Link } from "react-router-dom"
+import { useQuery } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import {
@@ -20,14 +21,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useApiData } from "@/hooks/use-api-data"
 import { ApiError } from "@/lib/api/client"
 import {
-  metricsQuery,
   type MetricsRange,
   type MetricsResult,
   type Widget,
 } from "@/lib/api/metrics"
+import { adminQueries } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
 import { deepLinkFor } from "./lib"
@@ -45,11 +45,13 @@ export function WidgetTile({
   onDelete: () => void
 }) {
   const query = { ...widget.query, range }
-  const queryKey = JSON.stringify(query)
-  const { data, loading, error, reload } = useApiData(
-    () => metricsQuery(query),
-    [queryKey]
-  )
+  const {
+    data,
+    isPending: loading,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery(adminQueries.widgetMetrics(query))
   const link = widget.viz === "stat" ? deepLinkFor(widget.query) : null
 
   const isStat = widget.viz === "stat"
@@ -76,13 +78,13 @@ export function WidgetTile({
           variant="ghost"
           size="icon"
           className="size-6"
-          onClick={reload}
+          onClick={() => void refetch()}
           title="Refresh"
           aria-label="Refresh widget"
         >
           <HugeiconsIcon
             icon={Refresh01Icon}
-            className={cn("size-3.5", loading && "animate-spin")}
+            className={cn("size-3.5", isFetching && "animate-spin")}
           />
         </Button>
         <DropdownMenu>
@@ -126,7 +128,7 @@ export function WidgetTile({
             loading={loading && !data}
             error={error}
             widget={widget}
-            data={data}
+            data={data ?? null}
           />
         </div>
       </CardContent>
@@ -161,7 +163,10 @@ function TileBody({
           : error.message
         : "query failed"
     return (
-      <div className="flex h-full items-center justify-center text-center text-xs text-destructive">
+      <div
+        className="flex h-full items-center justify-center text-center text-xs text-destructive"
+        role="alert"
+      >
         {msg}
       </div>
     )

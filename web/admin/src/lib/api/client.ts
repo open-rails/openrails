@@ -197,6 +197,7 @@ export interface RequestOptions {
   body?: unknown
   headers?: Record<string, string>
   query?: Record<string, string | number | boolean | undefined>
+  signal?: AbortSignal
 }
 
 interface FetchResult {
@@ -233,6 +234,7 @@ async function doFetch(
     method: opts.method ?? "GET",
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal,
   })
   if (res.status === 401 && retry && tokens?.refresh_token) {
     const refreshed = await refreshTokens(tokens)

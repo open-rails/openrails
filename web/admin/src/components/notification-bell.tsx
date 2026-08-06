@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate } from "react-router-dom"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -13,16 +14,11 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import {
-  getUnreadCount,
-  listNotifications,
-  markNotificationRead,
-} from "@/lib/api/endpoints"
 import type { MerchantNotification } from "@/lib/api/types"
 import { timeAgo } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 import { cn } from "@/lib/utils"
-
-const POLL_MS = 30_000
 
 // normalizeLink maps an alert's stored link to an in-app router path (basename
 // /admin) or an external URL. Returns { path } for router navigation or { href }
@@ -39,46 +35,24 @@ function normalizeLink(link?: string | null): { path?: string; href?: string } {
 
 export function NotificationBell() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const readNotification = useMutation(
+    adminMutations.markNotificationRead(queryClient)
+  )
+  const readNotifications = useMutation(
+    adminMutations.markNotificationsRead(queryClient)
+  )
   const [open, setOpen] = React.useState(false)
-  const [count, setCount] = React.useState(0)
-  const [items, setItems] = React.useState<MerchantNotification[]>([])
-  const [loading, setLoading] = React.useState(false)
-
-  // Poll the unread badge on a modest interval. Errors are swallowed — the bell
-  // must never spam toasts (and the endpoint may 404 on an un-migrated server).
-  React.useEffect(() => {
-    let cancelled = false
-    const tick = async () => {
-      try {
-        const res = await getUnreadCount()
-        if (!cancelled) setCount(res.unread ?? 0)
-      } catch {
-        /* ignore poll errors */
-      }
-    }
-    tick()
-    const h = setInterval(tick, POLL_MS)
-    return () => {
-      cancelled = true
-      clearInterval(h)
-    }
-  }, [])
-
-  const loadList = React.useCallback(async () => {
-    setLoading(true)
-    try {
-      const res = await listNotifications()
-      setItems(res.data ?? [])
-    } catch {
-      setItems([])
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const unreadOptions = adminQueries.unreadNotifications()
+  const notificationsOptions = adminQueries.notifications(open)
+  const { data: unreadData } = useQuery(unreadOptions)
+  const { data: notificationData, isFetching: loading } =
+    useQuery(notificationsOptions)
+  const count = unreadData?.unread ?? 0
+  const items = notificationData?.data ?? []
 
   const handleOpen = (next: boolean) => {
     setOpen(next)
-    if (next) loadList()
   }
 
   const isUnread = (n: MerchantNotification) => !n.read_at
@@ -87,13 +61,7 @@ export function NotificationBell() {
     setOpen(false)
     if (isUnread(n)) {
       try {
-        await markNotificationRead(n.id)
-        setItems((prev) =>
-          prev.map((x) =>
-            x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x
-          )
-        )
-        setCount((c) => Math.max(0, c - 1))
+        await readNotification.mutateAsync(n.id)
       } catch {
         /* best effort */
       }
@@ -104,15 +72,10 @@ export function NotificationBell() {
   }
 
   // No bulk endpoint in the contract — mark each currently-listed unread item.
-  const markAll = async () => {
+  const markAll = () => {
     const unread = items.filter(isUnread)
     if (unread.length === 0) return
-    await Promise.allSettled(unread.map((n) => markNotificationRead(n.id)))
-    const now = new Date().toISOString()
-    setItems((prev) =>
-      prev.map((x) => (x.read_at ? x : { ...x, read_at: now }))
-    )
-    setCount(0)
+    readNotifications.mutate(unread.map((notification) => notification.id))
   }
 
   return (
@@ -143,8 +106,9 @@ export function NotificationBell() {
               size="sm"
               className="h-6 px-2 text-xs"
               onClick={markAll}
+              disabled={readNotifications.isPending}
             >
-              Mark all read
+              {readNotifications.isPending ? "Marking…" : "Mark all read"}
             </Button>
           )}
         </div>

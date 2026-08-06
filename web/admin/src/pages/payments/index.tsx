@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 import { toast } from "sonner"
 
@@ -21,14 +22,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useApiData } from "@/hooks/use-api-data"
-import { listCustomers, listPayments } from "@/lib/api/endpoints"
 import type { PaymentObject } from "@/lib/api/types"
 import { formatMicros, formatUnix, shortId } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
-const EXPORT_PAGE = 200
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 
 const columns: ColumnDef<PaymentObject, unknown>[] = [
@@ -58,7 +58,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     header: "Refunded",
     cell: ({ row }) =>
       row.original.amount_refunded ? (
-        <span className="tabular-nums text-muted-foreground">
+        <span className="text-muted-foreground tabular-nums">
           {formatMicros(row.original.amount_refunded, row.original.currency)}
         </span>
       ) : (
@@ -88,23 +88,18 @@ export function PaymentsPage() {
   const customerLabel = params.get("customer") ?? ""
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
-  const [exporting, setExporting] = React.useState(false)
   const navigate = useNavigate()
+  const customerLookup = useMutation(adminMutations.findCustomer())
+  const exportPayments = useMutation(adminMutations.exportPayments())
 
   const filters = {
     rail: rail || undefined,
     refunds_only: view === "refunds" ? true : undefined,
     user_id: userId || undefined,
   }
-  const filterKey = JSON.stringify(filters)
-
-  const { data, loading, error } = useApiData(
-    () => listPayments(filters, PAGE, offset),
-    [filterKey, offset]
+  const { data, isPending: loading } = useQuery(
+    adminQueries.payments(filters, PAGE, offset)
   )
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load payments")
-  }, [error])
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)
@@ -120,8 +115,7 @@ export function PaymentsPage() {
     const term = input.trim()
     if (!term) return
     try {
-      const res = await listCustomers(term, 1, 0)
-      const c = res.data[0]
+      const c = await customerLookup.mutateAsync(term)
       if (!c) {
         toast.info("No customer matches")
         return
@@ -146,16 +140,8 @@ export function PaymentsPage() {
   }
 
   const exportCsv = async () => {
-    setExporting(true)
     try {
-      const rows: PaymentObject[] = []
-      let cursor = 0
-      for (;;) {
-        const page = await listPayments(filters, EXPORT_PAGE, cursor)
-        rows.push(...page.data)
-        if (rows.length >= page.total || page.data.length === 0) break
-        cursor += EXPORT_PAGE
-      }
+      const rows = await exportPayments.mutateAsync(filters)
       const csv = [
         [
           "id",
@@ -196,8 +182,6 @@ export function PaymentsPage() {
       URL.revokeObjectURL(url)
     } catch (err) {
       toastApiError(err, "Export payments")
-    } finally {
-      setExporting(false)
     }
   }
 
@@ -208,6 +192,7 @@ export function PaymentsPage() {
         <div className="flex flex-wrap items-center gap-3">
           <form
             className="relative"
+            aria-busy={customerLookup.isPending}
             onSubmit={(e) => {
               e.preventDefault()
               void searchCustomer()
@@ -221,6 +206,7 @@ export function PaymentsPage() {
               className="w-64 pl-8"
               placeholder="Search customer email, ref, or id…"
               value={input}
+              disabled={customerLookup.isPending}
               onChange={(e) => setInput(e.target.value)}
             />
           </form>
@@ -247,10 +233,12 @@ export function PaymentsPage() {
           <Button
             size="sm"
             onClick={exportCsv}
-            disabled={exporting || loading || (data?.total ?? 0) === 0}
+            disabled={
+              exportPayments.isPending || loading || (data?.total ?? 0) === 0
+            }
           >
             <HugeiconsIcon icon={Download01Icon} className="size-4" />
-            {exporting ? "Exporting…" : "Export CSV"}
+            {exportPayments.isPending ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>

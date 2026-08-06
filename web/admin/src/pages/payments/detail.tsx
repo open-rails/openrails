@@ -3,8 +3,11 @@ import { ArrowLeft01Icon, Undo02Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "@/components/fact-card"
+import { FormFieldErrors } from "@/components/form-field-errors"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -27,32 +30,23 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import {
-  getPayment,
-  REFUNDABLE_RAILS,
-  refundPayment,
-} from "@/lib/api/endpoints"
+import { REFUNDABLE_RAILS } from "@/lib/api/endpoints"
 import {
   formatMicros,
   formatUnix,
   microsFromInput,
   shortId,
 } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
 export function PaymentDetailPage() {
   const { id = "" } = useParams()
   const navigate = useNavigate()
-  const {
-    data: payment,
-    loading,
-    error,
-    reload,
-  } = useApiData(() => getPayment(id), [id])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load payment")
-  }, [error])
+  const { data: payment, isPending: loading } = useQuery(
+    adminQueries.payment(id)
+  )
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!payment)
@@ -90,9 +84,10 @@ export function PaymentDetailPage() {
         <div className="ml-auto">
           <RefundDialog
             payment={payment}
+            customerId={payment.user.replace(/^usr_/, "")}
+            subscriptionId={payment.subscription?.replace(/^sub_/, "")}
             disabled={!refundable}
             disabledNote={railRefundNote}
-            onDone={reload}
           />
         </div>
       </div>
@@ -174,9 +169,10 @@ export function PaymentDetailPage() {
 
 function RefundDialog({
   payment,
+  customerId,
+  subscriptionId,
   disabled,
   disabledNote,
-  onDone,
 }: {
   payment: {
     id: string
@@ -185,16 +181,58 @@ function RefundDialog({
     currency: string
     rail: string
   }
+  customerId: string
+  subscriptionId?: string
   disabled: boolean
   disabledNote?: string
-  onDone: () => void
 }) {
   const [open, setOpen] = React.useState(false)
   const remaining = payment.amount - payment.amount_refunded
-  const [amount, setAmount] = React.useState(String(remaining / 1_000_000))
-  const [reason, setReason] = React.useState("")
-  const [revokeAccess, setRevokeAccess] = React.useState(false)
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const refund = useMutation(
+    adminMutations.refundPayment(
+      queryClient,
+      payment.id,
+      customerId,
+      subscriptionId
+    )
+  )
+  const form = useForm({
+    defaultValues: {
+      amount: String(remaining / 1_000_000),
+      reason: "",
+      revokeAccess: false,
+    },
+    onSubmit: async ({ value }) => {
+      const amount = microsFromInput(value.amount)
+      if (amount === null || amount <= 0 || amount > remaining) return
+      try {
+        await refund.mutateAsync({
+          amount,
+          reason: value.reason,
+          revokeAccess: value.revokeAccess,
+        })
+        toast.success("Refund submitted")
+        handleOpenChange(false)
+      } catch (err) {
+        toastApiError(err, "Refund payment")
+      }
+    },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (next) {
+      form.reset({
+        amount: String(remaining / 1_000_000),
+        reason: "",
+        revokeAccess: false,
+      })
+    } else {
+      form.reset()
+      refund.reset()
+    }
+  }
 
   return (
     <>
@@ -203,11 +241,11 @@ function RefundDialog({
         size="sm"
         disabled={disabled}
         title={disabledNote}
-        onClick={() => setOpen(true)}
+        onClick={() => handleOpenChange(true)}
       >
         <HugeiconsIcon icon={Undo02Icon} className="size-4" /> Refund
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Refund payment</DialogTitle>
@@ -216,65 +254,117 @@ function RefundDialog({
               refundable: {formatMicros(remaining, payment.currency)}.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3">
-            <div className="grid gap-1.5">
-              <Label htmlFor="refund-amount">Amount ({payment.currency})</Label>
-              <Input
-                id="refund-amount"
-                type="number"
-                step="any"
-                min="0"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void form.handleSubmit()
+            }}
+            className="grid gap-4"
+          >
+            <div className="grid gap-3">
+              <form.Field
+                name="amount"
+                validators={{
+                  onChange: ({ value }) => {
+                    const amount = microsFromInput(value)
+                    if (amount === null || amount <= 0) {
+                      return "Enter an amount greater than zero"
+                    }
+                    return amount > remaining
+                      ? "Amount exceeds the remaining refundable balance"
+                      : undefined
+                  },
+                }}
+              >
+                {(field) => (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="refund-amount">
+                      Amount ({payment.currency})
+                    </Label>
+                    <Input
+                      id="refund-amount"
+                      type="number"
+                      step="any"
+                      min="0"
+                      max={remaining / 1_000_000}
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                      aria-invalid={field.state.meta.errors.length > 0}
+                    />
+                    <FormFieldErrors errors={field.state.meta.errors} />
+                  </div>
+                )}
+              </form.Field>
+              <form.Field name="reason">
+                {(field) => (
+                  <div className="grid gap-1.5">
+                    <Label htmlFor="refund-reason">Reason (optional)</Label>
+                    <Input
+                      id="refund-reason"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onChange={(event) =>
+                        field.handleChange(event.target.value)
+                      }
+                    />
+                  </div>
+                )}
+              </form.Field>
+              <form.Field name="revokeAccess">
+                {(field) => (
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="refund-revoke"
+                      checked={field.state.value}
+                      onCheckedChange={field.handleChange}
+                    />
+                    <Label htmlFor="refund-revoke">
+                      Also revoke granted access
+                    </Label>
+                  </div>
+                )}
+              </form.Field>
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor="refund-reason">Reason (optional)</Label>
-              <Input
-                id="refund-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="refund-revoke"
-                checked={revokeAccess}
-                onCheckedChange={setRevokeAccess}
-              />
-              <Label htmlFor="refund-revoke">Also revoke granted access</Label>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setOpen(false)}
-              disabled={busy}
-            >
-              Close
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={busy || !microsFromInput(amount)}
-              onClick={async () => {
-                const micros = microsFromInput(amount)
-                if (!micros || micros <= 0) return
-                setBusy(true)
-                try {
-                  await refundPayment(payment.id, micros, reason, revokeAccess)
-                  toast.success("Refund submitted")
-                  setOpen(false)
-                  onDone()
-                } catch (err) {
-                  toastApiError(err, "Refund payment")
-                } finally {
-                  setBusy(false)
+            <DialogFooter>
+              <form.Subscribe
+                selector={(state) =>
+                  [
+                    state.values.amount,
+                    state.canSubmit,
+                    state.isSubmitting,
+                  ] as const
                 }
-              }}
-            >
-              {busy ? "Refunding…" : "Refund"}
-            </Button>
-          </DialogFooter>
+              >
+                {([amountInput, canSubmit, isSubmitting]) => (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleOpenChange(false)}
+                      disabled={isSubmitting}
+                    >
+                      Close
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="destructive"
+                      disabled={
+                        !microsFromInput(amountInput) ||
+                        !canSubmit ||
+                        isSubmitting
+                      }
+                    >
+                      {isSubmitting ? "Refunding…" : "Refund"}
+                    </Button>
+                  </>
+                )}
+              </form.Subscribe>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </>

@@ -6,6 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
+import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
 import { DataTable } from "@/components/data-table"
@@ -20,16 +21,15 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useApiData } from "@/hooks/use-api-data"
-import { listCustomers, listSubscriptions } from "@/lib/api/endpoints"
 import type { AdminSubscription } from "@/lib/api/types"
 import { formatDate, shortId } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { toast } from "sonner"
 
 import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 
 const PAGE = 50
-const EXPORT_PAGE = 200
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 
 // past_due IS the dunning view (#664 doctrine: park, don't cancel).
@@ -105,23 +105,18 @@ export function SubscriptionsPage() {
   const customerLabel = params.get("customer") ?? ""
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
-  const [exporting, setExporting] = React.useState(false)
   const navigate = useNavigate()
+  const customerLookup = useMutation(adminMutations.findCustomer())
+  const exportSubscriptions = useMutation(adminMutations.exportSubscriptions())
 
   const filters = {
     ...(status ? { status } : {}),
     ...(rail ? { rail } : {}),
     ...(userId ? { user_id: userId } : {}),
   }
-  const filterKey = JSON.stringify(filters)
-
-  const { data, loading, error } = useApiData(
-    () => listSubscriptions(filters, PAGE, offset),
-    [filterKey, offset]
+  const { data, isPending: loading } = useQuery(
+    adminQueries.subscriptions(filters, PAGE, offset)
   )
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load subscriptions")
-  }, [error])
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)
@@ -137,8 +132,7 @@ export function SubscriptionsPage() {
     const term = input.trim()
     if (!term) return
     try {
-      const res = await listCustomers(term, 1, 0)
-      const c = res.data[0]
+      const c = await customerLookup.mutateAsync(term)
       if (!c) {
         toast.info("No customer matches")
         return
@@ -163,16 +157,8 @@ export function SubscriptionsPage() {
   }
 
   const exportCsv = async () => {
-    setExporting(true)
     try {
-      const rows: AdminSubscription[] = []
-      let cursor = 0
-      for (;;) {
-        const page = await listSubscriptions(filters, EXPORT_PAGE, cursor)
-        rows.push(...page.data)
-        if (rows.length >= page.total || page.data.length === 0) break
-        cursor += EXPORT_PAGE
-      }
+      const rows = await exportSubscriptions.mutateAsync(filters)
       const csv = [
         [
           "id",
@@ -207,20 +193,17 @@ export function SubscriptionsPage() {
       URL.revokeObjectURL(url)
     } catch (err) {
       toastApiError(err, "Export subscriptions")
-    } finally {
-      setExporting(false)
     }
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Subscriptions
-        </h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Subscriptions</h1>
         <div className="flex flex-wrap items-center gap-3">
           <form
             className="relative"
+            aria-busy={customerLookup.isPending}
             onSubmit={(e) => {
               e.preventDefault()
               void searchCustomer()
@@ -234,6 +217,7 @@ export function SubscriptionsPage() {
               className="w-64 pl-8"
               placeholder="Search customer email, ref, or id…"
               value={input}
+              disabled={customerLookup.isPending}
               onChange={(e) => setInput(e.target.value)}
             />
           </form>
@@ -260,10 +244,14 @@ export function SubscriptionsPage() {
           <Button
             size="sm"
             onClick={exportCsv}
-            disabled={exporting || loading || (data?.total ?? 0) === 0}
+            disabled={
+              exportSubscriptions.isPending ||
+              loading ||
+              (data?.total ?? 0) === 0
+            }
           >
             <HugeiconsIcon icon={Download01Icon} className="size-4" />
-            {exporting ? "Exporting…" : "Export CSV"}
+            {exportSubscriptions.isPending ? "Exporting…" : "Export CSV"}
           </Button>
         </div>
       </div>

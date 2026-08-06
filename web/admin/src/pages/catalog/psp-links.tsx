@@ -1,8 +1,14 @@
-import * as React from "react"
+import { useQuery } from "@tanstack/react-query"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -11,16 +17,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import { dryRunCheckoutRouting } from "@/lib/api/endpoints"
 import type {
   CatalogPrice,
   CatalogProviderState,
-  CheckoutRoutingDecision,
   CheckoutRoutingSkip,
 } from "@/lib/api/types"
 import { formatDate } from "@/lib/format"
-import { toastApiError } from "@/lib/toast"
+import { adminQueries } from "@/lib/queries"
 
 // or#812 — the frontend contract for catalog psp_links.
 //
@@ -42,11 +45,14 @@ import { toastApiError } from "@/lib/toast"
 // internal/db/models/checkout_session.go.
 const SKIP_LABELS: Record<CheckoutRoutingSkip, string> = {
   unknown_selector: "Not a declared PSP key or rail kind.",
-  ambiguous_selector: "Bare rail kind matched more than one armed PSP — name the PSP key.",
+  ambiguous_selector:
+    "Bare rail kind matched more than one armed PSP — name the PSP key.",
   not_armed: "No active PSP row: never configured, or archived.",
-  credentials_missing: "PSP is armed but the credentials this rail needs are absent.",
+  credentials_missing:
+    "PSP is armed but the credentials this rail needs are absent.",
   link_missing: "This price carries no usable psp_link for the PSP.",
-  mode_unsupported: "The rail cannot serve this checkout mode (one-off vs subscription).",
+  mode_unsupported:
+    "The rail cannot serve this checkout mode (one-off vs subscription).",
   service_unavailable: "The runtime service backing this rail is not wired.",
   resolve_failed: "The selector could not be resolved at decision time.",
 }
@@ -97,11 +103,17 @@ const LINK_ID_ORDER = [
 ]
 
 function linkEntries(ids?: Record<string, string>) {
-  const rest = Object.entries(ids ?? {}).filter(([k, v]) => k !== "rail" && v !== "")
+  const rest = Object.entries(ids ?? {}).filter(
+    ([k, v]) => k !== "rail" && v !== ""
+  )
   rest.sort(([a], [b]) => {
     const ia = LINK_ID_ORDER.indexOf(a)
     const ib = LINK_ID_ORDER.indexOf(b)
-    if (ia !== ib) return (ia < 0 ? LINK_ID_ORDER.length : ia) - (ib < 0 ? LINK_ID_ORDER.length : ib)
+    if (ia !== ib)
+      return (
+        (ia < 0 ? LINK_ID_ORDER.length : ia) -
+        (ib < 0 ? LINK_ID_ORDER.length : ib)
+      )
     return a.localeCompare(b)
   })
   return rest
@@ -118,27 +130,35 @@ export function PSPLinksCard({
   verified: boolean
   onVerify: () => void
 }) {
-  const links = Object.entries(price.providers ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  const links = Object.entries(price.providers ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b)
+  )
   return (
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2">
         <div className="grid gap-1">
           <CardTitle className="text-sm">PSP links</CardTitle>
           <CardDescription>
-            The price's <code className="font-mono">psp_links</code>, keyed by PSP. Links are
-            declared by the catalog and pushed by the provider adapter — they are not edited
-            here. "Verify" performs a live read-only retrieve against each attached provider.
+            The price's <code className="font-mono">psp_links</code>, keyed by
+            PSP. Links are declared by the catalog and pushed by the provider
+            adapter — they are not edited here. "Verify" performs a live
+            read-only retrieve against each attached provider.
           </CardDescription>
         </div>
-        <Button variant="outline" size="sm" disabled={verifying || !links.length} onClick={onVerify}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={verifying || !links.length}
+          onClick={onVerify}
+        >
           {verifying ? "Verifying…" : "Verify"}
         </Button>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
         {!links.length ? (
           <p className="text-sm text-muted-foreground">
-            No PSP links. This price exists in OpenRails only — no checkout can be routed to a
-            provider for it.
+            No PSP links. This price exists in OpenRails only — no checkout can
+            be routed to a provider for it.
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -156,17 +176,27 @@ export function PSPLinksCard({
                 {links.map(([psp, state]) => (
                   <TableRow key={psp}>
                     <TableCell className="font-mono text-xs">{psp}</TableCell>
-                    <TableCell className="text-xs">{state.ids?.rail ?? "—"}</TableCell>
+                    <TableCell className="text-xs">
+                      {state.ids?.rail ?? "—"}
+                    </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={linkStatusClass(state.status)}>
+                      <Badge
+                        variant="secondary"
+                        className={linkStatusClass(state.status)}
+                      >
                         {state.status}
                       </Badge>
                       {state.message && (
-                        <p className="mt-1 max-w-xs text-xs text-muted-foreground">{state.message}</p>
+                        <p className="mt-1 max-w-xs text-xs text-muted-foreground">
+                          {state.message}
+                        </p>
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className={syncStatusClass(state.sync_status)}>
+                      <Badge
+                        variant="secondary"
+                        className={syncStatusClass(state.sync_status)}
+                      >
                         {state.sync_status ?? "unknown"}
                       </Badge>
                       {state.last_synced_at && (
@@ -175,8 +205,12 @@ export function PSPLinksCard({
                         </p>
                       )}
                       {state.drift?.map((d) => (
-                        <p key={d.field} className="mt-1 text-xs text-muted-foreground">
-                          {d.field}: ours {d.openrails_value} · theirs {d.remote_value}
+                        <p
+                          key={d.field}
+                          className="mt-1 text-xs text-muted-foreground"
+                        >
+                          {d.field}: ours {d.openrails_value} · theirs{" "}
+                          {d.remote_value}
                         </p>
                       ))}
                     </TableCell>
@@ -203,15 +237,16 @@ export function PSPLinksCard({
           <div className="rounded-md border border-amber-500/40 p-3 text-xs">
             {price.pending_manual_actions.map((a) => (
               <p key={`${a.provider}-${a.action}`}>
-                <span className="font-mono">{a.provider}</span>: {a.hint || a.action}
+                <span className="font-mono">{a.provider}</span>:{" "}
+                {a.hint || a.action}
               </p>
             ))}
           </div>
         )}
         {!verified && !!links.length && (
           <p className="text-xs text-muted-foreground">
-            Provider sync reads "unknown" until Verify runs — OpenRails does not claim a remote
-            object matches without having looked.
+            Provider sync reads "unknown" until Verify runs — OpenRails does not
+            claim a remote object matches without having looked.
           </p>
         )}
       </CardContent>
@@ -225,17 +260,9 @@ export function PSPLinksCard({
 export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
   const {
     data: decision,
-    loading: busy,
-    error,
-    reload,
-  } = useApiData<CheckoutRoutingDecision>(
-    () => dryRunCheckoutRouting({ price_id: price.id }),
-    [price.id],
-  )
-
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Check checkout readiness")
-  }, [error])
+    isFetching: busy,
+    refetch: reload,
+  } = useQuery(adminQueries.checkoutRouting(price.id))
 
   const eligible = decision?.candidates.filter((c) => !c.skip) ?? []
 
@@ -245,11 +272,17 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
         <div className="grid gap-1">
           <CardTitle className="text-sm">Checkout readiness</CardTitle>
           <CardDescription>
-            Where a checkout for this price would land right now, and why every other candidate
-            was passed over. This runs the production routing decision — no session is created.
+            Where a checkout for this price would land right now, and why every
+            other candidate was passed over. This runs the production routing
+            decision — no session is created.
           </CardDescription>
         </div>
-        <Button variant="outline" size="sm" disabled={busy} onClick={reload}>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={busy}
+          onClick={() => void reload()}
+        >
           {busy ? "Checking…" : "Re-check"}
         </Button>
       </CardHeader>
@@ -263,9 +296,11 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
             <p className="text-sm">
               {decision.selected ? (
                 <>
-                  Selected <span className="font-mono">{decision.selected}</span>
+                  Selected{" "}
+                  <span className="font-mono">{decision.selected}</span>
                   {decision.rail && <> on {decision.rail}</>}
-                  {decision.mode && <> · {decision.mode}</>} · policy {decision.policy}
+                  {decision.mode && <> · {decision.mode}</>} · policy{" "}
+                  {decision.policy}
                   {decision.rule !== undefined && <> (rule {decision.rule})</>}
                 </>
               ) : (
@@ -275,7 +310,9 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
               )}
             </p>
             {!decision.candidates.length ? (
-              <p className="text-sm text-muted-foreground">No PSP candidates were evaluated.</p>
+              <p className="text-sm text-muted-foreground">
+                No PSP candidates were evaluated.
+              </p>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -293,12 +330,17 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
                         <TableCell className="font-mono text-xs">
                           {c.selector}
                           {c.selector === decision.selected && (
-                            <Badge variant="secondary" className={`ml-2 ${OK_BADGE}`}>
+                            <Badge
+                              variant="secondary"
+                              className={`ml-2 ${OK_BADGE}`}
+                            >
                               selected
                             </Badge>
                           )}
                         </TableCell>
-                        <TableCell className="text-xs">{c.rail || "—"}</TableCell>
+                        <TableCell className="text-xs">
+                          {c.rail || "—"}
+                        </TableCell>
                         <TableCell>
                           <Badge
                             variant="secondary"
@@ -318,9 +360,10 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
             )}
             {!!decision.candidates.length && eligible.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                A <span className="font-mono">link_missing</span> verdict is a catalog problem
-                (push the price to the provider); the other classes are PSP configuration —
-                fix them under Settings → Payment providers.
+                A <span className="font-mono">link_missing</span> verdict is a
+                catalog problem (push the price to the provider); the other
+                classes are PSP configuration — fix them under Settings →
+                Payment providers.
               </p>
             )}
           </>

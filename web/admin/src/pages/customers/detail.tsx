@@ -7,7 +7,10 @@ import {
 import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
+import { FormFieldErrors } from "@/components/form-field-errors"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -38,37 +41,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { useApiData } from "@/hooks/use-api-data"
-import {
-  createOffChannelPayment,
-  getCustomerProfile,
-  grantEntitlement,
-  grantProductAccess,
-  listPrices,
-  listProducts,
-  revokeEntitlement,
-  revokeProductAccess,
-} from "@/lib/api/endpoints"
 import {
   formatDate,
   formatMicros,
   microsFromInput,
   shortId,
 } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
-  const {
-    data: profile,
-    loading,
-    error,
-    reload,
-  } = useApiData(() => getCustomerProfile(customerId), [customerId])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load customer")
-  }, [error])
+  const { data: profile, isPending: loading } = useQuery(
+    adminQueries.customer(customerId)
+  )
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!profile)
@@ -92,9 +80,9 @@ export function CustomerDetailPage() {
           </p>
         </div>
         <div className="ml-auto flex gap-2">
-          <GrantEntitlementDialog customerId={customerId} onDone={reload} />
-          <GrantProductAccessDialog customerId={customerId} onDone={reload} />
-          <OffChannelPaymentDialog customerId={customerId} onDone={reload} />
+          <GrantEntitlementDialog customerId={customerId} />
+          <GrantProductAccessDialog customerId={customerId} />
+          <OffChannelPaymentDialog customerId={customerId} />
         </div>
       </div>
 
@@ -198,13 +186,10 @@ export function CustomerDetailPage() {
                       {e.end_at ? formatDate(e.end_at) : "indefinite"}
                     </TableCell>
                     <TableCell className="text-right">
-                      <RevokeButton
+                      <RevokeEntitlementButton
+                        customerId={customerId}
+                        entitlementId={e.id}
                         label={`Revoke ${e.entitlement}`}
-                        onRevoke={async () => {
-                          await revokeEntitlement(customerId, e.id)
-                          toast.success("Entitlement revoked")
-                          reload()
-                        }}
                       />
                     </TableCell>
                   </TableRow>
@@ -249,13 +234,10 @@ export function CustomerDetailPage() {
                       {g.ends_at ? formatDate(g.ends_at) : "indefinite"}
                     </TableCell>
                     <TableCell className="text-right">
-                      <RevokeButton
+                      <RevokeProductAccessButton
+                        customerId={customerId}
+                        grantId={g.id}
                         label="Revoke product access"
-                        onRevoke={async () => {
-                          await revokeProductAccess(customerId, g.id)
-                          toast.success("Product access revoked")
-                          reload()
-                        }}
                       />
                     </TableCell>
                   </TableRow>
@@ -350,12 +332,15 @@ export function CustomerDetailPage() {
 
 function RevokeButton({
   label,
+  busy,
   onRevoke,
+  successMessage,
 }: {
   label: string
-  onRevoke: () => Promise<void>
+  busy: boolean
+  onRevoke: () => Promise<unknown>
+  successMessage: string
 }) {
-  const [busy, setBusy] = React.useState(false)
   return (
     <Button
       variant="ghost"
@@ -363,13 +348,11 @@ function RevokeButton({
       aria-label={label}
       disabled={busy}
       onClick={async () => {
-        setBusy(true)
         try {
           await onRevoke()
+          toast.success(successMessage)
         } catch (err) {
           toastApiError(err, label)
-        } finally {
-          setBusy(false)
         }
       }}
     >
@@ -378,19 +361,86 @@ function RevokeButton({
   )
 }
 
-function GrantEntitlementDialog({
+function RevokeEntitlementButton({
   customerId,
-  onDone,
+  entitlementId,
+  label,
 }: {
   customerId: string
-  onDone: () => void
+  entitlementId: string
+  label: string
 }) {
-  const [open, setOpen] = React.useState(false)
-  const [entitlement, setEntitlement] = React.useState("")
-  const [hours, setHours] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const revoke = useMutation(
+    adminMutations.revokeCustomerEntitlement(queryClient, customerId)
+  )
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <RevokeButton
+      label={label}
+      busy={revoke.isPending}
+      onRevoke={() => revoke.mutateAsync(entitlementId)}
+      successMessage="Entitlement revoked"
+    />
+  )
+}
+
+function RevokeProductAccessButton({
+  customerId,
+  grantId,
+  label,
+}: {
+  customerId: string
+  grantId: string
+  label: string
+}) {
+  const queryClient = useQueryClient()
+  const revoke = useMutation(
+    adminMutations.revokeCustomerProductAccess(queryClient, customerId)
+  )
+
+  return (
+    <RevokeButton
+      label={label}
+      busy={revoke.isPending}
+      onRevoke={() => revoke.mutateAsync(grantId)}
+      successMessage="Product access revoked"
+    />
+  )
+}
+
+function GrantEntitlementDialog({ customerId }: { customerId: string }) {
+  const [open, setOpen] = React.useState(false)
+  const queryClient = useQueryClient()
+  const grant = useMutation(
+    adminMutations.grantCustomerEntitlement(queryClient, customerId)
+  )
+  const form = useForm({
+    defaultValues: { entitlement: "", hours: "" },
+    onSubmit: async ({ value }) => {
+      try {
+        await grant.mutateAsync({
+          entitlement: value.entitlement.trim(),
+          hours: value.hours ? Number(value.hours) : undefined,
+        })
+        toast.success("Entitlement granted")
+        handleOpenChange(false)
+      } catch (err) {
+        toastApiError(err, "Grant entitlement")
+      }
+    },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) {
+      form.reset()
+      grant.reset()
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button variant="outline" size="sm">
@@ -406,75 +456,130 @@ function GrantEntitlementDialog({
             empty for an indefinite grant.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="ent-name">Entitlement</Label>
-            <Input
-              id="ent-name"
-              value={entitlement}
-              onChange={(e) => setEntitlement(e.target.value)}
-              placeholder="premium"
-            />
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+          className="grid gap-4"
+        >
+          <div className="grid gap-3">
+            <form.Field
+              name="entitlement"
+              validators={{
+                onChange: ({ value }) =>
+                  value.trim() ? undefined : "Enter an entitlement",
+              }}
+            >
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ent-name">Entitlement</Label>
+                  <Input
+                    id="ent-name"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    placeholder="premium"
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
+            <form.Field
+              name="hours"
+              validators={{
+                onChange: ({ value }) => {
+                  if (!value) return undefined
+                  const hours = Number(value)
+                  return Number.isFinite(hours) && hours >= 1
+                    ? undefined
+                    : "Enter at least 1 hour"
+                },
+              }}
+            >
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="ent-hours">Hours (optional)</Label>
+                  <Input
+                    id="ent-hours"
+                    type="number"
+                    min="1"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="ent-hours">Hours (optional)</Label>
-            <Input
-              id="ent-hours"
-              type="number"
-              min="1"
-              value={hours}
-              onChange={(e) => setHours(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button
-            disabled={!entitlement.trim() || busy}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await grantEntitlement(
-                  customerId,
-                  entitlement.trim(),
-                  hours ? Number(hours) : undefined
-                )
-                toast.success("Entitlement granted")
-                setOpen(false)
-                setEntitlement("")
-                setHours("")
-                onDone()
-              } catch (err) {
-                toastApiError(err, "Grant entitlement")
-              } finally {
-                setBusy(false)
+          <DialogFooter>
+            <form.Subscribe
+              selector={(state) =>
+                [
+                  state.values.entitlement,
+                  state.canSubmit,
+                  state.isSubmitting,
+                ] as const
               }
-            }}
-          >
-            {busy ? "Granting…" : "Grant"}
-          </Button>
-        </DialogFooter>
+            >
+              {([entitlement, canSubmit, isSubmitting]) => (
+                <Button
+                  type="submit"
+                  disabled={!entitlement.trim() || !canSubmit || isSubmitting}
+                >
+                  {isSubmitting ? "Granting…" : "Grant"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
 }
 
-function GrantProductAccessDialog({
-  customerId,
-  onDone,
-}: {
-  customerId: string
-  onDone: () => void
-}) {
+function GrantProductAccessDialog({ customerId }: { customerId: string }) {
   const [open, setOpen] = React.useState(false)
-  const [productId, setProductId] = React.useState("")
-  const [endsAt, setEndsAt] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
-  const { data: products } = useApiData(
-    () => (open ? listProducts(1000, 0) : Promise.resolve(null)),
-    [open]
+  const queryClient = useQueryClient()
+  const grant = useMutation(
+    adminMutations.grantCustomerProductAccess(queryClient, customerId)
   )
+  const { data: products } = useQuery({
+    ...adminQueries.products(),
+    enabled: open,
+  })
+  const form = useForm({
+    defaultValues: { productId: "", endsAt: "" },
+    onSubmit: async ({ value }) => {
+      try {
+        await grant.mutateAsync({
+          productId: value.productId,
+          endsAt: value.endsAt
+            ? new Date(value.endsAt).toISOString()
+            : undefined,
+        })
+        toast.success("Product access granted")
+        handleOpenChange(false)
+      } catch (err) {
+        toastApiError(err, "Grant product access")
+      }
+    },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) {
+      form.reset()
+      grant.reset()
+    }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button variant="outline" size="sm">
@@ -489,82 +594,139 @@ function GrantProductAccessDialog({
             Admin grant of a catalog product, optionally time-boxed.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label>Product</Label>
-            <Select
-              value={productId}
-              onValueChange={(value) => setProductId(value ?? "")}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+          className="grid gap-4"
+        >
+          <div className="grid gap-3">
+            <form.Field
+              name="productId"
+              validators={{
+                onChange: ({ value }) => (value ? undefined : "Pick a product"),
+              }}
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Pick a product" />
-              </SelectTrigger>
-              <SelectContent>
-                {(products?.items ?? []).map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.display_name} ({p.key})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pa-product">Product</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(value) => field.handleChange(value ?? "")}
+                  >
+                    <SelectTrigger
+                      id="pa-product"
+                      aria-invalid={field.state.meta.errors.length > 0}
+                    >
+                      <SelectValue placeholder="Pick a product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(products?.items ?? []).map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.display_name} ({p.key})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
+            <form.Field
+              name="endsAt"
+              validators={{
+                onChange: ({ value }) =>
+                  value && Number.isNaN(new Date(value).getTime())
+                    ? "Enter a valid end date"
+                    : undefined,
+              }}
+            >
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="pa-ends">Ends at (optional)</Label>
+                  <Input
+                    id="pa-ends"
+                    type="datetime-local"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="pa-ends">Ends at (optional)</Label>
-            <Input
-              id="pa-ends"
-              type="datetime-local"
-              value={endsAt}
-              onChange={(e) => setEndsAt(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button
-            disabled={!productId || busy}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                await grantProductAccess(
-                  customerId,
-                  productId,
-                  endsAt ? new Date(endsAt).toISOString() : undefined
-                )
-                toast.success("Product access granted")
-                setOpen(false)
-                onDone()
-              } catch (err) {
-                toastApiError(err, "Grant product access")
-              } finally {
-                setBusy(false)
+          <DialogFooter>
+            <form.Subscribe
+              selector={(state) =>
+                [
+                  state.values.productId,
+                  state.canSubmit,
+                  state.isSubmitting,
+                ] as const
               }
-            }}
-          >
-            {busy ? "Granting…" : "Grant"}
-          </Button>
-        </DialogFooter>
+            >
+              {([productId, canSubmit, isSubmitting]) => (
+                <Button
+                  type="submit"
+                  disabled={!productId || !canSubmit || isSubmitting}
+                >
+                  {isSubmitting ? "Granting…" : "Grant"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )
 }
 
-function OffChannelPaymentDialog({
-  customerId,
-  onDone,
-}: {
-  customerId: string
-  onDone: () => void
-}) {
+function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
   const [open, setOpen] = React.useState(false)
-  const [priceId, setPriceId] = React.useState("")
-  const [transactionId, setTransactionId] = React.useState("")
-  const [amount, setAmount] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
-  const { data: prices } = useApiData(
-    () => (open ? listPrices() : Promise.resolve(null)),
-    [open]
+  const queryClient = useQueryClient()
+  const recordPayment = useMutation(
+    adminMutations.recordCustomerOffChannelPayment(queryClient, customerId)
   )
+  const { data: prices } = useQuery({
+    ...adminQueries.prices(),
+    enabled: open,
+  })
+  const form = useForm({
+    defaultValues: { priceId: "", transactionId: "", amount: "" },
+    onSubmit: async ({ value }) => {
+      try {
+        const micros = value.amount ? microsFromInput(value.amount) : null
+        const result = await recordPayment.mutateAsync({
+          price_id: value.priceId,
+          transaction_id: value.transactionId.trim(),
+          ...(micros !== null && value.amount ? { amount: micros } : {}),
+        })
+        toast.success(
+          result.status === "exists"
+            ? "Payment already recorded"
+            : "Payment recorded"
+        )
+        handleOpenChange(false)
+      } catch (err) {
+        toastApiError(err, "Record off-channel payment")
+      }
+    },
+  })
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next)
+    if (!next) {
+      form.reset()
+      recordPayment.reset()
+    }
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button variant="outline" size="sm">
@@ -582,80 +744,128 @@ function OffChannelPaymentDialog({
             id.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label>Price</Label>
-            <Select
-              value={priceId}
-              onValueChange={(value) => setPriceId(value ?? "")}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+          className="grid gap-4"
+        >
+          <div className="grid gap-3">
+            <form.Field
+              name="priceId"
+              validators={{
+                onChange: ({ value }) => (value ? undefined : "Pick a price"),
+              }}
             >
-              <SelectTrigger>
-                <SelectValue placeholder="Pick a price" />
-              </SelectTrigger>
-              <SelectContent>
-                {(prices?.items ?? []).map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {formatMicros(p.unit_amount, p.currency)}
-                    {p.auto_renew ? " · recurring" : ""} ({shortId(p.id)})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="oc-price">Price</Label>
+                  <Select
+                    value={field.state.value}
+                    onValueChange={(value) => field.handleChange(value ?? "")}
+                  >
+                    <SelectTrigger
+                      id="oc-price"
+                      aria-invalid={field.state.meta.errors.length > 0}
+                    >
+                      <SelectValue placeholder="Pick a price" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(prices?.items ?? []).map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {formatMicros(p.unit_amount, p.currency)}
+                          {p.auto_renew ? " · recurring" : ""} ({shortId(p.id)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
+            <form.Field
+              name="transactionId"
+              validators={{
+                onChange: ({ value }) =>
+                  value.trim() ? undefined : "Enter a transaction id",
+              }}
+            >
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="oc-txn">Transaction id</Label>
+                  <Input
+                    id="oc-txn"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    placeholder="external reference"
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
+            <form.Field
+              name="amount"
+              validators={{
+                onChange: ({ value }) => {
+                  if (!value) return undefined
+                  const amount = microsFromInput(value)
+                  return amount !== null && amount >= 0
+                    ? undefined
+                    : "Enter a non-negative amount"
+                },
+              }}
+            >
+              {(field) => (
+                <div className="grid gap-1.5">
+                  <Label htmlFor="oc-amount">
+                    Amount override (optional, major units)
+                  </Label>
+                  <Input
+                    id="oc-amount"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
+              )}
+            </form.Field>
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="oc-txn">Transaction id</Label>
-            <Input
-              id="oc-txn"
-              value={transactionId}
-              onChange={(e) => setTransactionId(e.target.value)}
-              placeholder="external reference"
-            />
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="oc-amount">
-              Amount override (optional, major units)
-            </Label>
-            <Input
-              id="oc-amount"
-              type="number"
-              step="any"
-              min="0"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-          </div>
-        </div>
-        <DialogFooter>
-          <Button
-            disabled={!priceId || !transactionId.trim() || busy}
-            onClick={async () => {
-              setBusy(true)
-              try {
-                const micros = amount ? microsFromInput(amount) : null
-                const res = await createOffChannelPayment(customerId, {
-                  price_id: priceId,
-                  transaction_id: transactionId.trim(),
-                  ...(micros !== null && micros !== undefined && amount
-                    ? { amount: micros }
-                    : {}),
-                })
-                toast.success(
-                  res.status === "exists"
-                    ? "Payment already recorded"
-                    : "Payment recorded"
-                )
-                setOpen(false)
-                onDone()
-              } catch (err) {
-                toastApiError(err, "Record off-channel payment")
-              } finally {
-                setBusy(false)
+          <DialogFooter>
+            <form.Subscribe
+              selector={(state) =>
+                [
+                  state.values.priceId,
+                  state.values.transactionId,
+                  state.canSubmit,
+                  state.isSubmitting,
+                ] as const
               }
-            }}
-          >
-            {busy ? "Recording…" : "Record"}
-          </Button>
-        </DialogFooter>
+            >
+              {([priceId, transactionId, canSubmit, isSubmitting]) => (
+                <Button
+                  type="submit"
+                  disabled={
+                    !priceId ||
+                    !transactionId.trim() ||
+                    !canSubmit ||
+                    isSubmitting
+                  }
+                >
+                  {isSubmitting ? "Recording…" : "Record"}
+                </Button>
+              )}
+            </form.Subscribe>
+          </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   )

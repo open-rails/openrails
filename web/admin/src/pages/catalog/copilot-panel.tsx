@@ -11,54 +11,52 @@ import {
   Loading02Icon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons"
-import * as React from "react"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
+
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import {
-  askCatalogCopilot,
-  confirmCopilotDraft,
-  type CatalogDiffDraft,
-  type CopilotAskResponse,
-  type CopilotDraft,
-  type PriceChangeDraft,
+import type {
+  CatalogDiffDraft,
+  CopilotDraft,
+  PriceChangeDraft,
 } from "@/lib/api/copilot"
 import { ApiError } from "@/lib/api/client"
-import { createPrice, getPriceByKey, getProduct } from "@/lib/api/endpoints"
-import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 
 export function CatalogCopilotPanel({
   enabled,
   draftingEnabled,
-  onCatalogChanged,
 }: {
   enabled: boolean
   draftingEnabled: boolean
-  onCatalogChanged: () => void
 }) {
-  const [question, setQuestion] = React.useState("")
-  const [asking, setAsking] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-  const [result, setResult] = React.useState<CopilotAskResponse | null>(null)
+  const askCatalog = useMutation(adminMutations.askCatalogCopilot())
+  const form = useForm({
+    defaultValues: { question: "" },
+    onSubmit: async ({ value }) => {
+      const question = value.question.trim()
+      if (!question) return
 
-  const ask = async () => {
-    const q = question.trim()
-    if (!q || asking) return
-    setAsking(true)
-    setError(null)
-    setResult(null) // one-shot: a new question replaces the previous answer
-    try {
-      setResult(await askCatalogCopilot(q))
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "ask failed")
-    } finally {
-      setAsking(false)
-    }
-  }
+      askCatalog.reset()
+      try {
+        await askCatalog.mutateAsync(question)
+      } catch {
+        // The request error renders inline below the form.
+      }
+    },
+  })
+  const result = askCatalog.data
+  const error = askCatalog.error
+    ? askCatalog.error instanceof ApiError
+      ? askCatalog.error.message
+      : "ask failed"
+    : null
 
   // Enabling the copilot is an operator setup step (see docs/admin-console.md);
   // an unconfigured feature is not page furniture, so render nothing.
@@ -71,43 +69,64 @@ export function CatalogCopilotPanel({
       <CardContent className="flex flex-col gap-3">
         <form
           className="flex items-center gap-2"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void ask()
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
           }}
         >
           <HugeiconsIcon
             icon={BubbleChatQuestionIcon}
             className="size-4 shrink-0 text-muted-foreground"
           />
-          <Input
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-            placeholder={
-              draftingEnabled
-                ? 'Ask about your catalog, or ask for a change — e.g. "who is still on the old premium price?" or "raise premium to $12"'
-                : 'Ask about your catalog — e.g. "what do we sell?" or "who is still on the old premium price?"'
-            }
-            className="flex-1"
-          />
-          <Button type="submit" size="sm" disabled={asking || !question.trim()}>
-            {asking ? (
-              <HugeiconsIcon
-                icon={Loading02Icon}
-                className="size-3.5 animate-spin"
+          <form.Field name="question">
+            {(field) => (
+              <Input
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+                placeholder={
+                  draftingEnabled
+                    ? 'Ask about your catalog, or ask for a change — e.g. "who is still on the old premium price?" or "raise premium to $12"'
+                    : 'Ask about your catalog — e.g. "what do we sell?" or "who is still on the old premium price?"'
+                }
+                className="flex-1"
               />
-            ) : null}
-            Ask
-          </Button>
+            )}
+          </form.Field>
+          <form.Subscribe
+            selector={(state) =>
+              [state.values.question, state.isSubmitting] as const
+            }
+          >
+            {([question, isSubmitting]) => (
+              <Button
+                type="submit"
+                size="sm"
+                disabled={isSubmitting || !question.trim()}
+              >
+                {isSubmitting ? (
+                  <HugeiconsIcon
+                    icon={Loading02Icon}
+                    className="size-3.5 animate-spin"
+                  />
+                ) : null}
+                Ask
+              </Button>
+            )}
+          </form.Subscribe>
         </form>
 
-        {asking ? (
+        {askCatalog.isPending ? (
           <p className="text-xs text-muted-foreground">
             Checking your catalog…
           </p>
         ) : null}
         {error ? (
-          <p className="text-xs whitespace-pre-wrap text-destructive">
+          <p
+            className="text-xs whitespace-pre-wrap text-destructive"
+            role="alert"
+          >
             {error}
           </p>
         ) : null}
@@ -122,8 +141,7 @@ export function CatalogCopilotPanel({
                 className="size-6 shrink-0"
                 aria-label="Dismiss answer"
                 onClick={() => {
-                  setResult(null)
-                  setError(null)
+                  askCatalog.reset()
                 }}
               >
                 <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
@@ -146,11 +164,7 @@ export function CatalogCopilotPanel({
             )}
 
             {result.drafts?.map((draft, i) => (
-              <DraftCard
-                key={i}
-                draft={draft}
-                onCatalogChanged={onCatalogChanged}
-              />
+              <DraftCard key={i} draft={draft} />
             ))}
           </div>
         ) : null}
@@ -159,13 +173,7 @@ export function CatalogCopilotPanel({
   )
 }
 
-function DraftCard({
-  draft,
-  onCatalogChanged,
-}: {
-  draft: CopilotDraft
-  onCatalogChanged: () => void
-}) {
+function DraftCard({ draft }: { draft: CopilotDraft }) {
   if (draft.kind === "refused" && draft.refusal) {
     return (
       <div className="rounded-lg border border-dashed p-3 text-xs">
@@ -178,20 +186,10 @@ function DraftCard({
     )
   }
   if (draft.kind === "price_change" && draft.price_change) {
-    return (
-      <PriceChangeDraftCard
-        draft={draft.price_change}
-        onCatalogChanged={onCatalogChanged}
-      />
-    )
+    return <PriceChangeDraftCard draft={draft.price_change} />
   }
   if (draft.kind === "catalog_diff" && draft.catalog_diff) {
-    return (
-      <CatalogDiffDraftCard
-        draft={draft.catalog_diff}
-        onCatalogChanged={onCatalogChanged}
-      />
-    )
+    return <CatalogDiffDraftCard draft={draft.catalog_diff} />
   }
   return null
 }
@@ -200,30 +198,14 @@ function DraftCard({
 // product name, then opens the SAME #777 wizard used everywhere else,
 // pre-filled at Step 3 — the human reviews and clicks Confirm exactly as
 // they would for a hand-typed change.
-function PriceChangeDraftCard({
-  draft,
-  onCatalogChanged,
-}: {
-  draft: PriceChangeDraft
-  onCatalogChanged: () => void
-}) {
-  const [reviewing, setReviewing] = React.useState(false)
-  const [price, setPrice] = React.useState<CatalogPrice | null>(null)
-  const [productName, setProductName] = React.useState("")
-  const [loading, setLoading] = React.useState(false)
+function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
+  const loadDraft = useMutation(adminMutations.loadCatalogPriceDraft())
 
   const openWizard = async () => {
-    setLoading(true)
     try {
-      const p = await getPriceByKey(draft.price_key)
-      const product = await getProduct(p.product_id)
-      setPrice(p)
-      setProductName(product.display_name)
-      setReviewing(true)
+      await loadDraft.mutateAsync(draft.price_key)
     } catch (err) {
       toastApiError(err, "Load draft for review")
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -246,24 +228,21 @@ function PriceChangeDraftCard({
         {draft.affected_count.toLocaleString()} affected · requires human
         confirm
       </p>
-      {reviewing && price ? (
+      {loadDraft.data ? (
         <PriceChangeWizard
-          price={price}
-          productName={productName}
+          price={loadDraft.data.price}
+          productName={loadDraft.data.productName}
           draft={draft}
-          onDone={() => {
-            setReviewing(false)
-            onCatalogChanged()
-          }}
+          onDone={() => loadDraft.reset()}
         />
       ) : (
         <Button
           size="sm"
           className="mt-2"
-          disabled={loading}
+          disabled={loadDraft.isPending}
           onClick={openWizard}
         >
-          {loading ? "Loading…" : "Review in wizard"}
+          {loadDraft.isPending ? "Loading…" : "Review in wizard"}
         </Button>
       )}
     </div>
@@ -273,31 +252,20 @@ function PriceChangeDraftCard({
 // CatalogDiffDraftCard: "Create this price" calls the SAME createPrice the
 // New Price form uses — a plain, explicit human confirm, never triggered by
 // the tool layer itself.
-function CatalogDiffDraftCard({
-  draft,
-  onCatalogChanged,
-}: {
-  draft: CatalogDiffDraft
-  onCatalogChanged: () => void
-}) {
-  const [busy, setBusy] = React.useState(false)
-  const [created, setCreated] = React.useState(false)
+function CatalogDiffDraftCard({ draft }: { draft: CatalogDiffDraft }) {
+  const queryClient = useQueryClient()
+  const createDraftPrice = useMutation(
+    adminMutations.createCatalogDraftPrice(queryClient)
+  )
 
   const confirm = async () => {
-    setBusy(true)
     try {
-      await createPrice(draft.create_price)
-      confirmCopilotDraft(
-        draft.draft_id,
-        "catalog_diff",
-        draft.create_price.key
-      ).catch(() => {})
-      setCreated(true)
-      onCatalogChanged()
+      await createDraftPrice.mutateAsync({
+        draftId: draft.draft_id,
+        price: draft.create_price,
+      })
     } catch (err) {
       toastApiError(err, "Create drafted price")
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -323,10 +291,14 @@ function CatalogDiffDraftCard({
       <Button
         size="sm"
         className="mt-2"
-        disabled={busy || created}
+        disabled={createDraftPrice.isPending || createDraftPrice.isSuccess}
         onClick={confirm}
       >
-        {created ? "Created" : busy ? "Creating…" : "Create this price"}
+        {createDraftPrice.isSuccess
+          ? "Created"
+          : createDraftPrice.isPending
+            ? "Creating…"
+            : "Create this price"}
       </Button>
     </div>
   )

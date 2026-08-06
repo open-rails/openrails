@@ -6,6 +6,7 @@ import {
   Sun01Icon,
 } from "@hugeicons/core-free-icons"
 import { Link, useNavigate } from "react-router-dom"
+import { useMutation } from "@tanstack/react-query"
 
 import { NotificationBell } from "@/components/notification-bell"
 import { useTheme } from "@/components/theme-provider"
@@ -31,6 +32,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useAuth } from "@/lib/auth"
+import { authMutations } from "@/lib/auth-mutations"
 
 export function SiteHeader({ title }: { title: string }) {
   return (
@@ -66,6 +68,7 @@ export function SiteHeader({ title }: { title: string }) {
 
 function UserMenu() {
   const { me, logout } = useAuth()
+  const signOut = useMutation(authMutations.logout(logout))
   const { theme, setTheme } = useTheme()
   const navigate = useNavigate()
   if (!me) return null
@@ -123,13 +126,15 @@ function UserMenu() {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onClick={async () => {
-            await logout()
-            navigate("/login")
-          }}
+          disabled={signOut.isPending}
+          onClick={() =>
+            signOut.mutate(undefined, {
+              onSuccess: () => navigate("/login"),
+            })
+          }
         >
           <HugeiconsIcon icon={Logout01Icon} />
-          Sign out
+          {signOut.isPending ? "Signing out…" : "Sign out"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

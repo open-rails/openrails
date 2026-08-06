@@ -1,5 +1,7 @@
 import * as React from "react"
 import { toast } from "sonner"
+import { useForm } from "@tanstack/react-form"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -24,15 +26,10 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { useApiData } from "@/hooks/use-api-data"
-import {
-  listFindings,
-  listRepairAlerts,
-  listWorkerHealth,
-  resolveFinding,
-} from "@/lib/api/endpoints"
 import type { Finding } from "@/lib/api/types"
 import { formatDate } from "@/lib/format"
+import { adminMutations } from "@/lib/mutations"
+import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
 export function OpsPage() {
@@ -64,14 +61,8 @@ const severityTone: Record<string, string> = {
 }
 
 function FindingsTab() {
-  const { data, loading, error, reload } = useApiData(
-    () => listFindings({}, 100, 0),
-    []
-  )
+  const { data, isPending: loading } = useQuery(adminQueries.findings())
   const [resolving, setResolving] = React.useState<Finding | null>(null)
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load findings")
-  }, [error])
 
   const gauges = data?.gauges
   return (
@@ -155,10 +146,6 @@ function FindingsTab() {
         <ResolveFindingDialog
           finding={resolving}
           onClose={() => setResolving(null)}
-          onDone={() => {
-            setResolving(null)
-            reload()
-          }}
         />
       )}
     </div>
@@ -195,28 +182,28 @@ function Gauge({
 function ResolveFindingDialog({
   finding,
   onClose,
-  onDone,
 }: {
   finding: Finding
   onClose: () => void
-  onDone: () => void
 }) {
-  const [notes, setNotes] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
+  const queryClient = useQueryClient()
+  const resolution = useMutation(adminMutations.resolveFinding(queryClient))
+  const form = useForm({ defaultValues: { notes: "" } })
   const canApprove = Boolean(finding.recommendation)
 
   const resolve = async (outcome: "approve" | "ignore") => {
-    setBusy(true)
     try {
-      await resolveFinding(finding.id, outcome, notes)
+      await resolution.mutateAsync({
+        id: finding.id,
+        outcome,
+        notes: form.state.values.notes,
+      })
       toast.success(
         outcome === "approve" ? "Recommendation executed" : "Finding ignored"
       )
-      onDone()
+      onClose()
     } catch (err) {
       toastApiError(err, "Resolve finding")
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -246,27 +233,39 @@ function ResolveFindingDialog({
             (with notes).
           </p>
         )}
-        <div className="grid gap-1.5">
-          <Label htmlFor="f-notes">
-            Notes {canApprove ? "(required to ignore)" : "(required)"}
-          </Label>
-          <Textarea
-            id="f-notes"
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-          />
-        </div>
+        <form.Field name="notes">
+          {(field) => (
+            <div className="grid gap-1.5">
+              <Label htmlFor="f-notes">
+                Notes {canApprove ? "(required to ignore)" : "(required)"}
+              </Label>
+              <Textarea
+                id="f-notes"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(event) => field.handleChange(event.target.value)}
+              />
+            </div>
+          )}
+        </form.Field>
         <DialogFooter>
-          <Button
-            variant="outline"
-            disabled={busy || !notes.trim()}
-            onClick={() => resolve("ignore")}
-          >
-            Ignore
-          </Button>
+          <form.Subscribe selector={(state) => state.values.notes}>
+            {(notes) => (
+              <Button
+                variant="outline"
+                disabled={resolution.isPending || !notes.trim()}
+                onClick={() => resolve("ignore")}
+              >
+                Ignore
+              </Button>
+            )}
+          </form.Subscribe>
           {canApprove && (
-            <Button disabled={busy} onClick={() => resolve("approve")}>
-              {busy ? "Working…" : "Approve recommendation"}
+            <Button
+              disabled={resolution.isPending}
+              onClick={() => resolve("approve")}
+            >
+              {resolution.isPending ? "Working…" : "Approve recommendation"}
             </Button>
           )}
         </DialogFooter>
@@ -276,10 +275,7 @@ function ResolveFindingDialog({
 }
 
 function RepairAlertsTab() {
-  const { data, loading, error } = useApiData(() => listRepairAlerts(50, 0), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load repair alerts")
-  }, [error])
+  const { data, isPending: loading } = useQuery(adminQueries.repairAlerts())
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!data?.data?.length)
     return <p className="text-sm text-muted-foreground">No repair alerts.</p>
@@ -314,10 +310,7 @@ function RepairAlertsTab() {
 }
 
 function WorkerHealthTab() {
-  const { data, loading, error } = useApiData(() => listWorkerHealth(), [])
-  React.useEffect(() => {
-    if (error) toastApiError(error, "Load worker health")
-  }, [error])
+  const { data, isPending: loading } = useQuery(adminQueries.workerHealth())
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!data?.length)
     return (
