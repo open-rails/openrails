@@ -51,6 +51,15 @@ func requireBoundBadSpendPolicy(t *testing.T, svc *billingservice.Service, ctx c
 // run end-to-end) and a freshly seeded payer.
 func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, identity.CustomerID, context.Context) {
 	t.Helper()
+	svc, ms, payer, ctx, _ := wastedSvcEnvWithRedis(t)
+	return svc, ms, payer, ctx
+}
+
+// wastedSvcEnvWithRedis is the same environment, handing back the Redis client
+// so a test can FLUSH it mid-run — the only way to prove a claim is durable
+// rather than merely cached (or#903).
+func wastedSvcEnvWithRedis(t *testing.T) (*billingservice.Service, *money.MoneyService, identity.CustomerID, context.Context, *redis.Client) {
+	t.Helper()
 	ctx := context.Background()
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
 	pool := dbi.Pool()
@@ -96,7 +105,7 @@ func wastedSvcEnv(t *testing.T) (*billingservice.Service, *money.MoneyService, i
 	ms := money.NewMoneyService(dbi)
 	_, err = ms.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 100_000_000, Source: "seed"})
 	require.NoError(t, err)
-	return svc, ms, payer, ctx
+	return svc, ms, payer, ctx, rdb
 }
 
 func grantDelegatedSpend(t *testing.T, svc *billingservice.Service, ctx context.Context, payer identity.CustomerID, invoker string) {
