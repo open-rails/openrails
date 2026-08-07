@@ -11,6 +11,7 @@ overrides:
   fast-uri: ^3.1.5 # GHSA-7p8r-x3mc-p8w7
   ip-address: ^10.3.1 # GHSA-mwp4-54f8-5fhr
   brace-expansion: ^5.0.9 # GHSA-rgw5-rvv9-x895
+  js-yaml: ^4.3.1 # GHSA-5p4m-2wfm-xmqj (dragged in by cosmiconfig)
 
 pmOnFail: error
 ignoreScripts: true
