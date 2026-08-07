@@ -5,6 +5,9 @@ package embed_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -40,7 +43,13 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	ctx := context.Background()
 
 	const schema = config.DefaultSchema
-	orphans := []string{"3", "4", "5", "6", "7", "8", "9", "10", "11", "12"}
+	// Orphans start one past the highest prefix the build actually carries, so
+	// adding a real migration never turns this fixture into a live prefix. It
+	// used to be hardcoded from "3", which migration 0003 made real: the INSERT
+	// then shadowed the genuine ledger row and the cleanup DELETE — matched on
+	// (app, schema, name) only — removed it, leaving 0003 recorded as pending
+	// and every later embed.New in the package refusing to boot.
+	orphans := orphanPrefixesPastEmbedded(t, 10)
 
 	superDSN := dbtest.SharedSuperuserDSN(t)
 	sqlDB, err := sql.Open("pgx", superDSN)
@@ -96,4 +105,29 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	require.ErrorAs(t, err, &orphanErr, "the refusal is typed, so a host can act on it")
 	require.Equal(t, schema, orphanErr.Schema)
 	require.Equal(t, orphans, orphanErr.Orphaned, "every orphan named, in numeric order")
+}
+
+// orphanPrefixesPastEmbedded returns n numeric prefixes starting just past the
+// highest *.up.sql prefix in the embedded postgres migration set.
+func orphanPrefixesPastEmbedded(t *testing.T, n int) []string {
+	t.Helper()
+	entries, err := postgresmigrations.FS.ReadDir(".")
+	require.NoError(t, err)
+	maxPrefix := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".up.sql") {
+			continue
+		}
+		var p int
+		if _, err := fmt.Sscanf(name, "%d_", &p); err == nil && p > maxPrefix {
+			maxPrefix = p
+		}
+	}
+	require.Positive(t, maxPrefix, "no migrations found in the embedded FS")
+	out := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		out = append(out, strconv.Itoa(maxPrefix+i))
+	}
+	return out
 }
