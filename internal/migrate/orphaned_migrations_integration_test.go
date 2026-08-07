@@ -5,6 +5,9 @@ package migrate_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
@@ -50,7 +53,9 @@ func TestRunPostgres_RefusesOrphanedMigrations(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = sqlDB.Close() })
 
-	orphans := []string{"3", "4", "5", "6", "7", "8", "9", "10", "11", "12"}
+	// Orphans start one past the highest prefix the build actually carries, so
+	// adding a real migration never turns this fixture into a live prefix.
+	orphans := orphanPrefixesPastEmbedded(t, 10)
 	t.Cleanup(func() {
 		for _, n := range orphans {
 			_, _ = sqlDB.ExecContext(context.Background(),
@@ -89,4 +94,29 @@ func TestRunPostgres_RefusesOrphanedMigrations(t *testing.T) {
 	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(orphanedSchema)
 	require.NoError(t, m.ValidateAllApplied(ctx, migrations),
 		"this is the hole or#901 closes: migratekit reports a frozen schema as fully migrated")
+}
+
+// orphanPrefixesPastEmbedded returns n numeric prefixes starting just past the
+// highest *.up.sql prefix in the embedded postgres migration set.
+func orphanPrefixesPastEmbedded(t *testing.T, n int) []string {
+	t.Helper()
+	entries, err := postgresmigrations.FS.ReadDir(".")
+	require.NoError(t, err)
+	maxPrefix := 0
+	for _, e := range entries {
+		name := e.Name()
+		if !strings.HasSuffix(name, ".up.sql") {
+			continue
+		}
+		var p int
+		if _, err := fmt.Sscanf(name, "%d_", &p); err == nil && p > maxPrefix {
+			maxPrefix = p
+		}
+	}
+	require.Positive(t, maxPrefix, "no migrations found in the embedded FS")
+	out := make([]string, 0, n)
+	for i := 1; i <= n; i++ {
+		out = append(out, strconv.Itoa(maxPrefix+i))
+	}
+	return out
 }
