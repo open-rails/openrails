@@ -146,12 +146,12 @@ export function NotificationBell() {
                   {n.severity === "critical" ? (
                     <HugeiconsIcon
                       icon={AlertCircleIcon}
-                      className="size-4 text-red-500"
+                      className="size-4 text-failed"
                     />
                   ) : (
                     <HugeiconsIcon
                       icon={Alert01Icon}
-                      className="size-4 text-amber-500"
+                      className="size-4 text-held"
                     />
                   )}
                 </span>

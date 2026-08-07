@@ -4,14 +4,8 @@ import * as React from "react"
 import { Navigate, useNavigate } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 
+import { LogoLockup } from "@/components/logo"
 import { Button } from "@/components/ui/button"
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
@@ -56,16 +50,17 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center bg-muted/40 p-4">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex size-10 items-center justify-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-            µ
-          </div>
-          <CardTitle>OpenRails Admin</CardTitle>
-          <CardDescription>Sign in to your merchant console</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-4">
+    <div className="flex min-h-svh items-center justify-center bg-background px-6 py-12">
+      <div className="w-full max-w-sm">
+        {/* the real lockup, in place of the placeholder glyph that stood here */}
+        <LogoLockup className="h-4" />
+        <h1 className="mt-8 text-2xl font-semibold tracking-tight text-balance">
+          Sign in to your console
+        </h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The merchant console for your OpenRails deployment.
+        </p>
+        <div className="mt-8 grid gap-4">
           {bootError && (
             <p className="text-sm text-destructive" role="alert">
               Console bootstrap failed: {bootError}
@@ -132,8 +127,8 @@ export function LoginPage() {
               deployment's AuthKit configuration.
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }

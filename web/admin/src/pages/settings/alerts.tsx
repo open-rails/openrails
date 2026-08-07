@@ -71,26 +71,26 @@ const TEMPLATE_COPY: Record<string, { label: string; description: string }> = {
   chargeback_rate_by_rail_account: {
     label: "Chargeback ratio per rail account",
     description:
-      "Warns before card-network monitoring thresholds. Fires per rail account when its " +
-      "chargeback ratio approaches the network limit (VAMP ≈ 0.9%) — the alert that gets a " +
+      "Warns before card-network monitoring thresholds. Fires per rail account when its" +
+      "chargeback ratio approaches the network limit (VAMP ≈ 0.9%) — the alert that gets a" +
       "high-risk merchant fined.",
   },
   dunning_spike: {
     label: "Dunning spike",
     description:
-      "Fires when the number of subscriptions in dunning (past_due) jumps versus its trailing " +
+      "Fires when the number of subscriptions in dunning (past_due) jumps versus its trailing" +
       "baseline — an early signal that a rail is suddenly declining hard.",
   },
   payers_at_depletion_risk: {
     label: "Payers approaching credit depletion",
     description:
-      "Fires when a batch of prepaid payers are about to run out of credits — the top-up revenue " +
+      "Fires when a batch of prepaid payers are about to run out of credits — the top-up revenue" +
       "moment, and a churn-risk signal for usage-billing platforms.",
   },
   payment_methods_expiring: {
     label: "Payment methods expiring (monthly digest)",
     description:
-      "A monthly heads-up of cards expiring soon so you can prompt updates before involuntary " +
+      "A monthly heads-up of cards expiring soon so you can prompt updates before involuntary" +
       "churn hits.",
   },
 }
@@ -116,7 +116,7 @@ function humanizeParam(name: string): string {
   return name
     .split("_")
     .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
-    .join(" ")
+    .join("")
 }
 
 // runway_days is fixed by the #733 engine (only 7 is accepted) — render it
@@ -164,7 +164,7 @@ function summarizeDeliveryResults(results: AlertDeliveryResult[]): string {
   if (failed.length === 0) {
     return `Test alert delivered to all ${results.length} channel${results.length > 1 ? "s" : ""}`
   }
-  const detail = failed.map((f) => f.detail || f.channel).join("; ")
+  const detail = failed.map((f) => f.detail || f.channel).join(";")
   return `Test alert: ${results.length - failed.length}/${results.length} channels succeeded (${detail})`
 }
 
@@ -305,8 +305,8 @@ function SeverityBadge({ severity }: { severity: AlertSeverity }) {
       variant="secondary"
       className={
         severity === "critical"
-          ? "bg-red-500/15 text-red-600 dark:text-red-400"
-          : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+          ? "bg-failed-surface text-failed"
+          : "bg-held-surface text-held"
       }
     >
       {severity}
@@ -328,7 +328,8 @@ function ChannelSummary({ channels }: { channels: AlertChannelRef[] }) {
       )}
       {sel.webhookIds.length > 0 && (
         <span className="inline-flex items-center gap-1">
-          <HugeiconsIcon icon={WebhookIcon} className="size-3" />{" "}
+          <HugeiconsIcon icon={WebhookIcon} className="size-3" />
+          {""}
           {sel.webhookIds.length} webhook
           {sel.webhookIds.length > 1 ? "s" : ""}
         </span>
@@ -372,7 +373,8 @@ function RulesSection({
           />
         ) : (
           <Button size="sm" disabled>
-            <HugeiconsIcon icon={Add01Icon} className="size-4" />{" "}
+            <HugeiconsIcon icon={Add01Icon} className="size-4" />
+            {""}
             {templatesLoading ? "Loading…" : "New rule"}
           </Button>
         )}
@@ -473,10 +475,7 @@ function RuleRow({
       </TableCell>
       <TableCell className="py-3">
         {firing ? (
-          <Badge
-            variant="secondary"
-            className="bg-red-500/15 text-red-600 dark:text-red-400"
-          >
+          <Badge variant="secondary" className="bg-failed-surface text-failed">
             firing
           </Badge>
         ) : (
@@ -799,7 +798,8 @@ function RuleDialog({
                               <HugeiconsIcon
                                 icon={Notification01Icon}
                                 className="size-4"
-                              />{" "}
+                              />
+                              {""}
                               In-app
                             </span>
                             <Badge variant="secondary" className="text-[10px]">
@@ -813,7 +813,8 @@ function RuleDialog({
                                 <HugeiconsIcon
                                   icon={Mail01Icon}
                                   className="size-4"
-                                />{" "}
+                                />
+                                {""}
                                 Email
                               </span>
                               <Switch
@@ -830,14 +831,14 @@ function RuleDialog({
                             {field.state.value.email &&
                               (alertEmail ? (
                                 <p className="text-xs text-muted-foreground">
-                                  Sent to{" "}
+                                  Sent to{""}
                                   <span className="font-medium text-foreground">
                                     {alertEmail}
                                   </span>
                                   .
                                 </p>
                               ) : (
-                                <p className="text-xs text-amber-600 dark:text-amber-400">
+                                <p className="text-xs text-held">
                                   No alert email set — email won&apos;t send
                                   until you set one above. The alert still
                                   reaches in-app and webhooks.
@@ -850,7 +851,8 @@ function RuleDialog({
                               <HugeiconsIcon
                                 icon={WebhookIcon}
                                 className="size-4"
-                              />{" "}
+                              />
+                              {""}
                               Webhooks
                             </span>
                             {webhooks.length === 0 ? (

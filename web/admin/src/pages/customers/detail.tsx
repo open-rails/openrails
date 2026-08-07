@@ -100,7 +100,7 @@ export function CustomerDetailPage() {
                   {formatMicros(b.balance, b.currency)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  held {formatMicros(b.held_balance, b.currency)} · owed{" "}
+                  held {formatMicros(b.held_balance, b.currency)} · owed{""}
                   {formatMicros(b.outstanding_owed_amount, b.currency)}
                 </p>
               </CardContent>
@@ -315,7 +315,7 @@ export function CustomerDetailPage() {
                     pm.health.expiry_status !== "valid" && (
                       <Badge
                         variant="secondary"
-                        className="mt-1 bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                        className="mt-1 bg-held-surface text-held"
                       >
                         {pm.health.expiry_status}
                       </Badge>

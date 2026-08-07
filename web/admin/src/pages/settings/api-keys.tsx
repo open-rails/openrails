@@ -48,23 +48,23 @@ const ROLES: { value: string; label: string; description: string }[] = [
     value: "viewer",
     label: "Viewer — read-only (recommended)",
     description:
-      "Can query metrics and read payments, subscriptions, catalog, and settings. " +
-      "Cannot change anything or move money. The right choice for LLM agents, " +
+      "Can query metrics and read payments, subscriptions, catalog, and settings." +
+      "Cannot change anything or move money. The right choice for LLM agents," +
       "reporting, and analytics integrations.",
   },
   {
     value: "support",
     label: "Support — customer operations",
     description:
-      "Everything Viewer can, plus customer fixes: refunds, subscription changes, " +
-      "and entitlement grants. Cannot change merchant settings, catalog, payment " +
+      "Everything Viewer can, plus customer fixes: refunds, subscription changes," +
+      "and entitlement grants. Cannot change merchant settings, catalog, payment" +
       "providers, or API keys.",
   },
   {
     value: "owner",
     label: "Owner — full control",
     description:
-      "Full authority over this merchant, including settings, payment providers, " +
+      "Full authority over this merchant, including settings, payment providers," +
       "and minting or revoking API keys. Only for trusted server automation.",
   },
 ]
@@ -153,7 +153,7 @@ function KeyRow({ apiKey }: { apiKey: MerchantAPIKey }) {
         {status === "active" ? (
           <Badge
             variant="secondary"
-            className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+            className="bg-settled-surface text-settled"
           >
             active
           </Badge>
@@ -357,16 +357,17 @@ function ShowOnceSecret({
       <DialogHeader>
         <DialogTitle>API key created</DialogTitle>
         <DialogDescription>
-          Copy the key now and store it somewhere safe.{" "}
+          Copy the key now and store it somewhere safe.{""}
           <span className="font-semibold text-foreground">
             You won&apos;t see this key again
-          </span>{" "}
-          — if it is lost, revoke it and mint a new one.
+          </span>
+          {""}— if it is lost, revoke it and mint a new one.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">
         <p className="text-sm">
-          <span className="font-medium">{minted.name}</span>{" "}
+          <span className="font-medium">{minted.name}</span>
+          {""}
           <Badge variant="secondary">{minted.role}</Badge>
         </p>
         <div className="flex flex-wrap items-center gap-2">
@@ -394,7 +395,7 @@ function ShowOnceSecret({
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Use it as a Bearer token:{" "}
+          Use it as a Bearer token:{""}
           <code>Authorization: Bearer {minted.prefix}…</code>
         </p>
       </div>

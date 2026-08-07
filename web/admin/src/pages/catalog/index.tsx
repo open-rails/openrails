@@ -248,7 +248,7 @@ function productFormValues(product?: CatalogProduct) {
     description: product?.description ?? "",
     tierGroup: product?.tier_group ?? "",
     tierRank: String(product?.tier_rank ?? 0),
-    entitlements: Object.keys(product?.entitlements_spec ?? {}).join(", "),
+    entitlements: Object.keys(product?.entitlements_spec ?? {}).join(","),
   }
 }
 
@@ -570,9 +570,7 @@ function PriceRow({
               key={psp}
               variant="secondary"
               className={
-                state.status === "linked"
-                  ? ""
-                  : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                state.status === "linked" ? "" : "bg-held-surface text-held"
               }
               title={state.message}
             >
@@ -828,7 +826,8 @@ function DriftTab() {
             className={
               refreshDrift.isPending ? "size-4 animate-spin" : "size-4"
             }
-          />{" "}
+          />
+          {""}
           Refresh scan
         </Button>
       </div>
@@ -862,7 +861,8 @@ function DriftTab() {
                   <TableCell>{e.provider}</TableCell>
                   <TableCell>{e.kind}</TableCell>
                   <TableCell className="text-xs">
-                    {e.openrails_resource_type}{" "}
+                    {e.openrails_resource_type}
+                    {""}
                     {shortId(
                       e.openrails_resource_id ?? e.external_resource_id ?? "",
                       13
