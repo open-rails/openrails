@@ -475,7 +475,7 @@ function credentialTitle(c: {
   if (c.last_validated_at)
     parts.push(`Validated ${formatDate(c.last_validated_at)}`)
   if (c.rotation_version) parts.push(`rotation v${c.rotation_version}`)
-  if (parts.length) return parts.join(" · ")
+  if (parts.length) return parts.join(" ·")
   return c.configured ? "Configured" : "Not configured"
 }
 
@@ -514,9 +514,7 @@ function ProviderRow({
                 key={name}
                 variant="secondary"
                 className={
-                  credential.configured
-                    ? ""
-                    : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                  credential.configured ? "" : "bg-held-surface text-held"
                 }
                 title={credentialTitle(credential)}
               >
@@ -537,16 +535,13 @@ function ProviderRow({
         {provider.archived ? (
           <Badge variant="secondary">archived</Badge>
         ) : provider.drained ? (
-          <Badge
-            variant="secondary"
-            className="bg-amber-500/15 text-amber-600 dark:text-amber-400"
-          >
+          <Badge variant="secondary" className="bg-held-surface text-held">
             draining ({provider.open_obligations})
           </Badge>
         ) : (
           <Badge
             variant="secondary"
-            className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+            className="bg-settled-surface text-settled"
           >
             active
           </Badge>
@@ -1072,8 +1067,8 @@ function CustomerControlsTab() {
             <p className="text-sm text-muted-foreground">
               <span className="font-mono text-xs break-all text-foreground">
                 {result.customerID}
-              </span>{" "}
-              · {result.currency.toUpperCase()}
+              </span>
+              {""}· {result.currency.toUpperCase()}
             </p>
           </div>
           <dl className="grid gap-4">

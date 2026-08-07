@@ -62,9 +62,9 @@ function skipLabel(skip?: string) {
   return SKIP_LABELS[skip as CheckoutRoutingSkip] ?? skip
 }
 
-const OK_BADGE = "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-const WARN_BADGE = "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-const BAD_BADGE = "bg-red-500/15 text-red-600 dark:text-red-400"
+const OK_BADGE = "bg-settled-surface text-settled"
+const WARN_BADGE = "bg-held-surface text-held"
+const BAD_BADGE = "bg-failed-surface text-failed"
 
 function linkStatusClass(status: CatalogProviderState["status"]) {
   if (status === "linked") return OK_BADGE
@@ -209,7 +209,7 @@ export function PSPLinksCard({
                           key={d.field}
                           className="mt-1 text-xs text-muted-foreground"
                         >
-                          {d.field}: ours {d.openrails_value} · theirs{" "}
+                          {d.field}: ours {d.openrails_value} · theirs{""}
                           {d.remote_value}
                         </p>
                       ))}
@@ -234,10 +234,10 @@ export function PSPLinksCard({
           </div>
         )}
         {!!price.pending_manual_actions?.length && (
-          <div className="rounded-md border border-amber-500/40 p-3 text-xs">
+          <div className="rounded-md border border-held/40 p-3 text-xs">
             {price.pending_manual_actions.map((a) => (
               <p key={`${a.provider}-${a.action}`}>
-                <span className="font-mono">{a.provider}</span>:{" "}
+                <span className="font-mono">{a.provider}</span>:{""}
                 {a.hint || a.action}
               </p>
             ))}
@@ -296,15 +296,15 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
             <p className="text-sm">
               {decision.selected ? (
                 <>
-                  Selected{" "}
+                  Selected{""}
                   <span className="font-mono">{decision.selected}</span>
                   {decision.rail && <> on {decision.rail}</>}
-                  {decision.mode && <> · {decision.mode}</>} · policy{" "}
+                  {decision.mode && <> · {decision.mode}</>} · policy{""}
                   {decision.policy}
                   {decision.rule !== undefined && <> (rule {decision.rule})</>}
                 </>
               ) : (
-                <span className="text-amber-600 dark:text-amber-400">
+                <span className="text-held">
                   No PSP is eligible — this price cannot be checked out.
                 </span>
               )}

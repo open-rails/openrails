@@ -149,7 +149,7 @@ export function PriceDetailPage() {
                       {entry.price.archived ? (
                         <Badge variant="secondary">grandfathered</Badge>
                       ) : (
-                        <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                        <Badge className="bg-settled-surface text-settled">
                           current
                         </Badge>
                       )}
@@ -184,7 +184,7 @@ export function PriceDetailPage() {
             <p>
               {applied.length} of {latestBatch.subscriptions_scheduled} migrated
               {scheduled.length > 0 && ` · ${scheduled.length} still scheduled`}
-              {" · effective "}
+              {" · effective"}
               {formatDate(latestBatch.effective_at)}
             </p>
             <p className="text-xs text-muted-foreground">

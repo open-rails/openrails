@@ -16,6 +16,16 @@
   --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
+  /* Money states, named for what the money is doing rather than for a generic
+     UI severity, so the interface and the ledger use the same words. */
+  --color-settled: var(--settled);
+  --color-settled-surface: var(--settled-surface);
+  --color-held: var(--held);
+  --color-held-surface: var(--held-surface);
+  --color-failed: var(--failed);
+  --color-failed-surface: var(--failed-surface);
+  --color-refunded: var(--refunded);
+  --color-refunded-surface: var(--refunded-surface);
   --color-chart-5: var(--chart-5);
   --color-chart-4: var(--chart-4);
   --color-chart-3: var(--chart-3);
@@ -48,73 +58,106 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Same token family as the product shell (openrails-saas/web/src/index.css).
+   Structure carries hue 248 at a chroma between 0.003 and 0.018. It never reads
+   as blue; it stops the greys going muddy beside the money states, which pure
+   achromatic neutrals do. */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  color-scheme: light;
+  --background: oklch(0.987 0.003 248);
+  --foreground: oklch(0.19 0.018 248);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.19 0.018 248);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --popover-foreground: oklch(0.19 0.018 248);
+  /* No chromatic accent. Colour is spent only on money state and data series,
+     so nothing in the interface competes with a state badge. */
+  --primary: oklch(0.24 0.02 248);
+  --primary-foreground: oklch(0.99 0.005 248);
+  --secondary: oklch(0.945 0.006 248);
+  --secondary-foreground: oklch(0.19 0.018 248);
+  --muted: oklch(0.966 0.005 248);
+  --muted-foreground: oklch(0.47 0.016 248);
+  --accent: oklch(0.928 0.008 248);
+  --accent-foreground: oklch(0.19 0.018 248);
+  /* Each pair is >= 4.5:1 and inside sRGB; the surface chroma is capped at what
+     the gamut allows at that lightness, or the browser silently clips it. */
+  --settled: oklch(0.52 0.118 158);
+  --settled-surface: oklch(0.955 0.03 158);
+  --held: oklch(0.54 0.115 72);
+  --held-surface: oklch(0.96 0.03 72);
+  --failed: oklch(0.53 0.19 27);
+  --failed-surface: oklch(0.955 0.022 27);
+  --refunded: oklch(0.53 0.13 250);
+  --refunded-surface: oklch(0.955 0.022 250);
+  --destructive: var(--failed);
+  --border: oklch(0.905 0.008 248);
+  --input: oklch(0.905 0.008 248);
+  --ring: oklch(0.24 0.02 248);
+  /* The data ramp stays chromatic: five series need five separable colours
+     whatever the accent does. Hues are spread wide and lightness spread wider
+     so the ramp survives colour-vision deficiency and greyscale. */
+  --chart-1: oklch(0.515 0.185 258);
+  --chart-2: oklch(0.575 0.1 185);
+  --chart-3: oklch(0.6 0.16 330);
+  --chart-4: oklch(0.63 0.125 80);
+  --chart-5: oklch(0.7 0.12 130);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: oklch(0.97 0.005 248);
+  --sidebar-foreground: oklch(0.19 0.018 248);
+  --sidebar-primary: oklch(0.19 0.018 248);
+  --sidebar-primary-foreground: oklch(0.99 0.005 248);
+  --sidebar-accent: oklch(0.928 0.008 248);
+  --sidebar-accent-foreground: oklch(0.19 0.018 248);
+  --sidebar-border: oklch(0.905 0.008 248);
+  --sidebar-ring: oklch(0.24 0.02 248);
 }
 
+/* Composed, not inverted. Four surface steps of its own (canvas 0.148, muted
+   0.168, card 0.188, accent 0.225) so elevation is a ladder rather than one
+   token reused at several opacities. Borders are opaque values, not white at an
+   alpha, so contrast does not depend on what sits behind them. */
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: dark;
+  --background: oklch(0.148 0.008 248);
+  --foreground: oklch(0.965 0.004 248);
+  --card: oklch(0.188 0.01 248);
+  --card-foreground: oklch(0.965 0.004 248);
+  --popover: oklch(0.188 0.01 248);
+  --popover-foreground: oklch(0.965 0.004 248);
+  --primary: oklch(0.93 0.008 248);
+  --primary-foreground: oklch(0.19 0.018 248);
+  --secondary: oklch(0.225 0.011 248);
+  --secondary-foreground: oklch(0.965 0.004 248);
+  --muted: oklch(0.168 0.009 248);
+  --muted-foreground: oklch(0.735 0.014 248);
+  --accent: oklch(0.225 0.011 248);
+  --accent-foreground: oklch(0.965 0.004 248);
+  --settled: oklch(0.78 0.145 160);
+  --settled-surface: oklch(0.245 0.045 160);
+  --held: oklch(0.815 0.135 78);
+  --held-surface: oklch(0.25 0.05 78);
+  --failed: oklch(0.735 0.155 25);
+  --failed-surface: oklch(0.25 0.05 25);
+  --refunded: oklch(0.76 0.12 252);
+  --refunded-surface: oklch(0.25 0.05 252);
+  --destructive: var(--failed);
+  --border: oklch(0.315 0.013 248);
+  --input: oklch(0.315 0.013 248);
+  --ring: oklch(0.93 0.008 248);
+  --chart-1: oklch(0.735 0.132 255);
+  --chart-2: oklch(0.86 0.13 180);
+  --chart-3: oklch(0.7 0.16 330);
+  --chart-4: oklch(0.9 0.115 95);
+  --chart-5: oklch(0.8 0.12 135);
+  --sidebar: oklch(0.205 0.01 248);
+  --sidebar-foreground: oklch(0.965 0.004 248);
+  --sidebar-primary: oklch(0.965 0.004 248);
+  --sidebar-primary-foreground: oklch(0.188 0.01 248);
+  --sidebar-accent: oklch(0.265 0.012 248);
+  --sidebar-accent-foreground: oklch(0.965 0.004 248);
+  --sidebar-border: oklch(0.315 0.013 248);
+  --sidebar-ring: oklch(0.93 0.008 248);
 }
 
 @layer base {
@@ -132,14 +175,28 @@
 button:not(:disabled),
 select:not(:disabled),
 [role="button"]:not([aria-disabled="true"]),
-[data-slot="button"]:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
-[data-slot="select-trigger"]:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="button"]:not(:disabled):not([aria-disabled="true"]):not(
+    [data-disabled]
+  ),
+[data-slot="select-trigger"]:not(:disabled):not([aria-disabled="true"]):not(
+    [data-disabled]
+  ),
 [data-slot="select-item"]:not([aria-disabled="true"]):not([data-disabled]),
-[data-slot="dropdown-menu-trigger"]:not(:disabled):not([aria-disabled="true"]):not([data-disabled]),
-[data-slot="dropdown-menu-item"]:not([aria-disabled="true"]):not([data-disabled]),
-[data-slot="dropdown-menu-sub-trigger"]:not([aria-disabled="true"]):not([data-disabled]),
-[data-slot="dropdown-menu-checkbox-item"]:not([aria-disabled="true"]):not([data-disabled]),
-[data-slot="dropdown-menu-radio-item"]:not([aria-disabled="true"]):not([data-disabled]),
+[data-slot="dropdown-menu-trigger"]:not(:disabled):not(
+    [aria-disabled="true"]
+  ):not([data-disabled]),
+[data-slot="dropdown-menu-item"]:not([aria-disabled="true"]):not(
+    [data-disabled]
+  ),
+[data-slot="dropdown-menu-sub-trigger"]:not([aria-disabled="true"]):not(
+    [data-disabled]
+  ),
+[data-slot="dropdown-menu-checkbox-item"]:not([aria-disabled="true"]):not(
+    [data-disabled]
+  ),
+[data-slot="dropdown-menu-radio-item"]:not([aria-disabled="true"]):not(
+    [data-disabled]
+  ),
 [role="menuitem"]:not([aria-disabled="true"]):not([data-disabled]),
 [role="menuitemcheckbox"]:not([aria-disabled="true"]):not([data-disabled]),
 [role="menuitemradio"]:not([aria-disabled="true"]):not([data-disabled]),

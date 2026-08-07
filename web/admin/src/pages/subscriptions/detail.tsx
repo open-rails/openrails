@@ -120,7 +120,7 @@ export function SubscriptionDetailPage() {
         <Fact label="Email">{sub.user_email ?? "—"}</Fact>
         <Fact label="Started">{formatDate(sub.started_at)}</Fact>
         <Fact label="Current period">
-          {formatDate(sub.current_period_starts_at)} →{" "}
+          {formatDate(sub.current_period_starts_at)} →{""}
           {formatDate(sub.current_period_ends_at)}
         </Fact>
         <Fact label="Price">
@@ -425,7 +425,7 @@ function ChangePaymentMethodDialog({
                       .filter((pm) => pm.rail === rail)
                       .map((pm) => (
                         <SelectItem key={pm.id} value={pm.id}>
-                          {pm.card?.brand ?? pm.type} ••••{" "}
+                          {pm.card?.brand ?? pm.type} ••••{""}
                           {pm.card?.last4 ?? "????"} ({pm.rail})
                         </SelectItem>
                       ))}
@@ -480,11 +480,12 @@ function PendingRepriceBadge({
   )
   return (
     <span className="flex items-center gap-1.5">
-      <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400">
-        moves to{" "}
+      <Badge className="bg-held-surface text-held">
+        moves to{""}
         {toPrice
           ? formatMicros(toPrice.unit_amount, toPrice.currency)
-          : shortId(reprice.to_price_id, 9)}{" "}
+          : shortId(reprice.to_price_id, 9)}
+        {""}
         on {formatDate(reprice.effective_at)}
       </Badge>
       <Button

@@ -36,6 +36,7 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
+import { LogoLockup } from "@/components/logo"
 import { useAuth } from "@/lib/auth"
 
 const nav = [
@@ -52,7 +53,16 @@ export function AppSidebar() {
   const { pathname } = useLocation()
   return (
     <Sidebar variant="inset" collapsible="icon">
-      <SidebarHeader>
+      <SidebarHeader className="gap-2">
+        {/* whose console this is, above which merchant you are looking at —
+            the same lockup and placement as the product shell */}
+        <Link
+          to="/"
+          aria-label="OpenRails home"
+          className="flex items-center rounded-md px-2 pt-1 outline-hidden group-data-[collapsible=icon]:hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+        >
+          <LogoLockup className="h-4" />
+        </Link>
         <MerchantSwitcher />
       </SidebarHeader>
       <SidebarContent>

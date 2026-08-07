@@ -1,17 +1,17 @@
 import { Badge } from "@/components/ui/badge"
 
 const tones: Record<string, string> = {
-  active: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  succeeded: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  completed: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  linked: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  past_due: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  pending: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  unknown: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  active: "bg-settled-surface text-settled",
+  succeeded: "bg-settled-surface text-settled",
+  completed: "bg-settled-surface text-settled",
+  linked: "bg-settled-surface text-settled",
+  past_due: "bg-held-surface text-held",
+  pending: "bg-held-surface text-held",
+  unknown: "bg-held-surface text-held",
   cancelled: "bg-muted text-muted-foreground",
-  failed: "bg-red-500/15 text-red-600 dark:text-red-400",
-  refunded: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
-  partially_refunded: "bg-sky-500/15 text-sky-600 dark:text-sky-400",
+  failed: "bg-failed-surface text-failed",
+  refunded: "bg-refunded-surface text-refunded",
+  partially_refunded: "bg-refunded-surface text-refunded",
 }
 
 export function StatusBadge({ status }: { status?: string }) {

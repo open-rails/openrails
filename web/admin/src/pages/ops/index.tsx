@@ -54,9 +54,9 @@ export function OpsPage() {
 }
 
 const severityTone: Record<string, string> = {
-  critical: "bg-red-500/15 text-red-600 dark:text-red-400",
-  high: "bg-orange-500/15 text-orange-600 dark:text-orange-400",
-  medium: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
+  critical: "bg-failed-surface text-failed",
+  high: "bg-held-surface text-held",
+  medium: "bg-held-surface text-held",
   low: "bg-muted text-muted-foreground",
 }
 
@@ -170,7 +170,7 @@ function Gauge({
       </CardHeader>
       <CardContent>
         <p
-          className={`text-2xl font-semibold ${alert && value > 0 ? "text-red-600 dark:text-red-400" : ""}`}
+          className={`text-2xl font-semibold ${alert && value > 0 ? "text-failed" : ""}`}
         >
           {value}
         </p>
@@ -347,7 +347,7 @@ function WorkerHealthTab() {
                 {w.consecutive_failures > 0 ? (
                   <Badge
                     variant="secondary"
-                    className="bg-red-500/15 text-red-600 dark:text-red-400"
+                    className="bg-failed-surface text-failed"
                   >
                     {w.consecutive_failures}
                   </Badge>

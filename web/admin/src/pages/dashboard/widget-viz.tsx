@@ -102,7 +102,7 @@ function StatViz({ result }: { result: MetricsResult }) {
             ? idx.dims
                 .map((d) => String(row[d.index] ?? ""))
                 .filter(Boolean)
-                .join(" · ")
+                .join(" ·")
             : ""
         return (
           <div key={i} className="flex items-baseline gap-2">
@@ -129,9 +129,7 @@ function StatViz({ result }: { result: MetricsResult }) {
         <span
           className={cn(
             "flex items-center gap-1 text-xs font-medium",
-            delta >= 0
-              ? "text-emerald-600 dark:text-emerald-400"
-              : "text-red-600 dark:text-red-400"
+            delta >= 0 ? "text-settled" : "text-failed"
           )}
         >
           {delta >= 0 ? (
@@ -257,7 +255,7 @@ function DonutViz({ result }: { result: MetricsResult }) {
         idx.dims
           .map((d) => String(row[d.index] ?? ""))
           .filter(Boolean)
-          .join(" · ") || primary.name,
+          .join(" ·") || primary.name,
       value: Number(row[primary.index] ?? 0),
     }))
     .filter((s) => s.value !== 0)
