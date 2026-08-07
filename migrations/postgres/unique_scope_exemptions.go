@@ -41,7 +41,15 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	"uq_subscription_reprices_one_scheduled":      "subscription_id FKs a merchant-owned subscription",
 	"uq_subscriptions_customer_tier_group_active": "customer_id FKs a merchant-owned customer (ID-3's one-live-per-tier-group rule)",
 	"unique_prices_product_amount_window":         "product_id FKs a merchant-owned product (ID-5 price financial substance)",
-	"uq_destructive_run_before_images_identity":   "destructive_run_id FKs a merchant-owned destructive_runs row (or#859 undo evidence)",
+	// uq_destructive_run_before_images_identity was here on that reasoning and
+	// is NOT any more (or#902): 0003 leads it with merchant_id, so it needs no
+	// exemption. The reasoning was not wrong, it was second-hand — the index was
+	// safe because destructive_runs.id happens to be a GLOBAL primary key, and
+	// because destructive_run_before_images_run_fk references destructive_runs(id)
+	// rather than (merchant_id, id) the safety was never enforced on this table
+	// at all. An entry in this class is only sound while the FK it leans on
+	// cannot be satisfied across the tenant boundary; check that before adding
+	// one, and prefer leading with merchant_id, which needs no such argument.
 
 	// Genuinely global identifiers, unique across the install by construction.
 	"solana_subscriptions_subscription_pda_key": "a Solana PDA is globally unique on-chain; two merchants CANNOT share one",

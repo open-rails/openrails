@@ -21,7 +21,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   -- A pruned row is prune's to reverse (or#858), never converge's: capturing
   -- it here would hand the converge rollback an image it must not write back.
   AND s.deleted_at IS NULL
-ON CONFLICT (destructive_run_id, table_name, row_id) DO NOTHING;
+ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 
 -- name: CaptureSubscriptionEntitlementBeforeImages :execrows
 -- Every LIVE entitlement window the transition is about to revoke or bound.
@@ -40,7 +40,7 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.source_id = sqlc.arg(subscription_id)::uuid
   AND e.revoked_at IS NULL
   AND e.deleted_at IS NULL
-ON CONFLICT (destructive_run_id, table_name, row_id) DO NOTHING;
+ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 
 -- --- intent attribution -------------------------------------------------------
 

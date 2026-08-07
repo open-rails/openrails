@@ -461,6 +461,87 @@ func TestGAP10_UniqueIndexesAreMerchantScoped(t *testing.T) {
 		"ID-11 (was GAP-10): unique index on a merchant-owned table omits merchant_id — one merchant can block another:\n%v", offenders)
 }
 
+// ID-11 in the flesh (or#902). TestGAP10 above is a census; this is the one
+// index it used to EXEMPT, checked by inserting rows rather than by reading a
+// catalogue.
+//
+// 0001 shipped destructive_run_before_images' identity unique as
+// (destructive_run_id, table_name, row_id) — a key spanning merchants on an
+// RLS-FORCED table, which is the exact ID-11 hazard: the conflicting row is
+// invisible to the inserting session, so the victim gets a unique violation
+// naming a row it cannot select. 0003 leads the key with merchant_id.
+//
+// Reaching the shared coordinate at all needs merchant B's image to cite
+// merchant A's run, which destructive_run_before_images_run_fk permits because
+// it references destructive_runs(id) and not (merchant_id, id) — referential
+// integrity checks bypass RLS, so the FK is not a tenant boundary. That is the
+// point, not an oversight in the test: it is precisely the shape the old index
+// turned into a cross-tenant unique violation, and precisely what a
+// merchant-led key makes harmless. Tightening that FK to a composite is the
+// stricter follow-up; if it lands, this second half stops being constructible
+// and should be deleted, leaving the shape assertion.
+func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
+	ctx, super, app := pools(t)
+
+	var def string
+	require.NoError(t, app.QueryRow(ctx, `
+		SELECT indexdef FROM pg_indexes
+		 WHERE schemaname = 'openrails'
+		   AND tablename  = 'destructive_run_before_images'
+		   AND indexname  = 'uq_destructive_run_before_images_identity'`).Scan(&def),
+		"the or#859 undo-evidence identity index is missing entirely")
+	require.Contains(t, def, "(merchant_id, destructive_run_id, table_name, row_id)",
+		"ID-11: the before-images identity unique must LEAD with merchant_id, got: %s", def)
+
+	a, b := uuid.New(), uuid.New()
+	for id, slug := range map[uuid.UUID]string{
+		a: "inv-bi-a-" + uuid.NewString()[:8],
+		b: "inv-bi-b-" + uuid.NewString()[:8],
+	} {
+		_, err := super.Exec(ctx,
+			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, id, slug)
+		require.NoError(t, err)
+	}
+
+	// One run, one subject row id: the whole coordinate the old key made global.
+	runID, rowID := uuid.New(), uuid.New()
+	_, err := super.Exec(ctx,
+		`INSERT INTO openrails.destructive_runs (id, merchant_id, kind, actor)
+		 VALUES ($1, $2, 'converge_enforce', 'or902-invariant-audit')`, runID, a)
+	require.NoError(t, err)
+
+	for _, m := range []uuid.UUID{a, b} {
+		tx, err := app.Begin(ctx)
+		require.NoError(t, err)
+		_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, m.String())
+		require.NoError(t, err)
+		_, err = tx.Exec(ctx, `
+			INSERT INTO openrails.destructive_run_before_images
+			    (merchant_id, destructive_run_id, table_name, row_id, before)
+			VALUES ($1, $2, 'subscriptions', $3, '{}'::jsonb)`, m, runID, rowID)
+		require.NoErrorf(t, err,
+			"merchant %s could not capture its own before-image on a coordinate another merchant already holds — "+
+				"the identity unique is spanning merchants again (ID-11)", m)
+		require.NoError(t, tx.Commit(ctx))
+	}
+
+	// And the rule the key still has to enforce: WITHIN a merchant it is one
+	// image per (run, table, row), because the second capture inside a run is
+	// the run's own later write and must not displace the state it inherited.
+	tx, err := app.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, a.String())
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO openrails.destructive_run_before_images
+		    (merchant_id, destructive_run_id, table_name, row_id, before)
+		VALUES ($1, $2, 'subscriptions', $3, '{"second":true}'::jsonb)`, a, runID, rowID)
+	require.Error(t, err,
+		"a merchant's SECOND capture of the same (run, table, row) must still be rejected — "+
+			"leading with merchant_id widened the key, it must not have disarmed it")
+}
+
 // GAP-9: org ↔ merchant is 1:1. Enforced on the policy-free merchants
 // directory, so this read is legitimate without a GUC.
 func TestGAP9_PermissionGroupIsUniquePerMerchant(t *testing.T) {
