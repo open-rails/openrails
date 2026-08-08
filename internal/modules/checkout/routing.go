@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -49,8 +50,9 @@ type RoutingInput struct {
 
 // RoutingCandidate is one evaluated candidate in preference order.
 type RoutingCandidate struct {
-	Selector string `json:"selector"`
-	Rail     string `json:"rail,omitempty"`
+	Selector string    `json:"selector"`
+	Rail     string    `json:"rail,omitempty"`
+	PSPID    uuid.UUID `json:"-"`
 	// Skip is "" when the candidate is eligible, else its skip class.
 	Skip string `json:"skip,omitempty"`
 }
@@ -133,7 +135,7 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 		return &RoutingDecision{
 			Target:     target,
 			Policy:     models.CheckoutRoutingPolicyExplicit,
-			Candidates: []RoutingCandidate{{Selector: target.PSP, Rail: target.Rail}},
+			Candidates: []RoutingCandidate{{Selector: target.PSP, Rail: target.Rail, PSPID: targetPSPID(target)}},
 		}, nil
 	}
 
@@ -144,7 +146,7 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 	decision := &RoutingDecision{Policy: policy, Rule: rule, Candidates: make([]RoutingCandidate, 0, len(order))}
 	for _, selector := range order {
 		target, skip := s.evaluateCandidate(ctx, targets, in, selector)
-		candidate := RoutingCandidate{Selector: selector, Rail: target.Rail, Skip: skip}
+		candidate := RoutingCandidate{Selector: selector, Rail: target.Rail, PSPID: targetPSPID(target), Skip: skip}
 		if skip == "" {
 			// The resolved PSP key is the answer, not the requested selector: a
 			// rail kind resolves to the armed account's key (#848).
@@ -159,6 +161,13 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 		return decision, ErrNoRoutableProcessor
 	}
 	return decision, nil
+}
+
+func targetPSPID(target railTarget) uuid.UUID {
+	if target.Scope == nil {
+		return uuid.Nil
+	}
+	return target.Scope.ID
 }
 
 // routingOrder resolves the candidate order for these inputs: the first
@@ -230,10 +239,13 @@ func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, targets 
 	target, err := targets.resolveRailTarget(ctx, selector)
 	if err != nil {
 		var ambiguous *AmbiguousRailError
+		var unarmed *UnarmedRailError
 		var unknown *UnknownRailError
 		switch {
 		case errors.As(err, &ambiguous):
 			return railTarget{}, models.CheckoutRoutingSkipAmbiguousSelector
+		case errors.As(err, &unarmed):
+			return railTarget{}, models.CheckoutRoutingSkipNotArmed
 		case errors.As(err, &unknown):
 			// A key that resolves to nothing may still be DECLARED and archived.
 			// Say "retired", not "never heard of it" — support reads this.

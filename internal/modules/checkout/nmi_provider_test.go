@@ -25,9 +25,7 @@ func TestRequireNMIPlanForTarget_ResolvesProviderEntry(t *testing.T) {
 	require.Equal(t, "plan_acme_123", planID)
 }
 
-func TestRequireNMIPlanForTarget_FallsBackToRailNamedEntry(t *testing.T) {
-	// A manifest that declared the link under the rail name still resolves
-	// when the provider is an account key.
+func TestRequireNMIPlanForTarget_ResolvesRailNamedProviderEntry(t *testing.T) {
 	price := &models.Price{
 		ID: uuid.New(),
 		PSPLinks: map[string]map[string]string{
@@ -38,9 +36,24 @@ func TestRequireNMIPlanForTarget_FallsBackToRailNamedEntry(t *testing.T) {
 		},
 	}
 
-	planID, err := requireNMIPlanForTarget(price, railTarget{PSP: "mobius", Rail: "nmi"})
+	planID, err := requireNMIPlanForTarget(price, railTarget{PSP: "nmi", Rail: "nmi"})
 	require.NoError(t, err)
 	require.Equal(t, "plan_rail_default", planID)
+}
+
+func TestRequireNMIPlanForTarget_DoesNotFallbackToRailEntry(t *testing.T) {
+	price := &models.Price{
+		ID: uuid.New(),
+		PSPLinks: map[string]map[string]string{
+			"nmi": {
+				models.RailKeyRail:   "nmi",
+				models.RailKeyPlanID: "plan_rail_default",
+			},
+		},
+	}
+
+	_, err := requireNMIPlanForTarget(price, railTarget{PSP: "mobius", Rail: "nmi"})
+	require.ErrorContains(t, err, "missing NMI plan configuration")
 }
 
 func TestRequireNMIPlanForTarget_NeverCrossesProviders(t *testing.T) {

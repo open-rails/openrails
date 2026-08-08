@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -158,6 +159,7 @@ type upgradeAdoptFixture struct {
 	newPrice    *models.Price
 	newProduct  *models.Product
 	existingSub *models.Subscription
+	target      railTarget
 	ctx         context.Context
 }
 
@@ -276,7 +278,16 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 		newPrice:    newPrice,
 		newProduct:  newProduct,
 		existingSub: existingSub,
-		ctx:         ctx,
+		target: railTarget{
+			PSP:  "nmi",
+			Rail: "nmi",
+			Scope: &merchants.PSPScope{
+				ID:   pspID,
+				Key:  "nmi",
+				Rail: "nmi",
+			},
+		},
+		ctx: ctx,
 	}
 }
 
@@ -287,7 +298,7 @@ func TestUpgradeAmbiguousCreateLanded_AdoptsInline(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("ambiguousLanded")
 
-	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{PSP: "nmi", Rail: "nmi"})
+	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
 	require.NoError(t, err, "landed-but-lost create must be adopted, not failed")
 	require.Equal(t, "success", resp.Status)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "never a second blind create")
@@ -313,7 +324,7 @@ func TestUpgradeAmbiguousCreateLost_RetryRecreatesSameOrderID(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("ambiguousLost")
 
-	_, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{PSP: "nmi", Rail: "nmi"})
+	_, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrCheckoutProcessing), "unresolved ambiguity is processing, never a decline: %v", err)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
@@ -328,7 +339,7 @@ func TestUpgradeAmbiguousCreateLost_RetryRecreatesSameOrderID(t *testing.T) {
 	// Provider recovers; the retry (same idempotency key ⇒ retryAfterFailure)
 	// scans the roster first, then re-creates under the ORIGINAL order id.
 	fx.gateway.createMode.Store("approve")
-	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, railTarget{PSP: "nmi", Rail: "nmi"})
+	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
 	require.NoError(t, err)
 	require.Equal(t, "success", resp.Status)
 	require.EqualValues(t, 2, fx.gateway.createCalls.Load())

@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -18,7 +19,9 @@ import (
 // capabilities resolveRailTarget consumes: key-first lookup + the #848
 // unambiguous rail-kind list.
 type fakePSPCatalog struct {
-	scopes []merchants.PSPScope
+	scopes  []merchants.PSPScope
+	keyErr  error
+	listErr error
 }
 
 func (f fakePSPCatalog) ActivePSPSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
@@ -26,6 +29,9 @@ func (f fakePSPCatalog) ActivePSPSecretName(context.Context, merchant.ID, string
 }
 
 func (f fakePSPCatalog) PSPScopeByKey(_ context.Context, _ merchant.ID, key, _ string) (merchants.PSPScope, bool, error) {
+	if f.keyErr != nil {
+		return merchants.PSPScope{}, false, f.keyErr
+	}
 	for _, s := range f.scopes {
 		if strings.EqualFold(s.Key, key) {
 			return s, true, nil
@@ -35,6 +41,9 @@ func (f fakePSPCatalog) PSPScopeByKey(_ context.Context, _ merchant.ID, key, _ s
 }
 
 func (f fakePSPCatalog) ActivePSPScopesForRail(_ context.Context, _ merchant.ID, rail, _ string) ([]merchants.PSPScope, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	var out []merchants.PSPScope
 	for _, s := range f.scopes {
 		if strings.EqualFold(s.Rail, rail) {
@@ -42,6 +51,16 @@ func (f fakePSPCatalog) ActivePSPScopesForRail(_ context.Context, _ merchant.ID,
 		}
 	}
 	return out, nil
+}
+
+type keyOnlyPSPCatalog struct{}
+
+func (keyOnlyPSPCatalog) ActivePSPSecretName(context.Context, merchant.ID, string, string, string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (keyOnlyPSPCatalog) PSPScopeByKey(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+	return merchants.PSPScope{}, false, nil
 }
 
 func railTargetTestService(scopes ...merchants.PSPScope) *CheckoutService {
@@ -109,6 +128,51 @@ func TestResolveRailTarget_UnknownSelector(t *testing.T) {
 	require.Equal(t, "bogus", unknown.Selector)
 }
 
+func TestResolveRailTarget_FailsClosedWithoutExactPSPIdentity(t *testing.T) {
+	t.Parallel()
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	lookupErr := errors.New("catalog unavailable")
+
+	tests := []struct {
+		name string
+		svc  *CheckoutService
+		ctx  context.Context
+		want string
+	}{
+		{name: "resolver not wired", svc: &CheckoutService{}, ctx: ctx, want: "resolution is not configured"},
+		{name: "rail list capability missing", svc: &CheckoutService{ProviderSecrets: keyOnlyPSPCatalog{}}, ctx: ctx, want: "rail resolution is not configured"},
+		{name: "key lookup fails", svc: &CheckoutService{ProviderSecrets: fakePSPCatalog{keyErr: lookupErr}}, ctx: ctx, want: "catalog unavailable"},
+		{name: "rail lookup fails", svc: &CheckoutService{ProviderSecrets: fakePSPCatalog{listErr: lookupErr}}, ctx: ctx, want: "catalog unavailable"},
+		{name: "rail has no armed provider", svc: railTargetTestService(), ctx: ctx, want: "has no armed PSP"},
+		{name: "merchant context missing", svc: railTargetTestService(), ctx: context.Background(), want: "no merchant resolved on context"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			target, err := tt.svc.resolveRailTarget(tt.ctx, "nmi")
+			require.ErrorContains(t, err, tt.want)
+			require.Nil(t, target.Scope)
+		})
+	}
+}
+
+func TestResolveRailTargetForPSP_SelectsPersistedAccount(t *testing.T) {
+	t.Parallel()
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	mobius := merchants.PSPScope{ID: uuid.New(), Rail: "nmi", AccountID: "gw-1", Key: "mobius"}
+	paykings := merchants.PSPScope{ID: uuid.New(), Rail: "nmi", AccountID: "gw-2", Key: "paykings"}
+	svc := railTargetTestService(mobius, paykings)
+
+	target, err := svc.resolveRailTargetForPSP(ctx, "nmi", paykings.ID)
+	require.NoError(t, err)
+	require.Equal(t, "paykings", target.PSP)
+	require.Equal(t, paykings.ID, target.Scope.ID)
+
+	_, err = svc.resolveRailTargetForPSP(ctx, "nmi", uuid.New())
+	require.ErrorContains(t, err, "is not armed")
+}
+
 func TestCheckoutRailUsable(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := railTargetTestService(
@@ -125,6 +189,6 @@ func TestCheckoutRailUsable(t *testing.T) {
 	require.Contains(t, err.Error(), "mobius-sandbox")
 	require.Contains(t, err.Error(), "paykings")
 
-	require.EqualError(t, svc.CheckoutRailUsable(ctx, "solana"), "unsupported rail", "known rail with nothing armed")
+	require.ErrorContains(t, svc.CheckoutRailUsable(ctx, "solana"), "has no armed PSP", "known rail with nothing armed")
 	require.ErrorContains(t, svc.CheckoutRailUsable(ctx, "bogus"), "unknown payment provider")
 }
