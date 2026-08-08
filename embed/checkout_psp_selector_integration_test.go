@@ -86,17 +86,22 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 		return resp.StatusCode, string(raw)
 	}
 
+	// The pre-gate's refusal for a rail with nothing armed. Named once: the
+	// negative assertions below only guard the gate while they spell it the
+	// same way the positive one does.
+	const unarmedRailRefusal = "has no armed PSP"
+
 	// PSP key: passes the gate, fails deeper on the fabricated price.
 	status, raw := post("mobius-sandbox")
 	require.Equal(t, http.StatusBadRequest, status, raw)
-	require.NotContains(t, raw, "unsupported rail", "PSP key must pass the pre-gate")
+	require.NotContains(t, raw, unarmedRailRefusal, "PSP key must pass the pre-gate")
 	require.NotContains(t, raw, "ambiguous rail")
 	require.Contains(t, raw, "price not found", raw)
 
 	// Rail kind with exactly one armed PSP: still accepted.
 	status, raw = post("ccbill")
 	require.Equal(t, http.StatusBadRequest, status, raw)
-	require.NotContains(t, raw, "unsupported rail", "unambiguous rail kind must pass the pre-gate")
+	require.NotContains(t, raw, unarmedRailRefusal, "unambiguous rail kind must pass the pre-gate")
 	require.Contains(t, raw, "price not found", raw)
 
 	// Rail kind with two armed PSPs: rejected, NAMING the keys.
@@ -114,5 +119,5 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 	// Rail kind with nothing armed: rejected (fail closed).
 	status, raw = post("solana")
 	require.Equal(t, http.StatusBadRequest, status, raw)
-	require.Contains(t, raw, "unsupported rail", raw)
+	require.Contains(t, raw, unarmedRailRefusal, raw)
 }
