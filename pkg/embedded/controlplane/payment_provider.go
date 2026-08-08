@@ -13,6 +13,21 @@ import (
 
 type PaymentProviderConfig = merchants.PaymentProviderConfig
 type UpsertPaymentProviderConfigRequest = merchants.UpsertPaymentProviderConfigRequest
+type PublicPSPConfig = merchants.PublicPSPConfig
+
+// ListPublicCheckoutPSPs returns the exact armed PSPs that a browser checkout
+// may offer, including their public browser-driver configuration.
+func ListPublicCheckoutPSPs(ctx context.Context, a *app.App, id merchant.ID, environment string) ([]PublicPSPConfig, error) {
+	providerService, err := paymentProviderService(a)
+	if err != nil {
+		return nil, fmt.Errorf("control plane list public checkout psps: %w", err)
+	}
+	providers, err := providerService.PublicCheckoutPSPs(ctx, id, environment)
+	if err != nil {
+		return nil, fmt.Errorf("control plane list public checkout psps: %w", err)
+	}
+	return providers, nil
+}
 
 // GetPaymentProviderConfig returns one system-owned merchant PSP
 // with credential values redacted.

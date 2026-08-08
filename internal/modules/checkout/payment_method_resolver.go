@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -47,6 +48,9 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 		}
 		if !rails.SameRail(pm.Rail, models.Rail(target.Rail)) {
 			return "", "", nil, false, errors.New("payment method belongs to a different payment provider")
+		}
+		if err := paymentMethodMatchesTargetPSP(pm, target); err != nil {
+			return "", "", nil, false, err
 		}
 
 		// NMI-backed only (checked above): vault id = customer-scope handle,
@@ -95,6 +99,19 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 	}
 
 	return pmNew.RailCustomerRef, pmNew.RailMethodRef, pmNew, true, nil
+}
+
+func paymentMethodMatchesTargetPSP(pm *models.PaymentMethod, target railTarget) error {
+	if pm == nil {
+		return errors.New("payment method identity is unavailable")
+	}
+	if target.Scope == nil {
+		return errors.New("payment provider identity is unavailable")
+	}
+	if pm.PspID == uuid.Nil || pm.PspID != target.Scope.ID {
+		return errors.New("payment method belongs to a different payment provider account")
+	}
+	return nil
 }
 
 func ResolveCheckoutFirstName(req *CheckoutRequest, user *UserIdentity) string {

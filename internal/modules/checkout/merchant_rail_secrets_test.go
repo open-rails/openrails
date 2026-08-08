@@ -3,8 +3,8 @@ package checkout
 import (
 	"context"
 	"errors"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -72,18 +73,38 @@ type checkoutStaticProviderSecretResolver struct {
 	settings    map[string]any
 }
 
+func (r checkoutStaticProviderSecretResolver) scope() merchants.PSPScope {
+	return merchants.PSPScope{
+		ID:          merchants.PspID(r.rail, r.environment, r.accountID),
+		Rail:        r.rail,
+		Environment: r.environment,
+		AccountID:   r.accountID,
+		Key:         r.rail,
+		Settings:    r.settings,
+	}
+}
+
 func (r checkoutStaticProviderSecretResolver) ActivePSPSecretName(_ context.Context, _ merchant.ID, rail, environment, key string) (string, bool, error) {
 	name, err := merchants.PSPSecretName(r.rail, r.environment, r.accountID, key)
 	return name, err == nil, err
 }
 
 func (r checkoutStaticProviderSecretResolver) ActivePSPScope(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
-	return merchants.PSPScope{
-		Rail:        r.rail,
-		Environment: r.environment,
-		AccountID:   r.accountID,
-		Settings:    r.settings,
-	}, true, nil
+	return r.scope(), true, nil
+}
+
+func (r checkoutStaticProviderSecretResolver) PSPScopeByKey(_ context.Context, _ merchant.ID, key, _ string) (merchants.PSPScope, bool, error) {
+	if !strings.EqualFold(strings.TrimSpace(key), strings.TrimSpace(r.rail)) {
+		return merchants.PSPScope{}, false, nil
+	}
+	return r.scope(), true, nil
+}
+
+func (r checkoutStaticProviderSecretResolver) ActivePSPScopesForRail(_ context.Context, _ merchant.ID, rail, _ string) ([]merchants.PSPScope, error) {
+	if !strings.EqualFold(strings.TrimSpace(rail), strings.TrimSpace(r.rail)) {
+		return nil, nil
+	}
+	return []merchants.PSPScope{r.scope()}, nil
 }
 
 type checkoutMissingProviderSecretResolver struct{}
@@ -94,6 +115,14 @@ func (checkoutMissingProviderSecretResolver) ActivePSPSecretName(context.Context
 
 func (checkoutMissingProviderSecretResolver) ActivePSPScope(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
 	return merchants.PSPScope{}, false, nil
+}
+
+func (checkoutMissingProviderSecretResolver) PSPScopeByKey(context.Context, merchant.ID, string, string) (merchants.PSPScope, bool, error) {
+	return merchants.PSPScope{}, false, nil
+}
+
+func (checkoutMissingProviderSecretResolver) ActivePSPScopesForRail(context.Context, merchant.ID, string, string) ([]merchants.PSPScope, error) {
+	return nil, nil
 }
 
 func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
@@ -127,7 +156,7 @@ func TestCheckoutWithoutScopedResolutionFailsClosed(t *testing.T) {
 	require.Contains(t, err.Error(), "not configured")
 }
 
-func TestCheckoutPSPResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing.T) {
+func TestCheckoutMissingMobiusPSPFailsClosed(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(merchants.NewMemorySecretStore())
@@ -135,7 +164,7 @@ func TestCheckoutPSPResolverMissingMobiusSecretDoesNotUseStaticClient(t *testing
 
 	_, err := svc.resolveNMIClient(ctx, "nmi")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "missing scoped merchant NMI secret")
+	require.Contains(t, err.Error(), "has no armed PSP")
 }
 
 func TestCheckoutFailsClosedWhenMerchantSecretBackendUnavailable(t *testing.T) {

@@ -249,20 +249,21 @@ func TestListCheckoutRailOptionsForPrice_ReturnsExecutableSelectors(t *testing.T
 		},
 	}
 	checkoutService := &CheckoutService{
-		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails:  rails,
+		Config:          &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
+		Rails:           rails,
+		ProviderSecrets: fakePSPCatalog{scopes: routingScopes(rails)},
 	}
 	svc := &CheckoutSessionService{
 		config:          &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		checkoutService: checkoutService,
 	}
 
-	options, err := svc.listCheckoutRailOptionsForPrice(context.Background(), price, &models.Product{})
+	options, err := svc.listCheckoutRailOptionsForPrice(routingContext(), price, &models.Product{})
 	require.NoError(t, err)
 	require.Equal(t, []CheckoutRailOption{
-		{Selector: "stripe", Rail: "stripe", Mode: "subscription"},
-		{Selector: "nmi", Rail: "nmi", Mode: "subscription"},
-		{Selector: "ccbill", Rail: "ccbill", Mode: "subscription"},
+		{Selector: "stripe", PSPID: merchants.PspID("stripe", "live", "acct_stripe"), Rail: "stripe", Mode: "subscription"},
+		{Selector: "nmi", PSPID: merchants.PspID("nmi", "live", "acct_nmi"), Rail: "nmi", Mode: "subscription"},
+		{Selector: "ccbill", PSPID: merchants.PspID("ccbill", "live", "945280-0000"), Rail: "ccbill", Mode: "subscription"},
 	}, options)
 
 	for _, option := range options {
@@ -283,7 +284,7 @@ func TestListCheckoutRailOptionsForPrice_ReturnsExecutableSelectors(t *testing.T
 			payment.Zip = "12345"
 			payment.Country = "US"
 		}
-		require.NoError(t, svc.validatePayment(context.Background(), option.Selector, payment, &UserIdentity{ID: uuid.NewString()}), option.Selector)
+		require.NoError(t, svc.validatePayment(routingContext(), option.Selector, payment, &UserIdentity{ID: uuid.NewString()}), option.Selector)
 	}
 }
 
@@ -301,13 +302,9 @@ func TestCheckoutPSPLinkForTarget(t *testing.T) {
 	assert.Equal(t, stale, checkoutPSPLinkForTarget(price, railTarget{PSP: "other", Rail: "nmi"}))
 	assert.Nil(t, checkoutPSPLinkForTarget(price, railTarget{PSP: "missing", Rail: "nmi"}))
 
-	railFallback := &models.Price{PSPLinks: map[string]map[string]string{"nmi": active}}
-	assert.Equal(t, active, checkoutPSPLinkForTarget(railFallback, railTarget{PSP: "mobius", Rail: "nmi"}))
-	assert.Nil(t, checkoutPSPLinkForTarget(railFallback, railTarget{
-		PSP:   "mobius",
-		Rail:  "nmi",
-		Scope: &merchants.PSPScope{Key: "mobius", Rail: "nmi"},
-	}))
+	railNamed := &models.Price{PSPLinks: map[string]map[string]string{"nmi": active}}
+	assert.Equal(t, active, checkoutPSPLinkForTarget(railNamed, railTarget{PSP: "nmi", Rail: "nmi"}))
+	assert.Nil(t, checkoutPSPLinkForTarget(railNamed, railTarget{PSP: "mobius", Rail: "nmi"}))
 }
 
 func TestCheckoutSessionServiceRequireProviderWrites(t *testing.T) {

@@ -10,7 +10,10 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // routingFixturePrice is a recurring price linked on all four rails.
@@ -33,8 +36,30 @@ func routingFixturePrice() *models.Price {
 }
 
 func routingFixtureService(armed railresolve.FixedSet) *CheckoutSessionService {
-	checkoutService := &CheckoutService{Config: fullModeConfigUnit(), Rails: armed}
+	checkoutService := &CheckoutService{
+		Config:          fullModeConfigUnit(),
+		Rails:           armed,
+		ProviderSecrets: fakePSPCatalog{scopes: routingScopes(armed)},
+	}
 	return &CheckoutSessionService{config: fullModeConfigUnit(), checkoutService: checkoutService}
+}
+
+func routingContext() context.Context {
+	return merchant.WithID(context.Background(), dbtest.TestMerchantID)
+}
+
+func routingScopes(armed railresolve.FixedSet) []merchants.PSPScope {
+	scopes := make([]merchants.PSPScope, 0, len(armed))
+	for key, processor := range armed {
+		scopes = append(scopes, merchants.PSPScope{
+			ID:          merchants.PspID(string(processor.Rail), "live", processor.AccountID),
+			Rail:        string(processor.Rail),
+			Environment: "live",
+			AccountID:   processor.AccountID,
+			Key:         key,
+		})
+	}
+	return scopes
 }
 
 func fullModeConfigUnit() *config.Config {
@@ -58,7 +83,7 @@ func TestRouteDefaultOrderIsTodaysHardcodedOrder(t *testing.T) {
 	require.Equal(t, []string{"stripe", "nmi", "ccbill", "solana"}, defaultRoutingOrder)
 
 	svc := routingFixtureService(routingArmedAll())
-	decision, err := svc.Route(context.Background(), RoutingInput{
+	decision, err := svc.Route(routingContext(), RoutingInput{
 		Price: routingFixturePrice(),
 		Mode:  models.CheckoutSessionModeSubscription,
 	})
@@ -79,7 +104,7 @@ func TestRouteFallsThroughUnavailableCandidates(t *testing.T) {
 	delete(armed, "stripe") // stripe not armed at all
 
 	svc := routingFixtureService(armed)
-	decision, err := svc.Route(context.Background(), RoutingInput{
+	decision, err := svc.Route(routingContext(), RoutingInput{
 		Price: routingFixturePrice(),
 		Mode:  models.CheckoutSessionModeSubscription,
 	})
@@ -110,7 +135,7 @@ func TestRouteSkipsModeUnsupported(t *testing.T) {
 		"nmi":    {Rail: models.RailNMI, AccountID: "acct_nmi", NMI: &config.NMIRailConfig{SecurityKey: "security_test"}},
 	}
 	svc := routingFixtureService(armed)
-	decision, err := svc.Route(context.Background(), RoutingInput{
+	decision, err := svc.Route(routingContext(), RoutingInput{
 		Price: price,
 		Mode:  models.CheckoutSessionModeOneOff,
 	})
@@ -129,7 +154,7 @@ func TestRouteFailsClosedWithNoEligibleProcessor(t *testing.T) {
 	t.Parallel()
 
 	svc := routingFixtureService(railresolve.FixedSet{})
-	decision, err := svc.Route(context.Background(), RoutingInput{
+	decision, err := svc.Route(routingContext(), RoutingInput{
 		Price: routingFixturePrice(),
 		Mode:  models.CheckoutSessionModeSubscription,
 	})
@@ -145,11 +170,8 @@ func TestRouteFailsClosedWithNoEligibleProcessor(t *testing.T) {
 func TestRouteExplicitSelectorNeverFallsBack(t *testing.T) {
 	t.Parallel()
 
-	armed := routingArmedAll()
-	delete(armed, "ccbill")
-
-	svc := routingFixtureService(armed)
-	decision, err := svc.Route(context.Background(), RoutingInput{
+	svc := routingFixtureService(routingArmedAll())
+	decision, err := svc.Route(routingContext(), RoutingInput{
 		Price:    routingFixturePrice(),
 		Mode:     models.CheckoutSessionModeSubscription,
 		Selector: "ccbill",
@@ -159,6 +181,21 @@ func TestRouteExplicitSelectorNeverFallsBack(t *testing.T) {
 	assert.Equal(t, "ccbill", decision.Selected())
 	assert.Empty(t, decision.Reason().Fallbacks)
 	assert.Empty(t, decision.Reason().Skipped)
+}
+
+func TestRouteExplicitSelectorMustBeArmed(t *testing.T) {
+	t.Parallel()
+
+	armed := routingArmedAll()
+	delete(armed, "ccbill")
+	svc := routingFixtureService(armed)
+
+	_, err := svc.Route(routingContext(), RoutingInput{
+		Price:    routingFixturePrice(),
+		Mode:     models.CheckoutSessionModeSubscription,
+		Selector: "ccbill",
+	})
+	require.ErrorContains(t, err, "has no armed PSP")
 }
 
 func TestRoutingRuleMatches(t *testing.T) {

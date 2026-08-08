@@ -90,10 +90,12 @@ type RecurringInfo struct {
 // -------------------------------- Checkout Sessions --------------------------------
 
 // CheckoutRailOption is a locally ready payment-provider choice for a price.
-// Selector is the exact value accepted by CheckoutPayment.Rail; Rail is the
+// Selector is the exact value accepted by CheckoutPayment.Rail; PSPID is the
+// stable provider identity used for server-side method matching; Rail is the
 // canonical gateway and Mode is "one_off" or "subscription".
 type CheckoutRailOption struct {
 	Selector string
+	PSPID    string
 	Rail     string
 	Mode     string
 }
@@ -148,7 +150,7 @@ type CheckoutPayment struct {
 // CheckoutSession represents a checkout session.
 type CheckoutSession struct {
 	ID             string
-	Status         string // "created", "requires_action", "succeeded", "failed", "expired"
+	Status         string // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
 	Mode           string // "subscription", "one_off"
 	PriceID        string
 	Amount         int64
@@ -321,6 +323,7 @@ type PaymentMethod struct {
 	ID             string
 	Type           string // "card"
 	Rail           string // "nmi", "ccbill", "stripe", etc.
+	PSPID          string // Exact payment-provider account that vaulted the method
 	Created        int64  // Unix epoch seconds
 	BillingDetails *BillingDetails
 	Card           *CardDetails

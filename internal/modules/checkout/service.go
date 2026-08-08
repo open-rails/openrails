@@ -2902,8 +2902,9 @@ func (s *CheckoutService) processTierChangeNMI(
 	}
 
 	// Route to existing methods which handle the heavy lifting. The existing
-	// subscription's rail resolves through arming to its payment provider.
-	target, err := s.resolveRailTarget(ctx, string(existingSub.Rail))
+	// subscription's persisted PSP identity resolves its exact account; a sibling
+	// account on the same rail must never receive its saved payment method.
+	target, err := s.resolveRailTargetForPSP(ctx, string(existingSub.Rail), existingSub.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -3031,10 +3032,8 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 }
 
 // requireNMIPlanForTarget returns the NMI plan the resolved payment provider
-// charges for this price: the provider's own link entry (by account key), or
-// the rail-named entry when the manifest declared it under the rail. Never a
-// rail-wide scan — with several accounts on a rail, each provider's plan is
-// its own.
+// charges for this price. It never scans or falls back across a rail: with
+// several accounts on one rail, each provider's plan is its own.
 func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, error) {
 	if price == nil {
 		return "", errors.New("price is required")
@@ -3049,11 +3048,6 @@ func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, er
 	}
 	if id, ok := lookup(target.PSP); ok {
 		return id, nil
-	}
-	if target.Scope == nil && target.PSP != target.Rail {
-		if id, ok := lookup(target.Rail); ok {
-			return id, nil
-		}
 	}
 	return "", fmt.Errorf("price %s is missing NMI plan configuration for payment provider %s (rail %s)", price.ID, target.PSP, target.Rail)
 }

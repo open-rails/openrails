@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -13,9 +14,11 @@ import (
 )
 
 // CheckoutRailOption is a locally ready payment-provider choice for a price.
-// Selector is the exact value checkout accepts; Rail is the canonical gateway.
+// Selector is the exact value checkout accepts, PSPID is the provider's stable
+// internal identity, and Rail is the canonical gateway.
 type CheckoutRailOption struct {
 	Selector string
+	PSPID    uuid.UUID
 	Rail     string
 	Mode     string
 }
@@ -95,6 +98,7 @@ func (s *CheckoutSessionService) listCheckoutRailOptionsForPrice(ctx context.Con
 		}
 		options = append(options, CheckoutRailOption{
 			Selector: candidate.Selector,
+			PSPID:    candidate.PSPID,
 			Rail:     candidate.Rail,
 			Mode:     string(mode),
 		})
@@ -194,7 +198,7 @@ func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, tar
 }
 
 // checkoutPSPLinkForTarget resolves the price link for the same account chosen
-// for credentials. A rail-named fallback preserves single-account manifests.
+// for credentials. It never substitutes another link from the same rail.
 func checkoutPSPLinkForTarget(price *models.Price, target railTarget) map[string]string {
 	if price == nil {
 		return nil
@@ -208,9 +212,6 @@ func checkoutPSPLinkForTarget(price *models.Price, target railTarget) map[string
 	}
 	if link := lookup(target.PSP); link != nil {
 		return link
-	}
-	if target.Scope == nil && target.PSP != target.Rail {
-		return lookup(target.Rail)
 	}
 	return nil
 }

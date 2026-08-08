@@ -162,8 +162,13 @@ func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) 
 	}
 	result := make([]CheckoutRailOption, 0, len(options))
 	for _, option := range options {
+		pspID := ""
+		if option.PSPID != uuid.Nil {
+			pspID = option.PSPID.String()
+		}
 		result = append(result, CheckoutRailOption{
 			Selector: option.Selector,
+			PSPID:    pspID,
 			Rail:     option.Rail,
 			Mode:     option.Mode,
 		})
@@ -1355,10 +1360,15 @@ func paymentFromModel(p *models.Payment) Payment {
 }
 
 func paymentMethodFromModel(pm *models.PaymentMethod) PaymentMethod {
+	pspID := ""
+	if pm.PspID != uuid.Nil {
+		pspID = pm.PspID.String()
+	}
 	result := PaymentMethod{
 		ID:      api.FormatPaymentMethodID(pm.ID),
 		Type:    "card",
 		Rail:    string(pm.Rail),
+		PSPID:   pspID,
 		Created: api.ToUnix(pm.CreatedAt),
 	}
 	if pm.LastFour != nil || pm.CardType != nil {
