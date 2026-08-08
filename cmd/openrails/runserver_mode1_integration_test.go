@@ -243,12 +243,17 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 		return resp.StatusCode, string(respBody)
 	}
 
+	// The refusal both assertions pivot on. Held in one place because they are
+	// two halves of one contract — an unarmed rail says this, an armed one does
+	// not — and drifted apart once when the wording changed on only one side.
+	const unarmedRailRefusal = "has no armed PSP"
+
 	status, respBody := checkout("stripe")
 	require.Equal(t, http.StatusBadRequest, status, "unarmed rail must be refused: %s", respBody)
-	require.Contains(t, respBody, "unsupported rail")
+	require.Contains(t, respBody, unarmedRailRefusal)
 
 	status, respBody = checkout("nmi")
-	require.NotContains(t, respBody, "unsupported rail",
+	require.NotContains(t, respBody, unarmedRailRefusal,
 		"manifest-armed NMI must pass checkout-rail readiness (status %d)", status)
 	require.NotEqual(t, http.StatusUnauthorized, status, "user token must verify: %s", respBody)
 	require.NotEqual(t, http.StatusForbidden, status, "user token must authorize: %s", respBody)
