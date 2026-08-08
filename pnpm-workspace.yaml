@@ -1,0 +1,21 @@
+packages:
+  - "."
+
+ignoreScripts: true
+ignorePnpmfile: true
+strictDepBuilds: true
+verifyDepsBeforeRun: error
+enablePrePostScripts: false
+dangerouslyAllowAllBuilds: false
+
+minimumReleaseAge: 1440
+minimumReleaseAgeStrict: true
+minimumReleaseAgeIgnoreMissingTime: false
+minimumReleaseAgeExclude:
+  - "@types/node@26.2.0"
+  - "eslint@10.8.1"
+trustPolicy: no-downgrade
+trustPolicyExclude:
+  - "semver@6.3.1"
+trustLockfile: false
+blockExoticSubdeps: true

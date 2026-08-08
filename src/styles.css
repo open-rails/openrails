@@ -1,0 +1,96 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "tw-animate-css";
+@source "./";
+
+/* openrails-checkout — scoped token set.
+   The component re-declares the standard shadcn custom properties under its
+   own root, so every utility inside .orck resolves against THESE values, not
+   the host page's. `data-orck-theme` picks the palette; `auto` follows the
+   OS. Integrator overrides land as inline custom properties (appearance.ts)
+   and win over both blocks below. */
+
+.orck {
+  --background: oklch(0.97 0.002 95);
+  --foreground: oklch(0.21 0.005 285);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.005 285);
+  --muted: oklch(0.94 0.002 95);
+  --muted-foreground: oklch(0.51 0.005 285);
+  --orck-faint: oklch(0.71 0.004 285);
+  --border: oklch(0.21 0.005 285 / 10%);
+  --orck-hairline: oklch(0.21 0.005 285 / 6%);
+  --input: oklch(0.21 0.005 285 / 12%);
+  --primary: oklch(0.21 0.005 285);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.94 0.002 95);
+  --secondary-foreground: oklch(0.21 0.005 285);
+  --accent: oklch(0.94 0.002 95);
+  --accent-foreground: oklch(0.21 0.005 285);
+  --destructive: oklch(0.577 0.245 27.3);
+  --ring: oklch(0.21 0.005 285 / 35%);
+  --radius: 0.625rem;
+  --orck-success: oklch(0.6 0.13 163);
+  --orck-font: "Instrument Sans Variable", "Instrument Sans", -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  font-family: var(--orck-font);
+  color: var(--foreground);
+  -webkit-font-smoothing: antialiased;
+  container-type: inline-size;
+  container-name: orck;
+}
+
+.orck[data-orck-theme="dark"] {
+  --background: oklch(0.16 0.004 285);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.21 0.005 285);
+  --card-foreground: oklch(0.96 0 0);
+  --muted: oklch(0.25 0.005 285);
+  --muted-foreground: oklch(0.69 0.005 285);
+  --orck-faint: oklch(0.5 0.004 285);
+  --border: oklch(1 0 0 / 10%);
+  --orck-hairline: oklch(1 0 0 / 6%);
+  --input: oklch(1 0 0 / 14%);
+  --primary: oklch(0.96 0 0);
+  --primary-foreground: oklch(0.18 0.004 285);
+  --secondary: oklch(0.25 0.005 285);
+  --secondary-foreground: oklch(0.96 0 0);
+  --accent: oklch(0.25 0.005 285);
+  --accent-foreground: oklch(0.96 0 0);
+  --destructive: oklch(0.7 0.19 22);
+  --ring: oklch(1 0 0 / 35%);
+  --orck-success: oklch(0.77 0.15 163);
+}
+
+@media (prefers-color-scheme: dark) {
+  .orck[data-orck-theme="auto"] {
+    --background: oklch(0.16 0.004 285);
+    --foreground: oklch(0.96 0 0);
+    --card: oklch(0.21 0.005 285);
+    --card-foreground: oklch(0.96 0 0);
+    --muted: oklch(0.25 0.005 285);
+    --muted-foreground: oklch(0.69 0.005 285);
+    --orck-faint: oklch(0.5 0.004 285);
+    --border: oklch(1 0 0 / 10%);
+    --orck-hairline: oklch(1 0 0 / 6%);
+    --input: oklch(1 0 0 / 14%);
+    --primary: oklch(0.96 0 0);
+    --primary-foreground: oklch(0.18 0.004 285);
+    --secondary: oklch(0.25 0.005 285);
+    --secondary-foreground: oklch(0.96 0 0);
+    --accent: oklch(0.25 0.005 285);
+    --accent-foreground: oklch(0.96 0 0);
+    --destructive: oklch(0.7 0.19 22);
+    --ring: oklch(1 0 0 / 35%);
+    --orck-success: oklch(0.77 0.15 163);
+  }
+}
+
+/* Collect.js mounts an iframe into the field container; make it fill. */
+.orck-collect-field iframe {
+  width: 100%;
+  height: 100%;
+  display: block;
+}

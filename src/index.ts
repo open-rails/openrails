@@ -1,0 +1,42 @@
+// openrails-checkout — the OpenRails checkout flow as a self-contained
+// component. `Checkout` is the flow; render it inline anywhere. `CheckoutModal`
+// is a ready-made dialog host around the same flow. Import "./styles.css"
+// once per app.
+import "./styles.css"
+
+export { Checkout, type CheckoutLayout, type CheckoutProps } from "./checkout"
+export { CheckoutModal, type CheckoutModalProps } from "./modal"
+export { CardBrandPlate } from "./components/card-brands"
+export { resolveCardBrand, type CardBrand } from "./lib/card-brands"
+export {
+  createHttpSource,
+  CheckoutSourceError,
+  type CheckoutSource,
+} from "./source"
+export { createFixtureSource, fixtureSession } from "./fixtures"
+export {
+  type CheckoutAppearance,
+  type CheckoutTheme,
+  type CheckoutVariables,
+} from "./appearance"
+export type {
+  CheckoutLineItem,
+  CheckoutPhase,
+  CheckoutPlan,
+  CheckoutSession,
+  CheckoutSessionStatus,
+  PaymentRailOption,
+  PayRequest,
+  PayResult,
+  SavedPaymentMethod,
+} from "./types"
+export {
+  checkoutLineItemSchema,
+  checkoutPlanSchema,
+  checkoutSessionSchema,
+  checkoutSessionStatusSchema,
+  payRequestSchema,
+  payResultSchema,
+  paymentRailOptionSchema,
+  savedPaymentMethodSchema,
+} from "./types"
