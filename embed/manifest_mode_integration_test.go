@@ -649,7 +649,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode, string(raw))
-	require.NotContains(t, string(raw), "unsupported rail", "the ccbill pre-gate must pass: an active manifest/DB-armed ccbill account exists")
+	require.NotContains(t, string(raw), "has no armed PSP", "the ccbill pre-gate must pass: an active manifest/DB-armed ccbill account exists")
 	require.Contains(t, string(raw), "price not found", "past the pre-gate, the request fails deeper on the fabricated price_id")
 }
 

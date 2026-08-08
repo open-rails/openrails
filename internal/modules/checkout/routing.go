@@ -170,6 +170,18 @@ func targetPSPID(target railTarget) uuid.UUID {
 	return target.Scope.ID
 }
 
+// unresolvedRailTarget is what a candidate knows about itself when resolution
+// failed. A bare rail kind ("stripe") is its own rail, so the trace can still
+// name it; a PSP key ("mobius") that did not resolve has no discoverable rail,
+// and an empty one is honest rather than guessed.
+func unresolvedRailTarget(selector string) railTarget {
+	name := strings.ToLower(strings.TrimSpace(selector))
+	if _, ok := knownRails[name]; !ok {
+		return railTarget{}
+	}
+	return railTarget{PSP: name, Rail: name}
+}
+
 // routingOrder resolves the candidate order for these inputs: the first
 // matching merchant rule, else the built-in default.
 func (s *CheckoutSessionService) routingOrder(ctx context.Context, in RoutingInput) ([]string, string, *int, error) {
@@ -241,20 +253,25 @@ func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, targets 
 		var ambiguous *AmbiguousRailError
 		var unarmed *UnarmedRailError
 		var unknown *UnknownRailError
+		// A skipped candidate still reports which rail it was: the trace lists
+		// every candidate in order with its skip class, and support reads it.
+		// Resolution failure is why the rail is unusable, not grounds to stop
+		// naming it — a bare rail kind names itself even when nothing is armed.
+		skipped := unresolvedRailTarget(selector)
 		switch {
 		case errors.As(err, &ambiguous):
-			return railTarget{}, models.CheckoutRoutingSkipAmbiguousSelector
+			return skipped, models.CheckoutRoutingSkipAmbiguousSelector
 		case errors.As(err, &unarmed):
-			return railTarget{}, models.CheckoutRoutingSkipNotArmed
+			return skipped, models.CheckoutRoutingSkipNotArmed
 		case errors.As(err, &unknown):
 			// A key that resolves to nothing may still be DECLARED and archived.
 			// Say "retired", not "never heard of it" — support reads this.
 			if targets.pspKeyArchived(ctx, selector) {
-				return railTarget{}, models.CheckoutRoutingSkipNotArmed
+				return skipped, models.CheckoutRoutingSkipNotArmed
 			}
-			return railTarget{}, models.CheckoutRoutingSkipUnknownSelector
+			return skipped, models.CheckoutRoutingSkipUnknownSelector
 		default:
-			return railTarget{}, models.CheckoutRoutingSkipResolveFailed
+			return skipped, models.CheckoutRoutingSkipResolveFailed
 		}
 	}
 	accountID := ""
