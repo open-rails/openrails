@@ -460,10 +460,15 @@ describe("CheckoutModal", () => {
       expect(screen.getByText("Pay $99.00")).toBeInTheDocument()
     })
     const dialog = screen.getByRole("dialog")
+    const overlay = document.querySelector('[data-slot="dialog-overlay"]')
+    expect(overlay?.parentElement).toBe(dialog.parentElement)
+    expect(dialog.parentElement).toHaveAttribute("data-slot", "dialog-portal")
     expect(dialog).toHaveClass(
+      "orck",
       "w-[860px]",
       "max-h-[calc(100dvh-2rem)]",
       "overflow-hidden",
+      "ring-0",
       "[&>[data-slot=dialog-close]]:top-5",
       "[&>[data-slot=dialog-close]]:right-5"
     )
@@ -484,16 +489,24 @@ describe("CheckoutModal", () => {
         open
         onOpenChange={() => {}}
         source={createFixtureSource()}
-        appearance={{ theme: "dark" }}
+        appearance={{
+          theme: "dark",
+          variables: {
+            primary: "oklch(0.7 0.2 250)",
+            radius: "1rem",
+          },
+        }}
       />
     )
 
     await screen.findByText("Pay $99.00")
-    expect(screen.getByRole("dialog")).toHaveAttribute(
-      "data-orck-theme",
-      "dark"
+    const dialog = screen.getByRole("dialog")
+    expect(dialog).toHaveAttribute("data-orck-theme", "dark")
+    expect(dialog.style.getPropertyValue("--primary")).toBe(
+      "oklch(0.7 0.2 250)"
     )
-    expect(screen.getByRole("dialog")).toHaveClass(
+    expect(dialog.style.getPropertyValue("--radius")).toBe("1rem")
+    expect(dialog).toHaveClass(
       "bg-background",
       "text-foreground",
       "[&>[data-slot=dialog-close]]:text-foreground"

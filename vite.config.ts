@@ -6,6 +6,8 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import dts from "vite-plugin-dts"
 
+import { checkoutCssPlugin } from "./tooling/checkout-css/vite-plugin.ts"
+
 const root = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
@@ -17,6 +19,7 @@ export default defineConfig({
       bundleTypes: true,
       tsconfigPath: path.resolve(root, "tsconfig.json"),
     }),
+    checkoutCssPlugin(),
   ],
   resolve: {
     alias: {
