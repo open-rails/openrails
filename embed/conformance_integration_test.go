@@ -279,14 +279,13 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	requestPrefix := env.side + "-" + uuid.NewString()
 
 	// 1) Deposit 1,000,000 internal amount units.
-	depositSrc := uuid.New()
 	dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID:  &pid,
 		Invoker:     env.invoker,
 		Currency:    env.currency,
 		Amount:      1_000_000,
 		Source:      "conformance",
-		SourceID:    &depositSrc,
+		SourceID:    uuid.NewString(),
 		Description: "seed",
 	})
 	require.NoError(t, err, "%s deposit", env.side)
@@ -364,14 +363,13 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	require.NoError(t, c.Release(ctx, uuid.NewString()), "%s release unknown hold is idempotent", env.side)
 	require.NoError(t, c.Release(ctx, "not-a-uuid"), "%s release garbage id is idempotent", env.side)
 
-	badSrc := uuid.New()
 	_, err = c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &pid,
 		Invoker:    env.invoker,
 		Currency:   "conformance_missing_currency",
 		Amount:     1,
 		Source:     "conformance",
-		SourceID:   &badSrc,
+		SourceID:   uuid.NewString(),
 	})
 	r.ErrDepositBadType = observeErr(t, env.side+" deposit unknown credit type", err)
 

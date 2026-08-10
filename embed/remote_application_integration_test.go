@@ -52,14 +52,14 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 
 		payer := uuid.New()
 		pid := openrails.CustomerID(payer)
-		src := uuid.New()
+		src := uuid.NewString()
 		dep, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 			CustomerID:  &pid,
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
 			Source:      "or484",
-			SourceID:    &src,
+			SourceID:    src,
 			Description: "jwks-principal deposit",
 		})
 		require.NoError(t, err, "authorized JWKS principal must administer the merchant")
@@ -76,14 +76,14 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 
 		payer := uuid.New()
 		pid := openrails.CustomerID(payer)
-		src := uuid.New()
+		src := uuid.NewString()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 			CustomerID:  &pid,
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      500_000,
 			Source:      "or484",
-			SourceID:    &src,
+			SourceID:    src,
 			Description: "should be denied",
 		})
 		require.Error(t, err, "JWKS principal without a merchant group role must be denied")
@@ -98,14 +98,14 @@ func TestStandaloneRemoteApplicationAuth(t *testing.T) {
 		c := standalone.Client()
 		payer := uuid.New()
 		pid := openrails.CustomerID(payer)
-		src := uuid.New()
+		src := uuid.NewString()
 		_, err := c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 			CustomerID:  &pid,
 			Invoker:     "or484-test",
 			Currency:    "USD",
 			Amount:      1_000,
 			Source:      "or484",
-			SourceID:    &src,
+			SourceID:    src,
 			Description: "API-key still works",
 		})
 		require.NoError(t, err, "API-key auth must keep working")

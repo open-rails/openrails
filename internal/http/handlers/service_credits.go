@@ -32,14 +32,17 @@ func serviceIdempotencyConflict(r *httprequest.Request, err error) bool {
 }
 
 type serviceDepositRequest struct {
-	CustomerID  string     `json:"customer_id"`
-	Invoker     string     `json:"invoker"`
-	Currency    string     `json:"currency"`
-	Amount      int64      `json:"amount" binding:"required"`
-	Source      string     `json:"source" binding:"required"`
-	SourceID    *uuid.UUID `json:"source_id" binding:"required"`
-	ExpiresAt   *int64     `json:"expires_at"`
-	Description *string    `json:"description"`
+	CustomerID string `json:"customer_id"`
+	Invoker    string `json:"invoker"`
+	Currency   string `json:"currency"`
+	Amount     int64  `json:"amount" binding:"required"`
+	Source     string `json:"source" binding:"required"`
+	// SourceID is the caller's reproducible idempotency key (or#906: any
+	// non-empty string, no longer restricted to a UUID — the structural key
+	// openrails.uq_grants_credit_deposit_once enforces is text).
+	SourceID    string  `json:"source_id" binding:"required"`
+	ExpiresAt   *int64  `json:"expires_at"`
+	Description *string `json:"description"`
 }
 
 type serviceCaptureRequest struct {
@@ -418,11 +421,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		expiresAt = &v
 	}
 
-	var depositSourceID string
-	if req.SourceID != nil && *req.SourceID != uuid.Nil {
-		depositSourceID = req.SourceID.String()
-	}
-	depositKey, err := money.NewIdempotencyKey(money.OpDeposit, req.Source, depositSourceID)
+	depositKey, err := billingservice.NewDepositIdempotencyKey(req.Source, req.SourceID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -446,6 +445,130 @@ func ServiceDepositCredits(r *httprequest.Request) {
 			return
 		}
 		r.ErrorJSON(http.StatusInternalServerError, "deposit failed")
+		return
+	}
+	r.SuccessJSON(trx)
+}
+
+// adminGrantCreditsRequest is the or#906 human-admin credit grant body.
+// source_id is the caller's REPRODUCIBLE idempotency key (the deposit's
+// structural identity — unique per (merchant, customer) in the database);
+// source is a descriptive label and deliberately NOT part of the key.
+type adminGrantCreditsRequest struct {
+	Invoker     string  `json:"invoker"`
+	Currency    string  `json:"currency"`
+	Amount      int64   `json:"amount" binding:"required"`
+	Source      string  `json:"source"`
+	SourceID    string  `json:"source_id" binding:"required"`
+	ExpiresAt   *int64  `json:"expires_at"`
+	Description *string `json:"description"`
+}
+
+// AdminGrantCredits is POST /v1/merchant/customers/{customer_id}/credits
+// (or#906): the human-admin sibling of the entitlement/product-access grants,
+// gated merchant:credits:grant + the AdminOperationGrant velocity limit. It is
+// the SAME deposit as the machine route — same idempotency key, same 409 on a
+// changed-amount replay, same Replayed reporting — addressed at a customer.
+func AdminGrantCredits(r *httprequest.Request) {
+	tenantSubjectID, err := parseServiceCustomerID(r.Param("customer_id"))
+	if err != nil || tenantSubjectID == nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+		return
+	}
+	var req adminGrantCreditsRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	if req.Amount <= 0 {
+		r.ErrorJSON(http.StatusBadRequest, "amount must be > 0")
+		return
+	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
+	source := strings.TrimSpace(req.Source)
+	if source == "" {
+		source = "admin"
+	}
+	invoker := strings.TrimSpace(req.Invoker)
+	if invoker == "" {
+		invoker = tenantSubjectID.String()
+	}
+	depositKey, err := billingservice.NewDepositIdempotencyKey(source, req.SourceID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		v := time.Unix(*req.ExpiresAt, 0).UTC()
+		expiresAt = &v
+	}
+	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
+		CustomerID:  tenantSubjectID,
+		Invoker:     invoker,
+		Currency:    currency,
+		Amount:      req.Amount,
+		Key:         depositKey,
+		ExpiresAt:   expiresAt,
+		Description: req.Description,
+	})
+	if err != nil {
+		if errors.Is(err, money.ErrBillingUnitRequired) || strings.Contains(err.Error(), "unknown currency") {
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+			return
+		}
+		if serviceIdempotencyConflict(r, err) {
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "credit grant failed")
+		return
+	}
+	r.SuccessJSON(trx)
+}
+
+// ServiceGetDeposit is GET /v1/merchant/credits/deposit (or#906): the
+// key-qualified "what did this key do" read. Query: customer_id + source_id —
+// the deposit's full structural key; operation is fixed to deposit by the
+// route, so the coordinate is unambiguous (or#894's keyless read stays
+// deleted). Answers the committed grant as the same CreditTransaction shape a
+// replay POST returns (Replayed=true), or 404 when the key never committed.
+func ServiceGetDeposit(r *httprequest.Request) {
+	tenantSubjectID, err := parseServiceCustomerID(r.Request.URL.Query().Get("customer_id"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
+		return
+	}
+	if tenantSubjectID == nil {
+		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
+		return
+	}
+	sourceID := strings.TrimSpace(r.Request.URL.Query().Get("source_id"))
+	if sourceID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "source_id required")
+		return
+	}
+	if !requireServiceCustomerScope(r, *tenantSubjectID) {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	trx, err := svc.GetDeposit(r.Request.Context(), *tenantSubjectID, sourceID)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "deposit lookup failed")
+		return
+	}
+	if trx == nil {
+		r.ErrorJSON(http.StatusNotFound, "deposit_not_found")
 		return
 	}
 	r.SuccessJSON(trx)

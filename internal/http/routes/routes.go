@@ -269,7 +269,14 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 
 	credits := group.Group("/credits")
 	credits.Handle(http.MethodGet, "/balance", h(httphandlers.ServiceGetCreditsBalance), readMW...)
+	// The machine deposit stays permission-gated only (no AdminOperationGrant
+	// limiter, or#906): the limiter is a HUMAN-velocity guard and machine
+	// credentials pass it unmetered anyway; rail settlement bursts are
+	// legitimate, and once-only is a database fact now (migration 0004).
 	credits.Handle(http.MethodPost, "/deposit", h(httphandlers.ServiceDepositCredits), writeMW...)
+	// or#906 key-qualified lookup: what did this deposit key do. GET on the
+	// same path the POST writes — read gate.
+	credits.Handle(http.MethodGet, "/deposit", h(httphandlers.ServiceGetDeposit), readMW...)
 }
 
 func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Options) {
@@ -710,6 +717,12 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	customers.Handle(http.MethodDelete, "/entitlements/:id", h(httphandlers.RevokeAdminEntitlement), revokeWrite...)
 	customers.Handle(http.MethodPost, "/product-access", h(httphandlers.GrantAdminProductAccess), grantWrite...)
 	customers.Handle(http.MethodDelete, "/product-access/:id", h(httphandlers.RevokeAdminProductAccess), revokeWrite...)
+	// or#906: human-admin credit grant. Money-in gets its OWN permission
+	// (merchant:credits:grant — owner-level, NOT held by the fixed support
+	// role) rather than riding customer-settings:update like its siblings:
+	// minting balance is the one grant whose blast radius is monetary.
+	creditsGrantWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCreditsGrant, middleware.AdminOperationGrant, dbMW...)
+	customers.Handle(http.MethodPost, "/credits", h(httphandlers.AdminGrantCredits), creditsGrantWrite...)
 
 	payments := rr.Group("/payments")
 	payments.Handle(http.MethodGet, "", h(httphandlers.GetAdminPayments), payRead...)

@@ -228,7 +228,8 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/delinquency` | `merchant:customer-settings:read` | Arrears delinquency roster (grace + delinquent, oldest debt first) plus the effective policy. `?state=grace\|delinquent`, `?limit=`. See [arrears-delinquency.md](../arrears-delinquency.md) |
 | GET | `/v1/merchant/customers/{customer_id}/delinquency` | `merchant:customer-settings:read` | One payer's delinquency state per currency; empty = never overdue |
 | GET | `/v1/merchant/credits/balance` | `merchant:customer-settings:read` | Credit balance |
-| POST | `/v1/merchant/credits/deposit` | `merchant:customer-settings:update` | Deposit/grant credits: `{ customer_id, invoker_id, credit_type, amount, source, source_id?, expires_at?, description? }`. Idempotent per `(customer_id, credit_type, source, source_id)` when `source_id` is set |
+| POST | `/v1/merchant/credits/deposit` | `merchant:customer-settings:update` | Deposit/grant credits: `{ customer_id, invoker, currency, amount, source, source_id, expires_at?, description? }`. `source_id` (any non-empty string) is REQUIRED and is the caller's reproducible idempotency key: once-only per `(customer_id, source_id)` is a database fact; `source` is a label, NOT part of the key. Identical replay → same grant with `Replayed=true`; replay with a different `amount` → 409 `idempotency_key_reused` |
+| GET | `/v1/merchant/credits/deposit` | `merchant:customer-settings:read` | What did this deposit key do (or#906): `?customer_id=&source_id=` → the committed grant (id, amount, created_at, `Replayed=true`); 404 `deposit_not_found` when the key never committed |
 | POST | `/v1/import/billing` | `merchant:billing:import` | Bulk DeclaredBilling book import (subscriptions/payments/payment methods wholesale) — a distinct owner-level grant |
 
 ## 5. Merchant admin (human) routes
@@ -252,6 +253,7 @@ for those routes.
 | DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke a manual entitlement grant |
 | POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
+| POST | `/v1/merchant/customers/{customer_id}/credits` | `merchant:credits:grant` | Grant credits (or#906): `{ currency, amount, source_id, invoker?, source?, expires_at?, description? }` — the human-admin deposit. `source_id` is the reproducible idempotency key (same semantics as the machine deposit above); `source` defaults to `admin`, `invoker` to the customer id. Owner-level permission (NOT held by the fixed support role); rate-limited as an admin grant operation |
 
 ### Payments & subscriptions
 

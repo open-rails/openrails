@@ -954,14 +954,14 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 	require.Equal(t, 1, productUsageLimitBindingCount(t, ctx, pool, customerID, limitKey, false))
 
 	client := standalone.Client()
-	depositSourceID := uuid.New()
+	depositSourceID := uuid.NewString()
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &customer,
 		Invoker:    customerID.String(),
 		Currency:   "USD",
 		Amount:     1_000,
 		Source:     "catalog-usage-limit",
-		SourceID:   &depositSourceID,
+		SourceID:   depositSourceID,
 	})
 	require.NoError(t, err)
 
@@ -1339,14 +1339,14 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 	require.Equal(t, "native-lifecycle-premium", entitlementRows[0].Entitlement)
 
 	client := surface.Client()
-	depositSourceID := uuid.New()
+	depositSourceID := uuid.NewString()
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    payerID.String(),
 		Currency:   "USD",
 		Amount:     10_000,
 		Source:     "catalog-native-lifecycle",
-		SourceID:   &depositSourceID,
+		SourceID:   depositSourceID,
 	})
 	require.NoError(t, err)
 	balance, err := client.Balance(ctx, payerID.String())

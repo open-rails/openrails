@@ -182,15 +182,32 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	}, nil
 }
 
+// DepositIdempotencyKey is the reproducible coordinate for one credit deposit
+// (or#906, mirroring UsageIdempotencyKey from 704f0bd0).
+type DepositIdempotencyKey = money.IdempotencyKey
+
+// NewDepositIdempotencyKey builds a deposit key (operation bound to deposit).
+// source labels the system of record ("stripe", "admin", …); sourceID is the
+// caller's reproducible key and is the deposit's structural identity — the
+// database enforces once-only at (merchant, customer, sourceID), so the SAME
+// sourceID under a DIFFERENT source is still the same deposit (doctrine, see
+// client.go DepositCreditsRequest.SourceID).
+func NewDepositIdempotencyKey(source, sourceID string) (DepositIdempotencyKey, error) {
+	return money.NewIdempotencyKey(money.OpDeposit, source, sourceID)
+}
+
 // DepositCreditsRequest is one admin/rail credit deposit. Key is the deposit's
 // idempotency coordinate (operation=deposit); build it with
-// money.NewIdempotencyKey(money.OpDeposit, source, sourceID). It must be
-// REPRODUCIBLE across retries of the same logical deposit — a value minted per
-// attempt passes every check and double-credits.
+// NewDepositIdempotencyKey(source, sourceID). It must be REPRODUCIBLE across
+// retries of the same logical deposit — a value minted per attempt passes
+// every check and double-credits.
 //
-// NOTE (measured, or#891): the deposit's structural key is the credit grant's
-// (merchant, customer, source_id); a duplicate is answered with the EXISTING
-// grant at its ORIGINAL amount, it is not rejected.
+// The deposit's structural key is the credit grant's (merchant, customer,
+// source_id), UNIQUE in the database (or#906 migration 0004). An identical
+// replay is answered with the EXISTING grant (Replayed=true); a replay whose
+// Amount differs from what the key committed is refused with
+// ErrIdempotencyKeyReused (amount only — currency/expiry/description drift is
+// tolerated, the or#891 posture everywhere).
 type DepositCreditsRequest struct {
 	CustomerID  *identity.CustomerID
 	Invoker     string
@@ -250,6 +267,47 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 		Status:          trx.Status,
 		Authorized:      trx.Authorized,
 		Captured:        trx.Captured,
+		Source:          trx.Source,
+		SourceID:        trx.SourceID,
+		ExpiresAt:       trx.ExpiresAt,
+		Description:     trx.Description,
+		CreatedAt:       trx.CreatedAt,
+		UpdatedAt:       trx.UpdatedAt,
+		Replayed:        trx.Replayed,
+	}, nil
+}
+
+// GetDeposit answers "what did this deposit key do" (or#906): the grant id,
+// amount, and created_at committed at the caller's key, with Replayed=true —
+// exactly what a replay POST would answer, without needing the amount. Returns
+// (nil, nil) when the key never committed. sourceID is the deposit key's
+// caller half; the operation half is fixed to deposit by this method
+// (key-qualified — or#894 deleted the keyless coordinate read as a trap).
+func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID, sourceID string) (*CreditTransaction, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	if customerID.IsZero() {
+		return nil, fmt.Errorf("customer_id required")
+	}
+	trx, err := s.moneyService().GetDepositBySourceID(ctx, customerID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	if trx == nil {
+		return nil, nil
+	}
+	return &CreditTransaction{
+		ID:              trx.ID,
+		CustomerID:      trx.CustomerID,
+		Invoker:         trx.Invoker,
+		Currency:        trx.Currency,
+		Amount:          trx.Amount,
+		TransactionType: trx.TransactionType,
+		Status:          trx.Status,
 		Source:          trx.Source,
 		SourceID:        trx.SourceID,
 		ExpiresAt:       trx.ExpiresAt,
