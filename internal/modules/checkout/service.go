@@ -746,6 +746,15 @@ func (s *CheckoutService) processNMISubscription(
 	// derived from the intent id. A crash/timeout at ANY point leaves an intent
 	// the executor/verifier resolves (sale search + roster scan) — never an
 	// orphaned live remote subscription, never a blind re-create.
+	// NMI sandbox accounts reject any email that is not the account owner's own
+	// address (E_ACCESS_DENIED), which fails add_subscription outright. The
+	// email is not needed to enrol a subscription, so leave it out of the
+	// intent payload in test mode — it is persisted, so filtering at execution
+	// time would still leave already-queued intents carrying it.
+	subscriptionEmail := req.Email
+	if s != nil && s.Config != nil && s.Config.IsTestMode() {
+		subscriptionEmail = ""
+	}
 	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
 		MerchantID: tid.UUID(),
 		Provider:   provider,
@@ -759,7 +768,7 @@ func (s *CheckoutService) processNMISubscription(
 			BillingID:              railMethodRef,
 			AmountMicros:           price.Amount,
 			Currency:               price.Currency,
-			Email:                  req.Email,
+			Email:                  subscriptionEmail,
 			UserID:                 user.ID,
 			PriceID:                price.ID,
 			LocalSubscriptionID:    subscriptionID,

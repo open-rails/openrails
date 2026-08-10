@@ -208,6 +208,14 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 
 	firstName, lastName := nmiNameParts(req.FirstName, req.LastName, req.NameOnCard)
+	// NMI sandbox accounts refuse any customer email that is not the account
+	// owner's own address (403 E_ACCESS_DENIED), which fails vault creation
+	// outright. The email is not needed to vault a card, so omit it in test
+	// mode rather than block every sandbox checkout.
+	vaultEmail := req.Email
+	if s != nil && s.Config != nil && s.Config.IsTestMode() {
+		vaultEmail = ""
+	}
 	vaultData := nmi.CreateCustomerVaultData{
 		PaymentToken: req.PaymentToken,
 		FirstName:    firstName,
@@ -218,7 +226,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		Zip:          req.Zip,
 		Country:      req.Country,
 		Phone:        req.Phone,
-		Email:        req.Email,
+		Email:        vaultEmail,
 		Company:      req.Company,
 		Address2:     req.Address2,
 	}
