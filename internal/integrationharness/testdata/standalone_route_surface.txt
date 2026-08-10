@@ -60,6 +60,7 @@ GET /v1/merchant/catalog/products/{id}
 GET /v1/merchant/catalog/reprice-all-prior-versions/preview
 GET /v1/merchant/credit-limit
 GET /v1/merchant/credits/balance
+GET /v1/merchant/credits/deposit
 GET /v1/merchant/customers
 GET /v1/merchant/customers/{customer_id}
 GET /v1/merchant/customers/{customer_id}/delinquency
@@ -146,6 +147,7 @@ POST /v1/merchant/catalog/publish
 POST /v1/merchant/catalog/reprice-all-prior-versions
 POST /v1/merchant/credits/deposit
 POST /v1/merchant/customers/entitlements:batch
+POST /v1/merchant/customers/{customer_id}/credits
 POST /v1/merchant/customers/{customer_id}/entitlements
 POST /v1/merchant/customers/{customer_id}/payments/off-channel
 POST /v1/merchant/customers/{customer_id}/product-access
