@@ -92,23 +92,27 @@ func TestCaptureHold_RedisFlushFallback(t *testing.T) {
 
 	// With fallback coordinates the rendered service is chargeable.
 	trx, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID:   reqID,
-		Amount:      400,
-		CustomerID:  payer.UUID().String(),
-		Currency:    money.DefaultCurrency,
-		Invoker:     "user:z",
-		AdmitSource: "usage",
+		RequestID:  reqID,
+		Amount:     400,
+		CustomerID: payer.UUID().String(),
+		Currency:   money.DefaultCurrency,
+		Invoker:    "user:z",
 	})
 	require.NoError(t, err, "capture must land after a Redis flush when coords are supplied")
 	require.NotNil(t, trx)
+	require.False(t, trx.Replayed, "first capture moved the money")
 
 	bal, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(100_000-400), bal.Balance)
 }
 
-// #676: a fallback capture retry after a pointer-resolved capture dedupes on the
-// same durable coordinates (no double charge).
+// or#907: a fallback capture retry after a pointer-resolved capture dedupes on
+// the caller's request id ALONE. The admit was deliberately placed with a
+// NON-default source ("usage") and the retry echoes nothing — before or#907
+// this exact shape rebuilt the coordinate at the "admit" default, missed the
+// lookup, and debited a second time (the hole that forced tensorhub th#969's
+// settlement outbox parking).
 func TestCaptureHold_FallbackRetryIsIdempotent(t *testing.T) {
 	svc, ms, rdb, payer, ctx := captureFallbackEnv(t)
 	reqID := uuid.NewString()
@@ -128,19 +132,21 @@ func TestCaptureHold_FallbackRetryIsIdempotent(t *testing.T) {
 	// First capture resolves the live pointer.
 	trx1, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: reqID, Amount: 400})
 	require.NoError(t, err)
+	require.False(t, trx1.Replayed)
 
-	// Redis flush, then an at-least-once retry via the fallback path.
+	// Redis flush, then an at-least-once retry via the fallback path. No
+	// admit-source echo of any kind: the request id is the whole caller key.
 	require.NoError(t, rdb.FlushDB(ctx).Err())
 	trx2, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID:   reqID,
-		Amount:      400,
-		CustomerID:  payer.UUID().String(),
-		Currency:    money.DefaultCurrency,
-		Invoker:     "user:z",
-		AdmitSource: "usage",
+		RequestID:  reqID,
+		Amount:     400,
+		CustomerID: payer.UUID().String(),
+		Currency:   money.DefaultCurrency,
+		Invoker:    "user:z",
 	})
 	require.NoError(t, err)
-	require.Equal(t, trx1.ID, trx2.ID, "retry must dedupe on the durable spend coordinates")
+	require.Equal(t, trx1.ID, trx2.ID, "retry must dedupe on the durable capture coordinate")
+	require.True(t, trx2.Replayed, "the retry moved nothing and must say so (LED-15)")
 
 	bal, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)

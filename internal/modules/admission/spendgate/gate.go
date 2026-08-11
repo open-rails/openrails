@@ -209,7 +209,7 @@ type AdmitInput struct {
 	Merchant, Customer, Currency string
 	RequestID                    string        // idempotency key (provider/tensorhub request id)
 	Invoker                      string        // recorded so capture's durable ledger write carries attribution
-	Source                       string        // idempotency namespace for the durable capture
+	Source                       string        // admit-time source namespace (informational; NOT part of the capture coordinate since or#907)
 	Cost                         int64         // estimate, minor units
 	AccountBalance               int64         // caller's ledger balance snapshot for (payer,currency), minor units
 	CreditLimit                  int64         // arrears credit line (0 = prepaid); affordability floor = -CreditLimit
@@ -219,7 +219,10 @@ type AdmitInput struct {
 }
 
 // HoldRef is the payer coordinates a request's hold was placed under, recovered
-// by Resolve so capture/release work from the request id alone.
+// by Resolve so capture/release work from the request id alone. Source is the
+// admit-time namespace, kept in the record for diagnostics; since or#907 the
+// capture's durable coordinate never reads it (it is volatile — the first
+// capture consumes this record).
 type HoldRef struct {
 	Customer string
 	Currency string

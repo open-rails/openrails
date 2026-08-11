@@ -55,22 +55,31 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 // (money.IdempotencyConflict: which field, committed vs retried).
 var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 
+// captureSourceNamespace is the FIXED source half of every capture's ledger
+// coordinate (or#907). It matches Admit's default source namespace, so capture
+// coordinates written before or#907 for default-source admits are identical.
+// It is deliberately NOT the admit-time source: that lived in the Redis hold
+// ref the first capture consumes, and rebuilding it from a caller echo is what
+// made a blank echo a second debit (tensorhub th#969's outbox existed to
+// compensate).
+const captureSourceNamespace = "admit"
+
 type CaptureHoldRequest struct {
+	// RequestID is the caller's idempotency key for this capture (or#907): the
+	// admit's request id. The durable ledger coordinate is composed from it and
+	// engine constants alone — no volatile state and no caller-echoed field
+	// participates — so ANY retry of the same request dedupes, unconditionally.
 	RequestID string
 	Amount    int64
 
 	// Fallback payer coordinates (#676). The admit-time request→payer pointer
 	// lives in Redis and can be lost (flush/failover/TTL overrun). When the
 	// pointer resolve misses AND CustomerID+Currency are supplied, capture
-	// proceeds against them — a rendered service is always chargeable.
-	// AdmitSource must echo the Source the admit was placed with (defaults to
-	// "admit", the Admit default) so the durable idempotency coordinates match a
-	// pointer-resolved capture of the same request. All ignored when the pointer
-	// is live.
-	CustomerID  string
-	Currency    string
-	Invoker     string
-	AdmitSource string
+	// proceeds against them — a rendered service is always chargeable. All
+	// ignored when the pointer is live.
+	CustomerID string
+	Currency   string
+	Invoker    string
 
 	// Usage analytics (#311): when EventType is set, the capture ALSO appends a
 	// openrails.usage_events row linked to the capture transaction (no second
@@ -357,10 +366,6 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 			Customer: fbCustomer,
 			Currency: fbCurrency,
 			Invoker:  strings.TrimSpace(req.Invoker),
-			Source:   strings.TrimSpace(req.AdmitSource),
-		}
-		if ref.Source == "" {
-			ref.Source = "admit" // Admit's default source namespace
 		}
 	}
 	payerID, err := uuid.Parse(ref.Customer)
@@ -368,15 +373,17 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		return nil, fmt.Errorf("invalid hold customer_id")
 	}
 	payer := identity.CustomerID(payerID)
-	source := ref.Source
-	if source == "" {
-		source = "usage"
-	}
 	// Durable money movement (#512 ledger), idempotent on
-	// (merchant, payer, currency, operation=capture, source, source_id) = the
-	// admit request id. The operation is what keeps a capture from aliasing a
-	// wasted-spend usage charge reported at the same request id (or#894).
-	captureKey, err := money.NewIdempotencyKey(money.OpCapture, source, req.RequestID)
+	// (merchant, payer, currency, operation=capture, source="admit",
+	// source_id=request id) — every part engine-composed or caller-key (or#907).
+	// The source half is a CONSTANT on purpose: it used to be the admit-time
+	// source recovered from the Redis hold ref, which the first capture
+	// consumes, so a retry rebuilt it from a caller-echoed field and a blank
+	// echo landed at a DIFFERENT coordinate — a second debit. A coordinate that
+	// depends on nothing volatile is what makes capture idempotent on the
+	// caller's key unconditionally. The operation is what keeps a capture from
+	// aliasing a wasted-spend usage charge at the same request id (or#894).
+	captureKey, err := money.NewIdempotencyKey(money.OpCapture, captureSourceNamespace, req.RequestID)
 	if err != nil {
 		return nil, err
 	}
@@ -401,7 +408,7 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	if strings.TrimSpace(req.EventType) != "" {
 		usageSource := strings.TrimSpace(req.Source)
 		if usageSource == "" {
-			usageSource = source
+			usageSource = captureSourceNamespace
 		}
 		sourceID := strings.TrimSpace(req.SourceID)
 		if sourceID == "" {

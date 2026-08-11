@@ -33,6 +33,34 @@ func (q *Queries) DeleteAllInvokerSpendLimits(ctx context.Context, arg DeleteAll
 	return result.RowsAffected(), nil
 }
 
+const deleteInvokerSpendLimit = `-- name: DeleteInvokerSpendLimit :execrows
+DELETE FROM openrails.invoker_spend_limits
+WHERE merchant_id = $1 AND customer_id = $2 AND scope = $3 AND scope_key = $4
+`
+
+type DeleteInvokerSpendLimitParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Scope      string
+	ScopeKey   string
+}
+
+// Single-grant revocation (or#911): removes exactly one addressed delegation
+// and leaves every sibling untouched. 0 rows is a real answer (nothing at that
+// key), surfaced to the caller rather than swallowed.
+func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvokerSpendLimitParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteInvokerSpendLimit,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Scope,
+		arg.ScopeKey,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
 SELECT id, merchant_id, customer_id, currency, rungs, created_at, updated_at FROM openrails.tier_schedules
 WHERE merchant_id = $1
@@ -140,7 +168,7 @@ func (q *Queries) ListDeclarativeBillingPolicyBindings(ctx context.Context, merc
 }
 
 const listInvokerSpendLimits = `-- name: ListInvokerSpendLimits :many
-SELECT id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at FROM openrails.invoker_spend_limits
+SELECT id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at, provenance FROM openrails.invoker_spend_limits
 WHERE merchant_id = $1 AND customer_id = $2
 `
 
@@ -169,6 +197,7 @@ func (q *Queries) ListInvokerSpendLimits(ctx context.Context, arg ListInvokerSpe
 			&i.Windows,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Provenance,
 		); err != nil {
 			return nil, err
 		}
@@ -346,10 +375,11 @@ func (q *Queries) UpsertBillingPolicyBindingTier(ctx context.Context, arg Upsert
 
 const upsertInvokerSpendLimit = `-- name: UpsertInvokerSpendLimit :exec
 INSERT INTO openrails.invoker_spend_limits (
-    id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    id, merchant_id, customer_id, scope, scope_key, windows, provenance, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
+    provenance = EXCLUDED.provenance,
     updated_at = EXCLUDED.updated_at
 `
 
@@ -360,12 +390,15 @@ type UpsertInvokerSpendLimitParams struct {
 	Scope      string
 	ScopeKey   string
 	Windows    []byte
+	Provenance string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
 
 // Per-invoker spend-limit upsert (#473/#517): the payer's cap on a delegated
-// invoker/role. Payer-set only (no owner discriminator).
+// invoker/role. Payer-set only (no owner discriminator). provenance (or#911)
+// is the caller's opaque reference for what authorized the grant; an upsert
+// replaces the whole grant, provenance included.
 func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvokerSpendLimitParams) error {
 	_, err := q.db.Exec(ctx, upsertInvokerSpendLimit,
 		arg.ID,
@@ -374,6 +407,7 @@ func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvoker
 		arg.Scope,
 		arg.ScopeKey,
 		arg.Windows,
+		arg.Provenance,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

@@ -98,6 +98,29 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 	stored, err = svc.InvokerSpendLimits(ctx, payer)
 	require.NoError(t, err)
 	require.Len(t, stored, 1, "rejected remote duplicate document must not mutate policy")
+
+	// or#911 over the machine client: provenance rides the grant, and the
+	// single-grant delete revokes exactly the addressed row.
+	second.Provenance = "sha256:" + strings.Repeat("cd", 32)
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), second))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), first))
+	stored, err = svc.InvokerSpendLimits(ctx, payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	for _, row := range stored {
+		if row.Scope == "role" {
+			require.Equal(t, second.Provenance, row.Provenance)
+		}
+	}
+
+	require.NoError(t, client.DeleteCustomerSpendDelegation(ctx, payerID.String(), "role", second.ScopeKey))
+	stored, err = svc.InvokerSpendLimits(ctx, payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 1, "delete must leave the sibling invoker grant untouched")
+	require.Equal(t, "invoker", stored[0].Scope)
+
+	err = client.DeleteCustomerSpendDelegation(ctx, payerID.String(), "role", second.ScopeKey)
+	require.ErrorIs(t, err, openrails.ErrNotFound, "an already-revoked grant is a real answer")
 }
 
 func TestReplaceInvokerSpendLimitsRollsBackOnWriteFailure(t *testing.T) {
@@ -386,6 +409,96 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations",
 		map[string]any{"customer_id": uuid.NewString(), "delegations": []map[string]any{}})
+	require.Equal(t, http.StatusBadRequest, resp.status, resp.body)
+}
+
+// or#911: single-grant DELETE revokes exactly the addressed delegation and
+// leaves siblings untouched (the zero-limit-window workaround dies), and a
+// grant carries the caller's opaque provenance reference, returned on reads.
+func TestCustomerTreasurySpendDelegationDeleteAndProvenance(t *testing.T) {
+	suite := setupTestSuite(t)
+
+	router := http.NewServeMux()
+	httproutes.RegisterCustomerTreasuryRoutes(httprouter.NewMux(router, "/v1/customers", suite.App.Runtime), suite.App.Runtime,
+		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{
+			subject: uuid.NewString(),
+			perms: []string{
+				controlplane.PermCustomerSpendDelegationsRead,
+				controlplane.PermCustomerSpendDelegationsUpdate,
+			},
+		}), routesurface.AllProviderRoutes())
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+
+	payerID := dbtest.TestMerchantID.UUID()
+	t.Cleanup(func() {
+		_, _ = suite.Pool.Exec(context.Background(),
+			"DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", payerID)
+	})
+
+	invokerKey := "user:" + uuid.NewString()
+	roleKey := uuid.NewString()
+	digest := "sha256:" + strings.Repeat("ab", 32)
+
+	doc := map[string]any{"delegations": []map[string]any{
+		{
+			"scope":      "invoker",
+			"scope_key":  invokerKey,
+			"provenance": digest,
+			"windows": []map[string]any{
+				{"key": "hour", "window_seconds": 3600, "limit": 1000, "currency": "USD"},
+			},
+		},
+		{
+			"scope":     "role",
+			"scope_key": roleKey,
+			"windows": []map[string]any{
+				{"key": "day", "window_seconds": 86400, "limit": 5000, "currency": "USD"},
+			},
+		},
+	}}
+	resp := requestCustomerTreasuryJSON(t, srv, http.MethodPut, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations", doc)
+	require.Equal(t, http.StatusOK, resp.status, resp.body)
+
+	// Provenance is stored on the grant and answered on reads — the mirror
+	// table a host kept solely to serve "which document authorized this" dies.
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations", nil)
+	require.Equal(t, http.StatusOK, resp.status, resp.body)
+	require.Contains(t, resp.body, digest)
+
+	svc, err := billingservice.New(suite.App.Runtime)
+	require.NoError(t, err)
+	payer := identity.CustomerID(payerID)
+	stored, err := svc.InvokerSpendLimits(dbtest.WithTestMerchant(context.Background()), payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 2)
+	byKey := map[string]billingservice.InvokerSpendLimitInput{}
+	for _, row := range stored {
+		byKey[row.Scope+"\x00"+row.ScopeKey] = row
+	}
+	require.Equal(t, digest, byKey["invoker\x00"+invokerKey].Provenance)
+	require.Empty(t, byKey["role\x00"+roleKey].Provenance, "provenance is per grant, not per document")
+
+	// DELETE the invoker grant only; the role sibling must survive verbatim.
+	deletePath := "/v1/customers/" + dbtest.TestMerchantSlug + "/spend-delegations/invoker/" + invokerKey
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodDelete, deletePath, nil)
+	require.Equal(t, http.StatusOK, resp.status, resp.body)
+	require.Contains(t, resp.body, `"deleted":true`)
+
+	stored, err = svc.InvokerSpendLimits(dbtest.WithTestMerchant(context.Background()), payer)
+	require.NoError(t, err)
+	require.Len(t, stored, 1, "single-grant delete must leave unrelated grants untouched")
+	require.Equal(t, "role", stored[0].Scope)
+	require.Equal(t, roleKey, stored[0].ScopeKey)
+
+	// A second delete is a real answer, not a silent success.
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodDelete, deletePath, nil)
+	require.Equal(t, http.StatusNotFound, resp.status, resp.body)
+	require.Contains(t, resp.body, "spend_delegation_not_found")
+
+	// An invalid scope is a caller bug, refused loudly.
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodDelete,
+		"/v1/customers/"+dbtest.TestMerchantSlug+"/spend-delegations/bogus/"+invokerKey, nil)
 	require.Equal(t, http.StatusBadRequest, resp.status, resp.body)
 }
 

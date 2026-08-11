@@ -32,6 +32,10 @@ type customerSpendDelegation struct {
 	// the path scope). Never emitted.
 	CustomerID string                      `json:"customer_id,omitempty"`
 	Windows    []models.BudgetWindowPolicy `json:"windows"`
+	// Provenance is the caller's opaque reference for what authorized this
+	// grant (or#911), e.g. a signed-document digest. Stored on the grant and
+	// returned on reads; OpenRails never interprets it.
+	Provenance string `json:"provenance,omitempty"`
 }
 
 // UnmarshalJSON keeps the delegation wire shape strict. or#893 deleted the
@@ -199,6 +203,48 @@ func ServicePutCustomerSpendDelegation(r *httprequest.Request) {
 	r.SuccessJSON(customerSpendDelegationFromInput(next[0]))
 }
 
+// DeleteCustomerSpendDelegation revokes exactly ONE addressed delegation
+// (or#911) and leaves every sibling untouched — the single-grant delete the
+// zero-limit-window workaround existed to approximate. 404 when nothing exists
+// at (scope, scope_key): already revoked or never granted, a real answer the
+// caller can act on.
+func DeleteCustomerSpendDelegation(r *httprequest.Request) {
+	resolved, ok := requireCustomerTreasuryPrincipal(r)
+	if !ok {
+		return
+	}
+	svc, payer, ok := customerTreasurySpendDelegationService(r, resolved)
+	if !ok {
+		return
+	}
+	deleteCustomerSpendDelegation(r, svc, payer)
+}
+
+// ServiceDeleteCustomerSpendDelegation is the merchant-machine counterpart of
+// DeleteCustomerSpendDelegation.
+func ServiceDeleteCustomerSpendDelegation(r *httprequest.Request) {
+	svc, payer, ok := serviceCustomerSpendDelegationService(r)
+	if !ok {
+		return
+	}
+	deleteCustomerSpendDelegation(r, svc, payer)
+}
+
+func deleteCustomerSpendDelegation(r *httprequest.Request, svc *billingservice.Service, payer identity.CustomerID) {
+	scope := r.Param("scope")
+	scopeKey := r.Param("scope_key")
+	deleted, err := svc.DeleteInvokerSpendLimit(r.Request.Context(), payer, scope, scopeKey)
+	if err != nil {
+		customerSpendDelegationWriteError(r, err, "spend delegation delete failed")
+		return
+	}
+	if !deleted {
+		r.ErrorJSON(http.StatusNotFound, "spend_delegation_not_found")
+		return
+	}
+	r.SuccessJSON(map[string]any{"deleted": true})
+}
+
 func serviceCustomerSpendDelegationService(r *httprequest.Request) (*billingservice.Service, identity.CustomerID, bool) {
 	payer, err := parseServiceCustomerID(r.Param("customer_id"))
 	if err != nil || payer == nil {
@@ -267,7 +313,7 @@ func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]billingse
 			})
 		}
 		out = append(out, billingservice.InvokerSpendLimitInput{
-			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows,
+			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows, Provenance: row.Provenance,
 		})
 	}
 	return billingservice.ValidateInvokerSpendLimitInputs(out)
@@ -287,6 +333,7 @@ func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []cust
 func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) customerSpendDelegation {
 	return customerSpendDelegation{
 		Scope: budgets.NormalizeScope(row.Scope), ScopeKey: row.ScopeKey, Windows: row.Windows,
+		Provenance: row.Provenance,
 	}
 }
 
@@ -306,7 +353,7 @@ func customerSpendDelegationFromInput(row billingservice.InvokerSpendLimitInput)
 		})
 	}
 	return customerSpendDelegation{
-		Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows,
+		Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows, Provenance: row.Provenance,
 	}
 }
 

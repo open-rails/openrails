@@ -186,6 +186,7 @@ merchant-admin principal (`merchant:*`) on top of the `customer:*` grants.
 | GET | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:read` |
 | PUT | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:update` — replace the full payer-owned delegation policy |
 | PUT | `/v1/customers/{customer_id}/spend-delegations:upsert` | `customer:spend-delegations:update` — upsert one delegation |
+| DELETE | `/v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `customer:spend-delegations:update` — revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
 | GET | `/v1/customers/{customer_id}/balance` | `customer:balance:read` |
 | GET | `/v1/customers/{customer_id}/transactions` | `customer:balance:read` |
 | GET | `/v1/customers/{customer_id}/usage` | `customer:balance:read` |
@@ -214,11 +215,12 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:read` | Active entitlements for a customer. Query: `at` (RFC3339) for point-in-time |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:update` | Replace the customer's full spend-delegation policy |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` | Upsert one delegation |
+| DELETE | `/v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` | `merchant:customer-settings:update` | Revoke exactly one delegation (or#911); siblings untouched; 404 when nothing exists at the key |
 | GET | `/v1/merchant/entitlements/{entitlement}/customers` | `merchant:customer-settings:read` | Customers currently holding an entitlement |
 | GET | `/v1/merchant/users/{user_id}/product-access` | `merchant:customer-settings:read` | A user's product access |
 | GET | `/v1/merchant/invokers/{invoker}/credits` | `merchant:customer-settings:read` | Invoker credit summary `{ currency, balance, held_balance }`. Query: `customer_id`, `currency` |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)` |
-| POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }` (≤ hold) |
+| POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }`. Idempotent on the path `{id}` unconditionally (or#907); an identical retry answers `Replayed: true`, a changed amount is refused 409 `idempotency_key_reused` |
 | POST | `/v1/merchant/admissions/{id}/release` | `merchant:admissions:create` | Release a hold without spending |
 | POST | `/v1/merchant/wasted-spend` | `merchant:admissions:create` | Report wasted spend against admissions |
 | POST | `/v1/merchant/usage/report` | `merchant:admissions:create` | Record usage events |
