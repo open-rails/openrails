@@ -104,7 +104,18 @@ func TestSelfHandler_FailClosed(t *testing.T) {
 // SelfHandler (the exported constructor) fails loud without an initialized app
 // graph — the identity-gated surface is never silently mounted.
 func TestSelfHandler_RequiresInitializedApp(t *testing.T) {
+	h, err := SelfHandler(nil, stubSelfAuthenticator{})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "not initialized")
+	require.Nil(t, h)
+}
+
+// #913: requesting the customer surface without a DelegatedAuthenticator must
+// name the standard bridge constructor, not just refuse.
+func TestSelfHandler_MissingAuthenticatorHintNamesTheBridge(t *testing.T) {
 	h, err := SelfHandler(nil, nil)
 	require.Error(t, err)
 	require.Nil(t, h)
+	require.ErrorContains(t, err, "RouteSetCustomer")
+	require.ErrorContains(t, err, "NewVerifierDelegatedAuthenticator")
 }

@@ -24,8 +24,9 @@ require (
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/moby/moby/api v1.54.3-0.20260603163940-285b47192d4b
 	github.com/moby/moby/client v0.4.2-0.20260603163940-285b47192d4b
-	github.com/open-rails/authkit v0.84.0
+	github.com/open-rails/authkit v0.87.0
 	github.com/open-rails/migratekit v1.4.0
+	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.12.1
 	github.com/riverqueue/river v0.26.0
 	github.com/riverqueue/river/riverdriver/riverpgxv5 v0.26.0
@@ -34,6 +35,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.42.0
+	google.golang.org/protobuf v1.36.11
 )
 
 require (
@@ -56,7 +58,6 @@ require (
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/pganalyze/pg_query_go/v6 v6.2.2 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/ryanuber/go-glob v1.0.0 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
@@ -67,7 +68,6 @@ require (
 	go.mongodb.org/mongo-driver/v2 v2.5.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/protobuf v1.36.11 // indirect
 	pgregory.net/rapid v1.3.0 // indirect
 )
 

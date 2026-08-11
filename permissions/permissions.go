@@ -6,6 +6,8 @@
 // them so there is one source of truth.
 package permissions
 
+import "strings"
+
 // Merchant (seller) permissions.
 const (
 	MerchantSettingsRead           = "merchant:settings:read"
@@ -99,3 +101,89 @@ const (
 	MerchantAll = "merchant:*"
 	CustomerAll = "customer:*"
 )
+
+// Canonical role→permission preset (#913).
+//
+// Every AuthKit-embedding host used to hand-roll the mapping from its own
+// role vocabulary onto this catalog, and both observed attempts were bugs:
+// tensorhub's map emitted exactly two invented permission strings and pinned
+// the WRONG merchant, 403ing its whole /customers/* subtree (th#1765);
+// cozy-art wrote no bridge at all, so its entire self-service surface
+// silently 404'd (ca#269). This preset is the documented DEFAULT for the
+// common AuthKit-host role shapes; a host with a different vocabulary
+// supplies its own mapping instead (see pkg/embedded/authkit
+// WithRolePermissions) — the preset is a default, never a constraint.
+//
+// The tiers:
+//
+//   - owner, admin       → PresetOwnerPermissions: the full wildcard tier,
+//     merchant:* AND customer:*. Both globs on purpose: the self-service /
+//     treasury surface gates on customer:* strings, so merchant:* alone would
+//     403 an owner reading its own organization's balance — the th#1765
+//     failure shape.
+//   - member             → PresetMemberPermissions: the customer self-service
+//     set (balance read, billing update, spend-delegations read/update,
+//     checkout create, payment-methods update).
+//   - read-only, readonly, viewer → PresetReadOnlyPermissions: the :read
+//     subset of the member set.
+//
+// Unknown roles contribute nothing (fail closed); matching is trimmed and
+// case-insensitive. Wildcards compose with billingauth.NewDelegatedGate —
+// billingauth.HasPermission expands "merchant:*"/"customer:*" prefix grants.
+var (
+	PresetOwnerPermissions = []string{MerchantAll, CustomerAll}
+
+	PresetMemberPermissions = []string{
+		CustomerBalanceRead,
+		CustomerBillingUpdate,
+		CustomerSpendDelegationsRead,
+		CustomerSpendDelegationsUpdate,
+		CustomerCheckoutCreate,
+		CustomerPaymentMethodsUpdate,
+	}
+
+	PresetReadOnlyPermissions = []string{
+		CustomerBalanceRead,
+		CustomerSpendDelegationsRead,
+	}
+)
+
+// ForRoles maps a principal's host roles onto the catalog via the canonical
+// preset documented above: the union of each recognized role's tier, deduped,
+// in tier order (owner/admin, then member, then read-only). Unrecognized
+// roles are ignored; no roles (or only unrecognized ones) yields nil, which
+// still authenticates for the grant-free /v1/me self-service surface but
+// passes no permission gate.
+func ForRoles(roles ...string) []string {
+	var owner, member, readOnly bool
+	for _, role := range roles {
+		switch strings.ToLower(strings.TrimSpace(role)) {
+		case "owner", "admin":
+			owner = true
+		case "member":
+			member = true
+		case "read-only", "readonly", "viewer":
+			readOnly = true
+		}
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(perms []string) {
+		for _, p := range perms {
+			if !seen[p] {
+				seen[p] = true
+				out = append(out, p)
+			}
+		}
+	}
+	if owner {
+		add(PresetOwnerPermissions)
+	}
+	if member {
+		add(PresetMemberPermissions)
+	}
+	if readOnly {
+		add(PresetReadOnlyPermissions)
+	}
+	return out
+}

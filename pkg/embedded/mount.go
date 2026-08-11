@@ -108,15 +108,19 @@ func SelfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator) (http.Ha
 }
 
 func selfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes) (http.Handler, error) {
+	// #913: checked first (static misconfiguration beats runtime state), and
+	// the error names the standard bridge — every observed host either
+	// hand-rolled this wrong (th#1765) or never wired it and shipped a
+	// 404ing self surface (ca#269).
+	if authn == nil {
+		return nil, fmt.Errorf("embedded billing: RouteSetCustomer (self surface) requires MountOptions.DelegatedAuthenticator — AuthKit-issuer hosts use pkg/embedded/authkit.NewVerifierDelegatedAuthenticator(issuers, audience, boundMerchantID)")
+	}
 	if e == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
 	}
 	a := e.App()
 	if a == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
-	}
-	if authn == nil {
-		return nil, fmt.Errorf("embedded billing: self surface requires MountOptions.DelegatedAuthenticator")
 	}
 	// #734: derive the SAME Host->merchant resolver the base handler uses
 	// (embedhttp.FromApp) from whatever control plane is attached — nil when

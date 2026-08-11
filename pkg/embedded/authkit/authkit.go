@@ -9,8 +9,12 @@
 package authkit
 
 import (
+	"fmt"
+
 	"github.com/open-rails/openrails/internal/auth"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // NewVerifierAuthenticator builds an AuthKit-backed, framework-neutral
@@ -32,4 +36,59 @@ func NewVerifierAuthenticator(issuers []string, expectedAud string) (billingauth
 		return nil, err
 	}
 	return auth.NewAuthenticator(v), nil
+}
+
+// DelegatedOption customizes NewVerifierDelegatedAuthenticator.
+type DelegatedOption func(*delegatedOptions)
+
+type delegatedOptions struct {
+	rolePermissions func(roles []string) []string
+}
+
+// WithRolePermissions overrides the canonical permissions.ForRoles preset
+// with the host's own role→permission mapping. The mapping's output feeds
+// DelegatedPrincipal.Permissions verbatim (the embedding host is trusted,
+// #564), and composes with billingauth.NewDelegatedGate — wildcard grants
+// like permissions.MerchantAll are expanded by billingauth.HasPermission. A
+// mapper returning nil grants nothing beyond the grant-free /v1/me surface.
+func WithRolePermissions(mapper func(roles []string) []string) DelegatedOption {
+	return func(o *delegatedOptions) { o.rolePermissions = mapper }
+}
+
+// NewVerifierDelegatedAuthenticator is the delegated twin of
+// NewVerifierAuthenticator (#913): an AuthKit-backed
+// billingauth.DelegatedAuthenticator for the embedded self-service surface
+// (RouteSetCustomer — /billing/v1/me/* and /billing/v1/customers/*). It
+// verifies the bearer token against the given JWKS issuers (optionally
+// constraining the audience) and returns a DelegatedPrincipal carrying:
+//
+//   - MerchantID: the ENGINE's bound merchant, pinned here at construction —
+//     never anything read from the caller's token. tensorhub's hand-rolled
+//     bridge pinned the caller's org UUID and scoped every request's RLS to a
+//     nonexistent merchant (th#1765); this parameter exists so that bug is
+//     unwritable.
+//   - SubjectID: the token's `sub` claim (the acting end user).
+//   - Issuer: the verified token issuer, for audit.
+//   - Permissions: permissions.ForRoles over the token's roles — the
+//     documented canonical preset (owner/admin → merchant:*+customer:*,
+//     member → the customer self-service set, read-only → its :read subset).
+//     Hosts with their own role vocabulary override via WithRolePermissions.
+//
+// Every host used to hand-write this mapping; tensorhub's was a live bug
+// (th#1765) and cozy-art simply never wrote one, 404ing its whole
+// self-service surface (ca#269). Pass the result as
+// embedded.MountOptions.DelegatedAuthenticator.
+func NewVerifierDelegatedAuthenticator(issuers []string, expectedAud string, merchantID string, opts ...DelegatedOption) (billingauth.DelegatedAuthenticator, error) {
+	if _, err := merchant.ParseID(merchantID); err != nil {
+		return nil, fmt.Errorf("delegated authenticator: merchant id %q: %w (pass the engine's bound merchant id)", merchantID, err)
+	}
+	v, err := auth.NewIssuerVerifier(issuers, expectedAud)
+	if err != nil {
+		return nil, err
+	}
+	o := delegatedOptions{rolePermissions: func(roles []string) []string { return permissions.ForRoles(roles...) }}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return auth.NewDelegatedAuthenticator(v, merchantID, o.rolePermissions), nil
 }
