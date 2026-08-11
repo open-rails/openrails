@@ -12,9 +12,9 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/auth"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
-	"github.com/open-rails/openrails/permissions"
 )
 
 // NewVerifierAuthenticator builds an AuthKit-backed, framework-neutral
