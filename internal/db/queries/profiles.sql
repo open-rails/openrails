@@ -41,7 +41,7 @@ ORDER BY slug;
 -- clears a name set elsewhere.
 INSERT INTO openrails.merchants (slug, status, display_name)
 VALUES ($1, 'active', sqlc.narg(display_name))
-ON CONFLICT (slug) DO UPDATE SET
+ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET
     display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
     updated_at = now()
 RETURNING id;

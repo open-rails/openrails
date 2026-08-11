@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -38,6 +39,15 @@ type ControlPlane struct {
 	// directly. The server no longer vends it (.Client() was dropped).
 	authClient *authcore.Client
 	hosted     bool
+	// merchantCreation is the WithMerchantCreation config when the merchant
+	// persona is opted into authkit's generated creation path (or#914); nil
+	// otherwise. WrapAuthRoute attaches the directory row around the
+	// generated POST /merchant, and ProvisionMerchant enforces the same
+	// declared policy on in-process user-claimed slugs.
+	merchantCreation *MerchantCreationConfig
+	// merchantCreationPattern is merchantCreation.SlugPattern compiled and
+	// anchored at construction (nil when no extra pattern is declared).
+	merchantCreationPattern *regexp.Regexp
 	// pool is the schema-aware wrapper used for OpenRails' own control-plane
 	// queries (openrails.* tables). AuthKit's own profiles.* queries go through
 	// authSvc, which holds the raw pool (#471).
@@ -77,6 +87,7 @@ type options struct {
 	trustedProxies               []string
 	rateLimitOverrides           map[string]ratelimit.Limit
 	redis                        *redis.Client
+	merchantCreation             *MerchantCreationConfig
 }
 
 // Option configures the control plane for embedding hosts.
@@ -88,6 +99,20 @@ type Option func(*options)
 func WithHostedPosture() Option {
 	return func(o *options) {
 		o.hosted = true
+	}
+}
+
+// WithMerchantCreation opts the merchant persona into authkit's generated
+// instance-creation path (ak#263, or#914): merchant slugs claimed by USERS —
+// the hosted "registration is provisioning" flow — go through
+// CreateInstanceForSubject, so the slug pattern, the reserved-slug list
+// (merchant.ReservedHostedSlugs plus cfg.ReservedSlugs), and the host
+// admission cost gate all apply automatically, and authkit mounts
+// POST /merchant with its own per-IP/per-user velocity limits. Standalone
+// never passes this.
+func WithMerchantCreation(cfg MerchantCreationConfig) Option {
+	return func(o *options) {
+		o.merchantCreation = &cfg
 	}
 }
 
@@ -326,6 +351,22 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	options := newOptions(opts)
 	lockedRegistration := !options.hosted
 
+	// or#914: hosted merchant creation goes through authkit's generated
+	// creation path (ak#263) — the merchant persona opts in and the host cost
+	// gate is wired as the WithInstanceAdmission seam below.
+	rbac := Groups()
+	var merchantCreationPattern *regexp.Regexp
+	if options.merchantCreation != nil {
+		rbac = withMerchantCreation(rbac, *options.merchantCreation)
+		if pat := strings.TrimSpace(options.merchantCreation.SlugPattern); pat != "" {
+			re, perr := regexp.Compile("^(?:" + pat + ")$")
+			if perr != nil {
+				return nil, fmt.Errorf("controlplane: merchant creation slug pattern: %w", perr)
+			}
+			merchantCreationPattern = re
+		}
+	}
+
 	coreCfg := authcore.Config{
 		Keys: authcore.KeysConfig{
 			Source:     keySource,
@@ -345,7 +386,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// outside permission groups. Each type's `owner` role is auto-seeded
 		// (= `<type>:*`), so OwnerOwnsAppResources is obsolete (every owner holds
 		// its own namespace directly; the flat case needs no cross-namespace grant).
-		RBAC: Groups(),
+		RBAC: rbac,
 		// Private standalone posture: no public user self-registration. Embedded
 		// bootstrap/core calls (CreatePermissionGroup/Genesis().AssignGroupRole/MintAPIKey)
 		// are unaffected. Hosted products opt in with WithHostedPosture; no
@@ -381,12 +422,35 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	if options.redis != nil {
 		coreOpts = append(coreOpts, authcore.WithRedis(options.redis))
 	}
+	if options.merchantCreation != nil && options.merchantCreation.Admission != nil {
+		// ak#263 host admission seam (signature per authkit v0.93.0: the
+		// predicate receives the normalized slug). Personas other than
+		// merchant never reach the host gate — openrails enables creation on
+		// the merchant persona only.
+		admit := options.merchantCreation.Admission
+		coreOpts = append(coreOpts, authcore.WithInstanceAdmission(func(ctx context.Context, persona, instanceSlug, subject string) error {
+			if persona != MerchantType {
+				return nil
+			}
+			return admit(ctx, instanceSlug, subject)
+		}))
+	}
 
 	// Client-first construction (#142): build the AuthKit engine, then adapt it
 	// with the HTTP server. Core() / the delegated verifier hold this client.
 	authClient, err := authcore.New(coreCfg, pool, coreOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
+	}
+	if options.merchantCreation != nil {
+		// ak#263 prerequisite (or#914): the generated POST /merchant creates
+		// groups parented at ROOT, and unlike Bootstrap/ProvisionMerchant the
+		// route has no ensure step of its own — a fresh deployment would 404
+		// (parent group not found) until something else seeded root. Ensure it
+		// here, once, at construction (idempotent, #844-tolerant).
+		if err := EnsureRootContainment(ctx, authClient); err != nil {
+			return nil, fmt.Errorf("controlplane: merchant creation enabled: %w", err)
+		}
 	}
 	// HTTP-layer options (#743): trusted-proxy CIDRs so the per-client
 	// registration/login rate limiter keys on the real client behind a load
@@ -439,15 +503,17 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	delegatedVerifier.WithService(authClient)
 
 	cp2 := &ControlPlane{
-		cfg:                cfg,
-		authSvc:            authSvc,
-		authClient:         authClient,
-		hosted:             options.hosted,
-		pool:               db.WrapPool(pool, cfg.DB.SchemaName()),
-		delegatedVerifier:  delegatedVerifier,
-		userVerifier:       userVerifier,
-		issuer:             issuer,
-		delegatedAudiences: []string{billingauth.TokenAudience},
+		cfg:                     cfg,
+		authSvc:                 authSvc,
+		authClient:              authClient,
+		hosted:                  options.hosted,
+		merchantCreation:        options.merchantCreation,
+		merchantCreationPattern: merchantCreationPattern,
+		pool:                    db.WrapPool(pool, cfg.DB.SchemaName()),
+		delegatedVerifier:       delegatedVerifier,
+		userVerifier:            userVerifier,
+		issuer:                  issuer,
+		delegatedAudiences:      []string{billingauth.TokenAudience},
 	}
 
 	// Load AuthKit's ACTIVE remote_applications into the multi-issuer verifier
@@ -480,6 +546,12 @@ func (c *ControlPlane) Core() *authcore.Client {
 		return nil
 	}
 	return c.authClient
+}
+
+// MerchantCreationEnabled reports whether the merchant persona is opted into
+// authkit's generated instance-creation path (or#914, WithMerchantCreation).
+func (c *ControlPlane) MerchantCreationEnabled() bool {
+	return c != nil && c.merchantCreation != nil
 }
 
 // AuthService returns the underlying AuthKit http.Service (for route mounting).

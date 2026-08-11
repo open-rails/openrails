@@ -21,6 +21,10 @@ import (
 // does not match a live merchant is a configuration error the caller should fail
 // boot on.
 func ResolveMerchantSlug(ctx context.Context, qx gen.DBTX, slug string) (merchant.ID, error) {
+	// or#914: slugs are STORED normalized (lowercase); normalize here so every
+	// caller-supplied ref (config, CLI flags, import payloads) resolves
+	// case-insensitively instead of each call site remembering to.
+	slug = merchant.NormalizeSlug(slug)
 	if slug == "" {
 		return merchant.ID{}, nil
 	}

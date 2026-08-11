@@ -82,10 +82,17 @@ func (c *ControlPlane) RouteSpecs() []authhttp.RouteSpec {
 
 // WrapAuthRoute is the control plane's per-route mount decoration
 // (MountOptions.Wrap): declared customer group-management routes get the lazy
-// customer permission-group ensure; everything else passes through.
+// customer permission-group ensure; the generated merchant CREATION route
+// (ak#263, mounted only under WithMerchantCreation) gets the or#914 directory
+// row attach; everything else passes through.
 func (c *ControlPlane) WrapAuthRoute(spec authhttp.RouteSpec, h http.Handler) http.Handler {
-	if c == nil || spec.Group != authhttp.RoutePermissionGroups ||
-		!strings.HasPrefix(spec.Path, "/"+CustomerType+"/{instance_slug}/") {
+	if c == nil || spec.Group != authhttp.RoutePermissionGroups {
+		return h
+	}
+	if c.merchantCreation != nil && spec.Method == http.MethodPost && spec.Path == "/"+MerchantType {
+		return c.merchantCreationAttachHandler(h)
+	}
+	if !strings.HasPrefix(spec.Path, "/"+CustomerType+"/{instance_slug}/") {
 		return h
 	}
 	return c.lazyCustomerGroupHandler(h)

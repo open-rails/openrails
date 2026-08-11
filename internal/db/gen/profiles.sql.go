@@ -124,7 +124,7 @@ func (q *Queries) ListMerchantDirectoryRefs(ctx context.Context, slugs []string)
 const registerMerchant = `-- name: RegisterMerchant :one
 INSERT INTO openrails.merchants (slug, status, display_name)
 VALUES ($1, 'active', $2)
-ON CONFLICT (slug) DO UPDATE SET
+ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET
     display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
     updated_at = now()
 RETURNING id

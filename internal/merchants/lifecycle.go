@@ -90,6 +90,10 @@ type Service struct {
 	// destructive gates the merchant purge (or#858). Never nil: NewService seeds
 	// it with deniedPolicy so an unwired service cannot purge.
 	destructive DestructivePolicy
+	// groupSlugResolver is the or#914 rename-forwarding seam: slug lookups
+	// that miss the directory table retry through the authkit merchant-group
+	// namespace (which follows ak#264 tombstones). Nil = table-only.
+	groupSlugResolver GroupSlugResolver
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
@@ -172,11 +176,14 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	// 1. Insert the merchant directory row. ON CONFLICT(slug) DO NOTHING keeps
 	//    the existing row; RETURNING only yields a row when THIS statement
 	//    performed the insert, which is how `created` is derived race-safely.
+	//    The arbiter is the or#914 LIVE-rows-only unique index (slug WHERE
+	//    deleted_at IS NULL): a soft-deleted row no longer pins its name, so a
+	//    slug authkit released can be provisioned again.
 	var insertedID string
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO openrails.merchants (slug, status, permission_group_id)
 		VALUES ($1, 'active', NULLIF($2,''))
-		ON CONFLICT (slug) DO NOTHING
+		ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING
 		RETURNING id::text
 	`, slug, groupID).Scan(&insertedID)
 	created := true
@@ -235,9 +242,16 @@ func (s *Service) Get(ctx context.Context, id merchant.ID) (*Merchant, error) {
 	return s.merchantByID(ctx, id)
 }
 
-// GetBySlug returns the merchant directory row by slug.
+// GetBySlug returns the merchant directory row by slug. A miss retries
+// through the authkit group namespace when the or#914 rename-forwarding seam
+// is wired (renamed-away slugs forward via their ak#264 tombstones).
 func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error) {
-	return s.merchantBySlug(ctx, normalizeSlug(slug))
+	norm := normalizeSlug(slug)
+	m, err := s.merchantBySlug(ctx, norm)
+	if errors.Is(err, ErrMerchantNotFound) {
+		return s.merchantByGroupFallback(ctx, norm)
+	}
+	return m, err
 }
 
 // DirectoryRef is a merchant's public-facing directory identity: the slug it is

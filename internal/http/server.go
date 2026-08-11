@@ -244,6 +244,9 @@ func New(deps Dependencies) (*Server, error) {
 		if terr != nil {
 			return nil, fmt.Errorf("build merchants service: %w", terr)
 		}
+		// or#914: slug resolution follows ak#264 group renames (tombstone
+		// forwarding) through the control plane's group namespace.
+		tsvc.WithGroupSlugResolver(deps.ControlPlane.MerchantGroupSlugResolver())
 		s.merchants = tsvc
 		if deps.Runtime != nil {
 			deps.Runtime.Merchants = tsvc

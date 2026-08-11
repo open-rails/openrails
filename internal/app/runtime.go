@@ -29,12 +29,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/internal/modules/replaycache"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -139,6 +139,12 @@ type Runtime struct {
 	MoneyCharger         money.Charger
 	RailCustomerService  *payments.RailCustomerService
 	Merchants            *merchants.Service
+	// MerchantGroupResolver is the or#914 rename-forwarding seam an attached
+	// control plane installs (slug -> merchant group id + current slug,
+	// tombstone-following). ArmMerchantsService applies it to any merchants
+	// service armed AFTER the control plane attached; the attach path applies
+	// it directly when Merchants already exists. Nil without a control plane.
+	MerchantGroupResolver merchants.GroupSlugResolver
 	// ManifestSecrets is the MODE-1 in-memory credential plane (#723), set iff
 	// merchant_source=manifest. Boot provisioning seeds it (Seeder()); runtime
 	// consumers read it through Merchants like any other store. The DB/Vault

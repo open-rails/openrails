@@ -19,8 +19,12 @@
 package controlplane
 
 import (
+	"context"
+
 	authcore "github.com/open-rails/authkit/embedded"
+
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Permission-group personas (#567). OpenRails declares exactly TWO flat
@@ -136,6 +140,54 @@ func Groups() []authcore.PersonaDef {
 			},
 		},
 	}
+}
+
+// MerchantCreationConfig opts the merchant persona into authkit's generated
+// instance-creation path (ak#263, or#914): user-claimed merchant slugs go
+// through CreateInstanceForSubject, so the slug pattern, reserved-slug
+// escalation, and the host admission (cost) gate all apply to hosted
+// "registration is provisioning" flows. Standalone/locked posture never
+// enables this; hosted products opt in through
+// pkg/embedded/controlplane.AttachOptions.MerchantCreation.
+type MerchantCreationConfig struct {
+	// ReservedSlugs are reserved IN ADDITION to merchant.ReservedHostedSlugs
+	// (the advisory hosted default, always included). Exact lowercase slugs.
+	ReservedSlugs []string
+	// ReservedEscalationRole names the root-group role allowed to claim
+	// reserved slugs through the creation path. Empty = reserved slugs are not
+	// claimable through it at all (operator paths — Bootstrap, manifests —
+	// are unaffected either way).
+	ReservedEscalationRole string
+	// SlugPattern further restricts creatable slugs beyond authkit's built-in
+	// instance-slug rule: an unanchored regexp source, anchored at schema
+	// build. Empty = built-in rule only.
+	SlugPattern string
+	// Admission is the host COST gate (authkit's WithInstanceAdmission seam,
+	// ak#263): consulted with the normalized candidate slug and the creating
+	// user id before any merchant group is created through the creation path.
+	// Return a non-nil error to refuse. nil = allow. Velocity limits (per-IP +
+	// per-user) are authkit's own and apply on its generated HTTP route;
+	// in-process creation (embcp.ProvisionMerchant) is gated by everything
+	// except those HTTP-layer limits.
+	Admission func(ctx context.Context, instanceSlug, ownerUserID string) error
+}
+
+// withMerchantCreation returns the Groups() catalog with the merchant persona's
+// generated-creation route enabled per cfg (or#914).
+func withMerchantCreation(defs []authcore.PersonaDef, cfg MerchantCreationConfig) []authcore.PersonaDef {
+	reserved := append(append([]string{}, merchant.ReservedHostedSlugs...), cfg.ReservedSlugs...)
+	for i := range defs {
+		if defs[i].Name != MerchantType {
+			continue
+		}
+		defs[i].Creation = authcore.InstanceCreationDef{
+			Enabled:                true,
+			SlugPattern:            cfg.SlugPattern,
+			ReservedSlugs:          reserved,
+			ReservedEscalationRole: cfg.ReservedEscalationRole,
+		}
+	}
+	return defs
 }
 
 // OpenRails permissions (#554). `merchant:*` is the seller hat (top-level

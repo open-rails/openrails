@@ -60,7 +60,7 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	var merchantID string
 	var displayName, apiHost *string
 	if err := database.Qx(ctx).QueryRow(ctx, `
-		SELECT id::text, display_name, api_host FROM openrails.merchants WHERE slug = $1
+		SELECT id::text, display_name, api_host FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL
 	`, slug).Scan(&merchantID, &displayName, &apiHost); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, fmt.Errorf("merchant %q not found", slug)
