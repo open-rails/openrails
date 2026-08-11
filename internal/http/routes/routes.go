@@ -723,6 +723,14 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	// minting balance is the one grant whose blast radius is monetary.
 	creditsGrantWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCreditsGrant, middleware.AdminOperationGrant, dbMW...)
 	customers.Handle(http.MethodPost, "/credits", h(httphandlers.AdminGrantCredits), creditsGrantWrite...)
+	// or#908 B2B business profile: posture is a consequence of onboarding —
+	// PUT onboards (terms acceptance gate, grant-class), DELETE offboards
+	// (refused while the payer owes, destructive-class). No "set posture"
+	// route exists by design.
+	customers.Handle(http.MethodGet, "/business-profile", h(httphandlers.GetAdminBusinessProfile), customerRead...)
+	customers.Handle(http.MethodPut, "/business-profile", h(httphandlers.PutAdminBusinessProfile), grantWrite...)
+	customers.Handle(http.MethodDelete, "/business-profile", h(httphandlers.DeleteAdminBusinessProfile), revokeWrite...)
+	rr.Handle(http.MethodGet, "/business-customers", h(httphandlers.ListAdminBusinessProfiles), customerRead...)
 
 	payments := rr.Group("/payments")
 	payments.Handle(http.MethodGet, "", h(httphandlers.GetAdminPayments), payRead...)

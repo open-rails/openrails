@@ -99,6 +99,33 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantCustomerSettingsRead,
 		},
 		{
+			// or#908 business profile: posture is a consequence of onboarding.
+			// PUT (onboard) rides the grant-class customer-settings write;
+			// DELETE (offboard) the destructive class of the same permission.
+			name:   "business profile read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/business-profile",
+			perm:   controlplane.PermMerchantCustomerSettingsRead,
+		},
+		{
+			name:   "business profile onboard",
+			method: http.MethodPut,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/business-profile",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
+			name:   "business profile offboard",
+			method: http.MethodDelete,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/business-profile",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
+			name:   "business roster read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/business-customers",
+			perm:   controlplane.PermMerchantCustomerSettingsRead,
+		},
+		{
 			name:   "payment providers write",
 			method: http.MethodPut,
 			path:   "/billing/v1/merchant/payment-providers/stripe",
