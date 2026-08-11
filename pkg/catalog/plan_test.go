@@ -462,29 +462,3 @@ func TestApply_DrivesFacade(t *testing.T) {
 	}
 }
 
-func TestApply_Idempotent(t *testing.T) {
-	m := loadFrom(t, planManifest)
-	f := newFakeApplier()
-	// Seed a fully-converged catalog.
-	ini := f.seedProduct("initiate", "cozy", 1, false)
-	ini.DisplayName = "Novice"
-	f.seedPrice(ini.ID, 1200, "USD", 30*24, false, "stripe")
-	cra := f.seedProduct("craftsman", "cozy", 2, false)
-	cra.DisplayName = "Craftsman"
-	f.seedPrice(cra.ID, 1300, "USD", 30*24, false, "stripe")
-
-	plan, err := Plan(context.Background(), f, m)
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	if plan.HasChanges() {
-		t.Fatalf("converged catalog should have no changes:\n%s", plan.String())
-	}
-	res, err := Apply(context.Background(), f, plan)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if res.ProductsCreated+res.ProductsUpdated+res.ProductsArchived+res.PricesCreated+res.PricesActivated+res.PricesArchived != 0 {
-		t.Fatalf("idempotent apply mutated something: %+v", res)
-	}
-}

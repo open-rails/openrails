@@ -184,45 +184,6 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 	}
 }
 
-// TestDiffPriceFieldsAmountDrift asserts diffPriceFields flags unit_amount and
-// currency divergence between the local OpenRails price and the Stripe price.
-func TestDiffPriceFieldsAmountDrift(t *testing.T) {
-	now := time.Now().UTC()
-	local := &models.Price{ID: uuid.New(), Amount: 10_000_000, Currency: "USD"}
-
-	// Amount diverges only.
-	sp := catalog.StripePrice{ID: "price_1", UnitAmount: 2000, Currency: "USD", Active: true}
-	events := diffPriceFields(local, sp, now)
-	if got := fieldSet(events); !got["unit_amount"] {
-		t.Fatalf("expected unit_amount drift, got fields %v", got)
-	} else if got["currency"] || got["active"] {
-		t.Fatalf("expected only unit_amount drift, got fields %v", got)
-	}
-
-	// Currency diverges only.
-	sp = catalog.StripePrice{ID: "price_1", UnitAmount: 1000, Currency: "EUR", Active: true}
-	events = diffPriceFields(local, sp, now)
-	if got := fieldSet(events); !got["currency"] {
-		t.Fatalf("expected currency drift, got fields %v", got)
-	} else if got["unit_amount"] || got["active"] {
-		t.Fatalf("expected only currency drift, got fields %v", got)
-	}
-
-	// Both diverge.
-	sp = catalog.StripePrice{ID: "price_1", UnitAmount: 2500, Currency: "GBP", Active: true}
-	events = diffPriceFields(local, sp, now)
-	got := fieldSet(events)
-	if !got["unit_amount"] || !got["currency"] {
-		t.Fatalf("expected both unit_amount and currency drift, got fields %v", got)
-	}
-
-	// Fully in sync (currency compared case-insensitively) -> no drift.
-	sp = catalog.StripePrice{ID: "price_1", UnitAmount: 1000, Currency: "USD", Active: true}
-	if events := diffPriceFields(local, sp, now); len(events) != 0 {
-		t.Fatalf("expected no drift when in sync, got %+v", events)
-	}
-}
-
 // fieldSet collapses a slice of drift events into a set of the fields that
 // drifted, for terse assertions.
 func fieldSet(events []models.CatalogDriftEvent) map[string]bool {

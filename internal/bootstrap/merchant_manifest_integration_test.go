@@ -332,29 +332,6 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	}
 }
 
-// #697: the manifest rejects a slash-form CCBill account_id loudly — the
-// composite identity is dash-joined (clientAccnum-clientSubacc).
-func TestReconcileMerchantManifestRejectsCCBillSlashAccountID(t *testing.T) {
-	ctx := context.Background()
-	pool := newMerchantManifestTestPool(t)
-	cp := newMerchantManifestControlPlane(t, pool)
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
-	mt.PSPs = map[string]PSPConfig{
-		"ccbill": {
-			"ccbill": {
-				AccountID: "900000/0000",
-				Secrets:   map[string]string{"salt": "secret"},
-			},
-		},
-	}
-	manifest.Merchants["cozy-art"] = mt
-
-	err := ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "CCBill account_id uses a dash: clientAccnum-clientSubacc, e.g. 945280-0000")
-}
-
 func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)

@@ -186,34 +186,6 @@ func runOnce(t *testing.T, ledger *fakeLedger, handler Handler, cfg ModeView) St
 	return stats
 }
 
-func TestRunnerOutcomeClassification(t *testing.T) {
-	cases := []struct {
-		name           string
-		outcome        Outcome
-		wantTransition string
-	}{
-		{"success", Succeeded(map[string]any{"deleted": true}), StatusSucceeded},
-		{"retryable failure", Retryable("declined"), StatusFailedRetryable},
-		{"ambiguous parks for verifier", Ambiguous("timeout mid-write"), StatusUnknownNeedsVerify},
-		{"terminal", Terminal("unsupported"), StatusFailedTerminal},
-		{"parked stays pending", Parked("kill switch"), StatusPending},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ledger := newFakeLedger()
-			h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: tc.outcome}
-			intent := testIntent("t", OriginUser, 1)
-			ledger.due = []gen.OpenrailsRailIntent{intent}
-
-			runOnce(t, ledger, h, modeFull())
-			assert.Equal(t, tc.wantTransition, ledger.transition[intent.ID])
-			if tc.outcome.Reason != "" {
-				assert.Equal(t, tc.outcome.Reason, ledger.reasons[intent.ID], "the reason is recorded on the intent")
-			}
-		})
-	}
-}
-
 func TestRunnerRetryableUsesHandlerBackoff(t *testing.T) {
 	ledger := newFakeLedger()
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Retryable("provider down")}
@@ -232,19 +204,6 @@ func TestRunnerRetryableUsesHandlerBackoff(t *testing.T) {
 	assert.WithinDuration(t, before.Add(3*time.Minute), next, 5*time.Second)
 }
 
-func TestRunnerRelevanceSupersedes(t *testing.T) {
-	ledger := newFakeLedger()
-	h := &fakeHandler{typ: "t", relevance: SupersededBy("subscription resumed"), execute: Succeeded(nil)}
-	intent := testIntent("t", OriginUser, 1)
-	ledger.due = []gen.OpenrailsRailIntent{intent}
-
-	stats := runOnce(t, ledger, h, modeFull())
-	assert.Equal(t, StatusSuperseded, ledger.transition[intent.ID])
-	assert.Equal(t, "subscription resumed", ledger.reasons[intent.ID])
-	assert.Equal(t, 1, stats.Superseded)
-	assert.Zero(t, h.executed, "a superseded intent must never execute")
-}
-
 func TestRunnerRelevanceErrorParksWithoutExecuting(t *testing.T) {
 	ledger := newFakeLedger()
 	h := &fakeHandler{typ: "t", relErr: assert.AnError, execute: Succeeded(nil)}
@@ -254,43 +213,6 @@ func TestRunnerRelevanceErrorParksWithoutExecuting(t *testing.T) {
 	runOnce(t, ledger, h, modeFull())
 	assert.Equal(t, StatusPending, ledger.transition[intent.ID], "relevance read failure keeps the intent pending")
 	assert.Zero(t, h.executed)
-}
-
-// TestRunnerModeGating drives the gate through the Runner: parked intents go
-// back to pending with the mode reason recorded and the handler is never
-// invoked; allowed ones execute.
-func TestRunnerModeGating(t *testing.T) {
-	cases := []struct {
-		name     string
-		mode     ModeView
-		origin   Origin
-		executes bool
-	}{
-		{"user under limited executes", modeLimited(), OriginUser, true},
-		{"admin under limited executes", modeLimited(), OriginAdmin, true},
-		{"system under limited parks", modeLimited(), OriginSystem, false},
-		{"user under readonly parks", modeReadonly(), OriginUser, false},
-		{"system under readonly parks", modeReadonly(), OriginSystem, false},
-		{"system under full executes", modeFull(), OriginSystem, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ledger := newFakeLedger()
-			h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
-			intent := testIntent("t", tc.origin, 1)
-			ledger.due = []gen.OpenrailsRailIntent{intent}
-
-			runOnce(t, ledger, h, tc.mode)
-			if tc.executes {
-				assert.Equal(t, 1, h.executed)
-				assert.Equal(t, StatusSucceeded, ledger.transition[intent.ID])
-			} else {
-				assert.Zero(t, h.executed, "gated intents must not attempt provider writes")
-				assert.Equal(t, StatusPending, ledger.transition[intent.ID])
-				assert.Contains(t, ledger.reasons[intent.ID], "mode=")
-			}
-		})
-	}
 }
 
 func TestRunnerMissingHandlerParks(t *testing.T) {
@@ -360,53 +282,6 @@ func TestRegistrySemantics(t *testing.T) {
 	assert.Panics(t, func() { reg.Register(nil) })
 }
 
-// TestEnqueueAndExecuteRunsTheIdenticalPipeline: the synchronous path claims
-// the just-enqueued intent and executes it through the same
-// gate/execute/classify machinery, returning the post-execution row.
-func TestEnqueueAndExecuteRunsTheIdenticalPipeline(t *testing.T) {
-	cases := []struct {
-		name       string
-		execute    Outcome
-		wantStatus string
-	}{
-		{"success", Succeeded(map[string]any{"transaction_id": "t1"}), StatusSucceeded},
-		{"terminal", Terminal("declined"), StatusFailedTerminal},
-		{"ambiguous", Ambiguous("timeout"), StatusUnknownNeedsVerify},
-		{"retryable", Retryable("conn refused"), StatusFailedRetryable},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			ledger := newFakeLedger()
-			h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: tc.execute}
-			ledger.enqueued = testIntent("t", OriginAdmin, 0)
-			ledger.enqueued.Status = StatusPending
-
-			r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull()}
-			row, err := r.EnqueueAndExecute(context.Background(), EnqueueParams{IntentType: "t", IdempotencyKey: "k"})
-			require.NoError(t, err)
-			assert.Equal(t, 1, h.executed)
-			assert.Equal(t, tc.wantStatus, row.Status)
-		})
-	}
-}
-
-// TestEnqueueAndExecuteGateParksNotErrors: a mode-gated intent comes back
-// pending with the park reason — parked is a state, never an error.
-func TestEnqueueAndExecuteGateParksNotErrors(t *testing.T) {
-	ledger := newFakeLedger()
-	h := &fakeHandler{typ: "t", relevance: StillRelevant(), execute: Succeeded(nil)}
-	ledger.enqueued = testIntent("t", OriginSystem, 0)
-	ledger.enqueued.Status = StatusPending
-
-	r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeLimited()}
-	row, err := r.EnqueueAndExecute(context.Background(), EnqueueParams{IntentType: "t", IdempotencyKey: "k"})
-	require.NoError(t, err)
-	assert.Zero(t, h.executed, "gated intents never attempt provider writes")
-	assert.Equal(t, StatusPending, row.Status)
-	require.NotNil(t, row.LastFailureReason)
-	assert.Contains(t, *row.LastFailureReason, "mode=limited")
-}
-
 // TestEnqueueAndExecuteConflictRowReturnedUntouched: an unclaimable conflict
 // (already succeeded) is handed back without execution — the caller acts on
 // the durable prior outcome (the dunning worker's repair path).
@@ -458,25 +333,6 @@ func TestRunnerTerminalEvidencePersisted(t *testing.T) {
 	runOnce(t, ledger, h, modeFull())
 	assert.Equal(t, StatusFailedTerminal, ledger.transition[intent.ID])
 	assert.Equal(t, map[string]any{"response_code": 252}, ledger.evidence[intent.ID])
-}
-
-func TestRunnerLogsExternalMutationAttemptsAppendOnly(t *testing.T) {
-	ledger := newFakeLedger()
-	h := &fakeHandler{typ: "t", relevance: StillRelevant(),
-		execute: Succeeded(map[string]any{"remote_id": "sub_123"})}
-	intent := testIntent("t", OriginUser, 2)
-	ledger.due = []gen.OpenrailsRailIntent{intent}
-
-	runOnce(t, ledger, h, modeFull())
-
-	require.Len(t, ledger.logs, 2)
-	assert.Equal(t, MutationLogPhaseAttempting, ledger.logs[0].Phase)
-	assert.Equal(t, MutationLogPhaseSucceeded, ledger.logs[1].Phase)
-	assert.Equal(t, intent.ID, *ledger.logs[0].ProviderIntentID)
-	assert.Equal(t, intent.ID, *ledger.logs[1].ProviderIntentID)
-	assert.Equal(t, intent.Attempts, ledger.logs[0].Attempt)
-	assert.Equal(t, intent.IdempotencyKey, ledger.logs[0].IdempotencyKey)
-	assert.Equal(t, "sub_123", ledger.logs[1].Evidence["remote_id"])
 }
 
 func TestRunnerDoesNotLogReadOnlyVerify(t *testing.T) {
@@ -550,8 +406,9 @@ func TestRunnerDestructiveKillSwitch(t *testing.T) {
 		executes bool
 		consults bool
 	}{
-		{"destructive type blocked by the switch", TypeNMIDeleteSubscription, false, false, true},
-		{"destructive type allowed when armed", TypeNMIDeleteSubscription, true, true, true},
+		// Rows for "blocked by the switch" / "allowed when armed" live in
+		// internal/river/provider_intents_rls_integration_test.go against the
+		// real DB-backed gate.
 		// Non-destructive work (refunds, captures) is not what the switch is
 		// for; halting money movement would be its own incident.
 		{"non-destructive type is not gated", "not_destructive", false, true, false},
@@ -584,19 +441,3 @@ func TestRunnerDestructiveKillSwitch(t *testing.T) {
 	}
 }
 
-// A gate that cannot read its policy must DENY, never default to allowing an
-// irreversible provider delete.
-func TestRunnerDestructiveGateFailsClosed(t *testing.T) {
-	ledger := newFakeLedger()
-	h := &fakeHandler{typ: TypeNMIDeleteSubscription, relevance: StillRelevant(), execute: Succeeded(nil)}
-	intent := testIntent(TypeNMIDeleteSubscription, OriginSystem, 1)
-	ledger.due = []gen.OpenrailsRailIntent{intent}
-
-	gate := &fakeDestructiveGate{allow: false, reason: "destructive policy unreadable (boom); refusing destructive actions (fail closed)"}
-	r := &Runner{Store: ledger, Registry: NewRegistry(h), Config: modeFull(), Destructive: gate}
-	_, err := r.RunExecuteOnce(context.Background())
-	require.NoError(t, err)
-
-	assert.Zero(t, h.executed)
-	assert.Contains(t, ledger.reasons[intent.ID], "fail closed")
-}

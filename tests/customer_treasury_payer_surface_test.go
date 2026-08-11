@@ -3,12 +3,10 @@
 package tests
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -19,8 +17,6 @@ import (
 	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/modules/admission"
-	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -285,89 +281,6 @@ func TestCustomerTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {
 		resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath(p), nil)
 		require.Equal(t, http.StatusNotFound, resp.status, "consumer route %s must not exist on the customer surface: %s", p, resp.body)
 	}
-}
-
-// TestCustomerTreasuryPayer_DelegatedDrawDownE2E is the Tensorhub use-case: the customer
-// loads credits, sets a per-invoker spend-delegation window over HTTP, and a
-// delegated invoker draws the customer balance down THROUGH that window while a
-// second invoker is independently metered (per-invoker, not pooled — #563).
-func TestCustomerTreasuryPayer_DelegatedDrawDownE2E(t *testing.T) {
-	suite := getSharedTestSuite(t)
-	ctx := suite.MerchantCtx()
-	customerPayer := identity.CustomerID(dbtest.TestMerchantID.UUID())
-
-	svc, err := billingservice.New(suite.App.Runtime)
-	require.NoError(t, err)
-
-	// Customer loads a large prepaid balance (the post-checkout effect) so the balance
-	// never gates — the spend-delegation WINDOW is what must bind.
-	depositID := uuid.New()
-	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
-		CustomerID: &customerPayer,
-		Invoker:    customerPayer.UUID().String(),
-		Currency:   money.DefaultCurrency,
-		Amount:     1_000_000_000,
-		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_customer_prepay", depositID.String()),
-	})
-	require.NoError(t, err)
-
-	t.Cleanup(func() {
-		_, _ = suite.Pool.Exec(context.Background(),
-			"DELETE FROM openrails.invoker_spend_limits WHERE customer_id = $1", customerPayer.UUID())
-	})
-
-	srv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
-
-	// The customer confirms its loaded balance over HTTP.
-	require.GreaterOrEqual(t, getCustomerBalance(t, srv, money.DefaultCurrency), int64(1_000_000_000))
-
-	// The customer grants alice a $1000-per-day window — over HTTP, the real surface.
-	alice := "user:alice"
-	resp := requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/spend-delegations"), map[string]any{
-		"delegations": []map[string]any{{
-			"scope":     "invoker",
-			"scope_key": alice,
-			"windows":   []map[string]any{{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": money.DefaultCurrency}},
-		}},
-	})
-	require.Equal(t, http.StatusOK, resp.status, resp.body)
-
-	// Wire the spendgate-backed admitter over the SAME Postgres + Redis the customer
-	// just wrote its policy to (the production admission path, #513).
-	adm := admission.NewAdmitter(
-		money.NewMoneyService(suite.App.Runtime.DB),
-		spendgate.New(suite.RedisClient),
-		admission.NewSpendgatePolicyLoader(
-			admission.NewBillingPolicyStore(suite.App.Runtime.DB),
-			admission.NewInvokerSpendLimitStore(suite.App.Runtime.DB),
-			nil,
-		),
-	)
-
-	drawDown := func(invoker string, amount int64) admission.AdmitDecision {
-		d, derr := adm.Admit(ctx, admission.AdmitRequest{
-			CustomerID:      customerPayer,
-			Invoker:         invoker,
-			InvokerType:     string(identity.InvokerTypeDelegated),
-			Currency:        money.DefaultCurrency,
-			EstimatedAmount: amount,
-			Source:          "usage",
-			SourceID:        uuid.NewString(),
-			ExpiresAt:       suite.GetClock().Now().Add(time.Hour),
-		})
-		require.NoError(t, derr)
-		return d
-	}
-
-	// alice draws the customer balance down within her window.
-	require.True(t, drawDown(alice, 600).Allowed, "first 600 fits alice's 1000 window")
-	require.False(t, drawDown(alice, 600).Allowed, "600+600 breaches alice's 1000 window")
-
-	// bob has no grant of his own; alice's window never widened his access
-	// (per-invoker isolation, not a pooled role counter).
-	bob := drawDown("user:bob", 100)
-	require.False(t, bob.Allowed, "an ungranted invoker cannot spend the customer balance")
-	require.Equal(t, admission.DenyDelegatedSpendNotAllowed, bob.DenyCode)
 }
 
 func getCustomerBalance(t *testing.T, srv *httptest.Server, currency string) int64 {

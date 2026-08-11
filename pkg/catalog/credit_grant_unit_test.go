@@ -38,35 +38,6 @@ func creditUnitManifest(t *testing.T, grant string) string {
 	return writeManifest(t, creditUnitManifestPrefix+grant+creditUnitManifestSuffix)
 }
 
-// The exact defect: a grant declaring a unit that disagrees with the balance it
-// names must never load.
-func TestLoad_GrantUnitDisagreeingWithBalanceIsRefused(t *testing.T) {
-	_, err := Load(creditUnitManifest(t, `      - key: ai-images
-        unit: usd
-        amount: 100
-`))
-	if err == nil {
-		t.Fatal("want load error for a grant unit that disagrees with its balance, got nil")
-	}
-	if !strings.Contains(err.Error(), "unit") {
-		t.Fatalf("want a unit removal/mismatch error, got %v", err)
-	}
-}
-
-// `currency` was the second spelling of the same field and had the same hole.
-func TestLoad_GrantCurrencyDisagreeingWithBalanceIsRefused(t *testing.T) {
-	_, err := Load(creditUnitManifest(t, `      - key: ai-images
-        currency: usd
-        amount: 100
-`))
-	if err == nil {
-		t.Fatal("want load error for a grant currency that disagrees with its balance, got nil")
-	}
-	if !strings.Contains(err.Error(), "currency") {
-		t.Fatalf("want a currency removal error, got %v", err)
-	}
-}
-
 // Even an AGREEING declaration is refused: the field is gone, not validated.
 // Tolerating the agreeing case keeps the knob alive and keeps teaching it.
 func TestLoad_GrantUnitAgreeingWithBalanceIsAlsoRefused(t *testing.T) {

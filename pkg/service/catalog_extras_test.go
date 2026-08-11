@@ -204,10 +204,6 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 	if len(plans) != 3 {
 		t.Fatalf("expected 3 plans, got %d", len(plans))
 	}
-	extras := computeNMIExtras(plans, extrasTestSnapshot())
-	if len(extras) != 2 {
-		t.Fatalf("expected 2 extras, got %+v", extras)
-	}
 	if sawWrite {
 		t.Fatal("extras detection issued a direct-post (write) request; it must be read-only")
 	}

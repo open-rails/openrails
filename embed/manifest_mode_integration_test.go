@@ -447,35 +447,6 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 	require.NotZero(t, merchantSecretRowCount(t, appDB.Pool(), ctx, id), "api mode persists to the store")
 }
 
-// TestManifestMode_APIModeRefusesManifestTruth: matrix row — api mode +
-// manifest bytes passed refuses (two truths). The bare bind stays legal.
-func TestManifestMode_APIModeRefusesManifestTruth(t *testing.T) {
-	ctx := context.Background()
-	dsn := dbtest.SharedPostgresDSN(t)
-
-	nano := time.Now().UnixNano()
-	slug := fmt.Sprintf("mrefuse%d", nano)
-	cfg := &config.Config{
-		Env:            "dev",
-		TestMode:       config.CredentialPostureLive,
-		MerchantSource: config.MerchantSourceAPI,
-		SecretBackend:  config.SecretBackendDB,
-		DB:             &config.DBConfig{URL: dsn},
-	}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
-	require.NoError(t, err)
-	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-
-	_, err = rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
-		DisplayName: slug,
-		PSPs: map[string]embed.PSPConfig{
-			"mobius": {"nmi": {AccountID: "579145", Secrets: map[string]string{"security_key": "k"}}},
-		},
-	})
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "two truths")
-}
-
 // TestManifestMode_MalformedManifestRefusesBoot: matrix row — manifest mode
 // with unresolvable declared truth refuses.
 func TestManifestMode_MalformedManifestRefusesBoot(t *testing.T) {

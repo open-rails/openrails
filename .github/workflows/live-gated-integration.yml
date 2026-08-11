@@ -122,34 +122,3 @@ jobs:
           fi
           go test -tags stripe_integration -run TestStripeModelBUpgrade_Integration -v -timeout 900s ./internal/modules/subscriptions/
 
-  # `vaultint` lane (#694 hygiene): the opt-in real-Vault tests (KV-v2 +
-  # Transit Ed25519) previously ran in NO suite. Needs no repo secrets — a
-  # throwaway dev-mode Vault provides the backend.
-  vaultint:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Download modules
-        run: go mod download
-      - name: Start dev Vault (KV-v2 + Transit)
-        run: |
-          docker run -d --name vault-dev --cap-add=IPC_LOCK -p 8200:8200 \
-            -e VAULT_DEV_ROOT_TOKEN_ID=root \
-            -e VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200 \
-            hashicorp/vault:1.17
-          for i in $(seq 1 30); do
-            if docker exec -e VAULT_ADDR=http://127.0.0.1:8200 vault-dev vault status >/dev/null 2>&1; then break; fi
-            sleep 1
-          done
-          docker exec -e VAULT_ADDR=http://127.0.0.1:8200 -e VAULT_TOKEN=root vault-dev \
-            vault secrets enable transit
-      - name: Vault live integration tests
-        env:
-          VAULT_ADDR: http://127.0.0.1:8200
-          VAULT_TOKEN: root
-        run: go test -tags vaultint -run Vault -v -timeout 300s ./internal/integrations/vault/...

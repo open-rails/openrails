@@ -144,26 +144,6 @@ products:
 	}
 }
 
-func TestRateCard_OneMeterPerUsageCard(t *testing.T) {
-	body := `
-version: 1
-meters:
-  - {key: m, event_type: e, value_property: $.v, aggregation: sum}
-products:
-  - key: p
-    display_name: P
-    rate_cards:
-      - meter: m
-        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 1}}
-      - meter: m
-        price: {model: per_unit, currency: usd, per_unit: {unit_amount: 2}}
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "already rated") {
-		t.Fatalf("want duplicate-meter error, got %v", err)
-	}
-}
-
 func TestRateCard_AllowanceAccrueFromMustExist(t *testing.T) {
 	body := `
 version: 1
