@@ -778,7 +778,7 @@ type OpenrailsMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
-// or#914 dormant-merchant sweeper warning ledger: never-used merchants currently on deletion notice. first_warned_at + the sweep's warning lead gates deletion (DeleteGroup ReleaseSlug + directory soft-delete); the row is withdrawn on any activity. RLS-exempt by design: operator-global control-plane sweep state over the merchant DIRECTORY, not tenant data — the activity probe itself runs per-merchant under MerchantTx.
+// or#914 dormant-merchant sweeper warning ledger: never-used merchants currently on deletion notice. first_warned_at + the sweep's warning lead gates deletion (DeleteGroup ReleaseSlug + directory soft-delete); the row is withdrawn on activity. Accessed only inside MerchantTx beside the activity probe.
 type OpenrailsMerchantDormancyNotice struct {
 	MerchantID    uuid.UUID
 	Slug          string
