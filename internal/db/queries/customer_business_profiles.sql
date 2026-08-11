@@ -31,6 +31,31 @@ LIMIT 1;
 DELETE FROM openrails.customer_business_profiles
 WHERE merchant_id = $1 AND customer_id = $2;
 
+-- CROSS-MERCHANT: merchants with business-cycle work, through migration 0007's
+-- SECURITY DEFINER work queue. Ids only (FC-16 R2).
+-- name: ListBusinessCycleWorkMerchants :many
+SELECT merchant_id FROM openrails.business_cycle_work_merchant_ids(
+    sqlc.arg(merchant_limit)::int);
+
+-- or#910 suspension-recommendation edges. Both are watermark CAS updates:
+-- Recommend fires only while no episode is open, Clear only while one is —
+-- racing evaluators collapse onto exactly one row change per direction.
+-- name: RecommendBusinessSuspension :execrows
+UPDATE openrails.customer_business_profiles
+SET suspension_recommended_at = sqlc.arg(now)::timestamptz,
+    suspension_reason = sqlc.arg(reason),
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1 AND customer_id = $2
+  AND suspension_recommended_at IS NULL;
+
+-- name: ClearBusinessSuspensionRecommendation :execrows
+UPDATE openrails.customer_business_profiles
+SET suspension_recommended_at = NULL,
+    suspension_reason = '',
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = $1 AND customer_id = $2
+  AND suspension_recommended_at IS NOT NULL;
+
 -- name: ListCustomerBusinessProfiles :many
 -- Merchant's business roster, oldest onboarding first, keyset-free but capped:
 -- business customers are operator-onboarded (tens, not millions), and the

@@ -37,8 +37,13 @@ type BusinessProfile struct {
 	KYCReference          string              `json:"kyc_reference,omitempty"`
 	Currency              string              `json:"currency"`
 	BudgetAlertThresholds []int64             `json:"budget_alert_thresholds"`
-	CreatedAt             time.Time           `json:"created_at"`
-	UpdatedAt             time.Time           `json:"updated_at"`
+	// SuspensionRecommendedAt / SuspensionReason are the or#910 dunning
+	// cycle's open RECOMMENDATION episode (a signal — hosts enforce; nil =
+	// none open). Written only by the cycle's CAS edges, never by Onboard.
+	SuspensionRecommendedAt *time.Time `json:"suspension_recommended_at,omitempty"`
+	SuspensionReason        string     `json:"suspension_reason,omitempty"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }
 
 // BusinessOnboarding is the operator onboarding/update payload. TermsVersion +
@@ -235,15 +240,17 @@ func businessProfileFromRow(row gen.OpenrailsCustomerBusinessProfile) BusinessPr
 		thresholds = []int64{}
 	}
 	return BusinessProfile{
-		CustomerID:            identity.CustomerID(row.CustomerID),
-		TermsVersion:          row.TermsVersion,
-		TermsAcceptedAt:       row.TermsAcceptedAt,
-		TermsAcceptedBy:       row.TermsAcceptedBy,
-		KYCReference:          row.KycReference,
-		Currency:              row.Currency,
-		BudgetAlertThresholds: thresholds,
-		CreatedAt:             row.CreatedAt,
-		UpdatedAt:             row.UpdatedAt,
+		CustomerID:              identity.CustomerID(row.CustomerID),
+		TermsVersion:            row.TermsVersion,
+		TermsAcceptedAt:         row.TermsAcceptedAt,
+		TermsAcceptedBy:         row.TermsAcceptedBy,
+		KYCReference:            row.KycReference,
+		Currency:                row.Currency,
+		BudgetAlertThresholds:   thresholds,
+		SuspensionRecommendedAt: row.SuspensionRecommendedAt,
+		SuspensionReason:        row.SuspensionReason,
+		CreatedAt:               row.CreatedAt,
+		UpdatedAt:               row.UpdatedAt,
 	}
 }
 

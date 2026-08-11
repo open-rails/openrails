@@ -271,6 +271,15 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add delinquency worker: %w", err)
 	}
+	// or#910 B2B dunning + budget alerts: notify-only ladder over the or#908
+	// business roster, suspension RECOMMENDATION signal (hosts enforce). Like
+	// delinquency it moves no money, so it runs regardless of charger wiring.
+	if err := addTrackedWorker(r, workers, &riverjobs.BusinessCycleWorker{
+		DB:    r.DB,
+		Clock: clock,
+	}); err != nil {
+		return fmt.Errorf("add business cycle worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.CreditReconcileWorker{
 		Money: r.MoneyService,
 		Clock: clock,
@@ -738,6 +747,21 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.DelinquencyArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Hourly: or#910 B2B dunning + budget alerts. Hourly like the collection
+	// pass it reacts to — every rung of the ladder is day-granular, and the
+	// exit half (recommendation cleared) also rides the payment webhooks'
+	// truth on the next pass.
+	jobs = append(jobs, r.healthPeriodic(
+		time.Hour,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.BusinessCycleArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
