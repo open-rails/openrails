@@ -52,6 +52,8 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	// Payment / transaction history.
 	group.Handle(http.MethodGet, "/payments", h(httphandlers.GetUserPayments))
 	group.Handle(http.MethodGet, "/entitlements/active", h(httphandlers.SelfGetActiveEntitlements))
+	// Effective-tier resolution (or#912): ?group= is required.
+	group.Handle(http.MethodGet, "/tier", h(httphandlers.GetMyTier))
 
 	group.Handle(http.MethodGet, "/notifications", h(httphandlers.GetNotifications))
 	group.Handle(http.MethodGet, "/notifications/unread-count", h(httphandlers.GetUnreadNotificationCount))

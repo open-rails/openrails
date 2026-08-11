@@ -125,6 +125,7 @@ func TestSelfService_PermissionlessPrincipalReachesMountedSelfRoutes(t *testing.
 		{"solana-tier-change", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-tier-change"},
 		{"solana-tier-change-confirm", http.MethodPost, "/v1/me/subscriptions/sub_123/solana-tier-change/confirm"},
 		{"balance", http.MethodGet, "/v1/me/balance"},
+		{"tier", http.MethodGet, "/v1/me/tier?group=premium"},
 		{"transactions", http.MethodGet, "/v1/me/transactions"},
 		{"settings", http.MethodPut, "/v1/me/settings"},
 	}

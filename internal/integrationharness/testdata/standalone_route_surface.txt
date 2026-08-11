@@ -43,6 +43,7 @@ GET /v1/me/products/{product_id}/access
 GET /v1/me/status
 GET /v1/me/subscriptions
 GET /v1/me/subscriptions/{id}
+GET /v1/me/tier
 GET /v1/me/transactions
 GET /v1/me/usage
 GET /v1/merchant/alerts/rules
