@@ -423,6 +423,8 @@ func TestCustomerTreasurySpendDelegationDeleteAndProvenance(t *testing.T) {
 		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{
 			subject: uuid.NewString(),
 			perms: []string{
+				// or#916: the merchant-as-payer path binds only for merchant admins.
+				permissions.MerchantAll,
 				controlplane.PermCustomerSpendDelegationsRead,
 				controlplane.PermCustomerSpendDelegationsUpdate,
 			},
