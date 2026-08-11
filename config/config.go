@@ -959,8 +959,9 @@ type AuthConfig struct {
 	// development Load defaults it to api_url (or http://localhost:<port>).
 	Issuer string `koanf:"issuer,omitempty"`
 
-	// Inline JWT signing-key material (env ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM
-	// / PUBLIC_KEYS, canonical AuthKit names — special-cased in
+	// Inline JWT signing-key material (env AUTHKIT_ACTIVE_KEY_ID /
+	// AUTHKIT_ACTIVE_PRIVATE_KEY_PEM / AUTHKIT_PUBLIC_KEYS, the canonical
+	// AuthKit binary names since ak#266/v0.89.0 — special-cased in
 	// envKeyToConfigKey so they land here instead of a mechanical auth.* split).
 	// Read ONCE here at the config-load boundary and handed to authkit as an
 	// explicit jwtkit.KeySource (internal/controlplane); authkit's own library
@@ -1968,16 +1969,18 @@ func envKeyToConfigKey(s string) string {
 		return "vault.address"
 	}
 
-	// ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM / PUBLIC_KEYS are AuthKit's
-	// canonical inline-key env names (mirrored by cmd/authkit-server); the
-	// mechanical split would look for a nonexistent "active"/"public" top-level
-	// prefix, so these are dead without the special case.
+	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
+	// AUTHKIT_PUBLIC_KEYS are AuthKit's canonical inline-key env names
+	// (mirrored by cmd/authkit-server; ak#266/v0.89.0 prefixed them, or#917
+	// follows); the mechanical split would look for a nonexistent "authkit"
+	// top-level prefix, so these are dead without the special case. The
+	// unprefixed names are poison — Load refuses boot on them.
 	switch s {
-	case "active_key_id":
+	case "authkit_active_key_id":
 		return "auth.active_key_id"
-	case "active_private_key_pem":
+	case "authkit_active_private_key_pem":
 		return "auth.active_private_key_pem"
-	case "public_keys":
+	case "authkit_public_keys":
 		return "auth.public_keys"
 	case "authkit_keys_path":
 		return "auth.keys_path"
@@ -2076,6 +2079,14 @@ func Load(configPath string, opts ...LoadOption) (*Config, error) {
 
 		v := strings.TrimSpace(value)
 
+		// auth.public_keys is a JSON STRING field ({kid: PEM}, parsed by the
+		// control plane at construction), not structured config — decoding it
+		// here would hand the strict unmarshal a map for a string field and
+		// refuse boot (or#917).
+		if mapped == "auth.public_keys" {
+			return mapped, v
+		}
+
 		// Allow JSON for arrays/objects where the remaining infrastructure config
 		// uses structured values.
 		if len(v) >= 2 {
@@ -2149,6 +2160,15 @@ func Load(configPath string, opts ...LoadOption) (*Config, error) {
 	}
 	if os.Getenv("OPENRAILS_SQL_TRACE") != "" {
 		return nil, fmt.Errorf("OPENRAILS_SQL_TRACE was renamed (#712): set db.sql_trace (env DB_SQL_TRACE)")
+	}
+	// HARD CUT (or#917, authkit ak#266/v0.89.0): the inline signing-key env
+	// names are AUTHKIT_-prefixed, matching the authkit binary. The old names
+	// would silently boot an ephemeral dev key / keys.json fallback instead of
+	// the operator's key — refuse, never silently drop key material.
+	for _, old := range []string{"ACTIVE_KEY_ID", "ACTIVE_PRIVATE_KEY_PEM", "PUBLIC_KEYS"} {
+		if os.Getenv(old) != "" {
+			return nil, fmt.Errorf("%s was renamed (or#917, authkit ak#266): set AUTHKIT_%s", old, old)
+		}
 	}
 	if k.Exists("billing_hot_path") || os.Getenv("OPENRAILS_BILLING_HOT_PATH_FAIL_POLICY") != "" || os.Getenv("BILLING_HOT_PATH_FAIL_POLICY") != "" {
 		return nil, fmt.Errorf("billing_hot_path was removed: OpenRails does not enforce client degraded-mode policy; configure any fail-open/fail-closed behavior in the calling client")

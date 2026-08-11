@@ -12,6 +12,11 @@ territory. The primary deep manual is [operations.md](operations.md).
 | **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), card-abuse tracking, and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). Redis holds only transient counters — nothing durable. |
 | **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them — without it the DB store is plaintext (loud warning; refused outside development for API-managed merchants). |
 
+OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
+(file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
+`AUTHKIT_ACTIVE_PRIVATE_KEY_PEM` / `AUTHKIT_PUBLIC_KEYS` envs — the same names
+the authkit binary reads (ak#266/or#917); the old unprefixed names refuse boot.
+
 Postgres specifics worth knowing:
 
 - RLS is enforced for the unprivileged `openrails_app` role (`NOLOGIN NOBYPASSRLS`,

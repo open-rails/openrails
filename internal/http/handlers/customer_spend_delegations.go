@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -65,21 +64,21 @@ func (e retiredWireKeyError) ClientSafeBindMessage() string { return string(e) }
 var _ httprequest.ClientSafeBindError = retiredWireKeyError("")
 
 // GetCustomerSpendDelegations returns the customer policy for sharing the
-// customer's own payable balance. The payer is forced to the resolved
-// customer/merchant id; the request never accepts a body customer_id (it is
-// taken from the :customer_id path scope). Every customer can delegate spend of
-// its balance.
+// customer's own payable balance. The payer is the typed treasury payer bound
+// by CustomerScopeRequired (or#916); the request never accepts a body
+// customer_id (it is taken from the :customer_id path scope). Every customer
+// can delegate spend of its balance.
 func GetCustomerSpendDelegations(r *httprequest.Request) {
-	resolved, ok := requireCustomerTreasuryPrincipal(r)
+	payer, ok := requireCustomerTreasuryPayer(r)
 	if !ok {
 		return
 	}
 
-	store, payer, ok := customerTreasuryStore(r, resolved)
+	store, ok := customerTreasuryStore(r)
 	if !ok {
 		return
 	}
-	rows, err := store.LoadAll(r.Request.Context(), payer)
+	rows, err := store.LoadAll(r.Request.Context(), payer.CustomerID)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "spend delegation lookup failed")
 		return
@@ -89,7 +88,7 @@ func GetCustomerSpendDelegations(r *httprequest.Request) {
 
 // PutCustomerSpendDelegations replaces the customer policy document.
 func PutCustomerSpendDelegations(r *httprequest.Request) {
-	resolved, ok := requireCustomerTreasuryPrincipal(r)
+	payer, ok := requireCustomerTreasuryPayer(r)
 	if !ok {
 		return
 	}
@@ -108,11 +107,11 @@ func PutCustomerSpendDelegations(r *httprequest.Request) {
 		return
 	}
 
-	svc, payer, ok := customerTreasurySpendDelegationService(r, resolved)
+	svc, ok := customerSpendDelegationService(r)
 	if !ok {
 		return
 	}
-	if err := svc.ReplaceInvokerSpendLimits(r.Request.Context(), payer, next); err != nil {
+	if err := svc.ReplaceInvokerSpendLimits(r.Request.Context(), payer.CustomerID, next); err != nil {
 		customerSpendDelegationWriteError(r, err, "spend delegation replace failed")
 		return
 	}
@@ -123,7 +122,7 @@ func PutCustomerSpendDelegations(r *httprequest.Request) {
 // PutCustomerSpendDelegation atomically upserts one addressed delegation and
 // leaves every unrelated payer-owned delegation untouched.
 func PutCustomerSpendDelegation(r *httprequest.Request) {
-	resolved, ok := requireCustomerTreasuryPrincipal(r)
+	payer, ok := requireCustomerTreasuryPayer(r)
 	if !ok {
 		return
 	}
@@ -138,11 +137,11 @@ func PutCustomerSpendDelegation(r *httprequest.Request) {
 		return
 	}
 
-	svc, payer, ok := customerTreasurySpendDelegationService(r, resolved)
+	svc, ok := customerSpendDelegationService(r)
 	if !ok {
 		return
 	}
-	if err := svc.SetInvokerSpendLimits(r.Request.Context(), payer, next[0]); err != nil {
+	if err := svc.SetInvokerSpendLimits(r.Request.Context(), payer.CustomerID, next[0]); err != nil {
 		customerSpendDelegationWriteError(r, err, "spend delegation upsert failed")
 		return
 	}
@@ -234,47 +233,25 @@ func customerSpendDelegationWriteError(r *httprequest.Request, err error, intern
 	r.ErrorJSON(http.StatusInternalServerError, internalMessage)
 }
 
-func requireCustomerTreasuryPrincipal(r *httprequest.Request) (*controlplane.ResolvedDelegated, bool) {
-	v, ok := r.Get(middleware.DelegatedContextKey)
-	if !ok {
-		r.ErrorJSON(http.StatusUnauthorized, "delegated principal required")
+// requireCustomerTreasuryPayer returns the typed payer bound by
+// middleware.CustomerScopeRequired (or#916). The scope match already happened
+// there; a missing binding means the route was mounted without the scope
+// middleware, so fail closed.
+func requireCustomerTreasuryPayer(r *httprequest.Request) (*middleware.TreasuryPayer, bool) {
+	payer, ok := middleware.TreasuryPayerFromRequest(r)
+	if !ok || payer.CustomerID.IsZero() {
+		r.ErrorJSON(http.StatusUnauthorized, "treasury payer not bound")
 		return nil, false
 	}
-	resolved, ok := v.(*controlplane.ResolvedDelegated)
-	if !ok || resolved == nil {
-		r.ErrorJSON(http.StatusUnauthorized, "delegated principal required")
-		return nil, false
-	}
-	if !customerIDMatchesResolved(r.Param("customer_id"), resolved) {
-		r.ErrorJSON(http.StatusForbidden, "customer_scope_mismatch")
-		return nil, false
-	}
-	return resolved, true
+	return payer, true
 }
 
-func customerIDMatchesResolved(customerID string, resolved *controlplane.ResolvedDelegated) bool {
-	return middleware.CustomerIDMatchesDelegated(customerID, resolved)
-}
-
-func customerTreasuryStore(r *httprequest.Request, resolved *controlplane.ResolvedDelegated) (*admission.InvokerSpendLimitStore, identity.CustomerID, bool) {
+func customerTreasuryStore(r *httprequest.Request) (*admission.InvokerSpendLimitStore, bool) {
 	if r.State == nil || r.State.DB == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return nil, identity.CustomerID(uuid.Nil), false
+		return nil, false
 	}
-	if resolved == nil || resolved.MerchantID.IsZero() {
-		r.ErrorJSON(http.StatusUnauthorized, "delegated principal invalid")
-		return nil, identity.CustomerID(uuid.Nil), false
-	}
-	return admission.NewInvokerSpendLimitStore(r.State.DB), identity.CustomerID(resolved.MerchantID.UUID()), true
-}
-
-func customerTreasurySpendDelegationService(r *httprequest.Request, resolved *controlplane.ResolvedDelegated) (*billingservice.Service, identity.CustomerID, bool) {
-	if resolved == nil || resolved.MerchantID.IsZero() {
-		r.ErrorJSON(http.StatusUnauthorized, "delegated principal invalid")
-		return nil, identity.CustomerID(uuid.Nil), false
-	}
-	svc, ok := customerSpendDelegationService(r)
-	return svc, identity.CustomerID(resolved.MerchantID.UUID()), ok
+	return admission.NewInvokerSpendLimitStore(r.State.DB), true
 }
 
 func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]billingservice.InvokerSpendLimitInput, error) {

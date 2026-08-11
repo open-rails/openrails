@@ -176,6 +176,11 @@ balance) acting on its OWN treasury, addressed by customer id. Handlers are
 shared with `/v1/me/*`; the delegated principal must additionally hold the
 listed `customer:*` grant for that customer (balances can be shared resources).
 
+Scope (or#916): `{customer_id}` must name the caller's OWN payable subject —
+its subject id or durable customer id. The merchant's own coordinates (slug or
+merchant id) address the MERCHANT's treasury account and bind only for a
+merchant-admin principal (`merchant:*`) on top of the `customer:*` grants.
+
 | Method | Path | Permission |
 |---|---|---|
 | GET | `/v1/customers/{customer_id}/spend-delegations` | `customer:spend-delegations:read` |

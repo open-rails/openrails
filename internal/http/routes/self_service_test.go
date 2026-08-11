@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/permissions"
 	merchantpkg "github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -31,6 +33,7 @@ import (
 type fakeDelegatedResolver struct {
 	permissions []string
 	merchantID  merchantpkg.ID
+	customerID  uuid.UUID
 	err         error
 }
 
@@ -46,6 +49,7 @@ func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string)
 		Merchant:         "acme-merchant",
 		MerchantID:       merchantID,
 		MerchantSlug:     "acme-merchant",
+		CustomerID:       f.customerID,
 		DelegatedSubject: "user-42",
 		Permissions:      f.permissions,
 	}, nil
@@ -203,11 +207,17 @@ func TestCustomerTreasurySpendDelegationsMountedAndGated(t *testing.T) {
 	w := doSelf(e, http.MethodGet, "/v1/customers/acme-merchant/spend-delegations", false)
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 
-	e = newCustomerTreasuryRouter(t, []string{controlplane.PermMerchantCustomerSettingsRead})
+	e = newCustomerTreasuryRouter(t, []string{permissions.MerchantAll})
 	w = doSelf(e, http.MethodGet, "/v1/customers/acme-merchant/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "merchant:* must not satisfy customer treasury")
 
+	// or#916: customer:* alone no longer binds the merchant payer account —
+	// merchant coordinates require merchant-admin standing.
 	e = newCustomerTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsRead})
+	w = doSelf(e, http.MethodGet, "/v1/customers/acme-merchant/spend-delegations", true)
+	require.Equal(t, http.StatusForbidden, w.Code, "a non-admin principal must not bind the merchant payer account")
+
+	e = newCustomerTreasuryRouter(t, []string{permissions.MerchantAll, controlplane.PermCustomerSpendDelegationsRead})
 	w = doSelf(e, http.MethodGet, "/v1/customers/other-customer/spend-delegations", true)
 	require.Equal(t, http.StatusForbidden, w.Code, "caller must be scoped to the customer in the path")
 
@@ -222,8 +232,34 @@ func TestCustomerTreasurySpendDelegationsMountedAndGated(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, w.Code, "read permission must not satisfy single-row update")
 }
 
+// or#916: a SUBJECT payer binds by its own identity — delegated_sub or its
+// durable customer id — with customer:* grants and NO merchant-admin standing.
+func TestCustomerTreasurySubjectPayerScope(t *testing.T) {
+	customerID := uuid.New()
+	mux := http.NewServeMux()
+	RegisterCustomerTreasuryRoutes(router.NewMux(mux, "/v1/customers", nil), nil,
+		middleware.DelegatedSelfRequired(fakeDelegatedResolver{
+			permissions: []string{controlplane.PermCustomerSpendDelegationsRead},
+			customerID:  customerID,
+		}), routesurface.AllProviderRoutes())
+
+	// Both subject coordinates bind: the durable customer id and delegated_sub.
+	for _, own := range []string{customerID.String(), "user-42"} {
+		w := doSelf(mux, http.MethodGet, "/v1/customers/"+own+"/spend-delegations", true)
+		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
+		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
+	}
+
+	// A sibling's id and the merchant's own coordinates stay forbidden.
+	for _, foreign := range []string{uuid.NewString(), "acme-merchant", dbtest.TestMerchantID.String()} {
+		w := doSelf(mux, http.MethodGet, "/v1/customers/"+foreign+"/spend-delegations", true)
+		require.Equal(t, http.StatusForbidden, w.Code, "foreign scope %s: %s", foreign, w.Body.String())
+	}
+}
+
 func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
-	e := newCustomerTreasuryRouter(t, []string{controlplane.PermCustomerSpendDelegationsUpdate})
+	e := newCustomerTreasuryRouter(t, []string{permissions.MerchantAll, controlplane.PermCustomerSpendDelegationsUpdate})
 	body := `{
 		"customer_id": "11111111-1111-1111-1111-111111111111",
 		"delegations": [{

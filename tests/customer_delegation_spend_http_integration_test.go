@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
@@ -78,6 +79,8 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{
 			subject: uuid.NewString(),
 			perms: []string{
+				// or#916: the merchant-as-payer path binds only for merchant admins.
+				permissions.MerchantAll,
 				controlplane.PermCustomerSpendDelegationsRead,
 				controlplane.PermCustomerSpendDelegationsUpdate,
 			},

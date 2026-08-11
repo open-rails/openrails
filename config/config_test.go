@@ -259,6 +259,34 @@ func TestLoad_EnvMapping(t *testing.T) {
 			require.ErrorContains(t, err, "db.sql_trace")
 		})
 	})
+
+	// or#917 hard cut (authkit ak#266/v0.89.0): the unprefixed key-material
+	// env names are poison — silently dropping them would boot on a fallback
+	// key instead of the operator's.
+	t.Run("rejects unprefixed key-material env names (or#917)", func(t *testing.T) {
+		for _, name := range []string{"ACTIVE_KEY_ID", "ACTIVE_PRIVATE_KEY_PEM", "PUBLIC_KEYS"} {
+			t.Run(name, func(t *testing.T) {
+				t.Setenv(name, "x")
+				_, err := Load("nonexistent-config.yaml")
+				require.ErrorContains(t, err, name+" was renamed")
+				require.ErrorContains(t, err, "AUTHKIT_"+name)
+			})
+		}
+	})
+}
+
+// or#917: the AUTHKIT_-prefixed key-material env names (authkit binary parity)
+// land on the inline auth.* fields.
+func TestLoad_AuthkitPrefixedKeyMaterialEnvNames(t *testing.T) {
+	t.Setenv("AUTHKIT_ACTIVE_KEY_ID", "kid-1")
+	t.Setenv("AUTHKIT_ACTIVE_PRIVATE_KEY_PEM", "-----BEGIN PRIVATE KEY-----")
+	t.Setenv("AUTHKIT_PUBLIC_KEYS", `{"kid-0":"-----BEGIN PUBLIC KEY-----"}`)
+
+	cfg, err := Load("nonexistent-config.yaml")
+	require.NoError(t, err)
+	require.Equal(t, "kid-1", cfg.Auth.ActiveKeyID)
+	require.Equal(t, "-----BEGIN PRIVATE KEY-----", cfg.Auth.ActivePrivateKeyPEM)
+	require.Equal(t, `{"kid-0":"-----BEGIN PUBLIC KEY-----"}`, cfg.Auth.PublicKeysJSON)
 }
 
 // #710: yaml `mode:` is a retired key and must fail loudly, not act as an alias.

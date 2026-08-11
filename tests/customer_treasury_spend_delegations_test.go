@@ -24,6 +24,7 @@ import (
 	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -296,6 +297,8 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{
 			subject: uuid.NewString(),
 			perms: []string{
+				// or#916: the merchant-as-payer path binds only for merchant admins.
+				permissions.MerchantAll,
 				controlplane.PermCustomerSpendDelegationsRead,
 				controlplane.PermCustomerSpendDelegationsUpdate,
 			},
