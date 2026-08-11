@@ -847,6 +847,68 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 	return items, nil
 }
 
+const resolveEffectiveTier = `-- name: ResolveEffectiveTier :one
+SELECT p.id AS product_id,
+       p.key AS product_key,
+       p.display_name AS product_display_name,
+       p.tier_rank,
+       ent.entitlement
+FROM openrails.products p
+JOIN openrails.entitlements ent
+  ON ent.merchant_id = p.merchant_id
+ AND ent.entitlement IN (SELECT jsonb_object_keys(p.entitlements_spec))
+WHERE p.merchant_id = $1
+  AND ent.customer_id = $2
+  AND p.tier_group = $3::text
+  AND p.archived = false
+  AND ent.start_at <= $4::timestamptz
+  AND (ent.end_at IS NULL OR ent.end_at > $4::timestamptz)
+  AND ent.revoked_at IS NULL
+  AND ent.deleted_at IS NULL
+ORDER BY p.tier_rank DESC, p.key ASC, ent.entitlement ASC
+LIMIT 1
+`
+
+type ResolveEffectiveTierParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	TierGroup  string
+	At         time.Time
+}
+
+type ResolveEffectiveTierRow struct {
+	ProductID          uuid.UUID
+	ProductKey         string
+	ProductDisplayName string
+	TierRank           int32
+	Entitlement        string
+}
+
+// or#912: THE effective tier for a customer within one tier group — the
+// highest-ranked non-archived product whose declared entitlements
+// (entitlements_spec keys) intersect the customer's ACTIVE entitlement windows
+// at `at`. Overlapping tiers (mid-upgrade) resolve to the winner, never an
+// error. Deterministic: tier_rank DESC, then product key ASC, then entitlement
+// ASC. Returns the winner's IMMUTABLE identifiers (entitlement string, product
+// key) alongside the mutable display name.
+func (q *Queries) ResolveEffectiveTier(ctx context.Context, arg ResolveEffectiveTierParams) (ResolveEffectiveTierRow, error) {
+	row := q.db.QueryRow(ctx, resolveEffectiveTier,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.TierGroup,
+		arg.At,
+	)
+	var i ResolveEffectiveTierRow
+	err := row.Scan(
+		&i.ProductID,
+		&i.ProductKey,
+		&i.ProductDisplayName,
+		&i.TierRank,
+		&i.Entitlement,
+	)
+	return i, err
+}
+
 const resumeEntitlementsBySubscription = `-- name: ResumeEntitlementsBySubscription :exec
 UPDATE openrails.entitlements ent SET
     end_at = NULL,

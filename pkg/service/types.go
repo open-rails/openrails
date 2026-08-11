@@ -188,6 +188,19 @@ type BillingStatus struct {
 	Entitlements          []string
 }
 
+// EffectiveTier is the single winning tier for a user within one tier group
+// (or#912). Entitlement and ProductKey are IMMUTABLE identifiers — hosts key
+// policy documents and token claims on Entitlement; DisplayName is mutable
+// and for display only.
+type EffectiveTier struct {
+	Group       string
+	Entitlement string
+	DisplayName string
+	TierRank    int
+	ProductID   string
+	ProductKey  string
+}
+
 // -------------------------------- Subscriptions --------------------------------
 
 // GetSubscriptionsOptions specifies filters for listing subscriptions.

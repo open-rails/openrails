@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Active-entitlements SELF read (issue #245). #528 retired the admin
@@ -72,6 +73,74 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 		"has_more": false,
 		"data":     items,
 	})
+}
+
+// effectiveTierResponse is the GET /me/tier payload (or#912). Tier is null
+// when the user holds no active entitlement in the group — the host applies
+// its own default; "no tier" is a normal answer, never an error.
+type effectiveTierResponse struct {
+	Group string             `json:"group"`
+	Tier  *effectiveTierBody `json:"tier"`
+}
+
+type effectiveTierBody struct {
+	// Entitlement is the winner's IMMUTABLE identifier — hosts key policy
+	// documents and token claims on it. DisplayName is mutable, display only.
+	Entitlement string           `json:"entitlement"`
+	DisplayName string           `json:"display_name"`
+	TierRank    int              `json:"tier_rank"`
+	Product     effectiveTierRef `json:"product"`
+}
+
+type effectiveTierRef struct {
+	ID  string `json:"id"`
+	Key string `json:"key"`
+}
+
+// GetMyTier resolves THE effective tier for the authenticated user within one
+// tier group (or#912): given the user's active entitlements, the
+// highest-ranked matching product wins — deterministic, overlap (mid-upgrade)
+// is resolution input, not a conflict error.
+func GetMyTier(r *httprequest.Request) {
+	if r.State == nil || r.State.EntitlementService == nil {
+		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
+		return
+	}
+	user := r.GetUser()
+	if user == nil || user.ID == "" {
+		r.ErrorJSON(http.StatusUnauthorized, "missing user identity")
+		return
+	}
+	group := strings.TrimSpace(r.Query("group"))
+	if group == "" {
+		r.ErrorJSON(http.StatusBadRequest, "group query parameter is required")
+		return
+	}
+	at, ok := parseAtQuery(r)
+	if !ok {
+		return
+	}
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	tier, err := r.State.EntitlementService.ResolveEffectiveTier(r.Request.Context(), user.ID, group, at)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve effective tier")
+		return
+	}
+	resp := effectiveTierResponse{Group: group}
+	if tier != nil {
+		resp.Tier = &effectiveTierBody{
+			Entitlement: tier.Entitlement,
+			DisplayName: tier.ProductDisplayName,
+			TierRank:    tier.TierRank,
+			Product: effectiveTierRef{
+				ID:  api.FormatProductID(tier.ProductID),
+				Key: tier.ProductKey,
+			},
+		}
+	}
+	r.JSON(http.StatusOK, resp)
 }
 
 // parseAtQuery reads an optional RFC3339 `at` query param. When absent, returns a
