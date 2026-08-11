@@ -736,6 +736,13 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	customers.Handle(http.MethodPut, "/business-profile", h(httphandlers.PutAdminBusinessProfile), grantWrite...)
 	customers.Handle(http.MethodDelete, "/business-profile", h(httphandlers.DeleteAdminBusinessProfile), revokeWrite...)
 	rr.Handle(http.MethodGet, "/business-customers", h(httphandlers.ListAdminBusinessProfiles), customerRead...)
+	// or#909 negotiated price overrides: per-customer rate cards replacing the
+	// merchant-default card for a meter (included allowance netted before
+	// overage). PUT rides the grant class; DELETE the destructive class —
+	// dropping a negotiated card silently reprices the customer at default.
+	customers.Handle(http.MethodGet, "/rate-overrides", h(httphandlers.ListAdminRateOverrides), customerRead...)
+	customers.Handle(http.MethodPut, "/rate-overrides/:meter_key", h(httphandlers.PutAdminRateOverride), grantWrite...)
+	customers.Handle(http.MethodDelete, "/rate-overrides/:meter_key", h(httphandlers.DeleteAdminRateOverride), revokeWrite...)
 
 	payments := rr.Group("/payments")
 	payments.Handle(http.MethodGet, "", h(httphandlers.GetAdminPayments), payRead...)

@@ -6,6 +6,7 @@ DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/customers/{customer_id}/business-profile
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
+DELETE /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}
 DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}
 DELETE /v1/merchant/payment-providers/{provider}
 DELETE /v1/merchant/team/invites/{id}
@@ -73,6 +74,7 @@ GET /v1/merchant/customers/{customer_id}/delinquency
 GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/payment-methods
 GET /v1/merchant/customers/{customer_id}/payments
+GET /v1/merchant/customers/{customer_id}/rate-overrides
 GET /v1/merchant/dashboard
 GET /v1/merchant/delinquency
 GET /v1/merchant/entitlements/{entitlement}/customers
@@ -191,6 +193,7 @@ PUT /v1/me/subscriptions/{id}/payment-method
 PUT /v1/merchant/api-host
 PUT /v1/merchant/credit-limit
 PUT /v1/merchant/customers/{customer_id}/business-profile
+PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}
 PUT /v1/merchant/customers/{customer_id}/spend-delegations
 PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert
 PUT /v1/merchant/dashboard
