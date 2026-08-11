@@ -210,6 +210,62 @@ DO UPDATE SET product_id = EXCLUDED.product_id,
 	})
 }
 
+// PayerRateCard is one negotiated per-payer override: the price (and optional
+// included allowance, netted before overage at rating time) that replaces the
+// merchant-default card for MeterKey when rating this payer.
+type PayerRateCard struct {
+	MeterKey  string             `json:"meter_key"`
+	Price     pricing.RatePrice  `json:"price"`
+	Allowance *pricing.Allowance `json:"allowance,omitempty"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// ListPayerRateCards returns a payer's negotiated overrides (or#909).
+func (s *MoneyService) ListPayerRateCards(ctx context.Context, payer identity.CustomerID) ([]PayerRateCard, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	payerID := payer.UUID()
+	var rows []gen.ListPayerRateCardsRow
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var e error
+		rows, e = s.db.Gen(ctx).ListPayerRateCards(ctx, gen.ListPayerRateCardsParams{
+			MerchantID: tid.UUID(), CustomerID: &payerID,
+		})
+		return e
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PayerRateCard, 0, len(rows))
+	for _, row := range rows {
+		card := PayerRateCard{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+		if row.MeterKey != nil {
+			card.MeterKey = *row.MeterKey
+		}
+		if err := json.Unmarshal(row.Price, &card.Price); err != nil {
+			return nil, fmt.Errorf("decode rate card price for meter %q: %w", card.MeterKey, err)
+		}
+		if len(row.Allowance) > 0 {
+			var a pricing.Allowance
+			if err := json.Unmarshal(row.Allowance, &a); err != nil {
+				return nil, fmt.Errorf("decode rate card allowance for meter %q: %w", card.MeterKey, err)
+			}
+			card.Allowance = &a
+		}
+		out = append(out, card)
+	}
+	return out, nil
+}
+
 // DeletePayerRateCard removes a payer's negotiated override for a meter,
 // restoring the merchant default.
 func (s *MoneyService) DeletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {

@@ -211,6 +211,45 @@ func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 	})
 }
 
+// PayerRateCardDTO is one negotiated per-payer override (or#909): the price
+// (and optional included allowance, netted before overage) replacing the
+// merchant-default card for MeterKey when rating this payer.
+type PayerRateCardDTO struct {
+	MeterKey  string             `json:"meter_key"`
+	Price     pricing.RatePrice  `json:"price"`
+	Allowance *pricing.Allowance `json:"allowance,omitempty"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
+}
+
+// ListPayerRateCards returns a payer's negotiated overrides.
+func (s *Service) ListPayerRateCards(ctx context.Context, payer identity.CustomerID) ([]PayerRateCardDTO, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	rows, err := s.moneyService().ListPayerRateCards(ctx, payer)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PayerRateCardDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PayerRateCardDTO{
+			MeterKey:  r.MeterKey,
+			Price:     r.Price,
+			Allowance: r.Allowance,
+			CreatedAt: r.CreatedAt,
+			UpdatedAt: r.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 // DeletePayerRateCard removes a payer's negotiated override for a meter.
 func (s *Service) DeletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {
 	ctx, release, pinErr := s.pin(ctx)

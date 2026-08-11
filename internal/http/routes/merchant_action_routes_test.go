@@ -126,6 +126,25 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantCustomerSettingsRead,
 		},
 		{
+			// or#909 negotiated price overrides: merchant-scoped admin CRUD.
+			name:   "rate overrides read",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/rate-overrides",
+			perm:   controlplane.PermMerchantCustomerSettingsRead,
+		},
+		{
+			name:   "rate override install",
+			method: http.MethodPut,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/rate-overrides/storage.gb",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
+			name:   "rate override delete",
+			method: http.MethodDelete,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/rate-overrides/storage.gb",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
 			name:   "payment providers write",
 			method: http.MethodPut,
 			path:   "/billing/v1/merchant/payment-providers/stripe",
