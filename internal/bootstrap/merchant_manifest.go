@@ -942,7 +942,7 @@ func lookupManifestMerchant(ctx context.Context, database *db.DB, slug string) (
 	err := database.Qx(ctx).QueryRow(ctx, `
 		SELECT id::text, status, permission_group_id
 		  FROM openrails.merchants
-		 WHERE slug = $1
+		 WHERE slug = $1 AND deleted_at IS NULL
 	`, slug).Scan(&id, &status, &permissionGroupID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, nil

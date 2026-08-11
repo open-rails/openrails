@@ -439,7 +439,7 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	seeder := plane.Seeder()
 	for slug, mt := range manifest.Merchants {
 		var idStr string
-		err := database.DataPool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).Scan(&idStr)
+		err := database.DataPool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1) AND deleted_at IS NULL`, slug).Scan(&idStr)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Never provisioned → no local mirror rows to pull for it.
 			log.WithField("merchant", slug).Warn("pull-provider: manifest merchant has no merchant row; skipping its secret plane")
@@ -472,7 +472,7 @@ func resolvePullProviderMerchant(ctx context.Context, database *db.DB, slug stri
 		return id, nil
 	}
 	var id string
-	if err := database.DataPool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).Scan(&id); err != nil {
+	if err := database.DataPool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1) AND deleted_at IS NULL`, slug).Scan(&id); err != nil {
 		return merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", slug, err)
 	}
 	return merchant.ParseID(id)

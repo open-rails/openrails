@@ -19,7 +19,7 @@ func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (merc
 	}
 	var id string
 	if err := database.DataPool().
-		QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1)`, slug).
+		QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1) AND deleted_at IS NULL`, slug).
 		Scan(&id); err != nil {
 		return merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", slug, err)
 	}
