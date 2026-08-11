@@ -2,6 +2,7 @@ DELETE /v1/customers/{customer_id}/payment-methods/{id}
 DELETE /v1/me/payment-methods/{id}
 DELETE /v1/merchant/alerts/rules/{id}
 DELETE /v1/merchant/api-keys/{id}
+DELETE /v1/merchant/customers/{customer_id}/business-profile
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
 DELETE /v1/merchant/payment-providers/{provider}
@@ -50,6 +51,7 @@ GET /v1/merchant/alerts/rules
 GET /v1/merchant/alerts/templates
 GET /v1/merchant/api-host
 GET /v1/merchant/api-keys
+GET /v1/merchant/business-customers
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/prices
 GET /v1/merchant/catalog/prices/by-key/{key}
@@ -64,6 +66,7 @@ GET /v1/merchant/credits/balance
 GET /v1/merchant/credits/deposit
 GET /v1/merchant/customers
 GET /v1/merchant/customers/{customer_id}
+GET /v1/merchant/customers/{customer_id}/business-profile
 GET /v1/merchant/customers/{customer_id}/delinquency
 GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/payment-methods
@@ -185,6 +188,7 @@ PUT /v1/me/settings
 PUT /v1/me/subscriptions/{id}/payment-method
 PUT /v1/merchant/api-host
 PUT /v1/merchant/credit-limit
+PUT /v1/merchant/customers/{customer_id}/business-profile
 PUT /v1/merchant/customers/{customer_id}/spend-delegations
 PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert
 PUT /v1/merchant/dashboard
