@@ -113,7 +113,7 @@ func selfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator, provider
 	// hand-rolled this wrong (th#1765) or never wired it and shipped a
 	// 404ing self surface (ca#269).
 	if authn == nil {
-		return nil, fmt.Errorf("embedded billing: RouteSetCustomer (self surface) requires MountOptions.DelegatedAuthenticator — AuthKit-issuer hosts use pkg/embedded/authkit.NewVerifierDelegatedAuthenticator(issuers, audience, boundMerchantID)")
+		return nil, fmt.Errorf("embedded billing: RouteSetCustomer (self surface) requires MountOptions.DelegatedAuthenticator — hosts with their own AuthKit verifier use pkg/embedded/authkit.NewDelegatedAuthenticator(verifier, boundMerchantID, opts...); remote-issuer hosts use NewVerifierDelegatedAuthenticator(issuers, audience, boundMerchantID, opts...)")
 	}
 	if e == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
