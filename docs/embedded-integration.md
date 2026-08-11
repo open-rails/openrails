@@ -283,14 +283,47 @@ interfaces over whatever auth you already have:
 - `billingauth.Gate` (merchant-admin routes only): `Authorize(ctx, r, permission)
   (Principal, error)` — checks a live `merchant:*` permission per request.
 
-AuthKit-issuer hosts should not hand-write these. `pkg/embedded/authkit` ships
-both bridges: `NewVerifierAuthenticator(issuers, aud)` and its delegated twin
-`NewVerifierDelegatedAuthenticator(issuers, aud, boundMerchantID)` (#913 — the
-merchant pin is YOUR engine's bound merchant, never anything from the caller's
-token). The delegated bridge stamps `Permissions` from the canonical
-role→permission preset `permissions.ForRoles` (owner/admin → `merchant:*` +
-`customer:*`; member → the customer self-service set; read-only → its `:read`
-subset); override with `WithRolePermissions` if your role vocabulary differs.
+AuthKit hosts should not hand-write these. `pkg/embedded/authkit` ships the
+bridges, in two flavours that differ only in where the verifier comes from:
+
+| your situation | use |
+|---|---|
+| you already have an AuthKit verifier (in-process AuthKit, embedded control plane) | `NewAuthenticator(v, …)` / `NewDelegatedAuthenticator(v, boundMerchantID, …)` |
+| you trust a REMOTE issuer over JWKS | `NewVerifierAuthenticator(issuers, aud, …)` / `NewVerifierDelegatedAuthenticator(issuers, aud, boundMerchantID, …)` |
+
+Inject your own verifier whenever you have one: the request is then verified
+through `VerifyRequest` — your whole credential chain (API-key branch,
+2FA-enrollment gate, issuer enrichment) — so billing cannot end up with a
+weaker check than the rest of your app, and an in-process host never refetches
+its own keys over HTTP. The merchant pin is YOUR engine's bound merchant in
+every flavour, never anything from the caller's token (#913/th#1765).
+
+By default `Permissions` comes from the canonical role→permission preset
+`permissions.ForRoles` (owner/admin → `merchant:*` + `customer:*`; member → the
+customer self-service set; read-only → its `:read` subset). The options
+(or#918):
+
+- `WithAdmission(func(ctx, *http.Request, verify.Claims) error)` — a per-request
+  veto that runs after verification, before the principal is built. JWT verify
+  is stateless, so a **banned or deleted user keeps a valid token until it
+  expires**: put your liveness gate here and every delegated principal,
+  `/v1/me` included, is checked. A non-nil error is logged and answered 401;
+  the message never reaches the client. `WithUserAdmission` is the same veto on
+  the non-delegated authenticator.
+- `WithPermissionResolver(func(ctx, *http.Request, verify.Claims) ([]string, error))`
+  — permissions from the live request instead of the token's roles, for a grant
+  that is a DB read ("is this user a billing admin?") and worth scoping to the
+  admin path so the hot self path stays lookup-free. Runs after the admission
+  veto. An error fails the request closed. Mutually exclusive with
+  `WithRolePermissions` (the simple case: your own role vocabulary).
+- `WithMerchantSlug(slug)` — required if principals must address the merchant's
+  OWN treasury account by slug (or#916); without it the uuid is the only
+  address that resolves.
+- `WithIssuer(iss)` — override the audit issuer (default: the token's `iss`),
+  e.g. `openrails.SelfIssuer` when your customer rows are keyed to it.
+- `WithoutTokenRoles()` (non-delegated) — drop the token's role snapshot from
+  `UserContext`. It is stale for the token's lifetime; omit it rather than pass
+  a snapshot nothing should authorize on.
 
 Mount everything as one framework-neutral `net/http` handler (gin hosts use
 `gin.WrapH`, chi `Mount`, …):

@@ -506,7 +506,12 @@ func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
 	if c == nil || c.authSvc == nil || c.authSvc.Verifier() == nil {
 		return nil
 	}
-	return auth.NewAuthenticator(c.authSvc.Verifier())
+	// Token-shaped verification, unchanged by or#918: this is the credential
+	// chain's JWT step for OpenRails' own routes, where a non-JWT bearer is an
+	// expected fallback to the next resolver (#845) rather than a rejection.
+	return auth.NewAuthenticator(auth.AuthenticatorConfig{
+		Verifier: auth.RequestVerifierFor(c.authSvc.Verifier()),
+	})
 }
 
 // Pool returns the control plane's schema-aware pgx pool (the pool holding the
