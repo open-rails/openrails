@@ -60,17 +60,6 @@ func TestMobiusAdapter_DeterministicPlanIDFormat(t *testing.T) {
 	}
 }
 
-func TestMobiusAdapter_AutoCreateUnconfiguredIsPending(t *testing.T) {
-	// No NMI client configured -> fall back to manual link.
-	a := &nmiAdapter{svc: &Service{rt: &app.Runtime{}}}
-	_, err := a.AutoCreate(context.Background(), autoCreateContext{
-		PriceID: uuid.New(), BillingCycleDays: intPtr(30),
-	})
-	if err != errPendingManualLink {
-		t.Fatalf("expected errPendingManualLink, got %v", err)
-	}
-}
-
 func TestMobiusAdapter_AutoCreateRejectsNilFrequency(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("{}"))

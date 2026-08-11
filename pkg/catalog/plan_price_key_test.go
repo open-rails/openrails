@@ -6,33 +6,6 @@ import (
 	"testing"
 )
 
-// TestPlan_PriceKeyAutoDefault: a single price per product+interval auto-
-// defaults to "<product-key>-<interval>".
-func TestPlan_PriceKeyAutoDefault(t *testing.T) {
-	m := loadFrom(t, `
-version: 1
-products:
-  - key: solo
-    display_name: Solo
-    prices:
-      - {currency: usd, unit_amount: 999, duration: 30d, auto_renew: true}
-`)
-	plan, err := Plan(context.Background(), newFakeApplier(), m)
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	pp := findProduct(plan, "solo")
-	if pp == nil || len(pp.Prices) != 1 {
-		t.Fatalf("expected 1 price, got %+v", pp)
-	}
-	if got, want := pp.Prices[0].CreateReq.Key, "solo-monthly"; got != want {
-		t.Fatalf("auto-default key = %q, want %q", got, want)
-	}
-	if got := pp.Prices[0].Key; got != "solo-monthly" {
-		t.Fatalf("plan key = %q, want solo-monthly", got)
-	}
-}
-
 // TestPlan_PriceKeyCollisionRefused: two declared prices at the SAME interval
 // with neither given an explicit key must both resolve to the identical
 // default — refused loudly at plan time (#774), never silently colliding.

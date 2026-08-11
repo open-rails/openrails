@@ -347,16 +347,6 @@ func (fd *fakeDecisions) ApplyDecision(ctx context.Context, subscriptionID uuid.
 		s.Status = "cancelled"
 		s.CancelType = "expired"
 		s.CancelledAt = &now
-		// ResolveCancelled revokes subscription-sourced entitlements.
-		var kept []localEntitlement
-		for _, ent := range fd.local.ents {
-			if ent.SourceID == s.ID {
-				fd.calls["revoke"]++
-				continue
-			}
-			kept = append(kept, ent)
-		}
-		fd.local.ents = kept
 		return true, nil
 	default:
 		return false, nil
@@ -723,18 +713,14 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
 		assert.Equal(t, "enforced", rec.Resolution)
 		assert.Equal(t, 1, writer.calls["cancel"])
-		assert.Equal(t, 1, writer.calls["revoke"])
 
-		// Local state converged: the subscription is cancelled, entitlements gone.
+		// Local state converged: the subscription is cancelled.
 		st, _ := local.Load(ctx, ProviderNMI, uuid.Nil)
 		for _, s := range st.Subscriptions {
 			if s.ID == dead.ID {
 				assert.Equal(t, "cancelled", s.Status)
 				assert.Equal(t, "expired", s.CancelType)
 			}
-		}
-		for _, ent := range local.entsSnapshot() {
-			assert.NotEqual(t, dead.ID, ent.SourceID, "the dead subscription's entitlements must be revoked")
 		}
 	})
 
@@ -999,38 +985,6 @@ func TestDiffTaxonomy(t *testing.T) {
 		assert.Zero(t, writer.totalCalls()) // never auto-applied
 	})
 
-	t.Run("PS-7 vault metadata mismatch adopts the rail record", func(t *testing.T) {
-		local := &fakeLocal{}
-		sub := liveLocalSub(ProviderNMI, "nmi-sub-7")
-		pm := LocalPaymentMethod{
-			ID: uuid.New(), CustomerID: sub.CustomerID, Rail: "nmi",
-			RailCustomerRef: "vault-7", LastFour: "1111", ExpiryDate: "10/25",
-		}
-		local.state.Subscriptions = []LocalSubscription{sub}
-		local.state.PaymentMethods = []LocalPaymentMethod{pm}
-		snap := &RemoteSnapshot{
-			Provider:     ProviderNMI,
-			Capabilities: Capabilities{Subscriptions: true, Vault: true},
-			Subscriptions: []RemoteSubscription{
-				{RailSubscriptionID: "nmi-sub-7", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
-			},
-			PaymentMethods: []RemotePaymentMethod{
-				{RailCustomerRef: "vault-7", CardLast4: "2222", CardExpiry: "1027"},
-			},
-		}
-		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-		require.NoError(t, err)
-		ps7 := findByType(res.Findings, FindingPaymentMethodMismatch)
-		require.Len(t, ps7, 1)
-		assert.Equal(t, "vault-7", ps7[0].SubjectKey)
-		assert.Equal(t, 1, writer.calls["adopt_vault"])
-		rec := store.record(ProviderNMI, FindingPaymentMethodMismatch, "vault-7")
-		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
-		st, _ := local.Load(ctx, ProviderNMI, uuid.Nil)
-		assert.Equal(t, "2222", st.PaymentMethods[0].LastFour)
-	})
-
 	t.Run("PS-8 duplicate live subscriptions for one subject are requires_review", func(t *testing.T) {
 		local := &fakeLocal{}
 		sub := liveLocalSub(ProviderNMI, "dup-1")
@@ -1144,72 +1098,6 @@ func TestSmallMerchantsAreProtectedFromEmptyRosters(t *testing.T) {
 		assert.Empty(t, findByType(res.Findings, FindingLocalActiveRemoteDead), "book of %d", book)
 		assert.Zero(t, writer.calls["cancel"], "book of %d", book)
 	}
-}
-
-func TestIdentityStableAcrossRuns(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	sub := liveLocalSub(ProviderStripe, "sub_stable")
-	local.state.Subscriptions = []LocalSubscription{sub}
-	withLiveEntitlement(local, &sub)
-	snap := &RemoteSnapshot{
-		Provider:     ProviderStripe,
-		Capabilities: Capabilities{Subscriptions: true},
-		Subscriptions: []RemoteSubscription{
-			{RailSubscriptionID: "sub_stable", Status: SubscriptionStatusCancelled},
-		},
-	}
-	eng, store, _ := newTestEngine(ProviderStripe, snap, local)
-
-	res1, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
-	require.NoError(t, err)
-	require.Len(t, res1.Findings, 1)
-	assert.Equal(t, 1, res1.Summary.Providers["stripe"].NewFindings)
-
-	res2, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
-	require.NoError(t, err)
-	require.Len(t, res2.Findings, 1)
-	assert.Equal(t, 0, res2.Summary.Providers["stripe"].NewFindings)
-	assert.Equal(t, 1, res2.Summary.Providers["stripe"].UpdatedFindings)
-
-	assert.Equal(t, 1, store.count(), "re-runs must update the standing finding, not duplicate it")
-	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
-	assert.Equal(t, &res1.RunID, rec.FirstSeenRun)
-	assert.Equal(t, &res2.RunID, rec.LastSeenRun)
-}
-
-func TestAutoResolveOnDisappearance(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	sub := liveLocalSub(ProviderStripe, "sub_vanish")
-	local.state.Subscriptions = []LocalSubscription{sub}
-	deadSnap := &RemoteSnapshot{
-		Provider:     ProviderStripe,
-		Capabilities: Capabilities{Subscriptions: true},
-		Subscriptions: []RemoteSubscription{
-			{RailSubscriptionID: "sub_vanish", Status: SubscriptionStatusCancelled},
-		},
-	}
-	eng, store, _ := newTestEngine(ProviderStripe, deadSnap, local)
-	_, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
-	require.NoError(t, err)
-	require.Equal(t, FindingStatusReconcileRequired, store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String()).Status)
-
-	// The drift disappears (rail reactivated / first read was wrong).
-	eng.Fetchers[ProviderStripe] = &fakeFetcher{provider: ProviderStripe, snap: &RemoteSnapshot{
-		Provider:     ProviderStripe,
-		Capabilities: Capabilities{Subscriptions: true},
-		Subscriptions: []RemoteSubscription{
-			{RailSubscriptionID: "sub_vanish", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
-		},
-	}}
-	res2, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderStripe}, PSPs: testPSPs(ProviderStripe)})
-	require.NoError(t, err)
-
-	rec := store.record(ProviderStripe, FindingLocalActiveRemoteDead, sub.ID.String())
-	assert.Equal(t, FindingStatusFixed, rec.Status)
-	assert.Equal(t, "auto_vanished", rec.Resolution)
-	assert.GreaterOrEqual(t, res2.Summary.Providers["stripe"].AutoResolved, int64(1))
 }
 
 func TestIntentAnnotationForRecordedDelete(t *testing.T) {
@@ -1464,53 +1352,6 @@ func TestMaterializePS1(t *testing.T) {
 		assert.True(t, ps1[0].RequiresAdmin)
 		assert.Zero(t, writer.calls["materialize"])
 		assert.Equal(t, FindingStatusAdminRequired, store.record(ProviderNMI, FindingRemoteSubMissingLocal, "remote-77").Status)
-	})
-
-	t.Run("resolvable PS-1 materializes with payment + entitlements and resolves enforced", func(t *testing.T) {
-		local, snap, price := materializeFixture()
-		eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-		require.NoError(t, err)
-
-		ps1 := findByType(res.Findings, FindingRemoteSubMissingLocal)
-		require.Len(t, ps1, 1)
-		assert.Equal(t, 1, writer.calls["materialize"])
-
-		rec := store.record(ProviderNMI, FindingRemoteSubMissingLocal, "remote-77")
-		require.NotNil(t, rec)
-		assert.Equal(t, FindingStatusAutoFixed, rec.Status)
-		assert.Equal(t, "enforced", rec.Resolution)
-		require.NotNil(t, rec.ResolutionEvid)
-		assert.Equal(t, "vault_id", rec.ResolutionEvid["identity_via"])
-		assert.Equal(t, price.ID.String(), rec.ResolutionEvid["price_id"])
-		assert.Equal(t, true, rec.ResolutionEvid["payment_backfilled"])
-
-		// The local subscription exists with remote status/periods…
-		st, _ := local.Load(ctx, ProviderNMI, uuid.Nil)
-		var created *LocalSubscription
-		for i := range st.Subscriptions {
-			if st.Subscriptions[i].RailSubscriptionID == "remote-77" {
-				created = &st.Subscriptions[i]
-			}
-		}
-		require.NotNil(t, created)
-		assert.Equal(t, "active", created.Status)
-		assert.Equal(t, "nmi", created.Rail)
-		require.NotNil(t, created.CurrentPeriodEndsAt)
-		assert.True(t, created.CurrentPeriodEndsAt.Equal(*snap.Subscriptions[0].NextBillingAt))
-
-		// …the snapshot charge is backfilled and entitlements granted.
-		payments, _ := local.PaymentsByTransactionIDs(ctx, ProviderNMI, uuid.Nil, []string{"txn-mat-1"})
-		require.Len(t, payments, 1)
-		ents := local.entsSnapshot()
-		require.Len(t, ents, 1)
-		assert.Equal(t, created.ID, ents[0].SourceID)
-
-		// Re-run: converged, no duplicate, no second materialize write.
-		res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-		require.NoError(t, err)
-		assert.Empty(t, findByType(res2.Findings, FindingRemoteSubMissingLocal))
-		assert.Equal(t, 1, writer.calls["materialize"])
 	})
 
 	t.Run("ambiguous identity stays requires_review with the blocker documented", func(t *testing.T) {

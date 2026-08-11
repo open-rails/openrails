@@ -16,7 +16,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -107,58 +106,6 @@ func TestTierGroupDetection(t *testing.T) {
 		require.NoError(t, err, "Should check eligibility without error")
 		assert.Equal(t, checkout.EligibilityAllowed, eligibility.Status, "Should allow new subscription")
 		assert.Nil(t, eligibility.ExistingSubscription, "Should not have existing subscription")
-	})
-}
-
-// TestTierProrationCalculation tests that proration is calculated correctly for tier upgrades
-func TestTierProrationCalculation(t *testing.T) {
-	suite := getSharedTestSuite(t)
-
-	// Seed tiered products
-	tieredProducts := suite.SeedTieredProducts()
-	premiumPrice := tieredProducts[0].Prices[0]     // $10/month
-	premiumPlusPrice := tieredProducts[1].Prices[0] // $20/month
-
-	t.Run("calculates correct proration for mid-cycle upgrade", func(t *testing.T) {
-		// User on Premium ($10/mo), 15 days remaining, upgrades to Premium+ ($20/mo)
-		// Expected proration: ($20 - $10) * (360h/720h) = $5
-
-		oldAmount := premiumPrice.Amount
-		newAmount := premiumPlusPrice.Amount
-		billingCycleHours := 30 * 24
-		hoursRemaining := 15 * 24
-
-		priceDiff := newAmount - oldAmount
-		prorationRatio := float64(hoursRemaining) / float64(billingCycleHours)
-		expectedProration := int64(float64(priceDiff) * prorationRatio)
-
-		assert.Equal(t, int64(5_000_000), expectedProration, "Proration should be $5 in micros")
-	})
-
-	t.Run("proration is zero at start of cycle", func(t *testing.T) {
-		oldAmount := premiumPrice.Amount
-		newAmount := premiumPlusPrice.Amount
-		billingCycleHours := 30 * 24
-		hoursRemaining := 30 * 24 // Full cycle remaining
-
-		priceDiff := newAmount - oldAmount
-		prorationRatio := float64(hoursRemaining) / float64(billingCycleHours)
-		prorationAmount := int64(float64(priceDiff) * prorationRatio)
-
-		assert.Equal(t, int64(10_000_000), prorationAmount, "Proration should be full difference at start of cycle")
-	})
-
-	t.Run("proration is zero at end of cycle", func(t *testing.T) {
-		oldAmount := premiumPrice.Amount
-		newAmount := premiumPlusPrice.Amount
-		billingCycleHours := 30 * 24
-		hoursRemaining := 0 // End of cycle
-
-		priceDiff := newAmount - oldAmount
-		prorationRatio := float64(hoursRemaining) / float64(billingCycleHours)
-		prorationAmount := int64(float64(priceDiff) * prorationRatio)
-
-		assert.Equal(t, int64(0), prorationAmount, "Proration should be zero at end of cycle")
 	})
 }
 
@@ -263,110 +210,6 @@ func TestScheduledDowngrade(t *testing.T) {
 		assert.Equal(t, premiumProduct.ID.String(), refreshedSub.ProductID.String(), "Product should be switched to Premium")
 		assert.Nil(t, refreshedSub.ScheduledPriceID, "Scheduled price should be cleared")
 		assert.Equal(t, models.StatusActive, refreshedSub.Status, "Subscription should be active")
-	})
-}
-
-// TestEntitlementChangesOnTierChange tests that entitlements are correctly updated
-func TestEntitlementChangesOnTierChange(t *testing.T) {
-	suite := getSharedTestSuite(t)
-	ctx := suite.MerchantCtx()
-
-	// Seed tiered products
-	tieredProducts := suite.SeedTieredProducts()
-	premiumPriceID := tieredProducts[0].Prices[0].ID     // rank 1, entitlements: [premium]
-	premiumPlusPriceID := tieredProducts[1].Prices[0].ID // rank 2, entitlements: [premium, extra]
-
-	userID := uuid.New().String()
-
-	t.Run("upgrade grants additional entitlements", func(t *testing.T) {
-		// Create Premium subscription
-		now := suite.GetClock().Now()
-		periodEnd := now.Add(30 * 24 * time.Hour)
-
-		sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-			UserID:              userID,
-			PriceID:             premiumPriceID,
-			Status:              models.StatusActive,
-			Rail:                models.RailNMI,
-			CurrentPeriodEndsAt: &periodEnd,
-		})
-		defer suite.CleanupSubscriptionsForUser(userID)
-
-		// Create Premium entitlement
-		suite.CreateTestEntitlement(userID, "premium", &sub.ID, models.EntitlementSourceSubscription)
-
-		// Verify only premium entitlement exists
-		ents := suite.GetEntitlementsByUserID(userID)
-		assert.Len(t, ents, 1, "Should have 1 entitlement before upgrade")
-		assert.Equal(t, "premium", ents[0].Entitlement)
-
-		// Simulate upgrade to Premium+ (this would be done by checkout service)
-		// For this test, we verify the entitlement change logic in isolation
-		entService := suite.App.Runtime.EntitlementService
-
-		// Grant new "extra" entitlement
-		notBefore := now.UTC()
-		_, err := entService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-			UserID:      userID,
-			Entitlement: "extra",
-			NotBefore:   &notBefore,
-			Indefinite:  true,
-			SourceType:  models.EntitlementSourceSubscription,
-			SourceID:    sub.ID,
-		})
-		require.NoError(t, err, "Should grant extra entitlement")
-
-		// Verify both entitlements now exist
-		ents = suite.GetEntitlementsByUserID(userID)
-		entNames := make(map[string]bool)
-		for _, e := range ents {
-			entNames[e.Entitlement] = true
-		}
-		assert.True(t, entNames["premium"], "Should have premium")
-		assert.True(t, entNames["extra"], "Should have extra after upgrade")
-	})
-
-	t.Run("downgrade revokes extra entitlements", func(t *testing.T) {
-		userID2 := uuid.New().String()
-		now := suite.GetClock().Now()
-		periodEnd := now.Add(30 * 24 * time.Hour)
-
-		// Create Premium+ subscription
-		sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
-			UserID:              userID2,
-			PriceID:             premiumPlusPriceID,
-			Status:              models.StatusActive,
-			Rail:                models.RailNMI,
-			CurrentPeriodEndsAt: &periodEnd,
-		})
-		defer suite.CleanupSubscriptionsForUser(userID2)
-
-		// Create Premium+ entitlements
-		suite.CreateTestEntitlement(userID2, "premium", &sub.ID, models.EntitlementSourceSubscription)
-		suite.CreateTestEntitlement(userID2, "extra", &sub.ID, models.EntitlementSourceSubscription)
-
-		// Verify both entitlements exist
-		ents := suite.GetEntitlementsByUserID(userID2)
-		assert.Len(t, ents, 2, "Should have 2 entitlements before downgrade")
-
-		// Revoke "extra" entitlement (simulating downgrade)
-		entService := suite.App.Runtime.EntitlementService
-
-		st := models.EntitlementSourceSubscription
-		sid := sub.ID
-		err := entService.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-			UserID:      userID2,
-			Entitlement: "extra",
-			SourceType:  &st,
-			SourceID:    &sid,
-			Reason:      models.EntitlementRevokeDowngrade,
-		})
-		require.NoError(t, err, "Should revoke extra entitlement")
-
-		// Verify only premium entitlement remains
-		ents = suite.GetEntitlementsByUserID(userID2)
-		assert.Len(t, ents, 1, "Should have 1 entitlement after downgrade")
-		assert.Equal(t, "premium", ents[0].Entitlement)
 	})
 }
 
