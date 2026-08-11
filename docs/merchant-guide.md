@@ -221,7 +221,7 @@ reference: `docs/api/endpoints.md`.
 | Deposit credits (machine/rails) | `POST /v1/merchant/credits/deposit` | — |
 | Grant credits to a customer (human admin) | `POST /v1/merchant/customers/{id}/credits` | Customers → profile |
 | Ask what a deposit key did | `GET /v1/merchant/credits/deposit?customer_id=&source_id=` | — |
-| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[:upsert]` | — |
+| Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[:upsert]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
 | Credit limit / trust level | `PUT /v1/merchant/credit-limit`, `GET /v1/merchant/trust-level` | Settings |
 | Catalog CRUD over HTTP | `POST/PATCH /v1/merchant/catalog/products`, `/prices` | Catalog |
 | Metrics | `GET /v1/merchant/metrics`, `/v1/merchant/metrics/query` + `/schema` | Dashboard |

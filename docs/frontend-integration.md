@@ -277,7 +277,7 @@ route requires an explicit `customer:*` permission carried by the delegated toke
 | `customer:payment-methods:update` | manage payment methods + billing portal |
 | `customer:checkout:create` | pre-pay / load credits (`POST .../checkout`) |
 | `customer:spend-delegations:read` | read the spend-delegation policy |
-| `customer:spend-delegations:update` | replace/upsert the spend-delegation policy |
+| `customer:spend-delegations:update` | replace/upsert/revoke the spend-delegation policy |
 
 Over-claimed tokens are rejected: your issuer's registered authority bounds what
 permissions a delegated JWT may carry.
