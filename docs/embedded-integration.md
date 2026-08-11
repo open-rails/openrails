@@ -283,6 +283,15 @@ interfaces over whatever auth you already have:
 - `billingauth.Gate` (merchant-admin routes only): `Authorize(ctx, r, permission)
   (Principal, error)` — checks a live `merchant:*` permission per request.
 
+AuthKit-issuer hosts should not hand-write these. `pkg/embedded/authkit` ships
+both bridges: `NewVerifierAuthenticator(issuers, aud)` and its delegated twin
+`NewVerifierDelegatedAuthenticator(issuers, aud, boundMerchantID)` (#913 — the
+merchant pin is YOUR engine's bound merchant, never anything from the caller's
+token). The delegated bridge stamps `Permissions` from the canonical
+role→permission preset `permissions.ForRoles` (owner/admin → `merchant:*` +
+`customer:*`; member → the customer self-service set; read-only → its `:read`
+subset); override with `WithRolePermissions` if your role vocabulary differs.
+
 Mount everything as one framework-neutral `net/http` handler (gin hosts use
 `gin.WrapH`, chi `Mount`, …):
 
