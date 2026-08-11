@@ -165,7 +165,7 @@ func TestBusinessProfile_MerchantScoped(t *testing.T) {
 	// A second merchant, its own pinned connection: merchant A's onboarding
 	// record must be invisible.
 	otherID := uuid.New()
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) DO NOTHING`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING`,
 		otherID, "or908-other-"+otherID.String()[:8])
 	require.NoError(t, err)
 	t.Cleanup(func() {

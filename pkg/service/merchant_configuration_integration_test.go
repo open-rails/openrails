@@ -127,7 +127,7 @@ func TestMerchantConfiguration_TwoMerchantsKeepDistinctProfiles(t *testing.T) {
 	_, err := pool.Exec(context.Background(), `
 		INSERT INTO openrails.merchants (id, slug, status)
 		VALUES ($1, $2, 'active')
-		ON CONFLICT (slug) DO UPDATE SET updated_at = now()
+		ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET updated_at = now()
 	`, merchantB.UUID(), "profile-b")
 	require.NoError(t, err)
 	t.Cleanup(func() {
