@@ -12,6 +12,29 @@ import (
 	"github.com/google/uuid"
 )
 
+const clearBusinessSuspensionRecommendation = `-- name: ClearBusinessSuspensionRecommendation :execrows
+UPDATE openrails.customer_business_profiles
+SET suspension_recommended_at = NULL,
+    suspension_reason = '',
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1 AND customer_id = $2
+  AND suspension_recommended_at IS NOT NULL
+`
+
+type ClearBusinessSuspensionRecommendationParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Now        time.Time
+}
+
+func (q *Queries) ClearBusinessSuspensionRecommendation(ctx context.Context, arg ClearBusinessSuspensionRecommendationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearBusinessSuspensionRecommendation, arg.MerchantID, arg.CustomerID, arg.Now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteCustomerBusinessProfile = `-- name: DeleteCustomerBusinessProfile :execrows
 DELETE FROM openrails.customer_business_profiles
 WHERE merchant_id = $1 AND customer_id = $2
@@ -31,7 +54,7 @@ func (q *Queries) DeleteCustomerBusinessProfile(ctx context.Context, arg DeleteC
 }
 
 const getCustomerBusinessProfile = `-- name: GetCustomerBusinessProfile :one
-SELECT merchant_id, customer_id, terms_version, terms_accepted_at, terms_accepted_by, kyc_reference, currency, budget_alert_thresholds, created_at, updated_at FROM openrails.customer_business_profiles
+SELECT merchant_id, customer_id, terms_version, terms_accepted_at, terms_accepted_by, kyc_reference, currency, budget_alert_thresholds, created_at, updated_at, suspension_recommended_at, suspension_reason FROM openrails.customer_business_profiles
 WHERE merchant_id = $1 AND customer_id = $2
 LIMIT 1
 `
@@ -55,12 +78,41 @@ func (q *Queries) GetCustomerBusinessProfile(ctx context.Context, arg GetCustome
 		&i.BudgetAlertThresholds,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SuspensionRecommendedAt,
+		&i.SuspensionReason,
 	)
 	return i, err
 }
 
+const listBusinessCycleWorkMerchants = `-- name: ListBusinessCycleWorkMerchants :many
+SELECT merchant_id FROM openrails.business_cycle_work_merchant_ids(
+    $1::int)
+`
+
+// CROSS-MERCHANT: merchants with business-cycle work, through migration 0007's
+// SECURITY DEFINER work queue. Ids only (FC-16 R2).
+func (q *Queries) ListBusinessCycleWorkMerchants(ctx context.Context, merchantLimit int32) ([]*uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listBusinessCycleWorkMerchants, merchantLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []*uuid.UUID
+	for rows.Next() {
+		var merchant_id *uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCustomerBusinessProfiles = `-- name: ListCustomerBusinessProfiles :many
-SELECT merchant_id, customer_id, terms_version, terms_accepted_at, terms_accepted_by, kyc_reference, currency, budget_alert_thresholds, created_at, updated_at FROM openrails.customer_business_profiles
+SELECT merchant_id, customer_id, terms_version, terms_accepted_at, terms_accepted_by, kyc_reference, currency, budget_alert_thresholds, created_at, updated_at, suspension_recommended_at, suspension_reason FROM openrails.customer_business_profiles
 WHERE merchant_id = $1
 ORDER BY created_at, customer_id
 LIMIT $2
@@ -94,6 +146,8 @@ func (q *Queries) ListCustomerBusinessProfiles(ctx context.Context, arg ListCust
 			&i.BudgetAlertThresholds,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SuspensionRecommendedAt,
+			&i.SuspensionReason,
 		); err != nil {
 			return nil, err
 		}
@@ -103,6 +157,38 @@ func (q *Queries) ListCustomerBusinessProfiles(ctx context.Context, arg ListCust
 		return nil, err
 	}
 	return items, nil
+}
+
+const recommendBusinessSuspension = `-- name: RecommendBusinessSuspension :execrows
+UPDATE openrails.customer_business_profiles
+SET suspension_recommended_at = $3::timestamptz,
+    suspension_reason = $4,
+    updated_at = $3::timestamptz
+WHERE merchant_id = $1 AND customer_id = $2
+  AND suspension_recommended_at IS NULL
+`
+
+type RecommendBusinessSuspensionParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Now        time.Time
+	Reason     string
+}
+
+// or#910 suspension-recommendation edges. Both are watermark CAS updates:
+// Recommend fires only while no episode is open, Clear only while one is —
+// racing evaluators collapse onto exactly one row change per direction.
+func (q *Queries) RecommendBusinessSuspension(ctx context.Context, arg RecommendBusinessSuspensionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recommendBusinessSuspension,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.Reason,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertCustomerBusinessProfile = `-- name: UpsertCustomerBusinessProfile :exec

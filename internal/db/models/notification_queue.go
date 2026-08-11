@@ -37,6 +37,18 @@ const (
 	NotificationAccountDelinquent        NotificationEventType = "account_delinquent"
 	NotificationAccountDelinquencyClosed NotificationEventType = "account_delinquency_cleared"
 
+	// B2B dunning ladder + budget alerts (or#910). Escalating notify-only
+	// invoice notices; the suspension rung is a RECOMMENDATION — OpenRails
+	// never revokes access, the host enforces (or#878 doctrine). budget_alert
+	// notifies on a crossed spend threshold and NEVER caps — caps are the
+	// consumer posture's job.
+	NotificationInvoiceIssued                 NotificationEventType = "invoice_issued"
+	NotificationInvoiceOverdue                NotificationEventType = "invoice_overdue"
+	NotificationInvoiceFinalNotice            NotificationEventType = "invoice_final_notice"
+	NotificationBusinessSuspensionRecommended NotificationEventType = "business_suspension_recommended"
+	NotificationBusinessSuspensionCleared     NotificationEventType = "business_suspension_cleared"
+	NotificationBudgetAlert                   NotificationEventType = "budget_alert"
+
 	// System notifications (1 type)
 	NotificationSystemAlert NotificationEventType = "system_alert" // (7) Arbitrary system notifications
 

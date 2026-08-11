@@ -37,18 +37,23 @@ type BusinessOnboardingDTO struct {
 // plus the sibling records one read should return together (invoice profile,
 // credit line, live arrears exposure).
 type BusinessProfileDTO struct {
-	CustomerID            string             `json:"customer_id"`
-	TermsVersion          string             `json:"terms_version"`
-	TermsAcceptedAt       time.Time          `json:"terms_accepted_at"`
-	TermsAcceptedBy       string             `json:"terms_accepted_by,omitempty"`
-	KYCReference          string             `json:"kyc_reference,omitempty"`
-	Currency              string             `json:"currency"`
-	BudgetAlertThresholds []int64            `json:"budget_alert_thresholds"`
-	InvoiceProfile        *InvoiceProfileDTO `json:"invoice_profile,omitempty"`
-	CreditLimit           int64              `json:"credit_limit"`
-	OutstandingOwed       int64              `json:"outstanding_owed"`
-	CreatedAt             time.Time          `json:"created_at"`
-	UpdatedAt             time.Time          `json:"updated_at"`
+	CustomerID            string    `json:"customer_id"`
+	TermsVersion          string    `json:"terms_version"`
+	TermsAcceptedAt       time.Time `json:"terms_accepted_at"`
+	TermsAcceptedBy       string    `json:"terms_accepted_by,omitempty"`
+	KYCReference          string    `json:"kyc_reference,omitempty"`
+	Currency              string    `json:"currency"`
+	BudgetAlertThresholds []int64   `json:"budget_alert_thresholds"`
+	// SuspensionRecommendedAt / SuspensionReason are the or#910 dunning
+	// cycle's open suspension-RECOMMENDATION episode (nil = none). A signal:
+	// the host enforces, OpenRails never revokes access.
+	SuspensionRecommendedAt *time.Time         `json:"suspension_recommended_at,omitempty"`
+	SuspensionReason        string             `json:"suspension_reason,omitempty"`
+	InvoiceProfile          *InvoiceProfileDTO `json:"invoice_profile,omitempty"`
+	CreditLimit             int64              `json:"credit_limit"`
+	OutstandingOwed         int64              `json:"outstanding_owed"`
+	CreatedAt               time.Time          `json:"created_at"`
+	UpdatedAt               time.Time          `json:"updated_at"`
 }
 
 // OnboardBusinessCustomer grants (or updates) a payer's business standing.
@@ -110,15 +115,17 @@ func (s *Service) getBusinessProfileComposed(ctx context.Context, payer identity
 		return nil, err
 	}
 	dto := BusinessProfileDTO{
-		CustomerID:            p.CustomerID.String(),
-		TermsVersion:          p.TermsVersion,
-		TermsAcceptedAt:       p.TermsAcceptedAt,
-		TermsAcceptedBy:       p.TermsAcceptedBy,
-		KYCReference:          p.KYCReference,
-		Currency:              p.Currency,
-		BudgetAlertThresholds: p.BudgetAlertThresholds,
-		CreatedAt:             p.CreatedAt,
-		UpdatedAt:             p.UpdatedAt,
+		CustomerID:              p.CustomerID.String(),
+		TermsVersion:            p.TermsVersion,
+		TermsAcceptedAt:         p.TermsAcceptedAt,
+		TermsAcceptedBy:         p.TermsAcceptedBy,
+		KYCReference:            p.KYCReference,
+		Currency:                p.Currency,
+		BudgetAlertThresholds:   p.BudgetAlertThresholds,
+		SuspensionRecommendedAt: p.SuspensionRecommendedAt,
+		SuspensionReason:        p.SuspensionReason,
+		CreatedAt:               p.CreatedAt,
+		UpdatedAt:               p.UpdatedAt,
 	}
 	if ip, err := s.moneyService().GetCustomerInvoiceProfile(ctx, payer); err == nil && ip != nil {
 		dto.InvoiceProfile = &InvoiceProfileDTO{
@@ -158,15 +165,17 @@ func (s *Service) ListBusinessCustomers(ctx context.Context, limit int) ([]Busin
 	out := make([]BusinessProfileDTO, 0, len(rows))
 	for _, p := range rows {
 		out = append(out, BusinessProfileDTO{
-			CustomerID:            p.CustomerID.String(),
-			TermsVersion:          p.TermsVersion,
-			TermsAcceptedAt:       p.TermsAcceptedAt,
-			TermsAcceptedBy:       p.TermsAcceptedBy,
-			KYCReference:          p.KYCReference,
-			Currency:              p.Currency,
-			BudgetAlertThresholds: p.BudgetAlertThresholds,
-			CreatedAt:             p.CreatedAt,
-			UpdatedAt:             p.UpdatedAt,
+			CustomerID:              p.CustomerID.String(),
+			TermsVersion:            p.TermsVersion,
+			TermsAcceptedAt:         p.TermsAcceptedAt,
+			TermsAcceptedBy:         p.TermsAcceptedBy,
+			KYCReference:            p.KYCReference,
+			Currency:                p.Currency,
+			BudgetAlertThresholds:   p.BudgetAlertThresholds,
+			SuspensionRecommendedAt: p.SuspensionRecommendedAt,
+			SuspensionReason:        p.SuspensionReason,
+			CreatedAt:               p.CreatedAt,
+			UpdatedAt:               p.UpdatedAt,
 		})
 	}
 	return out, nil
