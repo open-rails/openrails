@@ -209,15 +209,15 @@ func ServicePutCustomerSpendDelegation(r *httprequest.Request) {
 // at (scope, scope_key): already revoked or never granted, a real answer the
 // caller can act on.
 func DeleteCustomerSpendDelegation(r *httprequest.Request) {
-	resolved, ok := requireCustomerTreasuryPrincipal(r)
+	payer, ok := requireCustomerTreasuryPayer(r)
 	if !ok {
 		return
 	}
-	svc, payer, ok := customerTreasurySpendDelegationService(r, resolved)
+	svc, ok := customerSpendDelegationService(r)
 	if !ok {
 		return
 	}
-	deleteCustomerSpendDelegation(r, svc, payer)
+	deleteCustomerSpendDelegation(r, svc, payer.CustomerID)
 }
 
 // ServiceDeleteCustomerSpendDelegation is the merchant-machine counterpart of
