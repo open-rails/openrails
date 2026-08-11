@@ -36,6 +36,14 @@ type ProvisionMerchantRequest struct {
 // preserved in the wrap.
 var ErrInvalidSlug = errors.New("control plane provision: invalid slug")
 
+// ErrSlugReserved / ErrCreationRefused re-export the or#914 in-process
+// creation-policy refusals (errors.Is-able) so hosts can map a reserved slug
+// or an admission-gate refusal onto 4xx without importing internals.
+var (
+	ErrSlugReserved    = controlplane.ErrMerchantSlugReserved
+	ErrCreationRefused = controlplane.ErrMerchantCreationRefused
+)
+
 // ProvisionMerchantResult reports what ProvisionMerchant ensured.
 type ProvisionMerchantResult struct {
 	// MerchantID is the openrails.merchants directory row id.
@@ -115,6 +123,20 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	// future authkit release exposes a stable duplicate-group sentinel,
 	// mapping it to a typed ErrSlugTaken here — skipping the extra
 	// round-trip — is a non-breaking follow-up.
+	// or#914: a USER-claimed slug (owner set) on a creation-enabled deployment
+	// answers to the SAME declared policy authkit enforces on its generated
+	// POST /merchant route — the reserved-slug list, the extra slug pattern
+	// and the host admission (cost) gate. Refusals are typed
+	// (controlplane re-exports below: ErrSlugReserved / ErrCreationRefused)
+	// for hosts to map onto 4xx. The generated route is the canonical hosted
+	// creation path (it additionally rate-limits per IP/user and attaches the
+	// directory row itself); this keeps the in-process API from being a side
+	// door around the deployment's own policy. Operator paths (owner == "",
+	// Bootstrap, manifests) are not user claims and stay ungated.
+	if err := cp.EnforceMerchantCreationPolicy(ctx, slug, owner); err != nil {
+		return nil, fmt.Errorf("control plane provision: %w", err)
+	}
+
 	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
 	switch {
 	case errors.Is(err, authkit.ErrGroupNotFound):

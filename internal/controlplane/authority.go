@@ -7,6 +7,7 @@ import (
 
 	authcore "github.com/open-rails/authkit/embedded"
 
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -108,6 +109,25 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef 
 		return merchant.ID{}, "", err
 	}
 	return mid, mslug, nil
+}
+
+// MerchantGroupSlugResolver returns the or#914 rename-forwarding seam for the
+// merchants directory service: slug -> the bound merchant group's id and
+// CURRENT slug, following ak#264 tombstones so renamed-away slugs resolve to
+// the same group forever. Wire it with merchants.Service.WithGroupSlugResolver
+// wherever both the control plane and a directory service exist.
+func (c *ControlPlane) MerchantGroupSlugResolver() merchants.GroupSlugResolver {
+	return func(ctx context.Context, slug string) (string, string, error) {
+		core := c.Core()
+		if core == nil {
+			return "", "", ErrNoControlPlane
+		}
+		gi, err := core.GroupInstanceForSlug(ctx, MerchantType, strings.ToLower(strings.TrimSpace(slug)))
+		if err != nil {
+			return "", "", err
+		}
+		return gi.ID, gi.InstanceSlug, nil
+	}
 }
 
 // IsAdmin reports whether the user holds any merchant-staff grant in the named

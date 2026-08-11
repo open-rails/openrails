@@ -32,7 +32,10 @@ type WebhookResolver interface {
 	ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error)
 }
 
-// ResolveBySlug implements WebhookResolver against the openrails.merchants directory.
+// ResolveBySlug implements WebhookResolver against the openrails.merchants
+// directory. A miss retries through the authkit group namespace when the
+// or#914 rename-forwarding seam is wired, so a merchant's published webhook
+// URLs keep working across an ak#264 slug rename.
 func (s *Service) ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error) {
 	slug = normalizeSlug(slug)
 	if slug == "" {
@@ -43,6 +46,13 @@ func (s *Service) ResolveBySlug(ctx context.Context, slug string) (WebhookRoute,
 		SELECT id::text, status FROM openrails.merchants
 		 WHERE slug = $1 AND deleted_at IS NULL
 	`, slug).Scan(&idStr, &status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		m, ferr := s.merchantByGroupFallback(ctx, slug)
+		if ferr != nil {
+			return WebhookRoute{}, ErrMerchantRouteUnresolved
+		}
+		return s.routeFromScan(m.ID.String(), m.Slug, string(m.Status), nil)
+	}
 	return s.routeFromScan(idStr, slug, status, err)
 }
 

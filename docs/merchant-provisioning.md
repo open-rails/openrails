@@ -61,6 +61,56 @@ Embedded hosts provision merchants programmatically
 (`embed.Runtime.UpsertMerchantConfig`, same manifest shape) and pass auth at
 HTTP mount time; the issuer-as-owner path below is the standalone mechanism.
 
+## Merchant identity = permission group (or#914)
+
+The merchant's NAME is its authkit permission group's instance slug — one
+namespace, one team system. `openrails.merchants.slug` is a synced mirror
+(unique among live rows only), never an independently claimable name:
+
+- **Claims** are arbitrated by the group namespace. Hosted user-driven
+  creation goes through authkit's generated `POST /merchant` (ak#263); see the
+  recipe below.
+- **Renames** (ak#264, `RenamePermissionGroupSlug`): the old slug tombstones
+  and forwards to the same group forever. Every slug-addressed engine surface
+  (merchant-scoped routes, webhook URLs, service-credential refs) resolves the
+  directory table first and falls back through the group namespace, then
+  lazily re-syncs the stale row — published URLs keep working with no
+  operator step.
+- **Deletes**: a plain group delete tombstones the slug (default). A host that
+  proves a merchant was never used may free the name with
+  `DeletePermissionGroup(..., DeletePermissionGroupOptions{ReleaseSlug: true})`
+  and soft-delete the directory row; live-rows-only uniqueness makes the name
+  provisionable again as a NEW merchant.
+
+### Hosted creation recipe (registration is provisioning)
+
+A hosted product (openrails-saas shape) wires everything through
+`AttachOptions.MerchantCreation`:
+
+```go
+embcp.AttachWithOptions(ctx, app, cfg, pool, embcp.AttachOptions{
+    HostedPosture: true,
+    EmailSender:   sender,
+    MerchantCreation: &embcp.MerchantCreationConfig{
+        ReservedSlugs: []string{"my-brand"}, // + merchant.ReservedHostedSlugs, always
+        Admission: func(ctx context.Context, slug, ownerUserID string) error {
+            return nil // host cost gate: allowance / card-on-file (or#914 item 3)
+        },
+    },
+})
+```
+
+That one option: (1) mounts authkit's `POST /merchant` — authenticated users
+claim a slug behind authkit's per-IP/per-user velocity limits, the reserved
+list, and your admission gate — and OpenRails attaches the
+`openrails.merchants` directory row on success, so one call is the whole
+"registration is provisioning" flow (re-POSTing the same slug is the
+idempotent repair; the response carries `group_id`); (2) holds in-process
+`ProvisionMerchant` calls that name an `OwnerUserID` to the SAME policy
+(typed refusals `embcp.ErrSlugReserved` / `embcp.ErrCreationRefused`).
+Ownerless `ProvisionMerchant` and Bootstrap are operator acts and stay
+ungated — that is how a platform merchant claims a reserved name.
+
 ## Merchant manifest anatomy
 
 ```yaml

@@ -159,7 +159,23 @@ type AttachOptions struct {
 	// AuthKit's default. The type is authkit/ratelimit's own exported Limit —
 	// no OpenRails wrapper needed, matching Frontend/EmailSender above.
 	AuthRateLimitOverrides map[string]ratelimit.Limit
+
+	// MerchantCreation opts the merchant persona into authkit's generated
+	// instance-creation path (ak#263, or#914). With it set,
+	// ProvisionMerchant routes USER-claimed slugs (OwnerUserID != "") through
+	// CreateInstanceForSubject — slug pattern, reserved slugs
+	// (merchant.ReservedHostedSlugs + cfg.ReservedSlugs) and the
+	// cfg.Admission cost gate all apply automatically — and authkit mounts
+	// POST /merchant with its own per-IP/per-user velocity limits. Hosted
+	// "registration is provisioning" products should set this; leave nil for
+	// operator-provisioned (manifest/bootstrap) deployments.
+	MerchantCreation *MerchantCreationConfig
 }
+
+// MerchantCreationConfig is the nameable alias for
+// controlplane.MerchantCreationConfig (the BootstrapOptions alias pattern —
+// internal/controlplane cannot be imported outside this module).
+type MerchantCreationConfig = controlplane.MerchantCreationConfig
 
 // Get recovers the concrete *controlplane.ControlPlane attached to the app, or
 // nil when no control plane has been attached (an embedded host that never
@@ -236,6 +252,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if a.RedisClient != nil {
 		cpOpts = append(cpOpts, controlplane.WithRedis(a.RedisClient))
 	}
+	if opts.MerchantCreation != nil {
+		cpOpts = append(cpOpts, controlplane.WithMerchantCreation(*opts.MerchantCreation))
+	}
 	cp, err := controlplane.New(ctx, cfg, pool, cpOpts...)
 	if err != nil {
 		if ownedPool {
@@ -248,6 +267,18 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		a.SetControlPlane(cp, pool)
 	} else {
 		a.SetControlPlane(cp, nil)
+	}
+
+	// or#914: install the rename-forwarding seam so directory slug resolution
+	// (webhook routes, GetBySlug) follows ak#264 group renames. Covers both
+	// wiring orders: a merchants service armed LATER picks the seam up from
+	// the runtime (ArmMerchantsService); one armed EARLIER is wired here.
+	if a.Runtime != nil {
+		resolver := cp.MerchantGroupSlugResolver()
+		a.Runtime.MerchantGroupResolver = resolver
+		if a.Runtime.Merchants != nil {
+			a.Runtime.Merchants.WithGroupSlugResolver(resolver)
+		}
 	}
 	return nil
 }
