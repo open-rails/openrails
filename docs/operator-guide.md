@@ -52,9 +52,11 @@ modes"](operations.md#operating-modes-the-safety-levers).
   the system initiates nothing; `readonly` = nothing writes to a provider at
   all, wire-enforced.
 - **`test_mode`** (`TEST_MODE`, `--test-mode`) — the credential axis:
-  `sandbox | live`. Sandbox routes every rail to its test environment and
-  refuses live credentials at boot (live Stripe keys rejected, NMI accounts
-  probed with a test card), so no real money can move regardless of write mode.
+  `sandbox | live`; required outside development (or#915 — no silent live
+  default), sandbox by omission in development. Sandbox routes every rail to
+  its test environment and refuses live credentials at boot (live Stripe keys
+  rejected, NMI accounts probed with a test card), so no real money can move
+  regardless of write mode.
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|

@@ -43,6 +43,12 @@ For every merchant-manifest value: `yaml < secret files < env`. The manifest
 YAML is the base; mounted secret files overlay it; real `BILLING_MERCHANTS_*`
 environment variables win over both.
 
+The env/secret-file overlay carries ONLY credentials + branding (or#915):
+`..._SECRETS_*`, `_DISPLAY_NAME`, `_PROFILE_*`. Structural account state
+(`account_id`, `settings`, `archived`, `custodian`, `signer`), `invoice`,
+`api_host` and `delegated_invoker_wasted_spend_windows` live in the YAML; an
+env var naming one refuses boot with the manifest/DB home in the error.
+
 ## What happens at boot
 
 The conventional file is optional: absent, the server boots control-plane-only

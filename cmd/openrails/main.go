@@ -44,24 +44,20 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to get config flag: %w", err)
 			}
 
-			// --provider-write-mode rides the same koanf pipeline as everything
-			// else by overwriting PROVIDER_WRITE_MODE before Load: flag beats env
-			// beats yaml. The deprecated --mode alias is gone (#710).
+			// Flags ride the same koanf pipeline as everything else as a
+			// confmap overlay above env: flag beats env beats yaml (or#915 —
+			// the old path wrote PROVIDER_WRITE_MODE/TEST_MODE into the
+			// process env before Load, a back-door the env doctrine bans).
+			// The deprecated --mode alias is gone (#710).
+			var loadOpts []config.LoadOption
 			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
-				if err := os.Setenv("PROVIDER_WRITE_MODE", strings.TrimSpace(mode)); err != nil {
-					return fmt.Errorf("failed to apply --provider-write-mode: %w", err)
-				}
+				loadOpts = append(loadOpts, config.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
 			}
-
-			// --test-mode rides the same koanf pipeline as --provider-write-mode:
-			// overwrite TEST_MODE before Load so flag beats env beats yaml.
 			if posture, err := cmd.Flags().GetString("test-mode"); err == nil && strings.TrimSpace(posture) != "" {
-				if err := os.Setenv("TEST_MODE", strings.TrimSpace(posture)); err != nil {
-					return fmt.Errorf("failed to apply --test-mode: %w", err)
-				}
+				loadOpts = append(loadOpts, config.WithOverride("test_mode", strings.TrimSpace(posture)))
 			}
 
-			cfg, err := config.Load(configPath)
+			cfg, err := config.Load(configPath, loadOpts...)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
@@ -77,7 +73,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().
 		String("provider-write-mode", "", "Payment-provider write policy: full | limited | readonly (overrides PROVIDER_WRITE_MODE env and config.yaml; required outside development)")
 	rootCmd.PersistentFlags().
-		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; sandbox is development-only")
+		String("test-mode", "", "Credential posture: sandbox | live (sandbox uses Stripe test key, NMI sandbox probe, CCBill sandbox, Solana devnet); overrides TEST_MODE env and config.yaml; required outside development")
 
 	serverCmd := &cobra.Command{
 		Use:   "run-server",

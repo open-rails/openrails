@@ -151,6 +151,13 @@ Both fail loudly on retired anchors (`_ACCOUNTS_`, `_RAIL_MERCHANT_ACCOUNTS_`,
 `_PROVIDER_ACCOUNTS_` → "renamed to PSPS") and on any `BILLING_MERCHANTS_*`
 name that routes to no manifest field — a typo is an error, never a silent drop.
 
+The overlay carries ONLY credentials + branding (or#915): `..._SECRETS_*`
+(PSP and custodian), `_DISPLAY_NAME`, and `_PROFILE_*`. Everything else —
+`invoice`, `api_host`, `delegated_invoker_wasted_spend_windows`, PSP/custodian
+`account_id` / `settings` / `archived` / `custodian` / `signer` — is manifest
+YAML (or DB/API) state, and an env var naming one refuses boot with that home
+named in the error.
+
 ## Secrets: seeding vs runtime source of truth
 
 Secrets are addressed by `(merchant_id, name)`. PSP credentials use the
