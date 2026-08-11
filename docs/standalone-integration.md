@@ -93,7 +93,9 @@ openrails run-server --config /etc/openrails/config.yaml \
 Full MODE 1 walkthrough (file layout, secret-file overlay, precedence
 `yaml < secret files < env`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).
 The env overlay for merchant values is `BILLING_MERCHANTS_<MERCHANT>_PSPS_…`,
-e.g. `BILLING_MERCHANTS_MYAPP_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY`.
+e.g. `BILLING_MERCHANTS_MYAPP_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY` — and it
+carries only credentials + branding (`..._SECRETS_*`, `_DISPLAY_NAME`,
+`_PROFILE_*`; or#915). Everything else is manifest YAML state.
 
 ### First run
 

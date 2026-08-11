@@ -121,6 +121,65 @@ func TestLoad_EnvMapping(t *testing.T) {
 		assert.ErrorContains(t, err, "billing_hot_path was removed")
 	})
 
+	// or#915: the credential posture is REQUIRED outside development — the old
+	// silent live default meant a deployment that forgot TEST_MODE (or set the
+	// never-consumed TEST_ENV) ran on live credentials without ever saying so.
+	t.Run("test_mode is required outside development (or#915)", func(t *testing.T) {
+		t.Setenv("ENV", "production")
+		t.Setenv("PROVIDER_WRITE_MODE", "readonly")
+		_, err := Load("nonexistent-config.yaml")
+		require.ErrorContains(t, err, "test_mode is required outside development")
+	})
+
+	t.Run("explicit TEST_MODE=live boots outside development (or#915)", func(t *testing.T) {
+		t.Setenv("ENV", "production")
+		t.Setenv("PROVIDER_WRITE_MODE", "readonly")
+		t.Setenv("TEST_MODE", "live")
+		cfg, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+		require.Equal(t, CredentialPostureLive, cfg.TestMode)
+	})
+
+	t.Run("TEST_ENV refuses boot (or#915: it was never consumed)", func(t *testing.T) {
+		t.Setenv("TEST_ENV", "true")
+		_, err := Load("nonexistent-config.yaml")
+		require.ErrorContains(t, err, "TEST_ENV was never consumed and is removed (or#915)")
+	})
+
+	// or#915: flags reach the loader as a confmap overlay (WithOverride), not
+	// by writing into the process env — and the overlay beats env.
+	t.Run("WithOverride beats env and satisfies explicitness (or#915)", func(t *testing.T) {
+		t.Setenv("ENV", "production")
+		t.Setenv("PROVIDER_WRITE_MODE", "readonly")
+		t.Setenv("TEST_MODE", "sandbox")
+		cfg, err := Load("nonexistent-config.yaml", WithOverride("test_mode", "live"))
+		require.NoError(t, err)
+		require.Equal(t, CredentialPostureLive, cfg.TestMode, "flag overlay beats env")
+
+		os.Unsetenv("TEST_MODE")
+		cfg, err = Load("nonexistent-config.yaml", WithOverride("test_mode", "live"))
+		require.NoError(t, err)
+		require.Equal(t, CredentialPostureLive, cfg.TestMode, "--test-mode alone is an explicit declaration outside dev")
+	})
+
+	// or#915 strictness parity with the merchant overlay: a name INSIDE one of
+	// our config sections that hits no field refuses boot instead of silently
+	// dropping. (Names outside our sections — PATH, HOME — are never loaded.)
+	t.Run("unknown field in a known env section refuses boot (or#915)", func(t *testing.T) {
+		t.Setenv("DB_TYPO_FIELD", "x")
+		_, err := Load("nonexistent-config.yaml")
+		require.ErrorContains(t, err, "unknown keys refuse boot")
+		require.ErrorContains(t, err, "typo_field")
+	})
+
+	t.Run("unknown yaml key refuses boot (or#915)", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		require.NoError(t, os.WriteFile(path, []byte("env: development\nnot_a_real_key: 1\n"), 0o600))
+		_, err := Load(path)
+		require.ErrorContains(t, err, "unknown keys refuse boot")
+		require.ErrorContains(t, err, "not_a_real_key")
+	})
+
 	// #710 regression: SECRET_BACKEND is a multi-word TOP-LEVEL key. The old
 	// first-underscore splitting mapped it to secret.backend and silently
 	// dropped it — dangerous under #661 declared-intent.

@@ -15,7 +15,18 @@ import (
 // the host application's back — in embedded mode the HOST owns the process env.
 // Every value a library needs arrives as explicit config.
 func TestNoLibraryEnvReads(t *testing.T) {
-	needles := []string{"os.Getenv(", "os.LookupEnv(", "os.Environ(", "syscall.Getenv("}
+	readNeedles := []string{"os.Getenv(", "os.LookupEnv(", "os.Environ(", "syscall.Getenv("}
+
+	// or#915: env WRITES and dotenv loads are held to a stricter bar than
+	// reads. os.Setenv/os.Unsetenv are banned in ALL non-test code — cmd/
+	// included: --provider-write-mode/--test-mode used to reach the loader by
+	// writing into the process env before config.Load (a back-door that made
+	// env order-dependent and unauditable); flags ride a confmap overlay now.
+	// godotenv.Load has exactly ONE consumption point, logged at boot.
+	writeNeedles := []string{"os.Setenv(", "os.Unsetenv(", "godotenv.Load("}
+	writeAllowedFiles := map[string]string{
+		"config/config.go": "the ONE godotenv.Load consumption point (logged at boot); no Setenv",
+	}
 
 	// Allowlisted path prefixes (relative to the module root). One-line
 	// justification per entry — anything else that reads env FAILS.
@@ -59,10 +70,16 @@ func TestNoLibraryEnvReads(t *testing.T) {
 		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
 			return nil // test files own their env
 		}
+		readAllowed := false
 		for prefix := range allowedPrefixes {
 			if strings.HasPrefix(rel, prefix) {
-				return nil
+				readAllowed = true
+				break
 			}
+		}
+		_, writeAllowed := writeAllowedFiles[rel]
+		if readAllowed && writeAllowed {
+			return nil
 		}
 
 		f, err := os.Open(path)
@@ -76,9 +93,18 @@ func TestNoLibraryEnvReads(t *testing.T) {
 		for scanner.Scan() {
 			lineNo++
 			line := scanner.Text()
-			for _, needle := range needles {
-				if strings.Contains(line, needle) {
-					violations = append(violations, fmt.Sprintf("%s:%d: %s", rel, lineNo, strings.TrimSpace(line)))
+			if !readAllowed {
+				for _, needle := range readNeedles {
+					if strings.Contains(line, needle) {
+						violations = append(violations, fmt.Sprintf("%s:%d: %s", rel, lineNo, strings.TrimSpace(line)))
+					}
+				}
+			}
+			if !writeAllowed {
+				for _, needle := range writeNeedles {
+					if strings.Contains(line, needle) {
+						violations = append(violations, fmt.Sprintf("%s:%d: %s (env writes/dotenv loads are banned outside config.Load — or#915)", rel, lineNo, strings.TrimSpace(line)))
+					}
 				}
 			}
 		}

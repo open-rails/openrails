@@ -568,10 +568,12 @@ Two orthogonal settings:
   development): forgetting the knob can never mean full behavior. The old
   `mode` / `MODE` / `--mode` alias is removed (#710) — a set key fails loudly.
 - **`test_mode`** (yaml) / `TEST_MODE` (env) / `--test-mode` (CLI flag) — the
-  **credential** axis: `sandbox | live`, no other values. `config.Load`
-  defaults to sandbox in development-like boots and live otherwise; embedded
-  hosts build `Config` programmatically and must set it explicitly or
-  construction refuses to boot (#745).
+  **credential** axis: `sandbox | live`, no other values. Required outside
+  development (or#915): the boot refuses without an explicit value — the old
+  silent live default could put a deployment on live credentials by omission.
+  Development-only, an unset value defaults to sandbox. Embedded hosts build
+  `Config` programmatically and must set it explicitly or construction
+  refuses to boot (#745).
 
 What each provider write mode permits (`test_mode` applies orthogonally: with
 sandbox the same matrix holds against sandbox rails, so no real money can move

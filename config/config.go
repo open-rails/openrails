@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
@@ -1952,8 +1953,12 @@ func topLevelKoanfKeys() (scalar, nested map[string]bool) {
 }
 
 // envKeyToConfigKey maps an env var name to its koanf config key.
-// Examples: SECRET_BACKEND -> secret_backend, DB_URL -> db.url. Unknown names
-// pass through unchanged and are dropped at unmarshal.
+// Examples: SECRET_BACKEND -> secret_backend, DB_URL -> db.url. Names that
+// route to no config section return "" and are never loaded (the process env
+// is full of vars that are not ours — PATH, HOME, compose interpolation vars);
+// or#915 pairs this with a strict ErrorUnused unmarshal, so a name INSIDE one
+// of our sections that hits no field (DB_TYPO) refuses boot instead of
+// silently dropping.
 func envKeyToConfigKey(s string) string {
 	s = strings.ToLower(s)
 
@@ -1986,10 +1991,35 @@ func envKeyToConfigKey(s string) string {
 			return prefix + "." + rest
 		}
 	}
-	return s
+	return ""
 }
 
-func Load(configPath string) (*Config, error) {
+// LoadOption customizes Load. WithOverride is the CLI-flag path (or#915):
+// flags ride the same koanf pipeline as everything else via a confmap overlay
+// loaded ABOVE env (flag beats env beats yaml) — never by writing into the
+// process environment behind the loader's back.
+type LoadOption func(*loadOptions)
+
+type loadOptions struct {
+	overrides map[string]any
+}
+
+// WithOverride overlays one koanf config key (e.g. "test_mode",
+// "provider_write_mode") above every other source.
+func WithOverride(key string, value any) LoadOption {
+	return func(o *loadOptions) {
+		if o.overrides == nil {
+			o.overrides = map[string]any{}
+		}
+		o.overrides[key] = value
+	}
+}
+
+func Load(configPath string, opts ...LoadOption) (*Config, error) {
+	var options loadOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
 	k := koanf.New(".")
 
 	// Start from sensible defaults so zero-config works in containers/compose —
@@ -1999,11 +2029,16 @@ func Load(configPath string) (*Config, error) {
 	cfg := GetDefaultBillingConfig()
 	cfg.Env = ""
 
+	// A .env in the working directory is a real config source, so consuming
+	// one is LOGGED (or#915): a deployment silently absorbing a stray .env is
+	// the quiet failure mode the env audit flagged.
 	if err := godotenv.Load(); err != nil {
 		var pathErr *os.PathError
 		if !errors.As(err, &pathErr) {
 			return nil, err
 		}
+	} else if abs, absErr := filepath.Abs(".env"); absErr == nil {
+		log.Infof("config: loaded environment overrides from %s", abs)
 	}
 
 	if configPath == "" {
@@ -2023,6 +2058,14 @@ func Load(configPath string) (*Config, error) {
 	envCallbackWithValue := func(key string, value string) (string, interface{}) {
 		upperKey := strings.ToUpper(key)
 		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
+			return "", nil
+		}
+		// DB_ADMIN_PASSWORD belongs to the privileged migration role and is a
+		// docker-compose interpolation var, never server config.
+		// VAULT_SECRETS_PATH is consumed directly by config.SecretFiles, not a
+		// vault.* field. Without these skips the strict unmarshal would refuse
+		// boot on db.admin_password / vault.secrets_path.
+		if upperKey == "DB_ADMIN_PASSWORD" || upperKey == "VAULT_SECRETS_PATH" {
 			return "", nil
 		}
 
@@ -2070,6 +2113,14 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("loading environment variables: %w", err)
 	}
 
+	// CLI-flag overrides load ABOVE env (or#915): flag beats env beats yaml,
+	// without any os.Setenv back-door.
+	if len(options.overrides) > 0 {
+		if err := k.Load(confmap.Provider(options.overrides, "."), nil); err != nil {
+			return nil, fmt.Errorf("loading flag overrides: %w", err)
+		}
+	}
+
 	// HARD CUT (#469): the AuthKit control plane is always on in standalone
 	// mode; the verifier-only deployment mode is gone. The former
 	// auth.control_plane.enabled knob is rejected — not silently ignored — so a
@@ -2085,6 +2136,12 @@ func Load(configPath string) (*Config, error) {
 	// HARD CUT (#710): the deprecated provider_write_mode alias is gone.
 	if k.Exists("mode") || os.Getenv("MODE") != "" || os.Getenv("BILLING_MODE") != "" {
 		return nil, fmt.Errorf("mode was removed (#710): set provider_write_mode (env PROVIDER_WRITE_MODE, flag --provider-write-mode) to full|limited|readonly")
+	}
+	// HARD CUT (or#915): TEST_ENV was documented in .env.example but never
+	// consumed — an operator who set it believed they had chosen a credential
+	// posture and had not. Refuse, never silently drop.
+	if os.Getenv("TEST_ENV") != "" {
+		return nil, fmt.Errorf("TEST_ENV was never consumed and is removed (or#915): set test_mode (env TEST_MODE, flag --test-mode) to sandbox|live")
 	}
 	// #712: ad-hoc library env knobs moved into config; the old names fail loudly.
 	if os.Getenv("OPENRAILS_CATALOG_RECONCILIATION_INTERVAL") != "" {
@@ -2156,9 +2213,26 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("private_port was removed: OpenRails serves a single HTTP listener and there is no separate internal port; delete the private_port yaml key and PRIVATE_PORT env var")
 	}
 
-	// Unmarshal into config struct (overlay onto defaults)
-	if err := k.Unmarshal("", cfg); err != nil {
-		return nil, fmt.Errorf("unmarshaling config: %w", err)
+	// Unmarshal into config struct (overlay onto defaults). Strict (or#915,
+	// matching the merchant overlay's ErrorUnused): a yaml key or an env var
+	// inside one of our sections that hits no struct field refuses boot —
+	// "config I set is silently ignored" is the failure mode this kills.
+	// (envKeyToConfigKey already drops env names outside our sections, so the
+	// ambient process environment cannot trip this.)
+	if err := k.UnmarshalWithConf("", cfg, koanf.UnmarshalConf{
+		Tag: "koanf",
+		DecoderConfig: &mapstructure.DecoderConfig{
+			DecodeHook: mapstructure.ComposeDecodeHookFunc(
+				mapstructure.StringToTimeDurationHookFunc(),
+				mapstructure.StringToSliceHookFunc(","),
+				mapstructure.TextUnmarshallerHookFunc(),
+			),
+			Result:           cfg,
+			WeaklyTypedInput: true,
+			ErrorUnused:      true,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("unmarshaling config (unknown keys refuse boot — or#915): %w", err)
 	}
 
 	// SEC-18: ENV is REQUIRED and has no default. Every other knob can fail
@@ -2172,27 +2246,26 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("ENV is required (SEC-18): set env (env ENV) to development for a local/dev deployment, or to production/staging/<name> — there is no default, because the permissive posture (plaintext merchant secrets) is the development one. The DB role is NOT one of those relaxations: a BYPASSRLS role is refused in every environment")
 	}
 
-	// These sections are intentionally tolerated for operator visibility during
-	// migration, but they no longer participate in runtime configuration. Keep
-	// Load permissive while ensuring the returned struct reflects the supported
-	// infrastructure-only config surface.
 	// Sandbox-by-default in development (#355/#745): when test_mode is not
-	// explicitly provided, a dev-like boot defaults to sandbox credentials so a
+	// explicitly provided, a dev boot defaults to sandbox credentials so a
 	// local run can never accidentally move real money against live rail
 	// credentials — the dangerous case is silent ("forgot to set it"), so the
-	// safe value is the one you get by omission. Outside development the
-	// default stays live, and an explicit test_mode=sandbox is still rejected
-	// by Validate: prod opts into live only by omission and can never opt into
-	// sandbox. To run live locally, set test_mode=live explicitly (env
-	// TEST_MODE=live, flag --test-mode=live). This only governs standalone
-	// Load(); embedded hosts build the Config programmatically and MUST
-	// supply their own value — embedded.New refuses to construct otherwise.
+	// safe value is the one you get by omission. To run live locally, set
+	// test_mode=live explicitly (env TEST_MODE=live, flag --test-mode=live).
+	//
+	// Outside development test_mode is REQUIRED (or#915, fail-closed like
+	// provider_write_mode): the old silent live default meant an operator who
+	// believed an ignored TEST_ENV had put them in test was actually pointed
+	// at live credentials. The credential posture decides whether real money
+	// moves — it must be declared, never inherited by omission. This only
+	// governs standalone Load(); embedded hosts build the Config
+	// programmatically and MUST supply their own value — embedded.New refuses
+	// to construct otherwise.
 	if !k.Exists("test_mode") {
-		if cfg.IsDev() {
-			cfg.TestMode = CredentialPostureSandbox
-		} else {
-			cfg.TestMode = CredentialPostureLive
+		if !cfg.IsDev() {
+			return nil, fmt.Errorf("test_mode is required outside development (or#915): set test_mode (env TEST_MODE, flag --test-mode) to live or sandbox — the credential posture must be declared explicitly, there is no default")
 		}
+		cfg.TestMode = CredentialPostureSandbox
 	}
 
 	// The control plane is mandatory in standalone mode (#469). In development

@@ -9,23 +9,18 @@ import (
 )
 
 func TestMerchantBillingEnvKey(t *testing.T) {
+	// or#915: the env overlay carries ONLY credentials + branding — secrets
+	// (which must stay out of committed YAML) plus display_name/profile.
 	tests := map[string]string{
-		"BILLING_VERSION":                                                             "version",
-		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":                                      "merchants.doujins.display_name",
-		"BILLING_MERCHANTS_DOUJINS_API_HOST":                                          "merchants.doujins.api_host",
-		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL":                                "merchants.doujins.profile.from_email",
-		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY":              "merchants.doujins.psps.mobius.nmi.secrets.security_key",
-		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL": "merchants.doujins.psps.mobius-sandbox.nmi.settings.tokenization_url",
-		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_KEY": "merchants.doujins.psps.mobius-sandbox.nmi.settings.tokenization_key",
-		"BILLING_MERCHANTS_DOUJINS_PSPS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME":      "merchants.doujins.psps.ccbill.ccbill.secrets.datalink_username",
-		"BILLING_MERCHANTS_DOUJINS_PSPS_SOLANA_SOLANA_SIGNER_MODE":                    "merchants.doujins.psps.solana.solana.signer.mode",
+		"BILLING_VERSION":                                                        "version",
+		"BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME":                                 "merchants.doujins.display_name",
+		"BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL":                           "merchants.doujins.profile.from_email",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY":         "merchants.doujins.psps.mobius.nmi.secrets.security_key",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SECRETS_SECURITY_KEY": "merchants.doujins.psps.mobius-sandbox.nmi.secrets.security_key",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_CCBILL_CCBILL_SECRETS_DATALINK_USERNAME": "merchants.doujins.psps.ccbill.ccbill.secrets.datalink_username",
 		// or#880: custodians are declared once and overlaid like any PSP —
 		// the private application key must be keepable out of the YAML.
-		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY":         "merchants.doujins.custodians.bt.basis_theory.secrets.api_key",
-		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SETTINGS_PUBLIC_API_KEY": "merchants.doujins.custodians.bt.basis_theory.settings.public_api_key",
-		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_PROD_BASIS_THEORY_ACCOUNT_ID":         "merchants.doujins.custodians.bt-prod.basis_theory.account_id",
-		// #710: real manifest field, previously listed as a section but unrouted.
-		"BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS": "merchants.doujins.delegated_invoker_wasted_spend_windows",
+		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY": "merchants.doujins.custodians.bt.basis_theory.secrets.api_key",
 	}
 	for envName, want := range tests {
 		t.Run(envName, func(t *testing.T) {
@@ -36,6 +31,22 @@ func TestMerchantBillingEnvKey(t *testing.T) {
 	// #710: the ISSUER section routed to a manifest field that does not exist;
 	// it is gone (host-app trust lives under remote_application, not env).
 	require.Empty(t, MerchantBillingEnvKey("BILLING_MERCHANTS_DOUJINS_ISSUER_URL"))
+	// or#915: every non-credential, non-branding section left the routable set.
+	for _, name := range []string{
+		"BILLING_MERCHANTS_DOUJINS_API_HOST",
+		"BILLING_MERCHANTS_DOUJINS_INVOICE_COLLECTION_THRESHOLD",
+		"BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_ACCOUNT_ID",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_ARCHIVED",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_CUSTODIAN",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_SANDBOX_NMI_SETTINGS_TOKENIZATION_URL",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_SOLANA_SOLANA_SETTINGS_RECIPIENT_WALLET",
+		"BILLING_MERCHANTS_DOUJINS_PSPS_SOLANA_SOLANA_SIGNER_MODE",
+		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SETTINGS_PUBLIC_API_KEY",
+		"BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_PROD_BASIS_THEORY_ACCOUNT_ID",
+	} {
+		require.Emptyf(t, MerchantBillingEnvKey(name), "%s must not be env-routable (or#915)", name)
+	}
 }
 
 // #698: env vars still using a retired accounts anchor must fail loudly. The
@@ -120,23 +131,53 @@ merchants:
 	require.Equal(t, "private-env-value", account.Secrets["security_key"])
 }
 
-// #710: delegated_invoker_wasted_spend_windows is overlayable from env as one
-// JSON list value (it is a list field — no per-index env shape).
-func TestLoadMerchantConfigManifestBytesMergesWastedWindowsEnvOverlay(t *testing.T) {
-	t.Setenv("BILLING_MERCHANTS_COHOST_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS",
-		`[{"key":"burst","window":"15m","limit":5000000},{"key":"sustained","window":"5h","limit":20000000,"currency":"USD"}]`)
-
-	manifest, err := LoadMerchantConfigManifestBytes([]byte(`
+// or#915: sections removed from the env-routable set refuse boot LOUDLY, with
+// the manifest/DB home named — an operator still carrying the old vars learns
+// immediately, never a silent drop.
+func TestMerchantEnvOverlayRefusesNonCredentialSections(t *testing.T) {
+	manifest := []byte(`
 version: 1
 merchants:
-  cohost:
-    display_name: Cohost
-`))
-	require.NoError(t, err)
-	windows := manifest.Merchants["cohost"].DelegatedInvokerWastedSpendWindows
-	require.Len(t, windows, 2)
-	require.Equal(t, BudgetWindowConfig{Key: "burst", Window: "15m", Limit: 5_000_000}, windows[0])
-	require.Equal(t, BudgetWindowConfig{Key: "sustained", Window: "5h", Limit: 20_000_000, Currency: "USD"}, windows[1])
+  doujins:
+    display_name: Doujins
+`)
+	cases := []struct {
+		name string
+		env  string
+		want []string
+	}{
+		{"invoice", "BILLING_MERCHANTS_DOUJINS_INVOICE_COLLECTION_THRESHOLD",
+			[]string{"invoice policy left the env overlay", "merchants.<slug>.invoice", "merchant_configurations"}},
+		{"api_host", "BILLING_MERCHANTS_DOUJINS_API_HOST",
+			[]string{"api_host left the env overlay", "PUT /v1/merchant/api-host"}},
+		{"wasted-spend windows", "BILLING_MERCHANTS_DOUJINS_DELEGATED_INVOKER_WASTED_SPEND_WINDOWS",
+			[]string{"delegated_invoker_wasted_spend_windows left the env overlay", "push-merchant-config"}},
+		{"psp settings", "BILLING_MERCHANTS_DOUJINS_PSPS_SOLANA_SOLANA_SETTINGS_RECIPIENT_WALLET",
+			[]string{"PSP account state", "openrails.psps"}},
+		{"psp archived", "BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_ARCHIVED",
+			[]string{"PSP account state", "merchants.<slug>.psps"}},
+		{"psp custodian reference", "BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_CUSTODIAN",
+			[]string{"PSP account state", "merchants.<slug>.psps"}},
+		{"psp account_id", "BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_ACCOUNT_ID",
+			[]string{"PSP account state", "merchants.<slug>.psps"}},
+		{"psp signer", "BILLING_MERCHANTS_DOUJINS_PSPS_SOLANA_SOLANA_SIGNER_MODE",
+			[]string{"PSP account state", "merchants.<slug>.psps"}},
+		{"custodian settings", "BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SETTINGS_PUBLIC_API_KEY",
+			[]string{"custodian account state", "merchants.<slug>.custodians"}},
+		{"custodian account_id", "BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_PROD_BASIS_THEORY_ACCOUNT_ID",
+			[]string{"custodian account state", "merchants.<slug>.custodians"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(tc.env, "x")
+			_, err := LoadMerchantConfigManifestBytes(manifest)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tc.env)
+			for _, want := range tc.want {
+				require.Contains(t, err.Error(), want)
+			}
+		})
+	}
 }
 
 // #710: a BILLING_MERCHANTS_* var that routes to no manifest field fails
