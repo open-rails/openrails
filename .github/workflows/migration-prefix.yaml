@@ -1,0 +1,90 @@
+name: migration prefix
+
+# or#919 (ported from tensorhub th#1790) — a migration number claimed on this
+# branch may have been taken on `master` five minutes ago, and nothing else in
+# CI would say a word.
+#
+# THIS REPO IS WHERE THE OUTAGE HAPPENED. or#908 (PR #275) and or#911 (PR #276)
+# each shipped a migration `0005`; each was green ALONE; they merged minutes
+# apart. migratekit keys the applied-migrations ledger by the numeric prefix,
+# so the pair is ONE migration to every database and LoadFromFS refuses it —
+# every boot and every `migrate` on master failed until hotfix PR #278
+# (`8639ce85`) renumbered one of them to `0006`. GitHub does not re-run a check
+# when the base moves under an open PR, so both PRs read CLEAN to the end.
+#
+# So this job resolves `origin/master` OVER THE NETWORK when it runs, and its
+# verdict is stamped with the sha it measured. Its answer is true as of its own
+# start and no earlier. Re-run it immediately before merging; a green tick from
+# before a sibling landed is evidence about a tree that no longer exists.
+#
+# A GREEN CHECK IS AN EARLY WARNING, NOT A GATE. The guard is necessary but not
+# sufficient: tensorhub's instance PASSED on a genuinely colliding tree because
+# master moved AFTER the job ran. Until the ruleset ticks "require branches to
+# be up to date before merging" (which forces the re-run when master moves),
+# nothing structural closes that window.
+#
+# NO `paths:` FILTER, on purpose — twice over. A path-filtered workflow that
+# never runs leaves a REQUIRED context pending forever, so filtering here would
+# make the job impossible to enforce later without a second edit. And it costs
+# nothing to skip: a tree whose migration set is already a subset of master's
+# exits in seconds, after one shallow fetch and two listings. No database, no
+# containers, no Go build.
+#
+# NOT A REQUIRED CHECK (or#919, deliberate). Required contexts here are
+# configured by repo ruleset and that is Paul's call, not a lane's. To enforce
+# it: repo Settings -> Rules -> "Master integrity baseline" -> add a
+# "Require status checks to pass" rule -> add the context `prefix_collision`,
+# and — this is the half that actually closes the race — tick "Require branches
+# to be up to date before merging", which is what forces the re-run when master
+# moves.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    branches: [master]
+
+concurrency:
+  group: migration-prefix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prefix_collision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The PR HEAD, not refs/pull/N/merge. The merge ref is a snapshot of a
+          # base that has since moved — the exact thing this job exists to stop
+          # trusting — and it does not exist at all when the PR has conflicts,
+          # which would fail this job for a reason that is not its business.
+          # The head branch's own migration set is all the local side needs.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Depth 1 is sufficient and deliberate: the script reads two TREES,
+          # never history, and fetches master's tip itself.
+          fetch-depth: 1
+
+      - name: migration prefix collision
+        run: scripts/migration-prefix-collision.sh
+
+  # The guard's own behaviour, proven by driving the real script over real
+  # throwaway repositories — including a replay of the or#908/or#911 outage and
+  # a proof that an unreachable master reports UNVERIFIED instead of failing the
+  # PR. A fence that cannot go red is not a fence, and a fence that goes red for
+  # the wrong reason is worse than none while several lanes are in flight.
+  prefix_guard_tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: migration-prefix behaviour
+        run: go test -count=1 -v ./tools/migrationprefix/
