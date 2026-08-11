@@ -164,6 +164,7 @@ const (
 	PermMerchantDashboardUpdate        = permissions.MerchantDashboardUpdate
 	PermMerchantFindingsResolve        = permissions.MerchantFindingsResolve
 	PermMerchantBillingImport          = permissions.MerchantBillingImport
+	PermMerchantCreditsGrant           = permissions.MerchantCreditsGrant
 	PermMerchantMembersRead            = permissions.MerchantMembersRead
 	PermMerchantMembersManage          = permissions.MerchantMembersManage
 	PermMerchantCredentialsManage      = permissions.MerchantCredentialsManage

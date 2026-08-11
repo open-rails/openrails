@@ -218,7 +218,9 @@ reference: `docs/api/endpoints.md`.
 | List / inspect subscriptions | `GET /v1/merchant/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
 | Cancel / resume a subscription | `POST /v1/merchant/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
 | Change a subscription's payment method | `PUT /v1/merchant/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
-| Deposit credits | `POST /v1/merchant/credits/deposit` | — |
+| Deposit credits (machine/rails) | `POST /v1/merchant/credits/deposit` | — |
+| Grant credits to a customer (human admin) | `POST /v1/merchant/customers/{id}/credits` | Customers → profile |
+| Ask what a deposit key did | `GET /v1/merchant/credits/deposit?customer_id=&source_id=` | — |
 | Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[:upsert]` | — |
 | Credit limit / trust level | `PUT /v1/merchant/credit-limit`, `GET /v1/merchant/trust-level` | Settings |
 | Catalog CRUD over HTTP | `POST/PATCH /v1/merchant/catalog/products`, `/prices` | Catalog |
@@ -227,6 +229,13 @@ reference: `docs/api/endpoints.md`.
 
 Destructive semantics are deliberate: refunds and cancels require an explicit
 `revoke_access` decision — refunding money and revoking access are separate choices.
+
+Granting credits is money-in and carries its own permission,
+`merchant:credits:grant` — owner-level by default (`merchant:*`), NOT part of the
+fixed support role, unlike the entitlement/product-access grants (which ride
+`merchant:customer-settings:update`). The grant body's `source_id` is the
+caller's reproducible idempotency key: retrying it can never double-credit
+(database-enforced), and a retry with a different `amount` is refused with 409.
 
 ### The admin console
 

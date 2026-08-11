@@ -377,6 +377,60 @@ func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer 
 // it goes. Reads by coordinate now go through GetLedgerTransferByCoords with an
 // operation.
 
+// GetDepositBySourceID answers "what did this deposit key do" (or#906): the
+// credit grant committed at the caller's key, or (nil, nil) when the key never
+// committed. KEY-QUALIFIED on the deposit's full structural coordinate —
+// (merchant, payer, source_id) with operation=deposit fixed by the method
+// itself — exactly the coordinate depositTx dedupes on. NOT a keyless
+// coordinate read; or#894 deleted that shape as a trap (see above).
+func (s *MoneyService) GetDepositBySourceID(ctx context.Context, payer identity.CustomerID, sourceID string) (*models.MoneyTransaction, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil, fmt.Errorf("source_id required")
+	}
+	var out *models.MoneyTransaction
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		tid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		g, err := s.db.Gen(ctx).GetCreditGrantBySourceID(ctx, gen.GetCreditGrantBySourceIDParams{
+			MerchantID: tid.UUID(), CustomerID: payer.UUID(), SourceID: sourceID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		sid := g.SourceID
+		out = &models.MoneyTransaction{
+			ID:              g.ID,
+			MerchantID:      g.MerchantID,
+			CustomerID:      g.CustomerID,
+			Currency:        normalizeUnit(derefStrOr(g.Currency, "")),
+			Amount:          derefInt(g.Amount),
+			TransactionType: "deposit",
+			Status:          "posted",
+			Source:          g.SourceType,
+			SourceID:        &sid,
+			ExpiresAt:       g.EndsAt,
+			Description:     g.Reason,
+			CreatedAt:       g.CreatedAt,
+			UpdatedAt:       g.CreatedAt,
+			// The lookup exists to answer a caller that lost the POST's answer:
+			// the movement described here landed EARLIER, matching what a replay
+			// POST at this key would report (LED-15 vocabulary).
+			Replayed: true,
+		}
+		return nil
+	})
+	return out, err
+}
+
 type DepositParams struct {
 	// CustomerID is the merchant subject that owns the deposited balance (issue #221). When
 	// nil, the payer is the invoker (Invoker)'s own account/personal merchant-subject UUID for the
@@ -488,6 +542,19 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 			MerchantID: tenantID, CustomerID: payerID, SourceID: *params.SourceID,
 		})
 		if gerr == nil {
+			// or#906: a replay whose amount differs from what the key already
+			// committed is a caller bug, refused — never answered with the
+			// original amount as a "success" (or#891 doctrine; the committed
+			// amount is durable on the grant, no fingerprint column needed).
+			// Amount only, deliberately: currency/expiry/description drift is
+			// tolerated everywhere else (or#891 compares nothing but amount)
+			// and the same posture holds here.
+			if committed := derefInt(existing.Amount); committed != params.Amount {
+				return nil, &IdempotencyConflict{
+					Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
+					Field: "amount", Committed: committed, Retried: params.Amount,
+				}
+			}
 			// or#892: the deposit's structural key is the credit grant's
 			// (merchant, customer, source_id). A hit means this deposit already
 			// credited; say so instead of letting the caller assume it moved money.
@@ -505,6 +572,7 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		Customer: payerID, Kind: grants.Credit,
 		Source: grants.SourceType(depositSourceType(params.Source)), SourceID: derefStr(params.SourceID),
 		Amount: &params.Amount, Currency: &cur, StartsAt: now, EndsAt: params.ExpiresAt,
+		Reason: params.Description,
 	})
 	if err != nil {
 		return nil, err

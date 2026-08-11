@@ -108,6 +108,7 @@ type GrantInput struct {
 	EndsAt   *time.Time
 	Amount   *int64  // credit lots
 	Currency *string // credit lots
+	Reason   *string // free-text provenance (or#906: a deposit's description)
 }
 
 // Grant appends a 'grant' event (derive-1). Call Materialize afterwards (or rely
@@ -130,6 +131,7 @@ func (l *Ledger) Grant(ctx context.Context, in GrantInput) (gen.OpenrailsGrant, 
 		Kind: string(in.Kind), SourceType: string(in.Source), SourceID: in.SourceID, PaymentID: in.Payment,
 		Event: "grant", SupersedesID: nil, SpecSnapshot: spec,
 		StartsAt: starts, EndsAt: in.EndsAt, Amount: in.Amount, Currency: in.Currency,
+		Reason: in.Reason,
 	})
 }
 

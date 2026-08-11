@@ -39,6 +39,14 @@ const (
 	// DeclaredBilling book import writes subscriptions/payments/payment methods
 	// wholesale — owner/automation authority, not a support-role grant.
 	MerchantBillingImport = "merchant:billing:import"
+	// MerchantCreditsGrant gates the human-admin credit grant
+	// (or#906: POST /v1/merchant/customers/{id}/credits). Money-in is the one
+	// grant-shaped act whose blast radius is monetary, so it does NOT ride on
+	// merchant:customer-settings:update (which the fixed #567 support role
+	// holds): a support agent who can edit settings must not be able to mint
+	// balance. Owner-level (merchant:*) by default, grantable narrowly by a
+	// host with custom roles.
+	MerchantCreditsGrant = "merchant:credits:grant"
 	// MerchantMembersRead gates reading the merchant team roster and pending
 	// invites (#760: GET /v1/merchant/team[/invites]). Deliberately the SAME
 	// string as AuthKit's per-persona members:read built-in, so the OpenRails

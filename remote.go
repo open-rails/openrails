@@ -192,17 +192,13 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
 	}
-	var sourceID any
-	if req.SourceID != nil {
-		sourceID = req.SourceID.String()
-	}
 	body := map[string]any{
 		"customer_id": customerIDString(req.CustomerID),
 		"invoker":     req.Invoker,
 		"currency":    currency,
 		"amount":      req.Amount,
 		"source":      req.Source,
-		"source_id":   sourceID,
+		"source_id":   req.SourceID,
 	}
 	if req.ExpiresAt != nil {
 		body["expires_at"] = req.ExpiresAt.Unix()
@@ -212,6 +208,19 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 	}
 	var out CreditTransaction
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/deposit", body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// GetDeposit implements Client (handler ServiceGetDeposit, or#906). A key that
+// never committed returns an error matching ErrNotFound.
+func (c *remote) GetDeposit(ctx context.Context, customerID, sourceID string) (*CreditTransaction, error) {
+	q := url.Values{}
+	q.Set("customer_id", strings.TrimSpace(customerID))
+	q.Set("source_id", strings.TrimSpace(sourceID))
+	var out CreditTransaction
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/deposit?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

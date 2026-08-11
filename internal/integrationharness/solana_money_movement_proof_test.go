@@ -265,14 +265,14 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 
 	// Invoice state: a usage capture that finalizes an invoice in Postgres.
 	client := surface.Client()
-	depositSourceID := uuid.New()
+	depositSourceID := uuid.NewString()
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    payerID.String(),
 		Currency:   "USD",
 		Amount:     50_000,
 		Source:     "solana-money-movement",
-		SourceID:   &depositSourceID,
+		SourceID:   depositSourceID,
 	})
 	require.NoError(t, err)
 

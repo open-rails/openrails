@@ -69,14 +69,13 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 			invoker := "user:or900-" + uuid.NewString()
 
 			// --- item 2: applied vs replayed on the SDK type ------------------
-			depositSrc := uuid.New()
 			req := openrails.DepositCreditsRequest{
 				CustomerID: &pid,
 				Invoker:    invoker,
 				Currency:   currency,
 				Amount:     1_000_000,
 				Source:     "or900",
-				SourceID:   &depositSrc,
+				SourceID:   uuid.NewString(),
 			}
 			first, err := tr.client.DepositCredits(ctx, req)
 			require.NoError(t, err)

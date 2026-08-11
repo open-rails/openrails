@@ -106,6 +106,12 @@ type AdminFundingClient interface {
 	// DepositCredits mints a credit block for a payer (admin funding, promotions,
 	// money-in settlement). Returns the ledger transaction created.
 	DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error)
+	// GetDeposit answers "what did this deposit key do" (or#906): the grant
+	// committed at (customerID, sourceID) — id, amount, created_at, with
+	// Replayed=true — or an error matching ErrNotFound when the key never
+	// committed. Key-qualified: sourceID is the caller half of the deposit
+	// idempotency key; the operation half is deposit by construction.
+	GetDeposit(ctx context.Context, customerID, sourceID string) (*CreditTransaction, error)
 	// SetCreditLimit sets the admin-managed arrears credit line for a payer in one
 	// currency. A zero limit removes the credit line.
 	SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error
@@ -211,16 +217,19 @@ type DepositCreditsRequest struct {
 	Source string
 	// SourceID is the idempotency key for the deposit. REQUIRED, and it must be
 	// REPRODUCIBLE by the caller across retries of the same logical deposit —
-	// deriving it (uuidv5 over the operation's own identity) is the only way it
-	// survives this process. A value minted per request (uuid.New() in a handler)
-	// passes validation and guarantees nothing: it is a new deposit every time,
-	// which is exactly how a retried admin deposit double-credited an org.
+	// deriving it from the operation's own identity is the only way it survives
+	// this process. A value minted per request (uuid.New() in a handler) passes
+	// validation and guarantees nothing: it is a new deposit every time, which
+	// is exactly how a retried admin deposit double-credited an org. Any
+	// non-empty string (or#906; no longer restricted to a UUID).
 	//
-	// The deposit key is (merchant, payer, SourceID). Source is NOT part of it —
-	// the same SourceID under a different Source is still the same deposit. A
-	// duplicate is not rejected: it is answered with the EXISTING grant, so a
-	// replay is a success with the ORIGINAL amount.
-	SourceID    *uuid.UUID
+	// The deposit key is (merchant, payer, SourceID), UNIQUE in the database
+	// (or#906). Source is NOT part of it — doctrine, restated deliberately: the
+	// same SourceID under a different Source is still the same deposit, so a
+	// retry that relabels its source cannot double-credit. An IDENTICAL replay
+	// is answered with the EXISTING grant (Replayed=true); a replay whose
+	// Amount differs is refused with ErrIdempotencyKeyReused (HTTP 409).
+	SourceID    string
 	ExpiresAt   *time.Time
 	Description string
 }
