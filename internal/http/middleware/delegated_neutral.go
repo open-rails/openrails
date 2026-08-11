@@ -6,13 +6,16 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -223,31 +226,94 @@ func RequirePermission(perm string) router.Middleware {
 	}
 }
 
-// CustomerIDMatchesDelegated reports whether the :customer_id path segment
-// names the same customer as the resolved delegated principal — by slug,
-// merchant string, or merchant id.
-func CustomerIDMatchesDelegated(customerID string, resolved *controlplane.ResolvedDelegated) bool {
+// TreasuryPayerContextKey holds the *TreasuryPayer bound by
+// CustomerScopeRequired.
+const TreasuryPayerContextKey = "openrails.treasury_payer"
+
+// TreasuryPayer is the payer identity the customer-treasury surface
+// (/v1/customers/:customer_id/*) operates on, resolved and bound by
+// CustomerScopeRequired (or#916). Handlers consume this binding instead of
+// re-deriving a payer from merchant coordinates.
+type TreasuryPayer struct {
+	// Subject is the acting subject (delegated_sub), recorded for audit.
+	Subject string
+	// CustomerID is the payable subject every treasury read/write is keyed on.
+	CustomerID identity.CustomerID
+	// MerchantPayer marks the merchant-as-payer binding: the merchant's own
+	// treasury account, granted only to merchant-admin principals.
+	MerchantPayer bool
+}
+
+// TreasuryPayerFromRequest returns the payer bound by CustomerScopeRequired.
+func TreasuryPayerFromRequest(r *request.Request) (*TreasuryPayer, bool) {
+	if r == nil {
+		return nil, false
+	}
+	v, ok := r.Get(TreasuryPayerContextKey)
+	if !ok {
+		return nil, false
+	}
+	p, ok := v.(*TreasuryPayer)
+	return p, ok && p != nil
+}
+
+// ResolveTreasuryPayer matches the :customer_id path scope against the
+// resolved principal and returns the typed payer binding (or#916):
+//
+//   - SUBJECT payer: :customer_id names the principal's OWN payable subject
+//     (its delegated_sub or durable customer id). This is exactly the /v1/me
+//     binding — strictly more gated, since the treasury routes' customer:*
+//     RequirePermission rides on top.
+//   - MERCHANT payer: :customer_id names the pinned merchant's own
+//     coordinates (slug / id) — the merchant org's treasury account. Only a
+//     merchant-admin principal (one granted the full `merchant:*` authority)
+//     may bind it: every delegated principal of a merchant carries those
+//     coordinates, so matching them alone let ANY subject holding customer:*
+//     grants act on the merchant's balance (the pre-or#916 hazard).
+//
+// No match — including merchant coordinates presented without merchant-admin
+// authority — fails closed.
+func ResolveTreasuryPayer(customerID string, resolved *controlplane.ResolvedDelegated) (*TreasuryPayer, bool) {
 	customerID = strings.TrimSpace(customerID)
-	if customerID == "" || resolved == nil {
-		return false
+	if customerID == "" || resolved == nil || resolved.MerchantID.IsZero() {
+		return nil, false
 	}
-	candidates := []string{resolved.Merchant, resolved.MerchantSlug}
-	if !resolved.MerchantID.IsZero() {
-		candidates = append(candidates, resolved.MerchantID.String())
-	}
-	for _, candidate := range candidates {
-		if strings.TrimSpace(candidate) == customerID {
-			return true
+	subject := strings.TrimSpace(resolved.DelegatedSubject)
+	if (subject != "" && customerID == subject) ||
+		(resolved.CustomerID != uuid.Nil && customerID == resolved.CustomerID.String()) {
+		payer := identity.CustomerID(resolved.CustomerID)
+		if payer.IsZero() {
+			// Host principals carry the subject verbatim; a resolver that did
+			// not materialize a durable customer id still keys on the subject
+			// when it is a payable (uuid) subject.
+			payer = identity.CustomerIDFromString(subject)
 		}
+		if payer.IsZero() {
+			return nil, false
+		}
+		return &TreasuryPayer{Subject: subject, CustomerID: payer}, true
 	}
-	return false
+	for _, coordinate := range []string{resolved.Merchant, resolved.MerchantSlug, resolved.MerchantID.String()} {
+		if strings.TrimSpace(coordinate) != customerID {
+			continue
+		}
+		if !resolved.HasPermission(permissions.MerchantAll) {
+			return nil, false
+		}
+		return &TreasuryPayer{
+			Subject:       subject,
+			CustomerID:    identity.CustomerID(resolved.MerchantID.UUID()),
+			MerchantPayer: true,
+		}, true
+	}
+	return nil, false
 }
 
 // CustomerScopeRequired gates the customer-as-payer treasury surface
 // (/v1/customers/:customer_id/*, #567). Runs AFTER the delegated auth
-// middleware: confirms :customer_id matches the resolved principal's customer
-// and REBINDS the acting payer subject to the customer's payable subject so
-// the shared /v1/me money handlers operate on the customer balance. Never
+// middleware: resolves the typed treasury payer from the :customer_id scope
+// (or#916) and REBINDS the acting payer subject to that payable subject so
+// the shared /v1/me money handlers operate on the bound balance. Never
 // touches permissions; the pinned merchant is unchanged.
 func CustomerScopeRequired() router.Middleware {
 	return func(next router.Handler) router.Handler {
@@ -261,15 +327,24 @@ func CustomerScopeRequired() router.Middleware {
 				r.AbortJSON(http.StatusUnauthorized, "delegated principal invalid")
 				return
 			}
-			if !CustomerIDMatchesDelegated(r.Param("customer_id"), resolved) {
+			payer, ok := ResolveTreasuryPayer(r.Param("customer_id"), resolved)
+			if !ok {
 				r.AbortJSON(http.StatusForbidden, "customer_scope_mismatch")
 				return
 			}
-			r.SetUserContext(billingauth.UserContext{
-				UserID:   resolved.MerchantID.UUID().String(),
-				Username: resolved.Merchant,
+			user := billingauth.UserContext{
+				UserID:   payer.CustomerID.UUID().String(),
 				Merchant: resolved.Merchant,
-			})
+			}
+			if payer.MerchantPayer {
+				user.Username = resolved.Merchant
+			} else {
+				user.Email = resolved.Email
+				user.EmailVerified = resolved.EmailVerified
+				user.Username = resolved.Username
+			}
+			r.Set(TreasuryPayerContextKey, payer)
+			r.SetUserContext(user)
 			next(r)
 		}
 	}

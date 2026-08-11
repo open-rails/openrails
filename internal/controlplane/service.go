@@ -223,8 +223,8 @@ func resolveFrontendConfig(issuer string, override authcore.FrontendConfig) auth
 
 // resolveControlPlaneKeySource builds the JWT signing KeySource for the
 // control plane. Inline key material from config.Config.Auth (env
-// ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM/PUBLIC_KEYS, read once at config.Load —
-// #712) wins when present; otherwise it falls through to the standard
+// AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM/AUTHKIT_PUBLIC_KEYS,
+// read once at config.Load — #712/or#917) wins when present; otherwise it falls through to the standard
 // keys.json / dev-ephemeral resolution.
 func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) {
 	activeKeyID := strings.TrimSpace(cfg.Auth.ActiveKeyID)
@@ -233,12 +233,12 @@ func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) 
 		var publicKeysPEM map[string]string
 		if raw := strings.TrimSpace(cfg.Auth.PublicKeysJSON); raw != "" {
 			if err := json.Unmarshal([]byte(raw), &publicKeysPEM); err != nil {
-				return nil, fmt.Errorf("controlplane: parse auth.public_keys (PUBLIC_KEYS) JSON: %w", err)
+				return nil, fmt.Errorf("controlplane: parse auth.public_keys (AUTHKIT_PUBLIC_KEYS) JSON: %w", err)
 			}
 		}
 		ks, err := jwtkit.NewStaticKeySourceFromPEM(activeKeyID, activePrivateKeyPEM, publicKeysPEM)
 		if err != nil {
-			return nil, fmt.Errorf("controlplane: load JWT keys from ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM: %w", err)
+			return nil, fmt.Errorf("controlplane: load JWT keys from AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM: %w", err)
 		}
 		// #752: inline PEM is frozen for the process lifetime by construction —
 		// unlike keys_path (FILE-watched, hot-rotates), there is no way to rotate
@@ -246,7 +246,7 @@ func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) 
 		// (short-lived, disposable processes); every other environment gets a
 		// loud, one-time-per-boot heads-up naming the tradeoff.
 		if !cfg.IsDev() {
-			log.Warnf("controlplane: signing keys loaded from inline PEM (ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM) outside development — this key is FROZEN for the process lifetime: no hot rotation and no emergency revocation without a restart. keys_path (%s) is the FILE-watched, hot-rotating production path (#752); switch to it if you need no-restart key rotation or revocation.", jwtkit.DefaultAuthKeysPath)
+			log.Warnf("controlplane: signing keys loaded from inline PEM (AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM) outside development — this key is FROZEN for the process lifetime: no hot rotation and no emergency revocation without a restart. keys_path (%s) is the FILE-watched, hot-rotating production path (#752); switch to it if you need no-restart key rotation or revocation.", jwtkit.DefaultAuthKeysPath)
 		}
 		return ks, nil
 	}
@@ -287,7 +287,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// active signer; in dev it could even generate a different key on a second
 	// call.) Discovery (#712/#231: env is read ONLY at config.Load, never here or
 	// inside authkit): inline auth.active_key_id/active_private_key_pem (from
-	// ACTIVE_KEY_ID/ACTIVE_PRIVATE_KEY_PEM) wins; else /vault/auth/keys.json;
+	// AUTHKIT_ACTIVE_KEY_ID/AUTHKIT_ACTIVE_PRIVATE_KEY_PEM) wins; else
+	// /vault/auth/keys.json;
 	// else (dev only) an ephemeral dev key.
 	//
 	// The signing key is OPTIONAL (#527/#87): a control plane with no key runs

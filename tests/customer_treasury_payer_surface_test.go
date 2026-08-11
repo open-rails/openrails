@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -34,8 +35,12 @@ import (
 // the customer balance because CustomerScopeRequired rebinds the acting payer to
 // the customer.
 
-// allCustomerTreasuryPerms is the full payer-surface grant.
+// allCustomerTreasuryPerms is the full payer-surface grant for the
+// merchant-as-payer shape: since or#916 the merchant's own treasury account
+// binds only for merchant-admin principals (merchant:*), and each route still
+// needs its own customer:* grant on top.
 var allCustomerTreasuryPerms = []string{
+	permissions.MerchantAll,
 	controlplane.PermCustomerBalanceRead,
 	controlplane.PermCustomerBillingUpdate,
 	controlplane.PermCustomerPaymentMethodsUpdate,
@@ -45,14 +50,20 @@ var allCustomerTreasuryPerms = []string{
 }
 
 // newCustomerTreasuryServer mounts the customer-treasury surface behind a host-seam
-// principal carrying perms. The principal's MerchantID is always the test customer;
-// subject is irrelevant on this surface (the payer is rebound to the customer), so a
-// random subject proves the rebind is what scopes the balance.
+// principal carrying perms and a random subject: the merchant-as-payer shape, where
+// the payer is rebound to the merchant's own payable subject.
 func newCustomerTreasuryServer(t *testing.T, suite *TestContainerSuite, perms []string) *httptest.Server {
+	return newCustomerTreasuryServerAs(t, suite, uuid.NewString(), perms)
+}
+
+// newCustomerTreasuryServerAs mounts the same surface with an explicit acting
+// subject, for the or#916 subject-as-payer shape (the principal addressing its
+// OWN payable subject by :customer_id).
+func newCustomerTreasuryServerAs(t *testing.T, suite *TestContainerSuite, subject string, perms []string) *httptest.Server {
 	t.Helper()
 	router := http.NewServeMux()
 	httproutes.RegisterCustomerTreasuryRoutes(httprouter.NewMux(router, "/v1/customers", suite.App.Runtime), suite.App.Runtime,
-		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: uuid.NewString(), perms: perms}), routesurface.AllProviderRoutes())
+		middleware.DelegatedPrincipalRequired(hostSeamAuthenticator{subject: subject, perms: perms}), routesurface.AllProviderRoutes())
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
 	return srv
@@ -148,8 +159,9 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
-	// A read-only finance persona: customer:balance:read ONLY.
-	srv := newCustomerTreasuryServer(t, suite, []string{controlplane.PermCustomerBalanceRead})
+	// A read-only finance persona: a merchant admin (merchant:* binds the
+	// merchant payer account, or#916) holding customer:balance:read ONLY.
+	srv := newCustomerTreasuryServer(t, suite, []string{permissions.MerchantAll, controlplane.PermCustomerBalanceRead})
 
 	// Reads are allowed.
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/balance?currency=USD"), nil)
@@ -174,14 +186,22 @@ func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 func TestCustomerTreasuryPayerSurface_MerchantTokenAndCrossCustomerRejected(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
-	// Namespace separation: a merchant-only (seller hat) token holds NO customer:*
-	// grant, so it cannot reach any customer-payer route.
-	merchantSrv := newCustomerTreasuryServer(t, suite, []string{
-		controlplane.PermMerchantSettingsRead,
-		controlplane.PermMerchantCatalogUpdate,
-	})
+	// Namespace separation: a merchant-only (seller hat) token holds NO
+	// customer:* grant, so even a full merchant admin (merchant:* binds the
+	// merchant payer account, or#916) cannot reach any customer-payer route.
+	merchantSrv := newCustomerTreasuryServer(t, suite, []string{permissions.MerchantAll})
 	resp := requestCustomerTreasuryJSON(t, merchantSrv, http.MethodGet, customerPath("/balance?currency=USD"), nil)
 	require.Equal(t, http.StatusForbidden, resp.status, "merchant:* token must not reach a customer:* route: %s", resp.body)
+
+	// And a NON-admin merchant token never binds the merchant payer at all —
+	// concrete merchant grants are not merchant-admin standing.
+	supportSrv := newCustomerTreasuryServer(t, suite, []string{
+		controlplane.PermMerchantSettingsRead,
+		controlplane.PermMerchantCatalogUpdate,
+		controlplane.PermCustomerBalanceRead,
+	})
+	resp = requestCustomerTreasuryJSON(t, supportSrv, http.MethodGet, customerPath("/balance?currency=USD"), nil)
+	require.Equal(t, http.StatusForbidden, resp.status, "a non-admin principal must not bind the merchant payer account: %s", resp.body)
 
 	// Cross-customer: a fully-granted customer token may act ONLY on its OWN
 	// balance. The host principal resolves to the test customer, so a different
@@ -189,6 +209,65 @@ func TestCustomerTreasuryPayerSurface_MerchantTokenAndCrossCustomerRejected(t *t
 	customerSrv := newCustomerTreasuryServer(t, suite, allCustomerTreasuryPerms)
 	resp = requestCustomerTreasuryJSON(t, customerSrv, http.MethodGet, "/v1/customers/"+uuid.NewString()+"/balance?currency=USD", nil)
 	require.Equal(t, http.StatusForbidden, resp.status, "cross-customer access must be customer_scope_mismatch: %s", resp.body)
+}
+
+// TestCustomerTreasuryPayerSurface_SubjectPayer is the or#916 embedded shape:
+// the host principal's SUBJECT (e.g. a tensorhub org uuid) is the payer, and
+// :customer_id names that subject. Before or#916 the scope check matched only
+// MERCHANT coordinates, 403ing every subject payer with a correct permission
+// catalog; the subject must authorize on its own identity + customer:* grants.
+func TestCustomerTreasuryPayerSurface_SubjectPayer(t *testing.T) {
+	suite := getSharedTestSuite(t)
+	ctx := suite.MerchantCtx()
+
+	svc, err := billingservice.New(suite.App.Runtime)
+	require.NoError(t, err)
+
+	// The acting subject IS the payer (an org uuid in the tensorhub shape).
+	orgSubject := uuid.NewString()
+	orgPayer := identity.CustomerIDFromString(orgSubject)
+
+	// Fund the org's own payable account so the read has substance.
+	const deposit = 3_300_000
+	_, err = svc.DepositCredits(ctx, billingservice.DepositCreditsRequest{
+		CustomerID: &orgPayer,
+		Invoker:    orgSubject,
+		Currency:   "EUR",
+		Amount:     deposit,
+		Key:        money.MustIdempotencyKey(money.OpDeposit, "test_org_prepay", uuid.NewString()),
+	})
+	require.NoError(t, err)
+
+	srv := newCustomerTreasuryServerAs(t, suite, orgSubject, []string{
+		controlplane.PermCustomerBalanceRead,
+		controlplane.PermCustomerSpendDelegationsRead,
+	})
+
+	// Own subject id → 200 with the org's OWN balance (pre-or#916: 403
+	// customer_scope_mismatch, the th#1765/or#913-filed bug).
+	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+orgSubject+"/balance?currency=EUR", nil)
+	require.Equal(t, http.StatusOK, resp.status, "subject payer must read its own balance: %s", resp.body)
+	body := decodeJSONObject(t, resp.body)
+	require.EqualValues(t, deposit, body["balance_amount"], "balance must be keyed on the SUBJECT payer, not the merchant")
+
+	// Spend-delegation reads are keyed on the subject payer too (empty, not the
+	// merchant's policy document).
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+orgSubject+"/spend-delegations", nil)
+	require.Equal(t, http.StatusOK, resp.status, resp.body)
+	require.Empty(t, decodeDelegations(t, resp.body), "a fresh subject payer has no delegations of its own")
+
+	// A FOREIGN customer_id stays 403 — subject identity, not permission breadth.
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+uuid.NewString()+"/balance?currency=EUR", nil)
+	require.Equal(t, http.StatusForbidden, resp.status, "a sibling's customer_id must stay forbidden: %s", resp.body)
+
+	// The MERCHANT's own coordinates are not the subject's: a plain subject
+	// holding customer:* grants must not reach the merchant payer account
+	// (or#916 hazard 3 — every principal used to match the merchant id).
+	for _, merchantCoordinate := range []string{dbtest.TestMerchantSlug, dbtest.TestMerchantID.String()} {
+		resp = requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+merchantCoordinate+"/balance?currency=EUR", nil)
+		require.Equal(t, http.StatusForbidden, resp.status,
+			"a non-admin subject must not act on the merchant payer account (%s): %s", merchantCoordinate, resp.body)
+	}
 }
 
 func TestCustomerTreasuryPayerSurface_NoConsumerRoutes(t *testing.T) {

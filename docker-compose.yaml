@@ -160,14 +160,16 @@ services:
       API_URL: "${API_URL:-http://localhost:3053}"
       AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:3053}"
       # AuthKit signing keys for OpenRails' own issuer (read once at
-      # config.Load, never by the authkit library itself — #712/#231):
-      #   1. ACTIVE_KEY_ID / ACTIVE_PRIVATE_KEY_PEM / PUBLIC_KEYS envs, or
+      # config.Load, never by the authkit library itself — #712/#231; names
+      # AUTHKIT_-prefixed since ak#266/or#917, matching the authkit binary):
+      #   1. AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
+      #      AUTHKIT_PUBLIC_KEYS envs, or
       #   2. AUTHKIT_KEYS_PATH/keys.json injected by Vault/External Secrets, or
       #   3. development-only generated keys persisted at /.runtime/authkit.
       AUTHKIT_KEYS_PATH: "${AUTHKIT_KEYS_PATH:-/vault/auth}"
-      ACTIVE_KEY_ID: "${ACTIVE_KEY_ID:-}"
-      ACTIVE_PRIVATE_KEY_PEM: "${ACTIVE_PRIVATE_KEY_PEM:-}"
-      PUBLIC_KEYS: "${PUBLIC_KEYS:-}"
+      AUTHKIT_ACTIVE_KEY_ID: "${AUTHKIT_ACTIVE_KEY_ID:-}"
+      AUTHKIT_ACTIVE_PRIVATE_KEY_PEM: "${AUTHKIT_ACTIVE_PRIVATE_KEY_PEM:-}"
+      AUTHKIT_PUBLIC_KEYS: "${AUTHKIT_PUBLIC_KEYS:-}"
       # Closed-registration provisioning is explicit:
       #   openrails push-merchant-config -c /etc/openrails/config.yaml -f /etc/openrails/merchants.yaml
       #   openrails push-auth-bootstrap -c /etc/openrails/config.yaml -f /etc/openrails/bootstrap.yaml

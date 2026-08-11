@@ -267,7 +267,9 @@ completed.
 
 `/v1/me/*` needs no grants. Acting on a *shared* customer balance (an org/team wallet
 the user co-manages) uses `/v1/customers/:customer_id/...` — same handlers, but each
-route requires an explicit `customer:*` permission carried by the delegated token:
+route requires an explicit `customer:*` permission carried by the delegated token.
+`:customer_id` must name the caller's own payable subject (or#916); the merchant's
+own slug/id addresses the merchant's treasury and additionally requires `merchant:*`:
 
 | Permission | Allows |
 |---|---|
