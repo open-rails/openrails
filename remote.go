@@ -228,22 +228,24 @@ func (c *remote) GetDeposit(ctx context.Context, customerID, sourceID string) (*
 
 // captureBody is the POST /v1/merchant/admissions/:id/capture body. The wire
 // field is "amount" (the handler binds it as REQUIRED). customer_id / currency /
-// invoker / admit_source are the ADDITIVE #676 fallback payer coordinates.
+// invoker are the ADDITIVE #676 fallback payer coordinates.
 type captureBody struct {
-	Amount      int64          `json:"amount"`
-	CustomerID  string         `json:"customer_id,omitempty"`
-	Currency    string         `json:"currency,omitempty"`
-	Invoker     string         `json:"invoker,omitempty"`
-	AdmitSource string         `json:"admit_source,omitempty"`
-	EventType   string         `json:"event_type,omitempty"`
-	Resource    string         `json:"resource,omitempty"`
-	Metadata    map[string]any `json:"metadata,omitempty"`
-	Source      string         `json:"source,omitempty"`
-	SourceID    string         `json:"source_id,omitempty"`
+	Amount     int64          `json:"amount"`
+	CustomerID string         `json:"customer_id,omitempty"`
+	Currency   string         `json:"currency,omitempty"`
+	Invoker    string         `json:"invoker,omitempty"`
+	EventType  string         `json:"event_type,omitempty"`
+	Resource   string         `json:"resource,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+	Source     string         `json:"source,omitempty"`
+	SourceID   string         `json:"source_id,omitempty"`
 }
 
 // Capture implements Client (handler ServiceCaptureHold). Idempotent on the
-// request_id. A nil error means OpenRails accepted the capture.
+// request_id UNCONDITIONALLY (or#907): the durable coordinate is composed from
+// the request id and engine constants alone, so any retry dedupes and a
+// changed-amount retry is refused with ErrIdempotencyKeyReused. A nil error
+// means OpenRails accepted the capture.
 func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("capture requires request_id")
@@ -254,7 +256,6 @@ func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount i
 		body.CustomerID = usage.CustomerID
 		body.Currency = usage.Currency
 		body.Invoker = usage.Invoker
-		body.AdmitSource = usage.AdmitSource
 	}
 	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
 		body.EventType = usage.EventType
@@ -450,6 +451,21 @@ func (c *remote) SetCustomerSpendDelegation(ctx context.Context, customerID stri
 	}
 	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations:upsert"
 	return c.do(ctx, http.MethodPut, path, delegation, nil)
+}
+
+// DeleteCustomerSpendDelegation implements PolicySyncClient (handler
+// ServiceDeleteCustomerSpendDelegation): single-grant revocation (or#911).
+func (c *remote) DeleteCustomerSpendDelegation(ctx context.Context, customerID, scope, scopeKey string) error {
+	if strings.TrimSpace(customerID) == "" {
+		return invalidErr("customer_id required")
+	}
+	if strings.TrimSpace(scope) == "" || strings.TrimSpace(scopeKey) == "" {
+		return invalidErr("scope and scope_key required")
+	}
+	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) +
+		"/spend-delegations/" + url.PathEscape(strings.TrimSpace(scope)) +
+		"/" + url.PathEscape(strings.TrimSpace(scopeKey))
+	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
 // ListActiveEntitlements implements Client (handler

@@ -49,12 +49,13 @@ type serviceCaptureRequest struct {
 	Amount int64 `json:"amount" binding:"required"`
 
 	// Fallback payer coordinates (#676, additive): used only when the admit-time
-	// Redis pointer is gone, so a rendered service stays chargeable. admit_source
-	// must echo the admit's source (defaults to "admit").
-	CustomerID  string `json:"customer_id,omitempty"`
-	Currency    string `json:"currency,omitempty"`
-	Invoker     string `json:"invoker,omitempty"`
-	AdmitSource string `json:"admit_source,omitempty"`
+	// Redis pointer is gone, so a rendered service stays chargeable. The
+	// idempotency coordinate is the path request_id alone (or#907) — there is no
+	// admit_source echo any more; a retry dedupes regardless of what the admit
+	// was placed with.
+	CustomerID string `json:"customer_id,omitempty"`
+	Currency   string `json:"currency,omitempty"`
+	Invoker    string `json:"invoker,omitempty"`
 
 	// Usage analytics (#311): when event_type is set, the capture also appends a
 	// usage_event (no second debit) for the platform usage/revenue rollup.
@@ -598,18 +599,17 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		return
 	}
 	trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{
-		RequestID:   requestID,
-		Amount:      req.Amount,
-		CustomerID:  req.CustomerID,
-		Currency:    req.Currency,
-		Invoker:     req.Invoker,
-		AdmitSource: req.AdmitSource,
-		EventType:   req.EventType,
-		Resource:    req.Resource,
-		Dimensions:  req.Dimensions,
-		Metadata:    req.Metadata,
-		Source:      req.Source,
-		SourceID:    req.SourceID,
+		RequestID:  requestID,
+		Amount:     req.Amount,
+		CustomerID: req.CustomerID,
+		Currency:   req.Currency,
+		Invoker:    req.Invoker,
+		EventType:  req.EventType,
+		Resource:   req.Resource,
+		Dimensions: req.Dimensions,
+		Metadata:   req.Metadata,
+		Source:     req.Source,
+		SourceID:   req.SourceID,
 	})
 	if err == billingservice.ErrInsufficientCredits {
 		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")

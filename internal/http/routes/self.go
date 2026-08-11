@@ -130,6 +130,12 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 		h(httphandlers.PutCustomerSpendDelegation),
 		putSpendDelegations...,
 	)
+	// or#911: single-grant revocation. One addressed delegation dies; every
+	// sibling grant is untouched (a replace-all could clobber them).
+	group.Handle(http.MethodDelete, "/:customer_id/spend-delegations/:scope/:scope_key",
+		h(httphandlers.DeleteCustomerSpendDelegation),
+		putSpendDelegations...,
+	)
 
 	// Read the payer's money state. `status` is intentionally NOT mounted (it
 	// reports consumer concepts the customer does not own).

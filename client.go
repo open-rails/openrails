@@ -98,6 +98,10 @@ type PolicySyncClient interface {
 	// SetCustomerSpendDelegation atomically upserts one delegation without
 	// reading or replacing unrelated customer delegations.
 	SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error
+	// DeleteCustomerSpendDelegation revokes exactly ONE addressed delegation
+	// (or#911) and leaves every sibling untouched. A missing grant (already
+	// revoked or never granted) returns an error matching ErrNotFound.
+	DeleteCustomerSpendDelegation(ctx context.Context, customerID, scope, scopeKey string) error
 }
 
 // AdminFundingClient is the small non-hot-path funding/reporting surface used
@@ -317,17 +321,16 @@ type AdmitResponse struct {
 // It also carries OPTIONAL fallback payer coordinates (#676): the admit-time
 // request→payer pointer lives in Redis and can be lost (flush/failover/TTL
 // overrun). Supplying CustomerID+Currency lets the capture land anyway — a
-// rendered service is always chargeable. AdmitSource must echo the Source the
-// admit was placed with (defaults to "admit") so retries dedupe against a
-// pointer-resolved capture. These fields are independent of EventType.
+// rendered service is always chargeable. Retries dedupe on the request id
+// alone (or#907); nothing here participates in the idempotency coordinate.
+// These fields are independent of EventType.
 type CaptureUsage struct {
-	// CustomerID/Currency/Invoker/AdmitSource are the #676 capture-durability
-	// fallback coordinates (see type doc). Optional; ignored while the admit
-	// pointer is live.
-	CustomerID  string
-	Currency    string
-	Invoker     string
-	AdmitSource string
+	// CustomerID/Currency/Invoker are the #676 capture-durability fallback
+	// coordinates (see type doc). Optional; ignored while the admit pointer is
+	// live.
+	CustomerID string
+	Currency   string
+	Invoker    string
 
 	// EventType classifies the usage event (e.g. "inference", "storage"). Required
 	// for the event to be recorded; a blank EventType suppresses the usage event.
@@ -549,11 +552,14 @@ type SpendLimitWindow struct {
 
 // SpendDelegationInput is one payer-owned spend delegation. Machine clients use
 // the merchant service surface; customers manage the same policy through their
-// customer-owned treasury surface.
+// customer-owned treasury surface. Provenance (or#911) is the caller's opaque
+// reference for what authorized the grant (e.g. a signed-document digest);
+// stored on the grant and returned on reads, never interpreted by OpenRails.
 type SpendDelegationInput struct {
-	Scope    string             `json:"scope"`
-	ScopeKey string             `json:"scope_key,omitempty"`
-	Windows  []SpendLimitWindow `json:"windows"`
+	Scope      string             `json:"scope"`
+	ScopeKey   string             `json:"scope_key,omitempty"`
+	Windows    []SpendLimitWindow `json:"windows"`
+	Provenance string             `json:"provenance,omitempty"`
 }
 
 // ResourceRevenueDailyRow is one day's revenue for a resource.

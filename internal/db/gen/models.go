@@ -664,6 +664,8 @@ type OpenrailsInvokerSpendLimit struct {
 	Windows   []byte
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// Opaque caller-supplied provenance reference (or#911), e.g. a signed-document digest. Stored verbatim, returned on reads; never interpreted.
+	Provenance string
 }
 
 // #512 double-entry ledger accounts. One account belongs to exactly one (merchant, currency) ledger; TB-style posted/pending counters are maintained from immutable ledger_transfers and verified by reconciliation. account_type identifies its role (customer_balance, platform_revenue, processor_clearing, arrears_liability, expired_credits, fx_liquidity, world).

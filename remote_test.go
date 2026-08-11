@@ -152,6 +152,30 @@ func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T)
 	}
 }
 
+func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"deleted":true}`))
+	}))
+	defer srv.Close()
+
+	client := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+		return "test-token", nil
+	}))
+	err := client.DeleteCustomerSpendDelegation(context.Background(), " customer-1 ", "invoker", "user:11111111-1111-1111-1111-111111111111")
+	if err != nil {
+		t.Fatalf("DeleteCustomerSpendDelegation: %v", err)
+	}
+	if gotMethod != http.MethodDelete {
+		t.Fatalf("method = %s, want DELETE", gotMethod)
+	}
+	if gotPath != "/v1/merchant/customers/customer-1/spend-delegations/invoker/user:11111111-1111-1111-1111-111111111111" {
+		t.Fatalf("path = %s", gotPath)
+	}
+}
+
 // TestRemoteValidationErrorParity asserts that client-side pre-flight argument
 // checks return typed *StatusError values whose errors.Is chain includes
 // ErrInvalid — matching the embedded transport's behavior (#338).

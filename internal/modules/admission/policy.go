@@ -358,14 +358,22 @@ func NewInvokerSpendLimitStore(database *db.DB) *InvokerSpendLimitStore {
 	return &InvokerSpendLimitStore{db: database}
 }
 
-// InvokerSpendLimit is one stored limit: {scope, scopeKey, windows[]}. scopeKey is
-// the immutable role uuid (scope=role) / invoker string (scope=invoker) / tier key
-// (scope=invoker_tier).
+// InvokerSpendLimit is one stored limit: {scope, scopeKey, windows[], provenance}.
+// scopeKey is the immutable role uuid (scope=role) / invoker string
+// (scope=invoker) / tier key (scope=invoker_tier). Provenance is the caller's
+// opaque reference for what authorized the grant (or#911) — e.g. a
+// signed-document digest. Stored verbatim, returned on reads, never
+// interpreted; an upsert replaces it with the new grant's value.
 type InvokerSpendLimit struct {
-	Scope    string
-	ScopeKey string
-	Windows  []models.BudgetWindowPolicy
+	Scope      string
+	ScopeKey   string
+	Windows    []models.BudgetWindowPolicy
+	Provenance string
 }
+
+// maxProvenanceLength bounds the opaque provenance reference. It is a
+// reference (digest, id, URI), not a document store.
+const maxProvenanceLength = 512
 
 // ValidateInvokerSpendLimit validates and canonicalizes one payer-owned
 // delegated-spend policy before either transport writes it.
@@ -379,6 +387,10 @@ func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
 	p.ScopeKey = strings.TrimSpace(p.ScopeKey)
 	if p.ScopeKey == "" {
 		return InvokerSpendLimit{}, fmt.Errorf("scope_key required")
+	}
+	p.Provenance = strings.TrimSpace(p.Provenance)
+	if len(p.Provenance) > maxProvenanceLength {
+		return InvokerSpendLimit{}, fmt.Errorf("provenance must be at most %d characters", maxProvenanceLength)
 	}
 	if len(p.Windows) == 0 {
 		return InvokerSpendLimit{}, fmt.Errorf("windows required")
@@ -406,7 +418,7 @@ func ValidateInvokerSpendLimit(p InvokerSpendLimit) (InvokerSpendLimit, error) {
 }
 
 func invokerSpendLimitFromGen(r gen.OpenrailsInvokerSpendLimit) (InvokerSpendLimit, error) {
-	p := InvokerSpendLimit{Scope: r.Scope, ScopeKey: r.ScopeKey}
+	p := InvokerSpendLimit{Scope: r.Scope, ScopeKey: r.ScopeKey, Provenance: r.Provenance}
 	if len(r.Windows) > 0 {
 		if err := json.Unmarshal(r.Windows, &p.Windows); err != nil {
 			return InvokerSpendLimit{}, fmt.Errorf("admission: decode invoker spend-limit windows: %w", err)
@@ -489,15 +501,54 @@ func (s *InvokerSpendLimitStore) upsert(ctx context.Context, tenantID uuid.UUID,
 		return fmt.Errorf("admission: encode invoker spend-limit windows: %w", err)
 	}
 	return s.db.Gen(ctx).UpsertInvokerSpendLimit(ctx, gen.UpsertInvokerSpendLimitParams{
-		ID:            uuidutil.NewV7(),
-		MerchantID:    tenantID,
-		CustomerID:    payer.UUID(),
-		Scope:         budgets.NormalizeScope(p.Scope), // #491: store canonical invoker
-		ScopeKey:      p.ScopeKey,
-		Windows:       windowsJSON,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:         uuidutil.NewV7(),
+		MerchantID: tenantID,
+		CustomerID: payer.UUID(),
+		Scope:      budgets.NormalizeScope(p.Scope), // #491: store canonical invoker
+		ScopeKey:   p.ScopeKey,
+		Windows:    windowsJSON,
+		Provenance: p.Provenance,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	})
+}
+
+// Delete removes exactly ONE addressed delegation (or#911) and leaves every
+// sibling untouched — the single-grant revocation a replace-all cannot express
+// without clobbering unrelated grants. Returns whether a grant existed at the
+// key; 0 rows is a real answer, not success. Serialized under the same
+// per-payer lock as Upsert/Replace so it cannot interleave with a document
+// replace. Deliberately does NOT ensure the customer row: revoking from a
+// payer that was never materialized must not create one.
+func (s *InvokerSpendLimitStore) Delete(ctx context.Context, payer identity.CustomerID, scope, scopeKey string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("admission: invoker spend-limit store not initialized")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
+	tenantID := tid.UUID()
+	lockKey := tid.String() + ":" + payer.UUID().String()
+	deleted := false
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey); err != nil {
+			return fmt.Errorf("admission: lock invoker spend limits: %w", err)
+		}
+		txdb := s.db.NewWithPgxTx(tx)
+		rows, derr := txdb.Gen(ctx).DeleteInvokerSpendLimit(ctx, gen.DeleteInvokerSpendLimitParams{
+			MerchantID: tenantID,
+			CustomerID: payer.UUID(),
+			Scope:      budgets.NormalizeScope(scope),
+			ScopeKey:   strings.TrimSpace(scopeKey),
+		})
+		if derr != nil {
+			return derr
+		}
+		deleted = rows > 0
+		return nil
+	})
+	return deleted, err
 }
 
 // Replace atomically replaces the complete payer-owned policy document. Any

@@ -180,10 +180,14 @@ type SpendLimitWindowInput struct {
 // InvokerSpendLimitInput configures one hierarchical budget-scope policy (#473).
 // Scope is "subject" | "role" | "invoker" | "invoker_tier"; ScopeKey is the
 // role uuid, invoker string, or invoker-tier key, empty for scope=subject.
+// Provenance (or#911) is the caller's opaque reference for what authorized the
+// grant (e.g. a signed-document digest); stored on the grant, returned on
+// reads, never interpreted.
 type InvokerSpendLimitInput struct {
-	Scope    string                  `json:"scope"`
-	ScopeKey string                  `json:"scope_key,omitempty"`
-	Windows  []SpendLimitWindowInput `json:"windows"`
+	Scope      string                  `json:"scope"`
+	ScopeKey   string                  `json:"scope_key,omitempty"`
+	Windows    []SpendLimitWindowInput `json:"windows"`
+	Provenance string                  `json:"provenance,omitempty"`
 }
 
 // ErrInvalidInvokerSpendLimit identifies caller-owned spend-delegation input
@@ -235,6 +239,7 @@ func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpen
 		scopeKey := strings.TrimSpace(item.ScopeKey)
 		row, err := admission.ValidateInvokerSpendLimit(admission.InvokerSpendLimit{
 			Scope: scope, ScopeKey: scopeKey, Windows: budgetScopeWindowModels(item.Windows),
+			Provenance: item.Provenance,
 		})
 		if err != nil {
 			return nil, invalidInvokerSpendLimit(fmt.Sprintf("delegations[%d].%s", i, err))
@@ -246,6 +251,7 @@ func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpen
 		seen[key] = struct{}{}
 		out = append(out, InvokerSpendLimitInput{
 			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: spendLimitWindowInputs(row.Windows),
+			Provenance: row.Provenance,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -257,6 +263,7 @@ func ValidateInvokerSpendLimitInputs(in []InvokerSpendLimitInput) ([]InvokerSpen
 func invokerSpendLimitRow(in InvokerSpendLimitInput) admission.InvokerSpendLimit {
 	return admission.InvokerSpendLimit{
 		Scope: in.Scope, ScopeKey: in.ScopeKey, Windows: budgetScopeWindowModels(in.Windows),
+		Provenance: in.Provenance,
 	}
 }
 
@@ -307,9 +314,41 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 		for _, ww := range r.Windows {
 			w = append(w, SpendLimitWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, Limit: ww.Limit, Currency: ww.Currency})
 		}
-		out = append(out, InvokerSpendLimitInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w})
+		out = append(out, InvokerSpendLimitInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w, Provenance: r.Provenance})
 	}
 	return out, nil
+}
+
+// DeleteInvokerSpendLimit revokes exactly ONE addressed delegation (or#911) and
+// leaves every sibling untouched — the single-grant delete a replace-all cannot
+// express without clobbering unrelated grants, and the zero-limit-window
+// workaround existed to approximate. Returns whether a grant existed at
+// (scope, scope_key); false is a real answer (already revoked or never
+// granted), not an error.
+func (s *Service) DeleteInvokerSpendLimit(ctx context.Context, payer identity.CustomerID, scope, scopeKey string) (bool, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return false, pinErr
+	}
+	defer release()
+
+	if s == nil || s.rt == nil {
+		return false, fmt.Errorf("service not initialized")
+	}
+	if payer.IsZero() {
+		return false, fmt.Errorf("payer required")
+	}
+	scope = budgets.NormalizeScope(scope)
+	switch scope {
+	case budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTrustLevel:
+	default:
+		return false, invalidInvokerSpendLimit(fmt.Sprintf("scope must be %q, %q, or %q", budgets.ScopeInvoker, budgets.ScopeRole, budgets.ScopeInvokerTrustLevel))
+	}
+	scopeKey = strings.TrimSpace(scopeKey)
+	if scopeKey == "" {
+		return false, invalidInvokerSpendLimit("scope_key required")
+	}
+	return admission.NewInvokerSpendLimitStore(s.rt.DB).Delete(ctx, payer, scope, scopeKey)
 }
 
 // ReplaceInvokerSpendLimits fully replaces the payer-owned delegated-spend

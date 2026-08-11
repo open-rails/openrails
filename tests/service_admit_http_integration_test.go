@@ -113,9 +113,34 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	// 3) Capture r1 at 500 (actual < estimate) → 200; durable ledger debit lands.
 	w := post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{"amount": 500})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"Replayed":false`, "first capture moved the money")
 	bal, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "1000 − 500 captured = 500")
+
+	// 3b) or#907: retry the capture over the wire with only fallback payer
+	// coordinates. The first capture consumed the Redis pointer, so before
+	// or#907 this exact retry (no admit_source echo) landed at a different
+	// coordinate and debited again. Now the request id is the whole key:
+	// 200, Replayed=true, balance unchanged.
+	w = post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{
+		"amount": 500, "customer_id": payerID.String(), "currency": money.DefaultCurrency, "invoker": "user:a",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"Replayed":true`, "the retry moved nothing and must say so")
+	bal, err = ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
+	require.NoError(t, err)
+	require.Equal(t, int64(500), bal.Balance, "an at-least-once capture retry must not double debit")
+
+	// 3c) A retry that CHANGES the amount is a caller bug: 409, nothing moves.
+	w = post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{
+		"amount": 900, "customer_id": payerID.String(), "currency": money.DefaultCurrency, "invoker": "user:a",
+	})
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "idempotency_key_reused")
+	bal, err = ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
+	require.NoError(t, err)
+	require.Equal(t, int64(500), bal.Balance)
 
 	// 4) After capture freed the hold, a 300 admit fits the remaining 500 → 200.
 	a3 := admit(r3, 300)

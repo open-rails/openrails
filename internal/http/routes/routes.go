@@ -223,6 +223,11 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		h(httphandlers.ServicePutCustomerSpendDelegation),
 		writeMW...,
 	)
+	// or#911: single-grant revocation for machine callers.
+	customers.Handle(http.MethodDelete, "/spend-delegations/:scope/:scope_key",
+		h(httphandlers.ServiceDeleteCustomerSpendDelegation),
+		writeMW...,
+	)
 	// or#878: the delinquency state OpenRails derived, and the roster of who is
 	// overdue. Read-only on purpose — the state is a reading of invoice truth,
 	// so it is settled by paying the invoice, never by an API call.

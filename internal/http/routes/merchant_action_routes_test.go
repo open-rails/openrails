@@ -135,6 +135,12 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
 		},
 		{
+			name:   "delete customer spend delegation",
+			method: http.MethodDelete,
+			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/spend-delegations/invoker/user:22222222-2222-2222-2222-222222222222",
+			perm:   controlplane.PermMerchantCustomerSettingsUpdate,
+		},
+		{
 			name:   "merchant payments read",
 			method: http.MethodGet,
 			path:   "/billing/v1/merchant/payments",

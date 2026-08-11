@@ -75,13 +75,23 @@ LIMIT 1;
 
 -- name: UpsertInvokerSpendLimit :exec
 -- Per-invoker spend-limit upsert (#473/#517): the payer's cap on a delegated
--- invoker/role. Payer-set only (no owner discriminator).
+-- invoker/role. Payer-set only (no owner discriminator). provenance (or#911)
+-- is the caller's opaque reference for what authorized the grant; an upsert
+-- replaces the whole grant, provenance included.
 INSERT INTO openrails.invoker_spend_limits (
-    id, merchant_id, customer_id, scope, scope_key, windows, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    id, merchant_id, customer_id, scope, scope_key, windows, provenance, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (merchant_id, customer_id, scope, scope_key) DO UPDATE SET
     windows = EXCLUDED.windows,
+    provenance = EXCLUDED.provenance,
     updated_at = EXCLUDED.updated_at;
+
+-- name: DeleteInvokerSpendLimit :execrows
+-- Single-grant revocation (or#911): removes exactly one addressed delegation
+-- and leaves every sibling untouched. 0 rows is a real answer (nothing at that
+-- key), surfaced to the caller rather than swallowed.
+DELETE FROM openrails.invoker_spend_limits
+WHERE merchant_id = $1 AND customer_id = $2 AND scope = $3 AND scope_key = $4;
 
 -- name: DeleteAllInvokerSpendLimits :execrows
 -- Full-document replacement removes the exact merchant+payer set before

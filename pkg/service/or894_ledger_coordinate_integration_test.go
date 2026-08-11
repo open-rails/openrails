@@ -67,7 +67,7 @@ func TestOr894_WasteOverageThenCaptureOfTheSameRequestChargesBoth(t *testing.T) 
 
 	trx, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
 		RequestID: requestID, Amount: 900_000, CustomerID: pid.String(),
-		Currency: money.DefaultCurrency, Invoker: pid.String(), AdmitSource: "invoke",
+		Currency: money.DefaultCurrency, Invoker: pid.String(),
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(-900_000), trx.Amount,
@@ -79,7 +79,7 @@ func TestOr894_WasteOverageThenCaptureOfTheSameRequestChargesBoth(t *testing.T) 
 	// The capture is still idempotent at its own coordinate.
 	_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
 		RequestID: requestID, Amount: 900_000, CustomerID: pid.String(),
-		Currency: money.DefaultCurrency, Invoker: pid.String(), AdmitSource: "invoke",
+		Currency: money.DefaultCurrency, Invoker: pid.String(),
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(900_010), before-or894Balance(t, ms, ctx, payer))
