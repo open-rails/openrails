@@ -453,8 +453,8 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
         <DialogHeader>
           <DialogTitle>Grant entitlement</DialogTitle>
           <DialogDescription>
-            Grants the entitlement string directly (admin grant). Leave hours
-            empty for an indefinite grant.
+            Give this customer access without a payment. Use it for goodwill,
+            support fixes, and trials.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -476,6 +476,9 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
               {(field) => (
                 <div className="grid gap-1.5">
                   <Label htmlFor="ent-name">Entitlement</Label>
+                  <p className="text-[13px] text-muted-foreground">
+                    The name your product checks before unlocking a feature.
+                  </p>
                   <Input
                     id="ent-name"
                     value={field.state.value}
@@ -502,11 +505,15 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
             >
               {(field) => (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ent-hours">Hours (optional)</Label>
+                  <Label htmlFor="ent-hours">How long it lasts</Label>
+                  <p className="text-[13px] text-muted-foreground">
+                    In hours. Leave it empty and the access never expires.
+                  </p>
                   <Input
                     id="ent-hours"
                     type="number"
                     min="1"
+                    placeholder="Never expires"
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}
@@ -528,12 +535,22 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
               }
             >
               {([entitlement, canSubmit, isSubmitting]) => (
-                <Button
-                  type="submit"
-                  disabled={!entitlement.trim() || !canSubmit || isSubmitting}
-                >
-                  {isSubmitting ? "Granting…" : "Grant"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isSubmitting}
+                    onClick={() => handleOpenChange(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={!entitlement.trim() || !canSubmit || isSubmitting}
+                  >
+                    {isSubmitting ? "Granting…" : "Grant access"}
+                  </Button>
+                </>
               )}
             </form.Subscribe>
           </DialogFooter>
