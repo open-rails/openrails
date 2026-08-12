@@ -90,15 +90,18 @@ function FindingsTab() {
     <div className="flex flex-col gap-4">
       {gauges && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Gauge label="Open findings" value={gauges.total_open} />
+          {/* Each gauge says what is wrong with the MONEY, not what the check
+              is called internally: a merchant reading "freeloaders" cannot tell
+              whether that costs them anything. */}
+          <Gauge label="Open issues" value={gauges.total_open} />
           <Gauge
-            label="Orphaned members"
+            label="Paying, no access"
             value={gauges.orphaned_members}
             alert
           />
-          <Gauge label="Freeloaders" value={gauges.freeloaders} alert />
+          <Gauge label="Access, not paying" value={gauges.freeloaders} alert />
           <Gauge
-            label="Duplicate coverage"
+            label="Charged twice"
             value={gauges.duplicate_coverage}
             alert
           />
@@ -108,7 +111,7 @@ function FindingsTab() {
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : !data?.items?.length ? (
         <p className="text-sm text-muted-foreground">
-          No open findings — queue is clear.
+          Nothing needs attention right now.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
