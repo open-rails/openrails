@@ -778,6 +778,15 @@ type OpenrailsMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
+// or#914 dormant-merchant sweeper warning ledger: never-used merchants currently on deletion notice. first_warned_at + the sweep's warning lead gates deletion (DeleteGroup ReleaseSlug + directory soft-delete); the row is withdrawn on activity. Accessed only inside MerchantTx beside the activity probe.
+type OpenrailsMerchantDormancyNotice struct {
+	MerchantID    uuid.UUID
+	Slug          string
+	FirstWarnedAt time.Time
+	LastWarnedAt  time.Time
+	WarnCount     int64
+}
+
 // #736 MERCHANT-operator-facing in_app alert store (console bell). rule_id references the source alert_rules row informationally (no FK: notifications outlive rule deletion).
 type OpenrailsMerchantNotification struct {
 	ID         uuid.UUID

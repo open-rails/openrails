@@ -111,6 +111,38 @@ idempotent repair; the response carries `group_id`); (2) holds in-process
 Ownerless `ProvisionMerchant` and Bootstrap are operator acts and stay
 ungated — that is how a platform merchant claims a reserved name.
 
+For the Admission gate itself, `embcp.MerchantCreationAdmission` composes the
+standard hosted policy from openrails' own state — verified email always; a
+free allowance of OWNED merchants; beyond it, a vaulted payment method on
+file (no charge) unlocks more:
+
+```go
+admission, err := embcp.MerchantCreationAdmission(app, embcp.MerchantCreationPolicy{
+    FreeAllowance: 2,
+    HasVaultedPaymentMethod: func(ctx context.Context, subject string) (bool, error) {
+        // openrails-saas shape: the platform merchant's book holds the vault.
+        return embcp.SubjectHasVaultedPaymentMethod(ctx, app, platformMerchantID, subject)
+    },
+})
+```
+
+Typed refusals: `embcp.ErrEmailUnverified`, `embcp.ErrVaultedPaymentMethodRequired`.
+
+### Dormant-merchant sweep (never-used names go back in the pool)
+
+`embcp.SweepDormantMerchants(ctx, app, cfg)` runs one pass of the or#914
+dormancy policy: merchants past `cfg.TTL` with NO provider, money, catalog or
+customers (probed per merchant under `MerchantTx`) are warned in
+`openrails.merchant_dormancy_notices`; once a notice is older than
+`cfg.WarningLead`, an ARMED pass (`cfg.Armed`, default off = dry run) deletes
+the merchant group with `ReleaseSlug: true` — the camped name becomes
+claimable again — and soft-deletes the directory row. Notices withdraw on any
+activity. Host wiring: run it on a cadence (openrails-saas: a River worker),
+arm it behind the host's own destructive setting, and deliver the warning to
+the owner if a sender exists — the persisted notice row is the watermark
+either way. Reserved slugs and merchants without a group binding are never
+swept.
+
 ## Merchant manifest anatomy
 
 ```yaml
