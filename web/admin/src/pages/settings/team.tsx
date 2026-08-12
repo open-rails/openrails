@@ -361,11 +361,10 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
             <DialogHeader>
               <DialogTitle>Invite a teammate</DialogTitle>
               <DialogDescription>
-                If the email already has an account, they&apos;re added to the
-                team right away.
+                Someone who already has an account joins the team straight away.
                 {invitesEnabled
-                  ? " Otherwise you get a single-use link to send them."
-                  : " New emails without an account can't be invited on this deployment. The account has to be created first."}
+                  ? " Anyone else gets a single-use link you can send them."
+                  : " Anyone else has to create an account first, because this deployment does not send invites."}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -447,12 +446,22 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
                   }
                 >
                   {([email, canSubmit, isSubmitting]) => (
-                    <Button
-                      type="submit"
-                      disabled={!email.trim() || !canSubmit || isSubmitting}
-                    >
-                      {isSubmitting ? "Inviting…" : "Send invite"}
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={isSubmitting}
+                        onClick={() => handleOpenChange(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={!email.trim() || !canSubmit || isSubmitting}
+                      >
+                        {isSubmitting ? "Inviting…" : "Send invite"}
+                      </Button>
+                    </>
                   )}
                 </form.Subscribe>
               </DialogFooter>
