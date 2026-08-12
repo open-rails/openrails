@@ -248,7 +248,7 @@ function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
         open={open}
         onOpenChange={handleOpenChange}
         title="Cancel subscription"
-        description="Terminal cancellation at the payment rail. This is a last resort — dunning parks subscriptions as past_due without losing entitlements."
+        description="Terminal cancellation at the payment rail. This is a last resort. Dunning parks subscriptions as past_due without losing entitlements."
         confirmationWord="CANCEL"
         actionLabel="Cancel subscription"
         onConfirm={async () => {

@@ -47,7 +47,7 @@ import { adminQueries } from "@/lib/queries"
 const ROLES: { value: string; label: string; description: string }[] = [
   {
     value: "viewer",
-    label: "Viewer — read-only (recommended)",
+    label: "Viewer (read-only (recommended))",
     description:
       "Can query metrics and read payments, subscriptions, catalog, and settings." +
       "Cannot change anything or move money. The right choice for LLM agents," +
@@ -55,7 +55,7 @@ const ROLES: { value: string; label: string; description: string }[] = [
   },
   {
     value: "support",
-    label: "Support — customer operations",
+    label: "Support (customer operations)",
     description:
       "Everything Viewer can, plus customer fixes: refunds, subscription changes," +
       "and entitlement grants. Cannot change merchant settings, catalog, payment" +
@@ -63,7 +63,7 @@ const ROLES: { value: string; label: string; description: string }[] = [
   },
   {
     value: "owner",
-    label: "Owner — full control",
+    label: "Owner (full control)",
     description:
       "Full authority over this merchant, including settings, payment providers," +
       "and minting or revoking API keys. Only for trusted server automation.",
@@ -349,7 +349,7 @@ function ShowOnceSecret({
       setCopied(true)
       toast.success("Key copied to clipboard")
     } catch {
-      toast.error("Copy failed — reveal and copy the key manually")
+      toast.error("Copy failed. Reveal the key and copy it manually.")
     }
   }
 

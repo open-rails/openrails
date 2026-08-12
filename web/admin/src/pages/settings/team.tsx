@@ -45,24 +45,27 @@ import { adminQueries } from "@/lib/queries"
 // Fixed merchant catalog roles (#567) a teammate can hold, least privilege
 // first. The API validates against the same catalog; these descriptions are the
 // plain-language contract for team members (distinct from an API key's).
-const ROLES: { value: string; label: string; description: string }[] = [
+const ROLES: { value: string; name: string; hint: string; description: string }[] = [
   {
     value: "viewer",
-    label: "Viewer — read-only",
+    name: "Viewer",
+    hint: "read-only",
     description:
       "Can view metrics, payments, subscriptions, catalog, and settings. Cannot " +
       "change anything or move money. For finance, audit, and analyst access.",
   },
   {
     value: "support",
-    label: "Support — customer operations",
+    name: "Support",
+    hint: "customer operations",
     description:
       "Everything Viewer can, plus customer fixes: refunds, subscription changes, " +
       "and entitlement grants. Cannot change settings, catalog, providers, keys, or the team.",
   },
   {
     value: "owner",
-    label: "Owner — full control",
+    name: "Owner",
+    hint: "full control",
     description:
       "Full authority over this merchant, including settings, payment providers, " +
       "API keys, and the team itself. Only owners can manage teammates.",
@@ -70,7 +73,7 @@ const ROLES: { value: string; label: string; description: string }[] = [
 ]
 
 function roleLabel(role: string): string {
-  return ROLES.find((r) => r.value === role)?.label.split(" — ")[0] ?? role
+  return ROLES.find((r) => r.value === role)?.name ?? role
 }
 
 export function TeamTab() {
@@ -362,7 +365,7 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
                 team right away.
                 {invitesEnabled
                   ? " Otherwise you get a single-use link to send them."
-                  : " New emails without an account can't be invited on this deployment — the account must be provisioned first."}
+                  : " New emails without an account can't be invited on this deployment. The account has to be created first."}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -417,7 +420,12 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
                                 : "hover:bg-muted/50"
                             )}
                           >
-                            <p className="text-sm font-medium">{role.label}</p>
+                            <p className="text-sm font-medium">
+                                {role.name}
+                                <span className="ml-2 font-normal text-muted-foreground">
+                                  {role.hint}
+                                </span>
+                              </p>
                             <p className="mt-1 text-xs text-muted-foreground">
                               {role.description}
                             </p>
@@ -494,7 +502,7 @@ function ShowInviteLink({
               setCopied(true)
               toast.success("Invite link copied")
             } catch {
-              toast.error("Copy failed — select the link text manually")
+              toast.error("Copy failed. Select the link text manually.")
             }
           }}
         >

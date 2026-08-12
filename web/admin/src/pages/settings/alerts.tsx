@@ -80,12 +80,12 @@ const TEMPLATE_COPY: Record<string, { label: string; description: string }> = {
     label: "Dunning spike",
     description:
       "Fires when the number of subscriptions in dunning (past_due) jumps versus its trailing" +
-      "baseline — an early signal that a rail is suddenly declining hard.",
+      "baseline. An early sign that a rail has started declining hard.",
   },
   payers_at_depletion_risk: {
     label: "Payers approaching credit depletion",
     description:
-      "Fires when a batch of prepaid payers are about to run out of credits — the top-up revenue" +
+      "Fires when a batch of prepaid payers are about to run out of credits, the top-up revenue" +
       "moment, and a churn-risk signal for usage-billing platforms.",
   },
   payment_methods_expiring: {

@@ -123,8 +123,8 @@ export function WidgetEditor({
             {keylessCreate
               ? "Adding widgets is not switched on here."
               : initial
-                ? "Refine the widget with an instruction, or edit the title and viz directly — preview before saving."
-                : "Describe what the widget should show — the query is generated, previewed live, then saved."}
+                ? "Refine the widget with an instruction, or change the title and chart type yourself. You can preview before saving."
+                : "Describe what the widget should show. It is previewed before you save it."}
           </DialogDescription>
         </DialogHeader>
 
@@ -139,7 +139,7 @@ export function WidgetEditor({
                 <Textarea
                   placeholder={
                     query
-                      ? 'Refine it — e.g. "make it weekly" or "split by rail"'
+                      ? 'Refine it. For example "make it weekly" or "split by rail"'
                       : 'e.g. "count of users who cancelled per day, for the past 7 days"'
                   }
                   value={prompt}
@@ -164,8 +164,8 @@ export function WidgetEditor({
                   </Button>
                   <span className="text-xs text-muted-foreground">
                     {query
-                      ? "The instruction edits the current query — the preview updates."
-                      : "The generated widget previews below — adjust title and viz before saving."}
+                      ? "The instruction edits the current widget and the preview updates."
+                      : "The widget previews below. Adjust the title and chart type before saving."}
                   </span>
                 </div>
                 {genError ? (

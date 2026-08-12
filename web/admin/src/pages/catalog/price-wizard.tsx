@@ -174,7 +174,7 @@ export function PriceChangeWizard({
         variant="outline"
         size="sm"
         disabled
-        title="This is an archived prior version — change the current price for this key instead."
+        title="This is an archived version. Change the current price for this key instead."
       >
         Change price
       </Button>

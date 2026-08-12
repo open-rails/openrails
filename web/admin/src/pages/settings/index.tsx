@@ -628,7 +628,7 @@ function RotateCredentialsDialog({
       } catch (err) {
         toastApiError(
           err,
-          "Rotation refused — the current credential is unchanged and still serving"
+          "Rotation refused. Your current credential is unchanged and still working."
         )
       }
     },
