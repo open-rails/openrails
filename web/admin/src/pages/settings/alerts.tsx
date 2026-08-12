@@ -72,27 +72,22 @@ const TEMPLATE_COPY: Record<string, { label: string; description: string }> = {
   chargeback_rate_by_rail_account: {
     label: "Chargeback ratio per rail account",
     description:
-      "Warns before card-network monitoring thresholds. Fires per rail account when its" +
-      "chargeback ratio approaches the network limit (VAMP ≈ 0.9%) — the alert that gets a" +
-      "high-risk merchant fined.",
+      "Warns you before the card networks start monitoring you. Fires when a rail account's chargeback rate nears the limit of roughly 0.9%, the point where fines begin.",
   },
   dunning_spike: {
     label: "Dunning spike",
     description:
-      "Fires when the number of subscriptions in dunning (past_due) jumps versus its trailing" +
-      "baseline. An early sign that a rail has started declining hard.",
+      "Fires when the number of subscriptions with a failed payment jumps above its recent average. An early sign that a rail has started declining hard.",
   },
   payers_at_depletion_risk: {
     label: "Payers approaching credit depletion",
     description:
-      "Fires when a batch of prepaid payers are about to run out of credits, the top-up revenue" +
-      "moment, and a churn-risk signal for usage-billing platforms.",
+      "Fires when a group of prepaid customers is about to run out of credit. That is when they are most likely to top up, and most likely to leave.",
   },
   payment_methods_expiring: {
     label: "Payment methods expiring (monthly digest)",
     description:
-      "A monthly heads-up of cards expiring soon so you can prompt updates before involuntary" +
-      "churn hits.",
+      "A monthly list of cards expiring soon, so you can ask customers to update them before a payment fails.",
   },
 }
 
@@ -654,7 +649,9 @@ function RuleDialog({
           )
         }
       />
-      <DialogContent className={cn("max-h-[85vh] overflow-y-auto", DIALOG_FORM)}>
+      <DialogContent
+        className={cn("max-h-[85vh] overflow-y-auto", DIALOG_FORM)}
+      >
         <form.Subscribe selector={(state) => state.values}>
           {(values) => {
             const definition = templateByKey(templates, values.template)
