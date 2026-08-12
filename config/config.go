@@ -319,8 +319,8 @@ type EncryptionConfig struct {
 // #251). When Enabled, the merchant secret store resolves to Vault KV-v2 (same
 // (merchant, name) addressing) instead of DB+envelope, and Solana signing uses
 // Vault Transit (the key never leaves Vault). Disabled by default; self-hosted
-// uses the DB+envelope store. KV and Transit mounts are fixed to "secret" and
-// "transit"; the secret cache TTL is fixed in code.
+// uses the DB+envelope store. KV and Transit mounts default to "secret" and
+// "transit" (KVMount/TransitMount below); the secret cache TTL is fixed in code.
 type VaultConfig struct {
 	Enabled    bool   `koanf:"enabled,omitempty"`
 	Address    string `koanf:"address,omitempty"`     // VAULT_ADDR; empty uses the api default
@@ -331,6 +331,16 @@ type VaultConfig struct {
 	RoleID   string `koanf:"role_id,omitempty"`
 	SecretID string `koanf:"secret_id,omitempty"`
 	K8sRole  string `koanf:"k8s_role,omitempty"`
+	// KVMount is the KV-v2 mount merchant secrets live under (VAULT_KV_MOUNT).
+	// Empty defaults to "secret" (internal/merchantsecrets.DefaultVaultKVMount,
+	// unchanged from the previous unconditional constant) — set this when a
+	// deployment's Vault instance names its mount something else.
+	KVMount string `koanf:"kv_mount,omitempty"`
+	// TransitMount is the Transit mount Solana signing keys live under
+	// (VAULT_TRANSIT_MOUNT). Empty defaults to "transit"
+	// (internal/merchantsecrets.DefaultVaultTransitMount, unchanged from the
+	// previous unconditional constant).
+	TransitMount string `koanf:"transit_mount,omitempty"`
 }
 
 // AdminConsoleConfig configures the merchant admin console SPA (#740).

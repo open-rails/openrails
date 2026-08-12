@@ -35,7 +35,7 @@ func TestGateSecretBackend(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			useVault, err := gateSecretBackend(tc.backend, tc.vaultConnected, tc.caps)
+			useVault, err := gateSecretBackend(tc.backend, tc.vaultConnected, tc.caps, DefaultVaultKVMount)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("want error, got useVault=%v nil err", useVault)
