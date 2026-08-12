@@ -36,7 +36,6 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
-import { LogoLockup } from "@/components/logo"
 import { useAuth } from "@/lib/auth"
 
 const nav = [
@@ -53,16 +52,11 @@ export function AppSidebar() {
   const { pathname } = useLocation()
   return (
     <Sidebar variant="inset" collapsible="icon">
-      <SidebarHeader className="gap-2">
-        {/* whose console this is, above which merchant you are looking at —
-            the same lockup and placement as the product shell */}
-        <Link
-          to="/"
-          aria-label="OpenRails home"
-          className="flex items-center rounded-md px-2 pt-1 outline-hidden group-data-[collapsible=icon]:hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-        >
-          <LogoLockup className="h-4" />
-        </Link>
+      <SidebarHeader>
+        {/* No product lockup: this console mounts inside the host's own app
+            (doujins, cozy-art), where a vendor mark belongs to someone else's
+            product. The merchant switcher is the orientation that matters here,
+            and it names the merchant and role rather than the software. */}
         <MerchantSwitcher />
       </SidebarHeader>
       <SidebarContent>
