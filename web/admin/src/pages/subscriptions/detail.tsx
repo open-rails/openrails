@@ -416,6 +416,7 @@ function ChangePaymentMethodDialog({
                   onValueChange={(value) => field.handleChange(value ?? "")}
                 >
                   <SelectTrigger
+                    className="w-full"
                     id="subscription-payment-method"
                     aria-invalid={field.state.meta.errors.length > 0}
                   >

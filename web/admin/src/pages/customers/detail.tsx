@@ -636,6 +636,7 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
                     onValueChange={(value) => field.handleChange(value ?? "")}
                   >
                     <SelectTrigger
+                      className="w-full"
                       id="pa-product"
                       aria-invalid={field.state.meta.errors.length > 0}
                     >
@@ -799,6 +800,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                     onValueChange={(value) => field.handleChange(value ?? "")}
                   >
                     <SelectTrigger
+                      className="w-full"
                       id="oc-price"
                       aria-invalid={field.state.meta.errors.length > 0}
                     >
