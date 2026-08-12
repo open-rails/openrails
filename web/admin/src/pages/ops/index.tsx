@@ -36,10 +36,30 @@ import { toastApiError } from "@/lib/toast"
 export function OpsPage() {
   return (
     <Tabs defaultValue="findings" className="flex flex-col gap-4">
-      <TabsList>
-        <TabsTrigger value="findings">Findings</TabsTrigger>
-        <TabsTrigger value="repair-alerts">Repair alerts</TabsTrigger>
-        <TabsTrigger value="worker-health">Worker health</TabsTrigger>
+      {/* Line tabs, not the pill group: these are sections of one page rather
+          than a segmented control switching one value. */}
+      <TabsList
+        variant="line"
+        className="w-full justify-start gap-6 rounded-none p-0"
+      >
+        <TabsTrigger
+          value="findings"
+          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+        >
+          Findings
+        </TabsTrigger>
+        <TabsTrigger
+          value="repair-alerts"
+          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+        >
+          Repair alerts
+        </TabsTrigger>
+        <TabsTrigger
+          value="worker-health"
+          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+        >
+          Worker health
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="findings">
         <FindingsTab />
