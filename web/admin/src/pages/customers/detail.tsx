@@ -52,6 +52,14 @@ import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
+// The profile carries no email of its own; the only one the API returns rides on
+// this customer's subscriptions. Any of them identifies the same person.
+function customerEmail(profile: {
+  subscriptions: { user_email?: string }[]
+}): string | undefined {
+  return profile.subscriptions.find((s) => s.user_email?.trim())?.user_email
+}
+
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
@@ -74,12 +82,22 @@ export function CustomerDetailPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
-        <div>
-          <h2 className="text-sm">{profile.customer_id}</h2>
-          <p className="text-xs text-muted-foreground">
-            Trust level: {profile.trust_level || "default"}
+        {/* Lead with something a human recognises. The id is the only thing the
+            API guarantees, but an email on any of this customer's subscriptions
+            is what support actually searches by, so it takes the title and the
+            id drops to a subtitle. Trust level shows only when it is NOT the
+            default, because "default" tells the reader nothing. */}
+        <div className="min-w-0">
+          <h2 className="truncate text-base font-semibold">
+            {customerEmail(profile) ?? "Customer"}
+          </h2>
+          <p className="truncate text-xs text-muted-foreground">
+            {profile.customer_id}
           </p>
         </div>
+        {profile.trust_level && profile.trust_level !== "default" ? (
+          <Badge variant="secondary">{profile.trust_level}</Badge>
+        ) : null}
         <div className="ml-auto flex gap-2">
           <GrantEntitlementDialog customerId={customerId} />
           <GrantProductAccessDialog customerId={customerId} />
@@ -110,223 +128,237 @@ export function CustomerDetailPage() {
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Subscriptions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {profile.subscriptions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No subscriptions.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Subscription</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Rail</TableHead>
-                  <TableHead>Period ends</TableHead>
-                  <TableHead>Email</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {profile.subscriptions.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell>
-                      <Link
-                        className="text-xs underline-offset-2 hover:underline"
-                        to={`/subscriptions/${s.id}`}
-                      >
-                        {shortId(s.id, 13)}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={s.status} />
-                    </TableCell>
-                    <TableCell>{s.rail}</TableCell>
-                    <TableCell>
-                      {formatDate(s.current_period_ends_at)}
-                    </TableCell>
-                    <TableCell>{s.user_email ?? "—"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+      {/* Two tracks, because a merchant opens this page for one of two
+          reasons: to see what the customer PAID, or to see what they can
+          ACCESS. Money leads and takes the wider column; access is the
+          consequence and sits beside it. */}
+      <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
+        <div className="grid gap-4 lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Subscriptions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {profile.subscriptions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No subscriptions.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Subscription</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Rail</TableHead>
+                      <TableHead>Period ends</TableHead>
+                      <TableHead>Email</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {profile.subscriptions.map((s) => (
+                      <TableRow key={s.id}>
+                        <TableCell>
+                          <Link
+                            className="text-xs underline-offset-2 hover:underline"
+                            to={`/subscriptions/${s.id}`}
+                          >
+                            {shortId(s.id, 13)}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={s.status} />
+                        </TableCell>
+                        <TableCell>{s.rail}</TableCell>
+                        <TableCell>
+                          {formatDate(s.current_period_ends_at)}
+                        </TableCell>
+                        <TableCell>{s.user_email ?? "—"}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Entitlements</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {profile.entitlements.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No active entitlements.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Entitlement</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Starts</TableHead>
-                  <TableHead>Ends</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {profile.entitlements.map((e) => (
-                  <TableRow key={e.id}>
-                    <TableCell className="font-medium">
-                      {e.entitlement}
-                    </TableCell>
-                    <TableCell>{e.source_type}</TableCell>
-                    <TableCell>{formatDate(e.start_at)}</TableCell>
-                    <TableCell>
-                      {e.end_at ? formatDate(e.end_at) : "indefinite"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <RevokeEntitlementButton
-                        customerId={customerId}
-                        entitlementId={e.id}
-                        label={`Revoke ${e.entitlement}`}
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Payments</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {profile.payments.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No payments.</p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Payment</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Rail</TableHead>
+                      <TableHead>Purchased</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {profile.payments.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell>
+                          <Link
+                            className="text-xs underline-offset-2 hover:underline"
+                            to={`/payments/${p.id}`}
+                          >
+                            {shortId(p.id, 13)}
+                          </Link>
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={p.status} />
+                        </TableCell>
+                        <TableCell>
+                          {formatMicros(p.amount, p.currency)}
+                        </TableCell>
+                        <TableCell>{p.rail}</TableCell>
+                        <TableCell>{formatDate(p.purchased_at)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Product access</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {profile.product_access.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No product access grants.
-            </p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Product</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Ends</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {profile.product_access.map((g) => (
-                  <TableRow key={g.id}>
-                    <TableCell className="text-xs">
-                      {shortId(g.product_id, 13)}
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={g.status} />
-                    </TableCell>
-                    <TableCell>{g.source_type}</TableCell>
-                    <TableCell>
-                      {g.ends_at ? formatDate(g.ends_at) : "indefinite"}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <RevokeProductAccessButton
-                        customerId={customerId}
-                        grantId={g.id}
-                        label="Revoke product access"
-                      />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Payments</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {profile.payments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No payments.</p>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Rail</TableHead>
-                  <TableHead>Purchased</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {profile.payments.map((p) => (
-                  <TableRow key={p.id}>
-                    <TableCell>
-                      <Link
-                        className="text-xs underline-offset-2 hover:underline"
-                        to={`/payments/${p.id}`}
-                      >
-                        {shortId(p.id, 13)}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={p.status} />
-                    </TableCell>
-                    <TableCell>{formatMicros(p.amount, p.currency)}</TableCell>
-                    <TableCell>{p.rail}</TableCell>
-                    <TableCell>{formatDate(p.purchased_at)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm">Payment methods</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {profile.payment_methods.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              No payment methods on file.
-            </p>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              {profile.payment_methods.map((pm) => (
-                <div key={pm.id} className="rounded-md border p-3 text-sm">
-                  <p className="font-medium">
-                    {pm.card?.brand ?? pm.type} •••• {pm.card?.last4 ?? "????"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {pm.rail} · exp {pm.card?.exp_month ?? "??"}/
-                    {pm.card?.exp_year ?? "????"}
-                  </p>
-                  {pm.health?.expiry_status &&
-                    pm.health.expiry_status !== "valid" && (
-                      <Badge
-                        variant="secondary"
-                        className="mt-1 bg-held-surface text-held"
-                      >
-                        {pm.health.expiry_status}
-                      </Badge>
-                    )}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Payment methods</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {profile.payment_methods.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No payment methods on file.
+                </p>
+              ) : (
+                <div className="flex flex-wrap gap-3">
+                  {profile.payment_methods.map((pm) => (
+                    <div key={pm.id} className="rounded-md border p-3 text-sm">
+                      <p className="font-medium">
+                        {pm.card?.brand ?? pm.type} ••••{" "}
+                        {pm.card?.last4 ?? "????"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {pm.rail} · exp {pm.card?.exp_month ?? "??"}/
+                        {pm.card?.exp_year ?? "????"}
+                      </p>
+                      {pm.health?.expiry_status &&
+                        pm.health.expiry_status !== "valid" && (
+                          <Badge
+                            variant="secondary"
+                            className="mt-1 bg-held-surface text-held"
+                          >
+                            {pm.health.expiry_status}
+                          </Badge>
+                        )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+        <div className="grid gap-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Entitlements</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {profile.entitlements.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No active entitlements.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Entitlement</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Starts</TableHead>
+                      <TableHead>Ends</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {profile.entitlements.map((e) => (
+                      <TableRow key={e.id}>
+                        <TableCell className="font-medium">
+                          {e.entitlement}
+                        </TableCell>
+                        <TableCell>{e.source_type}</TableCell>
+                        <TableCell>{formatDate(e.start_at)}</TableCell>
+                        <TableCell>
+                          {e.end_at ? formatDate(e.end_at) : "indefinite"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <RevokeEntitlementButton
+                            customerId={customerId}
+                            entitlementId={e.id}
+                            label={`Revoke ${e.entitlement}`}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">Product access</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {profile.product_access.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No product access grants.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Source</TableHead>
+                      <TableHead>Ends</TableHead>
+                      <TableHead />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {profile.product_access.map((g) => (
+                      <TableRow key={g.id}>
+                        <TableCell className="text-xs">
+                          {shortId(g.product_id, 13)}
+                        </TableCell>
+                        <TableCell>
+                          <StatusBadge status={g.status} />
+                        </TableCell>
+                        <TableCell>{g.source_type}</TableCell>
+                        <TableCell>
+                          {g.ends_at ? formatDate(g.ends_at) : "indefinite"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <RevokeProductAccessButton
+                            customerId={customerId}
+                            grantId={g.id}
+                            label="Revoke product access"
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   )
 }
@@ -864,9 +896,8 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                 <div className="grid gap-1.5">
                   <Label htmlFor="oc-amount">Amount received</Label>
                   <p className="text-[13px] text-muted-foreground">
-                    Only if it differs from the price above, for example a
-                    part payment. Enter it the way you would write it, such as
-                    19.90.
+                    Only if it differs from the price above, for example a part
+                    payment. Enter it the way you would write it, such as 19.90.
                   </p>
                   <Input
                     id="oc-amount"
