@@ -31,6 +31,7 @@ import type {
   PaymentProviderDefinition,
 } from "@/lib/api/types"
 import { formatDate, formatMicros, microsFromInput } from "@/lib/format"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
@@ -627,7 +628,7 @@ function RotateCredentialsDialog({
       } catch (err) {
         toastApiError(
           err,
-          "Rotation refused — the current credential is unchanged and still serving"
+          "Rotation refused. Your current credential is unchanged and still working."
         )
       }
     },
@@ -648,7 +649,7 @@ function RotateCredentialsDialog({
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>
             Rotate {provider.rail} credentials · {provider.account_id}
@@ -783,7 +784,7 @@ function ProviderDialog({
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm">Configure provider</Button>} />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Configure payment provider</DialogTitle>
           <DialogDescription>

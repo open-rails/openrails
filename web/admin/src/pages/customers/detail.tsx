@@ -48,6 +48,7 @@ import {
   shortId,
 } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
@@ -448,12 +449,12 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Grant entitlement</DialogTitle>
           <DialogDescription>
-            Grants the entitlement string directly (admin grant). Leave hours
-            empty for an indefinite grant.
+            Give this customer access without a payment. Use it for goodwill,
+            support fixes, and trials.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -475,6 +476,9 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
               {(field) => (
                 <div className="grid gap-1.5">
                   <Label htmlFor="ent-name">Entitlement</Label>
+                  <p className="text-[13px] text-muted-foreground">
+                    The name your product checks before unlocking a feature.
+                  </p>
                   <Input
                     id="ent-name"
                     value={field.state.value}
@@ -501,11 +505,15 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
             >
               {(field) => (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="ent-hours">Hours (optional)</Label>
+                  <Label htmlFor="ent-hours">How long it lasts</Label>
+                  <p className="text-[13px] text-muted-foreground">
+                    In hours. Leave it empty and the access never expires.
+                  </p>
                   <Input
                     id="ent-hours"
                     type="number"
                     min="1"
+                    placeholder="Never expires"
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}
@@ -527,12 +535,22 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
               }
             >
               {([entitlement, canSubmit, isSubmitting]) => (
-                <Button
-                  type="submit"
-                  disabled={!entitlement.trim() || !canSubmit || isSubmitting}
-                >
-                  {isSubmitting ? "Granting…" : "Grant"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isSubmitting}
+                    onClick={() => handleOpenChange(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={!entitlement.trim() || !canSubmit || isSubmitting}
+                  >
+                    {isSubmitting ? "Granting…" : "Grant access"}
+                  </Button>
+                </>
               )}
             </form.Subscribe>
           </DialogFooter>
@@ -587,11 +605,12 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Grant product access</DialogTitle>
           <DialogDescription>
-            Admin grant of a catalog product, optionally time-boxed.
+            Give this customer one of your products without a payment. Nothing
+            is charged and no subscription is started.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -617,6 +636,7 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
                     onValueChange={(value) => field.handleChange(value ?? "")}
                   >
                     <SelectTrigger
+                      className="w-full"
                       id="pa-product"
                       aria-invalid={field.state.meta.errors.length > 0}
                     >
@@ -645,7 +665,10 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
             >
               {(field) => (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="pa-ends">Ends at (optional)</Label>
+                  <Label htmlFor="pa-ends">When access ends</Label>
+                  <p className="text-[13px] text-muted-foreground">
+                    Leave it empty and the access never expires.
+                  </p>
                   <Input
                     id="pa-ends"
                     type="datetime-local"
@@ -670,12 +693,22 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
               }
             >
               {([productId, canSubmit, isSubmitting]) => (
-                <Button
-                  type="submit"
-                  disabled={!productId || !canSubmit || isSubmitting}
-                >
-                  {isSubmitting ? "Granting…" : "Grant"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isSubmitting}
+                    onClick={() => handleOpenChange(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={!productId || !canSubmit || isSubmitting}
+                  >
+                    {isSubmitting ? "Granting…" : "Grant access"}
+                  </Button>
+                </>
               )}
             </form.Subscribe>
           </DialogFooter>
@@ -735,13 +768,13 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
-          <DialogTitle>Record off-channel payment</DialogTitle>
+          <DialogTitle>Record a payment taken elsewhere</DialogTitle>
           <DialogDescription>
-            Records a purchase completed outside OpenRails (e.g. a manual sale)
-            so entitlements and history stay correct. Idempotent on transaction
-            id.
+            For money you already collected outside OpenRails, such as a bank
+            transfer or a card taken over the phone. This records the sale and
+            starts the customer's access. It does not charge anyone.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -767,6 +800,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                     onValueChange={(value) => field.handleChange(value ?? "")}
                   >
                     <SelectTrigger
+                      className="w-full"
                       id="oc-price"
                       aria-invalid={field.state.meta.errors.length > 0}
                     >
@@ -794,13 +828,20 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
             >
               {(field) => (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="oc-txn">Transaction id</Label>
+                  <Label htmlFor="oc-txn">Reference</Label>
+                  {/* The reference is the idempotency key: naming that plainly
+                      is what stops the same payment being recorded twice. */}
+                  <p className="text-[13px] text-muted-foreground">
+                    Your reference for this payment, such as the bank transfer
+                    number. Recording the same reference twice will not charge
+                    or credit the customer again.
+                  </p>
                   <Input
                     id="oc-txn"
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}
-                    placeholder="external reference"
+                    placeholder="TRF-4471"
                     aria-invalid={field.state.meta.errors.length > 0}
                   />
                   <FormFieldErrors errors={field.state.meta.errors} />
@@ -821,14 +862,18 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
             >
               {(field) => (
                 <div className="grid gap-1.5">
-                  <Label htmlFor="oc-amount">
-                    Amount override (optional, major units)
-                  </Label>
+                  <Label htmlFor="oc-amount">Amount received</Label>
+                  <p className="text-[13px] text-muted-foreground">
+                    Only if it differs from the price above, for example a
+                    part payment. Enter it the way you would write it, such as
+                    19.90.
+                  </p>
                   <Input
                     id="oc-amount"
                     type="number"
                     step="any"
                     min="0"
+                    placeholder="Same as the price"
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}
@@ -851,17 +896,27 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
               }
             >
               {([priceId, transactionId, canSubmit, isSubmitting]) => (
-                <Button
-                  type="submit"
-                  disabled={
-                    !priceId ||
-                    !transactionId.trim() ||
-                    !canSubmit ||
-                    isSubmitting
-                  }
-                >
-                  {isSubmitting ? "Recording…" : "Record"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isSubmitting}
+                    onClick={() => handleOpenChange(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      !priceId ||
+                      !transactionId.trim() ||
+                      !canSubmit ||
+                      isSubmitting
+                    }
+                  >
+                    {isSubmitting ? "Recording…" : "Record payment"}
+                  </Button>
+                </>
               )}
             </form.Subscribe>
           </DialogFooter>

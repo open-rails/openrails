@@ -35,6 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { TeamInvite, TeamInviteResult, TeamMember } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
@@ -44,24 +45,27 @@ import { adminQueries } from "@/lib/queries"
 // Fixed merchant catalog roles (#567) a teammate can hold, least privilege
 // first. The API validates against the same catalog; these descriptions are the
 // plain-language contract for team members (distinct from an API key's).
-const ROLES: { value: string; label: string; description: string }[] = [
+const ROLES: { value: string; name: string; hint: string; description: string }[] = [
   {
     value: "viewer",
-    label: "Viewer — read-only",
+    name: "Viewer",
+    hint: "read-only",
     description:
       "Can view metrics, payments, subscriptions, catalog, and settings. Cannot " +
       "change anything or move money. For finance, audit, and analyst access.",
   },
   {
     value: "support",
-    label: "Support — customer operations",
+    name: "Support",
+    hint: "customer operations",
     description:
       "Everything Viewer can, plus customer fixes: refunds, subscription changes, " +
       "and entitlement grants. Cannot change settings, catalog, providers, keys, or the team.",
   },
   {
     value: "owner",
-    label: "Owner — full control",
+    name: "Owner",
+    hint: "full control",
     description:
       "Full authority over this merchant, including settings, payment providers, " +
       "API keys, and the team itself. Only owners can manage teammates.",
@@ -69,7 +73,7 @@ const ROLES: { value: string; label: string; description: string }[] = [
 ]
 
 function roleLabel(role: string): string {
-  return ROLES.find((r) => r.value === role)?.label.split(" — ")[0] ?? role
+  return ROLES.find((r) => r.value === role)?.name ?? role
 }
 
 export function TeamTab() {
@@ -346,7 +350,7 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm">Invite member</Button>} />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         {minted?.url ? (
           <ShowInviteLink
             result={minted}
@@ -357,11 +361,10 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
             <DialogHeader>
               <DialogTitle>Invite a teammate</DialogTitle>
               <DialogDescription>
-                If the email already has an account, they&apos;re added to the
-                team right away.
+                Someone who already has an account joins the team straight away.
                 {invitesEnabled
-                  ? " Otherwise you get a single-use link to send them."
-                  : " New emails without an account can't be invited on this deployment — the account must be provisioned first."}
+                  ? " Anyone else gets a single-use link you can send them."
+                  : " Anyone else has to create an account first, because this deployment does not send invites."}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -416,7 +419,12 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
                                 : "hover:bg-muted/50"
                             )}
                           >
-                            <p className="text-sm font-medium">{role.label}</p>
+                            <p className="text-sm font-medium">
+                                {role.name}
+                                <span className="ml-2 font-normal text-muted-foreground">
+                                  {role.hint}
+                                </span>
+                              </p>
                             <p className="mt-1 text-xs text-muted-foreground">
                               {role.description}
                             </p>
@@ -438,12 +446,22 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
                   }
                 >
                   {([email, canSubmit, isSubmitting]) => (
-                    <Button
-                      type="submit"
-                      disabled={!email.trim() || !canSubmit || isSubmitting}
-                    >
-                      {isSubmitting ? "Inviting…" : "Send invite"}
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={isSubmitting}
+                        onClick={() => handleOpenChange(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={!email.trim() || !canSubmit || isSubmitting}
+                      >
+                        {isSubmitting ? "Inviting…" : "Send invite"}
+                      </Button>
+                    </>
                   )}
                 </form.Subscribe>
               </DialogFooter>
@@ -493,7 +511,7 @@ function ShowInviteLink({
               setCopied(true)
               toast.success("Invite link copied")
             } catch {
-              toast.error("Copy failed — select the link text manually")
+              toast.error("Copy failed. Select the link text manually.")
             }
           }}
         >

@@ -45,6 +45,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { getBootstrap } from "@/lib/api/client"
+import { DIALOG_FORM, DIALOG_WIDE } from "@/lib/dialog-width"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import {
   formatDate,
@@ -321,11 +322,12 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
           )
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>{product ? "Edit product" : "New product"}</DialogTitle>
           <DialogDescription>
-            Entitlements are plain strings; comma-separate several.
+            A product is the thing a customer gets. You set what it costs
+            afterwards, by adding a price to it.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -346,7 +348,11 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
                 }}
               >
                 {(field) => (
-                  <Field label="Key" id="p-key">
+                  <Field
+                    label="Key"
+                    id="p-key"
+                    hint="A short name you use in your own code. It cannot be changed later."
+                  >
                     <Input
                       id="p-key"
                       value={field.state.value}
@@ -370,7 +376,11 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
               }}
             >
               {(field) => (
-                <Field label="Display name" id="p-name">
+                <Field
+                  label="Display name"
+                  id="p-name"
+                  hint="What customers see on checkout and invoices."
+                >
                   <Input
                     id="p-name"
                     value={field.state.value}
@@ -397,7 +407,11 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
             <div className="grid grid-cols-2 gap-3">
               <form.Field name="tierGroup">
                 {(field) => (
-                  <Field label="Tier group (optional)" id="p-tg">
+                  <Field
+                    label="Tier group"
+                    id="p-tg"
+                    hint="Products in one group are upgrades of each other. Leave empty if this stands alone."
+                  >
                     <Input
                       id="p-tg"
                       value={field.state.value}
@@ -411,7 +425,11 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
               </form.Field>
               <form.Field name="tierRank">
                 {(field) => (
-                  <Field label="Tier rank" id="p-tr">
+                  <Field
+                    label="Tier rank"
+                    id="p-tr"
+                    hint="Higher rank means a higher tier in the group."
+                  >
                     <Input
                       id="p-tr"
                       type="number"
@@ -427,7 +445,11 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
             </div>
             <form.Field name="entitlements">
               {(field) => (
-                <Field label="Entitlements (comma-separated)" id="p-ents">
+                <Field
+                  label="Entitlements"
+                  id="p-ents"
+                  hint="The access names your product checks. Separate several with commas."
+                >
                   <Input
                     id="p-ents"
                     value={field.state.value}
@@ -450,14 +472,24 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
               }
             >
               {([key, name, isSubmitting]) => (
-                <Button
-                  type="submit"
-                  disabled={
-                    isSubmitting || !name.trim() || (!product && !key.trim())
-                  }
-                >
-                  {isSubmitting ? "Saving…" : "Save"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isSubmitting}
+                    onClick={() => setOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      isSubmitting || !name.trim() || (!product && !key.trim())
+                    }
+                  >
+                    {isSubmitting ? "Saving…" : "Save product"}
+                  </Button>
+                </>
               )}
             </form.Subscribe>
           </DialogFooter>
@@ -649,7 +681,7 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>New price</DialogTitle>
           <DialogDescription>
@@ -702,7 +734,11 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                 }}
               >
                 {(field) => (
-                  <Field label="Amount (major units)" id="pr-amount">
+                  <Field
+                    label="Amount"
+                    id="pr-amount"
+                    hint="Enter it the way you would write it, such as 19.90."
+                  >
                     <Input
                       id="pr-amount"
                       type="number"
@@ -924,7 +960,7 @@ function PublishDialog() {
           </Button>
         }
       />
-      <DialogContent className="max-w-2xl">
+      <DialogContent className={DIALOG_WIDE}>
         <form
           className="grid gap-4"
           onSubmit={(event) => {
@@ -984,18 +1020,25 @@ function PublishDialog() {
   )
 }
 
+// hint carries the invisible constraint: what a value is for, or what happens if
+// it is left empty. Anything the control already says is left out.
 function Field({
   label,
   id,
+  hint,
   children,
 }: {
   label: string
   id: string
+  hint?: string
   children: React.ReactNode
 }) {
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>
+      {hint ? (
+        <p className="text-[13px] text-muted-foreground">{hint}</p>
+      ) : null}
       {children}
     </div>
   )

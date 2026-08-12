@@ -34,6 +34,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { MerchantAPIKey, MintedAPIKey } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
@@ -46,26 +47,26 @@ import { adminQueries } from "@/lib/queries"
 const ROLES: { value: string; label: string; description: string }[] = [
   {
     value: "viewer",
-    label: "Viewer — read-only (recommended)",
+    label: "Viewer (read-only, recommended)",
     description:
-      "Can query metrics and read payments, subscriptions, catalog, and settings." +
-      "Cannot change anything or move money. The right choice for LLM agents," +
-      "reporting, and analytics integrations.",
+      "Can query metrics and read payments, subscriptions, catalog, and settings. " +
+      "Cannot change anything or move money. The right choice for reporting and " +
+      "analytics integrations.",
   },
   {
     value: "support",
-    label: "Support — customer operations",
+    label: "Support (customer operations)",
     description:
-      "Everything Viewer can, plus customer fixes: refunds, subscription changes," +
-      "and entitlement grants. Cannot change merchant settings, catalog, payment" +
+      "Everything Viewer can, plus customer fixes: refunds, subscription changes " +
+      "and entitlement grants. Cannot change merchant settings, catalog, payment " +
       "providers, or API keys.",
   },
   {
     value: "owner",
-    label: "Owner — full control",
+    label: "Owner (full control)",
     description:
-      "Full authority over this merchant, including settings, payment providers," +
-      "and minting or revoking API keys. Only for trusted server automation.",
+      "Full authority over this merchant, including settings, payment providers " +
+      "and API keys. Only for software you fully trust.",
   },
 ]
 
@@ -227,7 +228,7 @@ function CreateKeyDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm">Create API key</Button>} />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         {minted ? (
           <ShowOnceSecret
             minted={minted}
@@ -238,8 +239,9 @@ function CreateKeyDialog() {
             <DialogHeader>
               <DialogTitle>Create API key</DialogTitle>
               <DialogDescription>
-                Pick the least-privileged role that can do the job — you can
-                always mint another key with more authority later.
+                A key lets your own software act on this account. Give it the
+                smallest role that does the job. You can create another key with
+                more access at any time.
               </DialogDescription>
             </DialogHeader>
             <form
@@ -315,12 +317,22 @@ function CreateKeyDialog() {
                   }
                 >
                   {([name, canSubmit, isSubmitting]) => (
-                    <Button
-                      type="submit"
-                      disabled={!name.trim() || !canSubmit || isSubmitting}
-                    >
-                      {isSubmitting ? "Creating…" : "Create key"}
-                    </Button>
+                    <>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={isSubmitting}
+                        onClick={() => handleOpenChange(false)}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="submit"
+                        disabled={!name.trim() || !canSubmit || isSubmitting}
+                      >
+                        {isSubmitting ? "Creating…" : "Create key"}
+                      </Button>
+                    </>
                   )}
                 </form.Subscribe>
               </DialogFooter>
@@ -348,7 +360,7 @@ function ShowOnceSecret({
       setCopied(true)
       toast.success("Key copied to clipboard")
     } catch {
-      toast.error("Copy failed — reveal and copy the key manually")
+      toast.error("Copy failed. Reveal the key and copy it manually.")
     }
   }
 

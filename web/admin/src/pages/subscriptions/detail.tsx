@@ -41,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { SubscriptionReprice } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { formatDate, formatMicros, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -247,7 +248,7 @@ function CancelDialog({ id, customerId }: { id: string; customerId?: string }) {
         open={open}
         onOpenChange={handleOpenChange}
         title="Cancel subscription"
-        description="Terminal cancellation at the payment rail. This is a last resort — dunning parks subscriptions as past_due without losing entitlements."
+        description="Terminal cancellation at the payment rail. This is a last resort. Dunning parks subscriptions as past_due without losing entitlements."
         confirmationWord="CANCEL"
         actionLabel="Cancel subscription"
         onConfirm={async () => {
@@ -382,7 +383,7 @@ function ChangePaymentMethodDialog({
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Change payment method</DialogTitle>
           <DialogDescription>
@@ -415,6 +416,7 @@ function ChangePaymentMethodDialog({
                   onValueChange={(value) => field.handleChange(value ?? "")}
                 >
                   <SelectTrigger
+                    className="w-full"
                     id="subscription-payment-method"
                     aria-invalid={field.state.meta.errors.length > 0}
                   >

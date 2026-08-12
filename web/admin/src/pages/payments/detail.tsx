@@ -31,6 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { REFUNDABLE_RAILS } from "@/lib/api/endpoints"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import {
   formatMicros,
   formatUnix,
@@ -246,7 +247,7 @@ function RefundDialog({
         <HugeiconsIcon icon={Undo02Icon} className="size-4" /> Refund
       </Button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent>
+        <DialogContent className={DIALOG_FORM}>
           <DialogHeader>
             <DialogTitle>Refund payment</DialogTitle>
             <DialogDescription>

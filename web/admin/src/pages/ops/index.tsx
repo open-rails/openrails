@@ -27,6 +27,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import type { Finding } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -35,10 +36,30 @@ import { toastApiError } from "@/lib/toast"
 export function OpsPage() {
   return (
     <Tabs defaultValue="findings" className="flex flex-col gap-4">
-      <TabsList>
-        <TabsTrigger value="findings">Findings</TabsTrigger>
-        <TabsTrigger value="repair-alerts">Repair alerts</TabsTrigger>
-        <TabsTrigger value="worker-health">Worker health</TabsTrigger>
+      {/* Line tabs, not the pill group: these are sections of one page rather
+          than a segmented control switching one value. */}
+      <TabsList
+        variant="line"
+        className="w-full justify-start gap-6 rounded-none p-0"
+      >
+        <TabsTrigger
+          value="findings"
+          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+        >
+          Findings
+        </TabsTrigger>
+        <TabsTrigger
+          value="repair-alerts"
+          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+        >
+          Repair alerts
+        </TabsTrigger>
+        <TabsTrigger
+          value="worker-health"
+          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+        >
+          Worker health
+        </TabsTrigger>
       </TabsList>
       <TabsContent value="findings">
         <FindingsTab />
@@ -69,15 +90,18 @@ function FindingsTab() {
     <div className="flex flex-col gap-4">
       {gauges && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Gauge label="Open findings" value={gauges.total_open} />
+          {/* Each gauge says what is wrong with the MONEY, not what the check
+              is called internally: a merchant reading "freeloaders" cannot tell
+              whether that costs them anything. */}
+          <Gauge label="Open issues" value={gauges.total_open} />
           <Gauge
-            label="Orphaned members"
+            label="Paying, no access"
             value={gauges.orphaned_members}
             alert
           />
-          <Gauge label="Freeloaders" value={gauges.freeloaders} alert />
+          <Gauge label="Access, not paying" value={gauges.freeloaders} alert />
           <Gauge
-            label="Duplicate coverage"
+            label="Charged twice"
             value={gauges.duplicate_coverage}
             alert
           />
@@ -87,7 +111,7 @@ function FindingsTab() {
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : !data?.items?.length ? (
         <p className="text-sm text-muted-foreground">
-          No open findings — queue is clear.
+          Nothing needs attention right now.
         </p>
       ) : (
         <div className="overflow-x-auto rounded-md border">
@@ -209,7 +233,7 @@ function ResolveFindingDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Resolve finding</DialogTitle>
           <DialogDescription>
