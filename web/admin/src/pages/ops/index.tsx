@@ -27,6 +27,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import type { Finding } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -209,7 +210,7 @@ function ResolveFindingDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Resolve finding</DialogTitle>
           <DialogDescription>

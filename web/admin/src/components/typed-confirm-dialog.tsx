@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DIALOG_CONFIRM } from "@/lib/dialog-width"
 
 // TypedConfirmDialog requires typing a confirmation phrase before a
 // destructive action (e.g. cancelling a subscription) can proceed.
@@ -43,7 +44,7 @@ export function TypedConfirmDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent>
+      <DialogContent className={DIALOG_CONFIRM}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

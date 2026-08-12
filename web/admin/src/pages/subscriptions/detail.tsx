@@ -41,6 +41,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { SubscriptionReprice } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { formatDate, formatMicros, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
@@ -382,7 +383,7 @@ function ChangePaymentMethodDialog({
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Change payment method</DialogTitle>
           <DialogDescription>

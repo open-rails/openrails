@@ -35,6 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { TeamInvite, TeamInviteResult, TeamMember } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
@@ -346,7 +347,7 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm">Invite member</Button>} />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         {minted?.url ? (
           <ShowInviteLink
             result={minted}

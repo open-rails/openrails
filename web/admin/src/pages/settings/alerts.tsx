@@ -44,6 +44,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { AlertRuleRequest } from "@/lib/api/endpoints"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import type {
   AlertChannelRef,
   AlertDeliveryResult,
@@ -653,7 +654,7 @@ function RuleDialog({
           )
         }
       />
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className={cn("max-h-[85vh] overflow-y-auto", DIALOG_FORM)}>
         <form.Subscribe selector={(state) => state.values}>
           {(values) => {
             const definition = templateByKey(templates, values.template)
@@ -1082,7 +1083,7 @@ function WebhookDialog() {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Add webhook</DialogTitle>
           <DialogDescription>

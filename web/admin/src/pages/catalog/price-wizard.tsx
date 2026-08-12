@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import type { PriceChangeDraft } from "@/lib/api/copilot"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import type { CatalogPrice } from "@/lib/api/types"
 import { formatMicros, microsFromInput } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -191,7 +192,7 @@ export function PriceChangeWizard({
           }
         />
       )}
-      <DialogContent className="max-w-lg">
+      <DialogContent className={DIALOG_FORM}>
         <form
           className="grid gap-4"
           onSubmit={(event) => {

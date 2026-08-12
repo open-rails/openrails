@@ -48,6 +48,7 @@ import {
   shortId,
 } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
@@ -448,7 +449,7 @@ function GrantEntitlementDialog({ customerId }: { customerId: string }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Grant entitlement</DialogTitle>
           <DialogDescription>
@@ -587,7 +588,7 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Grant product access</DialogTitle>
           <DialogDescription>
@@ -735,7 +736,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>Record off-channel payment</DialogTitle>
           <DialogDescription>

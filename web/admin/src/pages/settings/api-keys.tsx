@@ -34,6 +34,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { MerchantAPIKey, MintedAPIKey } from "@/lib/api/types"
+import { DIALOG_FORM } from "@/lib/dialog-width"
 import { cn } from "@/lib/utils"
 import { formatDate } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
@@ -227,7 +228,7 @@ function CreateKeyDialog() {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger render={<Button size="sm">Create API key</Button>} />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         {minted ? (
           <ShowOnceSecret
             minted={minted}

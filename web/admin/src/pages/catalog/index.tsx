@@ -45,6 +45,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { getBootstrap } from "@/lib/api/client"
+import { DIALOG_FORM, DIALOG_WIDE } from "@/lib/dialog-width"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import {
   formatDate,
@@ -321,7 +322,7 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
           )
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>{product ? "Edit product" : "New product"}</DialogTitle>
           <DialogDescription>
@@ -649,7 +650,7 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
           </Button>
         }
       />
-      <DialogContent>
+      <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
           <DialogTitle>New price</DialogTitle>
           <DialogDescription>
@@ -924,7 +925,7 @@ function PublishDialog() {
           </Button>
         }
       />
-      <DialogContent className="max-w-2xl">
+      <DialogContent className={DIALOG_WIDE}>
         <form
           className="grid gap-4"
           onSubmit={(event) => {

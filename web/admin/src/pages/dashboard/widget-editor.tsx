@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/client"
+import { DIALOG_WIDE } from "@/lib/dialog-width"
 import {
   WIDGET_VIZ,
   type MetricsQuery,
@@ -40,9 +41,14 @@ import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 
 import { WidgetVizView } from "./widget-viz"
+import { cn } from "@/lib/utils"
 
+// The reader here runs a merchant, not the deployment: config keys and doc paths
+// are not theirs to act on. Say what is unavailable, who can change it, and what
+// still works — the last part matters because editing existing widgets never
+// touches the LLM.
 const KEYLESS_MESSAGE =
-  "Widget creation needs an LLM key: set llm.api_key (env LLM_API_KEY) — see docs/admin-console.md"
+  "Ask whoever runs this deployment to turn it on. You can still rename existing widgets and change how they are shown."
 
 export function WidgetEditor({
   onOpenChange,
@@ -110,12 +116,12 @@ export function WidgetEditor({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-2xl">
+      <DialogContent className={cn("flex max-h-[90vh] flex-col overflow-hidden", DIALOG_WIDE)}>
         <DialogHeader>
           <DialogTitle>{initial ? "Edit widget" : "Add widget"}</DialogTitle>
           <DialogDescription>
             {keylessCreate
-              ? "Natural-language widget creation is not available on this deployment."
+              ? "Adding widgets is not switched on here."
               : initial
                 ? "Refine the widget with an instruction, or edit the title and viz directly — preview before saving."
                 : "Describe what the widget should show — the query is generated, previewed live, then saved."}
@@ -173,7 +179,7 @@ export function WidgetEditor({
               </div>
             ) : (
               <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
-                {KEYLESS_MESSAGE}. Title and viz stay editable below.
+                {KEYLESS_MESSAGE}
               </p>
             )}
 
