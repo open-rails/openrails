@@ -108,6 +108,7 @@ type Migration struct {
 	App        string
 	Database   string
 	Name       string
+	Schema     string
 	MigratedAt time.Time
 }
 
