@@ -275,11 +275,21 @@ func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) 
 		}
 		return ks, nil
 	}
-	keysPath := strings.TrimSpace(cfg.Auth.KeysPath)
-	if keysPath == "" {
-		keysPath = jwtkit.DefaultAuthKeysPath
+	return jwtkit.ResolveKeySource(authKeysPath(cfg), cfg.IsDev())
+}
+
+// authKeysPath is the directory AuthKit scans for key material. It holds BOTH
+// keys.json and totp.key (#148), so it has to be handed to authkit as well as to
+// the signing-key resolver: totpKeysDir reads Keys.Path whether or not a
+// KeySource is supplied. Leaving it unset pinned TOTP to the /vault/auth default
+// — a directory a host-run (non-container) engine does not have — so TOTP was
+// permanently unavailable and every RequiresMFA role, including the root owner
+// the bootstrap seeds, could never finish enrolment.
+func authKeysPath(cfg *config.Config) string {
+	if p := strings.TrimSpace(cfg.Auth.KeysPath); p != "" {
+		return p
 	}
-	return jwtkit.ResolveKeySource(keysPath, cfg.IsDev())
+	return jwtkit.DefaultAuthKeysPath
 }
 
 // New builds the OpenRails-owned AuthKit control plane from config and a pgx
@@ -370,6 +380,7 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	coreCfg := authcore.Config{
 		Keys: authcore.KeysConfig{
 			Source:     keySource,
+			Path:       authKeysPath(cfg),
 			VerifyOnly: verifyOnly,
 		},
 		Token: authcore.TokenConfig{
