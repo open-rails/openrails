@@ -48,7 +48,7 @@ const columns: ColumnDef<CustomerSummary, unknown>[] = [
   {
     header: "Created",
     cell: ({ row }) => (
-      <span className="text-muted-foreground">
+      <span className="text-muted-foreground tabular-nums">
         {formatDate(row.original.created_at)}
       </span>
     ),
@@ -56,7 +56,7 @@ const columns: ColumnDef<CustomerSummary, unknown>[] = [
   {
     header: "Last active",
     cell: ({ row }) => (
-      <span className="text-muted-foreground">
+      <span className="text-muted-foreground tabular-nums">
         {formatDate(row.original.last_seen_at)}
       </span>
     ),
