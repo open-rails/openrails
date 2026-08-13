@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -28,6 +30,7 @@ type adminUserPath struct {
 // per-section endpoints.
 type adminUserBillingProfile struct {
 	CustomerID     string                       `json:"customer_id"`
+	Email          *string                      `json:"email,omitempty"`
 	TrustLevel     string                       `json:"trust_level,omitempty"`
 	Subscriptions  []models.Subscription        `json:"subscriptions"`
 	Entitlements   []models.Entitlement         `json:"entitlements"`
@@ -83,6 +86,22 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		PaymentMethods: []paymentMethodResponse{},
 		CreditBalance:  []adminCreditBalanceResponse{},
 		ProductAccess:  []models.ProductAccessGrant{},
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "merchant scope required")
+		return
+	}
+	email, err := r.State.DB.Gen(ctx).GetLatestCustomerEmail(ctx, gen.GetLatestCustomerEmailParams{
+		CustomerID: customerID.UUID(),
+		MerchantID: merchantID.UUID(),
+	})
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load customer email")
+		return
+	}
+	if email != "" {
+		profile.Email = &email
 	}
 	if r.State.SubscriptionService != nil {
 		subs, err := r.State.SubscriptionService.GetActiveSubscriptionsByUserID(ctx, path.UserID)
