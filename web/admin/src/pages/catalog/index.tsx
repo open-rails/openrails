@@ -5,7 +5,7 @@ import {
   Upload01Icon,
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -42,7 +42,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { getBootstrap } from "@/lib/api/client"
 import { DIALOG_FORM, DIALOG_WIDE } from "@/lib/dialog-width"
@@ -60,9 +59,6 @@ import { priceIntervalLabel } from "@/pages/catalog/price-format"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
 import { adminQueries } from "@/lib/queries"
 
-const LINE_TAB =
-  "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
-
 function catalogCopilotEnabled(): boolean {
   try {
     return getBootstrap().catalog_copilot_enabled
@@ -79,52 +75,49 @@ function catalogDraftingEnabled(): boolean {
   }
 }
 
-export function CatalogPage() {
-  const [params, setParams] = useSearchParams()
-  const tab = params.get("tab") || "products"
-
+// Each part of the catalog is its own page, reached from the sub-items the
+// sidebar reveals under Catalog. The shell around them is identical, so it
+// lives here rather than being repeated three times.
+function CatalogSection({
+  title,
+  children,
+}: {
+  title: string
+  children: React.ReactNode
+}) {
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
       <CatalogCopilotPanel
         enabled={catalogCopilotEnabled()}
         draftingEnabled={catalogDraftingEnabled()}
       />
-      <Tabs
-        value={tab}
-        onValueChange={(v) => {
-          const p = new URLSearchParams(params)
-          if (!v || v === "products") p.delete("tab")
-          else p.set("tab", v)
-          setParams(p)
-        }}
-        className="flex flex-col gap-4"
-      >
-        <TabsList
-          variant="line"
-          className="w-full justify-start gap-6 rounded-none p-0"
-        >
-          <TabsTrigger value="products" className={LINE_TAB}>
-            Products
-          </TabsTrigger>
-          <TabsTrigger value="prices" className={LINE_TAB}>
-            Prices
-          </TabsTrigger>
-          <TabsTrigger value="drift" className={LINE_TAB}>
-            Drift
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="products">
-          <ProductsTab />
-        </TabsContent>
-        <TabsContent value="prices">
-          <PricesTab />
-        </TabsContent>
-        <TabsContent value="drift">
-          <DriftTab />
-        </TabsContent>
-      </Tabs>
+      {children}
     </div>
+  )
+}
+
+export function CatalogProductsPage() {
+  return (
+    <CatalogSection title="Products">
+      <ProductsTab />
+    </CatalogSection>
+  )
+}
+
+export function CatalogPricesPage() {
+  return (
+    <CatalogSection title="Prices">
+      <PricesTab />
+    </CatalogSection>
+  )
+}
+
+export function CatalogDriftPage() {
+  return (
+    <CatalogSection title="Drift">
+      <DriftTab />
+    </CatalogSection>
   )
 }
 
