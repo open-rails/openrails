@@ -1,3 +1,4 @@
+import * as React from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Logout01Icon,
@@ -34,14 +35,20 @@ import { SidebarTrigger } from "@/components/ui/sidebar"
 import { useAuth } from "@/lib/auth"
 import { authMutations } from "@/lib/auth-mutations"
 
-export function SiteHeader({ title }: { title: string }) {
+export interface Crumb {
+  label: string
+  /** A link when the step is somewhere you can go; plain text otherwise. */
+  to?: string
+}
+
+export function SiteHeader({ trail }: { trail: Crumb[] }) {
   return (
     <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
       <SidebarTrigger className="-ml-1" />
       <Separator orientation="vertical" className="mr-2 h-4" />
       <Breadcrumb>
         <BreadcrumbList>
-          {title === "Dashboard" ? (
+          {trail.length === 0 ? (
             <BreadcrumbItem>
               <BreadcrumbPage>Dashboard</BreadcrumbPage>
             </BreadcrumbItem>
@@ -50,10 +57,20 @@ export function SiteHeader({ title }: { title: string }) {
               <BreadcrumbItem>
                 <BreadcrumbLink render={<Link to="/">Dashboard</Link>} />
               </BreadcrumbItem>
-              <BreadcrumbSeparator />
-              <BreadcrumbItem>
-                <BreadcrumbPage>{title}</BreadcrumbPage>
-              </BreadcrumbItem>
+              {trail.map((crumb, index) => (
+                <React.Fragment key={crumb.label}>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    {crumb.to && index < trail.length - 1 ? (
+                      <BreadcrumbLink
+                        render={<Link to={crumb.to}>{crumb.label}</Link>}
+                      />
+                    ) : (
+                      <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                    )}
+                  </BreadcrumbItem>
+                </React.Fragment>
+              ))}
             </>
           )}
         </BreadcrumbList>

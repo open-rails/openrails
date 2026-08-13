@@ -2,7 +2,6 @@
 // (inset variant, brand header, nav, footer user menu, rail).
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  Add01Icon,
   CreditCardIcon,
   DashboardCircleIcon,
   PackageIcon,
@@ -21,7 +20,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -34,19 +32,46 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { useAuth } from "@/lib/auth"
 
-const nav = [
+interface NavItem {
+  title: string
+  url: string
+  icon: typeof DashboardCircleIcon
+  // Sub-items appear beneath the entry once the section is the one being
+  // looked at; they are not a permanently expanded tree.
+  items?: { title: string; url: string }[]
+}
+
+const nav: NavItem[] = [
   { title: "Dashboard", url: "/", icon: DashboardCircleIcon },
   { title: "Customers", url: "/customers", icon: UserGroupIcon },
   { title: "Subscriptions", url: "/subscriptions", icon: RepeatIcon },
   { title: "Payments", url: "/payments", icon: CreditCardIcon },
-  { title: "Catalog", url: "/catalog", icon: PackageIcon },
+  {
+    title: "Catalog",
+    url: "/catalog",
+    icon: PackageIcon,
+    items: [
+      { title: "Products", url: "/catalog" },
+      { title: "Prices", url: "/catalog/prices" },
+      { title: "Drift", url: "/catalog/drift" },
+    ],
+  },
   { title: "Ops", url: "/ops", icon: Wrench01Icon },
   { title: "Settings", url: "/settings", icon: Settings01Icon },
 ]
+
+// The Products sub-page IS /catalog, so it can only be the active one when
+// nothing deeper is selected.
+function subItemIsActive(pathname: string, url: string, sectionURL: string) {
+  return url === sectionURL ? pathname === url : pathname.startsWith(url)
+}
 
 export function AppSidebar() {
   const { pathname } = useLocation()
@@ -64,24 +89,46 @@ export function AppSidebar() {
           <SidebarGroupLabel>Billing</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {nav.map((item) => (
-                <SidebarMenuItem key={item.url}>
-                  <SidebarMenuButton
-                    isActive={
-                      item.url === "/"
-                        ? pathname === "/"
-                        : pathname.startsWith(item.url)
-                    }
-                    tooltip={item.title}
-                    render={
-                      <Link to={item.url}>
-                        <HugeiconsIcon icon={item.icon} />
-                        <span>{item.title}</span>
-                      </Link>
-                    }
-                  />
-                </SidebarMenuItem>
-              ))}
+              {nav.map((item) => {
+                const inSection =
+                  item.url === "/"
+                    ? pathname === "/"
+                    : pathname.startsWith(item.url)
+                return (
+                  <SidebarMenuItem key={item.url}>
+                    <SidebarMenuButton
+                      isActive={inSection}
+                      tooltip={item.title}
+                      render={
+                        <Link to={item.url}>
+                          <HugeiconsIcon icon={item.icon} />
+                          <span>{item.title}</span>
+                        </Link>
+                      }
+                    />
+                    {item.items && inSection && (
+                      <SidebarMenuSub>
+                        {item.items.map((sub) => (
+                          <SidebarMenuSubItem key={sub.url}>
+                            <SidebarMenuSubButton
+                              isActive={subItemIsActive(
+                                pathname,
+                                sub.url,
+                                item.url
+                              )}
+                              render={
+                                <Link to={sub.url}>
+                                  <span>{sub.title}</span>
+                                </Link>
+                              }
+                            />
+                          </SidebarMenuSubItem>
+                        ))}
+                      </SidebarMenuSub>
+                    )}
+                  </SidebarMenuItem>
+                )
+              })}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -158,16 +205,11 @@ function MerchantSwitcher() {
                   </DropdownMenuItem>
                 )
               })}
+              {/* No "create merchant" entry: this console administers one
+                  merchant and has no endpoint that makes another. It used to
+                  link to /account, a route only the hosted product serves, so
+                  on a standalone deployment the menu item led to a 404. */}
             </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => {
-                window.location.href = "/account?create=merchant"
-              }}
-            >
-              <HugeiconsIcon icon={Add01Icon} />
-              Create merchant
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>

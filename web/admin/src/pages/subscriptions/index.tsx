@@ -68,7 +68,7 @@ const columns: ColumnDef<AdminSubscription, unknown>[] = [
   {
     header: "Started",
     cell: ({ row }) => (
-      <span className="text-muted-foreground">
+      <span className="text-muted-foreground tabular-nums">
         {formatDate(row.original.started_at)}
       </span>
     ),
@@ -76,7 +76,7 @@ const columns: ColumnDef<AdminSubscription, unknown>[] = [
   {
     header: "Period ends",
     cell: ({ row }) => (
-      <span className="text-muted-foreground">
+      <span className="text-muted-foreground tabular-nums">
         {formatDate(row.original.current_period_ends_at)}
       </span>
     ),
