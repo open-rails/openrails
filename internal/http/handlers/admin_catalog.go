@@ -53,6 +53,7 @@ func writeCatalogError(r *httprequest.Request, err error) {
 		// raw Postgres "… (SQLSTATE 23505)" text must never leak to the client (#783).
 		r.ErrorJSON(http.StatusConflict, "a resource with these attributes already exists")
 	case strings.Contains(msg, "required"),
+		strings.Contains(msg, "auto_renew requires"),
 		strings.Contains(msg, "must be positive"),
 		strings.Contains(msg, "must be non-negative"),
 		strings.Contains(msg, "invalid"):
