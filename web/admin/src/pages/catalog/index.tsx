@@ -11,6 +11,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { FormFieldErrors } from "@/components/form-field-errors"
+import { LinkedTableRow } from "@/components/linked-table-row"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -572,7 +573,10 @@ function PriceRow({
     }
   }
   return (
-    <TableRow className={price.archived ? "opacity-60" : undefined}>
+    <LinkedTableRow
+      to={`/catalog/prices/${price.id}`}
+      className={price.archived ? "opacity-60" : undefined}
+    >
       <TableCell className="text-xs text-muted-foreground">
         <Link
           className="underline-offset-2 hover:underline"
@@ -624,7 +628,7 @@ function PriceRow({
           </Button>
         </div>
       </TableCell>
-    </TableRow>
+    </LinkedTableRow>
   )
 }
 

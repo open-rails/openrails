@@ -11,6 +11,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { FormFieldErrors } from "@/components/form-field-errors"
+import { LinkedTableRow } from "@/components/linked-table-row"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -139,7 +140,7 @@ export function CustomerDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {profile.subscriptions.map((s) => (
-                      <TableRow key={s.id}>
+                      <LinkedTableRow key={s.id} to={`/subscriptions/${s.id}`}>
                         <TableCell>
                           <Link
                             className="text-xs underline-offset-2 hover:underline"
@@ -152,11 +153,11 @@ export function CustomerDetailPage() {
                           <StatusBadge status={s.status} />
                         </TableCell>
                         <TableCell>{s.rail}</TableCell>
-                        <TableCell>
+                        <TableCell className="tabular-nums">
                           {formatDate(s.current_period_ends_at)}
                         </TableCell>
                         <TableCell>{s.user_email ?? "—"}</TableCell>
-                      </TableRow>
+                      </LinkedTableRow>
                     ))}
                   </TableBody>
                 </Table>
@@ -184,7 +185,7 @@ export function CustomerDetailPage() {
                   </TableHeader>
                   <TableBody>
                     {profile.payments.map((p) => (
-                      <TableRow key={p.id}>
+                      <LinkedTableRow key={p.id} to={`/payments/${p.id}`}>
                         <TableCell>
                           <Link
                             className="text-xs underline-offset-2 hover:underline"
@@ -196,12 +197,14 @@ export function CustomerDetailPage() {
                         <TableCell>
                           <StatusBadge status={p.status} />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="tabular-nums">
                           {formatMicros(p.amount, p.currency)}
                         </TableCell>
                         <TableCell>{p.rail}</TableCell>
-                        <TableCell>{formatDate(p.purchased_at)}</TableCell>
-                      </TableRow>
+                        <TableCell className="tabular-nums">
+                          {formatDate(p.purchased_at)}
+                        </TableCell>
+                      </LinkedTableRow>
                     ))}
                   </TableBody>
                 </Table>

@@ -10,6 +10,7 @@ import {
 } from "@tanstack/react-table"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { isInteractiveTarget } from "@/lib/dom"
 import {
   Table,
   TableBody,
@@ -63,10 +64,7 @@ export function DataTable<TData>({
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id} className="hover:bg-transparent">
                 {headerGroup.headers.map((header) => (
-                  <TableHead
-                    key={header.id}
-                    className="text-muted-foreground"
-                  >
+                  <TableHead key={header.id} className="text-muted-foreground">
                     {header.isPlaceholder
                       ? null
                       : flexRender(
@@ -93,10 +91,33 @@ export function DataTable<TData>({
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
+                  // A clickable row is a shortcut, not a control: it takes
+                  // Enter as well as a click, and it keeps its hands off
+                  // whatever the cells put inside it.
+                  tabIndex={onRowClick ? 0 : undefined}
+                  role={onRowClick ? "link" : undefined}
                   onClick={
-                    onRowClick ? () => onRowClick(row.original) : undefined
+                    onRowClick
+                      ? (event) => {
+                          if (isInteractiveTarget(event.target)) return
+                          onRowClick(row.original)
+                        }
+                      : undefined
                   }
-                  className={onRowClick ? "cursor-pointer" : undefined}
+                  onKeyDown={
+                    onRowClick
+                      ? (event) => {
+                          if (event.key !== "Enter") return
+                          if (isInteractiveTarget(event.target)) return
+                          onRowClick(row.original)
+                        }
+                      : undefined
+                  }
+                  className={
+                    onRowClick
+                      ? "cursor-pointer focus-visible:bg-muted/50 focus-visible:outline-none"
+                      : undefined
+                  }
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id} className="py-3.5">
