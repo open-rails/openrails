@@ -89,6 +89,43 @@ const TEMPLATE_COPY: Record<string, { label: string; description: string }> = {
     description:
       "A monthly list of cards expiring soon, so you can ask customers to update them before a payment fails.",
   },
+  webhook_silence: {
+    label: "A payment provider has gone quiet",
+    description:
+      "Fires when a provider you take money through stops sending updates altogether, which usually means it is pointed at the wrong address.",
+  },
+  webhook_rejects: {
+    label: "Updates arriving but being rejected",
+    description:
+      "Fires when a provider's updates reach you but fail their security check. Almost always the wrong signing secret.",
+  },
+  webhook_drift: {
+    label: "Updates arriving late or not at all",
+    description:
+      "Fires when changes at a provider are found by checking rather than being announced, which means some updates are quietly going missing.",
+  },
+}
+
+const SEVERITY_ITEMS = [
+  { value: "warning", label: "Warning (shown in the console)" },
+  { value: "critical", label: "Critical (also emailed and sent to webhooks)" },
+]
+
+// The engine describes each parameter for an operator reading an API. These say
+// the same thing to whoever runs the shop.
+const PARAM_COPY: Record<string, string> = {
+  threshold:
+    "The chargeback rate that sets off the alert, as a share of payments. 0.0063 is roughly 0.63%.",
+  window: "How far back to measure, such as 30d or 12w.",
+  multiplier:
+    "How many times the usual number counts as a spike. 2 means twice the recent average.",
+  min_count: "How many have to pile up before you are told.",
+  runway_days: "How few days of credit left counts as running out.",
+  days_ahead: "How far ahead to look for cards that are about to expire.",
+}
+
+function paramDescription(name: string, fallback: string): string {
+  return PARAM_COPY[name] ?? fallback
 }
 
 function templateLabel(t: AlertTemplateInfo): string {
@@ -111,8 +148,11 @@ function templateByKey(
 function humanizeParam(name: string): string {
   return name
     .split("_")
-    .map((w) => (w ? w[0].toUpperCase() + w.slice(1) : w))
-    .join("")
+    .filter(Boolean)
+    .map((word, index) =>
+      index === 0 ? word[0].toUpperCase() + word.slice(1) : word
+    )
+    .join(" ")
 }
 
 // runway_days is fixed by the #733 engine (only 7 is accepted) — render it
@@ -457,7 +497,7 @@ function RuleRow({
         <span className="font-medium">{label}</span>
         {def?.digest && (
           <span className="block text-xs text-muted-foreground">
-            Digest — periodic, not threshold-triggered
+            Sent on a schedule, not when a number crosses a line
           </span>
         )}
       </TableCell>
@@ -680,28 +720,28 @@ function RuleDialog({
                 >
                   {!editing && (
                     <div className="grid gap-2">
-                      <Label>Template</Label>
+                      <Label>What to watch</Label>
                       <div className="grid gap-2">
                         {templates.map((template) => (
-                          <button
+                          <Button
                             key={template.key}
                             type="button"
+                            variant="outline"
                             onClick={() => pickTemplate(template.key)}
                             aria-pressed={values.template === template.key}
                             className={cn(
-                              "rounded-md border p-3 text-left transition-colors",
-                              values.template === template.key
-                                ? "border-primary bg-primary/5"
-                                : "hover:bg-muted/50"
+                              "h-auto flex-col items-start gap-1 p-3 text-left whitespace-normal",
+                              values.template === template.key &&
+                                "border-primary bg-primary/5"
                             )}
                           >
-                            <p className="text-sm font-medium">
+                            <span className="text-sm font-medium">
                               {templateLabel(template)}
-                            </p>
-                            <p className="mt-1 text-xs text-muted-foreground">
+                            </span>
+                            <span className="text-xs text-muted-foreground">
                               {templateDescription(template)}
-                            </p>
-                          </button>
+                            </span>
+                          </Button>
                         ))}
                       </div>
                     </div>
@@ -749,7 +789,7 @@ function RuleDialog({
                                 }
                               />
                               <p className="text-xs text-muted-foreground">
-                                {spec.description}
+                                {paramDescription(spec.name, spec.description)}
                               </p>
                             </div>
                           )
@@ -763,6 +803,7 @@ function RuleDialog({
                       <div className="grid gap-1.5">
                         <Label>Severity</Label>
                         <Select
+                          items={SEVERITY_ITEMS}
                           value={field.state.value}
                           onValueChange={(value) =>
                             field.handleChange(value as AlertSeverity)
@@ -772,12 +813,11 @@ function RuleDialog({
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="warning">
-                              Warning — in-app by default
-                            </SelectItem>
-                            <SelectItem value="critical">
-                              Critical — push harder (email + webhooks)
-                            </SelectItem>
+                            {SEVERITY_ITEMS.map((item) => (
+                              <SelectItem key={item.value} value={item.value}>
+                                {item.label}
+                              </SelectItem>
+                            ))}
                           </SelectContent>
                         </Select>
                       </div>
@@ -787,7 +827,7 @@ function RuleDialog({
                   <form.Field name="channels">
                     {(field) => (
                       <div className="grid gap-2">
-                        <Label>Channels</Label>
+                        <Label>Where to send it</Label>
                         <div className="grid gap-2 rounded-md border p-3">
                           <div className="flex items-center justify-between">
                             <span className="inline-flex items-center gap-2 text-sm">
@@ -795,7 +835,7 @@ function RuleDialog({
                                 icon={Notification01Icon}
                                 className="size-4"
                               />
-                              In-app
+                              In the console
                             </span>
                             <Badge variant="secondary" className="text-[10px]">
                               always on
@@ -833,9 +873,9 @@ function RuleDialog({
                                 </p>
                               ) : (
                                 <p className="text-xs text-held">
-                                  No alert email set — email won&apos;t send
-                                  until you set one above. The alert still
-                                  reaches in-app and webhooks.
+                                  No alert email set, so nothing will be emailed
+                                  until you add one above. The alert still
+                                  reaches the console and any webhooks.
                                 </p>
                               ))}
                           </div>
@@ -850,7 +890,8 @@ function RuleDialog({
                             </span>
                             {webhooks.length === 0 ? (
                               <p className="text-xs text-muted-foreground">
-                                No webhooks configured — add one below.
+                                No webhooks yet. Add one below to send alerts to
+                                your own systems.
                               </p>
                             ) : (
                               <div className="grid gap-1">
@@ -903,6 +944,13 @@ function RuleDialog({
                   </form.Field>
 
                   <DialogFooter>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleOpen(false)}
+                    >
+                      Cancel
+                    </Button>
                     <form.Subscribe selector={(state) => state.isSubmitting}>
                       {(isSubmitting) => (
                         <Button
