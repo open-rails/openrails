@@ -17,9 +17,32 @@ import (
 )
 
 const (
-	vaultKVMount      = "secret"
-	vaultTransitMount = "transit"
+	// DefaultVaultKVMount is used when config.VaultConfig.KVMount is empty —
+	// unchanged from the previous unconditional constant, so existing
+	// deployments that never set KVMount keep their current behavior.
+	DefaultVaultKVMount = "secret"
+	// DefaultVaultTransitMount is used when config.VaultConfig.TransitMount is
+	// empty — unchanged from the previous unconditional constant.
+	DefaultVaultTransitMount = "transit"
 )
+
+// resolveVaultKVMount applies the config.VaultConfig.KVMount default. vc may
+// be nil (Vault disabled).
+func resolveVaultKVMount(vc *config.VaultConfig) string {
+	if vc == nil || vc.KVMount == "" {
+		return DefaultVaultKVMount
+	}
+	return vc.KVMount
+}
+
+// resolveVaultTransitMount applies the config.VaultConfig.TransitMount
+// default. vc may be nil (Vault disabled).
+func resolveVaultTransitMount(vc *config.VaultConfig) string {
+	if vc == nil || vc.TransitMount == "" {
+		return DefaultVaultTransitMount
+	}
+	return vc.TransitMount
+}
 
 // Store contains the selected merchant secret backend, the optional Vault Transit
 // client for Solana signing, and the probed Vault capabilities (#661). Capabilities
@@ -43,6 +66,11 @@ type Store struct {
 	// since those backends have no separate liveness signal beyond the runtime DB
 	// ping / in-memory plane (#748 Ready()).
 	vclient *vaultapi.Client
+	// kvMount is the resolved KV-v2 mount (config.VaultConfig.KVMount, or
+	// DefaultVaultKVMount) Build probed vclient against — Ping re-probes the
+	// same mount, never the package default directly, so a non-default mount
+	// stays correct post-construction.
+	kvMount string
 }
 
 // Ping reports whether the merchant-secret backend is usable RIGHT NOW — the
@@ -63,7 +91,7 @@ func (s *Store) Ping(ctx context.Context) error {
 			return fmt.Errorf("vault auth: %w", err)
 		}
 	}
-	if _, err := vault.SelfCapabilities(ctx, s.vclient, vaultKVMount); err != nil {
+	if _, err := vault.SelfCapabilities(ctx, s.vclient, s.kvMount); err != nil {
 		return fmt.Errorf("vault unreachable: %w", err)
 	}
 	return nil
@@ -111,8 +139,10 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		caps      vault.Capabilities
 		vaultAuth *vault.Supervisor
 	)
+	kvMount := DefaultVaultKVMount
 	if cfg != nil && cfg.Vault != nil && cfg.Vault.Enabled {
 		vc := cfg.Vault
+		kvMount = resolveVaultKVMount(vc)
 		client, sup, err := vault.Login(ctx, vault.Config{
 			Address:    vc.Address,
 			AuthMethod: vc.AuthMethod,
@@ -125,7 +155,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 			return nil, fmt.Errorf("vault login: %w", err)
 		}
 		vaultAuth = sup
-		caps, err = vault.SelfCapabilities(ctx, client, vaultKVMount)
+		caps, err = vault.SelfCapabilities(ctx, client, kvMount)
 		if err != nil {
 			// Only fatal when secrets are declared to live in Vault: the KV store
 			// can't be verified. Otherwise degrade — transit signing doesn't need
@@ -136,12 +166,12 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 			log.WithError(err).Warn("vault: capability probe failed; continuing (secret_backend=db, Vault used for transit signing only)")
 		}
 		vclient = client
-		transit = vault.NewTransitAdapter(client, vaultTransitMount)
+		transit = vault.NewTransitAdapter(client, resolveVaultTransitMount(vc))
 	}
 
 	// Secret store per DECLARED backend — never auto-fallback (the data lives in one
 	// place; a store that lacks it would run silently empty).
-	useVault, err := gateSecretBackend(backend, vclient != nil, caps)
+	useVault, err := gateSecretBackend(backend, vclient != nil, caps, kvMount)
 	if err != nil {
 		return nil, err
 	}
@@ -152,8 +182,8 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 			log.Warn("vault: secret_backend=vault with read-only KV capability; merchant-secret writes / config-push are disabled")
 		}
 		store := merchants.NewVaultSecretStore(
-			vaultKVMount,
-			vault.NewKVv2Adapter(vclient, vaultKVMount).WithReauthTrigger(vaultAuth),
+			kvMount,
+			vault.NewKVv2Adapter(vclient, kvMount).WithReauthTrigger(vaultAuth),
 			merchants.NewDBMerchantSlugResolver(pool),
 		)
 		return &Store{
@@ -164,6 +194,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 			SecretWrite:   secretWrite,
 			VaultAuth:     vaultAuth,
 			vclient:       vclient,
+			kvMount:       kvMount,
 		}, nil
 	}
 
@@ -185,7 +216,7 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 // given the probed capabilities. It errors on the one unrecoverable case — secrets
 // declared in Vault but the token can't read KV — and callers must NOT auto-fallback
 // to the DB store (the data lives in Vault, not the DB, so DB would be empty).
-func gateSecretBackend(backend string, vaultConnected bool, caps vault.Capabilities) (useVault bool, err error) {
+func gateSecretBackend(backend string, vaultConnected bool, caps vault.Capabilities, kvMount string) (useVault bool, err error) {
 	if backend != config.SecretBackendVault {
 		return false, nil
 	}
@@ -193,7 +224,7 @@ func gateSecretBackend(backend string, vaultConnected bool, caps vault.Capabilit
 		return false, fmt.Errorf("secret_backend=vault requires vault.enabled (no Vault connection to serve the KV store)")
 	}
 	if !caps.KVRead {
-		return false, fmt.Errorf("secret_backend=vault but the Vault token cannot read the KV mount %q; grant KV read or set secret_backend=db", vaultKVMount)
+		return false, fmt.Errorf("secret_backend=vault but the Vault token cannot read the KV mount %q; grant KV read or set secret_backend=db", kvMount)
 	}
 	return true, nil
 }
@@ -287,7 +318,7 @@ func BuildTransit(ctx context.Context, cfg *config.Config) (*Store, error) {
 		return nil, fmt.Errorf("vault login: %w", err)
 	}
 	return &Store{
-		SolanaTransit: vault.NewTransitAdapter(client, vaultTransitMount),
+		SolanaTransit: vault.NewTransitAdapter(client, resolveVaultTransitMount(vc)),
 		VaultAuth:     sup,
 		vclient:       client,
 	}, nil
