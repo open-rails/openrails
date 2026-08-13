@@ -116,7 +116,12 @@ export function WidgetEditor({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className={cn("flex max-h-[90vh] flex-col overflow-hidden", DIALOG_WIDE)}>
+      <DialogContent
+        className={cn(
+          "flex max-h-[90vh] flex-col overflow-hidden",
+          DIALOG_WIDE
+        )}
+      >
         <DialogHeader>
           <DialogTitle>{initial ? "Edit widget" : "Add widget"}</DialogTitle>
           <DialogDescription>

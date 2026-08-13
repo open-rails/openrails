@@ -45,7 +45,12 @@ import { adminQueries } from "@/lib/queries"
 // Fixed merchant catalog roles (#567) a teammate can hold, least privilege
 // first. The API validates against the same catalog; these descriptions are the
 // plain-language contract for team members (distinct from an API key's).
-const ROLES: { value: string; name: string; hint: string; description: string }[] = [
+const ROLES: {
+  value: string
+  name: string
+  hint: string
+  description: string
+}[] = [
   {
     value: "viewer",
     name: "Viewer",
@@ -420,11 +425,11 @@ function InviteDialog({ invitesEnabled }: { invitesEnabled: boolean }) {
                             )}
                           >
                             <p className="text-sm font-medium">
-                                {role.name}
-                                <span className="ml-2 font-normal text-muted-foreground">
-                                  {role.hint}
-                                </span>
-                              </p>
+                              {role.name}
+                              <span className="ml-2 font-normal text-muted-foreground">
+                                {role.hint}
+                              </span>
+                            </p>
                             <p className="mt-1 text-xs text-muted-foreground">
                               {role.description}
                             </p>

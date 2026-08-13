@@ -1165,8 +1165,8 @@ function CustomerControlsTab() {
             <p className="text-sm text-muted-foreground">
               <span className="font-mono text-xs break-all text-foreground">
                 {result.customerID}
-              </span>
-              {""}· {result.currency.toUpperCase()}
+              </span>{" "}
+              · {result.currency.toUpperCase()}
             </p>
           </div>
           <dl className="grid gap-4">

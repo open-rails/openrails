@@ -106,7 +106,7 @@ export function CustomerDetailPage() {
                   {formatMicros(b.balance, b.currency)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  held {formatMicros(b.held_balance, b.currency)} · owed{""}
+                  held {formatMicros(b.held_balance, b.currency)} · owed{" "}
                   {formatMicros(b.outstanding_owed_amount, b.currency)}
                 </p>
               </CardContent>

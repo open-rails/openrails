@@ -325,7 +325,6 @@ function ChannelSummary({ channels }: { channels: AlertChannelRef[] }) {
       {sel.webhookIds.length > 0 && (
         <span className="inline-flex items-center gap-1">
           <HugeiconsIcon icon={WebhookIcon} className="size-3" />
-          {""}
           {sel.webhookIds.length} webhook
           {sel.webhookIds.length > 1 ? "s" : ""}
         </span>
@@ -370,7 +369,6 @@ function RulesSection({
         ) : (
           <Button size="sm" disabled>
             <HugeiconsIcon icon={Add01Icon} className="size-4" />
-            {""}
             {templatesLoading ? "Loading…" : "New rule"}
           </Button>
         )}
@@ -797,7 +795,6 @@ function RuleDialog({
                                 icon={Notification01Icon}
                                 className="size-4"
                               />
-                              {""}
                               In-app
                             </span>
                             <Badge variant="secondary" className="text-[10px]">
@@ -812,7 +809,6 @@ function RuleDialog({
                                   icon={Mail01Icon}
                                   className="size-4"
                                 />
-                                {""}
                                 Email
                               </span>
                               <Switch
@@ -829,7 +825,7 @@ function RuleDialog({
                             {field.state.value.email &&
                               (alertEmail ? (
                                 <p className="text-xs text-muted-foreground">
-                                  Sent to{""}
+                                  Sent to{" "}
                                   <span className="font-medium text-foreground">
                                     {alertEmail}
                                   </span>
@@ -850,7 +846,6 @@ function RuleDialog({
                                 icon={WebhookIcon}
                                 className="size-4"
                               />
-                              {""}
                               Webhooks
                             </span>
                             {webhooks.length === 0 ? (

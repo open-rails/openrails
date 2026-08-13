@@ -900,7 +900,6 @@ function DriftTab() {
               refreshDrift.isPending ? "size-4 animate-spin" : "size-4"
             }
           />
-          {""}
           Refresh scan
         </Button>
       </div>
@@ -934,8 +933,7 @@ function DriftTab() {
                   <TableCell>{e.provider}</TableCell>
                   <TableCell>{e.kind}</TableCell>
                   <TableCell className="text-xs">
-                    {e.openrails_resource_type}
-                    {""}
+                    {e.openrails_resource_type}{" "}
                     {shortId(
                       e.openrails_resource_id ?? e.external_resource_id ?? "",
                       13
