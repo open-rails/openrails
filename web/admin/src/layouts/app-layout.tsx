@@ -6,13 +6,23 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { useAuth } from "@/lib/auth"
 
-const titles: [string, string][] = [
-  ["/customers", "Customers"],
-  ["/subscriptions", "Subscriptions"],
-  ["/payments", "Payments"],
-  ["/catalog", "Catalog"],
-  ["/ops", "Ops"],
-  ["/settings", "Settings"],
+// Longest path first: the catalog sub-pages have to match before the section
+// they live under. A trail of more than one entry becomes a real breadcrumb.
+const trails: [string, { label: string; to?: string }[]][] = [
+  ["/customers", [{ label: "Customers" }]],
+  ["/subscriptions", [{ label: "Subscriptions" }]],
+  ["/payments", [{ label: "Payments" }]],
+  [
+    "/catalog/prices",
+    [{ label: "Catalog", to: "/catalog" }, { label: "Prices" }],
+  ],
+  [
+    "/catalog/drift",
+    [{ label: "Catalog", to: "/catalog" }, { label: "Drift" }],
+  ],
+  ["/catalog", [{ label: "Catalog", to: "/catalog" }, { label: "Products" }]],
+  ["/ops", [{ label: "Ops" }]],
+  ["/settings", [{ label: "Settings" }]],
 ]
 
 export function AppLayout() {
@@ -40,15 +50,15 @@ export function AppLayout() {
     return <Navigate to="/login" replace />
   }
 
-  const title =
-    titles.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? "Dashboard"
+  const trail =
+    trails.find(([prefix]) => pathname.startsWith(prefix))?.[1] ?? []
 
   return (
     <TooltipProvider>
       <SidebarProvider>
         <AppSidebar />
         <SidebarInset>
-          <SiteHeader title={title} />
+          <SiteHeader trail={trail} />
           <main className="flex flex-1 flex-col p-4 md:p-8">
             <div className="mx-auto w-full max-w-7xl">
               <Outlet />
