@@ -182,12 +182,18 @@ export function PSPLinksCard({
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Provider</TableHead>
-                  <TableHead>Rail</TableHead>
-                  <TableHead>Sent</TableHead>
-                  <TableHead>Still matches</TableHead>
-                  <TableHead>Their reference</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">
+                    Provider
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">Rail</TableHead>
+                  <TableHead className="text-muted-foreground">Sent</TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Still matches
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Their reference
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -333,11 +339,19 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Provider</TableHead>
-                      <TableHead>Rail</TableHead>
-                      <TableHead>Outcome</TableHead>
-                      <TableHead>Why</TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">
+                        Provider
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Rail
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Outcome
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Why
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

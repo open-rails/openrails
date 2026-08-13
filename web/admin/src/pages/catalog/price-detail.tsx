@@ -128,11 +128,13 @@ export function PriceDetailPage() {
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Since</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Price</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">
+                    Amount
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">Since</TableHead>
+                  <TableHead className="text-muted-foreground">State</TableHead>
+                  <TableHead className="text-muted-foreground">Price</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

@@ -97,7 +97,7 @@ export function ApiKeysTab() {
         ) : (
           <Table className="min-w-[52rem]">
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead className="text-muted-foreground">Name</TableHead>
                 <TableHead className="text-muted-foreground">Role</TableHead>
                 <TableHead className="text-muted-foreground">Prefix</TableHead>

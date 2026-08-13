@@ -455,7 +455,7 @@ function ProvidersTab() {
         ) : (
           <Table className="min-w-[44rem]">
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead className="text-muted-foreground">
                   Provider
                 </TableHead>

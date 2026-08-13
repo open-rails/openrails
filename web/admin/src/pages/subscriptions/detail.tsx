@@ -187,11 +187,19 @@ export function SubscriptionDetailPage() {
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Payment</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Purchased</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">
+                    Payment
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Status
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Amount
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Purchased
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

@@ -422,7 +422,7 @@ function RulesSection({
       ) : (
         <Table className="min-w-[48rem]">
           <TableHeader>
-            <TableRow>
+            <TableRow className="hover:bg-transparent">
               <TableHead className="text-muted-foreground">Rule</TableHead>
               <TableHead className="text-muted-foreground">Severity</TableHead>
               <TableHead className="text-muted-foreground">Channels</TableHead>
@@ -1013,7 +1013,7 @@ function WebhooksSection({
       ) : (
         <Table className="min-w-[36rem]">
           <TableHeader>
-            <TableRow>
+            <TableRow className="hover:bg-transparent">
               <TableHead className="text-muted-foreground">Name</TableHead>
               <TableHead className="text-muted-foreground">Format</TableHead>
               <TableHead className="text-muted-foreground">URL</TableHead>

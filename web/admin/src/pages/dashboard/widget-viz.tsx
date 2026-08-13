@@ -301,7 +301,7 @@ function TableViz({ result }: { result: MetricsResult }) {
     <div className="h-full overflow-auto">
       <Table>
         <TableHeader>
-          <TableRow>
+          <TableRow className="hover:bg-transparent">
             {result.columns.map((c) => (
               <TableHead
                 key={c.name}

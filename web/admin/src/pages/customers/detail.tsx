@@ -130,12 +130,22 @@ export function CustomerDetailPage() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Subscription</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Rail</TableHead>
-                      <TableHead>Period ends</TableHead>
-                      <TableHead>Email</TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">
+                        Subscription
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Status
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Rail
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Period ends
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Email
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -175,12 +185,22 @@ export function CustomerDetailPage() {
               ) : (
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Payment</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Amount</TableHead>
-                      <TableHead>Rail</TableHead>
-                      <TableHead>Purchased</TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">
+                        Payment
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Status
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Amount
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Rail
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Purchased
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
