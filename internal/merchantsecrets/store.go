@@ -139,9 +139,10 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		caps      vault.Capabilities
 		vaultAuth *vault.Supervisor
 	)
-	kvMount := resolveVaultKVMount(cfg.Vault)
+	kvMount := DefaultVaultKVMount
 	if cfg != nil && cfg.Vault != nil && cfg.Vault.Enabled {
 		vc := cfg.Vault
+		kvMount = resolveVaultKVMount(vc)
 		client, sup, err := vault.Login(ctx, vault.Config{
 			Address:    vc.Address,
 			AuthMethod: vc.AuthMethod,
