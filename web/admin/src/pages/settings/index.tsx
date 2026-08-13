@@ -713,10 +713,9 @@ function RotateCredentialsDialog({
                   )
                 })}
                 <p className="text-xs text-muted-foreground">
-                  On success every OpenRails node cuts over to the new
-                  credential at its next charge or pull — the rotation raises a
-                  version floor that no node&apos;s credential cache may serve
-                  below. No restart, no waiting out a cache TTL.
+                  Once this succeeds, the new credential is used for the next
+                  charge and every one after it. Nothing needs restarting, and
+                  the old credential stops being used straight away.
                 </p>
               </div>
             )}

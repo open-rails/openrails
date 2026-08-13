@@ -1127,8 +1127,8 @@ function WebhookDialog() {
         <DialogHeader>
           <DialogTitle>Add webhook</DialogTitle>
           <DialogDescription>
-            Paste a Discord or Slack channel webhook URL — no bot needed — or a
-            “generic” URL your own receiver consumes.
+            Paste the webhook address from a Discord or Slack channel, no bot
+            needed, or any address of your own that can receive alerts.
           </DialogDescription>
         </DialogHeader>
         <form

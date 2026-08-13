@@ -253,8 +253,8 @@ function ResolveFindingDialog({
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            No mechanical fix is attached — this finding can only be ignored
-            (with notes).
+            Nothing here can be fixed automatically. You can only note why you
+            are leaving it.
           </p>
         )}
         <form.Field name="notes">
@@ -361,7 +361,7 @@ function WorkerHealthTab() {
                 {w.last_error_at ? (
                   <span title={w.last_error}>
                     {formatDate(w.last_error_at)}
-                    {w.last_error ? ` — ${w.last_error.slice(0, 60)}` : ""}
+                    {w.last_error ? `: ${w.last_error.slice(0, 60)}` : ""}
                   </span>
                 ) : (
                   "—"
