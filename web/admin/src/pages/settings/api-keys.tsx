@@ -369,17 +369,16 @@ function ShowOnceSecret({
       <DialogHeader>
         <DialogTitle>API key created</DialogTitle>
         <DialogDescription>
-          Copy the key now and store it somewhere safe.{""}
+          Copy the key now and store it somewhere safe.{" "}
           <span className="font-semibold text-foreground">
             You won&apos;t see this key again
-          </span>
-          {""}— if it is lost, revoke it and mint a new one.
+          </span>{" "}
+          — if it is lost, revoke it and mint a new one.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">
         <p className="text-sm">
-          <span className="font-medium">{minted.name}</span>
-          {""}
+          <span className="font-medium">{minted.name}</span>{" "}
           <Badge variant="secondary">{minted.role}</Badge>
         </p>
         <div className="flex flex-wrap items-center gap-2">
@@ -407,7 +406,7 @@ function ShowOnceSecret({
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          Use it as a Bearer token:{""}
+          Use it as a Bearer token:{" "}
           <code>Authorization: Bearer {minted.prefix}…</code>
         </p>
       </div>

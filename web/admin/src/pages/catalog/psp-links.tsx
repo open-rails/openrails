@@ -209,7 +209,7 @@ export function PSPLinksCard({
                           key={d.field}
                           className="mt-1 text-xs text-muted-foreground"
                         >
-                          {d.field}: ours {d.openrails_value} · theirs{""}
+                          {d.field}: ours {d.openrails_value} · theirs{" "}
                           {d.remote_value}
                         </p>
                       ))}
@@ -237,7 +237,7 @@ export function PSPLinksCard({
           <div className="rounded-md border border-held/40 p-3 text-xs">
             {price.pending_manual_actions.map((a) => (
               <p key={`${a.provider}-${a.action}`}>
-                <span className="font-mono">{a.provider}</span>:{""}
+                <span className="font-mono">{a.provider}</span>:{" "}
                 {a.hint || a.action}
               </p>
             ))}
@@ -296,10 +296,10 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
             <p className="text-sm">
               {decision.selected ? (
                 <>
-                  Selected{""}
+                  Selected{" "}
                   <span className="font-mono">{decision.selected}</span>
                   {decision.rail && <> on {decision.rail}</>}
-                  {decision.mode && <> · {decision.mode}</>} · policy{""}
+                  {decision.mode && <> · {decision.mode}</>} · policy{" "}
                   {decision.policy}
                   {decision.rule !== undefined && <> (rule {decision.rule})</>}
                 </>

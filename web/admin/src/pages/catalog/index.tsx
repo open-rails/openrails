@@ -643,9 +643,10 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
     defaultValues: {
       productId: "",
       amount: "",
-      currency: "usd",
+      currency: "USD",
       durationHours: "",
-      autoRenew: true,
+      // Off by default because the duration it renews over starts empty.
+      autoRenew: false,
     },
     onSubmit: async ({ value }) => {
       try {
@@ -685,8 +686,8 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
         <DialogHeader>
           <DialogTitle>New price</DialogTitle>
           <DialogDescription>
-            Financial terms are immutable after creation: a price change is a
-            new price plus archiving the old one.
+            These terms cannot be changed later. To charge a different amount,
+            create another price and deactivate this one.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -723,88 +724,124 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                 </Field>
               )}
             </form.Field>
-            <div className="grid grid-cols-2 gap-3">
-              <form.Field
-                name="amount"
-                validators={{
-                  onBlur: ({ value }) =>
-                    microsFromInput(value)
-                      ? undefined
-                      : "Enter an amount greater than zero",
-                }}
-              >
-                {(field) => (
-                  <Field
-                    label="Amount"
-                    id="pr-amount"
-                    hint="Enter it the way you would write it, such as 19.90."
-                  >
-                    <Input
-                      id="pr-amount"
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(event) =>
-                        field.handleChange(event.target.value)
-                      }
-                      aria-invalid={field.state.meta.errors.length > 0}
-                    />
-                    <FormFieldErrors errors={field.state.meta.errors} />
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="currency">
-                {(field) => (
-                  <Field label="Currency" id="pr-cur">
+            {/* Amount and currency are one money value, so they sit on one row
+                under one label — two labelled columns pull apart whenever the
+                hint wraps. */}
+            <Field
+              label="Amount"
+              id="pr-amount"
+              hint="Enter it the way you would write it, such as 19.90."
+            >
+              <div className="flex gap-2">
+                <form.Field
+                  name="amount"
+                  validators={{
+                    onBlur: ({ value }) =>
+                      microsFromInput(value)
+                        ? undefined
+                        : "Enter an amount greater than zero",
+                  }}
+                >
+                  {(field) => (
+                    <div className="flex-1">
+                      <Input
+                        id="pr-amount"
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        aria-invalid={field.state.meta.errors.length > 0}
+                      />
+                      <FormFieldErrors errors={field.state.meta.errors} />
+                    </div>
+                  )}
+                </form.Field>
+                <form.Field name="currency">
+                  {(field) => (
                     <Input
                       id="pr-cur"
+                      aria-label="Currency"
+                      className="w-24"
+                      // Three-letter currency codes, so the field normalises
+                      // rather than rejecting a lowercase entry on submit.
                       value={field.state.value}
+                      maxLength={3}
+                      autoCapitalize="characters"
+                      spellCheck={false}
+                      placeholder="USD"
                       onBlur={field.handleBlur}
                       onChange={(event) =>
-                        field.handleChange(event.target.value)
+                        field.handleChange(event.target.value.toUpperCase())
                       }
                     />
-                  </Field>
-                )}
-              </form.Field>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <form.Field name="durationHours">
-                {(field) => (
-                  <Field
-                    label="Access duration (hours, empty = durable)"
+                  )}
+                </form.Field>
+              </div>
+            </Field>
+            <form.Field name="durationHours">
+              {(field) => (
+                <Field
+                  label="Access duration"
+                  id="pr-dur"
+                  hint="In hours. Leave it empty for access that never expires."
+                >
+                  <Input
                     id="pr-dur"
-                  >
-                    <Input
-                      id="pr-dur"
-                      type="number"
-                      min="1"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(event) =>
-                        field.handleChange(event.target.value)
+                    type="number"
+                    min="1"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => {
+                      // Renewal has nothing to renew without a duration, and
+                      // the engine rejects that pair, so the switch follows.
+                      if (!event.target.value.trim()) {
+                        form.setFieldValue("autoRenew", false)
                       }
-                    />
-                  </Field>
-                )}
-              </form.Field>
-              <form.Field name="autoRenew">
-                {(field) => (
-                  <div className="flex items-end gap-2 pb-1">
-                    <Switch
-                      id="pr-renew"
-                      checked={field.state.value}
-                      onCheckedChange={field.handleChange}
-                    />
-                    <Label htmlFor="pr-renew">Auto-renew</Label>
-                  </div>
-                )}
-              </form.Field>
-            </div>
+                      field.handleChange(event.target.value)
+                    }}
+                  />
+                </Field>
+              )}
+            </form.Field>
+            <form.Subscribe selector={(state) => state.values.durationHours}>
+              {(durationHours) => (
+                <form.Field name="autoRenew">
+                  {(field) => (
+                    <div className="grid gap-1.5 rounded-md border p-3">
+                      <div className="flex items-center justify-between gap-4">
+                        <Label htmlFor="pr-renew" className="font-normal">
+                          Charge the customer again each period
+                        </Label>
+                        <Switch
+                          id="pr-renew"
+                          checked={field.state.value}
+                          disabled={!durationHours.trim()}
+                          onCheckedChange={field.handleChange}
+                        />
+                      </div>
+                      {durationHours.trim() ? null : (
+                        <p className="text-[13px] text-muted-foreground">
+                          Set an access duration to charge again each period.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </form.Field>
+              )}
+            </form.Subscribe>
           </div>
           <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleOpenChange(false)}
+            >
+              Cancel
+            </Button>
             <form.Subscribe
               selector={(state) =>
                 [
@@ -821,7 +858,7 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                     isSubmitting || !productId || !microsFromInput(amount)
                   }
                 >
-                  {isSubmitting ? "Creating…" : "Create"}
+                  {isSubmitting ? "Creating…" : "Create price"}
                 </Button>
               )}
             </form.Subscribe>
@@ -863,7 +900,6 @@ function DriftTab() {
               refreshDrift.isPending ? "size-4 animate-spin" : "size-4"
             }
           />
-          {""}
           Refresh scan
         </Button>
       </div>
@@ -897,8 +933,7 @@ function DriftTab() {
                   <TableCell>{e.provider}</TableCell>
                   <TableCell>{e.kind}</TableCell>
                   <TableCell className="text-xs">
-                    {e.openrails_resource_type}
-                    {""}
+                    {e.openrails_resource_type}{" "}
                     {shortId(
                       e.openrails_resource_id ?? e.external_resource_id ?? "",
                       13
@@ -924,6 +959,8 @@ function DriftTab() {
 
 function PublishDialog() {
   const [open, setOpen] = React.useState(false)
+  // The preview belongs to one manifest. Reopening the dialog must not show
+  // the plan from whatever was pasted last time.
   const [plan, setPlan] = React.useState<string>()
   const queryClient = useQueryClient()
   const publish = useMutation(adminMutations.publishCatalog(queryClient))
@@ -951,8 +988,16 @@ function PublishDialog() {
     onSubmit: async ({ value }) => run(value.manifest, false),
   })
 
+  const handleOpenChange = (next: boolean) => {
+    if (next) {
+      form.reset()
+      setPlan(undefined)
+    }
+    setOpen(next)
+  }
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
         render={
           <Button variant="outline" size="sm">
@@ -972,25 +1017,37 @@ function PublishDialog() {
           <DialogHeader>
             <DialogTitle>Publish catalog manifest</DialogTitle>
             <DialogDescription>
-              Terraform-style: paste the catalog manifest JSON, preview the
-              plan, then apply (insert + overwrite).
+              Publishing adds anything new and overwrites anything that already
+              exists. Preview the changes first to see exactly what it will do.
             </DialogDescription>
           </DialogHeader>
           <form.Field name="manifest">
             {(field) => (
-              <Textarea
-                className="min-h-40 text-xs"
-                placeholder='{"groups": ...}'
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onChange={(event) => field.handleChange(event.target.value)}
-              />
+              <div className="grid gap-1.5">
+                <Label htmlFor="publish-manifest">Manifest</Label>
+                <Textarea
+                  id="publish-manifest"
+                  className="max-h-72 min-h-40 font-mono text-xs"
+                  placeholder='{"groups": ...}'
+                  spellCheck={false}
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onChange={(event) => {
+                    // A previewed plan describes the manifest that produced it.
+                    setPlan(undefined)
+                    field.handleChange(event.target.value)
+                  }}
+                />
+              </div>
             )}
           </form.Field>
           {plan && (
-            <pre className="max-h-60 overflow-auto rounded-md bg-muted p-3 text-xs">
-              {plan}
-            </pre>
+            <div className="grid gap-1.5">
+              <p className="text-sm font-medium">What publishing will change</p>
+              <pre className="max-h-60 overflow-auto rounded-md border bg-muted/50 p-3 font-mono text-xs">
+                {plan}
+              </pre>
+            </div>
           )}
           <DialogFooter>
             <form.Subscribe selector={(state) => state.values.manifest}>
@@ -1002,13 +1059,13 @@ function PublishDialog() {
                     disabled={publish.isPending || !manifest.trim()}
                     onClick={() => void run(manifest, true)}
                   >
-                    Preview plan
+                    Preview changes
                   </Button>
                   <Button
                     type="submit"
                     disabled={publish.isPending || !manifest.trim()}
                   >
-                    {publish.isPending ? "Working…" : "Apply"}
+                    {publish.isPending ? "Publishing…" : "Publish"}
                   </Button>
                 </>
               )}

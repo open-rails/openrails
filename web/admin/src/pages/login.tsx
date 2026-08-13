@@ -168,7 +168,7 @@ export function LoginPage() {
               : "Enter your verification code"
             : "Sign in to your console"}
         </h1>
-        <p className="mt-2 text-pretty text-sm text-muted-foreground">
+        <p className="mt-2 text-sm text-pretty text-muted-foreground">
           {challenge
             ? verificationMode === "backup_code"
               ? "Enter one of the backup codes you saved when setting up two-factor authentication."
@@ -225,9 +225,7 @@ export function LoginPage() {
                     verificationMode === "backup_code" ? "text" : "numeric"
                   }
                   autoComplete={
-                    verificationMode === "backup_code"
-                      ? "off"
-                      : "one-time-code"
+                    verificationMode === "backup_code" ? "off" : "one-time-code"
                   }
                   autoFocus
                   required
