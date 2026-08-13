@@ -47,6 +47,21 @@ import { cn } from "@/lib/utils"
 // are not theirs to act on. Say what is unavailable, who can change it, and what
 // still works — the last part matters because editing existing widgets never
 // touches the LLM.
+// The wire values are chart-library names. These are what the shapes are called
+// when you are choosing one.
+const VIZ_LABELS: Record<WidgetViz, string> = {
+  stat: "Single number",
+  line: "Line chart",
+  area: "Area chart",
+  bar: "Bar chart",
+  donut: "Donut chart",
+  table: "Table",
+}
+
+function vizLabel(viz: WidgetViz): string {
+  return VIZ_LABELS[viz] ?? viz
+}
+
 const KEYLESS_MESSAGE =
   "Ask whoever runs this deployment to turn it on. You can still rename existing widgets and change how they are shown."
 
@@ -127,9 +142,11 @@ export function WidgetEditor({
           <DialogDescription>
             {keylessCreate
               ? "Adding widgets is not switched on here."
-              : initial
-                ? "Refine the widget with an instruction, or change the title and chart type yourself. You can preview before saving."
-                : "Describe what the widget should show. It is previewed before you save it."}
+              : !initial
+                ? "Describe what the widget should show. It is previewed before you save it."
+                : nlEnabled
+                  ? "Refine the widget with an instruction, or change the title and chart type yourself. You can preview before saving."
+                  : "Change the title or the chart type. You can preview before saving."}
           </DialogDescription>
         </DialogHeader>
 
@@ -167,11 +184,6 @@ export function WidgetEditor({
                     )}
                     {query ? "Refine" : "Generate"}
                   </Button>
-                  <span className="text-xs text-muted-foreground">
-                    {query
-                      ? "The instruction edits the current widget and the preview updates."
-                      : "The widget previews below. Adjust the title and chart type before saving."}
-                  </span>
                 </div>
                 {genError ? (
                   <p
@@ -182,16 +194,12 @@ export function WidgetEditor({
                   </p>
                 ) : null}
               </div>
-            ) : (
-              <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
-                {KEYLESS_MESSAGE}
-              </p>
-            )}
+            ) : null}
 
             {query ? (
               <>
-                <div className="grid grid-cols-[1fr_auto] gap-2">
-                  <div className="flex flex-col gap-1">
+                <div className="grid gap-2 sm:grid-cols-[1fr_12rem]">
+                  <div className="flex flex-col gap-1.5">
                     <Label htmlFor="widget-title">Title</Label>
                     <Input
                       id="widget-title"
@@ -200,19 +208,23 @@ export function WidgetEditor({
                       placeholder="Widget title"
                     />
                   </div>
-                  <div className="flex flex-col gap-1">
-                    <Label>Viz</Label>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="widget-viz">Chart type</Label>
                     <Select
+                      items={WIDGET_VIZ.map((v) => ({
+                        value: v,
+                        label: vizLabel(v),
+                      }))}
                       value={viz}
                       onValueChange={(v) => setViz(v as WidgetViz)}
                     >
-                      <SelectTrigger className="w-28">
+                      <SelectTrigger id="widget-viz" className="w-full">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {WIDGET_VIZ.map((v) => (
                           <SelectItem key={v} value={v}>
-                            {v}
+                            {vizLabel(v)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -260,7 +272,7 @@ export function WidgetEditor({
 
                 <details className="text-xs text-muted-foreground">
                   <summary className="cursor-pointer select-none">
-                    Query JSON
+                    What this widget asks for
                   </summary>
                   <pre className="mt-1 overflow-x-auto rounded-md border bg-muted/30 p-2">
                     {JSON.stringify(query, null, 2)}
