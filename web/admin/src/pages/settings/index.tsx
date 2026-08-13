@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -50,8 +51,22 @@ const LINE_TAB =
   "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
 
 export function SettingsPage() {
+  // The tab lives in the URL so a settings page can be linked to, and so the
+  // back button steps through tabs the way it looks like it should.
+  const [params, setParams] = useSearchParams()
+  const tab = params.get("tab") || "merchant"
+
   return (
-    <Tabs defaultValue="merchant" className="flex flex-col gap-4">
+    <Tabs
+      value={tab}
+      onValueChange={(next) => {
+        const updated = new URLSearchParams(params)
+        if (!next || next === "merchant") updated.delete("tab")
+        else updated.set("tab", next)
+        setParams(updated)
+      }}
+      className="flex flex-col gap-4"
+    >
       <div className="overflow-x-auto">
         <TabsList
           variant="line"
