@@ -44,17 +44,35 @@ import { adminQueries } from "@/lib/queries"
 // operators. Keep the keys in lockstep with
 // internal/db/models/checkout_session.go.
 const SKIP_LABELS: Record<CheckoutRoutingSkip, string> = {
-  unknown_selector: "Not a declared PSP key or rail kind.",
+  unknown_selector: "That name matches no provider you have set up.",
   ambiguous_selector:
-    "Bare rail kind matched more than one armed PSP — name the PSP key.",
-  not_armed: "No active PSP row: never configured, or archived.",
+    "More than one provider on this rail is set up. Name the provider rather than the rail.",
+  not_armed: "This provider is not set up here, or it was archived.",
   credentials_missing:
-    "PSP is armed but the credentials this rail needs are absent.",
-  link_missing: "This price carries no usable psp_link for the PSP.",
+    "The provider is set up, but the credentials it needs are missing.",
+  link_missing: "This price has not been sent to the provider yet.",
   mode_unsupported:
-    "The rail cannot serve this checkout mode (one-off vs subscription).",
-  service_unavailable: "The runtime service backing this rail is not wired.",
-  resolve_failed: "The selector could not be resolved at decision time.",
+    "This provider cannot take this kind of payment (one-off or recurring).",
+  service_unavailable: "The connection to this provider is not running.",
+  resolve_failed: "The provider could not be worked out at the time of asking.",
+}
+
+// The engine names each outcome for its own logs. These are the same outcomes
+// as a sentence you can act on.
+const SKIP_HEADLINES: Record<CheckoutRoutingSkip, string> = {
+  unknown_selector: "unknown provider",
+  ambiguous_selector: "more than one match",
+  not_armed: "not set up",
+  credentials_missing: "credentials missing",
+  link_missing: "not sent to provider",
+  mode_unsupported: "cannot take this payment",
+  service_unavailable: "connection not running",
+  resolve_failed: "could not be worked out",
+}
+
+function skipHeadline(skip?: string): string {
+  if (!skip) return "ready"
+  return SKIP_HEADLINES[skip as CheckoutRoutingSkip] ?? skip
 }
 
 function skipLabel(skip?: string) {
@@ -137,12 +155,12 @@ export function PSPLinksCard({
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2">
         <div className="grid gap-1">
-          <CardTitle className="text-sm">PSP links</CardTitle>
+          <CardTitle className="text-sm">Payment providers</CardTitle>
           <CardDescription>
-            The price's <code className="font-mono">psp_links</code>, keyed by
-            PSP. Links are declared by the catalog and pushed by the provider
-            adapter — they are not edited here. "Verify" performs a live
-            read-only retrieve against each attached provider.
+            Which providers this price has been sent to, and whether their copy
+            still matches yours. Publishing the catalog is what sends it; this
+            page only reports. Verify asks each provider what it currently
+            holds, and changes nothing.
           </CardDescription>
         </div>
         <Button
@@ -157,19 +175,25 @@ export function PSPLinksCard({
       <CardContent className="flex flex-col gap-3">
         {!links.length ? (
           <p className="text-sm text-muted-foreground">
-            No PSP links. This price exists in OpenRails only — no checkout can
-            be routed to a provider for it.
+            This price has not been sent to any provider, so nobody can be
+            charged for it yet.
           </p>
         ) : (
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>PSP</TableHead>
-                  <TableHead>Rail</TableHead>
-                  <TableHead>Link</TableHead>
-                  <TableHead>Provider sync</TableHead>
-                  <TableHead>Link ids</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">
+                    Provider
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">Rail</TableHead>
+                  <TableHead className="text-muted-foreground">Sent</TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Still matches
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Their reference
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -209,7 +233,7 @@ export function PSPLinksCard({
                           key={d.field}
                           className="mt-1 text-xs text-muted-foreground"
                         >
-                          {d.field}: ours {d.openrails_value} · theirs{" "}
+                          {d.field}: yours {d.openrails_value} · theirs{" "}
                           {d.remote_value}
                         </p>
                       ))}
@@ -245,8 +269,8 @@ export function PSPLinksCard({
         )}
         {!verified && !!links.length && (
           <p className="text-xs text-muted-foreground">
-            Provider sync reads "unknown" until Verify runs — OpenRails does not
-            claim a remote object matches without having looked.
+            Nothing is claimed about the providers' copies until you press
+            Verify.
           </p>
         )}
       </CardContent>
@@ -270,11 +294,11 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
     <Card>
       <CardHeader className="flex flex-row items-start justify-between gap-2">
         <div className="grid gap-1">
-          <CardTitle className="text-sm">Checkout readiness</CardTitle>
+          <CardTitle className="text-sm">Can this be bought?</CardTitle>
           <CardDescription>
-            Where a checkout for this price would land right now, and why every
-            other candidate was passed over. This runs the production routing
-            decision — no session is created.
+            Which provider would take the money if someone bought this right
+            now, and why the others were passed over. This asks the same
+            question a real checkout asks, without starting one.
           </CardDescription>
         </div>
         <Button
@@ -289,39 +313,45 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
       <CardContent className="flex flex-col gap-3">
         {!decision ? (
           <p className="text-sm text-muted-foreground">
-            {busy ? "Checking…" : "Routing could not be evaluated."}
+            {busy ? "Checking…" : "This check could not be run."}
           </p>
         ) : (
           <>
             <p className="text-sm">
               {decision.selected ? (
                 <>
-                  Selected{" "}
-                  <span className="font-mono">{decision.selected}</span>
-                  {decision.rail && <> on {decision.rail}</>}
-                  {decision.mode && <> · {decision.mode}</>} · policy{" "}
-                  {decision.policy}
-                  {decision.rule !== undefined && <> (rule {decision.rule})</>}
+                  Money for this price would go to{" "}
+                  <span className="font-medium">{decision.selected}</span>
+                  {decision.rail && <> on {decision.rail}</>}.
                 </>
               ) : (
                 <span className="text-held">
-                  No PSP is eligible — this price cannot be checked out.
+                  No provider can take this payment, so nobody can buy this
+                  price yet.
                 </span>
               )}
             </p>
             {!decision.candidates.length ? (
               <p className="text-sm text-muted-foreground">
-                No PSP candidates were evaluated.
+                There were no providers to consider.
               </p>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>PSP</TableHead>
-                      <TableHead>Rail</TableHead>
-                      <TableHead>Verdict</TableHead>
-                      <TableHead>Why</TableHead>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">
+                        Provider
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Rail
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Outcome
+                      </TableHead>
+                      <TableHead className="text-muted-foreground">
+                        Why
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -346,7 +376,7 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
                             variant="secondary"
                             className={c.skip ? WARN_BADGE : OK_BADGE}
                           >
-                            {c.skip ?? "eligible"}
+                            {skipHeadline(c.skip)}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">
@@ -360,10 +390,8 @@ export function CheckoutReadinessCard({ price }: { price: CatalogPrice }) {
             )}
             {!!decision.candidates.length && eligible.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                A <span className="font-mono">link_missing</span> verdict is a
-                catalog problem (push the price to the provider); the other
-                classes are PSP configuration — fix them under Settings →
-                Payment providers.
+                "Not sent to provider" is fixed by publishing the catalog.
+                Everything else is fixed under Settings, Payment providers.
               </p>
             )}
           </>

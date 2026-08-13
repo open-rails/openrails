@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useSearchParams } from "react-router-dom"
 import { toast } from "sonner"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -50,8 +51,22 @@ const LINE_TAB =
   "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
 
 export function SettingsPage() {
+  // The tab lives in the URL so a settings page can be linked to, and so the
+  // back button steps through tabs the way it looks like it should.
+  const [params, setParams] = useSearchParams()
+  const tab = params.get("tab") || "merchant"
+
   return (
-    <Tabs defaultValue="merchant" className="flex flex-col gap-4">
+    <Tabs
+      value={tab}
+      onValueChange={(next) => {
+        const updated = new URLSearchParams(params)
+        if (!next || next === "merchant") updated.delete("tab")
+        else updated.set("tab", next)
+        setParams(updated)
+      }}
+      className="flex flex-col gap-4"
+    >
       <div className="overflow-x-auto">
         <TabsList
           variant="line"
@@ -440,7 +455,7 @@ function ProvidersTab() {
         ) : (
           <Table className="min-w-[44rem]">
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead className="text-muted-foreground">
                   Provider
                 </TableHead>
@@ -713,10 +728,9 @@ function RotateCredentialsDialog({
                   )
                 })}
                 <p className="text-xs text-muted-foreground">
-                  On success every OpenRails node cuts over to the new
-                  credential at its next charge or pull — the rotation raises a
-                  version floor that no node&apos;s credential cache may serve
-                  below. No restart, no waiting out a cache TTL.
+                  Once this succeeds, the new credential is used for the next
+                  charge and every one after it. Nothing needs restarting, and
+                  the old credential stops being used straight away.
                 </p>
               </div>
             )}

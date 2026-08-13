@@ -139,11 +139,19 @@ export function PaymentDetailPage() {
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Refund</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Created</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">
+                    Refund
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Status
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Amount
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">
+                    Created
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

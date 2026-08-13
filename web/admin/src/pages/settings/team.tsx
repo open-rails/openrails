@@ -113,7 +113,7 @@ export function TeamTab() {
         ) : (
           <Table className="min-w-[36rem]">
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead className="text-muted-foreground">Member</TableHead>
                 <TableHead className="w-40 text-muted-foreground">
                   Role
@@ -146,7 +146,7 @@ export function TeamTab() {
           </div>
           <Table className="min-w-[36rem]">
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead className="text-muted-foreground">Role</TableHead>
                 <TableHead className="text-muted-foreground">Created</TableHead>
                 <TableHead className="text-muted-foreground">Expires</TableHead>

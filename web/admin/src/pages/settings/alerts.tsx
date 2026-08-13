@@ -422,7 +422,7 @@ function RulesSection({
       ) : (
         <Table className="min-w-[48rem]">
           <TableHeader>
-            <TableRow>
+            <TableRow className="hover:bg-transparent">
               <TableHead className="text-muted-foreground">Rule</TableHead>
               <TableHead className="text-muted-foreground">Severity</TableHead>
               <TableHead className="text-muted-foreground">Channels</TableHead>
@@ -1013,7 +1013,7 @@ function WebhooksSection({
       ) : (
         <Table className="min-w-[36rem]">
           <TableHeader>
-            <TableRow>
+            <TableRow className="hover:bg-transparent">
               <TableHead className="text-muted-foreground">Name</TableHead>
               <TableHead className="text-muted-foreground">Format</TableHead>
               <TableHead className="text-muted-foreground">URL</TableHead>
@@ -1127,8 +1127,8 @@ function WebhookDialog() {
         <DialogHeader>
           <DialogTitle>Add webhook</DialogTitle>
           <DialogDescription>
-            Paste a Discord or Slack channel webhook URL — no bot needed — or a
-            “generic” URL your own receiver consumes.
+            Paste the webhook address from a Discord or Slack channel, no bot
+            needed, or any address of your own that can receive alerts.
           </DialogDescription>
         </DialogHeader>
         <form

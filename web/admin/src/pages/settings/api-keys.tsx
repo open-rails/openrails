@@ -97,7 +97,7 @@ export function ApiKeysTab() {
         ) : (
           <Table className="min-w-[52rem]">
             <TableHeader>
-              <TableRow>
+              <TableRow className="hover:bg-transparent">
                 <TableHead className="text-muted-foreground">Name</TableHead>
                 <TableHead className="text-muted-foreground">Role</TableHead>
                 <TableHead className="text-muted-foreground">Prefix</TableHead>
@@ -371,9 +371,9 @@ function ShowOnceSecret({
         <DialogDescription>
           Copy the key now and store it somewhere safe.{" "}
           <span className="font-semibold text-foreground">
-            You won&apos;t see this key again
+            You will not see this key again.
           </span>{" "}
-          — if it is lost, revoke it and mint a new one.
+          If you lose it, revoke it and create another.
         </DialogDescription>
       </DialogHeader>
       <div className="grid gap-3">

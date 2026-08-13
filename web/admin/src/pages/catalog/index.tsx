@@ -144,11 +144,13 @@ function ProductsTab() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Product</TableHead>
-                <TableHead>Key</TableHead>
-                <TableHead>Tier</TableHead>
-                <TableHead>Entitlements</TableHead>
-                <TableHead>State</TableHead>
+                <TableHead className="text-muted-foreground">Product</TableHead>
+                <TableHead className="text-muted-foreground">Key</TableHead>
+                <TableHead className="text-muted-foreground">Tier</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Entitlements
+                </TableHead>
+                <TableHead className="text-muted-foreground">State</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -517,12 +519,14 @@ function PricesTab() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Price</TableHead>
-                <TableHead>Product</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Renews</TableHead>
-                <TableHead>Providers</TableHead>
-                <TableHead>State</TableHead>
+                <TableHead className="text-muted-foreground">Price</TableHead>
+                <TableHead className="text-muted-foreground">Product</TableHead>
+                <TableHead className="text-muted-foreground">Amount</TableHead>
+                <TableHead className="text-muted-foreground">Renews</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Providers
+                </TableHead>
+                <TableHead className="text-muted-foreground">State</TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -915,13 +919,21 @@ function DriftTab() {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Provider</TableHead>
-                <TableHead>Kind</TableHead>
-                <TableHead>Resource</TableHead>
-                <TableHead>Field</TableHead>
-                <TableHead>OpenRails</TableHead>
-                <TableHead>Remote</TableHead>
-                <TableHead>Detected</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Provider
+                </TableHead>
+                <TableHead className="text-muted-foreground">Kind</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Resource
+                </TableHead>
+                <TableHead className="text-muted-foreground">Field</TableHead>
+                <TableHead className="text-muted-foreground">
+                  OpenRails
+                </TableHead>
+                <TableHead className="text-muted-foreground">Remote</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Detected
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

@@ -103,7 +103,7 @@ export function PriceDetailPage() {
         <Fact label="Amount">
           {formatMicros(price.unit_amount, price.currency)}
         </Fact>
-        <Fact label="Currency · interval">
+        <Fact label="Renews">
           {price.currency.toUpperCase()} · {priceIntervalLabel(price)}
         </Fact>
         <Fact label="Created">{formatDate(price.created_at)}</Fact>
@@ -120,7 +120,7 @@ export function PriceDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-sm">Version chain</CardTitle>
+          <CardTitle className="text-sm">Price history</CardTitle>
         </CardHeader>
         <CardContent>
           {!history?.items?.length ? (
@@ -128,11 +128,13 @@ export function PriceDetailPage() {
           ) : (
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Since</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead>Price</TableHead>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="text-muted-foreground">
+                    Amount
+                  </TableHead>
+                  <TableHead className="text-muted-foreground">Since</TableHead>
+                  <TableHead className="text-muted-foreground">State</TableHead>
+                  <TableHead className="text-muted-foreground">Price</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -174,7 +176,9 @@ export function PriceDetailPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle className="text-sm">
-              {isPending ? "Pending migration" : "Last migration"}
+              {isPending
+                ? "Moving customers to the new price"
+                : "Last move to a new price"}
             </CardTitle>
             {isPending && (
               <CancelMigrationButton repriceIds={scheduled.map((r) => r.id)} />
@@ -182,17 +186,21 @@ export function PriceDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-col gap-2 text-sm">
             <p>
-              {applied.length} of {latestBatch.subscriptions_scheduled} migrated
+              {applied.length} of {latestBatch.subscriptions_scheduled} moved
               {scheduled.length > 0 && ` · ${scheduled.length} still scheduled`}
               {" · effective"}
               {formatDate(latestBatch.effective_at)}
             </p>
-            <p className="text-xs text-muted-foreground">
-              {latestBatch.subscriptions_skipped > 0 &&
-                `${latestBatch.subscriptions_skipped} subscription(s) were skipped (constraint violation or existing schedule conflict) at schedule time. `}
-              Progress is computed live from individual reprice rows (up to
-              1,000 fetched per batch).
-            </p>
+            {latestBatch.subscriptions_skipped > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {latestBatch.subscriptions_skipped} subscription
+                {latestBatch.subscriptions_skipped === 1
+                  ? " was"
+                  : "s were"}{" "}
+                left alone because another change was already scheduled for
+                them.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}

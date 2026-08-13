@@ -117,7 +117,7 @@ export function PriceChangeWizard({
         })
         if (created.pending_manual_actions?.length) {
           toast.warning(
-            `Price updated — manual step needed: ${created.pending_manual_actions.map((action) => `${action.provider}: ${action.hint}`).join("; ")}`
+            `Price updated. One step is left for you: ${created.pending_manual_actions.map((action) => `${action.provider}: ${action.hint}`).join(". ")}`
           )
         } else {
           toast.success(
@@ -224,7 +224,7 @@ export function PriceChangeWizard({
                 <>
                   <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                      Change price — {productName}
+                      Change price for {productName}
                       {draft && (
                         <Badge variant="secondary">drafted by copilot</Badge>
                       )}
@@ -327,8 +327,10 @@ export function PriceChangeWizard({
                                 }
                               />
                               <span>
-                                <span className="font-medium">Grandfather</span>{" "}
-                                — existing subscribers keep the current price.
+                                <span className="font-medium">
+                                  Grandfather.
+                                </span>{" "}
+                                Existing subscribers keep the current price.
                                 {direction === "increase" && (
                                   <Badge variant="secondary" className="ml-2">
                                     default
@@ -345,9 +347,9 @@ export function PriceChangeWizard({
                                 onChange={() => field.handleChange("migrate")}
                               />
                               <span>
-                                <span className="font-medium">Migrate</span> —
-                                move everyone to the new price at their next
-                                renewal on/after a date.
+                                <span className="font-medium">Migrate.</span>{" "}
+                                Move everyone to the new price at their first
+                                renewal on or after a date you choose.
                                 {direction === "decrease" && (
                                   <Badge variant="secondary" className="ml-2">
                                     default
@@ -381,14 +383,14 @@ export function PriceChangeWizard({
                               />
                               {direction === "increase" ? (
                                 <p className="text-xs text-muted-foreground">
-                                  Must be at least {noticeWindowDays} days out
-                                  (card-network advance-notice window for amount
-                                  increases — configurable in Settings; enforced
-                                  by the API).
+                                  Must be at least {noticeWindowDays} days away.
+                                  Card networks require that much notice before
+                                  a price goes up. You can change the number in
+                                  Settings.
                                 </p>
                               ) : (
                                 <p className="text-xs text-muted-foreground">
-                                  Decreases have no notice requirement — today
+                                  A price going down needs no notice, so today
                                   is fine.
                                 </p>
                               )}

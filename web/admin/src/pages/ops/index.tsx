@@ -117,13 +117,19 @@ function FindingsTab() {
         <div className="overflow-x-auto rounded-md border">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead>Severity</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Subject</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Recommendation</TableHead>
-                <TableHead>Last seen</TableHead>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="text-muted-foreground">
+                  Severity
+                </TableHead>
+                <TableHead className="text-muted-foreground">Type</TableHead>
+                <TableHead className="text-muted-foreground">Subject</TableHead>
+                <TableHead className="text-muted-foreground">Status</TableHead>
+                <TableHead className="text-muted-foreground">
+                  Recommendation
+                </TableHead>
+                <TableHead className="text-muted-foreground">
+                  Last seen
+                </TableHead>
                 <TableHead />
               </TableRow>
             </TableHeader>
@@ -253,8 +259,8 @@ function ResolveFindingDialog({
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">
-            No mechanical fix is attached — this finding can only be ignored
-            (with notes).
+            Nothing here can be fixed automatically. You can only note why you
+            are leaving it.
           </p>
         )}
         <form.Field name="notes">
@@ -307,12 +313,12 @@ function RepairAlertsTab() {
     <div className="overflow-x-auto rounded-md border">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>Event</TableHead>
-            <TableHead>Customer</TableHead>
-            <TableHead>Seen</TableHead>
-            <TableHead>Created</TableHead>
-            <TableHead>Data</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="text-muted-foreground">Event</TableHead>
+            <TableHead className="text-muted-foreground">Customer</TableHead>
+            <TableHead className="text-muted-foreground">Seen</TableHead>
+            <TableHead className="text-muted-foreground">Created</TableHead>
+            <TableHead className="text-muted-foreground">Data</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -344,12 +350,16 @@ function WorkerHealthTab() {
     <div className="overflow-x-auto rounded-md border">
       <Table>
         <TableHeader>
-          <TableRow>
-            <TableHead>Worker</TableHead>
-            <TableHead>Last success</TableHead>
-            <TableHead>Last error</TableHead>
-            <TableHead>Failures</TableHead>
-            <TableHead>Expected period</TableHead>
+          <TableRow className="hover:bg-transparent">
+            <TableHead className="text-muted-foreground">Worker</TableHead>
+            <TableHead className="text-muted-foreground">
+              Last success
+            </TableHead>
+            <TableHead className="text-muted-foreground">Last error</TableHead>
+            <TableHead className="text-muted-foreground">Failures</TableHead>
+            <TableHead className="text-muted-foreground">
+              Expected period
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -361,7 +371,7 @@ function WorkerHealthTab() {
                 {w.last_error_at ? (
                   <span title={w.last_error}>
                     {formatDate(w.last_error_at)}
-                    {w.last_error ? ` — ${w.last_error.slice(0, 60)}` : ""}
+                    {w.last_error ? `: ${w.last_error.slice(0, 60)}` : ""}
                   </span>
                 ) : (
                   "—"
