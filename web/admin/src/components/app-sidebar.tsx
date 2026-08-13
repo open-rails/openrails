@@ -2,7 +2,6 @@
 // (inset variant, brand header, nav, footer user menu, rail).
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  Add01Icon,
   CreditCardIcon,
   DashboardCircleIcon,
   PackageIcon,
@@ -21,7 +20,6 @@ import {
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -207,16 +205,11 @@ function MerchantSwitcher() {
                   </DropdownMenuItem>
                 )
               })}
+              {/* No "create merchant" entry: this console administers one
+                  merchant and has no endpoint that makes another. It used to
+                  link to /account, a route only the hosted product serves, so
+                  on a standalone deployment the menu item led to a 404. */}
             </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => {
-                window.location.href = "/account?create=merchant"
-              }}
-            >
-              <HugeiconsIcon icon={Add01Icon} />
-              Create merchant
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarMenuItem>
