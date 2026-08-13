@@ -33,6 +33,13 @@ func TestWriteCatalogError(t *testing.T) {
 			mustContain: "non-negative",
 		},
 		{
+			name:           "auto renew without access duration → 400",
+			err:            errors.New("auto_renew requires a finite access_duration_hours"),
+			wantStatus:     http.StatusBadRequest,
+			mustContain:    "access_duration_hours",
+			mustNotContain: "internal_error",
+		},
+		{
 			name:           "unique violation → 409, no raw SQLSTATE leak",
 			err:            errors.New(`ERROR: duplicate key value violates unique constraint "unique_prices_product_amount_window" (SQLSTATE 23505)`),
 			wantStatus:     http.StatusConflict,
