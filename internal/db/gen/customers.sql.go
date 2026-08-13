@@ -101,6 +101,34 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 	return id, err
 }
 
+const getLatestCustomerEmail = `-- name: GetLatestCustomerEmail :one
+SELECT COALESCE((
+  SELECT BTRIM(s.user_email)
+  FROM openrails.subscriptions s
+  WHERE s.customer_id = $1
+    AND s.merchant_id = $2
+    AND s.deleted_at IS NULL
+    AND NULLIF(BTRIM(s.user_email), '') IS NOT NULL
+  ORDER BY s.created_at DESC, s.id DESC
+  LIMIT 1
+), '')::text AS email
+`
+
+type GetLatestCustomerEmailParams struct {
+	CustomerID uuid.UUID
+	MerchantID uuid.UUID
+}
+
+// Customers do not own an email column. Project the latest non-empty email from
+// all subscription history so an inactive customer remains identifiable on the
+// detail page. The explicit merchant predicate protects BYPASSRLS connections.
+func (q *Queries) GetLatestCustomerEmail(ctx context.Context, arg GetLatestCustomerEmailParams) (string, error) {
+	row := q.db.QueryRow(ctx, getLatestCustomerEmail, arg.CustomerID, arg.MerchantID)
+	var email string
+	err := row.Scan(&email)
+	return email, err
+}
+
 const listMerchantsForCustomerSubject = `-- name: ListMerchantsForCustomerSubject :many
 SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
 FROM openrails.merchants m

@@ -22,6 +22,9 @@ import type {
   AuthTokens,
   Me,
   MerchantMembership,
+  PasswordLoginResponse,
+  TwoFactorChallengeResponse,
+  TwoFactorFactor,
 } from "@/lib/api/types"
 import {
   authStateQueryKey,
@@ -40,9 +43,52 @@ interface AuthState {
   merchants: MerchantMembership[]
   activeMerchant?: MerchantMembership
   selectMerchant: (slug: string) => void
-  loginWithPassword: (login: string, password: string) => Promise<void>
+  /** Resolves to a challenge when the account needs a second factor, else null. */
+  loginWithPassword: (
+    login: string,
+    password: string
+  ) => Promise<TwoFactorChallenge | null>
+  completeTwoFactor: (
+    challenge: TwoFactorChallenge,
+    code: string,
+    mode: TwoFactorVerificationMode
+  ) => Promise<void>
+  selectTwoFactor: (
+    challenge: TwoFactorChallenge,
+    factorId: string
+  ) => Promise<TwoFactorChallenge>
   startOIDC: (providerId: string) => void
   logout: () => Promise<void>
+}
+
+// Everything /2fa/verify needs, carried between the two sign-in steps. The
+// expected session is captured at the password step so a session that changes
+// underneath us mid-sign-in is still caught.
+export interface TwoFactorChallenge {
+  challenge: string
+  userID: string
+  factor: TwoFactorFactor
+  factors: TwoFactorFactor[]
+  method: string
+  verificationID?: string
+  expectedSession: ReturnType<typeof getTokens>
+}
+
+export type TwoFactorVerificationMode = "factor" | "backup_code"
+
+export function twoFactorVerificationBody(
+  challenge: TwoFactorChallenge,
+  code: string,
+  mode: TwoFactorVerificationMode
+) {
+  return {
+    user_id: challenge.userID,
+    challenge: challenge.challenge,
+    code: code.trim(),
+    ...(mode === "backup_code"
+      ? { backup_code: true }
+      : { factor_id: challenge.factor.id }),
+  }
 }
 
 const AuthContext = React.createContext<AuthState | undefined>(undefined)
@@ -75,23 +121,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => setUnauthorizedHandler(null)
   }, [])
 
-  const loginWithPassword = React.useCallback(
-    async (login: string, password: string) => {
-      const expectedSession = getTokens()
-      const res = await authApi<AuthTokens>("/password/login", {
-        method: "POST",
-        body: { login, password },
-      })
-      if (res.requires_2fa) {
-        throw new Error(
-          "This account requires 2FA; the admin console does not support 2FA login yet."
-        )
-      }
-      if (res.requires_verification) {
-        throw new Error(
-          "This account requires verification before it can sign in."
-        )
-      }
+  // Both sign-in paths end the same way: store the pair, load the identity,
+  // drop any merchant data belonging to whoever was signed in before.
+  const completeSession = React.useCallback(
+    async (res: AuthTokens, expectedSession: ReturnType<typeof getTokens>) => {
       const session = {
         access_token: res.access_token,
         refresh_token: res.refresh_token,
@@ -107,6 +140,75 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       queryClient.setQueryData<AuthStateData>(authStateQueryKey, (current) =>
         current ? { ...current, identity } : current
       )
+    },
+    []
+  )
+
+  const loginWithPassword = React.useCallback(
+    async (
+      login: string,
+      password: string
+    ): Promise<TwoFactorChallenge | null> => {
+      const expectedSession = getTokens()
+      const res = await authApi<PasswordLoginResponse>("/password/login", {
+        method: "POST",
+        body: { login, password },
+      })
+      // A 2FA account gets no tokens here. Hand the challenge back so the caller
+      // can ask for a code, rather than treating a normal policy as a failure.
+      if ("requires_2fa" in res && res.requires_2fa) {
+        return {
+          challenge: res.challenge,
+          userID: res.user_id,
+          factor: res.default_factor,
+          factors: res.available_factors,
+          method: res.method,
+          verificationID: res.verification_id,
+          expectedSession,
+        }
+      }
+      if ("requires_verification" in res && res.requires_verification) {
+        throw new Error(
+          "This account requires verification before it can sign in."
+        )
+      }
+      await completeSession(res, expectedSession)
+      return null
+    },
+    [completeSession]
+  )
+
+  const completeTwoFactor = React.useCallback(
+    async (
+      challenge: TwoFactorChallenge,
+      code: string,
+      mode: TwoFactorVerificationMode
+    ) => {
+      const res = await authApi<AuthTokens>("/2fa/verify", {
+        method: "POST",
+        body: twoFactorVerificationBody(challenge, code, mode),
+      })
+      await completeSession(res, challenge.expectedSession)
+    },
+    [completeSession]
+  )
+
+  const selectTwoFactor = React.useCallback(
+    async (challenge: TwoFactorChallenge, factorId: string) => {
+      const res = await authApi<TwoFactorChallengeResponse>("/2fa/challenge", {
+        method: "POST",
+        body: {
+          user_id: challenge.userID,
+          challenge: challenge.challenge,
+          factor_id: factorId,
+        },
+      })
+      return {
+        ...challenge,
+        factor: res.factor,
+        method: res.method,
+        verificationID: res.verification_id,
+      }
     },
     []
   )
@@ -170,6 +272,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       activeMerchant,
       selectMerchant,
       loginWithPassword,
+      completeTwoFactor,
+      selectTwoFactor,
       startOIDC,
       logout,
     }),
@@ -183,6 +287,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       activeMerchant,
       selectMerchant,
       loginWithPassword,
+      completeTwoFactor,
+      selectTwoFactor,
       startOIDC,
       logout,
     ]

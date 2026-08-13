@@ -145,6 +145,7 @@ export interface CreditBalance {
 
 export interface CustomerBillingProfile {
   customer_id: string
+  email?: string
   trust_level?: string
   subscriptions: RawSubscription[]
   entitlements: RawEntitlement[]
@@ -535,14 +536,47 @@ export interface AuthCapabilities {
   [k: string]: unknown
 }
 
+export interface TwoFactorFactor {
+  id: string
+  method: string
+  is_default?: boolean
+  phone_number?: string
+}
+
 export interface AuthTokens {
   access_token: string
   token_type: string
   expires_in: number
   refresh_token?: string
-  requires_2fa?: boolean
-  requires_verification?: boolean
+  requires_2fa?: false
+  requires_verification?: false
 }
+
+export interface TwoFactorRequiredResponse {
+  requires_2fa: true
+  user_id: string
+  challenge: string
+  method: string
+  verification_id?: string
+  default_factor: TwoFactorFactor
+  available_factors: TwoFactorFactor[]
+}
+
+export interface TwoFactorChallengeResponse {
+  requires_2fa: true
+  method: string
+  verification_id?: string
+  factor: TwoFactorFactor
+}
+
+export interface VerificationRequiredResponse {
+  requires_verification: true
+}
+
+export type PasswordLoginResponse =
+  | AuthTokens
+  | TwoFactorRequiredResponse
+  | VerificationRequiredResponse
 
 export interface Me {
   id: string
