@@ -68,7 +68,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
   {
     header: "Created",
     cell: ({ row }) => (
-      <span className="text-muted-foreground">
+      <span className="text-muted-foreground tabular-nums">
         {formatUnix(row.original.created)}
       </span>
     ),
