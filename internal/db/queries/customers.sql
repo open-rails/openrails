@@ -86,6 +86,21 @@ WHERE c.merchant_id = sqlc.arg(merchant_id)
           AND se.deleted_at IS NULL
           AND se.user_email ILIKE '%' || sqlc.arg(q) || '%'));
 
+-- name: GetLatestCustomerEmail :one
+-- Customers do not own an email column. Project the latest non-empty email from
+-- all subscription history so an inactive customer remains identifiable on the
+-- detail page. The explicit merchant predicate protects BYPASSRLS connections.
+SELECT COALESCE((
+  SELECT BTRIM(s.user_email)
+  FROM openrails.subscriptions s
+  WHERE s.customer_id = sqlc.arg(customer_id)
+    AND s.merchant_id = sqlc.arg(merchant_id)
+    AND s.deleted_at IS NULL
+    AND NULLIF(BTRIM(s.user_email), '') IS NOT NULL
+  ORDER BY s.created_at DESC, s.id DESC
+  LIMIT 1
+), '')::text AS email;
+
 -- name: UpsertCustomerBySubject :one
 -- Customer identity is the merchant plus the host/AuthKit stable UUID subject.
 -- The row id is that subject UUID; issuer is kept only as last-seen audit source.

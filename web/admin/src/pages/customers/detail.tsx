@@ -52,14 +52,6 @@ import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
-// The profile carries no email of its own; the only one the API returns rides on
-// this customer's subscriptions. Any of them identifies the same person.
-function customerEmail(profile: {
-  subscriptions: { user_email?: string }[]
-}): string | undefined {
-  return profile.subscriptions.find((s) => s.user_email?.trim())?.user_email
-}
-
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
@@ -82,14 +74,9 @@ export function CustomerDetailPage() {
         >
           <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
         </Button>
-        {/* Lead with something a human recognises. The id is the only thing the
-            API guarantees, but an email on any of this customer's subscriptions
-            is what support actually searches by, so it takes the title and the
-            id drops to a subtitle. Trust level shows only when it is NOT the
-            default, because "default" tells the reader nothing. */}
         <div className="min-w-0">
           <h2 className="truncate text-base font-semibold">
-            {customerEmail(profile) ?? "Customer"}
+            {profile.email ?? "Customer"}
           </h2>
           <p className="truncate text-xs text-muted-foreground">
             {profile.customer_id}
@@ -128,10 +115,6 @@ export function CustomerDetailPage() {
         </div>
       )}
 
-      {/* Two tracks, because a merchant opens this page for one of two
-          reasons: to see what the customer PAID, or to see what they can
-          ACCESS. Money leads and takes the wider column; access is the
-          consequence and sits beside it. */}
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
         <div className="grid gap-4 lg:col-span-2">
           <Card>
@@ -274,38 +257,29 @@ export function CustomerDetailPage() {
                   No active entitlements.
                 </p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Entitlement</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Starts</TableHead>
-                      <TableHead>Ends</TableHead>
-                      <TableHead />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {profile.entitlements.map((e) => (
-                      <TableRow key={e.id}>
-                        <TableCell className="font-medium">
+                <div className="grid gap-4">
+                  {profile.entitlements.map((e) => (
+                    <div key={e.id} className="flex min-w-0 items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">
                           {e.entitlement}
-                        </TableCell>
-                        <TableCell>{e.source_type}</TableCell>
-                        <TableCell>{formatDate(e.start_at)}</TableCell>
-                        <TableCell>
-                          {e.end_at ? formatDate(e.end_at) : "indefinite"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <RevokeEntitlementButton
-                            customerId={customerId}
-                            entitlementId={e.id}
-                            label={`Revoke ${e.entitlement}`}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {e.source_type}
+                        </p>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {formatDate(e.start_at)} to{" "}
+                          {e.end_at ? formatDate(e.end_at) : "no end date"}
+                        </p>
+                      </div>
+                      <RevokeEntitlementButton
+                        customerId={customerId}
+                        entitlementId={e.id}
+                        label={`Revoke ${e.entitlement}`}
+                      />
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
@@ -320,40 +294,33 @@ export function CustomerDetailPage() {
                   No product access grants.
                 </p>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Ends</TableHead>
-                      <TableHead />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {profile.product_access.map((g) => (
-                      <TableRow key={g.id}>
-                        <TableCell className="text-xs">
-                          {shortId(g.product_id, 13)}
-                        </TableCell>
-                        <TableCell>
+                <div className="grid gap-4">
+                  {profile.product_access.map((g) => (
+                    <div key={g.id} className="flex min-w-0 items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="truncate text-sm font-medium">
+                            {shortId(g.product_id, 13)}
+                          </p>
                           <StatusBadge status={g.status} />
-                        </TableCell>
-                        <TableCell>{g.source_type}</TableCell>
-                        <TableCell>
-                          {g.ends_at ? formatDate(g.ends_at) : "indefinite"}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <RevokeProductAccessButton
-                            customerId={customerId}
-                            grantId={g.id}
-                            label="Revoke product access"
-                          />
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {g.source_type}
+                        </p>
+                        <p className="text-xs text-muted-foreground tabular-nums">
+                          {g.ends_at
+                            ? `Ends ${formatDate(g.ends_at)}`
+                            : "No end date"}
+                        </p>
+                      </div>
+                      <RevokeProductAccessButton
+                        customerId={customerId}
+                        grantId={g.id}
+                        label="Revoke product access"
+                      />
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
           </Card>
