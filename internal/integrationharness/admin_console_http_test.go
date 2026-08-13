@@ -197,8 +197,8 @@ func TestAdminCustomersSearch(t *testing.T) {
 	aliceEmail := fmt.Sprintf("alice-%s@example.test", uuid.NewString()[:8])
 	aliceMerchantPSP := dbtest.EnsureTestPSP(ctx, t, pool, uuid.UUID(dbtest.TestMerchantID), "nmi")
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.subscriptions (product_id, status, rail, user_email, merchant_id, customer_id, psp_id)
-		 VALUES ($1, 'cancelled', 'nmi', $2, $3, $4, $5)`,
+		`INSERT INTO openrails.subscriptions (product_id, status, rail, user_email, merchant_id, customer_id, psp_id, cancelled_at, cancel_type)
+		 VALUES ($1, 'cancelled', 'nmi', $2, $3, $4, $5, NOW(), 'user')`,
 		productID, aliceEmail, uuid.UUID(dbtest.TestMerchantID), alice, aliceMerchantPSP)
 	require.NoError(t, err)
 
