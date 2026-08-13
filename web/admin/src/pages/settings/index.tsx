@@ -18,6 +18,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
   Table,
   TableBody,
   TableCell,
@@ -739,6 +746,61 @@ function RotateCredentialsDialog({
   )
 }
 
+// Where the account ID comes from differs per rail, and the merchant reads it
+// off a different dashboard each time. Naming that is the only way this field
+// is answerable without a support ticket.
+function accountIDHint(rail: string): string | undefined {
+  switch (rail) {
+    case "nmi":
+      return "The Gateway ID shown in your NMI dashboard."
+    case "stripe":
+      return "Your Stripe account ID. It starts with acct_."
+    case "ccbill":
+      return "Your account and sub-account joined with a dash, such as 999999-0000."
+    case "solana":
+      return "Taken from your signing key, so whatever you enter here is ignored."
+    default:
+      return undefined
+  }
+}
+
+const RAIL_NAMES: Record<string, string> = {
+  nmi: "NMI",
+  ccbill: "CCBill",
+  stripe: "Stripe",
+  solana: "Solana",
+}
+
+// Several rails carry the same display name ("Credit Card"), so the rail has to
+// stay visible or the list offers the same option twice.
+function railProviderLabel(rail: string, displayName: string): string {
+  const railName = RAIL_NAMES[rail] ?? rail
+  if (!displayName || displayName.toLowerCase() === railName.toLowerCase()) {
+    return railName
+  }
+  return `${displayName} (${railName})`
+}
+
+// Credential names arrive as storage keys. Read them as words, and keep the
+// acronyms the merchant sees on the provider's own dashboard.
+const CREDENTIAL_ACRONYMS: Record<string, string> = {
+  api: "API",
+  id: "ID",
+  url: "URL",
+}
+
+function credentialLabel(name: string): string {
+  const words = name.split(/[_-]+/).filter(Boolean)
+  return words
+    .map((word, index) => {
+      const acronym = CREDENTIAL_ACRONYMS[word.toLowerCase()]
+      if (acronym) return acronym
+      if (index > 0) return word.toLowerCase()
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+    })
+    .join(" ")
+}
+
 function ProviderDialog({
   providerDefinitions,
 }: {
@@ -788,10 +850,8 @@ function ProviderDialog({
         <DialogHeader>
           <DialogTitle>Configure payment provider</DialogTitle>
           <DialogDescription>
-            account_id is operator-declared per rail (NMI gateway id, Stripe
-            acct_…, CCBill clientAccnum-clientSubacc, Solana wallet). The
-            environment follows the deployment's test_mode. Credentials are
-            stored in the secret backend.
+            Connect the account that will take money for you. Credentials go
+            straight into the secret store and are never shown again.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -811,49 +871,77 @@ function ProviderDialog({
               }}
             >
               {(field) => (
-                <Field label="Rail" id="pv-rail">
-                  <select
-                    id="pv-rail"
-                    className="h-9 rounded-md border bg-transparent px-3 text-sm"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => {
-                      field.handleChange(event.target.value)
+                <Field label="Payment rail" id="pv-rail">
+                  <Select
+                    items={providerDefinitions.map((provider) => ({
+                      value: provider.rail,
+                      label: railProviderLabel(
+                        provider.rail,
+                        provider.display_name
+                      ),
+                    }))}
+                    value={field.state.value || null}
+                    onValueChange={(value) => {
+                      field.handleChange(value ?? "")
+                      // Each rail asks for different credentials, so anything
+                      // typed for the previous one is not carried over.
                       form.setFieldValue("credentials", {})
                     }}
-                    aria-invalid={field.state.meta.errors.length > 0}
                   >
-                    <option value="">Pick a rail…</option>
-                    {providerDefinitions.map((provider) => (
-                      <option key={provider.rail} value={provider.rail}>
-                        {provider.rail} — {provider.display_name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger
+                      id="pv-rail"
+                      className="w-full"
+                      aria-invalid={field.state.meta.errors.length > 0}
+                    >
+                      <SelectValue placeholder="Pick a rail…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {providerDefinitions.map((provider) => (
+                        <SelectItem key={provider.rail} value={provider.rail}>
+                          {railProviderLabel(
+                            provider.rail,
+                            provider.display_name
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <FormFieldErrors errors={field.state.meta.errors} />
                 </Field>
               )}
             </form.Field>
-            <form.Field
-              name="accountID"
-              validators={{
-                onChange: ({ value }) =>
-                  value.trim() ? undefined : "Enter the provider account ID",
-              }}
-            >
-              {(field) => (
-                <Field label="Account id" id="pv-acct">
-                  <Input
-                    id="pv-acct"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    aria-invalid={field.state.meta.errors.length > 0}
-                  />
-                  <FormFieldErrors errors={field.state.meta.errors} />
-                </Field>
+            <form.Subscribe selector={(state) => state.values.rail}>
+              {(rail) => (
+                <form.Field
+                  name="accountID"
+                  validators={{
+                    onChange: ({ value }) =>
+                      value.trim()
+                        ? undefined
+                        : "Enter the provider account ID",
+                  }}
+                >
+                  {(field) => (
+                    <Field
+                      label="Account ID"
+                      id="pv-acct"
+                      hint={accountIDHint(rail)}
+                    >
+                      <Input
+                        id="pv-acct"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(event) =>
+                          field.handleChange(event.target.value)
+                        }
+                        aria-invalid={field.state.meta.errors.length > 0}
+                      />
+                      <FormFieldErrors errors={field.state.meta.errors} />
+                    </Field>
+                  )}
+                </form.Field>
               )}
-            </form.Field>
+            </form.Subscribe>
             <form.Subscribe selector={(state) => state.values.rail}>
               {(rail) => {
                 const selectedProvider = providerDefinitions.find(
@@ -866,7 +954,7 @@ function ProviderDialog({
                         {selectedProvider?.credential_keys.map((name) => (
                           <Field
                             key={name}
-                            label={name}
+                            label={credentialLabel(name)}
                             id={`pv-credential-${name}`}
                           >
                             <Input
@@ -902,14 +990,23 @@ function ProviderDialog({
               }
             >
               {([rail, accountID, canSubmit, isSubmitting]) => (
-                <Button
-                  type="submit"
-                  disabled={
-                    !rail || !accountID.trim() || !canSubmit || isSubmitting
-                  }
-                >
-                  {isSubmitting ? "Saving…" : "Save"}
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => handleOpenChange(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={
+                      !rail || !accountID.trim() || !canSubmit || isSubmitting
+                    }
+                  >
+                    {isSubmitting ? "Saving…" : "Save provider"}
+                  </Button>
+                </>
               )}
             </form.Subscribe>
           </DialogFooter>
@@ -1158,18 +1255,25 @@ function CustomerControlsTab() {
   )
 }
 
+// hint carries the invisible constraint: where a value comes from, or what
+// happens if it is left empty. Anything the control already says is left out.
 function Field({
   label,
   id,
+  hint,
   children,
 }: {
   label: string
   id: string
+  hint?: string
   children: React.ReactNode
 }) {
   return (
     <div className="grid gap-1.5">
       <Label htmlFor={id}>{label}</Label>
+      {hint ? (
+        <p className="text-[13px] text-muted-foreground">{hint}</p>
+      ) : null}
       {children}
     </div>
   )
