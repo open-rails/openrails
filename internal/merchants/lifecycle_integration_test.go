@@ -150,22 +150,28 @@ CREATE TABLE IF NOT EXISTS openrails.probe_verdicts (
 CREATE TABLE IF NOT EXISTS openrails.subscriptions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
-    psp_id uuid,
+    rail text NOT NULL,
+    psp_id uuid NOT NULL,
     status text NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS openrails.payments (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
+    rail text NOT NULL,
     psp_id uuid,
-    status text NOT NULL
+    status text NOT NULL,
+    CONSTRAINT payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text]))))
 );
 
 CREATE TABLE IF NOT EXISTS openrails.rail_intents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     merchant_id uuid NOT NULL,
+    rail text NOT NULL,
     psp_id uuid,
-    status text NOT NULL
+    custodian_id uuid,
+    status text NOT NULL,
+    CONSTRAINT rail_intents_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
 );
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_purge_inventories (
@@ -195,6 +201,76 @@ CREATE TABLE IF NOT EXISTS openrails.destructive_runs (
     note          TEXT
 );
 `
+
+func compactLifecycleSQL(sql string) string {
+	return strings.Join(strings.Fields(strings.ToLower(sql)), " ")
+}
+
+func lifecycleFixtureObjectDDL(name string) string {
+	marker := "CREATE TABLE IF NOT EXISTS openrails." + name + " ("
+	start := strings.Index(schemaDDL, marker)
+	if start < 0 {
+		return ""
+	}
+	ddl := schemaDDL[start:]
+	end := strings.Index(ddl, "\n);")
+	if end < 0 {
+		return ""
+	}
+	return ddl[:end+3]
+}
+
+func TestLifecycleFixtureProviderProvenanceMatchesBaseline(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		object string
+		clause string
+	}{
+		{"subscriptions", "psp_id uuid not null"},
+		{"payments", "constraint payments_psp_required_on_rail check (((psp_id is not null) or (rail = any (array['manual'::text, 'admin'::text]))))"},
+		{"rail_intents", "constraint rail_intents_addressed check (((psp_id is not null) or (custodian_id is not null)))"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.object, func(t *testing.T) {
+			baseline, err := postgresmigrations.BaselineObjects(tc.object)
+			require.NoError(t, err)
+			fixture := lifecycleFixtureObjectDDL(tc.object)
+			require.NotEmpty(t, fixture, "minimal lifecycle fixture must define the object")
+			require.Contains(t, compactLifecycleSQL(baseline), tc.clause, "production baseline provenance contract changed")
+			require.Contains(t, compactLifecycleSQL(fixture), tc.clause, "minimal lifecycle fixture drifted from the production provenance contract")
+		})
+	}
+}
+
+func TestLifecycleFixtureEnforcesProviderProvenance(t *testing.T) {
+	ctx := context.Background()
+	pool := newTestPool(t)
+	merchantID := uuid.New()
+
+	_, err := pool.Exec(ctx, `
+		INSERT INTO openrails.subscriptions (merchant_id, rail, status)
+		VALUES ($1, 'nmi', 'active')
+	`, merchantID)
+	require.Error(t, err, "provider-bound subscriptions require a PSP")
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.payments (merchant_id, rail, status)
+		VALUES ($1, 'nmi', 'completed')
+	`, merchantID)
+	require.Error(t, err, "on-rail payments require a PSP")
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.payments (merchant_id, rail, status)
+		VALUES ($1, 'manual', 'completed')
+	`, merchantID)
+	require.NoError(t, err, "off-rail manual payments have no PSP")
+
+	_, err = pool.Exec(ctx, `
+		INSERT INTO openrails.rail_intents (merchant_id, rail, status)
+		VALUES ($1, 'nmi', 'pending')
+	`, merchantID)
+	require.Error(t, err, "outbound intents must address a PSP or custodian")
+}
 
 func newTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
@@ -326,8 +402,8 @@ func TestArchivedPSPDrainState(t *testing.T) {
 	require.Equal(t, int64(0), items[0].OpenObligations)
 
 	_, err = svc.pool.Exec(ctx, `
-		INSERT INTO openrails.subscriptions (merchant_id, psp_id, status)
-		VALUES ($1::uuid, $2::uuid, 'active')
+		INSERT INTO openrails.subscriptions (merchant_id, rail, psp_id, status)
+		VALUES ($1::uuid, 'nmi', $2::uuid, 'active')
 	`, tn.ID.String(), items[0].ID)
 	require.NoError(t, err)
 

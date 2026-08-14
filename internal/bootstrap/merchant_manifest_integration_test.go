@@ -51,22 +51,6 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_api_host ON openrails.merchants (api_host) WHERE api_host IS NOT NULL AND deleted_at IS NULL;
 
-CREATE TABLE IF NOT EXISTS openrails.merchant_configurations (
-    merchant_id uuid NOT NULL,
-    config jsonb DEFAULT '{}'::jsonb NOT NULL,
-    config_version bigint DEFAULT 1 NOT NULL,
-    created_at timestamptz DEFAULT now() NOT NULL,
-    updated_at timestamptz DEFAULT now() NOT NULL,
-    CONSTRAINT merchant_configurations_pkey PRIMARY KEY (merchant_id),
-    CONSTRAINT merchant_configurations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id)
-);
-ALTER TABLE ONLY openrails.merchant_configurations FORCE ROW LEVEL SECURITY;
-ALTER TABLE openrails.merchant_configurations ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.merchant_configurations;
-CREATE POLICY merchant_isolation ON openrails.merchant_configurations
-    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
-    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
-
 CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (
     merchant_id uuid NOT NULL,
     name text NOT NULL,
@@ -80,21 +64,6 @@ ALTER TABLE ONLY openrails.merchant_secrets FORCE ROW LEVEL SECURITY;
 ALTER TABLE openrails.merchant_secrets ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS merchant_isolation ON openrails.merchant_secrets;
 CREATE POLICY merchant_isolation ON openrails.merchant_secrets
-    USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
-    WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
-
-CREATE TABLE IF NOT EXISTS openrails.merchant_deks (
-    merchant_id uuid NOT NULL,
-    wrapped_dek bytea NOT NULL,
-    key_version integer DEFAULT 1 NOT NULL,
-    created_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamptz DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT pk_merchant_deks PRIMARY KEY (merchant_id)
-);
-ALTER TABLE ONLY openrails.merchant_deks FORCE ROW LEVEL SECURITY;
-ALTER TABLE openrails.merchant_deks ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS merchant_isolation ON openrails.merchant_deks;
-CREATE POLICY merchant_isolation ON openrails.merchant_deks
     USING ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid))
     WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id', true), ''))::uuid));
 
@@ -839,26 +808,28 @@ func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pg
 	_, err = pool.Exec(ctx, merchantManifestSchemaDDL)
 	require.NoError(t, err)
 
-	// #824 / or#880: the PSP-ownership preflight goes through the SECURITY
-	// DEFINER directory functions, and the manifest loader writes the custodian
-	// registry. Both are replayed from the REAL baseline definitions rather than
-	// hand-copied (and eventually drifted from) here.
+	// Replay the baseline objects whose exact shape matters to this harness:
+	// directory functions, merchant configuration and DEK storage, and the
+	// custodian registry. Hand-copying them here previously let removed version
+	// columns survive in tests after the production schema moved forward.
 	_, err = pool.Exec(ctx, `DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'openrails_app') THEN
 			CREATE ROLE openrails_app NOLOGIN NOBYPASSRLS;
 		END IF;
 	END $$;`)
 	require.NoError(t, err)
-	directoryDDL, err := postgresmigrations.BaselineObjects(
+	baselineDDL, err := postgresmigrations.BaselineObjects(
 		"current_merchant_id",
 		"assert_cross_merchant_reader",
 		"psp_owner_by_identity",
 		"customer_merchant_ids_for_subject",
+		"merchant_configurations",
+		"merchant_deks",
 		"custodians",
 		"custodian_owner_by_identity",
 	)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, directoryDDL)
+	_, err = pool.Exec(ctx, baselineDDL)
 	require.NoError(t, err)
 
 	// The custody reference onto psps, which this harness's own psps table
