@@ -255,6 +255,32 @@ func TestUpdateCustomerVault_ResolvesBillingID(t *testing.T) {
 	assert.Contains(t, patchBody, `"first_name":"Ada"`)
 }
 
+func TestUpdateCustomerVault_TargetsKnownBillingIDWithoutLookup(t *testing.T) {
+	var patchBody string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, http.MethodPatch, r.Method)
+		require.Equal(t, "/customers/vault-9", r.URL.Path)
+		raw, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		patchBody = string(raw)
+		_, _ = w.Write([]byte(`{"object":"customer","id":"vault-9"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := NewClient("mobius", &config.NMIProviderSettings{SecurityKey: "k"}, false)
+	require.NoError(t, err)
+	client.V5BaseURL = server.URL
+
+	err = client.UpdateCustomerVault(context.Background(), UpdateCustomerVaultData{
+		CustomerVaultID:         "vault-9",
+		BillingID:               "B88",
+		CreateCustomerVaultData: CreateCustomerVaultData{PaymentToken: "tok_new"},
+	})
+	require.NoError(t, err)
+	assert.Contains(t, patchBody, `"id":"B88"`)
+	assert.Contains(t, patchBody, `"payment_token":"tok_new"`)
+}
+
 // TestRunSale_BillingTargetedUsesClassic (#682): the live v5 sale cannot
 // select a billing entry (every shape rejected as extra parameters,
 // live-verified 2026-07-02), so a billing-targeted sale goes through classic

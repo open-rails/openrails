@@ -405,7 +405,7 @@ type CreatePaymentMethodRequest struct {
 
 // UpdatePaymentMethodRequest specifies payment method update parameters.
 type UpdatePaymentMethodRequest struct {
-	PaymentToken string // New token with updated card
+	PaymentToken string // Fresh single-use token for the replacement card
 	FirstName    *string
 	LastName     *string
 	Address1     *string
@@ -418,9 +418,9 @@ type UpdatePaymentMethodRequest struct {
 	Company      *string
 	Address2     *string
 	Provider     *string
-	LastFour     *string
-	CardType     *string
-	ExpiryDate   *string
+	LastFour     *string // Required tokenization result
+	CardType     *string // Required tokenization result
+	ExpiryDate   *string // Required tokenization result, "MM/YY"
 }
 
 // -------------------------------- Notifications --------------------------------

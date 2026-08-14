@@ -252,8 +252,9 @@ sequenceDiagram
 
 `POST /v1/me/payment-methods` takes a Collect.js `payment_token` plus billing details
 (`first_name`, `last_name`, `address1`, `city`, `state`, `zip`, `country`, optional
-`email`/`phone`) and creates an NMI vault record; `PUT /:id` re-tokenizes a replacement
-card. Checkout with a fresh `payment_token` also persists a payment method
+`email`/`phone`) and creates an NMI vault record. `PUT /:id` replaces an NMI card and
+requires the Collect.js `payment_token`, `last_four`, `card_type`, and `expiry_date`
+returned by tokenization. Checkout with a fresh `payment_token` also persists a payment method
 automatically. `payment_method_id`s can only be used by their owner — using someone
 else's is a 403.
 
@@ -262,6 +263,13 @@ exact JSON body for an exact-request retry. A different token is a new attempt a
 must use a new key. If create returns `provider_outcome_unknown`, refresh the payment
 method list before starting another attempt because the provider mutation may have
 completed.
+
+Stored-card replacement is durable. A confirmed replacement returns the updated
+payment method. `202 Accepted` has no body and means OpenRails is still resolving the
+provider outcome; repeat the exact request to inspect the same attempt. A
+`409 payment_method_update_retry_required` means that attempt did not update the card
+and Collect.js must tokenize it again. OpenRails never blindly resubmits a single-use
+Collect.js token after an ambiguous provider response.
 
 Deleting a stored NMI method returns `204 No Content` after provider and local
 removal are confirmed, or `202 Accepted` with no body while the durable delete is

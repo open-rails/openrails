@@ -34,11 +34,24 @@ type MockNMIServer struct {
 	SubscriptionIDGen int32
 	DeletedSubs       map[string]bool
 	deletedSubsMu     sync.Mutex
+	vaultCards        map[string]mockNMICard
+	replacementCards  map[string]mockNMICard
+	vaultCardsMu      sync.Mutex
+}
+
+type mockNMICard struct {
+	LastFour string
+	CardType string
+	Expiry   string
 }
 
 // NewMockNMIServer creates a new mock NMI server
 func NewMockNMIServer() *MockNMIServer {
-	mock := &MockNMIServer{IDPrefix: uuid.NewString()[:8]}
+	mock := &MockNMIServer{
+		IDPrefix:         uuid.NewString()[:8],
+		vaultCards:       map[string]mockNMICard{},
+		replacementCards: map[string]mockNMICard{},
+	}
 	mock.Server = httptest.NewServer(http.HandlerFunc(mock.handleRequest))
 	return mock
 }
@@ -144,6 +157,7 @@ func (m *MockNMIServer) handleV5(w http.ResponseWriter, r *http.Request) {
 		railCustomerRef := fmt.Sprintf("vault_%s_%d", m.IDPrefix, atomic.AddInt32(&m.VaultIDCounter, 1))
 		fmt.Fprintf(w, `{"object":"customer","id":"%s","billing":[{"object":"billing","id":"B1","priority":1}]}`, railCustomerRef)
 	case r.Method == http.MethodPatch && strings.HasPrefix(r.URL.Path, "/customers/"):
+		m.applyReplacementCard(strings.TrimPrefix(r.URL.Path, "/customers/"))
 		_, _ = w.Write([]byte(`{"object":"customer","id":"` + strings.TrimPrefix(r.URL.Path, "/customers/") + `"}`))
 	case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/customers/"):
 		w.WriteHeader(http.StatusNoContent)
@@ -171,6 +185,11 @@ func (m *MockNMIServer) handleV5(w http.ResponseWriter, r *http.Request) {
 		// id-filtered lookup (UpdateCustomerVault resolves the priority-1
 		// billing id with a read first): echo the customer with one billing.
 		if id := r.URL.Query().Get("id"); id != "" {
+			if card, ok := m.vaultCard(id); ok {
+				fmt.Fprintf(w, `{"customers":[{"object":"customer","id":"%s","billing":[{"object":"billing","id":"B1","priority":1,"payment_details":{"card_number":"************%s","card_exp":"%s","card_type":"%s"}}]}],"next_cursor":null,"has_more":false}`,
+					id, card.LastFour, card.Expiry, card.CardType)
+				return
+			}
 			fmt.Fprintf(w, `{"customers":[{"object":"customer","id":"%s","billing":[{"object":"billing","id":"B1","priority":1}]}],"next_cursor":null,"has_more":false}`, id)
 			return
 		}
@@ -220,6 +239,28 @@ func (m *MockNMIServer) Reset() {
 	m.ResponseOverride = ""
 	m.ShouldFail = false
 	m.FailReason = ""
+}
+
+func (m *MockNMIServer) SetCardReplacement(vaultID string, current, replacement mockNMICard) {
+	m.vaultCardsMu.Lock()
+	defer m.vaultCardsMu.Unlock()
+	m.vaultCards[vaultID] = current
+	m.replacementCards[vaultID] = replacement
+}
+
+func (m *MockNMIServer) vaultCard(vaultID string) (mockNMICard, bool) {
+	m.vaultCardsMu.Lock()
+	defer m.vaultCardsMu.Unlock()
+	card, ok := m.vaultCards[vaultID]
+	return card, ok
+}
+
+func (m *MockNMIServer) applyReplacementCard(vaultID string) {
+	m.vaultCardsMu.Lock()
+	defer m.vaultCardsMu.Unlock()
+	if card, ok := m.replacementCards[vaultID]; ok {
+		m.vaultCards[vaultID] = card
+	}
 }
 
 // SetupSuiteWithMockNMI creates a test suite with mock NMI client configured

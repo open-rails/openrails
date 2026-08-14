@@ -248,6 +248,7 @@ func TestCreatePaymentMethod(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request")
 	})
+
 }
 
 // TestDeletePaymentMethod tests deleting payment methods
@@ -424,14 +425,25 @@ func TestUpdatePaymentMethod(t *testing.T) {
 
 		// Create a payment method to update
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
-			UserID: userID,
-			Rail:   models.RailNMI,
+			UserID:     userID,
+			Rail:       models.RailNMI,
+			BillingID:  "B1",
+			LastFour:   "1111",
+			CardType:   "Visa",
+			ExpiryDate: "01/29",
 		})
+		mock.SetCardReplacement(pm.RailCustomerRef,
+			mockNMICard{LastFour: "1111", CardType: "Visa", Expiry: "0129"},
+			mockNMICard{LastFour: "4242", CardType: "Mastercard", Expiry: "1230"},
+		)
 
 		body := map[string]string{
 			"payment_token": "new-token",
 			"first_name":    "Updated",
 			"last_name":     "User",
+			"last_four":     "4242",
+			"card_type":     "Mastercard",
+			"expiry_date":   "12/30",
 		}
 		jsonBody, _ := json.Marshal(body)
 
@@ -449,6 +461,12 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, api.FormatPaymentMethodID(pm.ID), response["id"], "Should return same payment method ID")
+		card, ok := response["card"].(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "4242", card["last4"])
+		assert.Equal(t, "Mastercard", card["brand"])
+		assert.Equal(t, float64(12), card["exp_month"])
+		assert.Equal(t, float64(2030), card["exp_year"])
 	})
 
 	t.Run("returns error without payment_token", func(t *testing.T) {
@@ -471,6 +489,26 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		suite.Server.Handler().ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "Should return 400 Bad Request")
+	})
+
+	t.Run("requires tokenization metadata", func(t *testing.T) {
+		mock.Reset()
+		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
+			UserID: userID,
+			Rail:   models.RailNMI,
+		})
+		jsonBody, _ := json.Marshal(map[string]string{"payment_token": "new-token"})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", pm.ID.String()), bytes.NewReader(jsonBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+
+		suite.Server.Handler().ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		assert.Contains(t, w.Body.String(), "last_four, card_type, and expiry_date")
+		assert.Zero(t, mock.RequestCount, "invalid requests must not reach NMI")
 	})
 
 	t.Run("returns 404 for non-existent payment method", func(t *testing.T) {

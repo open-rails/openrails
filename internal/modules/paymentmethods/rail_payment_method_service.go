@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -37,6 +38,9 @@ type RailPaymentMethodService struct {
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
 	DeleteIntents PaymentMethodDeleteExecutor
+	// UpdateIntents routes UpdatePaymentMethod through the durable
+	// nmi_payment_method_update provider intent (#928); wired at runtime assembly.
+	UpdateIntents PaymentMethodUpdateExecutor
 	clock         clockwork.Clock
 	newNMIClient  func(provider string, cfg *config.NMIProviderSettings, testMode bool) (*nmi.NMIClient, error)
 }
@@ -510,9 +514,59 @@ func stringPtrOrNil(value string) *string {
 	return &value
 }
 
-// UpdatePaymentMethod updates vault in NMI and updates local record timestamp
+var (
+	ErrPaymentMethodUpdateProcessing = errors.New("payment method update is processing; retry the same request to check the result")
+	ErrPaymentMethodRetokenize       = errors.New("payment method was not updated; tokenize the card again")
+)
+
+// PaymentMethodUpdateValidationError is a caller-correctable replacement
+// request error. Message is safe to return through public surfaces.
+type PaymentMethodUpdateValidationError struct {
+	Message string
+}
+
+func (e *PaymentMethodUpdateValidationError) Error() string {
+	if e == nil {
+		return "invalid payment method update"
+	}
+	return e.Message
+}
+
+// PaymentMethodUpdateFailedError means the durable replacement reached an
+// unrecoverable provider/local conflict. Reason is operator-only.
+type PaymentMethodUpdateFailedError struct {
+	Reason string
+}
+
+func (e *PaymentMethodUpdateFailedError) Error() string {
+	if e == nil || strings.TrimSpace(e.Reason) == "" {
+		return "payment method update failed permanently"
+	}
+	return "payment method update failed permanently: " + e.Reason
+}
+
+// PaymentMethodUpdateOutcome mirrors the durable intent state without making
+// paymentmethods import intents (which would create a cycle).
+type PaymentMethodUpdateOutcome struct {
+	Method     *models.PaymentMethod
+	Done       bool
+	Retokenize bool
+	Terminal   bool
+	Reason     string
+}
+
+type PaymentMethodUpdateExecutor interface {
+	ExecutePaymentMethodUpdate(ctx context.Context, pm *models.PaymentMethod, req *UpdatePaymentMethodRequest) (PaymentMethodUpdateOutcome, error)
+}
+
+// UpdatePaymentMethod replaces an NMI card through the durable provider intent.
 func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *models.PaymentMethod, req *UpdatePaymentMethodRequest) (*models.PaymentMethod, error) {
-	// Use rail from the payment method.
+	if pm == nil {
+		return nil, errors.New("payment method is required")
+	}
+	if req == nil {
+		return nil, errors.New("payment method update is required")
+	}
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return nil, errors.New("payment method rail is required")
@@ -521,88 +575,70 @@ func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *
 	if !rails.SupportsPaymentMethodCRUD(models.Rail(rail)) {
 		return nil, RailPaymentMethodsUnsupported(rail)
 	}
-
-	client, _, err := s.resolveNMIClient(ctx, rail, &pm.PspID)
+	if err := preparePaymentMethodUpdate(req); err != nil {
+		return nil, err
+	}
+	if _, _, err := s.resolveNMIClient(ctx, rail, &pm.PspID); err != nil {
+		return nil, fmt.Errorf("%w: rail '%s' is not configured: %w", ErrPaymentMethodProviderUnavailable, rail, err)
+	}
+	if s.UpdateIntents == nil {
+		return nil, errors.New("payment method update intent executor not wired")
+	}
+	out, err := s.UpdateIntents.ExecutePaymentMethodUpdate(ctx, pm, req)
 	if err != nil {
-		return nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
+		return nil, fmt.Errorf("post payment method update intent: %w", err)
 	}
+	switch {
+	case out.Done:
+		return out.Method, nil
+	case out.Retokenize:
+		return nil, ErrPaymentMethodRetokenize
+	case out.Terminal:
+		return nil, &PaymentMethodUpdateFailedError{Reason: out.Reason}
+	default:
+		return nil, ErrPaymentMethodUpdateProcessing
+	}
+}
 
-	upd := nmi.UpdateCustomerVaultData{CustomerVaultID: pm.RailCustomerRef}
+func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
+	if req.PaymentToken == nil || strings.TrimSpace(*req.PaymentToken) == "" {
+		return &PaymentMethodUpdateValidationError{Message: "payment_token is required"}
+	}
+	token := strings.TrimSpace(*req.PaymentToken)
+	req.PaymentToken = &token
 
-	paymentTokenUpdated := false
-	if req.PaymentToken != nil {
-		trimmed := strings.TrimSpace(*req.PaymentToken)
-		if trimmed != "" {
-			upd.PaymentToken = trimmed
-			paymentTokenUpdated = true
-		}
+	lastFour := ""
+	if req.LastFour != nil {
+		lastFour = sanitizeLastFour(*req.LastFour)
 	}
-
-	if req.FirstName != nil {
-		upd.FirstName = *req.FirstName
+	cardType := ""
+	if req.CardType != nil {
+		cardType = sanitizeCardType(*req.CardType)
 	}
-	if req.LastName != nil {
-		upd.LastName = *req.LastName
+	expiry := ""
+	if req.ExpiryDate != nil {
+		expiry = normalizeReplacementExpiry(*req.ExpiryDate)
 	}
+	if lastFour == "" || cardType == "" || expiry == "" {
+		return &PaymentMethodUpdateValidationError{Message: "last_four, card_type, and expiry_date are required from the tokenization response"}
+	}
+	req.LastFour = &lastFour
+	req.CardType = &cardType
+	req.ExpiryDate = &expiry
 	if req.NameOnCard != nil && req.FirstName == nil && req.LastName == nil {
-		upd.FirstName, upd.LastName = nmiNameParts("", "", *req.NameOnCard)
+		first, last := nmiNameParts("", "", *req.NameOnCard)
+		req.FirstName = &first
+		req.LastName = &last
 	}
-	if req.Address1 != nil {
-		upd.Address1 = *req.Address1
-	}
-	if req.City != nil {
-		upd.City = *req.City
-	}
-	if req.State != nil {
-		upd.State = *req.State
-	}
-	if req.Zip != nil {
-		upd.Zip = *req.Zip
-	}
-	if req.Country != nil {
-		upd.Country = *req.Country
-	}
-	if req.Phone != nil {
-		upd.Phone = *req.Phone
-	}
-	if req.Email != nil {
-		upd.Email = *req.Email
-	}
-	if req.Company != nil {
-		upd.Company = *req.Company
-	}
-	if req.Address2 != nil {
-		upd.Address2 = *req.Address2
-	}
-
-	if err := client.UpdateCustomerVault(ctx, upd); err != nil {
-		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to update vault in NMI")
-		return nil, fmt.Errorf("failed to update payment method: %w", err)
-	}
-
-	if paymentTokenUpdated {
-		applyUpdatedCardMetadata(pm, req)
-	}
-	pm.UpdatedAt = s.now()
-	if err := s.PaymentMethodService.Update(ctx, pm); err != nil {
-		log.WithError(err).WithField("vault_id", pm.RailCustomerRef).Error("Failed to update local payment method record")
-		return nil, fmt.Errorf("failed to update local payment method record: %w", err)
-	}
-	log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully updated payment method")
-	return pm, nil
+	return nil
 }
 
-func applyUpdatedCardMetadata(pm *models.PaymentMethod, req *UpdatePaymentMethodRequest) {
-	pm.LastFour = sanitizedStringPtr(req.LastFour, sanitizeLastFour)
-	pm.CardType = sanitizedStringPtr(req.CardType, sanitizeCardType)
-	pm.ExpiryDate = sanitizedStringPtr(req.ExpiryDate, sanitizeExpiryDate)
-}
-
-func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
-	if value == nil {
-		return nil
+func normalizeReplacementExpiry(value string) string {
+	month, year, ok := sharedformat.ParseExpiry(value)
+	if !ok || month < 1 || month > 12 || year < 2000 || year > 9999 {
+		return ""
 	}
-	return stringPtrOrNil(sanitize(*value))
+	return fmt.Sprintf("%02d/%02d", month, year%100)
 }
 
 // ErrPaymentMethodDeleteProcessing: the durable vault-delete intent could not confirm
