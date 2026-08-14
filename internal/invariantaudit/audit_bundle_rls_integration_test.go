@@ -471,15 +471,9 @@ func TestGAP10_UniqueIndexesAreMerchantScoped(t *testing.T) {
 // invisible to the inserting session, so the victim gets a unique violation
 // naming a row it cannot select. 0003 leads the key with merchant_id.
 //
-// Reaching the shared coordinate at all needs merchant B's image to cite
-// merchant A's run, which destructive_run_before_images_run_fk permits because
-// it references destructive_runs(id) and not (merchant_id, id) — referential
-// integrity checks bypass RLS, so the FK is not a tenant boundary. That is the
-// point, not an oversight in the test: it is precisely the shape the old index
-// turned into a cross-tenant unique violation, and precisely what a
-// merchant-led key makes harmless. Tightening that FK to a composite is the
-// stricter follow-up; if it lands, this second half stops being constructible
-// and should be deleted, leaving the shape assertion.
+// The merchant-led unique is necessary but not sufficient: the before-image's
+// run reference must carry the same merchant identity so a row cannot cite a
+// different merchant's destructive run through a globally unique run ID.
 func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 	ctx, super, app := pools(t)
 
@@ -493,6 +487,18 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 	require.Contains(t, def, "(merchant_id, destructive_run_id, table_name, row_id)",
 		"ID-11: the before-images identity unique must LEAD with merchant_id, got: %s", def)
 
+	var fkDef string
+	require.NoError(t, super.QueryRow(ctx, `
+		SELECT pg_get_constraintdef(oid)
+		  FROM pg_constraint
+		 WHERE connamespace = 'openrails'::regnamespace
+		   AND conrelid = 'openrails.destructive_run_before_images'::regclass
+		   AND conname = 'destructive_run_before_images_run_fk'`).Scan(&fkDef),
+		"the before-image-to-run foreign key is missing entirely")
+	require.Contains(t, fkDef,
+		"FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id)",
+		"ID-11: the run foreign key must carry merchant identity, got: %s", fkDef)
+
 	a, b := uuid.New(), uuid.New()
 	for id, slug := range map[uuid.UUID]string{
 		a: "inv-bi-a-" + uuid.NewString()[:8],
@@ -503,43 +509,23 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// One run, one subject row id: the whole coordinate the old key made global.
-	runID, rowID := uuid.New(), uuid.New()
+	runID := uuid.New()
 	_, err := super.Exec(ctx,
 		`INSERT INTO openrails.destructive_runs (id, merchant_id, kind, actor)
 		 VALUES ($1, $2, 'converge_enforce', 'or902-invariant-audit')`, runID, a)
 	require.NoError(t, err)
 
-	for _, m := range []uuid.UUID{a, b} {
-		tx, err := app.Begin(ctx)
-		require.NoError(t, err)
-		_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, m.String())
-		require.NoError(t, err)
-		_, err = tx.Exec(ctx, `
-			INSERT INTO openrails.destructive_run_before_images
-			    (merchant_id, destructive_run_id, table_name, row_id, before)
-			VALUES ($1, $2, 'subscriptions', $3, '{}'::jsonb)`, m, runID, rowID)
-		require.NoErrorf(t, err,
-			"merchant %s could not capture its own before-image on a coordinate another merchant already holds — "+
-				"the identity unique is spanning merchants again (ID-11)", m)
-		require.NoError(t, tx.Commit(ctx))
-	}
-
-	// And the rule the key still has to enforce: WITHIN a merchant it is one
-	// image per (run, table, row), because the second capture inside a run is
-	// the run's own later write and must not displace the state it inherited.
 	tx, err := app.Begin(ctx)
 	require.NoError(t, err)
 	defer func() { _ = tx.Rollback(ctx) }()
-	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, a.String())
+	_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1::text, true)`, b.String())
 	require.NoError(t, err)
 	_, err = tx.Exec(ctx, `
 		INSERT INTO openrails.destructive_run_before_images
 		    (merchant_id, destructive_run_id, table_name, row_id, before)
-		VALUES ($1, $2, 'subscriptions', $3, '{"second":true}'::jsonb)`, a, runID, rowID)
+		VALUES ($1, $2, 'subscriptions', $3, '{}'::jsonb)`, b, runID, uuid.New())
 	require.Error(t, err,
-		"a merchant's SECOND capture of the same (run, table, row) must still be rejected — "+
-			"leading with merchant_id widened the key, it must not have disarmed it")
+		"a before-image must not cite another merchant's destructive run")
 }
 
 // GAP-9: org ↔ merchant is 1:1. Enforced on the policy-free merchants
