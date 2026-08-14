@@ -84,6 +84,7 @@ func TestUnknownCodesAreAlwaysRetry(t *testing.T) {
 		{"ccbill", "261"}, // NMI's number on a rail that does not speak it
 		{"ccbill", "anything"},
 		{"solana", "anything"},
+		{"mobius", "252"}, // PSP key, not a rail; must not inherit NMI's terminal bucket
 		{"a_rail_that_does_not_exist", "252"},
 	}
 	for _, c := range cases {
@@ -107,10 +108,6 @@ func TestNMILocalizationIDsAgreeWithNumericCodes(t *testing.T) {
 		}
 		if got := ClassifyDecline("nmi", id); got != want {
 			t.Errorf("ClassifyDecline(nmi, %q) = %v, want %v (numeric %d)", id, got, want, code)
-		}
-		// nmidirect records some codes with an nmi_ prefix.
-		if got := ClassifyDecline("mobius", "nmi_"+id); got != want {
-			t.Errorf("ClassifyDecline(mobius, nmi_%s) = %v, want %v", id, got, want)
 		}
 	}
 }
@@ -183,13 +180,9 @@ func TestDeclineRetryIsTheZeroValue(t *testing.T) {
 	}
 }
 
-// TestCustodianProxiedDeclinesClassifyThroughNMI (or#879) pins the property
-// that survived deleting the `vaulted_card` alias branch: a Basis-Theory-held
-// card is charged at an NMI gateway and returns NMI's classic response, so it
-// must classify through the NMI taxonomy — same vocabulary, different
-// transport. Before or#879 this worked only because someone remembered to
-// write `case "nmi", "mobius", "vaulted_card":`; now it works because the rail
-// IS nmi and there is no third value to forget.
+// TestCustodianProxiedDeclinesClassifyThroughNMI (or#879) pins that custody
+// does not change the rail. A Basis-Theory-held card charged at an NMI gateway
+// returns NMI's response vocabulary and therefore classifies as rail nmi.
 func TestCustodianProxiedDeclinesClassifyThroughNMI(t *testing.T) {
 	// One representative of each bucket, in both code shapes the charge path
 	// records (verbatim numeric, and the #733 localization form).
@@ -207,10 +200,6 @@ func TestCustodianProxiedDeclinesClassifyThroughNMI(t *testing.T) {
 		// The rail carried by a proxied charge is plain nmi.
 		if got := ClassifyDecline("nmi", c.code); got != c.want {
 			t.Errorf("ClassifyDecline(nmi, %q) = %q, want %q", c.code, got, c.want)
-		}
-		// The PSP-key spelling the row vocabulary also uses.
-		if got := ClassifyDecline("mobius", c.code); got != c.want {
-			t.Errorf("ClassifyDecline(mobius, %q) = %q, want %q", c.code, got, c.want)
 		}
 		// And the retired value classifies as nothing anyone decided — it must
 		// never reappear as a rail.

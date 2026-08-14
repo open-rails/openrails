@@ -180,7 +180,8 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	return &subIntentFixture{
 		db: dbi, runner: runner, gateway: gateway, svc: svc,
 		payload: NMISubscriptionCreatePayload{
-			Provider:               "mobius",
+			Provider:               string(models.RailNMI),
+			PSP:                    "mobius",
 			PlanID:                 planID,
 			CustomerVaultID:        railCustomerRef,
 			AmountMicros:           9_990_000,
@@ -201,7 +202,7 @@ func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailInt
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
-		Provider:       "mobius",
+		Provider:       string(models.RailNMI),
 		IntentType:     TypeNMISubscriptionCreate,
 		PriceID:        &fx.priceID,
 		PspID:          pspID,
@@ -217,7 +218,7 @@ func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailInt
 
 func (fx *subIntentFixture) localSub(t *testing.T) (*models.Subscription, bool) {
 	t.Helper()
-	sub, err := fx.svc.SubscriptionService.GetByRailSubscriptionID(fx.ctx, "mobius", fx.gateway.subID)
+	sub, err := fx.svc.SubscriptionService.GetByRailSubscriptionID(fx.ctx, string(models.RailNMI), fx.gateway.subID)
 	if err != nil {
 		return nil, false
 	}

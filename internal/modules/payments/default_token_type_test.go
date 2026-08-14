@@ -16,7 +16,6 @@ func TestDefaultTokenTypeNeedsBothAxes(t *testing.T) {
 		rail, custodian, want string
 	}{
 		{"nmi", models.CustodianPSP, charge.TokenTypePSPToken},
-		{"mobius", models.CustodianPSP, charge.TokenTypePSPToken},
 		{"nmi", models.CustodianBasisTheory, charge.TokenTypePANViaProxy},
 		{"NMI", models.CustodianBasisTheory, charge.TokenTypePANViaProxy},
 		// No custody fact stated: stamp nothing. A guessed token_type would
@@ -28,10 +27,18 @@ func TestDefaultTokenTypeNeedsBothAxes(t *testing.T) {
 		{"solana", "", ""},
 		// The retired rail value is not a rail.
 		{"vaulted_card", models.CustodianBasisTheory, ""},
+		// Mobius is a PSP key on NMI, not a rail.
+		{"mobius", models.CustodianPSP, ""},
 	}
 	for _, c := range cases {
 		if got := DefaultTokenType(c.rail, c.custodian); got != c.want {
 			t.Errorf("DefaultTokenType(%q, %q) = %q, want %q", c.rail, c.custodian, got, c.want)
 		}
+	}
+}
+
+func TestNormalizeFailureReasonRejectsPSPKeyAsRail(t *testing.T) {
+	if got := NormalizeFailureReason("mobius", "202"); got != FailureUnknown {
+		t.Fatalf("NormalizeFailureReason(mobius, 202) = %q, want %q", got, FailureUnknown)
 	}
 }

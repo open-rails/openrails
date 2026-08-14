@@ -182,7 +182,8 @@ func newSaleIntentFixture(t *testing.T) *saleIntentFixture {
 	return &saleIntentFixture{
 		db: dbi, runner: runner, gateway: gateway,
 		payload: NMISalePayload{
-			Provider:        "mobius",
+			Provider:        string(models.RailNMI),
+			PSP:             "mobius",
 			CustomerVaultID: "vault-" + uuid.NewString()[:8],
 			AmountMicros:    5_000_000,
 			Currency:        "USD",
@@ -199,7 +200,7 @@ func (fx *saleIntentFixture) enqueueAndExecute(t *testing.T, key string) gen.Ope
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
-		Provider:       "mobius",
+		Provider:       string(models.RailNMI),
 		IntentType:     TypeNMISale,
 		PriceID:        &fx.priceID,
 		PspID:          pspID,
@@ -217,7 +218,7 @@ func (fx *saleIntentFixture) paymentCount(t *testing.T) int {
 	t.Helper()
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		"SELECT count(*) FROM openrails.payments WHERE rail = 'mobius' AND transaction_id = $1", fx.gateway.txnID).Scan(&n))
+		"SELECT count(*) FROM openrails.payments WHERE rail = 'nmi' AND transaction_id = $1", fx.gateway.txnID).Scan(&n))
 	return n
 }
 
