@@ -159,9 +159,9 @@ on-chain prepare/confirm routes above.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset` |
-| POST | `/v1/me/payment-methods` | Create + activate a vault record. Body: `payment_token` (Collect.js) + billing details |
-| PUT | `/v1/me/payment-methods/{id}` | Replace the stored vault card (`payment_token` + optional billing fields) |
-| DELETE | `/v1/me/payment-methods/{id}` | Soft-delete the method |
+| POST | `/v1/me/payment-methods` | Store an NMI card. Body: `payment_token` (Collect.js) + billing details |
+| PUT | `/v1/me/payment-methods/{id}` | Replace the stored NMI card (`payment_token` + optional billing fields) |
+| DELETE | `/v1/me/payment-methods/{id}` | Delete an NMI method through the durable provider-aware workflow. Returns `204` when complete, `202` while provider convergence continues, and an error when refused/failed. Stripe cards are managed through Stripe Billing Portal. |
 
 ### Checkout (delegated)
 

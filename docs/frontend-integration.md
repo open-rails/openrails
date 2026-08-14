@@ -87,8 +87,8 @@ POST /v1/me/subscriptions/:id/cancel      body {"feedback": "..."} → 202 {"sta
 POST /v1/me/subscriptions/:id/resume      cancelled Stripe subscriptions → 202
 POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} — upgrades/downgrades
 PUT  /v1/me/subscriptions/:id/payment-method  swap the card on an NMI-backed subscription
-GET|POST /v1/me/payment-methods           list / add (tokenized card)
-PUT|DELETE /v1/me/payment-methods/:id     replace card / soft-delete
+GET|POST /v1/me/payment-methods           list / add (tokenized NMI card)
+PUT|DELETE /v1/me/payment-methods/:id     replace NMI card / provider-aware delete
 POST /v1/me/checkout                      create a checkout session
 GET  /v1/me/checkout/:id                  poll session status
 POST /v1/me/checkout/:id/confirm          finalize client-completed flows (Solana)
@@ -262,6 +262,11 @@ exact JSON body for an exact-request retry. A different token is a new attempt a
 must use a new key. If create returns `provider_outcome_unknown`, refresh the payment
 method list before starting another attempt because the provider mutation may have
 completed.
+
+Deleting a stored NMI method returns `204 No Content` after provider and local
+removal are confirmed, or `202 Accepted` with no body while the durable delete is
+still converging. Keep the method visible after `202` and refresh the list later.
+Stripe cards remain provider-owned and must be managed through Stripe Billing Portal.
 
 ### Shared-customer treasury: `/v1/customers/:customer_id/*`
 
