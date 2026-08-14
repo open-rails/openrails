@@ -109,6 +109,31 @@ func (s *RailCustomerService) GetCustomerID(ctx context.Context, userID, rail st
 	})
 }
 
+// GetAccountIDForPSP returns the exact PSP-owned remote customer id for a
+// payable merchant subject. Webhook repair paths use it when an event omits the
+// former customer id but the local payment-method evidence still identifies
+// the subject.
+func (s *RailCustomerService) GetAccountIDForPSP(ctx context.Context, customerID uuid.UUID, rail string) (string, error) {
+	if s == nil || s.DB == nil {
+		return "", fmt.Errorf("rail customer service not initialized")
+	}
+	rail = strings.TrimSpace(rail)
+	if customerID == uuid.Nil || rail == "" {
+		return "", fmt.Errorf("invalid rail customer args")
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return "", fmt.Errorf("resolve rail customer %s for PSP: %w", rail, err)
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	return s.DB.Gen(ctx).GetRailCustomerAccountIDForPSP(ctx, gen.GetRailCustomerAccountIDForPSPParams{
+		MerchantID: merchantID.UUID(), CustomerID: customerID, Rail: rail, PspID: pspID,
+	})
+}
+
 // GetUserIDByCustomerID reverses GetCustomerID: it resolves the platform user from a
 // rail customer id. Used by webhook handlers (e.g. subscription invoices) whose
 // payloads carry the customer id but not the user_id metadata.

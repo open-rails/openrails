@@ -80,6 +80,9 @@ type WebhookDispatcher struct {
 	// ConvergeEnqueuer (#684): schedules the coalesced fetch-and-converge job
 	// the slimmed Stripe/NMI subscription-state handlers enqueue.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
+	// StripePaymentStateReaderFactory is a test seam for exact-account provider
+	// reads. Production leaves it nil and uses the HTTP reader.
+	StripePaymentStateReaderFactory func(secretKey string) payments.StripePaymentStateReader
 }
 
 // webhookRegistry resolves WebhookHandlers by rail. The dispatcher is fully
@@ -187,6 +190,29 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 	if !webhookSignatureVerified(event) {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe webhook signature was not verified before processing"))
 	}
+	var paymentState payments.StripePaymentStateReader
+	if stripeEventNeedsPaymentState(event.EventType) {
+		if d.RailConfigs == nil {
+			return fmt.Errorf("stripe webhook rejected: rail resolution is not configured")
+		}
+		proc, err := d.RailConfigs.RailConfig(ctx, string(models.RailStripe), event.PspID)
+		if err != nil {
+			return fmt.Errorf("stripe webhook rejected: %w", err)
+		}
+		if proc == nil || proc.Stripe == nil || strings.TrimSpace(proc.Stripe.SecretKey) == "" {
+			return fmt.Errorf("stripe webhook rejected: routed account %q has no secret key", event.PspID)
+		}
+		factory := d.StripePaymentStateReaderFactory
+		if factory == nil {
+			factory = func(secretKey string) payments.StripePaymentStateReader {
+				return payments.NewHTTPStripePaymentStateReader(secretKey)
+			}
+		}
+		paymentState = factory(proc.Stripe.SecretKey)
+		if paymentState == nil {
+			return fmt.Errorf("stripe webhook rejected: payment-state reader is not configured")
+		}
+	}
 	service := StripeWebhookService{
 		DB:                           d.DB,
 		PriceService:                 d.PriceService,
@@ -202,8 +228,23 @@ func (h StripeWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, e
 		CheckoutSessionService:       d.CheckoutSessionService,
 		Clock:                        d.Clock,
 		ConvergeEnqueuer:             d.ConvergeEnqueuer,
+		StripePaymentState:           paymentState,
 	}
 	return service.HandleStripeWebhook(ctx, event.Payload)
+}
+
+func stripeEventNeedsPaymentState(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "charge.succeeded",
+		"payment_method.attached",
+		"payment_method.detached",
+		"customer.updated",
+		"customer.subscription.updated",
+		"customer.subscription.deleted":
+		return true
+	default:
+		return false
+	}
 }
 
 func webhookSignatureVerified(event *WebhookMessage) bool {

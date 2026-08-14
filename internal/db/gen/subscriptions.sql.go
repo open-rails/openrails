@@ -39,6 +39,31 @@ func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttem
 	return result.RowsAffected(), nil
 }
 
+const clearStripePaymentMethodSubscriptions = `-- name: ClearStripePaymentMethodSubscriptions :execrows
+UPDATE openrails.subscriptions SET
+    payment_method_id = NULL,
+    updated_at = now()
+WHERE rail = 'stripe'
+  AND psp_id = $1::uuid
+  AND payment_method_id = $2::uuid
+  AND deleted_at IS NULL
+`
+
+type ClearStripePaymentMethodSubscriptionsParams struct {
+	PspID           uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// A detached Stripe method can no longer be charged or reattached. Clear only
+// links owned by the exact PSP that delivered the detach event.
+func (q *Queries) ClearStripePaymentMethodSubscriptions(ctx context.Context, arg ClearStripePaymentMethodSubscriptionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, clearStripePaymentMethodSubscriptions, arg.PspID, arg.PaymentMethodID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSubscriptionsByCustomer = `-- name: CountSubscriptionsByCustomer :one
 SELECT count(*) FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
@@ -1595,6 +1620,34 @@ func (q *Queries) MarkCancelledSubscriptionsSuperseded(ctx context.Context, arg 
 		arg.SupersededBy,
 		arg.ExcludeID,
 	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setStripeSubscriptionPaymentMethod = `-- name: SetStripeSubscriptionPaymentMethod :execrows
+UPDATE openrails.subscriptions SET
+    payment_method_id = $1::uuid,
+    updated_at = now()
+WHERE rail = 'stripe'
+  AND psp_id = $2::uuid
+  AND rail_subscription_id = $3
+  AND deleted_at IS NULL
+  AND payment_method_id IS DISTINCT FROM $1::uuid
+`
+
+type SetStripeSubscriptionPaymentMethodParams struct {
+	PaymentMethodID    *uuid.UUID
+	PspID              uuid.UUID
+	RailSubscriptionID string
+}
+
+// Stripe provider truth owns the payment-method selection for Stripe-managed
+// subscriptions. The exact PSP predicate prevents one account's webhook from
+// relinking a sibling account's subscription.
+func (q *Queries) SetStripeSubscriptionPaymentMethod(ctx context.Context, arg SetStripeSubscriptionPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setStripeSubscriptionPaymentMethod, arg.PaymentMethodID, arg.PspID, arg.RailSubscriptionID)
 	if err != nil {
 		return 0, err
 	}

@@ -158,45 +158,36 @@ func compactStrings(values ...string) []string {
 	return out
 }
 
-// StripeCardSubscriptionLinker is the slice of the subscription service the card
-// upsert needs to link the active subscription's current payment method. The
-// concrete *subscriptions.SubscriptionService satisfies it; keeping it as an
-// interface here avoids a payments->subscriptions import cycle.
-type StripeCardSubscriptionLinker interface {
-	GetActiveSubscription(ctx context.Context, userID string) (*models.Subscription, error)
-	Update(ctx context.Context, subscription *models.Subscription) error
-}
-
-// UpsertStripeCardForCustomer upserts a openrails.payment_methods row for the
-// customer's card and links it as the active subscription's payment method, so
-// the /account "current card" reads purely from the DB.
-//
-// It is the single shared implementation behind both the webhook handler
-// (charge.succeeded / payment_method.attached) and the reconcile backfill. The
-// upsert is keyed by (rail=stripe, rail_method_ref=pm_); the subscription link is only
-// written when it changes. Both make it idempotent and safe to re-run.
+// UpsertStripeCardForCustomer mirrors one currently attached Stripe card. It
+// never decides which card a subscription should use; that decision is folded
+// separately from fetched Stripe customer/subscription truth.
 func UpsertStripeCardForCustomer(
 	ctx context.Context,
 	database *db.DB,
 	customers *RailCustomerService,
-	subscriptions StripeCardSubscriptionLinker,
 	clock clockwork.Clock,
 	customerID, paymentMethodID, initialTxnID string,
 	card *StripeCard,
-) error {
+) (*models.PaymentMethod, error) {
 	customerID = strings.TrimSpace(customerID)
-	if customerID == "" || database == nil || customers == nil || card == nil {
-		return nil
+	paymentMethodID = strings.TrimSpace(paymentMethodID)
+	if customerID == "" || paymentMethodID == "" || database == nil || customers == nil || card == nil {
+		return nil, nil
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("upsert stripe payment method %s: %w", paymentMethodID, err)
 	}
 	userID, err := customers.GetUserIDByCustomerID(ctx, string(models.RailStripe), customerID)
-	if err != nil || strings.TrimSpace(userID) == "" {
+	if db.IsNotFound(err) {
 		// No user mapping yet (e.g. customer created out-of-band); nothing to link.
-		return nil
+		return nil, nil
 	}
-
-	railCustomerRef := strings.TrimSpace(paymentMethodID)
-	if railCustomerRef == "" {
-		railCustomerRef = "stripe:" + customerID
+	if err != nil {
+		return nil, fmt.Errorf("resolve stripe customer %s: %w", customerID, err)
+	}
+	if strings.TrimSpace(userID) == "" {
+		return nil, nil
 	}
 
 	now := time.Now().UTC()
@@ -205,14 +196,15 @@ func UpsertStripeCardForCustomer(
 	}
 
 	methods := paymentmethods.NewPaymentMethodRepo(database)
-	pm, err := methods.GetByRailMethodRef(ctx, string(models.RailStripe), railCustomerRef)
+	pm, err := methods.GetByRailMethodRefForPSP(ctx, string(models.RailStripe), pspID, paymentMethodID)
 	switch {
 	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 		pm = &models.PaymentMethod{
 			ID:                   uuidutil.NewV7(),
 			CustomerID:           identity.CustomerIDFromString(userID).UUID(),
 			Rail:                 models.RailStripe,
-			RailMethodRef:        railCustomerRef, // Stripe pm_ token is the instrument-scope handle
+			PspID:                pspID,
+			RailMethodRef:        paymentMethodID,
 			InitialTransactionID: strings.TrimSpace(initialTxnID),
 			CardType:             &card.Brand,
 			LastFour:             &card.Last4,
@@ -224,13 +216,13 @@ func UpsertStripeCardForCustomer(
 		}
 		// Stamp the payable merchant subject alongside the legacy user_id (#317).
 		if pm.CustomerID, err = db.EnsureCustomerID(ctx, database.Qx(ctx), uuid.Nil, userID); err != nil {
-			return fmt.Errorf("resolve merchant subject for stripe payment method: %w", err)
+			return nil, fmt.Errorf("resolve merchant subject for stripe payment method: %w", err)
 		}
 		if err := methods.Create(ctx, pm); err != nil {
-			return fmt.Errorf("insert stripe payment method: %w", err)
+			return nil, fmt.Errorf("insert stripe payment method: %w", err)
 		}
 	case err != nil:
-		return fmt.Errorf("lookup stripe payment method: %w", err)
+		return nil, fmt.Errorf("lookup stripe payment method: %w", err)
 	default:
 		pm.CardType = &card.Brand
 		pm.LastFour = &card.Last4
@@ -239,24 +231,8 @@ func UpsertStripeCardForCustomer(
 		}
 		pm.UpdatedAt = now
 		if err := methods.Update(ctx, pm); err != nil {
-			return fmt.Errorf("update stripe payment method: %w", err)
+			return nil, fmt.Errorf("update stripe payment method: %w", err)
 		}
 	}
-
-	// Link as the active subscription's current payment method.
-	if subscriptions == nil {
-		return nil
-	}
-	sub, err := subscriptions.GetActiveSubscription(ctx, userID)
-	if err != nil || sub == nil {
-		return nil
-	}
-	if sub.PaymentMethodID != nil && *sub.PaymentMethodID == pm.ID {
-		return nil
-	}
-	sub.PaymentMethodID = &pm.ID
-	if err := subscriptions.Update(ctx, sub); err != nil {
-		return fmt.Errorf("link subscription payment method: %w", err)
-	}
-	return nil
+	return pm, nil
 }

@@ -321,6 +321,7 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		Signature:      prepared.Signature,
 		SignatureValid: &signatureVerified,
 		ReceivedAt:     time.Now(),
+		PspID:          accountID,
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {
 		if webhooks.IsWebhookErrorNonRetryable(err) {
