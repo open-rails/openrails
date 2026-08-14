@@ -609,7 +609,26 @@ func sanitizedStringPtr(value *string, sanitize func(string) string) *string {
 // the remote delete inline (transport-ambiguous outcome, parked provider). The
 // intent ledger completes it out-of-band; a retried request maps onto the SAME
 // intent. Never a lost delete.
-var ErrPaymentMethodDeleteProcessing = errors.New("payment method deletion is processing; it will complete automatically")
+var (
+	ErrPaymentMethodDeleteProcessing    = errors.New("payment method deletion is processing; it will complete automatically")
+	ErrPaymentMethodInUse               = errors.New("payment method is used by a live subscription")
+	ErrPaymentMethodDeleteUnsafe        = errors.New("payment method cannot be deleted safely")
+	ErrPaymentMethodProviderUnavailable = errors.New("payment method provider is unavailable")
+)
+
+// PaymentMethodDeleteFailedError means the durable delete reached a terminal
+// provider outcome. Reason is for operator logs; HTTP callers must return a
+// stable, non-leaky message instead of exposing it to the customer.
+type PaymentMethodDeleteFailedError struct {
+	Reason string
+}
+
+func (e *PaymentMethodDeleteFailedError) Error() string {
+	if e == nil || strings.TrimSpace(e.Reason) == "" {
+		return "payment method deletion failed permanently"
+	}
+	return "payment method deletion failed permanently: " + e.Reason
+}
 
 // PaymentMethodDeleteOutcome mirrors the durable intent's post-execution state without
 // importing the intents package (import cycle: intents → subscriptions →
@@ -617,6 +636,8 @@ var ErrPaymentMethodDeleteProcessing = errors.New("payment method deletion is pr
 type PaymentMethodDeleteOutcome struct {
 	// Done: the remote delete is confirmed and the local row is gone.
 	Done bool
+	// InUse: the delete was superseded because a live subscription uses it.
+	InUse bool
 	// Terminal: the delete failed permanently; Reason says why.
 	Terminal bool
 	Reason   string
@@ -648,8 +669,10 @@ func (s *RailPaymentMethodService) DeletePaymentMethod(ctx context.Context, pm *
 	case out.Done:
 		log.WithField("vault_id", pm.RailCustomerRef).Info("Successfully deleted payment method")
 		return nil
+	case out.InUse:
+		return ErrPaymentMethodInUse
 	case out.Terminal:
-		return fmt.Errorf("failed to delete payment method: %s", out.Reason)
+		return &PaymentMethodDeleteFailedError{Reason: out.Reason}
 	default:
 		return ErrPaymentMethodDeleteProcessing
 	}
@@ -670,37 +693,30 @@ func (s *RailPaymentMethodService) CleanupPaymentMethodBestEffort(ctx context.Co
 	return s.deletePaymentMethodDirect(ctx, client, pm, shared)
 }
 
-// deletePaymentMethodGuards runs the shared pre-delete checks: no active subscription
+// deletePaymentMethodGuards runs the shared pre-delete checks: no live subscription
 // may use the method, the rail must resolve to a configured client (fail fast
 // instead of parking a user-facing request), and a shared vault without a
 // billing id is refused outright.
 func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context, pm *models.PaymentMethod) (shared bool, client *nmi.NMIClient, err error) {
-	subs, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.CustomerID.String(), 1, 1000)
-	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for payment method")
-		return false, nil, fmt.Errorf("failed to check payment method usage: %w", err)
+	if pm == nil {
+		return false, nil, errors.New("payment method is required")
 	}
 
-	activeCount := 0
-	for _, sub := range subs {
-		if sub.Status == models.StatusActive || sub.Status == models.StatusPastDue {
-			if sub.PaymentMethodID != nil && *sub.PaymentMethodID == pm.ID {
-				activeCount++
-			}
-		}
-	}
-	if activeCount > 0 {
-		return false, nil, fmt.Errorf("cannot delete payment method: %d active subscription(s) are using this payment method", activeCount)
-	}
-
-	// Use rail from the payment method
 	rail := strings.ToLower(string(pm.Rail))
 	if rail == "" {
 		return false, nil, errors.New("payment method rail is required")
 	}
-
 	if !rails.SupportsPaymentMethodCRUD(models.Rail(rail)) {
 		return false, nil, RailPaymentMethodsUnsupported(rail)
+	}
+
+	liveCount, err := s.countLiveSubscriptionsUsingPaymentMethod(ctx, pm)
+	if err != nil {
+		log.WithError(err).WithFields(log.Fields{"vault_id": pm.RailCustomerRef, "user_id": pm.CustomerID.String()}).Error("Failed to check subscriptions for payment method")
+		return false, nil, fmt.Errorf("failed to check payment method usage: %w", err)
+	}
+	if liveCount > 0 {
+		return false, nil, fmt.Errorf("%w: %d active, pending, or past-due subscription(s)", ErrPaymentMethodInUse, liveCount)
 	}
 
 	// #682 shared-vault handling: deleting the remote vault customer destroys
@@ -720,14 +736,52 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 		// Cannot identify WHICH entry is this card — refuse rather than
 		// destroy the siblings (an importer that shares vaults must record
 		// per-row billing ids, see #682's shared-vault contract).
-		return shared, nil, fmt.Errorf("cannot delete vault %s: shared by other stored payment methods and this row carries no billing id to scope the delete", pm.RailCustomerRef)
+		return shared, nil, fmt.Errorf("%w: shared NMI customer %s has no billing id for this method", ErrPaymentMethodDeleteUnsafe, pm.RailCustomerRef)
 	}
 
 	client, _, err = s.resolveNMIClient(ctx, rail, &pm.PspID)
 	if err != nil {
-		return shared, nil, fmt.Errorf("rail '%s' is not configured: %w", rail, err)
+		return shared, nil, fmt.Errorf("%w: rail %q: %w", ErrPaymentMethodProviderUnavailable, rail, err)
 	}
 	return shared, client, nil
+}
+
+func (s *RailPaymentMethodService) countLiveSubscriptionsUsingPaymentMethod(ctx context.Context, pm *models.PaymentMethod) (int, error) {
+	var subs []*models.Subscription
+	if s.DB != nil {
+		rows, err := s.DB.Gen(ctx).ListSubscriptionsByPaymentMethodIDs(ctx, []uuid.UUID{pm.ID})
+		if err != nil {
+			return 0, err
+		}
+		subs, err = models.SubscriptionsFromGen(rows)
+		if err != nil {
+			return 0, err
+		}
+	} else {
+		if s.SubscriptionService == nil {
+			return 0, errors.New("subscription service is not configured")
+		}
+		fallback, _, err := s.SubscriptionService.GetPaginatedByUserID(ctx, pm.CustomerID.String(), 1, 1000)
+		if err != nil {
+			return 0, err
+		}
+		subs = make([]*models.Subscription, 0, len(fallback))
+		for i := range fallback {
+			subs = append(subs, &fallback[i])
+		}
+	}
+
+	liveCount := 0
+	for _, sub := range subs {
+		if sub == nil || sub.PaymentMethodID == nil || *sub.PaymentMethodID != pm.ID {
+			continue
+		}
+		switch sub.Status {
+		case models.StatusActive, models.StatusPending, models.StatusPastDue:
+			liveCount++
+		}
+	}
+	return liveCount, nil
 }
 
 // deletePaymentMethodDirect performs the remote delete (billing-entry-scoped for

@@ -217,6 +217,11 @@ func (r *Request) JSON(code int, body any) {
 	r.t.WriteJSON(code, body)
 }
 
+// Status writes an HTTP status with no response body.
+func (r *Request) Status(code int) {
+	r.t.WriteJSON(code, nil)
+}
+
 // ShouldBindURI binds path parameters into data and returns the error WITHOUT
 // writing a response.
 func (r *Request) ShouldBindURI(data any) error {
@@ -413,6 +418,10 @@ func (h *httpTransport) WriteJSON(code int, body any) {
 		return
 	}
 	h.wrote = true
+	if body == nil {
+		h.w.WriteHeader(code)
+		return
+	}
 	h.w.Header().Set("Content-Type", "application/json")
 	h.w.WriteHeader(code)
 	_ = json.NewEncoder(h.w).Encode(body)

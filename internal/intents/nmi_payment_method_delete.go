@@ -71,9 +71,9 @@ type RailClientResolver interface {
 // customer vault (or, for #682 shared vaults, of ONE billing entry):
 //
 //   - relevance: superseded only when the payment method is back in use by an
-//     active subscription (never destroy billing state in use). A missing
-//     local row does NOT supersede — the remote delete may still be pending
-//     and the payload refs carry everything needed to finish it.
+//     active, pending, or past-due subscription (never destroy billing state
+//     in use). A missing local row does NOT supersede — the remote delete may
+//     still be pending and the payload refs carry everything needed to finish it.
 //   - execute: read the vault first — absent IS success (deletes are
 //     idempotent by observation); present -> delete. Transport-ambiguous
 //     outcomes go to the verifier; parsed clean rejections retry.
@@ -122,7 +122,7 @@ func (h *NMIPaymentMethodDeleteHandler) CheckRelevance(ctx context.Context, inte
 	}
 	for _, sub := range subs {
 		status := string(sub.Status)
-		if status == string(models.StatusActive) || status == string(models.StatusPastDue) {
+		if status == string(models.StatusActive) || status == string(models.StatusPending) || status == string(models.StatusPastDue) {
 			return SupersededBy(fmt.Sprintf("payment method back in use by subscription %s (status=%s); delete no longer applies", sub.ID, status)), nil
 		}
 	}
@@ -383,7 +383,9 @@ func (t *PaymentMethodDeleteThrough) ExecutePaymentMethodDelete(ctx context.Cont
 	switch row.Status {
 	case StatusSucceeded:
 		out.Done = true
-	case StatusFailedTerminal, StatusSuperseded, StatusExpired:
+	case StatusSuperseded:
+		out.InUse = true
+	case StatusFailedTerminal, StatusExpired:
 		out.Terminal = true
 	}
 	return out, nil

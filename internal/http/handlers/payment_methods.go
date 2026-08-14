@@ -26,6 +26,8 @@ import (
 const (
 	createPaymentMethodTimeout              = 28 * time.Second
 	codePaymentMethodProviderOutcomeUnknown = "provider_outcome_unknown"
+	codePaymentMethodDeleteFailed           = "payment_method_delete_failed"
+	codePaymentMethodDeleteUnsupported      = "payment_method_delete_unsupported"
 )
 
 type listPaymentMethodsQuery struct {
@@ -539,35 +541,54 @@ func DeletePaymentMethod(r *httprequest.Request) {
 		}
 	}
 
-	for _, s := range paymentMethod.Subscriptions {
-		if s.Status == "active" || s.Status == "pending" || s.Status == "past_due" {
-			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID, "subscription_id": s.ID, "subscription_status": s.Status}).Warn("Cannot delete payment method linked to active, past_due or pending subscription")
-			r.ErrorJSON(http.StatusConflict, "Cannot delete payment method linked to active, past_due or pending subscription")
-			return
-		}
-	}
-
-	if err := r.State.PaymentMethodService.Delete(r.Request.Context(), id); err != nil {
-		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
-			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method not found during deletion")
-			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-			return
-		}
-		if errors.Is(err, intents.ErrRateCeilingTripped) {
-			// #732: destructive-op rate ceiling refused this delete. Client-safe
-			// message; the operator alert (finding + log.Error) was already raised.
-			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method delete refused by destructive-op rate ceiling")
-			r.ErrorJSON(http.StatusTooManyRequests, "Destructive operation rate limit reached — please try later or contact support")
-			return
-		}
-		log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Error("Failed to delete payment method")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to delete payment method")
+	err = r.State.RailPaymentMethodService.DeletePaymentMethod(r.Request.Context(), paymentMethod)
+	if err != nil {
+		respondPaymentMethodDeleteError(r, paymentMethod, user.ID, err)
 		return
 	}
 
 	log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID, "rail": paymentMethod.Rail}).Info("Payment method successfully deleted")
+	r.Status(http.StatusNoContent)
+}
 
-	r.SuccessJSON(map[string]any{"success": true, "message": "Payment method deleted successfully"})
+func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentMethod, userID string, err error) {
+	fields := log.Fields{"payment_method_id": pm.ID, "user_id": userID, "rail": pm.Rail}
+	switch {
+	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing):
+		log.WithError(err).WithFields(fields).Info("Payment method deletion is still converging")
+		r.Status(http.StatusAccepted)
+	case errors.Is(err, paymentmethods.ErrPaymentMethodInUse):
+		log.WithError(err).WithFields(fields).Warn("Payment method deletion blocked because the method is in use")
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict,
+			"Cannot delete payment method linked to an active, pending, or past-due subscription"))
+	case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
+		log.WithError(err).WithFields(fields).Warn("Payment method deletion refused because it cannot be scoped safely")
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeResourceConflict,
+			"Payment method cannot be deleted safely; contact support"))
+	case errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
+		log.WithError(err).WithFields(fields).Info("Payment method deletion is managed by the payment rail")
+		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, codePaymentMethodDeleteUnsupported, err.Error()).
+			WithMetadata(map[string]any{"rail": pm.Rail}))
+	case errors.Is(err, intents.ErrRateCeilingTripped):
+		// #732: the operator alert is raised by the destructive-operation
+		// ceiling; this surface returns a stable refusal and never deletes locally.
+		log.WithError(err).WithFields(fields).Warn("Payment method delete refused by destructive-operation rate ceiling")
+		r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, api.CodeRateLimitExceeded,
+			"Destructive operation rate limit reached; try again later or contact support"))
+	case errors.Is(err, merchants.ErrSecretBackendUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
+		log.WithError(err).WithFields(fields).Warn("Payment method delete unavailable because provider credentials could not be loaded")
+		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable,
+			"Payment rail credentials are temporarily unavailable"))
+	default:
+		var terminal *paymentmethods.PaymentMethodDeleteFailedError
+		if errors.As(err, &terminal) {
+			log.WithError(err).WithFields(fields).Error("Payment method deletion failed permanently at the provider")
+			r.APIError(api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, codePaymentMethodDeleteFailed,
+				"Payment method could not be deleted at the payment provider"))
+			return
+		}
+		r.InternalError("Failed to delete payment method", err)
+	}
 }
 
 func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge) paymentMethodResponse {
