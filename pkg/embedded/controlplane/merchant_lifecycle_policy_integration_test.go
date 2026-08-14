@@ -112,6 +112,21 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, first.Created)
 
+		// Re-posting a merchant this user already owns repairs provisioning; it
+		// is not another allowance-consuming claim and never consults the vault.
+		again, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
+			Slug: "pol-one-" + sfx, OwnerUserID: user.ID,
+		})
+		require.NoError(t, err)
+		require.False(t, again.Created)
+
+		// AuthKit forwards renamed-away slugs to the same internal group. The
+		// admission predicate must compare that stable identity, not only the
+		// group's current display slug.
+		renamedSlug := "pol-renamed-" + sfx
+		require.NoError(t, core.RenamePermissionGroupSlug(ctx, embcp.MerchantType, "pol-one-"+sfx, renamedSlug))
+		require.NoError(t, admission(ctx, "pol-one-"+sfx, user.ID), "an owned tombstone is still an idempotent repair")
+
 		// Beyond it: refused until a payment method is on file.
 		_, err = embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
 			Slug: "pol-two-" + sfx, OwnerUserID: user.ID,
@@ -125,14 +140,6 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		})
 		require.NoError(t, err, "a vaulted payment method unlocks creation beyond the allowance")
 		require.True(t, second.Created)
-
-		// The re-run of an ALREADY-OWNED slug stays idempotent even at the
-		// gate: owner is a member, nothing new is claimed.
-		again, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
-			Slug: "pol-one-" + sfx, OwnerUserID: user.ID,
-		})
-		require.NoError(t, err)
-		require.False(t, again.Created)
 
 		// SubjectHasVaultedPaymentMethod reads openrails' OWN vault: false on
 		// an empty book; true once an un-parked method exists for the subject

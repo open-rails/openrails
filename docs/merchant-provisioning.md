@@ -126,6 +126,12 @@ admission, err := embcp.MerchantCreationAdmission(app, embcp.MerchantCreationPol
 })
 ```
 
+The predicate is repair-safe: after verifying the owner, it resolves the
+claimed slug to AuthKit's stable group ID. Re-posting a live or renamed-away
+slug that resolves to a merchant the caller already owns bypasses the
+allowance and vault checks because it creates nothing. A genuinely new slug
+still runs the full gate.
+
 Typed refusals: `embcp.ErrEmailUnverified`, `embcp.ErrVaultedPaymentMethodRequired`.
 
 ### Dormant-merchant sweep (never-used names go back in the pool)
