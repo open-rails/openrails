@@ -26,6 +26,9 @@ type CreateCustomerVaultData struct {
 
 type UpdateCustomerVaultData struct {
 	CustomerVaultID string
+	// BillingID targets the exact stored instrument inside a multi-entry
+	// customer vault. Empty falls back to resolving the priority-1 entry.
+	BillingID string
 	CreateCustomerVaultData
 }
 
@@ -99,8 +102,9 @@ func (c *NMIClient) CreateCustomerVault(ctx context.Context, data CreateCustomer
 // UpdateCustomerVault updates the primary billing record (payment token
 // and/or address fields) via PATCH /v5/customers/{id}. The live gateway
 // REQUIRES billing[].id (verified 2026-07-01 — the documented
-// omit-for-priority-1 behavior 400s), so the priority-1 billing id is
-// resolved with a read first.
+// omit-for-priority-1 behavior 400s). Callers that already know the exact
+// billing entry pass BillingID; otherwise the priority-1 id is resolved with
+// a read first.
 func (c *NMIClient) UpdateCustomerVault(ctx context.Context, data UpdateCustomerVaultData) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -114,21 +118,28 @@ func (c *NMIClient) UpdateCustomerVault(ctx context.Context, data UpdateCustomer
 		return err
 	}
 
-	page, err := c.ListCustomersPage(ctx, "", 1, vaultID)
-	if err != nil {
-		return fmt.Errorf("failed to update customer vault: lookup: %w", err)
-	}
-	var primary *V5CustomerBilling
-	for i := range page.Customers {
-		if strings.TrimSpace(page.Customers[i].ID) == vaultID {
-			primary = page.Customers[i].PrimaryBilling()
-			break
+	billingID := strings.TrimSpace(data.BillingID)
+	if billingID == "" {
+		page, err := c.ListCustomersPage(ctx, "", 1, vaultID)
+		if err != nil {
+			return fmt.Errorf("failed to update customer vault: lookup: %w", err)
 		}
+		var primary *V5CustomerBilling
+		for i := range page.Customers {
+			if strings.TrimSpace(page.Customers[i].ID) == vaultID {
+				primary = page.Customers[i].PrimaryBilling()
+				break
+			}
+		}
+		if primary == nil {
+			return fmt.Errorf("failed to update customer vault: customer %s has no billing record at NMI", vaultID)
+		}
+		billingID = strings.TrimSpace(primary.ID)
 	}
-	if primary == nil {
-		return fmt.Errorf("failed to update customer vault: customer %s has no billing record at NMI", vaultID)
+	if billingID == "" {
+		return fmt.Errorf("failed to update customer vault: customer %s billing record has no id", vaultID)
 	}
-	billing.ID = primary.ID
+	billing.ID = billingID
 
 	body := map[string]any{"billing": []*v5CustomerBillingRequest{billing}}
 	if err := c.sendV5Request(ctx, http.MethodPatch, "/customers/"+url.PathEscape(vaultID), body, nil); err != nil {

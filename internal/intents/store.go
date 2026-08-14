@@ -345,6 +345,16 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 	return err
 }
 
+// PruneTerminalPayload removes a short-lived credential from a terminal
+// intent while retaining its status, reason, and non-sensitive evidence.
+func (s *Store) PruneTerminalPayload(ctx context.Context, id uuid.UUID) error {
+	_, err := s.db.Qx(ctx).Exec(ctx,
+		`UPDATE openrails.rail_intents
+		    SET payload = NULL, updated_at = now()
+		  WHERE id = $1 AND status = 'failed_terminal'`, id)
+	return err
+}
+
 // slimEvidence keeps only pruneEvidenceKeys (when present) off a succeeded
 // intent's evidence; returns nil when none are present so the column is set
 // NULL rather than to an empty object.

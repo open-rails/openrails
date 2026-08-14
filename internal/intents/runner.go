@@ -23,6 +23,7 @@ type ledger interface {
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
+	PruneTerminalPayload(ctx context.Context, id uuid.UUID) error
 	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
@@ -355,6 +356,11 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		err = r.Store.MarkFailedTerminal(ctx, intent.ID, outcome.Reason, outcome.Evidence)
 		stats.Terminal++
 		logEntry.WithField("reason", outcome.Reason).Error("intent failed terminally")
+		if err == nil && pruneTerminalPayloadFor(handler) {
+			if perr := r.Store.PruneTerminalPayload(ctx, intent.ID); perr != nil {
+				logEntry.WithError(perr).Warn("intent ledger: terminal payload prune failed")
+			}
+		}
 	case OutcomeParked:
 		if verifying {
 			// A verifier cannot park (reads are never blocked); treat as
@@ -389,6 +395,12 @@ type prunePolicy interface {
 	PrunePolicy() (keepPayload, keepEvidence bool)
 }
 
+// terminalPayloadPruner is implemented by handlers whose live payload contains
+// a short-lived credential that must not remain after terminal classification.
+type terminalPayloadPruner interface {
+	PruneTerminalPayload() bool
+}
+
 // prunePolicyFor resolves the handler's prune policy, defaulting to the
 // aggressive slim (drop payload, slim evidence to the pointer keys).
 func prunePolicyFor(handler Handler) (keepPayload, keepEvidence bool) {
@@ -396,6 +408,11 @@ func prunePolicyFor(handler Handler) (keepPayload, keepEvidence bool) {
 		return pp.PrunePolicy()
 	}
 	return false, false
+}
+
+func pruneTerminalPayloadFor(handler Handler) bool {
+	policy, ok := handler.(terminalPayloadPruner)
+	return ok && policy.PruneTerminalPayload()
 }
 
 func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, now time.Time, reason string) {

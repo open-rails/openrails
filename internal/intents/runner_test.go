@@ -18,16 +18,17 @@ import (
 // fakeLedger is an in-memory ledger recording the transition the Runner
 // applied to each intent.
 type fakeLedger struct {
-	due        []gen.OpenrailsRailIntent
-	dueVerify  []gen.OpenrailsRailIntent
-	accounts   map[uuid.UUID]gen.OpenrailsPsp
-	transition map[uuid.UUID]string // id -> applied transition
-	reasons    map[uuid.UUID]string
-	nextAt     map[uuid.UUID]time.Time
-	evidence   map[uuid.UUID]map[string]any
-	pruned     []uuid.UUID // ids the Runner pruned post-success (#607)
-	logs       []MutationLogParams
-	logErr     error
+	due            []gen.OpenrailsRailIntent
+	dueVerify      []gen.OpenrailsRailIntent
+	accounts       map[uuid.UUID]gen.OpenrailsPsp
+	transition     map[uuid.UUID]string // id -> applied transition
+	reasons        map[uuid.UUID]string
+	nextAt         map[uuid.UUID]time.Time
+	evidence       map[uuid.UUID]map[string]any
+	pruned         []uuid.UUID // ids the Runner pruned post-success (#607)
+	prunedTerminal []uuid.UUID
+	logs           []MutationLogParams
+	logErr         error
 
 	// Synchronous-path state: Enqueue returns enqueued (scripted conflict
 	// row); ClaimByID claims it unless claimByIDRefused.
@@ -108,6 +109,10 @@ func (f *fakeLedger) PruneSucceeded(_ context.Context, id uuid.UUID, _ map[strin
 	f.pruned = append(f.pruned, id)
 	return nil
 }
+func (f *fakeLedger) PruneTerminalPayload(_ context.Context, id uuid.UUID) error {
+	f.prunedTerminal = append(f.prunedTerminal, id)
+	return nil
+}
 func (f *fakeLedger) MarkFailedRetryable(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
 	f.transition[id] = StatusFailedRetryable
 	f.reasons[id] = reason
@@ -140,13 +145,14 @@ func (f *fakeLedger) MarkSuperseded(_ context.Context, id uuid.UUID, reason stri
 
 // fakeHandler scripts one intent type's behavior.
 type fakeHandler struct {
-	typ       string
-	relevance Relevance
-	relErr    error
-	execute   Outcome
-	verify    Outcome
-	executed  int
-	verified  int
+	typ                  string
+	relevance            Relevance
+	relErr               error
+	execute              Outcome
+	verify               Outcome
+	pruneTerminalPayload bool
+	executed             int
+	verified             int
 }
 
 func (h *fakeHandler) Type() string { return h.typ }
@@ -164,6 +170,7 @@ func (h *fakeHandler) Verify(context.Context, gen.OpenrailsRailIntent) Outcome {
 func (h *fakeHandler) Backoff(attempts int32) time.Duration {
 	return time.Duration(attempts) * time.Minute
 }
+func (h *fakeHandler) PruneTerminalPayload() bool { return h.pruneTerminalPayload }
 
 func testIntent(typ string, origin Origin, attempts int32) gen.OpenrailsRailIntent {
 	return gen.OpenrailsRailIntent{
@@ -335,6 +342,23 @@ func TestRunnerTerminalEvidencePersisted(t *testing.T) {
 	assert.Equal(t, map[string]any{"response_code": 252}, ledger.evidence[intent.ID])
 }
 
+func TestRunnerPrunesTerminalPayloadWhenHandlerOptsIn(t *testing.T) {
+	ledger := newFakeLedger()
+	h := &fakeHandler{
+		typ:                  "t",
+		relevance:            StillRelevant(),
+		execute:              Terminal("single-use credential rejected"),
+		pruneTerminalPayload: true,
+	}
+	intent := testIntent("t", OriginUser, 1)
+	ledger.due = []gen.OpenrailsRailIntent{intent}
+
+	runOnce(t, ledger, h, modeFull())
+
+	assert.Equal(t, StatusFailedTerminal, ledger.transition[intent.ID])
+	assert.Equal(t, []uuid.UUID{intent.ID}, ledger.prunedTerminal)
+}
+
 func TestRunnerDoesNotLogReadOnlyVerify(t *testing.T) {
 	ledger := newFakeLedger()
 	h := &fakeHandler{typ: "t", relevance: StillRelevant(), verify: Succeeded(nil)}
@@ -440,4 +464,3 @@ func TestRunnerDestructiveKillSwitch(t *testing.T) {
 		})
 	}
 }
-
