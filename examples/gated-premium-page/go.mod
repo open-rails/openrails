@@ -1,6 +1,6 @@
 module github.com/open-rails/openrails/examples/gated-premium-page
 
-go 1.26.5
+go 1.26.6
 
 // Examples build against the checkout, not a published tag, so breaking
 // engine changes update the example in the same PR (tracker #825).

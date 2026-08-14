@@ -13,7 +13,7 @@ RUN pnpm --config.verify-deps-before-run=false run build --outDir /out --emptyOu
 
 
 # Stage 2: build
-FROM golang:1.26.5-alpine AS builder
+FROM golang:1.26.6-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates

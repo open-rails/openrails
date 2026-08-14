@@ -1,6 +1,6 @@
 module github.com/open-rails/openrails
 
-go 1.26.5
+go 1.26.6
 
 // Keep the npm tree (which ships stray .go files) out of ./... package
 // patterns WITHOUT a nested go.mod — a nested module would prune web/admin
