@@ -43,6 +43,8 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	ctx := context.Background()
 
 	const schema = config.DefaultSchema
+	const cleanupPostgresMigration = `DELETE FROM public.migrations
+		WHERE app = $1 AND database = 'postgres' AND schema = $2 AND name = $3`
 	// Orphans start one past the highest prefix the build actually carries, so
 	// adding a real migration never turns this fixture into a live prefix. It
 	// used to be hardcoded from "3", which migration 0003 made real: the INSERT
@@ -57,10 +59,23 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	t.Cleanup(func() {
 		for _, n := range orphans {
-			_, _ = sqlDB.ExecContext(context.Background(),
-				`DELETE FROM public.migrations WHERE app = $1 AND schema = $2 AND name = $3`,
+			_, _ = sqlDB.ExecContext(context.Background(), cleanupPostgresMigration,
 				config.MigratekitApp, schema, n)
 		}
+	})
+
+	// A same-key ClickHouse ledger row proves cleanup is database-scoped. The
+	// old predicate omitted database and once deleted a real row from the other
+	// migration ledger when a generated orphan prefix collided with it.
+	sentinel := orphans[0]
+	_, err = sqlDB.ExecContext(ctx,
+		`INSERT INTO public.migrations (app, database, name, schema) VALUES ($1, 'clickhouse', $2, $3)`,
+		config.MigratekitApp, sentinel, schema)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = sqlDB.ExecContext(context.Background(),
+			`DELETE FROM public.migrations WHERE app = $1 AND database = 'clickhouse' AND schema = $2 AND name = $3`,
+			config.MigratekitApp, schema, sentinel)
 	})
 
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -105,6 +120,16 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	require.ErrorAs(t, err, &orphanErr, "the refusal is typed, so a host can act on it")
 	require.Equal(t, schema, orphanErr.Schema)
 	require.Equal(t, orphans, orphanErr.Orphaned, "every orphan named, in numeric order")
+
+	_, err = sqlDB.ExecContext(ctx, cleanupPostgresMigration, config.MigratekitApp, schema, sentinel)
+	require.NoError(t, err)
+	var clickHouseSentinel int
+	require.NoError(t, sqlDB.QueryRowContext(ctx, `
+		SELECT count(*) FROM public.migrations
+		 WHERE app = $1 AND database = 'clickhouse' AND schema = $2 AND name = $3`,
+		config.MigratekitApp, schema, sentinel).Scan(&clickHouseSentinel))
+	require.Equal(t, 1, clickHouseSentinel,
+		"Postgres orphan cleanup must not delete a same-key ClickHouse migration")
 }
 
 // orphanPrefixesPastEmbedded returns n numeric prefixes starting just past the

@@ -59,7 +59,7 @@ func TestRunPostgres_RefusesOrphanedMigrations(t *testing.T) {
 	t.Cleanup(func() {
 		for _, n := range orphans {
 			_, _ = sqlDB.ExecContext(context.Background(),
-				`DELETE FROM public.migrations WHERE app = $1 AND schema = $2 AND name = $3`,
+				`DELETE FROM public.migrations WHERE app = $1 AND database = 'postgres' AND schema = $2 AND name = $3`,
 				config.MigratekitApp, orphanedSchema, n)
 		}
 	})
