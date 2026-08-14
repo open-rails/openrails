@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/authkit"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -45,7 +46,9 @@ type MerchantCreationPolicy struct {
 // MerchantCreationConfig.Admission. Late-bound: the control plane is resolved
 // per call (the predicate is constructed before Attach completes). Every
 // unanswerable question refuses — admission is a judgment about identity and
-// money, never made on an unanswered question.
+// money, never made on an unanswered question. An already-owned group is an
+// idempotent repair, not a creation event, so it returns before allowance and
+// vault checks; stable group identity keeps that true across slug renames.
 func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error) {
 	if a == nil {
 		return nil, errors.New("merchant creation admission: app is required")
@@ -53,7 +56,7 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 	if policy.FreeAllowance <= 0 {
 		return nil, fmt.Errorf("merchant creation admission: FreeAllowance must be positive, got %d", policy.FreeAllowance)
 	}
-	return func(ctx context.Context, _ string, ownerUserID string) error {
+	return func(ctx context.Context, instanceSlug, ownerUserID string) error {
 		cp := Get(a)
 		if cp == nil || cp.Core() == nil {
 			return errors.New("control plane unavailable")
@@ -73,6 +76,23 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 		if err != nil {
 			return fmt.Errorf("list user's merchant memberships: %w", err)
 		}
+
+		claimedGroupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, merchant.NormalizeSlug(instanceSlug))
+		switch {
+		case err == nil:
+			for _, membership := range memberships {
+				if membership.Persona == controlplane.MerchantType &&
+					strings.EqualFold(membership.Role, controlplane.MerchantRoleOwner) &&
+					membership.GroupID == claimedGroupID {
+					return nil
+				}
+			}
+		case errors.Is(err, authkit.ErrGroupNotFound):
+			// A fresh slug has no group identity to match; apply the creation gate.
+		default:
+			return fmt.Errorf("resolve claimed merchant group: %w", err)
+		}
+
 		owned := 0
 		for _, m := range memberships {
 			if m.Persona == controlplane.MerchantType && strings.EqualFold(m.Role, controlplane.MerchantRoleOwner) {
