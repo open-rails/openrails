@@ -160,7 +160,7 @@ on-chain prepare/confirm routes above.
 |---|---|---|
 | GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset` |
 | POST | `/v1/me/payment-methods` | Store an NMI card. Body: `payment_token` (Collect.js) + billing details |
-| PUT | `/v1/me/payment-methods/{id}` | Replace the stored NMI card (`payment_token` + optional billing fields) |
+| PUT | `/v1/me/payment-methods/{id}` | Durably replace an NMI card. Requires tokenization's `payment_token`, `last_four`, `card_type`, and `expiry_date`; billing fields are optional. Returns the updated method when confirmed, `202` with no body while converging, `409 payment_method_update_retry_required` when a fresh token is required, or `502 payment_method_update_failed` for a terminal provider conflict. |
 | DELETE | `/v1/me/payment-methods/{id}` | Delete an NMI method through the durable provider-aware workflow. Returns `204` when complete, `202` while provider convergence continues, and an error when refused/failed. Stripe cards are managed through Stripe Billing Portal. |
 
 ### Checkout (delegated)
