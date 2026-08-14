@@ -111,6 +111,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/nmi_delete.go:Execute":                       "nmi_delete_subscription intent handler",
 	"internal/intents/nmi_payment_source_update.go:Execute":        "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
 	"internal/intents/nmi_payment_method_delete.go:Execute":        "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
+	"internal/intents/nmi_payment_method_update.go:Execute":        "nmi_payment_method_update intent handler — the only stored-card replacement writer",
 
 	// --- the checkout upgrade saga: reactive, compensating ----------------
 	"internal/modules/checkout/service.go:processUpgrade":          "upgrade proration sale + successor create: order ids content-derived, pre/post verify, ambiguity ⇒ roster-scan adopt-or-processing (#674 tail); full saga assessed and declined (completed.md #674)",
@@ -123,7 +124,6 @@ var allowedWriteCallers = map[string]string{
 
 	// --- vault lifecycle -------------------------------------------------
 	"internal/modules/paymentmethods/rail_payment_method_service.go:CreatePaymentMethod":       "the create half of the vault lifecycle: no durable intent exists until a vault does",
-	"internal/modules/paymentmethods/rail_payment_method_service.go:UpdatePaymentMethod":       "card update on an existing vault (reactive, user-initiated)",
 	"internal/modules/paymentmethods/rail_payment_method_service.go:deletePaymentMethodDirect": "reactive decline-cleanup only: vault referenced nowhere, harmless if lost; durable deletes route through DeletePaymentMethod → nmi_vault_delete intent (#674 tail)",
 	"internal/modules/paymentmethods/rail_payment_method_service.go:cleanupVaultBestEffort":    "reactive decline-cleanup (shared-vault scope); see deletePaymentMethodDirect",
 

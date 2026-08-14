@@ -48,41 +48,88 @@ func (vaultUnavailableSecretStore) Get(context.Context, merchant.ID, string) (me
 	return merchants.Secret{}, merchants.ErrSecretBackendUnavailable
 }
 
-func TestApplyUpdatedCardMetadataReplacesStoredCardDetails(t *testing.T) {
+func TestPreparePaymentMethodUpdateNormalizesTokenizedMetadata(t *testing.T) {
+	token := "  token-1  "
 	lastFour := "4242"
 	cardType := "Visa"
-	expiryDate := "12/30"
-	pm := &models.PaymentMethod{}
-
-	applyUpdatedCardMetadata(pm, &UpdatePaymentMethodRequest{
-		LastFour:   &lastFour,
-		CardType:   &cardType,
-		ExpiryDate: &expiryDate,
-	})
-
-	require.NotNil(t, pm.LastFour)
-	require.Equal(t, "4242", *pm.LastFour)
-	require.NotNil(t, pm.CardType)
-	require.Equal(t, "Visa", *pm.CardType)
-	require.NotNil(t, pm.ExpiryDate)
-	require.Equal(t, "12/30", *pm.ExpiryDate)
-}
-
-func TestApplyUpdatedCardMetadataClearsOmittedCardDetails(t *testing.T) {
-	oldLastFour := "1111"
-	oldCardType := "Visa"
-	oldExpiryDate := "01/29"
-	pm := &models.PaymentMethod{
-		LastFour:   &oldLastFour,
-		CardType:   &oldCardType,
-		ExpiryDate: &oldExpiryDate,
+	expiryDate := "12-2030"
+	req := &UpdatePaymentMethodRequest{
+		PaymentToken: &token,
+		LastFour:     &lastFour,
+		CardType:     &cardType,
+		ExpiryDate:   &expiryDate,
 	}
 
-	applyUpdatedCardMetadata(pm, &UpdatePaymentMethodRequest{})
+	require.NoError(t, preparePaymentMethodUpdate(req))
+	require.Equal(t, "token-1", *req.PaymentToken)
+	require.Equal(t, "4242", *req.LastFour)
+	require.Equal(t, "Visa", *req.CardType)
+	require.Equal(t, "12/30", *req.ExpiryDate)
+}
 
-	require.Nil(t, pm.LastFour)
-	require.Nil(t, pm.CardType)
-	require.Nil(t, pm.ExpiryDate)
+func TestPreparePaymentMethodUpdateRequiresVerifiableMetadata(t *testing.T) {
+	token := "token-1"
+	err := preparePaymentMethodUpdate(&UpdatePaymentMethodRequest{PaymentToken: &token})
+	require.EqualError(t, err, "last_four, card_type, and expiry_date are required from the tokenization response")
+}
+
+type fakePaymentMethodUpdateExecutor struct {
+	out PaymentMethodUpdateOutcome
+	err error
+}
+
+func (f fakePaymentMethodUpdateExecutor) ExecutePaymentMethodUpdate(context.Context, *models.PaymentMethod, *UpdatePaymentMethodRequest) (PaymentMethodUpdateOutcome, error) {
+	return f.out, f.err
+}
+
+func TestUpdatePaymentMethodMapsDurableOutcome(t *testing.T) {
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	store := merchants.NewMemorySecretStore()
+	secretName, err := merchants.PSPSecretName("nmi", "test", "mobius-account", "security_key")
+	require.NoError(t, err)
+	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
+	require.NoError(t, err)
+	pm := &models.PaymentMethod{ID: uuid.New(), CustomerID: uuid.New(), Rail: models.RailNMI, RailCustomerRef: "vault-1"}
+	token, lastFour, cardType, expiry := "token-1", "4242", "Visa", "12/30"
+	request := func() *UpdatePaymentMethodRequest {
+		return &UpdatePaymentMethodRequest{PaymentToken: &token, LastFour: &lastFour, CardType: &cardType, ExpiryDate: &expiry}
+	}
+
+	tests := []struct {
+		name    string
+		out     PaymentMethodUpdateOutcome
+		want    *models.PaymentMethod
+		wantErr error
+		failed  bool
+	}{
+		{name: "confirmed", out: PaymentMethodUpdateOutcome{Done: true, Method: pm}, want: pm},
+		{name: "processing", out: PaymentMethodUpdateOutcome{}, wantErr: ErrPaymentMethodUpdateProcessing},
+		{name: "fresh token required", out: PaymentMethodUpdateOutcome{Terminal: true, Retokenize: true}, wantErr: ErrPaymentMethodRetokenize},
+		{name: "terminal conflict", out: PaymentMethodUpdateOutcome{Terminal: true, Reason: "provider state conflict"}, failed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &RailPaymentMethodService{
+				Config:          vaultTestConfig(true),
+				MerchantSecrets: store,
+				ProviderSecrets: vaultStaticProviderSecretResolver{rail: "nmi", environment: "test", accountID: "mobius-account"},
+				UpdateIntents:   fakePaymentMethodUpdateExecutor{out: tt.out},
+			}
+			got, err := svc.UpdatePaymentMethod(ctx, pm, request())
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+			if tt.failed {
+				var terminal *PaymentMethodUpdateFailedError
+				require.ErrorAs(t, err, &terminal)
+				require.Equal(t, "provider state conflict", terminal.Reason)
+				return
+			}
+			require.NoError(t, err)
+			require.Same(t, tt.want, got)
+		})
+	}
 }
 
 func TestCreateVaultUsesMerchantSecretMobiusKeyWithoutStaticClient(t *testing.T) {

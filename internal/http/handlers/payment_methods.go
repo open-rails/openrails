@@ -24,10 +24,16 @@ import (
 )
 
 const (
-	createPaymentMethodTimeout              = 28 * time.Second
+	createPaymentMethodTimeout = 28 * time.Second
+	// Replacement performs a provider read, one bounded mutation, and a
+	// confirmation read. Leave enough room for all three NMI deadlines plus
+	// the durable ledger transitions around them.
+	updatePaymentMethodTimeout              = 50 * time.Second
 	codePaymentMethodProviderOutcomeUnknown = "provider_outcome_unknown"
 	codePaymentMethodDeleteFailed           = "payment_method_delete_failed"
 	codePaymentMethodDeleteUnsupported      = "payment_method_delete_unsupported"
+	codePaymentMethodUpdateFailed           = "payment_method_update_failed"
+	codePaymentMethodUpdateRetryRequired    = "payment_method_update_retry_required"
 )
 
 type listPaymentMethodsQuery struct {
@@ -405,21 +411,45 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		ExpiryDate:   body.ExpiryDate,
 	}
 
-	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Request.Context(), updatePaymentMethodTimeout)
 	defer cancel()
 
 	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"payment_method_id": methodID, "user_id": user.ID}).Error("Failed to update payment method")
-		if errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail) {
+		fields := log.Fields{"payment_method_id": methodID, "user_id": user.ID, "rail": pm.Rail}
+		switch {
+		case errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
-		}
-		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-			r.ErrorJSON(http.StatusServiceUnavailable, "payment rail credentials are temporarily unavailable")
+		case errors.Is(err, merchants.ErrSecretBackendUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
+			log.WithError(err).WithFields(fields).Warn("Payment method update unavailable because provider credentials could not be loaded")
+			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, api.CodeServiceUnavailable,
+				"Payment rail credentials are temporarily unavailable"))
+			return
+		case errors.Is(err, paymentmethods.ErrPaymentMethodUpdateProcessing):
+			log.WithError(err).WithFields(fields).Info("Payment method update is still converging")
+			r.Status(http.StatusAccepted)
+			return
+		case errors.Is(err, paymentmethods.ErrPaymentMethodRetokenize):
+			log.WithError(err).WithFields(fields).Info("Payment method update requires a fresh token")
+			r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, codePaymentMethodUpdateRetryRequired,
+				"The card was not updated. Enter the card again to create a fresh token."))
 			return
 		}
-		r.ErrorJSON(http.StatusBadRequest, "failed to update payment method")
+		var validation *paymentmethods.PaymentMethodUpdateValidationError
+		if errors.As(err, &validation) {
+			log.WithError(err).WithFields(fields).Info("Payment method update request was invalid")
+			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, api.CodeInvalidParam, validation.Message))
+			return
+		}
+		var terminal *paymentmethods.PaymentMethodUpdateFailedError
+		if errors.As(err, &terminal) {
+			log.WithError(err).WithFields(fields).Error("Payment method update failed permanently")
+			r.APIError(api.NewAPIError(http.StatusBadGateway, api.ErrorTypeAPI, codePaymentMethodUpdateFailed,
+				"Payment method could not be updated at the payment provider"))
+			return
+		}
+		r.InternalError("Failed to update payment method", err)
 		return
 	}
 

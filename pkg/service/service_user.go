@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -29,6 +30,41 @@ import (
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
+
+var (
+	// ErrPaymentMethodUpdateProcessing means the provider outcome is still
+	// converging. Repeating the same request checks the same durable attempt.
+	ErrPaymentMethodUpdateProcessing = errors.New("payment method update is processing")
+	// ErrPaymentMethodRetokenize means the provider did not apply the
+	// single-use token and the caller must tokenize the card again.
+	ErrPaymentMethodRetokenize = errors.New("payment method must be tokenized again")
+)
+
+// PaymentMethodUpdateFailedError means the provider replacement reached an
+// unrecoverable state that requires operator attention.
+type PaymentMethodUpdateFailedError struct {
+	Reason string
+}
+
+func (e *PaymentMethodUpdateFailedError) Error() string {
+	if e == nil || strings.TrimSpace(e.Reason) == "" {
+		return "payment method update failed permanently"
+	}
+	return "payment method update failed permanently: " + e.Reason
+}
+
+// PaymentMethodUpdateValidationError is a caller-correctable replacement
+// request error.
+type PaymentMethodUpdateValidationError struct {
+	Message string
+}
+
+func (e *PaymentMethodUpdateValidationError) Error() string {
+	if e == nil {
+		return "invalid payment method update"
+	}
+	return e.Message
+}
 
 // -------------------------------- Products --------------------------------
 
@@ -897,11 +933,29 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 
 	pm, err = vaults.UpdatePaymentMethod(ctx, pm, updateReq)
 	if err != nil {
-		return nil, err
+		return nil, paymentMethodUpdateFacadeError(err)
 	}
 
 	result := paymentMethodFromModel(pm)
 	return &result, nil
+}
+
+func paymentMethodUpdateFacadeError(err error) error {
+	switch {
+	case errors.Is(err, paymentmethods.ErrPaymentMethodUpdateProcessing):
+		return ErrPaymentMethodUpdateProcessing
+	case errors.Is(err, paymentmethods.ErrPaymentMethodRetokenize):
+		return ErrPaymentMethodRetokenize
+	}
+	var validation *paymentmethods.PaymentMethodUpdateValidationError
+	if errors.As(err, &validation) {
+		return &PaymentMethodUpdateValidationError{Message: validation.Message}
+	}
+	var terminal *paymentmethods.PaymentMethodUpdateFailedError
+	if errors.As(err, &terminal) {
+		return &PaymentMethodUpdateFailedError{Reason: terminal.Reason}
+	}
+	return err
 }
 
 // DeletePaymentMethod deletes (deactivates) a payment method.
