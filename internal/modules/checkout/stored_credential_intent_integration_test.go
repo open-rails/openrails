@@ -20,8 +20,8 @@ import (
 // persists the returned transaction id as the instrument's anchor; a checkout
 // on an already-anchored instrument sends indicator=used + the anchor.
 
-// seedSaleInstrument stores a payment_methods row matching the fixture
-// payload's rail handles, with the given unscheduled anchor ("" = legacy/new).
+// seedSaleInstrument stores a payment_methods row matching the fixture's NMI
+// rail and Mobius PSP, with the given unscheduled anchor ("" = new).
 func (fx *saleIntentFixture) seedSaleInstrument(t *testing.T, unscheduledRef string) uuid.UUID {
 	t.Helper()
 	pool := fx.db.Pool()
@@ -32,7 +32,7 @@ func (fx *saleIntentFixture) seedSaleInstrument(t *testing.T, unscheduledRef str
 		`INSERT INTO openrails.payment_methods
 		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 		    initial_transaction_id, stored_credential_unscheduled_ref)
-		 VALUES ($1, $2, $3, 'mobius', $4, $5, '', '', $6)`,
+		 VALUES ($1, $2, $3, 'nmi', $4, $5, '', '', $6)`,
 		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, unscheduledRef)
 	require.NoError(t, err)
 	t.Cleanup(func() {
@@ -98,7 +98,7 @@ func (fx *subIntentFixture) seedSubInstrument(t *testing.T, recurringRef string)
 		`INSERT INTO openrails.payment_methods
 		   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 		    initial_transaction_id, stored_credential_recurring_ref)
-		 VALUES ($1, $2, $3, 'mobius', $4, $5, '', '', $6)`,
+		 VALUES ($1, $2, $3, 'nmi', $4, $5, '', '', $6)`,
 		pmID, dbtest.TestMerchantID.UUID(), customerID, pspID, fx.payload.CustomerVaultID, recurringRef)
 	require.NoError(t, err)
 	t.Cleanup(func() {

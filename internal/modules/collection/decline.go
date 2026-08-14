@@ -300,7 +300,7 @@ func ClassifyDeclineDetail(rail, code string) Classification {
 		return c
 	}
 	switch c.Rail {
-	case "nmi", "mobius":
+	case "nmi":
 		// A custodian-proxied charge lands on the SAME NMI gateway and returns
 		// the SAME classic response, so it classifies here too — the rail is
 		// nmi either way (or#879: custody is not a rail). #795: one decline

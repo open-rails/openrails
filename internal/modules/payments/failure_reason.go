@@ -212,7 +212,7 @@ func ccbillFailureReason(rawCode string) string {
 // gateways). "" = not a stamped card rail.
 func DefaultTokenType(rail, custodian string) string {
 	switch strings.ToLower(strings.TrimSpace(rail)) {
-	case "nmi", "mobius":
+	case "nmi":
 		switch strings.TrimSpace(custodian) {
 		case models.CustodianBasisTheory:
 			return charge.TokenTypePANViaProxy
@@ -235,7 +235,7 @@ func NormalizeFailureReason(rail, rawCode string) string {
 		return FailureUnknown
 	}
 	switch rail {
-	case "nmi", "mobius":
+	case "nmi":
 		// A custodian-proxied charge lands on the SAME NMI gateway and returns
 		// the SAME classic response (or#879) — one taxonomy, two transports.
 		if n, err := strconv.Atoi(rawCode); err == nil {
