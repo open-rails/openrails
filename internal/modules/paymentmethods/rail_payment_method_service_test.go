@@ -323,6 +323,14 @@ func (deleteVaultNoSubs) GetPaginatedByUserID(context.Context, string, int, int)
 	return nil, 0, nil
 }
 
+type deleteVaultSubscriptions struct {
+	subscriptions []models.Subscription
+}
+
+func (f deleteVaultSubscriptions) GetPaginatedByUserID(context.Context, string, int, int) ([]models.Subscription, int, error) {
+	return f.subscriptions, len(f.subscriptions), nil
+}
+
 type fakeVaultDeleteExecutor struct {
 	out    PaymentMethodDeleteOutcome
 	err    error
@@ -375,12 +383,56 @@ func TestDeleteVaultBranchesOnIntentOutcome(t *testing.T) {
 	exec = &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Terminal: true, Reason: "shared vault, no billing id"}}
 	svc, pm = deleteVaultTestService(exec)
 	err := svc.DeletePaymentMethod(ctx, pm)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "shared vault, no billing id")
+	var terminal *PaymentMethodDeleteFailedError
+	require.ErrorAs(t, err, &terminal)
+	require.Equal(t, "shared vault, no billing id", terminal.Reason)
 
 	exec = &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Reason: "vault delete outcome unknown"}}
 	svc, pm = deleteVaultTestService(exec)
 	require.ErrorIs(t, svc.DeletePaymentMethod(ctx, pm), ErrPaymentMethodDeleteProcessing)
+
+	exec = &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{InUse: true, Reason: "back in use"}}
+	svc, pm = deleteVaultTestService(exec)
+	require.ErrorIs(t, svc.DeletePaymentMethod(ctx, pm), ErrPaymentMethodInUse)
+}
+
+func TestDeletePaymentMethodBlocksEveryLiveSubscriptionStatus(t *testing.T) {
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	for _, status := range []models.SubscriptionStatus{
+		models.StatusActive,
+		models.StatusPending,
+		models.StatusPastDue,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			exec := &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Done: true}}
+			svc, pm := deleteVaultTestService(exec)
+			svc.SubscriptionService = deleteVaultSubscriptions{subscriptions: []models.Subscription{{
+				ID:              uuid.New(),
+				CustomerID:      pm.CustomerID,
+				PaymentMethodID: &pm.ID,
+				Status:          status,
+			}}}
+
+			err := svc.DeletePaymentMethod(ctx, pm)
+			require.ErrorIs(t, err, ErrPaymentMethodInUse)
+			require.Zero(t, exec.called, "a live subscription must block before the delete intent is posted")
+		})
+	}
+}
+
+func TestDeletePaymentMethodRejectsProviderManagedRails(t *testing.T) {
+	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	for _, rail := range []models.Rail{models.RailStripe, models.RailCCBill, models.RailSolana} {
+		t.Run(string(rail), func(t *testing.T) {
+			exec := &fakeVaultDeleteExecutor{out: PaymentMethodDeleteOutcome{Done: true}}
+			svc, pm := deleteVaultTestService(exec)
+			pm.Rail = rail
+
+			err := svc.DeletePaymentMethod(ctx, pm)
+			require.ErrorIs(t, err, ErrPaymentMethodsUnsupportedOnRail)
+			require.Zero(t, exec.called, "provider-managed methods must never reach the NMI delete intent")
+		})
+	}
 }
 
 func TestDeleteVaultRequiresIntentExecutor(t *testing.T) {

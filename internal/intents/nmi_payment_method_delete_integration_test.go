@@ -373,4 +373,5 @@ func TestNMIVaultDeleteIntent_SupersededWhenBackInUse(t *testing.T) {
 	require.EqualValues(t, 0, fx.gateway.vaultDeleteCalls.Load(), "in-use billing state is never destroyed")
 	require.EqualValues(t, 0, fx.gateway.entryDeleteCalls.Load())
 	require.True(t, fx.localRowExists(t))
+	require.True(t, fx.executeThrough(t).InUse, "the producer must expose superseded as an in-use refusal")
 }

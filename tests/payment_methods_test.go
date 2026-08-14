@@ -4,6 +4,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,8 +16,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/pkg/api"
 )
+
+type fakePaymentMethodDeleteExecutor struct {
+	outcome paymentmethods.PaymentMethodDeleteOutcome
+	err     error
+}
+
+func (f fakePaymentMethodDeleteExecutor) ExecutePaymentMethodDelete(context.Context, *models.PaymentMethod) (paymentmethods.PaymentMethodDeleteOutcome, error) {
+	return f.outcome, f.err
+}
 
 // TestPaymentMethodsRequiresAuth tests that payment methods endpoints require authentication
 func TestPaymentMethodsRequiresAuth(t *testing.T) {
@@ -239,7 +252,23 @@ func TestCreatePaymentMethod(t *testing.T) {
 
 // TestDeletePaymentMethod tests deleting payment methods
 func TestDeletePaymentMethod(t *testing.T) {
-	suite, token, userID := setupTestSuiteWithAuth(t)
+	suite, _ := SetupSuiteWithMockNMI(t)
+	userID := uuid.NewString()
+	token := suite.MintUserToken(userID, "payment-method-delete-"+uuid.NewString()+"@test.example")
+	originalDeleteIntents := suite.App.Runtime.RailPaymentMethodService.DeleteIntents
+	dbtest.ArmDestructiveActions(context.Background(), t, dbtest.TestMerchantID.UUID())
+	t.Cleanup(func() {
+		suite.App.Runtime.RailPaymentMethodService.DeleteIntents = originalDeleteIntents
+		dbtest.DisarmDestructiveActions(context.Background(), t, suite.MerchantPool())
+	})
+	paymentMethodExists := func(id uuid.UUID) bool {
+		for _, pm := range suite.GetPaymentMethodsByUserID(userID) {
+			if pm.ID == id {
+				return true
+			}
+		}
+		return false
+	}
 
 	t.Run("deletes payment method successfully", func(t *testing.T) {
 		// Create a payment method to delete
@@ -247,6 +276,10 @@ func TestDeletePaymentMethod(t *testing.T) {
 			UserID: userID,
 			Rail:   models.RailNMI,
 		})
+		var methodPSPID uuid.UUID
+		require.NoError(t, suite.MerchantPool().QueryRow(context.Background(),
+			`SELECT psp_id FROM openrails.payment_methods WHERE id = $1`, pm.ID,
+		).Scan(&methodPSPID))
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
@@ -254,20 +287,89 @@ func TestDeletePaymentMethod(t *testing.T) {
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
-		require.Equal(t, http.StatusOK, w.Code, "Should return 200 OK")
-
-		var response map[string]interface{}
-		err := json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-
-		assert.True(t, response["success"].(bool), "Success should be true")
-		assert.Contains(t, response["message"], "deleted", "Message should mention deleted")
+		require.Equal(t, http.StatusNoContent, w.Code, "completed deletion returns 204 No Content")
+		assert.Empty(t, w.Body.String())
 
 		// Verify payment method is actually deleted
 		pms := suite.GetPaymentMethodsByUserID(userID)
 		for _, p := range pms {
 			assert.NotEqual(t, pm.ID, p.ID, "Deleted payment method should not be in list")
 		}
+
+		var intentStatus string
+		var intentPSPID uuid.UUID
+		err := suite.MerchantPool().QueryRow(context.Background(), `
+			SELECT status, psp_id
+			FROM openrails.rail_intents
+			WHERE intent_type = $1 AND idempotency_key = $2`,
+			intents.TypeNMIPaymentMethodDelete,
+			intents.NMIPaymentMethodDeleteIdempotencyKey(pm.ID),
+		).Scan(&intentStatus, &intentPSPID)
+		require.NoError(t, err)
+		assert.Equal(t, string(intents.StatusSucceeded), intentStatus)
+		assert.Equal(t, methodPSPID, intentPSPID, "delete intent must preserve the method's exact PSP binding")
+	})
+
+	t.Run("returns 202 while durable deletion is processing", func(t *testing.T) {
+		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: userID, Rail: models.RailNMI})
+		suite.App.Runtime.RailPaymentMethodService.DeleteIntents = fakePaymentMethodDeleteExecutor{}
+		defer func() { suite.App.Runtime.RailPaymentMethodService.DeleteIntents = originalDeleteIntents }()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		suite.Server.Handler().ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
+		assert.Empty(t, w.Body.String())
+		assert.True(t, paymentMethodExists(pm.ID), "processing must keep the local mirror visible")
+	})
+
+	t.Run("returns 502 for a terminal provider failure", func(t *testing.T) {
+		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: userID, Rail: models.RailNMI})
+		suite.App.Runtime.RailPaymentMethodService.DeleteIntents = fakePaymentMethodDeleteExecutor{
+			outcome: paymentmethods.PaymentMethodDeleteOutcome{Terminal: true, Reason: "provider detail must stay private"},
+		}
+		defer func() { suite.App.Runtime.RailPaymentMethodService.DeleteIntents = originalDeleteIntents }()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		suite.Server.Handler().ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadGateway, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "payment_method_delete_failed")
+		assert.NotContains(t, w.Body.String(), "provider detail must stay private")
+		assert.True(t, paymentMethodExists(pm.ID))
+	})
+
+	t.Run("returns 429 when the destructive ceiling refuses deletion", func(t *testing.T) {
+		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: userID, Rail: models.RailNMI})
+		suite.App.Runtime.RailPaymentMethodService.DeleteIntents = fakePaymentMethodDeleteExecutor{err: intents.ErrRateCeilingTripped}
+		defer func() { suite.App.Runtime.RailPaymentMethodService.DeleteIntents = originalDeleteIntents }()
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		suite.Server.Handler().ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), api.CodeRateLimitExceeded)
+		assert.True(t, paymentMethodExists(pm.ID))
+	})
+
+	t.Run("rejects deletion for portal-managed Stripe methods", func(t *testing.T) {
+		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: userID, Rail: models.RailStripe})
+
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		suite.Server.Handler().ServeHTTP(w, req)
+
+		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), "payment_method_delete_unsupported")
+		assert.Contains(t, w.Body.String(), "Billing Portal")
+		assert.True(t, paymentMethodExists(pm.ID))
 	})
 
 	t.Run("returns 404 for non-existent payment method", func(t *testing.T) {

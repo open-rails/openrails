@@ -111,6 +111,20 @@ func TestHTTPSuccessJSON(t *testing.T) {
 	}
 }
 
+func TestHTTPStatusWritesNoBody(t *testing.T) {
+	for _, status := range []int{http.StatusAccepted, http.StatusNoContent} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := NewHTTP(rec, httptest.NewRequest(http.MethodDelete, "/x", nil), nil)
+			req.Status(status)
+
+			require.Equal(t, status, rec.Code)
+			require.Empty(t, rec.Body.String())
+			require.Empty(t, rec.Header().Get("Content-Type"))
+		})
+	}
+}
+
 func TestHTTPAPIErrorIncludesRequestID(t *testing.T) {
 	tests := []struct {
 		name      string
