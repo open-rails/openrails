@@ -39,10 +39,10 @@ of these. Nothing else in the repo touches a real provider.
 
 | Lane | Workflow | Cadence | Reaches |
 |---|---|---|---|
-| NMI sandbox | `.github/workflows/live-gated-integration.yml` job `nmi-sandbox` | weekly, Mon 06:00 UTC | real NMI sandbox gateway |
+| NMI sandbox | `.github/workflows/live-gated-integration.yaml` job `nmi-sandbox` | weekly, Mon 06:00 UTC | real NMI sandbox gateway |
 | Live invoice collection | same file, job `live-invoice-collection` | weekly | Stripe test mode + NMI sandbox |
 | Stripe Model-B upgrade | same file, job `stripe-model-b` | weekly | Stripe test mode |
-| Solana devnet | `.github/workflows/solana-devnet-integration.yml` job `devnet-service-layer` | daily 07:00 UTC | Solana devnet, real USDC |
+| Solana devnet | `.github/workflows/solana-devnet-integration.yaml` job `devnet-service-layer` | daily 07:00 UTC | Solana devnet, real USDC |
 | Solana sustained rebill | same file, job `devnet-multirebill` | on demand (~3h) | Solana devnet, real USDC |
 | Hermetic integration | `.github/workflows/ci.yaml` | every PR | Postgres + Redis testcontainers, fake provider HTTP |
 

@@ -2,7 +2,7 @@ name: Live-Gated Integration
 
 # Scheduled real-wire proof (#694): the env-gated live tests silently t.Skip on
 # normal CI (no credentials there, by design), so without this workflow they
-# run NOWHERE. Weekly cron + on-demand, mirroring solana-devnet-integration.yml.
+# run NOWHERE. Weekly cron + on-demand, mirroring solana-devnet-integration.yaml.
 #
 # Every job is enforcing (continue-on-error is never set) but the WORKFLOW is
 # not a required check — a sandbox outage must not block merges. Skip-if-absent

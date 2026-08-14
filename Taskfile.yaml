@@ -159,7 +159,7 @@ tasks:
       - bash scripts/migration-lint.sh
 
   lint:
-    desc: golangci-lint over the whole module (same gate CI runs — see .golangci.yml)
+    desc: golangci-lint over the whole module (same gate CI runs — see .golangci.yaml)
     cmds:
       # Pinned: a floating version silently changes what the gate means.
       - |

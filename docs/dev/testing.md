@@ -159,7 +159,7 @@ capped at the plan amount per period; cancel vs revoke semantics
 the real stop, surfacing as token OwnerMismatch on the next crank); and
 submit-and-confirm before a pull counts as success. CI runs the real-USDC
 service-layer test daily and the multi-hour rebill test on manual dispatch
-(`.github/workflows/solana-devnet-integration.yml`).
+(`.github/workflows/solana-devnet-integration.yaml`).
 
 The full-stack flow (checkout `payment.rail: "solana"` →
 `next_action: solana_sign_transactions` → wallet signs → confirm → first

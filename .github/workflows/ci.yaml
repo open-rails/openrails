@@ -198,7 +198,7 @@ jobs:
           echo "unit-shard matrix result: $result"
           [ "$result" = "success" ] || exit 1
 
-  # or#869: .golangci.yml existed for a year with nothing running it — and could
+  # or#869: .golangci.yaml existed for a year with nothing running it — and could
   # not have run (v1 schema, which current golangci-lint refuses to load). The
   # enabled rule set is exactly what passes today; deferred linters are recorded
   # in the config header with counts. This job is REQUIRED, not advisory: an
