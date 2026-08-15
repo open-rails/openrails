@@ -3,13 +3,16 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -23,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -48,6 +52,9 @@ type StripeWebhookService struct {
 	// the handler marks the subscription dirty and the coalesced River job
 	// fetches provider truth and converges via the #665 decider.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
+	// StripePaymentState reads the exact routed Stripe account. Payment-method
+	// events are wake-up signals; fetched provider truth owns the local link.
+	StripePaymentState payments.StripePaymentStateReader
 }
 
 func (s *StripeWebhookService) now() time.Time {
@@ -66,7 +73,8 @@ type stripeEvent struct {
 }
 
 type stripeEventData struct {
-	Object json.RawMessage `json:"object"`
+	Object             json.RawMessage `json:"object"`
+	PreviousAttributes json.RawMessage `json:"previous_attributes"`
 }
 
 type stripeInvoiceLineItem struct {
@@ -195,12 +203,10 @@ type stripeInvoicePayment struct {
 	} `json:"payment"`
 }
 
-// stripePaymentMethod is the payment_method.attached payload; card details live
-// directly under `card`.
+// stripePaymentMethod is the identity carried by payment_method events.
 type stripePaymentMethod struct {
-	ID       string                     `json:"id"`
-	Customer string                     `json:"customer"`
-	Card     payments.StripeCardDetails `json:"card"`
+	ID       string `json:"id"`
+	Customer string `json:"customer"`
 }
 
 type stripeDispute struct {
@@ -264,6 +270,8 @@ var HandledStripeEventTypes = []string{
 	"refund.updated",
 	"charge.succeeded",
 	"payment_method.attached",
+	"payment_method.detached",
+	"customer.updated",
 	"charge.refunded",
 	"charge.dispute.created",
 	"charge.dispute.closed",
@@ -279,7 +287,10 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 	case "invoice.paid", "invoice.payment_failed":
 		return s.markDirtyFromInvoice(ctx, eventType, obj, evt.Created)
 	case "customer.subscription.updated", "customer.subscription.deleted":
-		return s.markDirtyFromSubscription(ctx, eventType, obj, evt.Created)
+		if err := s.markDirtyFromSubscription(ctx, eventType, obj, evt.Created); err != nil {
+			return err
+		}
+		return s.reconcileStripePaymentStateFromSubscription(ctx, obj)
 
 	case "invoice_payment.paid":
 		return s.handleInvoicePaymentPaid(ctx, obj)
@@ -297,6 +308,10 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 		return s.handleChargeSucceeded(ctx, obj)
 	case "payment_method.attached":
 		return s.handlePaymentMethodAttached(ctx, obj)
+	case "payment_method.detached":
+		return s.handlePaymentMethodDetached(ctx, obj, evt.Data.PreviousAttributes)
+	case "customer.updated":
+		return s.handleCustomerUpdated(ctx, obj)
 	case "charge.refunded":
 		return s.handleChargeRefunded(ctx, obj)
 	case "charge.dispute.created", "charge.dispute.closed":
@@ -340,26 +355,22 @@ func (s *StripeWebhookService) markDirtyFromSubscription(ctx context.Context, ev
 	return markSubscriptionDirty(ctx, s.ConvergeEnqueuer, string(models.RailStripe), data.ID, eventType, evtCreated)
 }
 
-// handleChargeSucceeded snapshots the charged card onto the matching payment row
-// (per-payment history) and records it as the subscription's current card. The
-// charge payload embeds payment_method_details.card, so no Stripe fetch is needed.
+// handleChargeSucceeded snapshots the charged card onto the matching payment
+// row. It then treats the charge as a wake-up signal and fetches Stripe's
+// current defaults; the charged method itself does not imply "default".
 func (s *StripeWebhookService) handleChargeSucceeded(ctx context.Context, obj json.RawMessage) error {
 	var charge stripeCharge
 	if err := json.Unmarshal(obj, &charge); err != nil {
 		return fmt.Errorf("parse charge: %w", err)
 	}
 	card := payments.NormalizeStripeCard(charge.PaymentMethodDetails.Card)
-	if card == nil {
-		return nil
+	if card != nil {
+		txnIDs := stripeChargeSnapshotTransactionIDs(charge)
+		if err := payments.SnapshotPaymentCard(ctx, s.DB, txnIDs, card); err != nil {
+			return err
+		}
 	}
-
-	txnIDs := stripeChargeSnapshotTransactionIDs(charge)
-	if err := payments.SnapshotPaymentCard(ctx, s.DB, txnIDs, card); err != nil {
-		return err
-	}
-
-	// Current card for the active subscription.
-	return s.recordStripeCardForCustomer(ctx, charge.Customer, charge.PaymentMethod, charge.ID, card)
+	return s.reconcileStripeCustomerPaymentStateInTx(ctx, charge.Customer)
 }
 
 func stripeChargeSnapshotTransactionIDs(charge stripeCharge) []string {
@@ -389,38 +400,228 @@ func (s *StripeWebhookService) handleInvoicePaymentPaid(ctx context.Context, obj
 	return nil
 }
 
-// handlePaymentMethodAttached records a newly attached card as the customer's
-// current payment method (e.g. when the user updates their card in the portal).
+// handlePaymentMethodAttached mirrors an attached method only after fetching
+// its current Stripe state, then converges subscription links from provider
+// defaults. The event payload never decides which card is current.
 func (s *StripeWebhookService) handlePaymentMethodAttached(ctx context.Context, obj json.RawMessage) error {
 	var pm stripePaymentMethod
 	if err := json.Unmarshal(obj, &pm); err != nil {
 		return fmt.Errorf("parse payment_method: %w", err)
 	}
-	card := payments.NormalizeStripeCard(pm.Card)
-	if card == nil {
-		return nil
-	}
-	return s.recordStripeCardForCustomer(ctx, pm.Customer, pm.ID, pm.ID, card)
+	return s.withStripePaymentStateTx(ctx, pm.Customer, pm.ID, func(txdb *db.DB, tx pgx.Tx) error {
+		if _, err := payments.MirrorAttachedStripePaymentMethod(ctx, txdb, payments.NewRailCustomerService(txdb), s.Clock, s.StripePaymentState, pm.ID); err != nil {
+			return fmt.Errorf("mirror attached stripe payment method: %w", err)
+		}
+		if err := s.convergeStripeCustomerPaymentState(ctx, txdb, pm.Customer); err != nil {
+			return err
+		}
+		return MarkWebhookProcessedInTx(ctx, tx)
+	})
 }
 
-// recordStripeCardForCustomer upserts a openrails.payment_methods row for the
-// customer's card and links it as the active subscription's payment method. It
-// delegates to payments.UpsertStripeCardForCustomer so the webhook path and the
-// reconcile backfill share one implementation.
-func (s *StripeWebhookService) recordStripeCardForCustomer(ctx context.Context, customerID, paymentMethodID, initialTxnID string, card *payments.StripeCard) error {
-	var linker payments.StripeCardSubscriptionLinker
-	if s.SubscriptionService != nil {
-		linker = s.SubscriptionService
+func (s *StripeWebhookService) handlePaymentMethodDetached(ctx context.Context, obj, previous json.RawMessage) error {
+	var pm stripePaymentMethod
+	if err := json.Unmarshal(obj, &pm); err != nil {
+		return fmt.Errorf("parse detached payment_method: %w", err)
 	}
-	return payments.UpsertStripeCardForCustomer(
+	customerID := strings.TrimSpace(pm.Customer)
+	if customerID == "" && len(previous) > 0 {
+		var prior struct {
+			Customer string `json:"customer"`
+		}
+		if err := json.Unmarshal(previous, &prior); err != nil {
+			return fmt.Errorf("parse detached payment_method previous attributes: %w", err)
+		}
+		customerID = strings.TrimSpace(prior.Customer)
+	}
+	return s.withStripePaymentStateTx(ctx, customerID, pm.ID, func(txdb *db.DB, tx pgx.Tx) error {
+		method, err := payments.ParkDetachedStripePaymentMethod(ctx, txdb, pm.ID)
+		if err != nil {
+			return err
+		}
+		if method != nil {
+			if err := recordStripeDetachedPaymentMethodFinding(ctx, txdb, method); err != nil {
+				return err
+			}
+			if customerID == "" {
+				customerID, err = payments.NewRailCustomerService(txdb).GetAccountIDForPSP(
+					ctx, method.CustomerID, string(models.RailStripe),
+				)
+				if db.IsNotFound(err) {
+					customerID = ""
+				} else if err != nil {
+					return fmt.Errorf("resolve detached stripe method customer: %w", err)
+				}
+				if customerID != "" {
+					merchantID, err := merchant.Require(ctx)
+					if err != nil {
+						return err
+					}
+					if err := gen.New(tx).LockStripePaymentState(
+						ctx,
+						stripePaymentStateLockKey(
+							merchantID.UUID(),
+							method.PspID,
+							stripeCustomerLockSubject,
+							customerID,
+						),
+					); err != nil {
+						return fmt.Errorf("lock detached stripe customer reconciliation: %w", err)
+					}
+				}
+			}
+		}
+		if err := s.convergeStripeCustomerPaymentState(ctx, txdb, customerID); err != nil {
+			return err
+		}
+		return MarkWebhookProcessedInTx(ctx, tx)
+	})
+}
+
+func (s *StripeWebhookService) handleCustomerUpdated(ctx context.Context, obj json.RawMessage) error {
+	var customer struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(obj, &customer); err != nil {
+		return fmt.Errorf("parse stripe customer: %w", err)
+	}
+	return s.reconcileStripeCustomerPaymentStateInTx(ctx, customer.ID)
+}
+
+func (s *StripeWebhookService) reconcileStripePaymentStateFromSubscription(ctx context.Context, obj json.RawMessage) error {
+	var subscription struct {
+		Customer string `json:"customer"`
+	}
+	if err := json.Unmarshal(obj, &subscription); err != nil {
+		return fmt.Errorf("parse stripe subscription payment state: %w", err)
+	}
+	return s.reconcileStripeCustomerPaymentStateInTx(ctx, subscription.Customer)
+}
+
+func (s *StripeWebhookService) reconcileStripeCustomerPaymentStateInTx(ctx context.Context, customerID string) error {
+	if strings.TrimSpace(customerID) == "" {
+		return nil
+	}
+	return s.withStripePaymentStateTx(ctx, customerID, "", func(txdb *db.DB, tx pgx.Tx) error {
+		if err := s.convergeStripeCustomerPaymentState(ctx, txdb, customerID); err != nil {
+			return err
+		}
+		return MarkWebhookProcessedInTx(ctx, tx)
+	})
+}
+
+func (s *StripeWebhookService) convergeStripeCustomerPaymentState(ctx context.Context, txdb *db.DB, customerID string) error {
+	customerID = strings.TrimSpace(customerID)
+	if customerID == "" {
+		return nil
+	}
+	err := payments.ConvergeStripeCustomerPaymentState(
 		ctx,
-		s.DB,
-		s.RailCustomerService,
-		linker,
+		txdb,
+		payments.NewRailCustomerService(txdb),
 		s.Clock,
-		customerID, paymentMethodID, initialTxnID,
-		card,
+		s.StripePaymentState,
+		customerID,
 	)
+	if errors.Is(err, payments.ErrStripeObjectNotFound) {
+		log.WithContext(ctx).WithField("stripe_customer_id", customerID).
+			Info("stripe payment-method reconciliation skipped unknown customer")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("converge stripe customer payment state: %w", err)
+	}
+	return nil
+}
+
+func (s *StripeWebhookService) withStripePaymentStateTx(
+	ctx context.Context,
+	customerID string,
+	paymentMethodID string,
+	fn func(*db.DB, pgx.Tx) error,
+) error {
+	if s.DB == nil {
+		return errors.New("stripe payment-method reconciliation database is not configured")
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("stripe payment-method reconciliation requires merchant scope: %w", err)
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return fmt.Errorf("stripe payment-method reconciliation requires PSP scope: %w", err)
+	}
+	subjectKind := stripeCustomerLockSubject
+	subjectID := strings.TrimSpace(customerID)
+	if subjectID == "" {
+		subjectKind = stripePaymentMethodLockSubject
+		subjectID = strings.TrimSpace(paymentMethodID)
+	}
+	if subjectID == "" {
+		return errors.New("stripe payment-method reconciliation requires a customer or payment method")
+	}
+	lockKey := stripePaymentStateLockKey(
+		merchantID.UUID(),
+		pspID,
+		subjectKind,
+		subjectID,
+	)
+	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if err := gen.New(tx).LockStripePaymentState(ctx, lockKey); err != nil {
+			return fmt.Errorf("lock stripe payment-method reconciliation: %w", err)
+		}
+		return fn(s.DB.NewWithPgxTx(tx), tx)
+	})
+}
+
+type stripePaymentStateLockSubject string
+
+const (
+	stripeCustomerLockSubject      stripePaymentStateLockSubject = "customer"
+	stripePaymentMethodLockSubject stripePaymentStateLockSubject = "method"
+)
+
+func stripePaymentStateLockKey(
+	merchantID uuid.UUID,
+	pspID uuid.UUID,
+	subject stripePaymentStateLockSubject,
+	subjectID string,
+) string {
+	return "payments:stripe:" +
+		merchantID.String() + ":" +
+		pspID.String() + ":" +
+		string(subject) + ":" +
+		strings.TrimSpace(subjectID)
+}
+
+func recordStripeDetachedPaymentMethodFinding(ctx context.Context, database *db.DB, method *models.PaymentMethod) error {
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	evidence, err := json.Marshal(map[string]any{
+		"provider":          string(models.RailStripe),
+		"psp_id":            method.PspID.String(),
+		"payment_method_id": method.ID.String(),
+		"rail_method_ref":   method.RailMethodRef,
+		"customer_id":       method.CustomerID.String(),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal detached stripe payment-method finding: %w", err)
+	}
+	action := "Collect a replacement payment method in Stripe and verify the subscription default before resuming collection."
+	if _, err := database.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID:        merchantID.UUID(),
+		FindingType:       "consistency.stripe_payment_method_detached",
+		SubjectKey:        method.PspID.String() + ":" + method.RailMethodRef,
+		Severity:          "high",
+		Status:            "requires_review",
+		RecommendedAction: &action,
+		Evidence:          evidence,
+	}); err != nil {
+		return fmt.Errorf("record detached stripe payment-method finding: %w", err)
+	}
+	return nil
 }
 
 func zeroTimePtr(t time.Time) *time.Time {

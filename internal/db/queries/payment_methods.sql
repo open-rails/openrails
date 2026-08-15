@@ -49,6 +49,21 @@ SELECT * FROM openrails.payment_methods pm
 WHERE pm.rail = $1 AND pm.rail_method_ref = $2
 LIMIT 1;
 
+-- name: GetPaymentMethodByRailMethodRefForPSP :one
+-- Provider webhook folds must bind the instrument to the exact account whose
+-- credentials verified the event. The same merchant may run multiple accounts
+-- on one rail, so a rail-only lookup is not sufficient for provider truth.
+SELECT * FROM openrails.payment_methods pm
+WHERE pm.rail = sqlc.arg(rail)
+  AND pm.psp_id = sqlc.arg(psp_id)::uuid
+  AND pm.rail_method_ref = sqlc.arg(rail_method_ref)
+LIMIT 1;
+
+-- name: LockStripePaymentState :exec
+-- Serialize Stripe payment-method/default convergence across workers and
+-- instances for one merchant, PSP, and provider customer.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
+
 -- name: UpdatePaymentMethod :execrows
 UPDATE openrails.payment_methods SET
     customer_id = $2,
@@ -207,6 +222,18 @@ UPDATE openrails.payment_methods SET
     parked_at = now(),
     updated_at = now()
 WHERE custodian = sqlc.arg(custodian)
+  AND rail_method_ref = sqlc.arg(rail_method_ref)
+  AND park_reason = '';
+
+-- name: ParkStripePaymentMethodByRef :execrows
+-- A Stripe detach is irreversible provider truth. Preserve the local evidence,
+-- but make the exact PSP-owned instrument unusable. RLS adds merchant scope.
+UPDATE openrails.payment_methods SET
+    park_reason = sqlc.arg(park_reason),
+    parked_at = COALESCE(parked_at, now()),
+    updated_at = now()
+WHERE rail = 'stripe'
+  AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail_method_ref = sqlc.arg(rail_method_ref)
   AND park_reason = '';
 

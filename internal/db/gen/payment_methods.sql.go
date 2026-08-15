@@ -438,6 +438,57 @@ func (q *Queries) GetPaymentMethodByRailMethodRef(ctx context.Context, arg GetPa
 	return i, err
 }
 
+const getPaymentMethodByRailMethodRefForPSP = `-- name: GetPaymentMethodByRailMethodRefForPSP :one
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods pm
+WHERE pm.rail = $1
+  AND pm.psp_id = $2::uuid
+  AND pm.rail_method_ref = $3
+LIMIT 1
+`
+
+type GetPaymentMethodByRailMethodRefForPSPParams struct {
+	Rail          string
+	PspID         uuid.UUID
+	RailMethodRef string
+}
+
+// Provider webhook folds must bind the instrument to the exact account whose
+// credentials verified the event. The same merchant may run multiple accounts
+// on one rail, so a rail-only lookup is not sufficient for provider truth.
+func (q *Queries) GetPaymentMethodByRailMethodRefForPSP(ctx context.Context, arg GetPaymentMethodByRailMethodRefForPSPParams) (OpenrailsPaymentMethod, error) {
+	row := q.db.QueryRow(ctx, getPaymentMethodByRailMethodRefForPSP, arg.Rail, arg.PspID, arg.RailMethodRef)
+	var i OpenrailsPaymentMethod
+	err := row.Scan(
+		&i.ID,
+		&i.Rail,
+		&i.InitialTransactionID,
+		&i.LastFour,
+		&i.CardType,
+		&i.ExpiryDate,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.RailCustomerRef,
+		&i.RailMethodRef,
+		&i.RebillDriver,
+		&i.StoredCredentialRecurringRef,
+		&i.StoredCredentialUnscheduledRef,
+		&i.Custodian,
+		&i.Fingerprint,
+		&i.NetworkTokenID,
+		&i.NetworkTokenStatus,
+		&i.NetworkTokenPar,
+		&i.ChargeVia,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.AccountUpdaterCheckedAt,
+	)
+	return i, err
+}
+
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many
 SELECT DISTINCT ON (s.payment_method_id)
     s.payment_method_id AS payment_method_id,
@@ -809,6 +860,17 @@ func (q *Queries) ListPaymentMethodsByRails(ctx context.Context, rails []string)
 	return items, nil
 }
 
+const lockStripePaymentState = `-- name: LockStripePaymentState :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Serialize Stripe payment-method/default convergence across workers and
+// instances for one merchant, PSP, and provider customer.
+func (q *Queries) LockStripePaymentState(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockStripePaymentState, lockKey)
+	return err
+}
+
 const parkPaymentMethodByMethodRef = `-- name: ParkPaymentMethodByMethodRef :execrows
 UPDATE openrails.payment_methods SET
     park_reason = $1,
@@ -832,6 +894,33 @@ type ParkPaymentMethodByMethodRefParams struct {
 // that reported the problem (or#879), since the method ref is its token id.
 func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaymentMethodByMethodRefParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkPaymentMethodByMethodRef, arg.ParkReason, arg.Custodian, arg.RailMethodRef)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const parkStripePaymentMethodByRef = `-- name: ParkStripePaymentMethodByRef :execrows
+UPDATE openrails.payment_methods SET
+    park_reason = $1,
+    parked_at = COALESCE(parked_at, now()),
+    updated_at = now()
+WHERE rail = 'stripe'
+  AND psp_id = $2::uuid
+  AND rail_method_ref = $3
+  AND park_reason = ''
+`
+
+type ParkStripePaymentMethodByRefParams struct {
+	ParkReason    string
+	PspID         uuid.UUID
+	RailMethodRef string
+}
+
+// A Stripe detach is irreversible provider truth. Preserve the local evidence,
+// but make the exact PSP-owned instrument unusable. RLS adds merchant scope.
+func (q *Queries) ParkStripePaymentMethodByRef(ctx context.Context, arg ParkStripePaymentMethodByRefParams) (int64, error) {
+	result, err := q.db.Exec(ctx, parkStripePaymentMethodByRef, arg.ParkReason, arg.PspID, arg.RailMethodRef)
 	if err != nil {
 		return 0, err
 	}

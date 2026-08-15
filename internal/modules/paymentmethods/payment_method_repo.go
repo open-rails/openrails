@@ -227,6 +227,21 @@ func (r *PaymentMethodRepo) GetByRailMethodRef(ctx context.Context, rail, method
 	return models.PaymentMethodFromGen(row)
 }
 
+func (r *PaymentMethodRepo) GetByRailMethodRefForPSP(ctx context.Context, rail string, pspID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
+	row, err := r.db.Gen(ctx).GetPaymentMethodByRailMethodRefForPSP(ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{
+		Rail:          rail,
+		PspID:         pspID,
+		RailMethodRef: methodRef,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrPaymentMethodNotFound
+		}
+		return nil, err
+	}
+	return models.PaymentMethodFromGen(row)
+}
+
 func (r *PaymentMethodRepo) Update(ctx context.Context, method *models.PaymentMethod) error {
 	meta, err := models.ToJSONB(method.Metadata)
 	if err != nil {

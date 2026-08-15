@@ -135,6 +135,30 @@ WHERE sub.customer_id = $1 AND sub.rail = $2
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC;
 
+-- name: SetStripeSubscriptionPaymentMethod :execrows
+-- Stripe provider truth owns the payment-method selection for Stripe-managed
+-- subscriptions. The exact PSP predicate prevents one account's webhook from
+-- relinking a sibling account's subscription.
+UPDATE openrails.subscriptions SET
+    payment_method_id = sqlc.narg(payment_method_id)::uuid,
+    updated_at = now()
+WHERE rail = 'stripe'
+  AND psp_id = sqlc.arg(psp_id)::uuid
+  AND rail_subscription_id = sqlc.arg(rail_subscription_id)
+  AND deleted_at IS NULL
+  AND payment_method_id IS DISTINCT FROM sqlc.narg(payment_method_id)::uuid;
+
+-- name: ClearStripePaymentMethodSubscriptions :execrows
+-- A detached Stripe method can no longer be charged or reattached. Clear only
+-- links owned by the exact PSP that delivered the detach event.
+UPDATE openrails.subscriptions SET
+    payment_method_id = NULL,
+    updated_at = now()
+WHERE rail = 'stripe'
+  AND psp_id = sqlc.arg(psp_id)::uuid
+  AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+  AND deleted_at IS NULL;
+
 -- name: ListActiveSubscriptionsByRail :many
 SELECT * FROM openrails.subscriptions sub
 WHERE sub.rail = $1 AND sub.status = 'active'
