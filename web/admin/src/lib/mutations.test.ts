@@ -6,6 +6,7 @@ import {
   cancelReprice,
   cancelSubscription,
   changeSubscriptionPaymentMethod,
+  changeSubscriptionTier,
   createOffChannelPayment,
   createPrice,
   createProduct,
@@ -19,6 +20,7 @@ import {
   listSubscriptions,
   markNotificationRead,
   previewRepriceAllPriorVersions,
+  previewSubscriptionTierChange,
   publishCatalog,
   putMerchantSettings,
   putPaymentProvider,
@@ -46,6 +48,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   cancelSubscription: vi.fn(),
   changeTeamRole: vi.fn(),
   changeSubscriptionPaymentMethod: vi.fn(),
+  changeSubscriptionTier: vi.fn(),
   createAlertRule: vi.fn(),
   createApiKey: vi.fn(),
   createOffChannelPayment: vi.fn(),
@@ -71,6 +74,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   putMerchantSettings: vi.fn(),
   putPaymentProvider: vi.fn(),
   previewRepriceAllPriorVersions: vi.fn(),
+  previewSubscriptionTierChange: vi.fn(),
   publishCatalog: vi.fn(),
   removeTeamMember: vi.fn(),
   refreshCatalogDrift: vi.fn(),
@@ -613,6 +617,51 @@ describe("subscription mutations", () => {
       "subscription-1",
       "payment-method-1"
     )
+  })
+
+  it("previews and applies a tier change, then refreshes affected billing data", async () => {
+    const queryClient = new QueryClient()
+    const subscriptionsKey = queryKeys.subscriptions()
+    const customerKey = queryKeys.customer("customer-1")
+    const paymentsKey = queryKeys.payments()
+    queryClient.setQueryData(subscriptionsKey, { data: [] })
+    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
+    queryClient.setQueryData(paymentsKey, { data: [] })
+    vi.mocked(previewSubscriptionTierChange).mockResolvedValue({} as never)
+    vi.mocked(changeSubscriptionTier).mockResolvedValue({} as never)
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.previewSubscriptionTierChange("subscription-1")
+      )
+      .execute("price-2")
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.changeSubscriptionTier(
+          queryClient,
+          "subscription-1",
+          "customer-1"
+        )
+      )
+      .execute("price-2")
+
+    expect(previewSubscriptionTierChange).toHaveBeenCalledWith(
+      "subscription-1",
+      "price-2"
+    )
+    expect(changeSubscriptionTier).toHaveBeenCalledWith(
+      "subscription-1",
+      "price-2"
+    )
+    expect(queryClient.getQueryState(subscriptionsKey)?.isInvalidated).toBe(
+      true
+    )
+    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(true)
   })
 
   it("cancels a scheduled reprice and refreshes subscription and catalog data", async () => {

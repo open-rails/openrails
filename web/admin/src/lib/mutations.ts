@@ -12,6 +12,7 @@ import {
   cancelSubscription,
   changeTeamRole,
   changeSubscriptionPaymentMethod,
+  changeSubscriptionTier,
   createAlertRule,
   createApiKey,
   createOffChannelPayment,
@@ -37,6 +38,7 @@ import {
   putMerchantSettings,
   putPaymentProvider,
   previewRepriceAllPriorVersions,
+  previewSubscriptionTierChange,
   publishCatalog,
   refreshCatalogDrift,
   refundPayment,
@@ -351,6 +353,41 @@ export const adminMutations = {
       onSuccess: () =>
         Promise.all([
           queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+          ...(customerKey
+            ? [queryClient.invalidateQueries({ queryKey: customerKey })]
+            : []),
+        ]),
+    })
+  },
+  previewSubscriptionTierChange: (subscriptionId: string) => {
+    const subscriptionsKey = queryKeys.subscriptions()
+    return mutationOptions({
+      mutationKey: [
+        ...subscriptionsKey,
+        subscriptionId,
+        "change-tier",
+        "preview",
+      ],
+      mutationFn: (priceId: string) =>
+        previewSubscriptionTierChange(subscriptionId, priceId),
+    })
+  },
+  changeSubscriptionTier: (
+    queryClient: QueryClient,
+    subscriptionId: string,
+    customerId?: string
+  ) => {
+    const subscriptionsKey = queryKeys.subscriptions()
+    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    const paymentsKey = queryKeys.payments()
+    return mutationOptions({
+      mutationKey: [...subscriptionsKey, subscriptionId, "change-tier"],
+      mutationFn: (priceId: string) =>
+        changeSubscriptionTier(subscriptionId, priceId),
+      onSuccess: () =>
+        Promise.all([
+          queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
+          queryClient.invalidateQueries({ queryKey: paymentsKey }),
           ...(customerKey
             ? [queryClient.invalidateQueries({ queryKey: customerKey })]
             : []),

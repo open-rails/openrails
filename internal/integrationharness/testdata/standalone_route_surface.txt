@@ -171,6 +171,8 @@ POST /v1/merchant/plan-migrations/preview
 POST /v1/merchant/plan-migrations/{id}/cancel
 POST /v1/merchant/reprices/{id}/cancel
 POST /v1/merchant/subscriptions/{id}/cancel
+POST /v1/merchant/subscriptions/{id}/change-tier
+POST /v1/merchant/subscriptions/{id}/change-tier/preview
 POST /v1/merchant/subscriptions/{id}/reprice
 POST /v1/merchant/subscriptions/{id}/resume
 POST /v1/merchant/team/invites
