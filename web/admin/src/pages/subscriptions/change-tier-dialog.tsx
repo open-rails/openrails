@@ -21,13 +21,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { SubscriptionStatus } from "@/lib/api/types"
+import type { Rail, SubscriptionStatus } from "@/lib/api/types"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
 import { formatDate, formatMicros } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
-import { tierChangeOptions } from "@/pages/subscriptions/tier-change-options"
+import {
+  adminTierChangeBlockReason,
+  tierChangeOptionLabel,
+  tierChangeOptions,
+} from "@/pages/subscriptions/tier-change-options"
 
 interface ChangeTierDialogProps {
   subscriptionId: string
@@ -36,6 +40,8 @@ interface ChangeTierDialogProps {
   priceId: string
   currency?: string
   scheduledPriceId?: string | null
+  hasPendingReprice: boolean
+  rail: Rail
   status: SubscriptionStatus
 }
 
@@ -46,6 +52,8 @@ export function ChangeTierDialog({
   priceId,
   currency,
   scheduledPriceId,
+  hasPendingReprice,
+  rail,
   status,
 }: ChangeTierDialogProps) {
   const [open, setOpen] = React.useState(false)
@@ -84,8 +92,12 @@ export function ChangeTierDialog({
   const selected = options.find((option) => option.price.id === selectedPriceId)
   const reviewed =
     reviewedPriceId === selectedPriceId ? preview.data : undefined
-  const canChange = status === "active" || status === "past_due"
-  const triggerDisabled = !canChange || Boolean(scheduledPriceId)
+  const blockReason = adminTierChangeBlockReason({
+    rail,
+    status,
+    scheduledPriceId,
+    hasPendingReprice,
+  })
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next)
@@ -117,14 +129,8 @@ export function ChangeTierDialog({
           <Button
             variant="outline"
             size="sm"
-            disabled={triggerDisabled}
-            title={
-              scheduledPriceId
-                ? "A tier change is already scheduled"
-                : canChange
-                  ? undefined
-                  : "Only active or past-due subscriptions can change tier"
-            }
+            disabled={Boolean(blockReason)}
+            title={blockReason}
           >
             Change tier
           </Button>
@@ -159,11 +165,7 @@ export function ChangeTierDialog({
               <SelectContent>
                 {options.map((option) => (
                   <SelectItem key={option.price.id} value={option.price.id}>
-                    {option.product.display_name} · {option.direction} ·{" "}
-                    {formatMicros(
-                      option.price.unit_amount,
-                      option.price.currency
-                    )}
+                    {tierChangeOptionLabel(option)}
                   </SelectItem>
                 ))}
               </SelectContent>

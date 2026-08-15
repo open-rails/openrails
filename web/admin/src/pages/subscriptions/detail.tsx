@@ -102,6 +102,8 @@ export function SubscriptionDetailPage() {
             priceId={sub.price_id}
             currency={sub.price?.currency}
             scheduledPriceId={sub.scheduled_price_id}
+            hasPendingReprice={Boolean(pendingReprice)}
+            rail={sub.rail}
             status={sub.status}
           />
           <ChangePaymentMethodDialog

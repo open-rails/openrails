@@ -2444,6 +2444,9 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 			return nil, ErrTierChangeNoSubscription
 		}
 	}
+	if err := validateTierChangeSubscriptionStatus(existingSub); err != nil {
+		return nil, err
+	}
 
 	// 3. Load current price and product
 	currentPrice, err := s.PriceService.GetByID(ctx, existingSub.PriceID)
@@ -2543,6 +2546,9 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 			return nil, ErrTierChangeNoSubscription
 		}
 	}
+	if err := validateTierChangeSubscriptionStatus(existingSub); err != nil {
+		return nil, err
+	}
 
 	currentPrice, err := s.PriceService.GetByID(ctx, existingSub.PriceID)
 	if err != nil {
@@ -2578,6 +2584,9 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	}
 
 	if newProduct.TierRank < currentProduct.TierRank {
+		if err := s.validateTierChangePreviewTarget(ctx, existingSub, currentPrice, newPrice, user, "downgrade"); err != nil {
+			return nil, err
+		}
 		// Downgrade: scheduled for period end, nothing charged now.
 		if existingSub.ScheduledPriceID != nil {
 			return nil, ErrTierChangePending
@@ -2596,6 +2605,10 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 		return resp, nil
 	}
 
+	if err := s.validateTierChangePreviewTarget(ctx, existingSub, currentPrice, newPrice, user, "upgrade"); err != nil {
+		return nil, err
+	}
+
 	// Upgrade: Model B reset-period — charge now, rebill the full price at now+cycle.
 	firstCharge, cycleHours, err := CalculateModelBUpgradeCharge(PriceAmountOf(currentPrice), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
 	if err != nil {
@@ -2612,6 +2625,61 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 		formatMinorAmount(newPrice.Amount, newPrice.Currency),
 		nextDate.Format("January 2, 2006"))
 	return resp, nil
+}
+
+func validateTierChangeSubscriptionStatus(subscription *models.Subscription) error {
+	if subscription.Status == models.StatusActive || subscription.Status == models.StatusPastDue {
+		return nil
+	}
+	return &TierChangeError{
+		HTTPStatus: http.StatusConflict,
+		Message:    "only active or past-due subscriptions can change tier",
+	}
+}
+
+func (s *CheckoutService) validateTierChangePreviewTarget(
+	ctx context.Context,
+	existingSub *models.Subscription,
+	currentPrice, newPrice *models.Price,
+	user *UserIdentity,
+	action string,
+) error {
+	switch {
+	case existingSub.Rail == models.RailStripe:
+		if _, ok := newPrice.GetStripeConfig(); !ok {
+			return &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "target price not configured for Stripe"}
+		}
+		if action == "downgrade" {
+			if _, ok := currentPrice.GetStripeConfig(); !ok {
+				return &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "current price not configured for Stripe"}
+			}
+		}
+	case rails.IsNMI(existingSub.Rail):
+		target, err := s.resolveRailTargetForPSP(ctx, string(existingSub.Rail), existingSub.PspID)
+		if err != nil {
+			return err
+		}
+		if _, err := requireNMIPlanForTarget(newPrice, target); err != nil {
+			return err
+		}
+	case existingSub.Rail == models.RailCCBill:
+		if action == "downgrade" {
+			return &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "CCBill subscription downgrades are not supported"}
+		}
+		if _, _, ok := newPrice.GetCCBillFlexForm(); !ok {
+			return &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "target price is not configured for CCBill"}
+		}
+		if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {
+			return &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "verified customer email and username are required for CCBill"}
+		}
+	case existingSub.Rail == models.RailSolana:
+		if !priceHasSolanaRecurring(newPrice) {
+			return &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "target price is not configured for Solana recurring billing"}
+		}
+	default:
+		return &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: fmt.Sprintf("unsupported rail: %s", existingSub.Rail)}
+	}
+	return nil
 }
 
 // formatMinorAmount renders an internal micro-unit amount as currency copy,
@@ -2905,6 +2973,9 @@ func (s *CheckoutService) processTierChangeNMI(
 		PriceID:        req.PriceID,
 		Rail:           string(existingSub.Rail),
 		IdempotencyKey: req.IdempotencyKey,
+	}
+	if user.Email != nil {
+		checkoutReq.Email = strings.TrimSpace(*user.Email)
 	}
 	if existingSub.PaymentMethodID != nil {
 		checkoutReq.PaymentMethodID = api.FormatPaymentMethodID(*existingSub.PaymentMethodID)

@@ -4,10 +4,12 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -28,12 +30,13 @@ func (merchantActionAuth) Authenticate(_ context.Context, _ *http.Request) (bill
 }
 
 type merchantActionChecker struct {
-	perm string
+	perm    string
+	allowed bool
 }
 
 func (c *merchantActionChecker) HasAdminPermission(_ context.Context, _, _, perm string) (bool, error) {
 	c.perm = perm
-	return false, nil
+	return c.allowed, nil
 }
 
 func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
@@ -266,6 +269,48 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 		if rec.Code != http.StatusNotFound {
 			t.Fatalf("%s %s should not be registered on primary merchant surface, got %d", tc.method, tc.path, rec.Code)
 		}
+	}
+}
+
+func TestMerchantTierChangeUsesOffChannelAdminLimit(t *testing.T) {
+	mux := http.NewServeMux()
+	delegated := fakeMerchantDelegatedResolver{resolved: &controlplane.ResolvedDelegated{
+		DelegatedSubject: "22222222-2222-4222-8222-222222222222",
+		MerchantID:       dbtest.TestMerchantID,
+		Merchant:         "merchant_1",
+		Permissions:      []string{controlplane.PermMerchantSubscriptionsUpdate},
+	}}
+	opts := Options{
+		Gate:         NewGate(GateOptions{DelegatedResolver: delegated}),
+		AdminLimiter: middleware.NewAdminOperationLimiter(nil),
+	}
+	RegisterMerchantActionRoutes(router.NewMux(mux, "/billing/v1/merchant", nil), nil, opts)
+
+	request := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader("{"))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer aaa.bbb.ccc")
+		mux.ServeHTTP(rec, req)
+		return rec
+	}
+
+	previewPath := "/billing/v1/merchant/subscriptions/11111111-1111-1111-1111-111111111111/change-tier/preview"
+	for range 12 {
+		if rec := request(previewPath); rec.Code == http.StatusTooManyRequests {
+			t.Fatal("preview must not consume the mutating tier-change limit")
+		}
+	}
+
+	actionPath := "/billing/v1/merchant/subscriptions/11111111-1111-1111-1111-111111111111/change-tier"
+	for range 10 {
+		if rec := request(actionPath); rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("tier change was limited before the off-channel allowance: %s", rec.Body.String())
+		}
+	}
+	if rec := request(actionPath); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected tier change to use the off-channel admin limit, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

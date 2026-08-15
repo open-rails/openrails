@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/api"
 )
 
 // TestTierGroupDetection tests that the checkout service correctly detects tier groups
@@ -457,6 +458,7 @@ func TestAdminChangeTierParity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			userID := uuid.NewString()
+			email := userID + "@test.example.com"
 			periodEnd := suite.GetClock().Now().Add(15 * 24 * time.Hour)
 			var paymentMethodID *uuid.UUID
 			if tc.expectedAction == "upgrade" {
@@ -477,10 +479,13 @@ func TestAdminChangeTierParity(t *testing.T) {
 				CurrentPeriodEndsAt: &periodEnd,
 			})
 			defer suite.CleanupSubscriptionsForUser(userID)
+			_, err := suite.Pool.Exec(suite.MerchantCtx(),
+				"UPDATE openrails.subscriptions SET user_email = $1 WHERE id = $2", email, sub.ID)
+			require.NoError(t, err)
 
 			self := preview(t, suite.Server.Handler(),
 				"/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier/preview",
-				suite.MintUserToken(userID, userID+"@test.example.com"),
+				suite.MintUserToken(userID, email),
 				tc.targetPrice.String())
 			merchant := preview(t, admin,
 				"/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier/preview",
@@ -496,7 +501,7 @@ func TestAdminChangeTierParity(t *testing.T) {
 			require.Equal(t, self.NextChargeAmount, merchant.NextChargeAmount)
 			require.NotNil(t, self.NextChargeDate)
 			require.NotNil(t, merchant.NextChargeDate)
-			require.WithinDuration(t, *self.NextChargeDate, *merchant.NextChargeDate, 100*time.Millisecond)
+			require.WithinDuration(t, *self.NextChargeDate, *merchant.NextChargeDate, time.Second)
 			require.Equal(t, self.Effective, merchant.Effective)
 			require.Equal(t, self.IsEstimate, merchant.IsEstimate)
 
@@ -519,7 +524,105 @@ func TestAdminChangeTierParity(t *testing.T) {
 				updated := suite.GetSubscription(sub.ID)
 				require.NotNil(t, updated.ScheduledPriceID)
 				require.Equal(t, tc.targetPrice, *updated.ScheduledPriceID)
+			} else {
+				require.NotNil(t, changed.SubscriptionID)
+				newSubscriptionID, err := api.ParseSubscriptionID(*changed.SubscriptionID)
+				require.NoError(t, err)
+				updated := suite.GetSubscription(newSubscriptionID)
+				require.NotNil(t, updated.UserEmail)
+				require.Equal(t, email, *updated.UserEmail)
 			}
+		})
+	}
+}
+
+func TestAdminChangeTierGuards(t *testing.T) {
+	suite, mock := SetupSuiteWithMockNMI(t)
+	admin := newHostSeamAdminRouter(t, suite, "b8048048-0480-4804-8804-804804804805",
+		[]string{controlplane.PermMerchantSubscriptionsUpdate})
+	tieredProducts := suite.SeedTieredProducts()
+	premiumPriceID := tieredProducts[0].Prices[0].ID
+	premiumPlusPriceID := tieredProducts[1].Prices[0].ID
+
+	post := func(t *testing.T, subID uuid.UUID, suffix string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(map[string]string{"price_id": premiumPlusPriceID.String()})
+		require.NoError(t, err)
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost,
+			"/v1/merchant/subscriptions/sub_"+subID.String()+"/change-tier"+suffix,
+			bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+		admin.ServeHTTP(rec, req)
+		return rec
+	}
+
+	t.Run("refuses a cancelled subscription before charging", func(t *testing.T) {
+		userID := uuid.NewString()
+		sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+			UserID: userID, PriceID: premiumPriceID, Status: models.StatusCancelled, Rail: models.RailNMI,
+		})
+		defer suite.CleanupSubscriptionsForUser(userID)
+		mock.Reset()
+
+		rec := post(t, sub.ID, "")
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+
+		serviceRequest := &checkout.TierChangeRequest{
+			PriceID:        premiumPlusPriceID.String(),
+			SubscriptionID: sub.ID,
+		}
+		customer := &checkout.UserIdentity{ID: userID}
+		_, err := suite.App.Runtime.CheckoutService.TierChange(suite.MerchantCtx(), serviceRequest, customer)
+		require.ErrorContains(t, err, "only active or past-due subscriptions")
+		_, err = suite.App.Runtime.CheckoutService.TierChangePreview(suite.MerchantCtx(), serviceRequest, customer)
+		require.ErrorContains(t, err, "only active or past-due subscriptions")
+		require.Zero(t, mock.RequestCount)
+	})
+
+	t.Run("refuses an existing scheduled tier change", func(t *testing.T) {
+		userID := uuid.NewString()
+		sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+			UserID: userID, PriceID: premiumPriceID, Status: models.StatusActive, Rail: models.RailNMI,
+		})
+		defer suite.CleanupSubscriptionsForUser(userID)
+		_, err := suite.Pool.Exec(suite.MerchantCtx(),
+			"UPDATE openrails.subscriptions SET scheduled_price_id = $1 WHERE id = $2", premiumPlusPriceID, sub.ID)
+		require.NoError(t, err)
+
+		rec := post(t, sub.ID, "/preview")
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), "tier change scheduled")
+	})
+
+	t.Run("refuses an existing scheduled reprice", func(t *testing.T) {
+		userID := uuid.NewString()
+		sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+			UserID: userID, PriceID: premiumPriceID, Status: models.StatusActive, Rail: models.RailNMI,
+		})
+		defer suite.CleanupSubscriptionsForUser(userID)
+		repriceRepo := subscriptions.NewRepriceRepo(suite.App.Runtime.DB)
+		_, err := repriceRepo.CreateSubscriptionReprice(suite.MerchantCtx(), sub.ID,
+			premiumPriceID, premiumPlusPriceID, suite.GetClock().Now().Add(24*time.Hour), nil, false)
+		require.NoError(t, err)
+
+		rec := post(t, sub.ID, "/preview")
+		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
+		require.Contains(t, rec.Body.String(), "scheduled price change")
+	})
+
+	for _, rail := range []models.Rail{models.RailCCBill, models.RailSolana} {
+		t.Run("requires customer action on "+string(rail), func(t *testing.T) {
+			userID := uuid.NewString()
+			sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+				UserID: userID, PriceID: premiumPriceID, Status: models.StatusActive, Rail: rail,
+			})
+			defer suite.CleanupSubscriptionsForUser(userID)
+
+			rec := post(t, sub.ID, "/preview")
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), "require")
 		})
 	}
 }

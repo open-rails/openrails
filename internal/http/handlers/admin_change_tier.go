@@ -5,9 +5,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -65,7 +67,7 @@ func adminTierChangeRequest(
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return nil, nil, false
 	}
-	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil {
+	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil || r.State.RepriceService == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
 		return nil, nil, false
 	}
@@ -83,6 +85,37 @@ func adminTierChangeRequest(
 	if subscription.CustomerID == uuid.Nil {
 		log.WithField("subscription_id", subscriptionID).Error("admin tier change: subscription has no customer")
 		r.ErrorJSON(http.StatusInternalServerError, "subscription customer unavailable")
+		return nil, nil, false
+	}
+	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue {
+		r.ErrorJSON(http.StatusConflict, "only active or past-due subscriptions can change tier")
+		return nil, nil, false
+	}
+	if subscription.ScheduledPriceID != nil {
+		r.ErrorJSON(http.StatusConflict, "subscription already has a tier change scheduled")
+		return nil, nil, false
+	}
+	if subscription.Rail == models.RailCCBill {
+		r.ErrorJSON(http.StatusBadRequest, "CCBill tier changes require customer self-service")
+		return nil, nil, false
+	}
+	if subscription.Rail == models.RailSolana {
+		r.ErrorJSON(http.StatusBadRequest, "Solana tier changes require the customer's wallet signature")
+		return nil, nil, false
+	}
+
+	scheduled := models.RepriceStatusScheduled
+	reprices, err := r.State.RepriceService.List(r.Request.Context(), subscriptions.SubscriptionRepriceFilter{
+		SubscriptionID: &subscriptionID,
+		Status:         &scheduled,
+	}, 1, 0)
+	if err != nil {
+		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: check scheduled reprices")
+		r.ErrorJSON(http.StatusInternalServerError, "failed to check scheduled price changes")
+		return nil, nil, false
+	}
+	if len(reprices) > 0 {
+		r.ErrorJSON(http.StatusConflict, "subscription already has a scheduled price change")
 		return nil, nil, false
 	}
 
