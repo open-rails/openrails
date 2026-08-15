@@ -211,6 +211,18 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantSubscriptionsUpdate,
 		},
 		{
+			name:   "merchant subscription tier change preview",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/subscriptions/11111111-1111-1111-1111-111111111111/change-tier/preview",
+			perm:   controlplane.PermMerchantSubscriptionsUpdate,
+		},
+		{
+			name:   "merchant subscription tier change",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/subscriptions/11111111-1111-1111-1111-111111111111/change-tier",
+			perm:   controlplane.PermMerchantSubscriptionsUpdate,
+		},
+		{
 			name:   "repair alerts read",
 			method: http.MethodGet,
 			path:   "/billing/v1/merchant/repair-alerts",

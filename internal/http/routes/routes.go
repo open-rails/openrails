@@ -754,6 +754,8 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	subs.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminSubscription), subRead...)
 	subs.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.AdminCancelSubscription), subCancel...)
 	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.AdminResumeSubscription), subWrite...)
+	subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.AdminChangeTier), subWrite...)
+	subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.AdminChangeTierPreview), subWrite...)
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
 	// #773 reprice: schedule a single subscription's price move at its next
 	// renewal on/after effective_at.

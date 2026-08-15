@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -210,6 +211,16 @@ func TestScheduledDowngrade(t *testing.T) {
 		assert.Equal(t, premiumProduct.ID.String(), refreshedSub.ProductID.String(), "Product should be switched to Premium")
 		assert.Nil(t, refreshedSub.ScheduledPriceID, "Scheduled price should be cleared")
 		assert.Equal(t, models.StatusActive, refreshedSub.Status, "Subscription should be active")
+
+		// Entitlements cut over at the same renewal boundary: the lower tier's
+		// retained entitlement remains while the higher-tier-only grant is gone.
+		ents := suite.GetEntitlementsByUserID(userID)
+		entNames := make(map[string]bool, len(ents))
+		for _, entitlement := range ents {
+			entNames[entitlement.Entitlement] = true
+		}
+		assert.True(t, entNames["premium"], "Should retain the lower-tier entitlement")
+		assert.False(t, entNames["extra"], "Should revoke the higher-tier-only entitlement")
 	})
 }
 
@@ -399,6 +410,118 @@ func TestChangeTierEndpoint(t *testing.T) {
 		assert.NotNil(t, refreshedSub.ScheduledPriceID, "Should have scheduled price ID")
 		assert.Equal(t, premiumPriceID.String(), refreshedSub.ScheduledPriceID.String(), "Scheduled price should be Premium")
 	})
+}
+
+// TestAdminChangeTierParity proves the merchant-admin routes delegate to the
+// same preview/action path as self-service. The delegated admin subject is
+// deliberately different from the subscription customer: the handler must
+// resolve the customer from the subscription rather than charge as the actor.
+func TestAdminChangeTierParity(t *testing.T) {
+	suite, _ := SetupSuiteWithMockNMI(t)
+	admin := newHostSeamAdminRouter(t, suite, "b8048048-0480-4804-8804-804804804804",
+		[]string{controlplane.PermMerchantSubscriptionsUpdate})
+
+	tieredProducts := suite.SeedTieredProducts()
+	premiumPriceID := tieredProducts[0].Prices[0].ID
+	premiumPlusPriceID := tieredProducts[1].Prices[0].ID
+
+	preview := func(
+		t *testing.T,
+		handler http.Handler,
+		path, token, priceID string,
+	) checkout.TierChangePreviewResponse {
+		t.Helper()
+		body, err := json.Marshal(map[string]string{"price_id": priceID})
+		require.NoError(t, err)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+		var response checkout.TierChangePreviewResponse
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		return response
+	}
+
+	for _, tc := range []struct {
+		name           string
+		currentPrice   uuid.UUID
+		targetPrice    uuid.UUID
+		expectedAction string
+	}{
+		{name: "upgrade", currentPrice: premiumPriceID, targetPrice: premiumPlusPriceID, expectedAction: "upgrade"},
+		{name: "downgrade", currentPrice: premiumPlusPriceID, targetPrice: premiumPriceID, expectedAction: "downgrade"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			userID := uuid.NewString()
+			periodEnd := suite.GetClock().Now().Add(15 * 24 * time.Hour)
+			var paymentMethodID *uuid.UUID
+			if tc.expectedAction == "upgrade" {
+				paymentMethod := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{
+					UserID:  userID,
+					Rail:    models.RailNMI,
+					VaultID: "vault-" + uuid.NewString()[:8],
+				})
+				paymentMethodID = &paymentMethod.ID
+			}
+			sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+				UserID:              userID,
+				PriceID:             tc.currentPrice,
+				Status:              models.StatusActive,
+				Rail:                models.RailNMI,
+				RailSubID:           "admin-tier-change-" + uuid.NewString()[:8],
+				PaymentMethodID:     paymentMethodID,
+				CurrentPeriodEndsAt: &periodEnd,
+			})
+			defer suite.CleanupSubscriptionsForUser(userID)
+
+			self := preview(t, suite.Server.Handler(),
+				"/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier/preview",
+				suite.MintUserToken(userID, userID+"@test.example.com"),
+				tc.targetPrice.String())
+			merchant := preview(t, admin,
+				"/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier/preview",
+				merchantDelegatedTestToken,
+				tc.targetPrice.String())
+
+			require.Equal(t, tc.expectedAction, merchant.Action)
+			require.Equal(t, self.Action, merchant.Action)
+			require.Equal(t, self.PriceID, merchant.PriceID)
+			require.Equal(t, self.Rail, merchant.Rail)
+			require.Equal(t, self.Currency, merchant.Currency)
+			require.Equal(t, self.AmountDueNow, merchant.AmountDueNow)
+			require.Equal(t, self.NextChargeAmount, merchant.NextChargeAmount)
+			require.NotNil(t, self.NextChargeDate)
+			require.NotNil(t, merchant.NextChargeDate)
+			require.WithinDuration(t, *self.NextChargeDate, *merchant.NextChargeDate, 100*time.Millisecond)
+			require.Equal(t, self.Effective, merchant.Effective)
+			require.Equal(t, self.IsEstimate, merchant.IsEstimate)
+
+			body, err := json.Marshal(map[string]string{"price_id": tc.targetPrice.String()})
+			require.NoError(t, err)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost,
+				"/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier",
+				bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+			admin.ServeHTTP(w, req)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			var changed checkout.TierChangeResponse
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &changed))
+			require.Equal(t, "succeeded", changed.Status)
+			require.Equal(t, tc.expectedAction, changed.Action)
+			if tc.expectedAction == "downgrade" {
+				updated := suite.GetSubscription(sub.ID)
+				require.NotNil(t, updated.ScheduledPriceID)
+				require.Equal(t, tc.targetPrice, *updated.ScheduledPriceID)
+			}
+		})
+	}
 }
 
 // TestCheckoutBlocksTierChanges tests that /v1/checkout returns an error for tier changes
