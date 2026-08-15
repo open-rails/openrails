@@ -46,6 +46,7 @@ import { formatDate, formatMicros, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
+import { ChangeTierDialog } from "@/pages/subscriptions/change-tier-dialog"
 
 export function SubscriptionDetailPage() {
   const { id = "" } = useParams()
@@ -94,6 +95,15 @@ export function SubscriptionDetailPage() {
           {resumable && (
             <ResumeButton id={sub.id} customerId={sub.customer_id} />
           )}
+          <ChangeTierDialog
+            subscriptionId={sub.id}
+            customerId={sub.customer_id}
+            productId={sub.product_id}
+            priceId={sub.price_id}
+            currency={sub.price?.currency}
+            scheduledPriceId={sub.scheduled_price_id}
+            status={sub.status}
+          />
           <ChangePaymentMethodDialog
             subscriptionId={sub.id}
             customerId={sub.customer_id}

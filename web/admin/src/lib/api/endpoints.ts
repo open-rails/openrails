@@ -35,6 +35,8 @@ import type {
   RepricePreviewResult,
   RepriceStatus,
   SubscriptionReprice,
+  TierChangePreview,
+  TierChangeResult,
   TeamInvite,
   TeamInviteResult,
   TeamMember,
@@ -176,6 +178,18 @@ export const changeSubscriptionPaymentMethod = (
       body: { payment_method_id: paymentMethodId },
     }
   )
+
+export const previewSubscriptionTierChange = (id: string, priceId: string) =>
+  api<TierChangePreview>(`/merchant/subscriptions/${id}/change-tier/preview`, {
+    method: "POST",
+    body: { price_id: priceId },
+  })
+
+export const changeSubscriptionTier = (id: string, priceId: string) =>
+  api<TierChangeResult>(`/merchant/subscriptions/${id}/change-tier`, {
+    method: "POST",
+    body: { price_id: priceId },
+  })
 
 // --- Payments ---
 

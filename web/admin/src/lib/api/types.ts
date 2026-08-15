@@ -23,6 +23,7 @@ export interface RawSubscription {
   customer_id?: string
   product_id: string
   price_id: string
+  scheduled_price_id?: string | null
   status: SubscriptionStatus
   started_at: string
   ended_at: string | null
@@ -181,6 +182,41 @@ export interface PaymentObject {
 
 export interface AdminSubscription extends RawSubscription {
   payments?: RawPayment[]
+}
+
+export interface TierChangePreview {
+  object: "tier_change_preview"
+  action: "upgrade" | "downgrade"
+  price_id: string
+  rail: Rail
+  currency: string
+  amount_due_now: number
+  next_charge_amount: number
+  next_charge_date?: string
+  effective: "now" | "period_end"
+  is_estimate: boolean
+  message?: string
+}
+
+export interface TierChangeResult {
+  object: "tier_change"
+  status: "succeeded" | "requires_action" | "blocked"
+  mode: "tier_change"
+  action: "upgrade" | "downgrade"
+  price_id: string
+  url?: string
+  payment: {
+    rail?: Rail
+    redirect_url?: string
+    transaction_id?: string
+  }
+  subscription_id?: string
+  message?: string
+  delayed_start?: string
+  currency?: string
+  amount_due_now: number
+  next_charge_amount: number
+  next_charge_date?: string
 }
 
 // --- Catalog ---
