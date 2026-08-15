@@ -459,7 +459,12 @@ func (s *StripeWebhookService) handlePaymentMethodDetached(ctx context.Context, 
 					}
 					if err := gen.New(tx).LockStripePaymentState(
 						ctx,
-						stripePaymentStateLockKey(merchantID.UUID(), method.PspID, customerID),
+						stripePaymentStateLockKey(
+							merchantID.UUID(),
+							method.PspID,
+							stripeCustomerLockSubject,
+							customerID,
+						),
 					); err != nil {
 						return fmt.Errorf("lock detached stripe customer reconciliation: %w", err)
 					}
@@ -546,14 +551,21 @@ func (s *StripeWebhookService) withStripePaymentStateTx(
 	if err != nil {
 		return fmt.Errorf("stripe payment-method reconciliation requires PSP scope: %w", err)
 	}
-	subject := strings.TrimSpace(customerID)
-	if subject == "" {
-		subject = strings.TrimSpace(paymentMethodID)
+	subjectKind := stripeCustomerLockSubject
+	subjectID := strings.TrimSpace(customerID)
+	if subjectID == "" {
+		subjectKind = stripePaymentMethodLockSubject
+		subjectID = strings.TrimSpace(paymentMethodID)
 	}
-	if subject == "" {
+	if subjectID == "" {
 		return errors.New("stripe payment-method reconciliation requires a customer or payment method")
 	}
-	lockKey := stripePaymentStateLockKey(merchantID.UUID(), pspID, subject)
+	lockKey := stripePaymentStateLockKey(
+		merchantID.UUID(),
+		pspID,
+		subjectKind,
+		subjectID,
+	)
 	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := gen.New(tx).LockStripePaymentState(ctx, lockKey); err != nil {
 			return fmt.Errorf("lock stripe payment-method reconciliation: %w", err)
@@ -562,8 +574,24 @@ func (s *StripeWebhookService) withStripePaymentStateTx(
 	})
 }
 
-func stripePaymentStateLockKey(merchantID, pspID uuid.UUID, subject string) string {
-	return "stripe-payment-state:" + merchantID.String() + ":" + pspID.String() + ":" + strings.TrimSpace(subject)
+type stripePaymentStateLockSubject string
+
+const (
+	stripeCustomerLockSubject      stripePaymentStateLockSubject = "customer"
+	stripePaymentMethodLockSubject stripePaymentStateLockSubject = "method"
+)
+
+func stripePaymentStateLockKey(
+	merchantID uuid.UUID,
+	pspID uuid.UUID,
+	subject stripePaymentStateLockSubject,
+	subjectID string,
+) string {
+	return "payments:stripe:" +
+		merchantID.String() + ":" +
+		pspID.String() + ":" +
+		string(subject) + ":" +
+		strings.TrimSpace(subjectID)
 }
 
 func recordStripeDetachedPaymentMethodFinding(ctx context.Context, database *db.DB, method *models.PaymentMethod) error {

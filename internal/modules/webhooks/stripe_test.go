@@ -4,7 +4,45 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+
+	"github.com/google/uuid"
 )
+
+func TestStripePaymentStateLockKey(t *testing.T) {
+	merchantID := uuid.MustParse("5b8a5905-4231-4e94-9fcc-e8dbf6eb0367")
+	pspID := uuid.MustParse("7319679b-ffdc-4e69-be1d-538458ee2cdb")
+
+	tests := []struct {
+		name      string
+		subject   stripePaymentStateLockSubject
+		subjectID string
+		expected  string
+	}{
+		{
+			name:      "customer",
+			subject:   stripeCustomerLockSubject,
+			subjectID: " cus_123 ",
+			expected: "payments:stripe:5b8a5905-4231-4e94-9fcc-e8dbf6eb0367:" +
+				"7319679b-ffdc-4e69-be1d-538458ee2cdb:customer:cus_123",
+		},
+		{
+			name:      "payment method",
+			subject:   stripePaymentMethodLockSubject,
+			subjectID: " pm_123 ",
+			expected: "payments:stripe:5b8a5905-4231-4e94-9fcc-e8dbf6eb0367:" +
+				"7319679b-ffdc-4e69-be1d-538458ee2cdb:method:pm_123",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := stripePaymentStateLockKey(merchantID, pspID, test.subject, test.subjectID)
+			if got != test.expected {
+				t.Fatalf("stripePaymentStateLockKey() = %q, want %q", got, test.expected)
+			}
+		})
+	}
+}
 
 // Regression for the 2026-04-22.preview invoice shape: subscription metadata
 // lives under parent.subscription_details and the line-item price under
