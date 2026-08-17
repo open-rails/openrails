@@ -131,6 +131,12 @@ named at runtime (`config.RiverSchema`). sqlc has no type information for it and
 could not express the schema-qualified name anyway. Only the schema is
 interpolated, after an identifier check; the kind list is a bound parameter.
 
+`LockUsageEventsForMeterCorrection` is also PERMANENT, but remains in sqlc: it
+holds a table-level transaction lock so an event insert cannot race a meter's
+semantic correction. PostgreSQL does not permit `EXPLAIN LOCK TABLE`, so the
+auditor cannot plan it; execution and the surrounding concurrency test are the
+applicable proofs.
+
 **DEBT** is ordinary queries not yet ported to `internal/db/queries/*.sql`.
 Nothing about them requires raw SQL.
 

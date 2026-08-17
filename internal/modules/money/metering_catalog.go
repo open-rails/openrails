@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
@@ -102,35 +103,28 @@ func (s *MoneyService) ListUsageMeters(ctx context.Context, limit, offset int) (
 	}
 
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		if err := s.db.Qx(ctx).QueryRow(ctx, `
-SELECT count(*)
-FROM openrails.catalog_meters
-WHERE merchant_id = $1`, tenant.UUID()).Scan(&page.Total); err != nil {
+		queries := gen.New(s.db.Qx(ctx))
+		page.Total, err = queries.CountUsageMeters(ctx, tenant.UUID())
+		if err != nil {
 			return fmt.Errorf("count usage meters: %w", err)
 		}
 
-		rows, err := s.db.Qx(ctx).Query(
-			ctx,
-			usageMeterSelect+` ORDER BY meter.key LIMIT $2 OFFSET $3`,
-			tenant.UUID(),
-			page.Limit,
-			page.Offset,
-		)
+		rows, err := queries.ListUsageMetersWithCatalog(ctx, gen.ListUsageMetersWithCatalogParams{
+			MerchantID: tenant.UUID(),
+			PageLimit:  int32(page.Limit),
+			PageOffset: int32(page.Offset),
+		})
 		if err != nil {
 			return fmt.Errorf("list usage meters: %w", err)
 		}
-		defer rows.Close()
 
-		page.Items = make([]UsageMeter, 0, page.Limit)
-		for rows.Next() {
-			meter, err := scanUsageMeter(rows)
+		page.Items = make([]UsageMeter, 0, len(rows))
+		for _, row := range rows {
+			meter, err := usageMeterFromListRow(row)
 			if err != nil {
 				return err
 			}
 			page.Items = append(page.Items, meter)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate usage meters: %w", err)
 		}
 		return nil
 	})
@@ -153,18 +147,18 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*Usa
 
 	var meter UsageMeter
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		row := s.db.Qx(ctx).QueryRow(
+		row, queryErr := gen.New(s.db.Qx(ctx)).GetUsageMeterWithCatalog(
 			ctx,
-			usageMeterSelect+` AND meter.key = $2`,
-			tenant.UUID(),
-			meterKey,
+			gen.GetUsageMeterWithCatalogParams{MerchantID: tenant.UUID(), MeterKey: meterKey},
 		)
-		var err error
-		meter, err = scanUsageMeter(row)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrUsageMeterNotFound
+		if queryErr != nil {
+			if errors.Is(queryErr, pgx.ErrNoRows) {
+				return ErrUsageMeterNotFound
+			}
+			return queryErr
 		}
-		return err
+		meter, queryErr = usageMeterFromGetRow(row)
+		return queryErr
 	})
 	if err != nil {
 		return nil, err
@@ -194,192 +188,147 @@ func (s *MoneyService) ListUsageMeterOverrides(
 	}
 
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var exists bool
-		if err := s.db.Qx(ctx).QueryRow(ctx, `
-SELECT EXISTS (
-    SELECT 1 FROM openrails.catalog_meters
-    WHERE merchant_id = $1 AND key = $2
-)`, tenant.UUID(), meterKey).Scan(&exists); err != nil {
+		queries := gen.New(s.db.Qx(ctx))
+		exists, err := queries.UsageMeterExists(ctx, gen.UsageMeterExistsParams{
+			MerchantID: tenant.UUID(),
+			MeterKey:   meterKey,
+		})
+		if err != nil {
 			return fmt.Errorf("check usage meter: %w", err)
 		}
 		if !exists {
 			return ErrUsageMeterNotFound
 		}
 
-		if err := s.db.Qx(ctx).QueryRow(ctx, `
-SELECT count(*)
-FROM openrails.catalog_rate_cards
-WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NOT NULL`, tenant.UUID(), meterKey).Scan(&page.Total); err != nil {
+		page.Total, err = queries.CountUsageMeterOverrides(ctx, gen.CountUsageMeterOverridesParams{
+			MerchantID: tenant.UUID(),
+			MeterKey:   meterKey,
+		})
+		if err != nil {
 			return fmt.Errorf("count usage meter overrides: %w", err)
 		}
 
-		rows, err := s.db.Qx(ctx).Query(ctx, `
-SELECT card.customer_id,
-       COALESCE(customer.subject, ''),
-       COALESCE((
-           SELECT BTRIM(subscription.user_email)
-           FROM openrails.subscriptions subscription
-           WHERE subscription.merchant_id = card.merchant_id
-             AND subscription.customer_id = card.customer_id
-             AND subscription.deleted_at IS NULL
-             AND NULLIF(BTRIM(subscription.user_email), '') IS NOT NULL
-           ORDER BY subscription.created_at DESC, subscription.id DESC
-           LIMIT 1
-       ), ''),
-       card.price,
-       card.allowance,
-       card.created_at,
-       card.updated_at
-FROM openrails.catalog_rate_cards card
-JOIN openrails.customers customer
-  ON customer.merchant_id = card.merchant_id
- AND customer.id = card.customer_id
-WHERE card.merchant_id = $1
-  AND card.meter_key = $2
-  AND card.customer_id IS NOT NULL
-ORDER BY card.updated_at DESC, card.customer_id
-LIMIT $3 OFFSET $4`, tenant.UUID(), meterKey, page.Limit, page.Offset)
+		rows, err := queries.ListUsageMeterOverrides(ctx, gen.ListUsageMeterOverridesParams{
+			MerchantID: tenant.UUID(),
+			MeterKey:   meterKey,
+			PageLimit:  int32(page.Limit),
+			PageOffset: int32(page.Offset),
+		})
 		if err != nil {
 			return fmt.Errorf("list usage meter overrides: %w", err)
 		}
-		defer rows.Close()
 
-		page.Items = make([]UsageMeterOverride, 0, page.Limit)
-		for rows.Next() {
-			var item UsageMeterOverride
-			var priceJSON, allowanceJSON []byte
-			if err := rows.Scan(
-				&item.CustomerID,
-				&item.Subject,
-				&item.Email,
-				&priceJSON,
-				&allowanceJSON,
-				&item.CreatedAt,
-				&item.UpdatedAt,
-			); err != nil {
-				return fmt.Errorf("scan usage meter override: %w", err)
+		page.Items = make([]UsageMeterOverride, 0, len(rows))
+		for _, row := range rows {
+			if row.CustomerID == nil {
+				return fmt.Errorf("usage meter override has no customer")
 			}
-			if err := decodeRateCard(priceJSON, allowanceJSON, &item.Price, &item.Allowance); err != nil {
+			item := UsageMeterOverride{
+				CustomerID: *row.CustomerID,
+				Subject:    row.Subject,
+				CreatedAt:  row.CreatedAt,
+				UpdatedAt:  row.UpdatedAt,
+			}
+			if row.Email != nil {
+				item.Email = *row.Email
+			}
+			if err := decodeRateCard(row.Price, row.Allowance, &item.Price, &item.Allowance); err != nil {
 				return fmt.Errorf("decode usage meter override for customer %s: %w", item.CustomerID, err)
 			}
 			page.Items = append(page.Items, item)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate usage meter overrides: %w", err)
 		}
 		return nil
 	})
 	return page, err
 }
 
-const usageMeterSelect = `
-WITH activity AS (
-    SELECT event_type, count(*) AS event_count, max(occurred_at) AS last_event_at
-    FROM openrails.usage_events
-    WHERE merchant_id = $1
-    GROUP BY event_type
-), override_counts AS (
-    SELECT meter_key, count(*) AS override_count
-    FROM openrails.catalog_rate_cards
-    WHERE merchant_id = $1 AND customer_id IS NOT NULL
-    GROUP BY meter_key
-)
-SELECT meter.key,
-       COALESCE(meter.event_type, ''),
-       COALESCE(NULLIF(meter.event_type, ''), meter.key) AS effective_event_type,
-       COALESCE(meter.value_property, ''),
-       COALESCE(meter.aggregation, ''),
-       COALESCE(meter.unit, ''),
-       meter.group_by,
-       meter.created_at,
-       meter.updated_at,
-       COALESCE(override_counts.override_count, 0),
-       COALESCE(activity.event_count, 0) > 0 AS has_activity,
-       activity.last_event_at,
-       card.id,
-       card.product_id,
-       COALESCE(product.key, ''),
-       card.filter,
-       card.price,
-       card.allowance,
-       card.created_at,
-       card.updated_at
-FROM openrails.catalog_meters meter
-LEFT JOIN activity
-  ON activity.event_type = COALESCE(NULLIF(meter.event_type, ''), meter.key)
-LEFT JOIN override_counts
-  ON override_counts.meter_key = meter.key
-LEFT JOIN openrails.catalog_rate_cards card
-  ON card.merchant_id = meter.merchant_id
- AND card.meter_key = meter.key
- AND card.customer_id IS NULL
-LEFT JOIN openrails.products product
-  ON product.merchant_id = card.merchant_id
- AND product.id = card.product_id
-WHERE meter.merchant_id = $1`
-
-type usageMeterScanner interface {
-	Scan(dest ...any) error
+type usageMeterRecord struct {
+	key                string
+	eventType          string
+	effectiveEventType string
+	valueProperty      string
+	aggregation        string
+	unit               string
+	groupBy            []byte
+	createdAt          time.Time
+	updatedAt          time.Time
+	overrideCount      int64
+	hasActivity        bool
+	lastEventAt        *time.Time
+	cardID             *uuid.UUID
+	productID          *uuid.UUID
+	productKey         *string
+	filter             []byte
+	price              []byte
+	allowance          []byte
+	cardCreatedAt      *time.Time
+	cardUpdatedAt      *time.Time
 }
 
-func scanUsageMeter(row usageMeterScanner) (UsageMeter, error) {
+func usageMeterFromListRow(row gen.ListUsageMetersWithCatalogRow) (UsageMeter, error) {
+	return usageMeterFromRecord(usageMeterRecord{
+		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
+		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
+		groupBy: row.GroupBy, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
+		overrideCount: row.OverrideCount, hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
+		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
+		filter: row.Filter, price: row.Price, allowance: row.Allowance,
+		cardCreatedAt: row.CardCreatedAt, cardUpdatedAt: row.CardUpdatedAt,
+	})
+}
+
+func usageMeterFromGetRow(row gen.GetUsageMeterWithCatalogRow) (UsageMeter, error) {
+	return usageMeterFromRecord(usageMeterRecord{
+		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
+		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
+		groupBy: row.GroupBy, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
+		overrideCount: row.OverrideCount, hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
+		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
+		filter: row.Filter, price: row.Price, allowance: row.Allowance,
+		cardCreatedAt: row.CardCreatedAt, cardUpdatedAt: row.CardUpdatedAt,
+	})
+}
+
+func usageMeterFromRecord(row usageMeterRecord) (UsageMeter, error) {
 	var meter UsageMeter
-	var groupByJSON []byte
-	var cardID, productID *uuid.UUID
-	var productKey *string
-	var filterJSON, priceJSON, allowanceJSON []byte
-	var cardCreatedAt, cardUpdatedAt *time.Time
-	if err := row.Scan(
-		&meter.Key,
-		&meter.EventType,
-		&meter.EffectiveEventType,
-		&meter.ValueProperty,
-		&meter.Aggregation,
-		&meter.Unit,
-		&groupByJSON,
-		&meter.CreatedAt,
-		&meter.UpdatedAt,
-		&meter.OverrideCount,
-		&meter.HasActivity,
-		&meter.LastEventAt,
-		&cardID,
-		&productID,
-		&productKey,
-		&filterJSON,
-		&priceJSON,
-		&allowanceJSON,
-		&cardCreatedAt,
-		&cardUpdatedAt,
-	); err != nil {
-		return meter, err
-	}
-	if err := json.Unmarshal(groupByJSON, &meter.GroupBy); err != nil {
+	meter.Key = row.key
+	meter.EventType = row.eventType
+	meter.EffectiveEventType = row.effectiveEventType
+	meter.ValueProperty = row.valueProperty
+	meter.Aggregation = row.aggregation
+	meter.Unit = row.unit
+	meter.CreatedAt = row.createdAt
+	meter.UpdatedAt = row.updatedAt
+	meter.OverrideCount = row.overrideCount
+	meter.HasActivity = row.hasActivity
+	meter.LastEventAt = row.lastEventAt
+	if err := json.Unmarshal(row.groupBy, &meter.GroupBy); err != nil {
 		return meter, fmt.Errorf("decode meter %q group_by: %w", meter.Key, err)
 	}
 	if meter.GroupBy == nil {
 		meter.GroupBy = map[string]string{}
 	}
 	meter.BillingSupported = pricing.BillingSupported(meter.Aggregation)
-	if cardID == nil {
+	if row.cardID == nil {
 		return meter, nil
 	}
-	if productID == nil || productKey == nil || cardCreatedAt == nil || cardUpdatedAt == nil {
+	if row.productID == nil || row.productKey == nil || row.cardCreatedAt == nil || row.cardUpdatedAt == nil {
 		return meter, fmt.Errorf("meter %q default rate card is incomplete", meter.Key)
 	}
 	card := DefaultUsageRateCard{
-		ID:         *cardID,
-		ProductID:  *productID,
-		ProductKey: *productKey,
-		CreatedAt:  *cardCreatedAt,
-		UpdatedAt:  *cardUpdatedAt,
+		ID:         *row.cardID,
+		ProductID:  *row.productID,
+		ProductKey: *row.productKey,
+		CreatedAt:  *row.cardCreatedAt,
+		UpdatedAt:  *row.cardUpdatedAt,
 	}
-	if err := json.Unmarshal(filterJSON, &card.Filter); err != nil {
+	if err := json.Unmarshal(row.filter, &card.Filter); err != nil {
 		return meter, fmt.Errorf("decode meter %q rate card filter: %w", meter.Key, err)
 	}
 	if card.Filter == nil {
 		card.Filter = map[string][]string{}
 	}
-	if err := decodeRateCard(priceJSON, allowanceJSON, &card.Price, &card.Allowance); err != nil {
+	if err := decodeRateCard(row.price, row.allowance, &card.Price, &card.Allowance); err != nil {
 		return meter, fmt.Errorf("decode meter %q default rate card: %w", meter.Key, err)
 	}
 	meter.DefaultRateCard = &card
@@ -442,16 +391,15 @@ func usageMeterHasActivity(
 	// Meter corrections are rare control-plane writes. Hold inserts while the
 	// activity predicate is checked so a concurrent report cannot slip between
 	// the check and the semantic update and then be reinterpreted.
-	if _, err := tx.Exec(ctx, `LOCK TABLE openrails.usage_events IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+	queries := gen.New(tx)
+	if err := queries.LockUsageEventsForMeterCorrection(ctx); err != nil {
 		return false, fmt.Errorf("lock usage activity: %w", err)
 	}
-	var hasActivity bool
-	if err := tx.QueryRow(ctx, `
-SELECT EXISTS (
-    SELECT 1
-    FROM openrails.usage_events
-    WHERE merchant_id = $1 AND event_type = ANY($2::text[])
-)`, merchantID, eventTypes).Scan(&hasActivity); err != nil {
+	hasActivity, err := queries.UsageEventsExistForTypes(ctx, gen.UsageEventsExistForTypesParams{
+		MerchantID: merchantID,
+		EventTypes: eventTypes,
+	})
+	if err != nil {
 		return false, fmt.Errorf("check usage meter activity: %w", err)
 	}
 	return hasActivity, nil
@@ -471,31 +419,22 @@ func loadUsageMeterForRateCard(
 	meterKey string,
 ) (pricing.Meter, error) {
 	var meter pricing.Meter
-	var groupByJSON []byte
-	err := tx.QueryRow(ctx, `
-SELECT key,
-       COALESCE(event_type, ''),
-       COALESCE(value_property, ''),
-       COALESCE(aggregation, ''),
-       COALESCE(unit, ''),
-       group_by
-FROM openrails.catalog_meters
-WHERE merchant_id = $1 AND key = $2
-FOR UPDATE`, merchantID, meterKey).Scan(
-		&meter.Key,
-		&meter.EventType,
-		&meter.ValueProperty,
-		&meter.Aggregation,
-		&meter.Unit,
-		&groupByJSON,
-	)
+	row, err := gen.New(tx).GetUsageMeterForUpdate(ctx, gen.GetUsageMeterForUpdateParams{
+		MerchantID: merchantID,
+		MeterKey:   meterKey,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return meter, ErrUsageMeterNotFound
 	}
 	if err != nil {
 		return meter, fmt.Errorf("load usage meter: %w", err)
 	}
-	if err := json.Unmarshal(groupByJSON, &meter.GroupBy); err != nil {
+	meter.Key = row.Key
+	meter.EventType = row.EventType
+	meter.ValueProperty = row.ValueProperty
+	meter.Aggregation = row.Aggregation
+	meter.Unit = row.Unit
+	if err := json.Unmarshal(row.GroupBy, &meter.GroupBy); err != nil {
 		return meter, fmt.Errorf("decode usage meter group_by: %w", err)
 	}
 	if meter.GroupBy == nil {
@@ -516,12 +455,11 @@ func ensureAllowanceMeter(
 	if allowance == nil || allowance.AccrueFrom == "" {
 		return nil
 	}
-	var exists bool
-	if err := tx.QueryRow(ctx, `
-SELECT EXISTS (
-    SELECT 1 FROM openrails.catalog_meters
-    WHERE merchant_id = $1 AND key = $2
-)`, merchantID, allowance.AccrueFrom).Scan(&exists); err != nil {
+	exists, err := gen.New(tx).UsageMeterExists(ctx, gen.UsageMeterExistsParams{
+		MerchantID: merchantID,
+		MeterKey:   allowance.AccrueFrom,
+	})
+	if err != nil {
 		return fmt.Errorf("check allowance source meter: %w", err)
 	}
 	if !exists {
@@ -536,12 +474,10 @@ func loadDefaultRateCardCurrency(
 	merchantID uuid.UUID,
 	meterKey string,
 ) (string, error) {
-	var priceJSON []byte
-	err := tx.QueryRow(ctx, `
-SELECT price
-FROM openrails.catalog_rate_cards
-WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NULL
-FOR UPDATE`, merchantID, meterKey).Scan(&priceJSON)
+	priceJSON, err := gen.New(tx).GetDefaultUsageRateCardPriceForUpdate(
+		ctx,
+		gen.GetDefaultUsageRateCardPriceForUpdateParams{MerchantID: merchantID, MeterKey: meterKey},
+	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrDefaultRateCardRequired
 	}
@@ -561,12 +497,10 @@ func ensureActiveProduct(
 	merchantID uuid.UUID,
 	productID uuid.UUID,
 ) error {
-	var id uuid.UUID
-	err := tx.QueryRow(ctx, `
-SELECT id
-FROM openrails.products
-WHERE merchant_id = $1 AND id = $2 AND NOT archived
-FOR SHARE`, merchantID, productID).Scan(&id)
+	_, err := gen.New(tx).GetActiveMeteringProductForShare(ctx, gen.GetActiveMeteringProductForShareParams{
+		MerchantID: merchantID,
+		ProductID:  productID,
+	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrRateCardProductNotFound
 	}
