@@ -658,6 +658,14 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	// collision) — mode-1-guarded like every other catalog write.
 	prices.Handle(http.MethodPost, "/:id/key", h(httphandlers.AdminSetPriceKey), writeMW...)
 
+	meters := catalog.Group("/meters")
+	meters.Handle(http.MethodGet, "", h(httphandlers.AdminListUsageMeters), readMW...)
+	meters.Handle(http.MethodGet, "/:key", h(httphandlers.AdminGetUsageMeter), readMW...)
+	meters.Handle(http.MethodGet, "/:key/overrides", h(httphandlers.AdminListUsageMeterOverrides), readMW...)
+	meters.Handle(http.MethodPut, "/:key", h(httphandlers.AdminPutUsageMeter), writeMW...)
+	meters.Handle(http.MethodPut, "/:key/rate-card", h(httphandlers.AdminPutDefaultUsageRateCard), writeMW...)
+	meters.Handle(http.MethodDelete, "/:key/rate-card", h(httphandlers.AdminDeleteDefaultUsageRateCard), writeMW...)
+
 	catalog.Handle(http.MethodGet, "/drift", h(httphandlers.AdminListCatalogDrift), readMW...)
 	catalog.Handle(http.MethodPost, "/drift/refresh", h(httphandlers.AdminRefreshCatalogDrift), writeMW...)
 	catalog.Handle(http.MethodPost, "/publish", h(httphandlers.MerchantPublishCatalog), writeMW...)

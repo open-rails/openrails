@@ -238,6 +238,114 @@ export interface CatalogProduct {
   updated_at: string
 }
 
+export type UsageAggregation =
+  | "sum"
+  | "count"
+  | "max"
+  | "min"
+  | "unique_count"
+  | "latest"
+export type UsagePriceModel = "per_unit" | "tiered" | "package"
+
+export interface UsageRateTier {
+  up_to: number | null
+  unit_amount?: number
+  flat_amount?: number
+}
+
+export interface UsageRateMatrixCell {
+  unit_amount: number
+  maximum_amount?: number
+  included?: number
+}
+
+export interface UsageRatePrice {
+  model: UsagePriceModel
+  currency: string
+  per_unit?: {
+    unit_amount?: number
+    divide_by?: number
+    round?: "up" | "down" | "half_up"
+    maximum_amount?: number
+    matrix?: {
+      dimension: string
+      cells: Record<string, UsageRateMatrixCell>
+    }
+  }
+  tiered?: {
+    mode: "volume" | "graduated"
+    tiers: UsageRateTier[]
+  }
+  package?: {
+    amount: number
+    package_size: number
+    free_units?: number
+  }
+}
+
+export interface UsageAllowance {
+  included?: number
+  accrue_from?: string
+  cap?: string
+}
+
+export interface DefaultUsageRateCard {
+  id: string
+  product_id: string
+  product_key: string
+  filter: Record<string, string[]>
+  price: UsageRatePrice
+  allowance?: UsageAllowance
+  created_at: string
+  updated_at: string
+}
+
+export interface UsageMeter {
+  key: string
+  event_type?: string
+  effective_event_type: string
+  value_property?: string
+  aggregation: UsageAggregation
+  unit?: string
+  group_by: Record<string, string>
+  billing_supported: boolean
+  default_rate_card?: DefaultUsageRateCard
+  override_count: number
+  has_activity: boolean
+  last_event_at?: string
+  created_at: string
+  updated_at: string
+  configuration_source: "api" | "manifest"
+  writes_allowed: boolean
+}
+
+export interface UsageMeterOverride {
+  customer_id: string
+  subject?: string
+  email?: string
+  price: UsageRatePrice
+  allowance?: UsageAllowance
+  created_at: string
+  updated_at: string
+}
+
+export interface CustomerUsageRateOverride {
+  meter_key: string
+  price: UsageRatePrice
+  allowance?: UsageAllowance
+  created_at: string
+  updated_at: string
+}
+
+export interface UsageMeterPage {
+  items: UsageMeter[]
+  total: number
+  limit: number
+  offset: number
+  configuration_source: "api" | "manifest"
+  writes_allowed: boolean
+}
+
 // CatalogProviderState is one entry of prices.psp_links as the API projects it
 // (or#812): the map is keyed by PSP key ("mobius"), and `ids` is the stored
 // link entry verbatim — including `ids.rail`, the gateway the entry lives on.

@@ -10,6 +10,7 @@ import {
   getPriceKeyHistory,
   getProduct,
   getSubscription,
+  getUsageMeter,
   getUnreadCount,
   dryRunCheckoutRouting,
   listAlertRules,
@@ -17,6 +18,7 @@ import {
   listApiKeys,
   listCatalogDrift,
   listCustomers,
+  listCustomerUsageRateOverrides,
   listFindings,
   listNotifications,
   listPaymentProviders,
@@ -27,6 +29,8 @@ import {
   listRepriceBatchesByKey,
   listReprices,
   listSubscriptions,
+  listUsageMeterOverrides,
+  listUsageMeters,
   listTeam,
   listTeamInvites,
   listWebhooks,
@@ -40,6 +44,29 @@ import {
   metricsQuery,
   type MetricsQuery,
 } from "@/lib/api/metrics"
+import type { UsageMeterPage } from "@/lib/api/types"
+
+type UsageMeterPageLoader = (
+  limit: number,
+  offset: number,
+  signal?: AbortSignal
+) => Promise<UsageMeterPage>
+
+export async function collectUsageMeterPages(
+  loadPage: UsageMeterPageLoader,
+  signal?: AbortSignal
+): Promise<UsageMeterPage> {
+  const first = await loadPage(200, 0, signal)
+  const items = [...first.items]
+  let offset = first.offset + first.limit
+  while (items.length < first.total) {
+    const page = await loadPage(200, offset, signal)
+    items.push(...page.items)
+    if (page.items.length === 0) break
+    offset = page.offset + page.limit
+  }
+  return { ...first, items, limit: items.length, offset: 0 }
+}
 
 const merchantRoot = () =>
   ["merchant", getTokens()?.merchant ?? "unselected"] as const
@@ -51,6 +78,8 @@ export const queryKeys = {
   merchant: merchantRoot,
   customers: () => [...merchantRoot(), "customers"] as const,
   customer: (id: string) => [...merchantRoot(), "customers", id] as const,
+  customerUsageRates: (id: string) =>
+    [...queryKeys.customer(id), "usage-rates"] as const,
   subscriptions: () => [...merchantRoot(), "subscriptions"] as const,
   subscription: (id: string) =>
     [...merchantRoot(), "subscriptions", id] as const,
@@ -58,6 +87,9 @@ export const queryKeys = {
   payment: (id: string) => [...merchantRoot(), "payments", id] as const,
   catalog: () => [...merchantRoot(), "catalog"] as const,
   catalogDrift: () => [...merchantRoot(), "catalog", "drift"] as const,
+  usageMeters: () => [...merchantRoot(), "catalog", "meters"] as const,
+  usageMeter: (key: string) =>
+    [...merchantRoot(), "catalog", "meters", key] as const,
   settings: () => [...merchantRoot(), "settings"] as const,
   team: () => [...merchantRoot(), "team"] as const,
   alerts: () => [...merchantRoot(), "alerts"] as const,
@@ -80,6 +112,13 @@ export const adminQueries = {
       queryFn: ({ signal }) => getCustomerProfile(id, signal),
       enabled: Boolean(id),
       meta: { errorAction: "Load customer" },
+    }),
+  customerUsageRates: (id: string) =>
+    queryOptions({
+      queryKey: queryKeys.customerUsageRates(id),
+      queryFn: ({ signal }) => listCustomerUsageRateOverrides(id, signal),
+      enabled: Boolean(id),
+      meta: { errorAction: "Load negotiated usage rates" },
     }),
   subscriptions: (
     filters: SubscriptionFilters,
@@ -217,6 +256,35 @@ export const adminQueries = {
         dryRunCheckoutRouting({ price_id: priceId }, signal),
       enabled: Boolean(priceId),
       meta: { errorAction: "Check checkout readiness" },
+    }),
+  usageMeters: (limit = 200, offset = 0) =>
+    queryOptions({
+      queryKey: [...queryKeys.usageMeters(), { limit, offset }],
+      queryFn: ({ signal }) => listUsageMeters(limit, offset, signal),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load usage meters" },
+    }),
+  allUsageMeters: () =>
+    queryOptions({
+      queryKey: [...queryKeys.usageMeters(), "all"],
+      queryFn: ({ signal }) => collectUsageMeterPages(listUsageMeters, signal),
+      meta: { errorAction: "Load usage meters" },
+    }),
+  usageMeter: (key: string) =>
+    queryOptions({
+      queryKey: queryKeys.usageMeter(key),
+      queryFn: ({ signal }) => getUsageMeter(key, signal),
+      enabled: Boolean(key),
+      meta: { errorAction: "Load usage meter" },
+    }),
+  usageMeterOverrides: (key: string, limit = 200, offset = 0) =>
+    queryOptions({
+      queryKey: [...queryKeys.usageMeter(key), "overrides", { limit, offset }],
+      queryFn: ({ signal }) =>
+        listUsageMeterOverrides(key, limit, offset, signal),
+      enabled: Boolean(key),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load negotiated usage rates" },
     }),
   findings: () =>
     queryOptions({

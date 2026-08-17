@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/pricing"
@@ -30,21 +29,13 @@ func PutAdminRateOverride(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	meterKey := strings.TrimSpace(r.Param("meter_key"))
+	meterKey := pricing.NormalizeKey(r.Param("meter_key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
 		return
 	}
 	var req adminRateOverrideRequest
 	if !r.BindJSON(&req) {
-		return
-	}
-	if strings.TrimSpace(req.Price.Model) == "" {
-		r.ErrorJSON(http.StatusBadRequest, "price.model required")
-		return
-	}
-	if req.Allowance != nil && req.Allowance.Included < 0 {
-		r.ErrorJSON(http.StatusBadRequest, "allowance.included must be >= 0")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -58,7 +49,7 @@ func PutAdminRateOverride(r *httprequest.Request) {
 		Price:     req.Price,
 		Allowance: req.Allowance,
 	}); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		writeMeteringError(r, err)
 		return
 	}
 	cards, err := svc.ListPayerRateCards(r.Request.Context(), *payer)
@@ -103,7 +94,7 @@ func DeleteAdminRateOverride(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 		return
 	}
-	meterKey := strings.TrimSpace(r.Param("meter_key"))
+	meterKey := pricing.NormalizeKey(r.Param("meter_key"))
 	if meterKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "meter_key required")
 		return

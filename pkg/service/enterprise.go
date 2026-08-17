@@ -152,11 +152,12 @@ func (s *Service) EnsureUsageProduct(ctx context.Context, key, displayName strin
 
 // UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
 type UsageMeterSpec struct {
-	Key           string `json:"key"`
-	EventType     string `json:"event_type"`
-	ValueProperty string `json:"value_property"`
-	Aggregation   string `json:"aggregation"` // sum | count
-	Unit          string `json:"unit,omitempty"`
+	Key           string            `json:"key"`
+	EventType     string            `json:"event_type"`
+	ValueProperty string            `json:"value_property"`
+	Aggregation   string            `json:"aggregation"` // sum | count
+	Unit          string            `json:"unit,omitempty"`
+	GroupBy       map[string]string `json:"group_by,omitempty"`
 }
 
 // EnsureUsageMeter idempotently declares a host-owned catalog meter.
@@ -176,16 +177,19 @@ func (s *Service) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) err
 		ValueProperty: spec.ValueProperty,
 		Aggregation:   spec.Aggregation,
 		Unit:          spec.Unit,
+		GroupBy:       spec.GroupBy,
 	})
 }
 
 // UsageRateCardInput declares an in_arrears usage rate card. Payer nil = the
 // merchant-default card (ProductID required); Payer set = a negotiated
-// per-payer override that replaces the default for that meter.
+// per-payer price/allowance override inheriting the default's product, filter,
+// and meter contract.
 type UsageRateCardInput struct {
 	Payer     *identity.CustomerID
 	ProductID *uuid.UUID
 	MeterKey  string
+	Filter    map[string][]string
 	Price     pricing.RatePrice
 	Allowance *pricing.Allowance
 }
@@ -206,13 +210,29 @@ func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 		Payer:     in.Payer,
 		ProductID: in.ProductID,
 		MeterKey:  in.MeterKey,
+		Filter:    in.Filter,
 		Price:     in.Price,
 		Allowance: in.Allowance,
 	})
 }
 
+// DeleteDefaultUsageRateCard removes a meter's merchant-default card after all
+// negotiated payer overrides have been removed.
+func (s *Service) DeleteDefaultUsageRateCard(ctx context.Context, meterKey string) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
+	if s == nil || s.rt == nil {
+		return fmt.Errorf("service not initialized")
+	}
+	return s.moneyService().DeleteDefaultUsageRateCard(ctx, meterKey)
+}
+
 // PayerRateCardDTO is one negotiated per-payer override (or#909): the price
-// (and optional included allowance, netted before overage) replacing the
+// (and optional included allowance, netted before overage) applied over the
 // merchant-default card for MeterKey when rating this payer.
 type PayerRateCardDTO struct {
 	MeterKey  string             `json:"meter_key"`

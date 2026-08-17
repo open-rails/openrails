@@ -78,7 +78,7 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 			return err
 		}
 		for dimValue, quantity := range aggregates {
-			if quantity <= 0 || !rateCardFilterAllows(rc.Filter, dimensionKey, dimValue) {
+			if quantity <= 0 {
 				continue
 			}
 			amount, err := rateCatalogRateCardUsage(rc.Price, rc.Allowance, dimValue, quantity, includedOverride)
@@ -165,29 +165,40 @@ ORDER BY rc.ordinal`, merchantID, currency, payer.UUID())
 	if err != nil {
 		return nil, err
 	}
-	return resolvePayerRateCardOverrides(out), nil
+	return resolvePayerRateCardOverrides(out)
 }
 
 // resolvePayerRateCardOverrides collapses the loaded set to one card per
-// meter_key: a payer-scoped card (#798) replaces the merchant default.
-func resolvePayerRateCardOverrides(cards []catalogRateCardRow) []catalogRateCardRow {
-	overridden := map[string]bool{}
+// meter_key: a payer-scoped card contributes only price and allowance; the
+// meter, product-owned filter and dimensional contract remain the default's.
+func resolvePayerRateCardOverrides(cards []catalogRateCardRow) ([]catalogRateCardRow, error) {
+	overrides := map[string]catalogRateCardRow{}
 	for _, rc := range cards {
 		if rc.PayerScoped {
-			overridden[rc.MeterKey] = true
+			overrides[rc.MeterKey] = rc
 		}
 	}
-	if len(overridden) == 0 {
-		return cards
-	}
-	out := cards[:0]
+	out := make([]catalogRateCardRow, 0, len(cards))
+	defaults := make(map[string]struct{}, len(cards))
 	for _, rc := range cards {
-		if !rc.PayerScoped && overridden[rc.MeterKey] {
+		if rc.PayerScoped {
 			continue
+		}
+		defaults[rc.MeterKey] = struct{}{}
+		if override, ok := overrides[rc.MeterKey]; ok {
+			rc.ID = override.ID
+			rc.PayerScoped = true
+			rc.Price = override.Price
+			rc.Allowance = override.Allowance
 		}
 		out = append(out, rc)
 	}
-	return out
+	for meterKey := range overrides {
+		if _, ok := defaults[meterKey]; !ok {
+			return nil, fmt.Errorf("meter %q: %w", meterKey, ErrDefaultRateCardRequired)
+		}
+	}
+	return out, nil
 }
 
 func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string, rc catalogRateCardRow, groupProperty string, from, to time.Time) (map[string]int64, error) {
@@ -202,8 +213,16 @@ func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uu
 	if agg != "sum" && agg != "count" {
 		return nil, fmt.Errorf("meter %q aggregation %q is not supported for billing", rc.MeterKey, agg)
 	}
+	filterRules, err := rateCardFilterRules(rc)
+	if err != nil {
+		return nil, err
+	}
+	filterJSON, err := json.Marshal(filterRules)
+	if err != nil {
+		return nil, fmt.Errorf("encode meter %q filters: %w", rc.MeterKey, err)
+	}
 	out := map[string]int64{}
-	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		rows, qerr := s.db.Qx(ctx).Query(ctx, `
 SELECT COALESCE(NULLIF(ue.metadata ->> $8, ''), NULLIF(ue.dimensions ->> $8, ''), '') AS dim_value,
        COALESCE(SUM(
@@ -218,7 +237,21 @@ WHERE ue.merchant_id = $1
   AND ue.event_type = $4
   AND ue.occurred_at >= $5::timestamptz
   AND ue.occurred_at < $6::timestamptz
-GROUP BY dim_value`, merchantID, payer.UUID(), currency, rc.EventType, from, to, valueKey, groupProperty, agg)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_to_recordset($10::jsonb)
+          AS filter_rule(property_key text, allowed_values jsonb)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(filter_rule.allowed_values) AS allowed_value(value)
+          WHERE allowed_value.value = COALESCE(
+              NULLIF(ue.metadata ->> filter_rule.property_key, ''),
+              NULLIF(ue.dimensions ->> filter_rule.property_key, ''),
+              ''
+          )
+      )
+  )
+GROUP BY dim_value`, merchantID, payer.UUID(), currency, rc.EventType, from, to, valueKey, groupProperty, agg, filterJSON)
 		if qerr != nil {
 			return qerr
 		}
@@ -264,6 +297,14 @@ func (s *MoneyService) accruedAllowanceUnits(ctx context.Context, merchantID uui
 	if agg != "sum" && agg != "count" {
 		return 0, fmt.Errorf("allowance source meter %q aggregation %q is not supported", source.MeterKey, agg)
 	}
+	filterRules, err := rateCardFilterRules(source)
+	if err != nil {
+		return 0, err
+	}
+	filterJSON, err := json.Marshal(filterRules)
+	if err != nil {
+		return 0, fmt.Errorf("encode allowance source meter %q filters: %w", source.MeterKey, err)
+	}
 
 	total := int64(0)
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -282,7 +323,21 @@ WHERE ue.merchant_id = $1
   AND ue.event_type = $4
   AND ue.occurred_at >= $5::timestamptz
   AND ue.occurred_at < $6::timestamptz
-GROUP BY dim_value, resource_id`, merchantID, payer.UUID(), currency, source.EventType, from, to, valueKey, dimensionProperty, resourceProperty, agg)
+  AND NOT EXISTS (
+      SELECT 1
+      FROM jsonb_to_recordset($11::jsonb)
+          AS filter_rule(property_key text, allowed_values jsonb)
+      WHERE NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(filter_rule.allowed_values) AS allowed_value(value)
+          WHERE allowed_value.value = COALESCE(
+              NULLIF(ue.metadata ->> filter_rule.property_key, ''),
+              NULLIF(ue.dimensions ->> filter_rule.property_key, ''),
+              ''
+          )
+      )
+  )
+GROUP BY dim_value, resource_id`, merchantID, payer.UUID(), currency, source.EventType, from, to, valueKey, dimensionProperty, resourceProperty, agg, filterJSON)
 		if qerr != nil {
 			return qerr
 		}
@@ -394,20 +449,28 @@ func rateCatalogRateCardUsage(price pricing.RatePrice, allowance *pricing.Allowa
 	return cm.Rate(billable)
 }
 
-func rateCardFilterAllows(filter map[string][]string, dimensionKey, dimValue string) bool {
-	if len(filter) == 0 || dimensionKey == "" {
-		return true
-	}
-	allowed, ok := filter[dimensionKey]
-	if !ok || len(allowed) == 0 {
-		return true
-	}
-	for _, candidate := range allowed {
-		if candidate == dimValue {
-			return true
+type usageFilterRule struct {
+	PropertyKey   string   `json:"property_key"`
+	AllowedValues []string `json:"allowed_values"`
+}
+
+func rateCardFilterRules(card catalogRateCardRow) ([]usageFilterRule, error) {
+	rules := make([]usageFilterRule, 0, len(card.Filter))
+	for dimension, allowed := range card.Filter {
+		property := propertyKey(card.GroupBy[dimension])
+		if property == "" {
+			return nil, fmt.Errorf(
+				"rate card %s filter dimension %q has no meter property",
+				card.ID,
+				dimension,
+			)
 		}
+		rules = append(rules, usageFilterRule{
+			PropertyKey:   property,
+			AllowedValues: allowed,
+		})
 	}
-	return false
+	return rules, nil
 }
 
 func propertyKey(property string) string {

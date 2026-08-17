@@ -15,6 +15,7 @@ import {
   CatalogProductsPage,
 } from "@/pages/catalog"
 import { PriceDetailPage } from "@/pages/catalog/price-detail"
+import { CatalogMeteringPage, MeterDetailPage } from "@/pages/catalog/metering"
 import { CustomersPage } from "@/pages/customers"
 import { CustomerDetailPage } from "@/pages/customers/detail"
 import { DashboardPage } from "@/pages/dashboard"
@@ -43,6 +44,8 @@ const router = createBrowserRouter(
         { path: "catalog", element: <CatalogProductsPage /> },
         { path: "catalog/prices", element: <CatalogPricesPage /> },
         { path: "catalog/prices/:id", element: <PriceDetailPage /> },
+        { path: "catalog/metering", element: <CatalogMeteringPage /> },
+        { path: "catalog/metering/:key", element: <MeterDetailPage /> },
         { path: "catalog/drift", element: <CatalogDriftPage /> },
         { path: "ops", element: <OpsPage /> },
         { path: "settings", element: <SettingsPage /> },

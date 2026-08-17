@@ -40,20 +40,20 @@ VALUES ($1, 'droplet-runtime', 'Droplet Runtime', $3),
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_meters (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
-VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', 'second', '{"size_slug":"metadata.size_slug","resource_id":"metadata.resource_id"}'::jsonb),
+VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', 'second', '{"size_slug":"metadata.size_slug","resource_id":"metadata.resource_id","region":"metadata.region"}'::jsonb),
        ($1, $3, 'bandwidth.transfer', 'bytes', 'sum', 'byte', '{}'::jsonb)`,
 		merchantID, dropletMeter, bandwidthMeter)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_rate_cards
-    (merchant_id, product_id, ordinal, meter_key, payment_term, price)
+    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, price)
 VALUES
-    ($1, $2, 1, $4, 'in_arrears', '{
+    ($1, $2, 1, $4, 'in_arrears', '{"region":["eu"]}'::jsonb, '{
       "model":"per_unit",
       "currency":"USD",
       "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1}}}}
     }'::jsonb),
-    ($1, $3, 1, $5, 'in_arrears', '{
+    ($1, $3, 1, $5, 'in_arrears', '{}'::jsonb, '{
       "model":"per_unit",
       "currency":"USD",
       "per_unit":{"unit_amount":10000,"divide_by":1073741824}
@@ -80,7 +80,19 @@ WHERE merchant_id = $1 AND product_id = $2`, merchantID, bandwidthProductID, dro
 		Currency:   cur,
 		EventType:  "droplet.usage",
 		Dimensions: map[string]int64{"seconds": 10_000 * 3600},
-		Metadata:   map[string]any{"size_slug": "s-1vcpu-1gb", "resource_id": "droplet-1"},
+		Metadata:   map[string]any{"size_slug": "s-1vcpu-1gb", "resource_id": "droplet-1", "region": "eu"},
+		Amount:     0,
+		Key:        money.MustIdempotencyKey(money.UsageOperation("droplet.usage"), "ratecard-test", uuid.NewString()),
+		OccurredAt: occurred,
+	})
+	require.NoError(t, err)
+	_, err = svc.RecordUsage(ctx, money.RecordUsageParams{
+		Payer:      &payer,
+		Invoker:    payer.UUID().String(),
+		Currency:   cur,
+		EventType:  "droplet.usage",
+		Dimensions: map[string]int64{"seconds": 10_000 * 3600},
+		Metadata:   map[string]any{"size_slug": "s-1vcpu-1gb", "resource_id": "droplet-filtered", "region": "us"},
 		Amount:     0,
 		Key:        money.MustIdempotencyKey(money.UsageOperation("droplet.usage"), "ratecard-test", uuid.NewString()),
 		OccurredAt: occurred,
@@ -364,4 +376,3 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', $3::jsonb)`, merchantID, productID,
 		require.Equal(t, c.want, quote.PaidAmount, "round %q quoted the wrong micros", c.mode)
 	}
 }
-

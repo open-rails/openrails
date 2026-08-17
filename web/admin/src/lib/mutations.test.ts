@@ -11,6 +11,8 @@ import {
   createPrice,
   createProduct,
   deactivatePrice,
+  deleteCustomerUsageRateOverride,
+  deleteDefaultUsageRateCard,
   getPriceByKey,
   getProduct,
   grantEntitlement,
@@ -22,8 +24,11 @@ import {
   previewRepriceAllPriorVersions,
   previewSubscriptionTierChange,
   publishCatalog,
+  putDefaultUsageRateCard,
+  putCustomerUsageRateOverride,
   putMerchantSettings,
   putPaymentProvider,
+  putUsageMeter,
   refreshCatalogDrift,
   refundPayment,
   repriceAllPriorVersions,
@@ -57,7 +62,9 @@ vi.mock("@/lib/api/endpoints", () => ({
   createWebhook: vi.fn(),
   deactivatePrice: vi.fn(),
   deactivateProduct: vi.fn(),
+  deleteCustomerUsageRateOverride: vi.fn(),
   deleteAlertRule: vi.fn(),
+  deleteDefaultUsageRateCard: vi.fn(),
   deletePaymentProvider: vi.fn(),
   deleteWebhook: vi.fn(),
   getCreditLimit: vi.fn(),
@@ -76,6 +83,8 @@ vi.mock("@/lib/api/endpoints", () => ({
   previewRepriceAllPriorVersions: vi.fn(),
   previewSubscriptionTierChange: vi.fn(),
   publishCatalog: vi.fn(),
+  putDefaultUsageRateCard: vi.fn(),
+  putCustomerUsageRateOverride: vi.fn(),
   removeTeamMember: vi.fn(),
   refreshCatalogDrift: vi.fn(),
   refundPayment: vi.fn(),
@@ -90,6 +99,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   testAlertRule: vi.fn(),
   updateAlertRule: vi.fn(),
   updateProduct: vi.fn(),
+  putUsageMeter: vi.fn(),
 }))
 
 vi.mock("@/lib/api/metrics", () => ({
@@ -123,6 +133,13 @@ beforeEach(() => {
   vi.mocked(createProduct).mockResolvedValue({} as never)
   vi.mocked(createPrice).mockResolvedValue({} as never)
   vi.mocked(deactivatePrice).mockResolvedValue({} as never)
+  vi.mocked(putUsageMeter).mockResolvedValue({} as never)
+  vi.mocked(putDefaultUsageRateCard).mockResolvedValue({} as never)
+  vi.mocked(putCustomerUsageRateOverride).mockResolvedValue({} as never)
+  vi.mocked(deleteCustomerUsageRateOverride).mockResolvedValue({
+    message: "ok",
+  })
+  vi.mocked(deleteDefaultUsageRateCard).mockResolvedValue(undefined)
   vi.mocked(previewRepriceAllPriorVersions).mockResolvedValue({
     matched: 3,
   } as never)
@@ -1212,5 +1229,139 @@ describe("catalog mutations", () => {
     expect(cancelReprice).toHaveBeenCalledWith("reprice-1")
     expect(cancelReprice).toHaveBeenCalledWith("reprice-2")
     expect(queryClient.getQueryState(repricesKey)?.isInvalidated).toBe(true)
+  })
+
+  it("stores a meter and refreshes the collection and its detail", async () => {
+    const queryClient = new QueryClient()
+    const metersKey = queryKeys.usageMeters()
+    const detailKey = queryKeys.usageMeter("api-tokens")
+    queryClient.setQueryData(metersKey, { items: [] })
+    queryClient.setQueryData(detailKey, { key: "api-tokens" })
+    const meter = {
+      event_type: "token.used",
+      value_property: "tokens",
+      aggregation: "sum" as const,
+      unit: "tokens",
+      group_by: {},
+    }
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.putUsageMeter(queryClient))
+      .execute({ key: "api-tokens", meter })
+
+    expect(putUsageMeter).toHaveBeenCalledWith("api-tokens", meter)
+    expect(queryClient.getQueryState(metersKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true)
+  })
+
+  it("stores and removes a default rate through the metering cache boundary", async () => {
+    const queryClient = new QueryClient()
+    const detailKey = queryKeys.usageMeter("api-tokens")
+    queryClient.setQueryData(detailKey, { key: "api-tokens" })
+    const rateCard = {
+      product_id: "product-1",
+      filter: {},
+      price: {
+        model: "per_unit" as const,
+        currency: "USD",
+        per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+      },
+    }
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.putDefaultUsageRateCard(queryClient))
+      .execute({ key: "api-tokens", rateCard })
+
+    expect(putDefaultUsageRateCard).toHaveBeenCalledWith("api-tokens", rateCard)
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true)
+
+    queryClient.setQueryData(detailKey, { key: "api-tokens" })
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.deleteDefaultUsageRateCard(queryClient)
+      )
+      .execute("api-tokens")
+
+    expect(deleteDefaultUsageRateCard).toHaveBeenCalledWith("api-tokens")
+    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true)
+  })
+
+  it("stores and removes a negotiated rate across every affected cache", async () => {
+    const queryClient = new QueryClient()
+    const customerKey = queryKeys.customer("customer-1")
+    const ratesKey = queryKeys.customerUsageRates("customer-1")
+    const metersKey = queryKeys.usageMeters()
+    const meterKey = queryKeys.usageMeter("api-tokens")
+    const dashboardKey = queryKeys.dashboard()
+    for (const key of [
+      customerKey,
+      ratesKey,
+      metersKey,
+      meterKey,
+      dashboardKey,
+    ]) {
+      queryClient.setQueryData(key, {})
+    }
+    const override = {
+      price: {
+        model: "per_unit" as const,
+        currency: "USD",
+        per_unit: { unit_amount: 500_000, divide_by: 1 },
+      },
+    }
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.putCustomerUsageRateOverride(queryClient)
+      )
+      .execute({
+        customerId: "customer-1",
+        meterKey: "api-tokens",
+        override,
+      })
+
+    expect(putCustomerUsageRateOverride).toHaveBeenCalledWith(
+      "customer-1",
+      "api-tokens",
+      override
+    )
+    for (const key of [
+      customerKey,
+      ratesKey,
+      metersKey,
+      meterKey,
+      dashboardKey,
+    ]) {
+      expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true)
+      queryClient.setQueryData(key, {})
+    }
+
+    await queryClient
+      .getMutationCache()
+      .build(
+        queryClient,
+        adminMutations.deleteCustomerUsageRateOverride(queryClient)
+      )
+      .execute({ customerId: "customer-1", meterKey: "api-tokens" })
+
+    expect(deleteCustomerUsageRateOverride).toHaveBeenCalledWith(
+      "customer-1",
+      "api-tokens"
+    )
+    for (const key of [
+      customerKey,
+      ratesKey,
+      metersKey,
+      meterKey,
+      dashboardKey,
+    ]) {
+      expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true)
+    }
   })
 })

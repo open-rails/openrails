@@ -3,6 +3,7 @@ DELETE /v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}
 DELETE /v1/me/payment-methods/{id}
 DELETE /v1/merchant/alerts/rules/{id}
 DELETE /v1/merchant/api-keys/{id}
+DELETE /v1/merchant/catalog/meters/{key}/rate-card
 DELETE /v1/merchant/customers/{customer_id}/business-profile
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
@@ -57,6 +58,9 @@ GET /v1/merchant/api-host
 GET /v1/merchant/api-keys
 GET /v1/merchant/business-customers
 GET /v1/merchant/catalog/drift
+GET /v1/merchant/catalog/meters
+GET /v1/merchant/catalog/meters/{key}
+GET /v1/merchant/catalog/meters/{key}/overrides
 GET /v1/merchant/catalog/prices
 GET /v1/merchant/catalog/prices/by-key/{key}
 GET /v1/merchant/catalog/prices/by-key/{key}/history
@@ -194,6 +198,8 @@ PUT /v1/me/payment-methods/{id}
 PUT /v1/me/settings
 PUT /v1/me/subscriptions/{id}/payment-method
 PUT /v1/merchant/api-host
+PUT /v1/merchant/catalog/meters/{key}
+PUT /v1/merchant/catalog/meters/{key}/rate-card
 PUT /v1/merchant/credit-limit
 PUT /v1/merchant/customers/{customer_id}/business-profile
 PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}

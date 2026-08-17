@@ -480,6 +480,7 @@ usage_limits:
 meters:
   - key: api-calls
     aggregation: sum
+    value_property: $.count
 credit_balances:
   - key: monthly-usd
     unit: usd
@@ -552,7 +553,7 @@ func TestLoad_RateCardCarriesTimeDenominatorInDivideBy(t *testing.T) {
 	body := `
 version: 1
 meters:
-  - {key: vm-seconds, aggregation: sum}
+  - {key: vm-seconds, aggregation: sum, value_property: $.seconds}
 products:
   - key: vm
     display_name: VM
@@ -584,7 +585,7 @@ func TestLoad_BaseFeePriceRowCoexistsWithRateCard(t *testing.T) {
 	body := `
 version: 1
 meters:
-  - {key: api-calls, aggregation: sum}
+  - {key: api-calls, aggregation: sum, value_property: $.count}
 products:
   - key: api
     display_name: API
@@ -620,7 +621,7 @@ func TestLoad_RateCardsMayNotShareAMeter(t *testing.T) {
 	body := `
 version: 1
 meters:
-  - {key: droplet-vcpu-seconds, aggregation: sum}
+  - {key: droplet-vcpu-seconds, aggregation: sum, value_property: $.seconds}
 products:
   - key: basic-droplet
     display_name: Basic Droplet
@@ -649,7 +650,7 @@ func TestLoad_RetiredPricingInputsFailWithTheRewrite(t *testing.T) {
 		body := `
 version: 1
 meters:
-  - {key: api-calls, aggregation: sum}
+  - {key: api-calls, aggregation: sum, value_property: $.count}
 products:
   - key: api
     display_name: API
@@ -715,7 +716,7 @@ products:
       - {currency: usd, unit_amount: 1_000, duration: 30d}
 `
 		_, err := Load(writeManifest(t, body))
-		if err == nil || !strings.Contains(err.Error(), `meter "api-calls" must set aggregation (sum/count/max/min/unique_count/latest)`) {
+		if err == nil || !strings.Contains(err.Error(), "aggregation is required") {
 			t.Fatalf("want missing-aggregation error, got %v", err)
 		}
 	})

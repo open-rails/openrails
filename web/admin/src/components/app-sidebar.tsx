@@ -60,6 +60,7 @@ const nav: NavItem[] = [
     items: [
       { title: "Products", url: "/catalog" },
       { title: "Prices", url: "/catalog/prices" },
+      { title: "Metering", url: "/catalog/metering" },
       { title: "Drift", url: "/catalog/drift" },
     ],
   },

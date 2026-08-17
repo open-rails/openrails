@@ -39,6 +39,10 @@ unindexed-filter ListSubscriptionReprices        # optional admin filter, paged
 # Capped by a caller-supplied key list the auditor cannot prove from the schema.
 unbounded-many LookupCustomerIDsBySubjects  # capped by subjects[]; uq index is PARTIAL so uncredited
 
+# Transaction-level concurrency fences are executable SQL but cannot be
+# wrapped in EXPLAIN by the query auditor.
+unplannable LockUsageEventsForMeterCorrection # LOCK TABLE closes the meter-correction/report race
+
 # On-demand integrity diagnostics must return every finding. Pagination would
 # let a partial result be mistaken for a healthy ledger.
 unbounded-many ListLedgerConservationBreaches # operator audit: every breached ledger
