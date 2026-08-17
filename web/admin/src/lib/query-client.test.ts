@@ -138,6 +138,13 @@ describe("query keys", () => {
       "meters",
       "api-tokens",
     ])
+    expect(queryKeys.customerUsageRates("customer-1")).toEqual([
+      "merchant",
+      "unselected",
+      "customers",
+      "customer-1",
+      "usage-rates",
+    ])
   })
 
   it("only reports query errors when the usage requests it", () => {

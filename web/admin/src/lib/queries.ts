@@ -18,6 +18,7 @@ import {
   listApiKeys,
   listCatalogDrift,
   listCustomers,
+  listCustomerUsageRateOverrides,
   listFindings,
   listNotifications,
   listPaymentProviders,
@@ -54,6 +55,8 @@ export const queryKeys = {
   merchant: merchantRoot,
   customers: () => [...merchantRoot(), "customers"] as const,
   customer: (id: string) => [...merchantRoot(), "customers", id] as const,
+  customerUsageRates: (id: string) =>
+    [...queryKeys.customer(id), "usage-rates"] as const,
   subscriptions: () => [...merchantRoot(), "subscriptions"] as const,
   subscription: (id: string) =>
     [...merchantRoot(), "subscriptions", id] as const,
@@ -86,6 +89,13 @@ export const adminQueries = {
       queryFn: ({ signal }) => getCustomerProfile(id, signal),
       enabled: Boolean(id),
       meta: { errorAction: "Load customer" },
+    }),
+  customerUsageRates: (id: string) =>
+    queryOptions({
+      queryKey: queryKeys.customerUsageRates(id),
+      queryFn: ({ signal }) => listCustomerUsageRateOverrides(id, signal),
+      enabled: Boolean(id),
+      meta: { errorAction: "Load negotiated usage rates" },
     }),
   subscriptions: (
     filters: SubscriptionFilters,

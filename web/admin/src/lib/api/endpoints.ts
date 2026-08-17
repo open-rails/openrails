@@ -15,6 +15,7 @@ import type {
   CatalogProduct,
   CheckoutRoutingDecision,
   CustomerBillingProfile,
+  CustomerUsageRateOverride,
   CustomerSummary,
   Finding,
   FindingsListResponse,
@@ -72,6 +73,39 @@ export const getCustomerPaymentMethods = (
   api<{ object: "list"; data: PaymentMethodResponse[] }>(
     `/merchant/customers/${customerId}/payment-methods`,
     { signal }
+  )
+
+export interface CustomerUsageRateOverrideRequest {
+  price: UsageRatePrice
+  allowance?: UsageAllowance
+}
+
+export const listCustomerUsageRateOverrides = (
+  customerId: string,
+  signal?: AbortSignal
+) =>
+  api<CustomerUsageRateOverride[]>(
+    `/merchant/customers/${customerId}/rate-overrides`,
+    { signal }
+  )
+
+export const putCustomerUsageRateOverride = (
+  customerId: string,
+  meterKey: string,
+  body: CustomerUsageRateOverrideRequest
+) =>
+  api<CustomerUsageRateOverride>(
+    `/merchant/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
+    { method: "PUT", body }
+  )
+
+export const deleteCustomerUsageRateOverride = (
+  customerId: string,
+  meterKey: string
+) =>
+  api<{ message: string }>(
+    `/merchant/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
+    { method: "DELETE" }
   )
 
 export const grantEntitlement = (

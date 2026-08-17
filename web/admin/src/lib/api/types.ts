@@ -329,6 +329,14 @@ export interface UsageMeterOverride {
   updated_at: string
 }
 
+export interface CustomerUsageRateOverride {
+  meter_key: string
+  price: UsageRatePrice
+  allowance?: UsageAllowance
+  created_at: string
+  updated_at: string
+}
+
 export interface UsageMeterPage {
   items: UsageMeter[]
   total: number
