@@ -40,6 +40,10 @@ import type {
   TeamInvite,
   TeamInviteResult,
   TeamMember,
+  UsageAllowance,
+  UsageMeter,
+  UsageMeterOverride,
+  UsageRatePrice,
   WebhookFormat,
   WorkerHealth,
 } from "./types"
@@ -277,6 +281,67 @@ export const activateProduct = (id: string) =>
 export const deactivateProduct = (id: string) =>
   api<CatalogProduct>(`/merchant/catalog/products/${id}/deactivate`, {
     method: "POST",
+  })
+
+export interface UsageMeterRequest {
+  event_type: string
+  value_property: string
+  aggregation: "sum" | "count"
+  unit?: string
+  group_by: Record<string, string>
+}
+
+export interface DefaultUsageRateCardRequest {
+  product_id: string
+  filter: Record<string, string[]>
+  price: UsageRatePrice
+  allowance?: UsageAllowance
+}
+
+export const listUsageMeters = (
+  limit = 200,
+  offset = 0,
+  signal?: AbortSignal
+) =>
+  api<ItemsEnvelope<UsageMeter>>("/merchant/catalog/meters", {
+    query: { limit, offset },
+    signal,
+  })
+
+export const getUsageMeter = (key: string, signal?: AbortSignal) =>
+  api<UsageMeter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
+    signal,
+  })
+
+export const listUsageMeterOverrides = (
+  key: string,
+  limit = 200,
+  offset = 0,
+  signal?: AbortSignal
+) =>
+  api<ItemsEnvelope<UsageMeterOverride>>(
+    `/merchant/catalog/meters/${encodeURIComponent(key)}/overrides`,
+    { query: { limit, offset }, signal }
+  )
+
+export const putUsageMeter = (key: string, body: UsageMeterRequest) =>
+  api<UsageMeter>(`/merchant/catalog/meters/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    body,
+  })
+
+export const putDefaultUsageRateCard = (
+  key: string,
+  body: DefaultUsageRateCardRequest
+) =>
+  api<UsageMeter>(
+    `/merchant/catalog/meters/${encodeURIComponent(key)}/rate-card`,
+    { method: "PUT", body }
+  )
+
+export const deleteDefaultUsageRateCard = (key: string) =>
+  api<void>(`/merchant/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
+    method: "DELETE",
   })
 
 export const listPrices = (productId?: string, signal?: AbortSignal) =>

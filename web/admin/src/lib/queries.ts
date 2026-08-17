@@ -10,6 +10,7 @@ import {
   getPriceKeyHistory,
   getProduct,
   getSubscription,
+  getUsageMeter,
   getUnreadCount,
   dryRunCheckoutRouting,
   listAlertRules,
@@ -27,6 +28,8 @@ import {
   listRepriceBatchesByKey,
   listReprices,
   listSubscriptions,
+  listUsageMeterOverrides,
+  listUsageMeters,
   listTeam,
   listTeamInvites,
   listWebhooks,
@@ -58,6 +61,9 @@ export const queryKeys = {
   payment: (id: string) => [...merchantRoot(), "payments", id] as const,
   catalog: () => [...merchantRoot(), "catalog"] as const,
   catalogDrift: () => [...merchantRoot(), "catalog", "drift"] as const,
+  usageMeters: () => [...merchantRoot(), "catalog", "meters"] as const,
+  usageMeter: (key: string) =>
+    [...merchantRoot(), "catalog", "meters", key] as const,
   settings: () => [...merchantRoot(), "settings"] as const,
   team: () => [...merchantRoot(), "team"] as const,
   alerts: () => [...merchantRoot(), "alerts"] as const,
@@ -217,6 +223,29 @@ export const adminQueries = {
         dryRunCheckoutRouting({ price_id: priceId }, signal),
       enabled: Boolean(priceId),
       meta: { errorAction: "Check checkout readiness" },
+    }),
+  usageMeters: (limit = 200, offset = 0) =>
+    queryOptions({
+      queryKey: [...queryKeys.usageMeters(), { limit, offset }],
+      queryFn: ({ signal }) => listUsageMeters(limit, offset, signal),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load usage meters" },
+    }),
+  usageMeter: (key: string) =>
+    queryOptions({
+      queryKey: queryKeys.usageMeter(key),
+      queryFn: ({ signal }) => getUsageMeter(key, signal),
+      enabled: Boolean(key),
+      meta: { errorAction: "Load usage meter" },
+    }),
+  usageMeterOverrides: (key: string, limit = 200, offset = 0) =>
+    queryOptions({
+      queryKey: [...queryKeys.usageMeter(key), "overrides", { limit, offset }],
+      queryFn: ({ signal }) =>
+        listUsageMeterOverrides(key, limit, offset, signal),
+      enabled: Boolean(key),
+      placeholderData: keepPreviousData,
+      meta: { errorAction: "Load negotiated usage rates" },
     }),
   findings: () =>
     queryOptions({

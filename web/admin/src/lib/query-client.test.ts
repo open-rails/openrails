@@ -121,6 +121,25 @@ describe("query keys", () => {
     ])
   })
 
+  it("scopes metering collections and detail independently", () => {
+    vi.stubGlobal("localStorage", storage())
+    vi.stubGlobal("sessionStorage", storage())
+
+    expect(queryKeys.usageMeters()).toEqual([
+      "merchant",
+      "unselected",
+      "catalog",
+      "meters",
+    ])
+    expect(queryKeys.usageMeter("api-tokens")).toEqual([
+      "merchant",
+      "unselected",
+      "catalog",
+      "meters",
+      "api-tokens",
+    ])
+  })
+
   it("only reports query errors when the usage requests it", () => {
     vi.stubGlobal("localStorage", storage())
     vi.stubGlobal("sessionStorage", storage())
