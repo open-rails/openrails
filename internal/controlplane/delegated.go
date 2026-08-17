@@ -50,6 +50,13 @@ type ResolvedDelegated struct {
 	// was pinned from (every delegated token is FEDERATED merchant-signed, #259).
 	// Used for audit and issuer/subject attribution (#246).
 	Issuer string
+	// Invoker is the opaque host-owned spend principal this credential acts as
+	// under CustomerID's account (or#930). Non-empty means INVOKER-SCOPED: the
+	// caller spends the payer's money without being the payer, so it may read
+	// its own spend windows and nothing else. Only the host-principal seam
+	// (billingauth.DelegatedPrincipal) sets it — the invoker string is host-owned
+	// and opaque, so a signed delegated token has nothing to carry it in.
+	Invoker string
 	// Permissions is the token's claim, already bounded by AuthKit's verifier to the
 	// signing remote-app's stored authority (#564): an over-claim rejects the token,
 	// so this is a subset the signer is entitled to grant. Empty for self-service.
@@ -119,6 +126,7 @@ func ResolvedDelegatedFromHostPrincipal(p *billingauth.DelegatedPrincipal) (*Res
 		CustomerID:       customerID.UUID(),
 		DelegatedSubject: subject,
 		Issuer:           strings.TrimSpace(p.Issuer),
+		Invoker:          strings.TrimSpace(p.Invoker),
 		Permissions:      perms,
 		Email:            p.Email,
 		EmailVerified:    p.EmailVerified,

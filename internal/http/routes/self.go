@@ -36,7 +36,18 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	if rt != nil && rt.DB != nil {
 		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
 	}
-	group := rr.Group("", mw...)
+
+	// or#930: the delegated invoker's own spend-window read is the ONE thing an
+	// INVOKER-SCOPED principal may do — it spends the payer's money without being
+	// the payer, so the bound subject names an account it does not own. This route
+	// runs without PayerScopedRequired; everything below it runs with, so the
+	// narrow credential class cannot reach the payer's money surface.
+	rr.Group("", mw...).Handle(http.MethodGet, "/spend-limits", h(httphandlers.GetMySpendLimits))
+
+	payerMW := make([]router.Middleware, 0, len(mw)+1)
+	payerMW = append(payerMW, mw...)
+	payerMW = append(payerMW, middleware.PayerScopedRequired())
+	group := rr.Group("", payerMW...)
 
 	// Customer money self-service.
 	group.Handle(http.MethodGet, "/balance", h(httphandlers.GetMyBalance))
@@ -107,7 +118,10 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 // the acting payer to the customer's payable subject. Every route is gated by a
 // `customer:*` permission because the balance may be a SHARED resource.
 func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes, writeMW ...router.Middleware) {
-	mw := []router.Middleware{delegatedMW, middleware.CustomerScopeRequired()}
+	// PayerScopedRequired (or#930): the treasury surface acts ON a payer account,
+	// so an invoker-scoped principal — which spends a payer's money without being
+	// the payer — is refused here outright, ahead of the customer:* gates.
+	mw := []router.Middleware{delegatedMW, middleware.PayerScopedRequired(), middleware.CustomerScopeRequired()}
 	if rt != nil && rt.DB != nil {
 		mw = append(mw, middleware.MerchantDBConnMW(rt.DB))
 	}

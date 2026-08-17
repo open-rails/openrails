@@ -280,6 +280,17 @@ interfaces over whatever auth you already have:
   `Issuer` (audit), `Permissions` (trusted verbatim for in-process hosts — grant
   only what you mean), contact metadata. Adapt with
   `billingauth.DelegatedAuthenticatorFunc`.
+- **Invoker-scoped principals** (or#930). Set `Invoker` when the credential
+  spends a payer's money WITHOUT being the payer — your platform's end user
+  drawing on your org's balance under a spend delegation. Use the SAME opaque
+  invoker string you pass to admission, so the identity that is metered is the
+  identity that reads. OpenRails then narrows the principal to exactly one
+  thing, `GET /v1/me/spend-limits`; every other `/v1/me/*` and `/v1/customers/*`
+  route refuses it `403 invoker_scoped_principal`, because `SubjectID` there
+  names an account the invoker does not own. That guard is what makes it safe to
+  map an end-user credential onto a payer account at all — without it the
+  self-service surface is all-or-nothing, and hosts correctly reject end-user
+  tokens outright.
 - `billingauth.Gate` (merchant-admin routes only): `Authorize(ctx, r, permission)
   (Principal, error)` — checks a live `merchant:*` permission per request.
 

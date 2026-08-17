@@ -290,6 +290,138 @@ func (s *Service) SetInvokerSpendLimits(ctx context.Context, payer identity.Cust
 	return admission.NewInvokerSpendLimitStore(s.rt.DB).Upsert(ctx, payer, invokerSpendLimitRow(next[0]))
 }
 
+// InvokerSpendWindowsInput names the invoker whose live spend windows to read.
+// The caller supplies the identity from its AUTH seam, never from the wire —
+// this read answers "what am I metered against", so an invoker the caller could
+// name would be somebody else's budget.
+type InvokerSpendWindowsInput struct {
+	Invoker string
+	// Roles are the invoker's immutable role UUIDs, so role-scoped grants it
+	// holds are included exactly as the admit path includes them (#473).
+	Roles []uuid.UUID
+	// Currency the limits are reported in; the spendgate meters one currency per
+	// payer, and a window declared in another is FX-converted the same way admit
+	// converts it. Defaults to the service currency.
+	Currency string
+	// TrustLevel selects invoker_tier grants; empty resolves the payer's live
+	// level exactly as admission does.
+	TrustLevel string
+}
+
+// InvokerSpendWindow is one delegated spend window with its live metering.
+// Used is the window's current total; because windows are estimate-based it
+// already includes in-flight reservations, and Reserved names that part.
+// Remaining is what the gate would still admit.
+type InvokerSpendWindow struct {
+	Scope         string    `json:"scope"`
+	Key           string    `json:"key"`
+	WindowSeconds int64     `json:"window_seconds"`
+	Limit         int64     `json:"limit"`
+	Currency      string    `json:"currency"`
+	Used          int64     `json:"used"`
+	Reserved      int64     `json:"reserved"`
+	Remaining     int64     `json:"remaining"`
+	ResetsAt      time.Time `json:"resets_at"`
+}
+
+// InvokerSpendWindows returns the spend windows a delegated invoker is enforced
+// against on payer's account, with their live metering (or#930).
+//
+// It is a READ over the accounting admission already keeps: the same grants the
+// admit path resolves (LoadDelegatedWindows), metered by the same Redis counters
+// and hold records the gate writes. Nothing here counts anything.
+//
+// PAYER-SCOPE WINDOWS ARE DELIBERATELY ABSENT. The payer's own caps and product
+// usage limits gate the whole account, not this invoker; showing them to one
+// delegated user would report a budget it neither owns nor can act on, and would
+// leak the account's aggregate posture. The payer reads those as the payer.
+func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.CustomerID, in InvokerSpendWindowsInput) ([]InvokerSpendWindow, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	if s == nil || s.rt == nil {
+		return nil, fmt.Errorf("service not initialized")
+	}
+	if s.rt.RedisClient == nil {
+		return nil, fmt.Errorf("spend windows unavailable: redis not configured")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	invoker := strings.TrimSpace(in.Invoker)
+	if invoker == "" {
+		return nil, fmt.Errorf("invoker required")
+	}
+	currency, err := requireCurrency(in.Currency)
+	if err != nil {
+		return nil, err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	trustLevel := strings.TrimSpace(in.TrustLevel)
+	if trustLevel == "" {
+		if t, terr := s.moneyService().GetTrustLevel(ctx, payer, currency); terr == nil && t != "" {
+			trustLevel = t
+		}
+		if trustLevel == "" {
+			trustLevel = admission.DefaultTrustLevel
+		}
+	}
+
+	roles := make([]string, 0, len(in.Roles))
+	for _, role := range in.Roles {
+		roles = append(roles, role.String())
+	}
+	req := spendgate.Request{Invoker: invoker, TrustLevel: trustLevel, Roles: roles}
+	loader := admission.NewSpendgatePolicyLoader(
+		admission.NewBillingPolicyStore(s.rt.DB),
+		admission.NewInvokerSpendLimitStore(s.rt.DB),
+		s.rt.FXProvider,
+	).WithCache(s.rt.AdmissionPolicyCache)
+	scopes, _, err := loader.LoadDelegatedWindows(ctx, payer, trustLevel, currency, req)
+	if err != nil {
+		return nil, err
+	}
+
+	usage, err := spendgate.New(s.rt.RedisClient).WindowUsage(
+		ctx, tid.UUID().String(), payer.UUID().String(), currency, spendgate.Policy{Scopes: scopes}, req)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]InvokerSpendWindow, 0, len(usage))
+	for _, u := range usage {
+		remaining := u.Limit - u.Used
+		if remaining < 0 {
+			remaining = 0
+		}
+		out = append(out, InvokerSpendWindow{
+			Scope:         string(u.Scope),
+			Key:           u.Key,
+			WindowSeconds: int64(u.Duration / time.Second),
+			Limit:         u.Limit,
+			Currency:      currency,
+			Used:          u.Used,
+			Reserved:      u.Reserved,
+			Remaining:     remaining,
+			ResetsAt:      u.ResetsAt,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Scope != out[j].Scope {
+			return out[i].Scope < out[j].Scope
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out, nil
+}
+
 // InvokerSpendLimits returns the payer's per-invoker spend limits (#473/#517).
 func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.CustomerID) ([]InvokerSpendLimitInput, error) {
 	ctx, release, pinErr := s.pin(ctx)

@@ -45,6 +45,23 @@ type DelegatedPrincipal struct {
 	// same audit slot as a delegated token's validated `iss`.
 	Issuer string
 
+	// Invoker is the opaque, host-owned spend principal this credential acts
+	// as under SubjectID's account — the SAME string the host passes as
+	// AdmitRequest.Invoker, so the identity that is metered is the identity
+	// that reads (or#930).
+	//
+	// Set it ONLY for a credential that spends a payer's money WITHOUT being
+	// the payer: a platform's end user drawing on the platform org's balance
+	// under a spend delegation. A principal that carries an Invoker is
+	// INVOKER-SCOPED and OpenRails narrows it to exactly one thing — reading
+	// its own spend windows. Every other self-service and treasury route
+	// refuses it (middleware.PayerScopedRequired), because SubjectID there
+	// names an account the invoker does not own.
+	//
+	// Leave empty for the payer's own credential; the subject is then both
+	// payer and invoker, and the full self-service surface applies.
+	Invoker string
+
 	// Permissions are optional for self-service routes. For an in-process host
 	// principal the embedding host is TRUSTED, so these permissions are accepted
 	// as authoritative and are NOT filtered against an allowlist (#564); the host
