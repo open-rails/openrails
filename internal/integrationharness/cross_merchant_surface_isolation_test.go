@@ -176,6 +176,30 @@ func TestCrossMerchantCatalogIsolationHTTP(t *testing.T) {
 	require.NotContains(t, string(body), "Stolen By A")
 }
 
+func TestCrossMerchantMeterIsolationHTTP(t *testing.T) {
+	ctx := context.Background()
+	p := newIsolationPair(t, ctx)
+	meterKey := "iso-meter-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	meterURL := p.url("/v1/merchant/catalog/meters/" + meterKey)
+
+	status, body := requestJSON(t, http.MethodPut, meterURL, p.bToken, map[string]any{
+		"aggregation": "count",
+		"unit":        "request",
+	})
+	require.Equalf(t, http.StatusOK, status, "B creates its own meter: %s", string(body))
+
+	status, body = requestJSON(t, http.MethodGet, meterURL, p.aToken, nil)
+	require.Equalf(t, http.StatusNotFound, status, "A reads B's meter: %s", string(body))
+	require.Contains(t, string(body), `"code":"usage_meter_not_found"`)
+
+	status, body = requestJSON(t, http.MethodGet, p.url("/v1/merchant/catalog/meters?limit=200"), p.aToken, nil)
+	require.Equalf(t, http.StatusOK, status, "A lists its own meters: %s", string(body))
+	require.NotContains(t, string(body), meterKey)
+
+	status, body = requestJSON(t, http.MethodGet, meterURL, p.bToken, nil)
+	require.Equalf(t, http.StatusOK, status, "B still reads its own meter: %s", string(body))
+}
+
 // TestCrossMerchantCustomerIsolationHTTP: the #740 customer list/search and the
 // per-customer profile route are merchant-scoped.
 func TestCrossMerchantCustomerIsolationHTTP(t *testing.T) {

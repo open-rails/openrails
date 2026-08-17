@@ -7,6 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -69,6 +73,42 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			name:   "catalog publish",
 			method: http.MethodPost,
 			path:   "/billing/v1/merchant/catalog/publish",
+			perm:   controlplane.PermMerchantCatalogUpdate,
+		},
+		{
+			name:   "meter list",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/catalog/meters",
+			perm:   controlplane.PermMerchantCatalogRead,
+		},
+		{
+			name:   "meter detail",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/catalog/meters/storage-gb",
+			perm:   controlplane.PermMerchantCatalogRead,
+		},
+		{
+			name:   "meter overrides",
+			method: http.MethodGet,
+			path:   "/billing/v1/merchant/catalog/meters/storage-gb/overrides",
+			perm:   controlplane.PermMerchantCatalogRead,
+		},
+		{
+			name:   "meter put",
+			method: http.MethodPut,
+			path:   "/billing/v1/merchant/catalog/meters/storage-gb",
+			perm:   controlplane.PermMerchantCatalogUpdate,
+		},
+		{
+			name:   "default rate card put",
+			method: http.MethodPut,
+			path:   "/billing/v1/merchant/catalog/meters/storage-gb/rate-card",
+			perm:   controlplane.PermMerchantCatalogUpdate,
+		},
+		{
+			name:   "default rate card delete",
+			method: http.MethodDelete,
+			path:   "/billing/v1/merchant/catalog/meters/storage-gb/rate-card",
 			perm:   controlplane.PermMerchantCatalogUpdate,
 		},
 		{
@@ -270,6 +310,38 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			t.Fatalf("%s %s should not be registered on primary merchant surface, got %d", tc.method, tc.path, rec.Code)
 		}
 	}
+}
+
+func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
+	mux := http.NewServeMux()
+	checker := &merchantActionChecker{}
+	rt := &app.Runtime{Config: &config.Config{MerchantSource: config.MerchantSourceManifest}}
+	opts := Options{
+		Gate: NewGate(GateOptions{
+			Authenticator:          merchantActionAuth{},
+			AdminPermissionChecker: checker,
+		}),
+	}
+	RegisterCatalogRoutes(router.NewMux(mux, "/billing/v1/merchant/catalog", nil), rt, opts)
+
+	recorder := httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPut,
+		"/billing/v1/merchant/catalog/meters/storage-gb",
+		strings.NewReader(`{"aggregation":"count"}`),
+	))
+	require.Equal(t, http.StatusMethodNotAllowed, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"code":"manifest_driven"`)
+	require.Empty(t, checker.perm, "manifest guard must run before authorization")
+
+	recorder = httptest.NewRecorder()
+	mux.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodGet,
+		"/billing/v1/merchant/catalog/meters",
+		nil,
+	))
+	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.Equal(t, controlplane.PermMerchantCatalogRead, checker.perm)
 }
 
 func TestMerchantTierChangeUsesOffChannelAdminLimit(t *testing.T) {
