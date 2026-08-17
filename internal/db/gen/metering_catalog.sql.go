@@ -33,18 +33,33 @@ func (q *Queries) CountUsageMeterOverrides(ctx context.Context, arg CountUsageMe
 }
 
 const countUsageMeters = `-- name: CountUsageMeters :one
-
 SELECT count(*)
 FROM openrails.catalog_meters
 WHERE merchant_id = $1
 `
 
-// Merchant-admin usage-meter catalog reads and lifecycle guards (#805).
 func (q *Queries) CountUsageMeters(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countUsageMeters, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const deleteDefaultUsageRateCard = `-- name: DeleteDefaultUsageRateCard :exec
+DELETE FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1
+  AND meter_key = $2::text
+  AND customer_id IS NULL
+`
+
+type DeleteDefaultUsageRateCardParams struct {
+	MerchantID uuid.UUID
+	MeterKey   string
+}
+
+func (q *Queries) DeleteDefaultUsageRateCard(ctx context.Context, arg DeleteDefaultUsageRateCardParams) error {
+	_, err := q.db.Exec(ctx, deleteDefaultUsageRateCard, arg.MerchantID, arg.MeterKey)
+	return err
 }
 
 const getActiveMeteringProductForShare = `-- name: GetActiveMeteringProductForShare :one
@@ -68,6 +83,33 @@ func (q *Queries) GetActiveMeteringProductForShare(ctx context.Context, arg GetA
 	return id, err
 }
 
+const getDefaultUsageRateCardDeleteState = `-- name: GetDefaultUsageRateCardDeleteState :one
+SELECT count(*) FILTER (WHERE customer_id IS NULL) > 0 AS default_exists,
+       count(*) FILTER (WHERE customer_id IS NOT NULL) AS override_count
+FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1
+  AND meter_key = $2::text
+`
+
+type GetDefaultUsageRateCardDeleteStateParams struct {
+	MerchantID uuid.UUID
+	MeterKey   string
+}
+
+type GetDefaultUsageRateCardDeleteStateRow struct {
+	DefaultExists bool
+	OverrideCount int64
+}
+
+// The meter row is already locked by the caller, which serializes every rate-card
+// mutation for this meter; PostgreSQL does not permit FOR UPDATE on aggregates.
+func (q *Queries) GetDefaultUsageRateCardDeleteState(ctx context.Context, arg GetDefaultUsageRateCardDeleteStateParams) (GetDefaultUsageRateCardDeleteStateRow, error) {
+	row := q.db.QueryRow(ctx, getDefaultUsageRateCardDeleteState, arg.MerchantID, arg.MeterKey)
+	var i GetDefaultUsageRateCardDeleteStateRow
+	err := row.Scan(&i.DefaultExists, &i.OverrideCount)
+	return i, err
+}
+
 const getDefaultUsageRateCardPriceForUpdate = `-- name: GetDefaultUsageRateCardPriceForUpdate :one
 SELECT price
 FROM openrails.catalog_rate_cards
@@ -87,6 +129,33 @@ func (q *Queries) GetDefaultUsageRateCardPriceForUpdate(ctx context.Context, arg
 	var price []byte
 	err := row.Scan(&price)
 	return price, err
+}
+
+const getDefaultUsageRateCardStateForUpdate = `-- name: GetDefaultUsageRateCardStateForUpdate :one
+SELECT filter, allowance, price
+FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1
+  AND meter_key = $2::text
+  AND customer_id IS NULL
+FOR UPDATE
+`
+
+type GetDefaultUsageRateCardStateForUpdateParams struct {
+	MerchantID uuid.UUID
+	MeterKey   string
+}
+
+type GetDefaultUsageRateCardStateForUpdateRow struct {
+	Filter    []byte
+	Allowance []byte
+	Price     []byte
+}
+
+func (q *Queries) GetDefaultUsageRateCardStateForUpdate(ctx context.Context, arg GetDefaultUsageRateCardStateForUpdateParams) (GetDefaultUsageRateCardStateForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getDefaultUsageRateCardStateForUpdate, arg.MerchantID, arg.MeterKey)
+	var i GetDefaultUsageRateCardStateForUpdateRow
+	err := row.Scan(&i.Filter, &i.Allowance, &i.Price)
+	return i, err
 }
 
 const getUsageMeterForUpdate = `-- name: GetUsageMeterForUpdate :one
@@ -232,6 +301,65 @@ func (q *Queries) GetUsageMeterWithCatalog(ctx context.Context, arg GetUsageMete
 		&i.CardUpdatedAt,
 	)
 	return i, err
+}
+
+const getUsageRateCardAllowanceDependencyCurrencies = `-- name: GetUsageRateCardAllowanceDependencyCurrencies :one
+SELECT COALESCE(
+    array_agg(DISTINCT upper(COALESCE(price ->> 'currency', ''))),
+    ARRAY[]::text[]
+)::text[] AS currencies
+FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1
+  AND allowance ->> 'accrue_from' = $2::text
+`
+
+type GetUsageRateCardAllowanceDependencyCurrenciesParams struct {
+	MerchantID uuid.UUID
+	MeterKey   string
+}
+
+func (q *Queries) GetUsageRateCardAllowanceDependencyCurrencies(ctx context.Context, arg GetUsageRateCardAllowanceDependencyCurrenciesParams) ([]string, error) {
+	row := q.db.QueryRow(ctx, getUsageRateCardAllowanceDependencyCurrencies, arg.MerchantID, arg.MeterKey)
+	var currencies []string
+	err := row.Scan(&currencies)
+	return currencies, err
+}
+
+const insertUsageMeter = `-- name: InsertUsageMeter :exec
+INSERT INTO openrails.catalog_meters
+    (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
+VALUES (
+    $1,
+    $2,
+    NULLIF($3::text, ''),
+    NULLIF($4::text, ''),
+    $5::text,
+    NULLIF($6::text, ''),
+    $7::jsonb
+)
+`
+
+type InsertUsageMeterParams struct {
+	MerchantID    uuid.UUID
+	MeterKey      string
+	EventType     string
+	ValueProperty string
+	Aggregation   string
+	Unit          string
+	GroupBy       []byte
+}
+
+func (q *Queries) InsertUsageMeter(ctx context.Context, arg InsertUsageMeterParams) error {
+	_, err := q.db.Exec(ctx, insertUsageMeter,
+		arg.MerchantID,
+		arg.MeterKey,
+		arg.EventType,
+		arg.ValueProperty,
+		arg.Aggregation,
+		arg.Unit,
+		arg.GroupBy,
+	)
+	return err
 }
 
 const listUsageMeterOverrides = `-- name: ListUsageMeterOverrides :many
@@ -430,12 +558,193 @@ func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageM
 	return items, nil
 }
 
+const listUsageRateCardPricesForUpdate = `-- name: ListUsageRateCardPricesForUpdate :many
+SELECT customer_id, price
+FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1
+  AND meter_key = $2::text
+FOR UPDATE
+`
+
+type ListUsageRateCardPricesForUpdateParams struct {
+	MerchantID uuid.UUID
+	MeterKey   string
+}
+
+type ListUsageRateCardPricesForUpdateRow struct {
+	CustomerID *uuid.UUID
+	Price      []byte
+}
+
+func (q *Queries) ListUsageRateCardPricesForUpdate(ctx context.Context, arg ListUsageRateCardPricesForUpdateParams) ([]ListUsageRateCardPricesForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listUsageRateCardPricesForUpdate, arg.MerchantID, arg.MeterKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUsageRateCardPricesForUpdateRow
+	for rows.Next() {
+		var i ListUsageRateCardPricesForUpdateRow
+		if err := rows.Scan(&i.CustomerID, &i.Price); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockUsageEventsForMeterCorrection = `-- name: LockUsageEventsForMeterCorrection :exec
 LOCK TABLE openrails.usage_events IN SHARE ROW EXCLUSIVE MODE
 `
 
 func (q *Queries) LockUsageEventsForMeterCorrection(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, lockUsageEventsForMeterCorrection)
+	return err
+}
+
+const lockUsageMeterKey = `-- name: LockUsageMeterKey :exec
+
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Merchant-admin usage-meter catalog reads and lifecycle guards (#805).
+func (q *Queries) LockUsageMeterKey(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockUsageMeterKey, lockKey)
+	return err
+}
+
+const lockUsageRateCardProduct = `-- name: LockUsageRateCardProduct :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 1))
+`
+
+func (q *Queries) LockUsageRateCardProduct(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockUsageRateCardProduct, lockKey)
+	return err
+}
+
+const updateUsageMeter = `-- name: UpdateUsageMeter :exec
+UPDATE openrails.catalog_meters
+SET event_type = NULLIF($1::text, ''),
+    value_property = NULLIF($2::text, ''),
+    aggregation = $3::text,
+    unit = NULLIF($4::text, ''),
+    group_by = $5::jsonb,
+    updated_at = now()
+WHERE merchant_id = $6
+  AND key = $7
+`
+
+type UpdateUsageMeterParams struct {
+	EventType     string
+	ValueProperty string
+	Aggregation   string
+	Unit          string
+	GroupBy       []byte
+	MerchantID    uuid.UUID
+	MeterKey      string
+}
+
+func (q *Queries) UpdateUsageMeter(ctx context.Context, arg UpdateUsageMeterParams) error {
+	_, err := q.db.Exec(ctx, updateUsageMeter,
+		arg.EventType,
+		arg.ValueProperty,
+		arg.Aggregation,
+		arg.Unit,
+		arg.GroupBy,
+		arg.MerchantID,
+		arg.MeterKey,
+	)
+	return err
+}
+
+const upsertDefaultUsageRateCard = `-- name: UpsertDefaultUsageRateCard :exec
+INSERT INTO openrails.catalog_rate_cards
+    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price)
+VALUES (
+    $1,
+    $2::uuid,
+    COALESCE(
+        (SELECT ordinal FROM openrails.catalog_rate_cards
+         WHERE merchant_id = $1
+           AND product_id = $2::uuid
+           AND meter_key = $3::text
+           AND customer_id IS NULL),
+        (SELECT MAX(ordinal) + 1 FROM openrails.catalog_rate_cards
+         WHERE merchant_id = $1
+           AND product_id = $2::uuid
+           AND customer_id IS NULL),
+        1
+    ),
+    $3::text, 'in_arrears', $4::jsonb,
+    $5::jsonb, $6::jsonb
+)
+ON CONFLICT (merchant_id, meter_key)
+    WHERE meter_key IS NOT NULL AND customer_id IS NULL
+DO UPDATE SET product_id = EXCLUDED.product_id,
+    ordinal = EXCLUDED.ordinal,
+    filter = EXCLUDED.filter,
+    allowance = EXCLUDED.allowance,
+    price = EXCLUDED.price,
+    updated_at = now()
+`
+
+type UpsertDefaultUsageRateCardParams struct {
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+	MeterKey   string
+	Filter     []byte
+	Allowance  []byte
+	Price      []byte
+}
+
+func (q *Queries) UpsertDefaultUsageRateCard(ctx context.Context, arg UpsertDefaultUsageRateCardParams) error {
+	_, err := q.db.Exec(ctx, upsertDefaultUsageRateCard,
+		arg.MerchantID,
+		arg.ProductID,
+		arg.MeterKey,
+		arg.Filter,
+		arg.Allowance,
+		arg.Price,
+	)
+	return err
+}
+
+const upsertPayerUsageRateCard = `-- name: UpsertPayerUsageRateCard :exec
+INSERT INTO openrails.catalog_rate_cards
+    (merchant_id, product_id, customer_id, ordinal, meter_key, payment_term, filter, allowance, price)
+VALUES (
+    $1, NULL, $2::uuid, 1,
+    $3::text, 'in_arrears', '{}'::jsonb,
+    $4::jsonb, $5::jsonb
+)
+ON CONFLICT (merchant_id, customer_id, meter_key)
+    WHERE meter_key IS NOT NULL AND customer_id IS NOT NULL
+DO UPDATE SET product_id = NULL,
+    filter = '{}'::jsonb,
+    allowance = EXCLUDED.allowance,
+    price = EXCLUDED.price,
+    updated_at = now()
+`
+
+type UpsertPayerUsageRateCardParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	MeterKey   string
+	Allowance  []byte
+	Price      []byte
+}
+
+func (q *Queries) UpsertPayerUsageRateCard(ctx context.Context, arg UpsertPayerUsageRateCardParams) error {
+	_, err := q.db.Exec(ctx, upsertPayerUsageRateCard,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.MeterKey,
+		arg.Allowance,
+		arg.Price,
+	)
 	return err
 }
 
@@ -476,6 +785,30 @@ type UsageMeterExistsParams struct {
 
 func (q *Queries) UsageMeterExists(ctx context.Context, arg UsageMeterExistsParams) (bool, error) {
 	row := q.db.QueryRow(ctx, usageMeterExists, arg.MerchantID, arg.MeterKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const usageRateCardCurrencyConflict = `-- name: UsageRateCardCurrencyConflict :one
+SELECT EXISTS (
+    SELECT 1
+    FROM openrails.catalog_rate_cards
+    WHERE merchant_id = $1
+      AND meter_key = $2::text
+      AND customer_id IS NOT NULL
+      AND upper(COALESCE(price ->> 'currency', '')) <> $3
+)
+`
+
+type UsageRateCardCurrencyConflictParams struct {
+	MerchantID uuid.UUID
+	MeterKey   string
+	Currency   string
+}
+
+func (q *Queries) UsageRateCardCurrencyConflict(ctx context.Context, arg UsageRateCardCurrencyConflictParams) (bool, error) {
+	row := q.db.QueryRow(ctx, usageRateCardCurrencyConflict, arg.MerchantID, arg.MeterKey, arg.Currency)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

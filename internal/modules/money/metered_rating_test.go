@@ -62,3 +62,29 @@ func TestResolvePayerRateCardOverridesRequiresDefault(t *testing.T) {
 	}})
 	require.ErrorIs(t, err, ErrDefaultRateCardRequired)
 }
+
+func TestRateCardFilterRulesResolveEveryDeclaredDimension(t *testing.T) {
+	card := catalogRateCardRow{
+		ID:      uuid.New(),
+		GroupBy: map[string]string{"region": "metadata.region", "plan": "$.plan"},
+		Filter:  map[string][]string{"region": {"eu"}, "plan": {"pro", "team"}},
+	}
+
+	rules, err := rateCardFilterRules(card)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []usageFilterRule{
+		{PropertyKey: "region", AllowedValues: []string{"eu"}},
+		{PropertyKey: "plan", AllowedValues: []string{"pro", "team"}},
+	}, rules)
+}
+
+func TestRateCardFilterRulesRejectMissingMeterProperty(t *testing.T) {
+	card := catalogRateCardRow{
+		ID:      uuid.New(),
+		GroupBy: map[string]string{},
+		Filter:  map[string][]string{"region": {"eu"}},
+	}
+
+	_, err := rateCardFilterRules(card)
+	require.ErrorContains(t, err, `filter dimension "region" has no meter property`)
+}

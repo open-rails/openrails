@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -138,48 +137,27 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec
 		return err
 	}
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(
-			ctx,
-			`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-			tid.UUID().String()+":"+meter.Key,
-		); err != nil {
+		queries := gen.New(tx)
+		if err := queries.LockUsageMeterKey(ctx, tid.UUID().String()+":"+meter.Key); err != nil {
 			return fmt.Errorf("lock usage meter: %w", err)
 		}
 
 		var existing pricing.Meter
-		var existingGroupBy []byte
-		err := tx.QueryRow(ctx, `
-SELECT key,
-       COALESCE(event_type, ''),
-       COALESCE(value_property, ''),
-       COALESCE(aggregation, ''),
-       COALESCE(unit, ''),
-       group_by
-FROM openrails.catalog_meters
-WHERE merchant_id = $1 AND key = $2
-FOR UPDATE`, tid.UUID(), meter.Key).Scan(
-			&existing.Key,
-			&existing.EventType,
-			&existing.ValueProperty,
-			&existing.Aggregation,
-			&existing.Unit,
-			&existingGroupBy,
-		)
+		row, err := queries.GetUsageMeterForUpdate(ctx, gen.GetUsageMeterForUpdateParams{
+			MerchantID: tid.UUID(),
+			MeterKey:   meter.Key,
+		})
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
-			_, err = tx.Exec(ctx, `
-INSERT INTO openrails.catalog_meters
-    (merchant_id, key, event_type, value_property, aggregation, unit, group_by)
-VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, NULLIF($6, ''), $7::jsonb)`,
-				tid.UUID(),
-				meter.Key,
-				meter.EventType,
-				meter.ValueProperty,
-				meter.Aggregation,
-				meter.Unit,
-				string(groupByJSON),
-			)
-			if err != nil {
+			if err := queries.InsertUsageMeter(ctx, gen.InsertUsageMeterParams{
+				MerchantID:    tid.UUID(),
+				MeterKey:      meter.Key,
+				EventType:     meter.EventType,
+				ValueProperty: meter.ValueProperty,
+				Aggregation:   meter.Aggregation,
+				Unit:          meter.Unit,
+				GroupBy:       groupByJSON,
+			}); err != nil {
 				return fmt.Errorf("insert usage meter: %w", err)
 			}
 			return nil
@@ -187,7 +165,14 @@ VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, NULLIF($6, ''), $7::jsonb)`,
 			return fmt.Errorf("load usage meter: %w", err)
 		}
 
-		if err := json.Unmarshal(existingGroupBy, &existing.GroupBy); err != nil {
+		existing = pricing.Meter{
+			Key:           row.Key,
+			EventType:     row.EventType,
+			ValueProperty: row.ValueProperty,
+			Aggregation:   row.Aggregation,
+			Unit:          row.Unit,
+		}
+		if err := json.Unmarshal(row.GroupBy, &existing.GroupBy); err != nil {
 			return fmt.Errorf("decode usage meter group_by: %w", err)
 		}
 		if usageMeterSemanticsEqual(existing, meter) {
@@ -200,24 +185,18 @@ VALUES ($1, $2, NULLIF($3, ''), NULLIF($4, ''), $5, NULLIF($6, ''), $7::jsonb)`,
 		if hasActivity {
 			return ErrMeterInUse
 		}
-		_, err = tx.Exec(ctx, `
-UPDATE openrails.catalog_meters
-SET event_type = NULLIF($3, ''),
-    value_property = NULLIF($4, ''),
-    aggregation = $5,
-    unit = NULLIF($6, ''),
-    group_by = $7::jsonb,
-    updated_at = now()
-WHERE merchant_id = $1 AND key = $2`,
-			tid.UUID(),
-			meter.Key,
-			meter.EventType,
-			meter.ValueProperty,
-			meter.Aggregation,
-			meter.Unit,
-			string(groupByJSON),
-		)
-		if err != nil {
+		if err := validateUsageMeterRateCardContracts(ctx, queries, tid.UUID(), meter); err != nil {
+			return err
+		}
+		if err := queries.UpdateUsageMeter(ctx, gen.UpdateUsageMeterParams{
+			MerchantID:    tid.UUID(),
+			MeterKey:      meter.Key,
+			EventType:     meter.EventType,
+			ValueProperty: meter.ValueProperty,
+			Aggregation:   meter.Aggregation,
+			Unit:          meter.Unit,
+			GroupBy:       groupByJSON,
+		}); err != nil {
 			return fmt.Errorf("update usage meter: %w", err)
 		}
 		return nil
@@ -245,32 +224,32 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	}
 	meterKey := pricing.NormalizeKey(in.MeterKey)
 	if meterKey == "" {
-		return fmt.Errorf("meter_key required")
+		return invalidUsageRateCard(fmt.Errorf("meter_key required"))
 	}
 	payerScoped := in.Payer != nil && !in.Payer.IsZero()
 	if !payerScoped && (in.ProductID == nil || *in.ProductID == uuid.Nil) {
-		return fmt.Errorf("product_id required for a merchant-default rate card")
+		return invalidUsageRateCard(fmt.Errorf("product_id required for a merchant-default rate card"))
 	}
 	if payerScoped && in.ProductID != nil {
-		return fmt.Errorf("product_id is inherited by a payer rate card")
+		return invalidUsageRateCard(fmt.Errorf("product_id is inherited by a payer rate card"))
 	}
 	if payerScoped && len(in.Filter) > 0 {
-		return fmt.Errorf("filter is inherited by a payer rate card")
+		return invalidUsageRateCard(fmt.Errorf("filter is inherited by a payer rate card"))
 	}
 	if err := pricing.ValidateUsagePrice("usage rate card", &in.Price); err != nil {
-		return err
+		return invalidUsageRateCard(err)
 	}
 	if in.Price.Currency == "" {
-		return fmt.Errorf("usage rate card: currency is required")
+		return invalidUsageRateCard(fmt.Errorf("usage rate card: currency is required"))
 	}
 	if err := RequireBillingCurrency(in.Price.Currency); err != nil {
-		return err
+		return invalidUsageRateCard(err)
 	}
 	if err := pricing.ValidateAllowance("usage rate card", in.Allowance); err != nil {
-		return err
+		return invalidUsageRateCard(err)
 	}
 	if err := pricing.ValidateFilter("usage rate card", &in.Filter); err != nil {
-		return err
+		return invalidUsageRateCard(err)
 	}
 	priceJSON, err := json.Marshal(in.Price)
 	if err != nil {
@@ -287,21 +266,33 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 		return err
 	}
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		queries := gen.New(tx)
 		meter, err := loadUsageMeterForRateCard(ctx, tx, tid.UUID(), meterKey)
 		if err != nil {
 			return err
 		}
 		if !pricing.BillingSupported(meter.Aggregation) {
-			return fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation)
+			return invalidUsageRateCard(fmt.Errorf("usage meter: aggregation %q is not supported for billing", meter.Aggregation))
 		}
 		if err := pricing.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
+			return invalidUsageRateCard(err)
+		}
+		if err := ensureAllowanceSource(
+			ctx,
+			tx,
+			tid.UUID(),
+			meterKey,
+			in.Payer,
+			in.Price.Currency,
+			in.Allowance,
+		); err != nil {
 			return err
 		}
-		if err := ensureAllowanceMeter(ctx, tx, tid.UUID(), in.Allowance); err != nil {
+		if err := validateRateCardAsAllowanceSource(ctx, queries, tid.UUID(), meter, in.Price); err != nil {
 			return err
 		}
 		if payerScoped {
-			if err := ensureCustomer(ctx, gen.New(tx), tid.UUID(), in.Payer.UUID()); err != nil {
+			if err := ensureCustomer(ctx, queries, tid.UUID(), in.Payer.UUID()); err != nil {
 				return err
 			}
 			defaultCurrency, err := loadDefaultRateCardCurrency(ctx, tx, tid.UUID(), meterKey)
@@ -311,23 +302,13 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 			if in.Price.Currency != defaultCurrency {
 				return ErrRateCardCurrencyMismatch
 			}
-			_, err = tx.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards
-    (merchant_id, product_id, customer_id, ordinal, meter_key, payment_term, filter, allowance, price)
-VALUES ($1, NULL, $2, 1, $3, 'in_arrears', '{}'::jsonb, $4::jsonb, $5::jsonb)
-ON CONFLICT (merchant_id, customer_id, meter_key) WHERE meter_key IS NOT NULL AND customer_id IS NOT NULL
-DO UPDATE SET product_id = NULL,
-    filter = '{}'::jsonb,
-    allowance = EXCLUDED.allowance,
-    price = EXCLUDED.price,
-    updated_at = now()`,
-				tid.UUID(),
-				in.Payer.UUID(),
-				meterKey,
-				allowanceJSONOrNull(allowanceJSON),
-				string(priceJSON),
-			)
-			if err != nil {
+			if err := queries.UpsertPayerUsageRateCard(ctx, gen.UpsertPayerUsageRateCardParams{
+				MerchantID: tid.UUID(),
+				CustomerID: in.Payer.UUID(),
+				MeterKey:   meterKey,
+				Allowance:  allowanceJSON,
+				Price:      priceJSON,
+			}); err != nil {
 				return fmt.Errorf("upsert payer usage rate card: %w", err)
 			}
 			return nil
@@ -335,23 +316,21 @@ DO UPDATE SET product_id = NULL,
 		if err := ensureActiveProduct(ctx, tx, tid.UUID(), *in.ProductID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(
+		if err := queries.LockUsageRateCardProduct(
 			ctx,
-			`SELECT pg_advisory_xact_lock(hashtextextended($1, 1))`,
 			tid.UUID().String()+":"+in.ProductID.String(),
 		); err != nil {
 			return fmt.Errorf("lock rate card product: %w", err)
 		}
-		var hasCurrencyConflict bool
-		if err := tx.QueryRow(ctx, `
-SELECT EXISTS (
-    SELECT 1
-    FROM openrails.catalog_rate_cards
-    WHERE merchant_id = $1
-      AND meter_key = $2
-      AND customer_id IS NOT NULL
-      AND upper(COALESCE(price ->> 'currency', '')) <> $3
-)`, tid.UUID(), meterKey, in.Price.Currency).Scan(&hasCurrencyConflict); err != nil {
+		hasCurrencyConflict, err := queries.UsageRateCardCurrencyConflict(
+			ctx,
+			gen.UsageRateCardCurrencyConflictParams{
+				MerchantID: tid.UUID(),
+				MeterKey:   meterKey,
+				Currency:   in.Price.Currency,
+			},
+		)
+		if err != nil {
 			return fmt.Errorf("check payer rate card currencies: %w", err)
 		}
 		if hasCurrencyConflict {
@@ -361,33 +340,14 @@ SELECT EXISTS (
 		if err != nil {
 			return fmt.Errorf("encode rate card filter: %w", err)
 		}
-		_, err = tx.Exec(ctx, `
-INSERT INTO openrails.catalog_rate_cards
-    (merchant_id, product_id, ordinal, meter_key, payment_term, filter, allowance, price)
-VALUES ($1, $2,
-    COALESCE(
-        (SELECT ordinal FROM openrails.catalog_rate_cards
-         WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND customer_id IS NULL),
-        (SELECT MAX(ordinal) + 1 FROM openrails.catalog_rate_cards
-         WHERE merchant_id = $1 AND product_id = $2 AND customer_id IS NULL),
-        1
-    ),
-    $3, 'in_arrears', $4::jsonb, $5::jsonb, $6::jsonb)
-ON CONFLICT (merchant_id, meter_key) WHERE meter_key IS NOT NULL AND customer_id IS NULL
-DO UPDATE SET product_id = EXCLUDED.product_id,
-    ordinal = EXCLUDED.ordinal,
-    filter = EXCLUDED.filter,
-    allowance = EXCLUDED.allowance,
-    price = EXCLUDED.price,
-    updated_at = now()`,
-			tid.UUID(),
-			in.ProductID,
-			meterKey,
-			string(filterJSON),
-			allowanceJSONOrNull(allowanceJSON),
-			string(priceJSON),
-		)
-		if err != nil {
+		if err := queries.UpsertDefaultUsageRateCard(ctx, gen.UpsertDefaultUsageRateCardParams{
+			MerchantID: tid.UUID(),
+			ProductID:  *in.ProductID,
+			MeterKey:   meterKey,
+			Filter:     filterJSON,
+			Allowance:  allowanceJSON,
+			Price:      priceJSON,
+		}); err != nil {
 			return fmt.Errorf("upsert default usage rate card: %w", err)
 		}
 		return nil
@@ -412,27 +372,40 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 		if _, err := loadUsageMeterForRateCard(ctx, tx, tid.UUID(), meterKey); err != nil {
 			return err
 		}
-		var defaultExists bool
-		var overrideCount int64
-		if err := tx.QueryRow(ctx, `
-SELECT EXISTS (
-           SELECT 1 FROM openrails.catalog_rate_cards
-           WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NULL
-       ),
-       count(*) FILTER (WHERE customer_id IS NOT NULL)
-FROM openrails.catalog_rate_cards
-WHERE merchant_id = $1 AND meter_key = $2`, tid.UUID(), meterKey).Scan(&defaultExists, &overrideCount); err != nil {
+		queries := gen.New(tx)
+		state, err := queries.GetDefaultUsageRateCardDeleteState(
+			ctx,
+			gen.GetDefaultUsageRateCardDeleteStateParams{
+				MerchantID: tid.UUID(),
+				MeterKey:   meterKey,
+			},
+		)
+		if err != nil {
 			return fmt.Errorf("load default usage rate card: %w", err)
 		}
-		if !defaultExists {
+		if !state.DefaultExists {
 			return ErrDefaultRateCardNotFound
 		}
-		if overrideCount > 0 {
+		if state.OverrideCount > 0 {
 			return ErrRateCardHasOverrides
 		}
-		if _, err := tx.Exec(ctx, `
-DELETE FROM openrails.catalog_rate_cards
-WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NULL`, tid.UUID(), meterKey); err != nil {
+		dependencyCurrencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(
+			ctx,
+			gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{
+				MerchantID: tid.UUID(),
+				MeterKey:   meterKey,
+			},
+		)
+		if err != nil {
+			return fmt.Errorf("load allowance dependencies: %w", err)
+		}
+		if len(dependencyCurrencies) > 0 {
+			return ErrAllowanceSourceInUse
+		}
+		if err := queries.DeleteDefaultUsageRateCard(ctx, gen.DeleteDefaultUsageRateCardParams{
+			MerchantID: tid.UUID(),
+			MeterKey:   meterKey,
+		}); err != nil {
 			return fmt.Errorf("delete default usage rate card: %w", err)
 		}
 		return nil
@@ -504,7 +477,7 @@ func (s *MoneyService) DeletePayerRateCard(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	meterKey = strings.TrimSpace(meterKey)
+	meterKey = pricing.NormalizeKey(meterKey)
 	if meterKey == "" {
 		return fmt.Errorf("meter_key required")
 	}
@@ -519,11 +492,4 @@ WHERE merchant_id = $1 AND customer_id = $2 AND meter_key = $3`,
 			tid.UUID(), payer.UUID(), meterKey)
 		return e
 	})
-}
-
-func allowanceJSONOrNull(b []byte) any {
-	if len(b) == 0 {
-		return nil
-	}
-	return string(b)
 }
