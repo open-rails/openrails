@@ -52,6 +52,7 @@ import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
+import { CustomerUsageRatesSection } from "./usage-rates"
 
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
@@ -65,7 +66,7 @@ export function CustomerDetailPage() {
     return <p className="text-sm text-muted-foreground">Customer not found.</p>
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <div className="flex items-center gap-3">
         <Button
           variant="ghost"
@@ -115,6 +116,8 @@ export function CustomerDetailPage() {
           ))}
         </div>
       )}
+
+      <CustomerUsageRatesSection customerId={customerId} />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
         <div className="grid gap-4 lg:col-span-2">

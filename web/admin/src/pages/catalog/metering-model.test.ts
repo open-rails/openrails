@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest"
 
-import type { UsageMeter } from "@/lib/api/types"
+import type { DefaultUsageRateCard, UsageMeter } from "@/lib/api/types"
 import {
   buildMeterRequest,
   buildRateCardRequest,
+  customerUsageRateRows,
   meterCollectionState,
   meterDefinitionLocked,
+  negotiatedRateFormValues,
+  negotiatedRateRequest,
   rateCardFormValues,
   RateCardFormError,
   summarizeRateCard,
@@ -184,6 +187,64 @@ describe("rate-card form", () => {
       expect((error as RateCardFormError).fieldId).toBe("matrix-cell-0-value")
     }
   })
+
+  it("prefills negotiated editing from the override over inherited defaults", () => {
+    const defaults = {
+      id: "rate-1",
+      product_id: "product-1",
+      product_key: "pro",
+      filter: { region: ["us"] },
+      price: {
+        model: "per_unit" as const,
+        currency: "USD",
+        per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+      },
+      created_at: "2026-08-17T00:00:00Z",
+      updated_at: "2026-08-17T00:00:00Z",
+    } as DefaultUsageRateCard
+    const values = negotiatedRateFormValues(defaults, {
+      meter_key: "tokens",
+      price: {
+        model: "package",
+        currency: "USD",
+        package: { amount: 5_000_000, package_size: 1000 },
+      },
+      allowance: { included: 50 },
+      created_at: "2026-08-17T00:00:00Z",
+      updated_at: "2026-08-17T00:00:00Z",
+    })
+
+    expect(values.productId).toBe("product-1")
+    expect(values.currency).toBe("USD")
+    expect(values.model).toBe("package")
+    expect(values.packageAmount).toBe("5")
+    expect(values.allowanceIncluded).toBe("50")
+    expect(values.filters).toEqual([{ key: "region", value: "us" }])
+  })
+
+  it("sends only the negotiated price and allowance", () => {
+    const request = negotiatedRateRequest({
+      product_id: "inherited-product",
+      filter: { region: ["us"] },
+      price: {
+        model: "per_unit",
+        currency: "USD",
+        per_unit: { unit_amount: 500_000, divide_by: 1 },
+      },
+      allowance: { included: 50 },
+    })
+
+    expect(request).toEqual({
+      price: {
+        model: "per_unit",
+        currency: "USD",
+        per_unit: { unit_amount: 500_000, divide_by: 1 },
+      },
+      allowance: { included: 50 },
+    })
+    expect(request).not.toHaveProperty("product_id")
+    expect(request).not.toHaveProperty("filter")
+  })
 })
 
 describe("metering states", () => {
@@ -210,6 +271,28 @@ describe("metering states", () => {
         has_activity: true,
       })
     ).toContain("first event")
+  })
+
+  it("joins negotiated rates only to billable meters with defaults", () => {
+    const ready = {
+      key: "tokens",
+      billing_supported: true,
+      default_rate_card: { price: {} },
+    } as UsageMeter
+    const unsupported = {
+      key: "unused",
+      billing_supported: false,
+    } as UsageMeter
+    const override = {
+      meter_key: "tokens",
+      price: { model: "per_unit", currency: "USD" },
+      created_at: "2026-08-17T00:00:00Z",
+      updated_at: "2026-08-17T00:00:00Z",
+    } as const
+
+    expect(customerUsageRateRows([unsupported, ready], [override])).toEqual([
+      { meter: ready, override },
+    ])
   })
 
   it("summarizes each supported model", () => {

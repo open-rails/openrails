@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ApiError } from "@/lib/api/client"
-import { adminQueries, queryKeys } from "@/lib/queries"
+import { adminQueries, collectUsageMeterPages, queryKeys } from "@/lib/queries"
 import { queryClient, shouldRetry } from "@/lib/query-client"
 import { toastApiError } from "@/lib/toast"
 
@@ -145,6 +145,35 @@ describe("query keys", () => {
       "customer-1",
       "usage-rates",
     ])
+  })
+
+  it("collects every meter page for customer rate selection", async () => {
+    const firstMeter = { key: "first" } as never
+    const lastMeter = { key: "last" } as never
+    const loadPage = vi
+      .fn()
+      .mockResolvedValueOnce({
+        items: [firstMeter],
+        total: 2,
+        limit: 1,
+        offset: 0,
+        configuration_source: "api",
+        writes_allowed: true,
+      })
+      .mockResolvedValueOnce({
+        items: [lastMeter],
+        total: 2,
+        limit: 1,
+        offset: 1,
+        configuration_source: "api",
+        writes_allowed: true,
+      })
+
+    const result = await collectUsageMeterPages(loadPage)
+
+    expect(loadPage).toHaveBeenNthCalledWith(1, 200, 0, undefined)
+    expect(loadPage).toHaveBeenNthCalledWith(2, 200, 1, undefined)
+    expect(result.items).toEqual([firstMeter, lastMeter])
   })
 
   it("only reports query errors when the usage requests it", () => {

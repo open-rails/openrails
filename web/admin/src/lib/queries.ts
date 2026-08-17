@@ -44,6 +44,29 @@ import {
   metricsQuery,
   type MetricsQuery,
 } from "@/lib/api/metrics"
+import type { UsageMeterPage } from "@/lib/api/types"
+
+type UsageMeterPageLoader = (
+  limit: number,
+  offset: number,
+  signal?: AbortSignal
+) => Promise<UsageMeterPage>
+
+export async function collectUsageMeterPages(
+  loadPage: UsageMeterPageLoader,
+  signal?: AbortSignal
+): Promise<UsageMeterPage> {
+  const first = await loadPage(200, 0, signal)
+  const items = [...first.items]
+  let offset = first.offset + first.limit
+  while (items.length < first.total) {
+    const page = await loadPage(200, offset, signal)
+    items.push(...page.items)
+    if (page.items.length === 0) break
+    offset = page.offset + page.limit
+  }
+  return { ...first, items, limit: items.length, offset: 0 }
+}
 
 const merchantRoot = () =>
   ["merchant", getTokens()?.merchant ?? "unselected"] as const
@@ -239,6 +262,12 @@ export const adminQueries = {
       queryKey: [...queryKeys.usageMeters(), { limit, offset }],
       queryFn: ({ signal }) => listUsageMeters(limit, offset, signal),
       placeholderData: keepPreviousData,
+      meta: { errorAction: "Load usage meters" },
+    }),
+  allUsageMeters: () =>
+    queryOptions({
+      queryKey: [...queryKeys.usageMeters(), "all"],
+      queryFn: ({ signal }) => collectUsageMeterPages(listUsageMeters, signal),
       meta: { errorAction: "Load usage meters" },
     }),
   usageMeter: (key: string) =>
