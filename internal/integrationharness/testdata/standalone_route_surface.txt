@@ -44,6 +44,7 @@ GET /v1/me/payment-methods
 GET /v1/me/payments
 GET /v1/me/products
 GET /v1/me/products/{product_id}/access
+GET /v1/me/spend-limits
 GET /v1/me/status
 GET /v1/me/subscriptions
 GET /v1/me/subscriptions/{id}
