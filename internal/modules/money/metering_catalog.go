@@ -438,6 +438,12 @@ func usageMeterHasActivity(
 	if replacementEventType != eventTypes[0] {
 		eventTypes = append(eventTypes, replacementEventType)
 	}
+	// Meter corrections are rare control-plane writes. Hold inserts while the
+	// activity predicate is checked so a concurrent report cannot slip between
+	// the check and the semantic update and then be reinterpreted.
+	if _, err := tx.Exec(ctx, `LOCK TABLE openrails.usage_events IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return false, fmt.Errorf("lock usage activity: %w", err)
+	}
 	var hasActivity bool
 	if err := tx.QueryRow(ctx, `
 SELECT EXISTS (
@@ -567,35 +573,4 @@ FOR SHARE`, merchantID, productID).Scan(&id)
 		return fmt.Errorf("check rate card product: %w", err)
 	}
 	return nil
-}
-
-func normalizeRateCardFilter(filter map[string][]string) (map[string][]string, error) {
-	out := make(map[string][]string, len(filter))
-	for rawKey, rawValues := range filter {
-		key := strings.TrimSpace(rawKey)
-		if key == "" {
-			return nil, fmt.Errorf("usage rate card: filter keys must be non-empty")
-		}
-		if _, exists := out[key]; exists {
-			return nil, fmt.Errorf("usage rate card: duplicate filter key %q", key)
-		}
-		values := make([]string, 0, len(rawValues))
-		seen := make(map[string]struct{}, len(rawValues))
-		for _, rawValue := range rawValues {
-			value := strings.TrimSpace(rawValue)
-			if value == "" {
-				return nil, fmt.Errorf("usage rate card: filter values must be non-empty")
-			}
-			if _, exists := seen[value]; exists {
-				continue
-			}
-			seen[value] = struct{}{}
-			values = append(values, value)
-		}
-		if len(values) == 0 {
-			return nil, fmt.Errorf("usage rate card: filter %q must contain at least one value", key)
-		}
-		out[key] = values
-	}
-	return out, nil
 }

@@ -226,6 +226,43 @@ func ValidateAllowance(where string, allowance *Allowance) error {
 	return nil
 }
 
+// ValidateFilter normalizes a meter filter and rejects ambiguous or empty
+// dimensions and values.
+func ValidateFilter(where string, filter *map[string][]string) error {
+	if filter == nil {
+		return fmt.Errorf("%s: filter is required", where)
+	}
+	normalized := make(map[string][]string, len(*filter))
+	for rawKey, rawValues := range *filter {
+		key := strings.TrimSpace(rawKey)
+		if key == "" {
+			return fmt.Errorf("%s: filter keys must be non-empty", where)
+		}
+		if _, exists := normalized[key]; exists {
+			return fmt.Errorf("%s: duplicate filter key %q", where, key)
+		}
+		values := make([]string, 0, len(rawValues))
+		seen := make(map[string]struct{}, len(rawValues))
+		for _, rawValue := range rawValues {
+			value := strings.TrimSpace(rawValue)
+			if value == "" {
+				return fmt.Errorf("%s: filter values must be non-empty", where)
+			}
+			if _, exists := seen[value]; exists {
+				continue
+			}
+			seen[value] = struct{}{}
+			values = append(values, value)
+		}
+		if len(values) == 0 {
+			return fmt.Errorf("%s: filter %q must contain at least one value", where, key)
+		}
+		normalized[key] = values
+	}
+	*filter = normalized
+	return nil
+}
+
 // ValidateDimensions verifies that filter and matrix dimensions belong to the
 // meter's declared group_by registry.
 func ValidateDimensions(

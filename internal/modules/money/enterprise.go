@@ -269,11 +269,9 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if err := pricing.ValidateAllowance("usage rate card", in.Allowance); err != nil {
 		return err
 	}
-	normalizedFilter, err := normalizeRateCardFilter(in.Filter)
-	if err != nil {
+	if err := pricing.ValidateFilter("usage rate card", &in.Filter); err != nil {
 		return err
 	}
-	in.Filter = normalizedFilter
 	priceJSON, err := json.Marshal(in.Price)
 	if err != nil {
 		return fmt.Errorf("encode rate card price: %w", err)

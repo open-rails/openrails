@@ -186,7 +186,7 @@ func (m *Manifest) validateRateCardModel() error {
 						return err
 					}
 				}
-				if err := validateFilterKeys(where, rc.Filter, mt); err != nil {
+				if err := validateFilterKeys(where, &rc.Filter, mt); err != nil {
 					return err
 				}
 				if rc.Allowance != nil && rc.Allowance.AccrueFrom != "" {
@@ -211,6 +211,9 @@ func validateMatrixDimension(where string, mx *Matrix, mt Meter) error {
 	})
 }
 
-func validateFilterKeys(where string, filter map[string][]string, mt Meter) error {
-	return pricing.ValidateDimensions(where, mt.GroupBy, filter, nil)
+func validateFilterKeys(where string, filter *map[string][]string, mt Meter) error {
+	if err := pricing.ValidateFilter(where, filter); err != nil {
+		return err
+	}
+	return pricing.ValidateDimensions(where, mt.GroupBy, *filter, nil)
 }

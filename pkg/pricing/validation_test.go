@@ -199,6 +199,15 @@ func TestValidateDimensions(t *testing.T) {
 	), "filter key")
 }
 
+func TestValidateFilter(t *testing.T) {
+	filter := map[string][]string{" region ": {" eu ", "eu", "us"}}
+	require.NoError(t, pricing.ValidateFilter("rate card", &filter))
+	assert.Equal(t, map[string][]string{"region": {"eu", "us"}}, filter)
+
+	invalid := map[string][]string{"region": {}}
+	require.ErrorContains(t, pricing.ValidateFilter("rate card", &invalid), "at least one value")
+}
+
 func int64Pointer(value int64) *int64 {
 	return &value
 }
