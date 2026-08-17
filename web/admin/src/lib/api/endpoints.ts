@@ -43,6 +43,7 @@ import type {
   UsageAllowance,
   UsageMeter,
   UsageMeterOverride,
+  UsageMeterPage,
   UsageRatePrice,
   WebhookFormat,
   WorkerHealth,
@@ -303,7 +304,7 @@ export const listUsageMeters = (
   offset = 0,
   signal?: AbortSignal
 ) =>
-  api<ItemsEnvelope<UsageMeter>>("/merchant/catalog/meters", {
+  api<UsageMeterPage>("/merchant/catalog/meters", {
     query: { limit, offset },
     signal,
   })

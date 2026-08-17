@@ -20,6 +20,12 @@ type adminUsageMeterResponse struct {
 	WritesAllowed       bool   `json:"writes_allowed"`
 }
 
+type adminUsageMeterPageResponse struct {
+	paginatedResponse[adminUsageMeterResponse]
+	ConfigurationSource string `json:"configuration_source"`
+	WritesAllowed       bool   `json:"writes_allowed"`
+}
+
 type adminUsageMeterRequest struct {
 	EventType     string            `json:"event_type"`
 	ValueProperty string            `json:"value_property"`
@@ -52,12 +58,16 @@ func AdminListUsageMeters(r *httprequest.Request) {
 	for _, meter := range page.Data {
 		items = append(items, adminUsageMeterDTO(r, meter))
 	}
-	r.JSON(http.StatusOK, paginatedResponse[adminUsageMeterResponse]{
-		Items:  items,
-		Total:  page.TotalItems,
-		Limit:  page.Limit,
-		Offset: page.Offset,
-	})
+	r.JSON(
+		http.StatusOK,
+		adminUsageMeterPageDTO(
+			r,
+			items,
+			page.TotalItems,
+			page.Limit,
+			page.Offset,
+		),
+	)
 }
 
 func AdminGetUsageMeter(r *httprequest.Request) {
@@ -246,15 +256,40 @@ func loadAdminUsageMeter(r *httprequest.Request, rawKey string) (*billingservice
 }
 
 func adminUsageMeterDTO(r *httprequest.Request, meter billingservice.UsageMeterDTO) adminUsageMeterResponse {
+	source, writesAllowed := adminCatalogOwnership(r)
+	return adminUsageMeterResponse{
+		UsageMeterDTO:       meter,
+		ConfigurationSource: source,
+		WritesAllowed:       writesAllowed,
+	}
+}
+
+func adminUsageMeterPageDTO(
+	r *httprequest.Request,
+	items []adminUsageMeterResponse,
+	total int64,
+	limit int,
+	offset int,
+) adminUsageMeterPageResponse {
+	source, writesAllowed := adminCatalogOwnership(r)
+	return adminUsageMeterPageResponse{
+		paginatedResponse: paginatedResponse[adminUsageMeterResponse]{
+			Items:  items,
+			Total:  total,
+			Limit:  limit,
+			Offset: offset,
+		},
+		ConfigurationSource: source,
+		WritesAllowed:       writesAllowed,
+	}
+}
+
+func adminCatalogOwnership(r *httprequest.Request) (string, bool) {
 	source := config.MerchantSourceManifest
 	if r.State != nil && r.State.Config != nil {
 		source = r.State.Config.MerchantSourceMode()
 	}
-	return adminUsageMeterResponse{
-		UsageMeterDTO:       meter,
-		ConfigurationSource: source,
-		WritesAllowed:       source == config.MerchantSourceAPI,
-	}
+	return source, source == config.MerchantSourceAPI
 }
 
 func writeMeteringValidationError(r *httprequest.Request, code string, err error) {

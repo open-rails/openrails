@@ -329,6 +329,15 @@ export interface UsageMeterOverride {
   updated_at: string
 }
 
+export interface UsageMeterPage {
+  items: UsageMeter[]
+  total: number
+  limit: number
+  offset: number
+  configuration_source: "api" | "manifest"
+  writes_allowed: boolean
+}
+
 // CatalogProviderState is one entry of prices.psp_links as the API projects it
 // (or#812): the map is keyed by PSP key ("mobius"), and `ids` is the stored
 // link entry verbatim — including `ids.rail`, the gateway the entry lives on.

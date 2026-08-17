@@ -95,6 +95,45 @@ func TestAdminUsageMeterDTOOwnership(t *testing.T) {
 	require.True(t, apiDTO.WritesAllowed)
 }
 
+func TestAdminUsageMeterPageDTOOwnershipWithoutItems(t *testing.T) {
+	tests := []struct {
+		name          string
+		source        string
+		writesAllowed bool
+	}{
+		{
+			name:          "api catalog stays writable",
+			source:        config.MerchantSourceAPI,
+			writesAllowed: true,
+		},
+		{
+			name:          "manifest catalog stays read-only",
+			source:        config.MerchantSourceManifest,
+			writesAllowed: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := httprequest.NewHTTP(
+				httptest.NewRecorder(),
+				httptest.NewRequest(http.MethodGet, "/", nil),
+				&app.Runtime{Config: &config.Config{MerchantSource: test.source}},
+			)
+			page := adminUsageMeterPageDTO(
+				r,
+				[]adminUsageMeterResponse{},
+				0,
+				50,
+				0,
+			)
+
+			require.Empty(t, page.Items)
+			require.Equal(t, test.source, page.ConfigurationSource)
+			require.Equal(t, test.writesAllowed, page.WritesAllowed)
+		})
+	}
+}
+
 func TestWriteMeteringError(t *testing.T) {
 	tests := []struct {
 		name       string
