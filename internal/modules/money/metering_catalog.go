@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 const (
 	defaultMeteringPageSize = 50
 	maxMeteringPageSize     = 200
+	maxMeteringPageOffset   = math.MaxInt32
 )
 
 var (
@@ -116,8 +118,8 @@ func (s *MoneyService) ListUsageMeters(ctx context.Context, limit, offset int) (
 
 		rows, err := queries.ListUsageMetersWithCatalog(ctx, gen.ListUsageMetersWithCatalogParams{
 			MerchantID: tenant.UUID(),
-			PageLimit:  int32(page.Limit),
-			PageOffset: int32(page.Offset),
+			PageLimit:  meteringPageInt32(page.Limit),
+			PageOffset: meteringPageInt32(page.Offset),
 		})
 		if err != nil {
 			return fmt.Errorf("list usage meters: %w", err)
@@ -216,8 +218,8 @@ func (s *MoneyService) ListUsageMeterOverrides(
 		rows, err := queries.ListUsageMeterOverrides(ctx, gen.ListUsageMeterOverridesParams{
 			MerchantID: tenant.UUID(),
 			MeterKey:   meterKey,
-			PageLimit:  int32(page.Limit),
-			PageOffset: int32(page.Offset),
+			PageLimit:  meteringPageInt32(page.Limit),
+			PageOffset: meteringPageInt32(page.Offset),
 		})
 		if err != nil {
 			return fmt.Errorf("list usage meter overrides: %w", err)
@@ -370,7 +372,20 @@ func normalizeMeteringPage(limit, offset int) (int, int) {
 	if offset < 0 {
 		offset = 0
 	}
+	if offset > maxMeteringPageOffset {
+		offset = maxMeteringPageOffset
+	}
 	return limit, offset
+}
+
+func meteringPageInt32(value int) int32 {
+	if value < 0 {
+		return 0
+	}
+	if value > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(value)
 }
 
 func usageMeterSemanticsEqual(left, right pricing.Meter) bool {

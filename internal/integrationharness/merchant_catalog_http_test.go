@@ -675,8 +675,9 @@ func TestNativeCatalogRateCardUsageHTTP(t *testing.T) {
 	manifest := catalog.Manifest{
 		Version: catalog.SupportedVersion,
 		Meters: []catalog.Meter{{
-			Key:         meterKey,
-			Aggregation: "sum",
+			Key:           meterKey,
+			ValueProperty: meterKey,
+			Aggregation:   "sum",
 		}},
 		Products: []catalog.Product{{
 			Key:         productKey,
