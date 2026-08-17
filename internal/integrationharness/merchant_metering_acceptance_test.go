@@ -5,6 +5,7 @@ package integrationharness
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -139,8 +140,9 @@ VALUES ($1, $2, $3)`, customerID, merchantID, "metering-acceptance-"+customerID.
 		require.NoError(t, err)
 	}
 
+	overrideMeterKey := url.PathEscape(strings.ReplaceAll(meterKey, "-", " "))
 	overrideURL := surface.BaseURL + "/v1/merchant/customers/" +
-		negotiatedCustomer.String() + "/rate-overrides/" + meterKey
+		negotiatedCustomer.String() + "/rate-overrides/" + overrideMeterKey
 	status, body = requestJSON(t, http.MethodPut, overrideURL, token, map[string]any{
 		"price": map[string]any{
 			"model":    pricing.ModelPerUnit,
@@ -165,6 +167,10 @@ VALUES ($1, $2, $3)`, customerID, merchantID, "metering-acceptance-"+customerID.
 		require.Equal(t, http.StatusOK, status, string(body))
 		status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/usage/report", token, usage)
 		require.Equal(t, http.StatusOK, status, "identical usage retry must be idempotent: "+string(body))
+		disallowed := usageReport(customerID, eventType, "filtered-"+customerID.String(), firstOccurred, 10_000)
+		disallowed["metadata"] = map[string]any{"region": "us"}
+		status, body = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/usage/report", token, disallowed)
+		require.Equal(t, http.StatusOK, status, string(body))
 	}
 
 	from, to := firstOccurred.Add(-time.Hour), firstOccurred.Add(time.Hour)

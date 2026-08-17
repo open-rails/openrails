@@ -222,6 +222,36 @@ describe("rate-card form", () => {
     expect(values.filters).toEqual([{ key: "region", value: "us" }])
   })
 
+  it("keeps an existing override without an allowance at no allowance", () => {
+    const defaults = {
+      id: "rate-1",
+      product_id: "product-1",
+      product_key: "pro",
+      filter: {},
+      price: {
+        model: "per_unit" as const,
+        currency: "USD",
+        per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+      },
+      allowance: { included: 100 },
+      created_at: "2026-08-17T00:00:00Z",
+      updated_at: "2026-08-17T00:00:00Z",
+    } as DefaultUsageRateCard
+
+    const createValues = negotiatedRateFormValues(defaults)
+    const values = negotiatedRateFormValues(defaults, {
+      meter_key: "tokens",
+      price: defaults.price,
+      created_at: "2026-08-17T00:00:00Z",
+      updated_at: "2026-08-17T00:00:00Z",
+    })
+
+    expect(createValues.allowanceMode).toBe("included")
+    expect(createValues.allowanceIncluded).toBe("100")
+    expect(values.allowanceMode).toBe("none")
+    expect(values.allowanceIncluded).toBe("")
+  })
+
   it("sends only the negotiated price and allowance", () => {
     const request = negotiatedRateRequest({
       product_id: "inherited-product",

@@ -206,7 +206,7 @@ export function negotiatedRateFormValues(
   return rateCardFormValues({
     ...defaultCard,
     price: override?.price ?? defaultCard.price,
-    allowance: override?.allowance ?? defaultCard.allowance,
+    allowance: override ? override.allowance : defaultCard.allowance,
   })
 }
 
