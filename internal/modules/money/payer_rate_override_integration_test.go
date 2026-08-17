@@ -25,7 +25,7 @@ func TestPayerRateOverride_AllowanceNettedBeforeOverage(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	productID := uuid.New()
-	meter := "or909.storage." + uuid.NewString()[:8]
+	meter := "or909-storage-" + uuid.NewString()[:8]
 	eventType := "or909.usage." + uuid.NewString()[:8]
 	defaultPayer := identity.CustomerIDFromString(uuid.NewString())
 
@@ -106,14 +106,25 @@ func TestPayerRateOverride_AllowanceNettedBeforeOverage(t *testing.T) {
 func TestPayerRateOverride_MerchantScoped(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	merchantID := dbtest.TestMerchantID.UUID()
-	meter := "or909.scope." + uuid.NewString()[:8]
+	meter := "or909-scope-" + uuid.NewString()[:8]
+	productID := uuid.New()
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", merchantID, meter)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", merchantID, meter)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
 	})
 
+	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, 'Scope', $3)`,
+		productID, "or909-scope-"+uuid.NewString()[:8], merchantID)
+	require.NoError(t, err)
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{
 		Key: meter, EventType: "or909.scope.evt." + uuid.NewString()[:8], ValueProperty: "gb", Aggregation: "sum", Unit: "gb",
+	}))
+	require.NoError(t, svc.SetUsageRateCard(ctx, money.UsageRateCardInput{
+		ProductID: &productID,
+		MeterKey:  meter,
+		Price: pricing.RatePrice{Model: "per_unit", Currency: "USD",
+			PerUnit: &pricing.PerUnitPrice{UnitAmount: 20_000}},
 	}))
 	require.NoError(t, svc.SetUsageRateCard(ctx, money.UsageRateCardInput{
 		Payer: &payer, MeterKey: meter,
@@ -122,7 +133,7 @@ func TestPayerRateOverride_MerchantScoped(t *testing.T) {
 	}))
 
 	otherID := uuid.New()
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING`,
 		otherID, "or909-other-"+otherID.String()[:8])
 	require.NoError(t, err)
 	t.Cleanup(func() {

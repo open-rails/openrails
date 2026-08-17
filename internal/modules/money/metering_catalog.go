@@ -27,6 +27,7 @@ var (
 	ErrDefaultRateCardRequired  = errors.New("default usage rate card required")
 	ErrRateCardHasOverrides     = errors.New("usage rate card has payer overrides")
 	ErrRateCardCurrencyMismatch = errors.New("usage rate card currency must match default")
+	ErrRateCardProductNotFound  = errors.New("usage rate card product not found")
 )
 
 // UsageMeter is one merchant-scoped usage stream and its optional default
@@ -493,6 +494,9 @@ FOR UPDATE`, merchantID, meterKey).Scan(
 	if meter.GroupBy == nil {
 		meter.GroupBy = map[string]string{}
 	}
+	if err := pricing.ValidateMeter("usage meter", &meter); err != nil {
+		return meter, err
+	}
 	return meter, nil
 }
 
@@ -550,16 +554,17 @@ func ensureActiveProduct(
 	merchantID uuid.UUID,
 	productID uuid.UUID,
 ) error {
-	var exists bool
-	if err := tx.QueryRow(ctx, `
-SELECT EXISTS (
-    SELECT 1 FROM openrails.products
-    WHERE merchant_id = $1 AND id = $2 AND NOT archived
-)`, merchantID, productID).Scan(&exists); err != nil {
-		return fmt.Errorf("check rate card product: %w", err)
+	var id uuid.UUID
+	err := tx.QueryRow(ctx, `
+SELECT id
+FROM openrails.products
+WHERE merchant_id = $1 AND id = $2 AND NOT archived
+FOR SHARE`, merchantID, productID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrRateCardProductNotFound
 	}
-	if !exists {
-		return fmt.Errorf("active product not found")
+	if err != nil {
+		return fmt.Errorf("check rate card product: %w", err)
 	}
 	return nil
 }

@@ -165,29 +165,40 @@ ORDER BY rc.ordinal`, merchantID, currency, payer.UUID())
 	if err != nil {
 		return nil, err
 	}
-	return resolvePayerRateCardOverrides(out), nil
+	return resolvePayerRateCardOverrides(out)
 }
 
 // resolvePayerRateCardOverrides collapses the loaded set to one card per
-// meter_key: a payer-scoped card (#798) replaces the merchant default.
-func resolvePayerRateCardOverrides(cards []catalogRateCardRow) []catalogRateCardRow {
-	overridden := map[string]bool{}
+// meter_key: a payer-scoped card contributes only price and allowance; the
+// meter, product-owned filter and dimensional contract remain the default's.
+func resolvePayerRateCardOverrides(cards []catalogRateCardRow) ([]catalogRateCardRow, error) {
+	overrides := map[string]catalogRateCardRow{}
 	for _, rc := range cards {
 		if rc.PayerScoped {
-			overridden[rc.MeterKey] = true
+			overrides[rc.MeterKey] = rc
 		}
 	}
-	if len(overridden) == 0 {
-		return cards
-	}
-	out := cards[:0]
+	out := make([]catalogRateCardRow, 0, len(cards))
+	defaults := make(map[string]struct{}, len(cards))
 	for _, rc := range cards {
-		if !rc.PayerScoped && overridden[rc.MeterKey] {
+		if rc.PayerScoped {
 			continue
+		}
+		defaults[rc.MeterKey] = struct{}{}
+		if override, ok := overrides[rc.MeterKey]; ok {
+			rc.ID = override.ID
+			rc.PayerScoped = true
+			rc.Price = override.Price
+			rc.Allowance = override.Allowance
 		}
 		out = append(out, rc)
 	}
-	return out
+	for meterKey := range overrides {
+		if _, ok := defaults[meterKey]; !ok {
+			return nil, fmt.Errorf("meter %q: %w", meterKey, ErrDefaultRateCardRequired)
+		}
+	}
+	return out, nil
 }
 
 func (s *MoneyService) aggregateRateCardUsage(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string, rc catalogRateCardRow, groupProperty string, from, to time.Time) (map[string]int64, error) {
