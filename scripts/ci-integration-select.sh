@@ -45,6 +45,14 @@ packages="$(
   exit 1
 }
 
+# Packages the diff can NEVER exempt (or#931). A fence whose input is the WHOLE
+# assembled surface — internal/integrationharness pins the standalone route
+# table against a golden — is affected by a change to any route registration in
+# the tree, and by construction its own directory is not in that diff. Narrowing
+# it by diff means it only ever runs post-merge, which is how or#930 added
+# `GET /v1/me/spend-limits` with six green shards and reddened master.
+always_run="internal/integrationharness"
+
 # Narrow to the packages the diff touches, unless the diff hit a shared surface.
 if [ "${BROAD:-}" != "true" ] && [ -n "${CHANGED_FILES:-}" ]; then
   packages="$(
@@ -61,10 +69,11 @@ if [ "${BROAD:-}" != "true" ] && [ -n "${CHANGED_FILES:-}" ]; then
       { for (d in touched) if (d == $1 || index(d "/", $1 "/") == 1) { print; next } }
     ' <<<"$packages"
   )"
-  if [ -z "$packages" ]; then
-    echo "ci-integration-select: no integration-tagged package touched by the diff" >&2
-    exit 0
-  fi
+  for pkg in $always_run; do
+    if ! printf '%s\n' "$packages" | grep -qxF "$pkg"; then
+      packages="$(printf '%s\n%s\n' "$packages" "$pkg" | grep -v '^$' | sort -u)"
+    fi
+  done
 fi
 
 printf '%s\n' "$packages" | SHARDS="${SHARDS:-1}" SHARD="${SHARD:-1}" \
