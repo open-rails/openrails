@@ -13,6 +13,10 @@ const trails: [string, { label: string; to?: string }[]][] = [
   ["/subscriptions", [{ label: "Subscriptions" }]],
   ["/payments", [{ label: "Payments" }]],
   [
+    "/catalog/metering",
+    [{ label: "Catalog", to: "/catalog" }, { label: "Metering" }],
+  ],
+  [
     "/catalog/prices",
     [{ label: "Catalog", to: "/catalog" }, { label: "Prices" }],
   ],
@@ -59,8 +63,8 @@ export function AppLayout() {
         <AppSidebar />
         <SidebarInset>
           <SiteHeader trail={trail} />
-          <main className="flex flex-1 flex-col p-4 md:p-8">
-            <div className="mx-auto w-full max-w-7xl">
+          <main className="flex min-w-0 flex-1 flex-col p-4 md:p-8">
+            <div className="mx-auto w-full max-w-7xl min-w-0">
               <Outlet />
             </div>
           </main>

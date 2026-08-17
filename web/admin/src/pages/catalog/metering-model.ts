@@ -62,6 +62,16 @@ export interface RateCardFormValues {
   allowanceCap: string
 }
 
+export class RateCardFormError extends Error {
+  readonly fieldId: string
+
+  constructor(fieldId: string, message: string) {
+    super(message)
+    this.name = "RateCardFormError"
+    this.fieldId = fieldId
+  }
+}
+
 export type MeterCollectionState =
   "loading" | "permission" | "error" | "empty" | "ready"
 
@@ -175,10 +185,10 @@ export function rateCardFormValues(
 export function buildRateCardRequest(
   values: RateCardFormValues
 ): DefaultUsageRateCardRequest {
-  if (!values.productId) throw new Error("Select a product.")
+  if (!values.productId) rateCardError("rate-product", "Select a product.")
   const currency = values.currency.trim().toUpperCase()
   if (!/^[A-Z]{3}$/.test(currency)) {
-    throw new Error("Enter a three-letter ISO currency.")
+    rateCardError("rate-currency", "Enter a three-letter ISO currency.")
   }
 
   const price = buildPrice(values, currency)
@@ -196,36 +206,72 @@ function buildPrice(
   currency: string
 ): UsageRatePrice {
   if (values.model === "per_unit") {
-    const divideBy = positiveInteger(values.divideBy, "Divisor")
-    const maximumAmount = optionalMoney(values.maximumAmount, "Maximum amount")
+    const divideBy = positiveInteger(
+      values.divideBy,
+      "Divisor",
+      "rate-divide-by"
+    )
+    const maximumAmount = optionalMoney(
+      values.maximumAmount,
+      "Maximum amount",
+      "rate-maximum"
+    )
     if (values.matrixEnabled) {
       const dimension = values.matrixDimension.trim()
-      if (!dimension) throw new Error("Select a matrix dimension.")
+      if (!dimension) {
+        rateCardError("matrix-dimension", "Select a matrix dimension.")
+      }
       if (values.matrixCells.length === 0) {
-        throw new Error("Add at least one matrix cell.")
+        rateCardError("matrix-add-cell", "Add at least one matrix cell.")
       }
       const cells: NonNullable<
         NonNullable<UsageRatePrice["per_unit"]>["matrix"]
       >["cells"] = {}
-      for (const row of values.matrixCells) {
+      for (const [index, row] of values.matrixCells.entries()) {
         const key = row.key.trim()
-        if (!key) throw new Error("Each matrix cell needs a value.")
-        if (cells[key]) throw new Error(`Duplicate matrix value “${key}”.`)
+        const fieldPrefix = `matrix-cell-${index}`
+        if (!key) {
+          rateCardError(
+            `${fieldPrefix}-value`,
+            "Each matrix cell needs a value."
+          )
+        }
+        if (cells[key]) {
+          rateCardError(
+            `${fieldPrefix}-value`,
+            `Duplicate matrix value “${key}”.`
+          )
+        }
         cells[key] = {
-          unit_amount: requiredMoney(row.unitAmount, `Price for ${key}`, true),
-          ...(optionalMoney(row.maximumAmount, `Maximum for ${key}`) > 0
+          unit_amount: requiredMoney(
+            row.unitAmount,
+            `Price for ${key}`,
+            `${fieldPrefix}-unit-price`,
+            true
+          ),
+          ...(optionalMoney(
+            row.maximumAmount,
+            `Maximum for ${key}`,
+            `${fieldPrefix}-maximum`
+          ) > 0
             ? {
                 maximum_amount: optionalMoney(
                   row.maximumAmount,
-                  `Maximum for ${key}`
+                  `Maximum for ${key}`,
+                  `${fieldPrefix}-maximum`
                 ),
               }
             : {}),
-          ...(optionalWhole(row.included, `Included units for ${key}`) > 0
+          ...(optionalWhole(
+            row.included,
+            `Included units for ${key}`,
+            `${fieldPrefix}-included`
+          ) > 0
             ? {
                 included: optionalWhole(
                   row.included,
-                  `Included units for ${key}`
+                  `Included units for ${key}`,
+                  `${fieldPrefix}-included`
                 ),
               }
             : {}),
@@ -246,7 +292,12 @@ function buildPrice(
       model: "per_unit",
       currency,
       per_unit: {
-        unit_amount: requiredMoney(values.unitAmount, "Unit price", true),
+        unit_amount: requiredMoney(
+          values.unitAmount,
+          "Unit price",
+          "rate-unit-amount",
+          true
+        ),
         divide_by: divideBy,
         round: values.round,
         ...(maximumAmount > 0 ? { maximum_amount: maximumAmount } : {}),
@@ -255,29 +306,48 @@ function buildPrice(
   }
 
   if (values.model === "tiered") {
-    if (values.tiers.length === 0) throw new Error("Add at least one tier.")
+    if (values.tiers.length === 0) {
+      rateCardError("tier-add", "Add at least one tier.")
+    }
     const tiers = values.tiers.map((row, index) => {
       const last = index === values.tiers.length - 1
       const upTo = row.upTo.trim()
-      if (last && upTo) throw new Error("The final tier must be unbounded.")
-      if (!last && !upTo)
-        throw new Error("Only the final tier can be unbounded.")
+      if (last && upTo) {
+        rateCardError(
+          `tier-${index}-limit`,
+          "The final tier must be unbounded."
+        )
+      }
+      if (!last && !upTo) {
+        rateCardError(
+          `tier-${index}-limit`,
+          "Only the final tier can be unbounded."
+        )
+      }
       return {
-        up_to: last ? null : positiveInteger(upTo, `Tier ${index + 1} limit`),
+        up_to: last
+          ? null
+          : positiveInteger(
+              upTo,
+              `Tier ${index + 1} limit`,
+              `tier-${index}-limit`
+            ),
         unit_amount: requiredMoney(
           row.unitAmount,
           `Tier ${index + 1} unit price`,
+          `tier-${index}-unit-price`,
           true
         ),
         flat_amount: optionalMoney(
           row.flatAmount,
-          `Tier ${index + 1} flat amount`
+          `Tier ${index + 1} flat amount`,
+          `tier-${index}-flat-amount`
         ),
       }
     })
     for (let index = 1; index < tiers.length - 1; index += 1) {
       if ((tiers[index].up_to ?? 0) <= (tiers[index - 1].up_to ?? 0)) {
-        throw new Error("Tier limits must increase.")
+        rateCardError(`tier-${index}-limit`, "Tier limits must increase.")
       }
     }
     return {
@@ -291,9 +361,17 @@ function buildPrice(
     model: "package",
     currency,
     package: {
-      amount: requiredMoney(values.packageAmount, "Package price"),
-      package_size: positiveInteger(values.packageSize, "Package size"),
-      free_units: optionalWhole(values.freeUnits, "Free units"),
+      amount: requiredMoney(
+        values.packageAmount,
+        "Package price",
+        "package-amount"
+      ),
+      package_size: positiveInteger(
+        values.packageSize,
+        "Package size",
+        "package-size"
+      ),
+      free_units: optionalWhole(values.freeUnits, "Free units", "package-free"),
     },
   }
 }
@@ -304,14 +382,23 @@ function buildAllowance(
   if (values.allowanceMode === "none") return undefined
   if (values.allowanceMode === "included") {
     return {
-      included: optionalWhole(values.allowanceIncluded, "Included allowance"),
+      included: optionalWhole(
+        values.allowanceIncluded,
+        "Included allowance",
+        "allowance-included"
+      ),
     }
   }
   const accrueFrom = normalizeMeterKey(values.allowanceAccrueFrom)
-  if (!accrueFrom) throw new Error("Select the allowance source meter.")
+  if (!accrueFrom) {
+    rateCardError("allowance-source", "Select the allowance source meter.")
+  }
   const cap = values.allowanceCap.trim().toLowerCase()
   if (!/^\d+[hd]$/.test(cap)) {
-    throw new Error("Allowance cap must be a whole number of hours or days.")
+    rateCardError(
+      "allowance-cap",
+      "Allowance cap must be a whole number of hours or days."
+    )
   }
   return { accrue_from: accrueFrom, cap }
 }
@@ -330,15 +417,29 @@ function rowsToMap(rows: KeyValueRow[], name: string): Record<string, string> {
 
 function filterRowsToMap(rows: KeyValueRow[]): Record<string, string[]> {
   const result: Record<string, string[]> = {}
-  for (const row of rows) {
+  for (const [index, row] of rows.entries()) {
     const key = row.key.trim()
     const values = [
       ...new Set(row.value.split(",").map((value) => value.trim())),
     ].filter(Boolean)
-    if (!key || values.length === 0) {
-      throw new Error("Each filter needs a dimension and at least one value.")
+    if (!key) {
+      rateCardError(
+        `filter-${index}-dimension`,
+        "Select a dimension for this filter."
+      )
     }
-    if (result[key]) throw new Error(`Duplicate filter dimension “${key}”.`)
+    if (values.length === 0) {
+      rateCardError(
+        `filter-${index}-values`,
+        "Enter at least one value for this filter."
+      )
+    }
+    if (result[key]) {
+      rateCardError(
+        `filter-${index}-dimension`,
+        `Duplicate filter dimension “${key}”.`
+      )
+    }
     result[key] = values
   }
   return result
@@ -347,37 +448,47 @@ function filterRowsToMap(rows: KeyValueRow[]): Record<string, string[]> {
 function requiredMoney(
   value: string,
   label: string,
+  fieldId: string,
   allowZero = false
 ): number {
   const amount = microsFromInput(value)
   if (amount === null || amount < 0 || (!allowZero && amount === 0)) {
-    throw new Error(
+    rateCardError(
+      fieldId,
       `${label} must be ${allowZero ? "zero or more" : "greater than zero"}.`
     )
   }
   return amount
 }
 
-function optionalMoney(value: string, label: string): number {
+function optionalMoney(value: string, label: string, fieldId: string): number {
   if (!value.trim()) return 0
-  return requiredMoney(value, label, true)
+  return requiredMoney(value, label, fieldId, true)
 }
 
-function positiveInteger(value: string, label: string): number {
+function positiveInteger(
+  value: string,
+  label: string,
+  fieldId: string
+): number {
   const amount = Number(value)
   if (!Number.isSafeInteger(amount) || amount <= 0) {
-    throw new Error(`${label} must be a positive whole number.`)
+    rateCardError(fieldId, `${label} must be a positive whole number.`)
   }
   return amount
 }
 
-function optionalWhole(value: string, label: string): number {
+function optionalWhole(value: string, label: string, fieldId: string): number {
   if (!value.trim()) return 0
   const amount = Number(value)
   if (!Number.isSafeInteger(amount) || amount < 0) {
-    throw new Error(`${label} must be zero or a positive whole number.`)
+    rateCardError(fieldId, `${label} must be zero or a positive whole number.`)
   }
   return amount
+}
+
+function rateCardError(fieldId: string, message: string): never {
+  throw new RateCardFormError(fieldId, message)
 }
 
 function microsToInput(value?: number): string {

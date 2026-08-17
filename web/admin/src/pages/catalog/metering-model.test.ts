@@ -7,6 +7,7 @@ import {
   meterCollectionState,
   meterDefinitionLocked,
   rateCardFormValues,
+  RateCardFormError,
   summarizeRateCard,
   type MeterFormValues,
   type RateCardFormValues,
@@ -162,6 +163,26 @@ describe("rate-card form", () => {
       accrue_from: "active-seats",
       cap: "30d",
     })
+  })
+
+  it("addresses row validation to the exact invalid control", () => {
+    const values = baseRate()
+    Object.assign(values, {
+      productId: "product-1",
+      matrixEnabled: true,
+      matrixDimension: "model",
+      matrixCells: [
+        { key: "", unitAmount: "0.01", maximumAmount: "", included: "" },
+      ],
+    })
+
+    try {
+      buildRateCardRequest(values)
+      throw new Error("expected validation to fail")
+    } catch (error) {
+      expect(error).toBeInstanceOf(RateCardFormError)
+      expect((error as RateCardFormError).fieldId).toBe("matrix-cell-0-value")
+    }
   })
 })
 
