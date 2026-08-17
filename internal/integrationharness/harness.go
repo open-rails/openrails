@@ -304,11 +304,11 @@ func (r trustingResolver) ResolveAPIKey(context.Context, string) (*controlplane.
 }
 
 // StartEmbeddedHost boots Server 1: an embedded engine (embed.New, host-owns-auth)
-// over the shared Postgres + Redis, serving the real embedded /v1/merchant/*
-// surface over httptest behind the REAL service-credential route gate wired to
-// a TRUSTING resolver (no auth). It registers the bound merchant (embed.New does
-// this) and returns a Surface whose client speaks real HTTP. currency is the
-// client's default currency (Balance keys off it).
+// over the shared Postgres + Redis, serving the embedded merchant API, admin,
+// and catalog route sets over httptest behind the REAL service-credential route
+// gate wired to a TRUSTING resolver (no auth). It registers the bound merchant
+// (embed.New does this) and returns a Surface whose client speaks real HTTP.
+// currency is the client's default currency (Balance keys off it).
 func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	h.t.Helper()
 
@@ -327,16 +327,19 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 
 	mux := http.NewServeMux()
 	runtime := rt.Embedded().App().Runtime
+	routeOptions := httproutes.Options{
+		Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
+			merchantID:   dbtest.TestMerchantID,
+			merchantSlug: dbtest.TestMerchantSlug,
+		}}),
+	}
 	httproutes.RegisterServiceRoutes(
 		router.NewMux(mux, "/v1/merchant", runtime),
 		runtime,
-		httproutes.Options{
-			Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
-				merchantID:   dbtest.TestMerchantID,
-				merchantSlug: dbtest.TestMerchantSlug,
-			}}),
-		},
+		routeOptions,
 	)
+	httproutes.RegisterCatalogRoutes(router.NewMux(mux, "/v1/merchant/catalog", runtime), runtime, routeOptions)
+	httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, "/v1/merchant", runtime), runtime, routeOptions)
 	srv := httptest.NewServer(middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(runtime.ConfiguredMerchant)))
 	h.cleanup(srv.Close)
 
