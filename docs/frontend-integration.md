@@ -78,6 +78,7 @@ GET  /v1/me/status                        premium status: active subscription, n
 GET  /v1/me/balance?currency=USD          durable balance (micros for USD)
 GET  /v1/me/transactions                  ledger transactions, newest first
 GET  /v1/me/usage                         metered usage rolled up by event type
+GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
 GET  /v1/me/invoices[/:id]                itemized statements
 GET  /v1/me/payments                      one-off payment history
 GET  /v1/me/entitlements/active           active entitlements

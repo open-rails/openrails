@@ -55,8 +55,18 @@ type Principal struct {
 	MerchantSource string
 	CredentialType CredentialType
 	Subject        string
+	// Invoker is the host-owned spend principal this credential acts as under
+	// Subject's account (or#930). Non-empty = INVOKER-SCOPED: it spends the
+	// payer's money without being the payer.
+	Invoker string
 
 	can func(context.Context, string) bool
+}
+
+// InvokerScoped reports whether this principal acts as a delegated INVOKER on
+// someone else's payer account, rather than as the payer itself.
+func (p *Principal) InvokerScoped() bool {
+	return p != nil && strings.TrimSpace(p.Invoker) != ""
 }
 
 // Can reports whether the resolved principal has perm.
@@ -199,10 +209,39 @@ func principalFromDelegated(resolved *controlplane.ResolvedDelegated, typ Creden
 		MerchantSource: "delegated_issuer",
 		CredentialType: typ,
 		Subject:        strings.TrimSpace(resolved.DelegatedSubject),
+		Invoker:        strings.TrimSpace(resolved.Invoker),
 		can: func(_ context.Context, perm string) bool {
 			// #564: resolved.Permissions is already claim ∩ signer authority.
 			return resolved.HasPermission(perm)
 		},
+	}
+}
+
+// PayerScopedRequired refuses an INVOKER-SCOPED principal (or#930): a credential
+// that spends a payer's money without being the payer. Its bound subject names
+// an account it does not own, so everything the self-service and treasury
+// surfaces answer — balance, transactions, invoices, subscriptions, payment
+// methods, checkout, the payer's own delegation policy — is somebody else's.
+//
+// This is the guard that makes the narrow credential class SAFE to mint: a host
+// can map an end user onto the payer org's account for the one read that is
+// genuinely the end user's own (its spend windows) without opening the payer's
+// whole surface to it. Fail closed — an unauthenticated request is refused here
+// too, so mounting this without an auth middleware cannot silently pass.
+func PayerScopedRequired() router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *request.Request) {
+			principal, ok := PrincipalFromRequest(r)
+			if !ok {
+				r.AbortJSON(http.StatusUnauthorized, "bearer principal required")
+				return
+			}
+			if principal.InvokerScoped() {
+				r.AbortJSON(http.StatusForbidden, "invoker_scoped_principal")
+				return
+			}
+			next(r)
+		}
 	}
 }
 
