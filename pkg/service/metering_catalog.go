@@ -18,6 +18,7 @@ var (
 	ErrRateCardHasOverrides     = money.ErrRateCardHasOverrides
 	ErrRateCardCurrencyMismatch = money.ErrRateCardCurrencyMismatch
 	ErrRateCardProductNotFound  = money.ErrRateCardProductNotFound
+	ErrAllowanceMeterNotFound   = money.ErrAllowanceMeterNotFound
 )
 
 // UsageMeterDTO is one merchant-scoped usage stream and its billing state.

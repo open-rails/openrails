@@ -28,6 +28,7 @@ var (
 	ErrRateCardHasOverrides     = errors.New("usage rate card has payer overrides")
 	ErrRateCardCurrencyMismatch = errors.New("usage rate card currency must match default")
 	ErrRateCardProductNotFound  = errors.New("usage rate card product not found")
+	ErrAllowanceMeterNotFound   = errors.New("usage rate card allowance meter not found")
 )
 
 // UsageMeter is one merchant-scoped usage stream and its optional default
@@ -524,7 +525,7 @@ SELECT EXISTS (
 		return fmt.Errorf("check allowance source meter: %w", err)
 	}
 	if !exists {
-		return fmt.Errorf("usage rate card: allowance.accrue_from references unknown meter %q", allowance.AccrueFrom)
+		return fmt.Errorf("%w: %q", ErrAllowanceMeterNotFound, allowance.AccrueFrom)
 	}
 	return nil
 }
