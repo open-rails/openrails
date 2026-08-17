@@ -4,17 +4,15 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
+	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 // SupportedVersion is the only manifest schema version this tool accepts.
 const SupportedVersion = 1
-
-var invalidSlugChars = regexp.MustCompile(`[^a-z0-9_-]+`)
 
 // normalizeDuration parses a #622 access-window duration. An empty value or
 // "indefinite" returns nil (durable/perpetual). A finite value must be a whole
@@ -44,9 +42,7 @@ func formatDurationHours(hours int) string {
 }
 
 func normalizeSlug(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	value = invalidSlugChars.ReplaceAllString(value, "-")
-	return strings.Trim(value, "-_")
+	return pricing.NormalizeKey(value)
 }
 
 // normalizeCurrency canonicalises a currency code to UPPER case (CUR-6).
@@ -522,21 +518,27 @@ func (m *Manifest) validateMeters() error {
 	seen := map[string]struct{}{}
 	for i := range m.Meters {
 		meter := &m.Meters[i]
-		meter.Key = normalizeSlug(meter.Key)
-		if meter.Key == "" {
-			return fmt.Errorf("meter #%d key is required", i+1)
+		validated := pricing.Meter{
+			Key:           meter.Key,
+			EventType:     meter.EventType,
+			ValueProperty: meter.ValueProperty,
+			Aggregation:   meter.Aggregation,
+			Unit:          meter.Unit,
+			GroupBy:       meter.GroupBy,
 		}
+		if err := pricing.ValidateMeter(fmt.Sprintf("meter #%d", i+1), &validated); err != nil {
+			return err
+		}
+		meter.Key = validated.Key
+		meter.EventType = validated.EventType
+		meter.ValueProperty = validated.ValueProperty
+		meter.Aggregation = validated.Aggregation
+		meter.Unit = validated.Unit
+		meter.GroupBy = validated.GroupBy
 		if _, ok := seen[meter.Key]; ok {
 			return fmt.Errorf("duplicate meter key %q", meter.Key)
 		}
 		seen[meter.Key] = struct{}{}
-		meter.Aggregation = strings.ToLower(strings.TrimSpace(meter.Aggregation))
-		if meter.Aggregation == "" {
-			return fmt.Errorf("meter %q must set aggregation (sum/count/max/min/unique_count/latest)", meter.Key)
-		}
-		if _, ok := validAggregations[meter.Aggregation]; !ok {
-			return fmt.Errorf("meter %q aggregation must be one of sum/count/max/min/unique_count/latest", meter.Key)
-		}
 	}
 	return nil
 }

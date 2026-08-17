@@ -37,6 +37,7 @@ catalogs:
     meters:
       - key: api_calls
         aggregation: sum
+        value_property: $.count
     credit_balances:
       - key: image_credits
         unit: credit

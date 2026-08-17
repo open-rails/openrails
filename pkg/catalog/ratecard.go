@@ -57,17 +57,13 @@ var QuoteUnitsForSpend = pricing.QuoteUnitsForSpend
 // unit-seconds + a price-level divide_by (the OpenMeter heartbeat approach),
 // so no native weighted_sum is needed.
 const (
-	AggSum         = "sum"
-	AggCount       = "count"
-	AggMax         = "max"
-	AggMin         = "min"
-	AggUniqueCount = "unique_count"
-	AggLatest      = "latest"
+	AggSum         = pricing.AggregationSum
+	AggCount       = pricing.AggregationCount
+	AggMax         = pricing.AggregationMax
+	AggMin         = pricing.AggregationMin
+	AggUniqueCount = pricing.AggregationUniqueCount
+	AggLatest      = pricing.AggregationLatest
 )
-
-var validAggregations = map[string]struct{}{
-	AggSum: {}, AggCount: {}, AggMax: {}, AggMin: {}, AggUniqueCount: {}, AggLatest: {},
-}
 
 // payment terms (OpenMeter PaymentTermType / Lago pay_in_advance).
 const (
@@ -108,137 +104,10 @@ func (rc RateCard) RateUsage(dimValue string, quantity int64) (int64, error) {
 	return rc.Price.ToChargeModel().Rate(quantity)
 }
 
-var validRoundModes = map[string]struct{}{
-	"": {}, RoundHalfUp: {}, RoundUp: {}, RoundDown: {},
-}
-
 // validateRatePrice normalizes and validates a charge-model price. `where` is a
 // human label for error messages (e.g. `product "droplet" rate_card #1`).
 func validateRatePrice(where string, rp *RatePrice) error {
-	rp.Model = strings.ToLower(strings.TrimSpace(rp.Model))
-	if rp.Currency != "" {
-		rp.Currency = normalizeCurrency(rp.Currency)
-		if !validPriceCurrency(rp.Currency) {
-			return fmt.Errorf("%s: currency must be an ISO money currency", where)
-		}
-	}
-	blocks := 0
-	if rp.Flat != nil {
-		blocks++
-	}
-	if rp.PerUnit != nil {
-		blocks++
-	}
-	if rp.Tiered != nil {
-		blocks++
-	}
-	if rp.Package != nil {
-		blocks++
-	}
-	if blocks != 1 {
-		return fmt.Errorf("%s: price model requires exactly one matching sub-block", where)
-	}
-
-	switch rp.Model {
-	case ModelFlat:
-		if rp.Flat == nil {
-			return fmt.Errorf("%s: model flat requires flat block", where)
-		}
-		if rp.Flat.Amount <= 0 {
-			return fmt.Errorf("%s: flat price requires a positive amount", where)
-		}
-	case ModelPerUnit:
-		if rp.PerUnit == nil {
-			return fmt.Errorf("%s: model per_unit requires per_unit block", where)
-		}
-		rp.PerUnit.Round = strings.ToLower(strings.TrimSpace(rp.PerUnit.Round))
-		if _, ok := validRoundModes[rp.PerUnit.Round]; !ok {
-			return fmt.Errorf("%s: round must be up, down or half_up, got %q", where, rp.PerUnit.Round)
-		}
-		if rp.PerUnit.MaximumAmount < 0 {
-			return fmt.Errorf("%s: maximum_amount must be >= 0", where)
-		}
-		if rp.PerUnit.Matrix == nil && rp.PerUnit.UnitAmount < 0 {
-			return fmt.Errorf("%s: per_unit unit_amount must be >= 0", where)
-		}
-		if rp.PerUnit.DivideBy < 0 {
-			return fmt.Errorf("%s: divide_by must be >= 0", where)
-		}
-		if rp.PerUnit.Matrix != nil {
-			if err := validateMatrix(where, rp.PerUnit.Matrix); err != nil {
-				return err
-			}
-		}
-	case ModelTiered:
-		if rp.Tiered == nil {
-			return fmt.Errorf("%s: model tiered requires tiered block", where)
-		}
-		rp.Tiered.Mode = strings.ToLower(strings.TrimSpace(rp.Tiered.Mode))
-		if rp.Tiered.Mode != TierModeVolume && rp.Tiered.Mode != TierModeGraduated {
-			return fmt.Errorf("%s: tiered mode must be %q or %q, got %q", where, TierModeVolume, TierModeGraduated, rp.Tiered.Mode)
-		}
-		if err := validateTiers(where, rp.Tiered.Tiers); err != nil {
-			return err
-		}
-	case ModelPackage:
-		if rp.Package == nil {
-			return fmt.Errorf("%s: model package requires package block", where)
-		}
-		if rp.Package.PackageSize <= 0 {
-			return fmt.Errorf("%s: package_size must be > 0", where)
-		}
-		if rp.Package.Amount <= 0 {
-			return fmt.Errorf("%s: package amount must be > 0", where)
-		}
-		if rp.Package.FreeUnits < 0 {
-			return fmt.Errorf("%s: free_units must be >= 0", where)
-		}
-	default:
-		return fmt.Errorf("%s: model must be one of flat/per_unit/tiered/package, got %q", where, rp.Model)
-	}
-	return nil
-}
-
-func validateTiers(where string, tiers []RateTier) error {
-	if len(tiers) == 0 {
-		return fmt.Errorf("%s: tiered price requires tiers", where)
-	}
-	var prev int64
-	for i := range tiers {
-		t := &tiers[i]
-		if t.UnitAmount < 0 || t.FlatAmount < 0 {
-			return fmt.Errorf("%s: tier #%d amounts must be >= 0", where, i+1)
-		}
-		last := i == len(tiers)-1
-		switch {
-		case t.UpTo == nil && !last:
-			return fmt.Errorf("%s: only the last tier may be unbounded (up_to omitted)", where)
-		case t.UpTo != nil && last:
-			return fmt.Errorf("%s: the last tier must be unbounded (omit up_to)", where)
-		case t.UpTo != nil:
-			if *t.UpTo <= prev {
-				return fmt.Errorf("%s: tier up_to values must strictly ascend (got %d after %d)", where, *t.UpTo, prev)
-			}
-			prev = *t.UpTo
-		}
-	}
-	return nil
-}
-
-func validateMatrix(where string, mx *Matrix) error {
-	mx.Dimension = strings.TrimSpace(mx.Dimension)
-	if mx.Dimension == "" {
-		return fmt.Errorf("%s: matrix requires a dimension", where)
-	}
-	if len(mx.Cells) == 0 {
-		return fmt.Errorf("%s: matrix requires at least one cell", where)
-	}
-	for key, cell := range mx.Cells {
-		if cell.UnitAmount < 0 || cell.MaximumAmount < 0 || cell.Included < 0 {
-			return fmt.Errorf("%s: matrix cell %q amounts must be >= 0", where, key)
-		}
-	}
-	return nil
+	return pricing.ValidateRatePrice(where, rp)
 }
 
 // validateRateCard validates one rate card: a flat fee (no meter) or a metered
@@ -276,16 +145,7 @@ func validateRateCard(where string, rc *RateCard) error {
 }
 
 func validateAllowance(where string, a *Allowance) error {
-	if a.Included < 0 {
-		return fmt.Errorf("%s: allowance.included must be >= 0", where)
-	}
-	a.AccrueFrom = normalizeSlug(a.AccrueFrom)
-	if a.Cap != "" {
-		if _, err := ParseDurationSpec(a.Cap); err != nil {
-			return fmt.Errorf("%s: allowance.cap: %w", where, err)
-		}
-	}
-	return nil
+	return pricing.ValidateAllowance(where, a)
 }
 
 // validateRateCardModel validates the #638 rate-card and #639 credit-purchase
@@ -343,23 +203,14 @@ func (m *Manifest) validateRateCardModel() error {
 }
 
 func validateMatrixDimension(where string, mx *Matrix, mt Meter) error {
-	if len(mt.GroupBy) == 0 {
-		return nil // legacy meter / no declared dimensions: nothing to cross-check
-	}
-	if _, ok := mt.GroupBy[mx.Dimension]; !ok {
-		return fmt.Errorf("%s matrix dimension %q is not a group_by key of meter %q", where, mx.Dimension, mt.Key)
-	}
-	return nil
+	return pricing.ValidateDimensions(where, mt.GroupBy, nil, &RatePrice{
+		Model: ModelPerUnit,
+		PerUnit: &PerUnitPrice{
+			Matrix: mx,
+		},
+	})
 }
 
 func validateFilterKeys(where string, filter map[string][]string, mt Meter) error {
-	if len(mt.GroupBy) == 0 {
-		return nil
-	}
-	for k := range filter {
-		if _, ok := mt.GroupBy[k]; !ok {
-			return fmt.Errorf("%s filter key %q is not a group_by key of meter %q", where, k, mt.Key)
-		}
-	}
-	return nil
+	return pricing.ValidateDimensions(where, mt.GroupBy, filter, nil)
 }
