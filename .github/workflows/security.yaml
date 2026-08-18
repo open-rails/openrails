@@ -78,7 +78,7 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: needs.security-changes.outputs.go == 'true'
       # gosec loads packages with full type information, so it pays the same
       # dependency-compile bill the Go jobs do and wants the same warm cache.
@@ -134,7 +134,7 @@ jobs:
     timeout-minutes: 20
     needs: security-changes
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: needs.security-changes.outputs.go == 'true'
       - uses: ./.github/actions/go-env
         if: needs.security-changes.outputs.go == 'true'
@@ -163,9 +163,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
