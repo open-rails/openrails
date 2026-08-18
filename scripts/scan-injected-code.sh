@@ -5,33 +5,65 @@
 # Guards against the repo-injection worm (DPRK "Contagious Interview" /
 # PolinRider class) that appended an obfuscated dropper to build-config files on
 # infected contributor machines and rode into this repo inside otherwise normal
-# commits (2025-11 .. 2026-05: vite/webpack/tailwind/postcss configs).
+# commits (2025-11 .. 2026-05: vite/webpack/tailwind/postcss configs, and
+# frontend/scripts/setup-husky.mjs in cozy-art).
 #
 # The payload hides after a ~2800-space run on the last line of a config file,
-# so it is invisible in an editor and in `git diff` without scrolling right.
-# The obfuscator's variable names and version strings change between variants,
-# so the load-bearing rules here are STRUCTURAL (whitespace runs, line length)
-# rather than literal-signature matches.
+# so it is invisible in an editor and in `git diff` without scrolling right. The
+# obfuscator's variable names and version strings change between variants, so
+# the load-bearing rules here are STRUCTURAL (whitespace, line length, file
+# size, string length) rather than literal-signature matches.
 #
 # Usage:
 #   scan-injected-code.sh [--all]              scan every tracked file (default)
-#   scan-injected-code.sh --staged             scan staged files (pre-commit hook)
-#   scan-injected-code.sh --range <rev-range>  scan files changed in a range (CI)
+#   scan-injected-code.sh --all --include-untracked
+#                                              ...plus untracked, non-ignored files
+#   scan-injected-code.sh --staged             scan staged blobs (pre-commit hook)
+#   scan-injected-code.sh --range <rev-range>  scan blobs changed in a range (CI)
 #   scan-injected-code.sh --files <path>...    scan the named paths verbatim
 #   scan-injected-code.sh --self-test          run the detector against its fixtures
 #
 # Exits non-zero if anything is found. See docs/injection-scan.md.
 
 set -euo pipefail
+export LC_ALL=C # byte-wise matching; grep -P must not choke on invalid UTF-8
 
 # --- tunables ----------------------------------------------------------------
 
-MAX_SPACES=100        # rule 1: consecutive spaces (non-Markdown)
-MAX_TABS=20           # rule 1: consecutive tabs
-MAX_CONFIG_LINE=500   # rule 6: longest line allowed in a build config
-DEAD_DROP_WINDOW=1000 # rule 4: chars allowed between a C2 host and an eval/spawn
+MAX_SPACES=100             # rule 1: consecutive spaces (non-Markdown)
+MAX_TABS=20                # rule 1: consecutive tabs
+MAX_CONFIG_LINE=250        # rule 6: longest line allowed in a build config
+MAX_CONFIG_INTERIOR_WS=40  # rule 7: whitespace chars after a config line's first non-blank
+MAX_UNICODE_WS_RUN=20      # rule 8: non-ASCII whitespace run allowed outside configs
+MAX_CONFIG_BYTES=8192      # rule 9: build-config size cap (raise for a big hand-written config)
+MAX_CONFIG_STRING=200      # rule 10: longest string literal allowed in a build config
+DEAD_DROP_WINDOW=1000      # rule 4: chars allowed between a C2 host and an eval/spawn
+MIN_B64_LITERAL=16         # rule 12: shortest base64 literal worth decoding
+MAX_DECODE_BYTES=65536     # rule 12: bytes of a decoded literal that get matched
 
 DEAD_DROP_HOSTS='trongrid\.io|aptoslabs\.com|bsc-dataseed|bsc-rpc\.publicnode\.com|eth_getTransactionByHash'
+
+# Obfuscator markers, generalised past the observed literals (version strings and
+# table names change between variants). Used by rules 5 and 12.
+MARKER_RE='_\$_[0-9a-f]{4}|global\s*(?:\[\s*["\x27][^"\x27]{1,8}["\x27]\s*\]|\.\s*\w{1,8})\s*=\s*["\x27][0-9]+-[0-9]+-[0-9]+["\x27]'
+
+# Rule 12 — what a decoded literal must contain to be a finding. A dead-drop
+# host, a chain account address, any URL, or a marker. "Decodes cleanly" alone
+# is not enough: legitimate web code base64s plenty of harmless data.
+DECODED_INTERESTING="${DEAD_DROP_HOSTS}|0x[0-9a-fA-F]{40,}|https?://|${MARKER_RE}"
+
+# Non-ASCII whitespace / invisibles, as raw UTF-8 bytes so the pattern works on
+# any file: U+00A0 U+1680 U+2000-U+200B U+202F U+205F U+2060 U+3000 U+FEFF.
+UNICODE_WS='(?:\xC2\xA0|\xE1\x9A\x80|\xE2\x80[\x80-\x8B\xAF]|\xE2\x81[\x9F\xA0]|\xE3\x80\x80|\xEF\xBB\xBF)'
+
+# Rule 11 scope: a NUL byte is normal in a binary, never in these.
+SOURCE_EXT_RE='\.(js|jsx|ts|tsx|mjs|cjs|go|php|py|sh)$'
+
+# Build configs — the worm's target class. Deliberately wide: setup-husky.mjs
+# and .husky/* were hit in the wild and match no *.config.* pattern. A bare
+# `*rc.js` alternative was REJECTED: it matches a vendored
+# public/vendor/codemirror/mode/mirc/mirc.js in the legacy trees.
+CONFIG_RE='(^|/)([^/]+\.config\.[A-Za-z]+|(vite|webpack|tailwind|postcss|next|rollup|svelte|astro|nuxt)\.config\.[^/]+|(gulpfile|Gruntfile)\.[A-Za-z]+|setup-[^/]+\.(js|mjs|cjs|ts))$|(^|/)\.husky/[^/]+$'
 
 # Excluded from every rule: the fixtures deliberately carry live signatures.
 SKIP_ALL_RE='(^|/)scripts/testdata/injection-scan/'
@@ -39,23 +71,25 @@ SKIP_ALL_RE='(^|/)scripts/testdata/injection-scan/'
 # describe. Both are still subject to the structural whitespace rule.
 SKIP_CONTENT_RE='(^|/)(scripts/scan-injected-code\.sh|docs/injection-scan\.md)$'
 
-self="${BASH_SOURCE[0]}"
+self="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 findings=0
 
 # --- argument parsing --------------------------------------------------------
 
 usage() {
-	sed -n '3,25p' "$self" | sed -e 's/^#\{0,1\} \{0,1\}//'
+	sed -n '3,26p' "$self" | sed -e 's/^#\{0,1\} \{0,1\}//'
 	exit 2
 }
 
 mode=all
 range=""
+include_untracked=0
 declare -a explicit_files=()
 
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--all) mode=all ;;
+	--include-untracked) include_untracked=1 ;;
 	--staged) mode=staged ;;
 	--range)
 		mode=range
@@ -116,16 +150,56 @@ grep_rule() {
 
 list_files() {
 	case "$mode" in
-	all) git ls-files -z ;;
+	all)
+		git ls-files -z
+		if [ "$include_untracked" -eq 1 ]; then
+			git ls-files -z --others --exclude-standard
+		fi
+		;;
 	staged) git diff --cached --name-only --diff-filter=ACM -z ;;
 	range) git diff --name-only --diff-filter=ACM -z "$range" ;;
 	files) [ "${#explicit_files[@]}" -eq 0 ] || printf '%s\0' "${explicit_files[@]}" ;;
 	esac
 }
 
-declare -a FILES=() CONTENT_FILES=() WS_FILES=() CONFIG_FILES=()
+declare -a FILES=() CONTENT_FILES=() WS_FILES=() CONFIG_FILES=() SOURCE_FILES=() MANIFEST_FILES=()
 declare -a raw=()
 mapfile -d '' -t raw < <(list_files)
+
+# --staged / --range must read the BLOB, not the working tree: `git add <bad
+# file>` followed by restoring a clean copy on disk otherwise sails through the
+# hook while the flagged blob is what actually gets committed. Materialise the
+# blobs under a temp root and scan there, keeping repo-relative paths so the
+# report still names the real file.
+TMPROOT=""
+cleanup() { [ -z "$TMPROOT" ] || rm -rf -- "$TMPROOT"; }
+trap cleanup EXIT
+
+materialize() {
+	local rev="$1" f
+	TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/injscan.XXXXXX")"
+	for f in ${raw[@]+"${raw[@]}"}; do
+		mkdir -p -- "$TMPROOT/$(dirname -- "$f")"
+		if ! git show "$rev:$f" >"$TMPROOT/$f" 2>/dev/null; then
+			rm -f -- "$TMPROOT/$f"
+			echo "injection scan: no blob for $f at '${rev:-<index>}' - skipped" >&2
+		fi
+	done
+	cd -- "$TMPROOT"
+}
+
+case "$mode" in
+staged) materialize "" ;;
+range)
+	# Scan the tip side of the range: A...B / A..B -> B, bare rev -> itself.
+	case "$range" in
+	*...*) tip="${range##*...}" ;;
+	*..*) tip="${range##*..}" ;;
+	*) tip="$range" ;;
+	esac
+	materialize "${tip:-HEAD}"
+	;;
+esac
 
 # Explicit paths are scanned verbatim (no exclusions) so the self-test can point
 # the detector at its own fixtures.
@@ -141,9 +215,9 @@ for f in ${raw[@]+"${raw[@]}"}; do
 	# Rule 1 excludes Markdown: padded Markdown tables legitimately carry long
 	# space runs (a real doujins doc has a 166-space run).
 	[[ $f =~ \.mdx?$ ]] || WS_FILES+=("$f")
-	if [[ $f =~ (^|/)([^/]+\.config\.(js|cjs|mjs|ts)|(vite|webpack|tailwind|postcss|next)\.config\.[^/]+)$ ]]; then
-		CONFIG_FILES+=("$f")
-	fi
+	if [[ $f =~ $CONFIG_RE ]]; then CONFIG_FILES+=("$f"); fi
+	if [[ $f =~ $SOURCE_EXT_RE ]]; then SOURCE_FILES+=("$f"); fi
+	if [[ $f =~ (^|/)manifest\.json$ ]]; then MANIFEST_FILES+=("$f"); fi
 done
 
 # --- self-test ---------------------------------------------------------------
@@ -192,6 +266,26 @@ if [ "$mode" = self-test ]; then
 	# Regression guard for the calibration false positive: a vendored web3 SDK
 	# bundle names chain RPC hosts but keeps no eval/spawn near them.
 	check vendor-bundle-benign.js
+	# Rules 7-11.
+	check interior-padded.config.js R7-config-interior-ws
+	check unicode-padded.config.js R8-config-unicode-ws
+	check unicode-run.js R8-unicode-ws-run
+	check oversized.config.js R9-config-size
+	check long-string.config.js R10-config-string
+	check nul-byte.js R11-nul-byte
+	check decoded-c2.js R12-decoded-payload
+	check tampered-extension/manifest.json R13-manifest-meta
+	# Low-noise guards for rules 12 and 13: ordinary atob of harmless data, and a
+	# wallet manifest whose client_id sits in oauth2, not in a __meta container.
+	check benign-atob.js
+	check benign-extension/manifest.json
+	# Widened config file set: these paths are configs now, and each carries a
+	# 300-char line that only R6 can see.
+	check setup-husky.mjs R6-config-line
+	check gulpfile.js R6-config-line
+	# The bare-`*rc.js` alternative that was rejected: a vendored CodeMirror mode
+	# named mirc.js is NOT a build config and must stay clean.
+	check mirc.js
 
 	# The tracked tree itself must be clean, in both whole-tree and range mode.
 	if "$self" --all >/dev/null 2>&1; then
@@ -348,22 +442,147 @@ done
 
 # Rule 5 — known obfuscator markers, generalised past the observed literals
 # (the version strings and table names change between variants). Fast path
-# only; rules 1 and 6 are the net.
+# only; the structural rules are the net.
 grep_rule R5-marker \
 	"known dropper obfuscator marker" \
-	'_\$_[0-9a-f]{4}|global\s*(?:\[\s*["\x27][^"\x27]{1,8}["\x27]\s*\]|\.\s*\w{1,8})\s*=\s*["\x27][0-9]+-[0-9]+-[0-9]+["\x27]' \
+	"$MARKER_RE" \
 	${CONTENT_FILES[@]+"${CONTENT_FILES[@]}"}
 
-# Rule 6 — code appended past the last legitimate statement of a build config.
-# Practically: a build config has no business carrying a very long line (the
-# longest legitimate one across these repos is 97 chars).
+# Rules 6, 7, 9, 10 — the build-config envelope. A build config is small,
+# hand-written and short-lined; every dimension a dropper inflates is capped.
 for cfg in ${CONFIG_FILES[@]+"${CONFIG_FILES[@]}"}; do
+	# Rule 6 — code appended past the last legitimate statement. The longest
+	# legitimate config line across these repos is 199 chars (cozy-art
+	# frontend/vite.config.ts:50).
 	read -r len lineno < <(
 		awk 'length($0) > m { m = length($0); n = FNR } END { print m + 0, n + 0 }' "$cfg"
 	)
 	if [ "$len" -gt "$MAX_CONFIG_LINE" ]; then
 		emit R6-config-line "$cfg" "$lineno" \
 			"build config carries a ${len}-char line (limit ${MAX_CONFIG_LINE}) - code appended past the last statement?"
+	fi
+
+	# Rule 7 — interior whitespace. Padding-shape independent: it counts every
+	# blank AFTER the line's first non-blank, so chunked padding (99 spaces +
+	# /**/ + 99 spaces ...) and mixed space/tab runs cannot slip under a
+	# run-length limit. Highest legitimate value measured is 31.
+	while IFS='	' read -r wsline wscount; do
+		emit R7-config-interior-ws "$cfg" "$wsline" \
+			"build config line carries ${wscount} interior whitespace chars (limit ${MAX_CONFIG_INTERIOR_WS}) - padding hiding appended code?"
+	done < <(awk -v mw="$MAX_CONFIG_INTERIOR_WS" '
+		{
+			s = $0
+			sub(/^[[:space:]]+/, "", s)
+			n = 0
+			for (i = 1; i <= length(s); i++) {
+				c = substr(s, i, 1)
+				if (c == " " || c == "\t" || c == "\r" || c == "\f" || c == "\v") n++
+			}
+			if (n >= mw) printf "%d\t%d\n", FNR, n
+		}' "$cfg")
+
+	# Rule 9 — size cap. A hand-written build config is small; a dropper is not.
+	bytes="$(wc -c <"$cfg")"
+	if [ "$bytes" -gt "$MAX_CONFIG_BYTES" ]; then
+		emit R9-config-size "$cfg" 1 \
+			"build config is ${bytes} bytes (limit ${MAX_CONFIG_BYTES}) - raise MAX_CONFIG_BYTES only for a config you have read end to end"
+	fi
+done
+
+# Rule 8 (configs) — ANY non-ASCII whitespace / invisible character. A build
+# config has no business containing one, and 400 no-break spaces pad exactly
+# like 400 spaces while sliding under a space-run rule.
+grep_rule R8-config-unicode-ws \
+	"non-ASCII whitespace in a build config" \
+	"$UNICODE_WS" \
+	${CONFIG_FILES[@]+"${CONFIG_FILES[@]}"}
+
+# Rule 10 — an over-long string literal in a build config: the encoded payload
+# table, wrapped across short lines so no single line trips rule 6.
+grep_rule R10-config-string \
+	"string literal over ${MAX_CONFIG_STRING} chars in a build config" \
+	"(?:\x27[^\x27]{$((MAX_CONFIG_STRING + 1)),}\x27|\"[^\"]{$((MAX_CONFIG_STRING + 1)),}\"|\x60[^\x60]{$((MAX_CONFIG_STRING + 1)),}\x60)" \
+	${CONFIG_FILES[@]+"${CONFIG_FILES[@]}"}
+
+# Rule 8 (global) — the same invisibles anywhere else, but as a RUN. "Any
+# occurrence" tree-wide costs 34 false positives in minified CSS/JS (real
+# no-break spaces inside legitimate content strings); a run of
+# ${MAX_UNICODE_WS_RUN} is padding, not content. Carriage returns pad too.
+grep_rule R8-unicode-ws-run \
+	"run of non-ASCII whitespace (padding)" \
+	"${UNICODE_WS}{${MAX_UNICODE_WS_RUN},}|\r{${MAX_UNICODE_WS_RUN},}" \
+	${WS_FILES[@]+"${WS_FILES[@]}"}
+
+# Rule 11 — a NUL byte in a source file. Not just an oddity: `grep -I` treats
+# such a file as binary and skips it, which silently disables rules 1-5 and 8
+# for it. Scoped to source extensions - unscoped it fires on every legitimate
+# binary in the tree.
+declare -a NUL_HITS=()
+if [ "${#SOURCE_FILES[@]}" -gt 0 ]; then
+	mapfile -d '' -t NUL_HITS < <(
+		printf '%s\0' "${SOURCE_FILES[@]}" |
+			xargs -0 --no-run-if-empty grep -laZP -e '\x00' -- 2>/dev/null || true
+	)
+fi
+for f in ${NUL_HITS[@]+"${NUL_HITS[@]}"}; do
+	emit R11-nul-byte "$f" 1 \
+		"NUL byte in a source file - it reads as binary, so the text rules skip it; inspect with 'xxd'"
+done
+
+# Rule 12 — decode, THEN match. Rules 4 and 5 read plaintext; the fake-Phantom
+# wallet stealer (2025-12) kept its C2 in
+# atob("<base64 of an aptos fullnode account URL>") and so scored clean. Decode
+# every base64 literal handed to atob()/Buffer.from(...,'base64') and re-run the
+# dead-drop / marker patterns against the plaintext. In a build config ANY
+# base64-shaped literal is decoded: a config has no legitimate reason to carry one.
+declare -a B64_SCOPE=()
+if [ "${#CONTENT_FILES[@]}" -gt 0 ]; then
+	mapfile -d '' -t B64_SCOPE < <(
+		printf '%s\0' "${CONTENT_FILES[@]}" |
+			xargs -0 --no-run-if-empty grep -lIZP -e 'atob\s*\(|base64' -- 2>/dev/null || true
+	)
+fi
+declare -A DECODE_SEEN=()
+declare -a DECODE_FILES=()
+for f in ${B64_SCOPE[@]+"${B64_SCOPE[@]}"} ${CONFIG_FILES[@]+"${CONFIG_FILES[@]}"}; do
+	if [ -z "${DECODE_SEEN[$f]:-}" ]; then
+		DECODE_SEEN["$f"]=1
+		DECODE_FILES+=("$f")
+	fi
+done
+for f in ${DECODE_FILES[@]+"${DECODE_FILES[@]}"}; do
+	# One alternation: grep -P takes a single pattern.
+	lit_pattern="atob\s*\(\s*[\"\x27]\K[A-Za-z0-9+/=]{${MIN_B64_LITERAL},}(?=[\"\x27])"
+	lit_pattern="$lit_pattern|Buffer\s*\.\s*from\s*\(\s*[\"\x27]\K[A-Za-z0-9+/=]{${MIN_B64_LITERAL},}(?=[\"\x27]\s*,\s*[\"\x27]base64)"
+	if [[ $f =~ $CONFIG_RE ]]; then
+		lit_pattern="$lit_pattern|[\"\x27\x60]\K[A-Za-z0-9+/=]{32,}(?=[\"\x27\x60])"
+	fi
+	while IFS= read -r lit; do
+		[ -n "$lit" ] || continue
+		pad=$(((4 - ${#lit} % 4) % 4))
+		[ "$pad" -eq 3 ] && continue # not a valid base64 length
+		dec="$(printf '%s%s' "$lit" "$(printf '%*s' "$pad" '' | tr ' ' '=')" |
+			base64 -d 2>/dev/null | head -c "$MAX_DECODE_BYTES" | tr -d '\0' || true)"
+		[ "${#dec}" -ge 8 ] || continue
+		# Mostly-printable only: a decoded binary blob is not evidence.
+		nonprint="$(printf '%s' "$dec" | tr -d '[:print:][:space:]' | wc -c)"
+		[ "$((nonprint * 10))" -le "${#dec}" ] || continue
+		hit="$(printf '%s' "$dec" | grep -oP "$DECODED_INTERESTING" | head -1 || true)"
+		[ -n "$hit" ] || continue
+		lineno="$(grep -nIF -m1 -e "$lit" -- "$f" 2>/dev/null | cut -d: -f1)"
+		emit R12-decoded-payload "$f" "${lineno:-1}" \
+			"base64 literal decodes to a C2/marker ('$hit'): ${dec:0:100}"
+	done < <(grep -ohIP -e "$lit_pattern" -- "$f" 2>/dev/null | sort -u || true)
+done
+
+# Rule 13 — browser-extension manifest tampering. The fake-Phantom extension
+# stashed its victim fingerprint in manifest.commands.__meta, which Chrome
+# ignores and the payload reads back at runtime. Match the __meta CONTAINER, not
+# client_id alone: Petra and Nightly legitimately carry oauth2.client_id.
+for f in ${MANIFEST_FILES[@]+"${MANIFEST_FILES[@]}"}; do
+	if grep -qzP '"__meta"\s*:\s*\{[^{}]*"client_id"' -- "$f" 2>/dev/null; then
+		emit R13-manifest-meta "$f" 1 \
+			"extension manifest carries a __meta object with a client_id - attacker-written victim fingerprint"
 	fi
 done
 

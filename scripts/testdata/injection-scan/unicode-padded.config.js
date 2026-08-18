@@ -1,0 +1,2 @@
+// FIXTURE - inert. U+00A0 padding: invisible, and not an ASCII space run.
+module.exports = {};                                                                                                                                                                                                                                                                                                                                                                                                                console.log('inert');

@@ -1,0 +1,19 @@
+{
+   "manifest_version": 3,
+   "name": "FIXTURE - inert. Not a loadable extension.",
+   "version": "0.0.0",
+   "commands": {
+      "_execute_action": {
+         "suggested_key": {
+            "linux": "Alt+Shift+P"
+         }
+      },
+      "__meta": {
+         "description": "FIXTURE",
+         "_V": "0-0",
+         "client_id": "fixture$fixture",
+         "ext_title": "FIXTURE",
+         "installed_time": "2000-01-01 00:00:00"
+      }
+   }
+}
