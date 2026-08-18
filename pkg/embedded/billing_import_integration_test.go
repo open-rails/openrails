@@ -410,3 +410,145 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		return nil
 	}))
 }
+
+func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
+	_, appDSN := dbtest.SharedRLSPostgres(t)
+	pool, err := pgxpool.New(context.Background(), appDSN)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	appDB, err := db.NewWithPGXPool(pool, "")
+	require.NoError(t, err)
+
+	sfx := uuid.NewString()[:8]
+	productID, priceID, customerID := uuid.New(), uuid.New(), uuid.New()
+	railSubID := "atomic-sub-" + sfx
+	vaultID := "atomic-vault-" + sfx
+	asOf := time.Date(2026, 8, 18, 0, 0, 0, 0, time.UTC)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := appDB.Qx(ctx).Exec(ctx,
+			`INSERT INTO openrails.products (id,key,display_name,entitlements_spec,merchant_id)
+			 VALUES ($1,$2,$2,'{"premium":null}'::jsonb,$3)`,
+			productID, "atomic-import-"+sfx, merchantID)
+		require.NoError(t, err)
+		_, err = appDB.Qx(ctx).Exec(ctx,
+			`INSERT INTO openrails.prices (id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id)
+			 VALUES ($1,$2,23000000,'USD',720,true,$3)`,
+			priceID, productID, merchantID)
+		require.NoError(t, err)
+		dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id=$1 AND id=$2`, merchantID, customerID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			return nil
+		})
+	})
+
+	book := DeclaredBilling{
+		AsOf:       asOf,
+		DefaultPSP: PSPRef{Key: "nmi"},
+		Customers:  []DeclaredCustomer{{Customer: customerID}},
+		PaymentMethods: []DeclaredPaymentMethod{{
+			Customer: customerID, Rail: "nmi", RailCustomerRef: vaultID,
+			InitialTransactionID: "atomic-initial-" + sfx,
+		}},
+		Subscriptions: []DeclaredSubscription{{
+			SourceID: "atomic", Customer: customerID, Price: priceID, Rail: "nmi",
+			RailSubscriptionID: railSubID, StartedAt: asOf.Add(-30 * 24 * time.Hour),
+			Evidence: json.RawMessage(`{`),
+		}},
+	}
+
+	_, err = ImportBilling(context.Background(), BillingImportOptions{
+		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: book,
+	})
+	require.Error(t, err)
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		for name, query := range map[string]string{
+			"customer":       `SELECT count(*) FROM openrails.customers WHERE merchant_id=$1 AND id=$2`,
+			"payment method": `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`,
+			"subscription":   `SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2`,
+		} {
+			var count int
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, query, merchantID, customerID).Scan(&count))
+			require.Zero(t, count, "%s must roll back with the book", name)
+		}
+		return nil
+	}))
+
+	book.Subscriptions[0].Evidence = json.RawMessage(`{"legacy_source":"atomic-test"}`)
+	result, err := ImportBilling(context.Background(), BillingImportOptions{
+		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: book,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{"atomic"}, result.Imported)
+}
+
+func TestImportBilling_RefusesPaymentMethodOwnerChange(t *testing.T) {
+	_, appDSN := dbtest.SharedRLSPostgres(t)
+	pool, err := pgxpool.New(context.Background(), appDSN)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	appDB, err := db.NewWithPGXPool(pool, "")
+	require.NoError(t, err)
+
+	sfx := uuid.NewString()[:8]
+	owner, other := uuid.New(), uuid.New()
+	vaultID := "owned-vault-" + sfx
+	asOf := time.Date(2026, 8, 18, 0, 0, 0, 0, time.UTC)
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")
+		return nil
+	}))
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payment_methods WHERE merchant_id=$1 AND rail_customer_ref=$2`, merchantID, vaultID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.customers WHERE merchant_id=$1 AND id = ANY($2::uuid[])`, merchantID, []uuid.UUID{owner, other})
+			return nil
+		})
+	})
+
+	method := func(customer uuid.UUID) DeclaredBilling {
+		return DeclaredBilling{
+			AsOf:       asOf,
+			DefaultPSP: PSPRef{Key: "nmi"},
+			Customers:  []DeclaredCustomer{{Customer: customer}},
+			PaymentMethods: []DeclaredPaymentMethod{{
+				Customer: customer, Rail: "nmi", RailCustomerRef: vaultID,
+				InitialTransactionID: "owned-initial-" + sfx,
+			}},
+		}
+	}
+
+	_, err = ImportBilling(context.Background(), BillingImportOptions{
+		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: method(owner),
+	})
+	require.NoError(t, err)
+	_, err = ImportBilling(context.Background(), BillingImportOptions{
+		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: method(other),
+	})
+	require.ErrorContains(t, err, "already belongs to customer")
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		var got uuid.UUID
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT customer_id FROM openrails.payment_methods WHERE merchant_id=$1 AND rail_customer_ref=$2`,
+			merchantID, vaultID).Scan(&got))
+		require.Equal(t, owner, got)
+		return nil
+	}))
+}

@@ -196,7 +196,9 @@ type Result struct {
 // ambiguous cohort is seeded `unknown` and resolved by the #665 decider against
 // the declared snapshot at AsOf — park-as-unknown and cancellation-last-resort
 // hold server-side by construction. Charges land idempotently by
-// (rail, transaction_id). Runs in a single merchant-scoped connection (RLS).
+// (rail, transaction_id). Runs in a single merchant-scoped transaction (RLS):
+// infrastructure failures roll back the whole declared book, while per-source
+// business blocks remain ordinary committed outcomes for the other rows.
 func Import(ctx context.Context, opts Options) (Result, error) {
 	res := Result{Reasons: map[string]string{}}
 	if ctx == nil {
@@ -222,21 +224,18 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 
-	// Lifecycle clock pinned at AsOf: every lifecycle write (ended_at, grace,
-	// updated_at) is dated at the horizon — deterministic re-runs.
-	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(asOf))
-	// A terminal cancel — through the decider (ResolveCancelledRemoteAlive) or
-	// declared explicitly with a live remote schedule — must durably record the
-	// owed remote NMI delete. Enqueue the real ledger intent inline, same as the
-	// runtime producers — user-origin (these are the source system's user
-	// cancellations; system-origin would park under mode=limited), no rate
-	// ceiling (batch declaration of settled facts, not self-service).
-	deferDelete := intents.NewNMIDeleteScheduler(database, nil, intents.OriginUser, "billing-import terminal cancel, remote may be alive")
-	lc.SetDeferredDeleteScheduler(deferDelete)
+	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := database.NewWithPgxTx(tx)
+		qx := txdb.Qx(ctx)
+		q := txdb.Gen(ctx)
 
-	err = database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		qx := database.Qx(ctx)
-		q := database.Gen(ctx)
+		// Lifecycle clock pinned at AsOf: every lifecycle write (ended_at, grace,
+		// updated_at) is dated at the horizon — deterministic re-runs. The service
+		// and deferred-delete scheduler share this transaction so subscription,
+		// evidence, payment and intent writes cannot partially commit.
+		lc := subscriptions.NewSubscriptionLifecycleService(txdb, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(asOf))
+		deferDelete := intents.NewNMIDeleteScheduler(txdb, nil, intents.OriginUser, "billing-import terminal cancel, remote may be alive")
+		lc.SetDeferredDeleteScheduler(deferDelete)
 
 		// or#893: every provider-bound row the import writes carries a PSP.
 		// Resolve the merchant's catalog ONCE, then attribute each declared row
@@ -270,9 +269,13 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			seen[s.Customer] = struct{}{}
 		}
 
-		// Payment methods: idempotent by (rail, rail_customer_ref, rail_method_ref).
+		// Payment methods: idempotent by the PSP-scoped instrument identity. An
+		// existing instrument is reusable only by the same customer and rail; the
+		// assertion lives in this transaction so hosts do not need a racy precheck.
 		pmIDs := map[string]uuid.UUID{}
-		pmKey := func(rail, custRef, methodRef string) string { return rail + "\x1f" + custRef + "\x1f" + methodRef }
+		pmKey := func(psp uuid.UUID, rail, custRef, methodRef string) string {
+			return psp.String() + "\x1f" + rail + "\x1f" + custRef + "\x1f" + methodRef
+		}
 		for _, pm := range opts.Book.PaymentMethods {
 			if pm.Rail == "" || pm.RailCustomerRef == "" || pm.Customer == uuid.Nil {
 				return fmt.Errorf("declared payment method requires rail, rail_customer_ref and customer")
@@ -281,11 +284,13 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			if err != nil {
 				return err
 			}
-			var id uuid.UUID
+			var id, owner uuid.UUID
+			var existingRail string
 			err = qx.QueryRow(ctx,
-				`SELECT id FROM openrails.payment_methods
-				 WHERE merchant_id = $1 AND rail = $2 AND rail_customer_ref = $3 AND rail_method_ref = $4`,
-				merchantID.UUID(), pm.Rail, pm.RailCustomerRef, pm.RailMethodRef).Scan(&id)
+				`SELECT id, customer_id, rail FROM openrails.payment_methods
+				 WHERE merchant_id = $1 AND psp_id = $2 AND rail_customer_ref = $3 AND rail_method_ref = $4`,
+				merchantID.UUID(), pmPSP, pm.RailCustomerRef, pm.RailMethodRef).
+				Scan(&id, &owner, &existingRail)
 			if err == pgx.ErrNoRows {
 				id = uuid.New()
 				created := pm.CreatedAt.UTC()
@@ -312,8 +317,12 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				}
 			} else if err != nil {
 				return fmt.Errorf("lookup payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
+			} else if owner != pm.Customer {
+				return fmt.Errorf("payment method %s/%s already belongs to customer %s, not %s", pm.Rail, pm.RailCustomerRef, owner, pm.Customer)
+			} else if !strings.EqualFold(existingRail, pm.Rail) {
+				return fmt.Errorf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
 			}
-			pmIDs[pmKey(pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
+			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
 
 		// Transactions → the declared snapshot's charge events.
@@ -361,17 +370,21 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				f.DunningLastRetryAt = s.Dunning.LastRetryAt
 			}
 			if s.PaymentMethod != nil {
-				key := pmKey(s.PaymentMethod.Rail, s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef)
+				key := pmKey(subPSP, s.PaymentMethod.Rail, s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef)
 				id, ok := pmIDs[key]
 				if !ok {
 					// Ref to an instrument that already exists locally (e.g. a
 					// prior import created it) — resolve from the DB once.
-					var existing uuid.UUID
+					var existing, owner uuid.UUID
 					err := qx.QueryRow(ctx,
-						`SELECT id FROM openrails.payment_methods
-						 WHERE merchant_id = $1 AND rail = $2 AND rail_customer_ref = $3 AND rail_method_ref = $4`,
-						merchantID.UUID(), s.PaymentMethod.Rail, s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef).Scan(&existing)
+						`SELECT id, customer_id FROM openrails.payment_methods
+						 WHERE merchant_id = $1 AND psp_id = $2 AND rail = $3 AND rail_customer_ref = $4 AND rail_method_ref = $5`,
+						merchantID.UUID(), subPSP, s.PaymentMethod.Rail, s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef).
+						Scan(&existing, &owner)
 					if err == nil {
+						if owner != s.Customer {
+							return fmt.Errorf("resolve payment method ref %s: instrument belongs to customer %s, not %s", s.SourceID, owner, s.Customer)
+						}
 						id, ok = existing, true
 						pmIDs[key] = existing
 					} else if err != pgx.ErrNoRows {
@@ -385,7 +398,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			facts = append(facts, f)
 		}
 
-		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, database, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
+		outcomes, err := reconcile.ImportDeclaredSubscriptions(ctx, txdb, lc, deferDelete, merchantID.UUID(), facts, txns, reconcile.DeclaredCoverage{
 			SubscriptionsExhaustive: opts.Book.SubscriptionsExhaustive,
 			ExpectedSubscriptions:   opts.Book.ExpectedSubscriptions,
 		}, asOf)
