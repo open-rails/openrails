@@ -1,0 +1,12 @@
+{
+   "manifest_version": 3,
+   "name": "FIXTURE - benign wallet manifest",
+   "version": "0.0.0",
+   "oauth2": {
+      "client_id": "1234-abc.apps.googleusercontent.com",
+      "scopes": [
+         "openid",
+         "email"
+      ]
+   }
+}
