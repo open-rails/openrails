@@ -173,3 +173,29 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           scanners: vuln,secret,misconfig
+
+  # Blocks the repo-injection worm that appended an obfuscated dropper to
+  # build-config files on infected contributor machines (2025-11 .. 2026-05).
+  # OpenRails was never hit, but it is the billing engine and shares
+  # contributors with the repos that were. See docs/injection-scan.md.
+  #
+  # Lives here, not in ci.yaml: this file already triggers on push as well as
+  # pull_request, and the worm arrives inside someone else's ordinary commit, so
+  # push coverage is the point. Cheap and language-agnostic, so it is not gated
+  # on security-changes — a docs-only PR can carry the payload too.
+  injection-scan:
+    name: Injected Code Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Whole tree on PRs too, not just the diff: a diff-only scan would happily
+      # pass a payload that already landed on the branch.
+      - name: Scan tracked files
+        run: ./scripts/scan-injected-code.sh --all
+      # Proves the detector still fires: the fixtures under
+      # scripts/testdata/injection-scan/ must trip the rules they belong to.
+      - name: Detector self-test
+        run: ./scripts/scan-injected-code.sh --self-test

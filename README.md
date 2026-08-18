@@ -388,3 +388,25 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Glossary](docs/glossary.md) — rails, PSPs, merchants, payers, and the rest of the vocabulary.
 - [Metrics & query API](docs/metrics-for-llms.md) — analytics access for dashboards and LLM agents.
 - [Contributing / hacking on OpenRails](docs/dev/README.md) — dev workflow, testing, local webhooks.
+- [Injected-code scan](docs/injection-scan.md) — the supply-chain gate every clone runs; rules, exclusions, and what to do when it fires.
+
+---
+
+### Injected-code scan (required for every clone)
+
+A repo-injection worm appended an obfuscated dropper to build-config files in
+sibling repositories from infected contributor machines between 2025-11 and
+2026-05. OpenRails was never hit, but it is the billing engine and shares
+contributors with the repositories that were, so it runs the same gate:
+`scripts/scan-injected-code.sh` scans the whole tree on every push and pull
+request and blocks the merge.
+
+Install the pre-commit hook once per clone:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+Manual use: `./scripts/scan-injected-code.sh` (whole tree), `--staged`,
+`--range origin/master...HEAD`, or `--self-test`. Rules, exclusions and what to
+do when it fires are in [docs/injection-scan.md](docs/injection-scan.md).

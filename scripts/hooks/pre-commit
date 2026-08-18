@@ -1,0 +1,14 @@
+#!/bin/sh
+#
+# Blocks a commit that stages the signature of an injected-malware dropper.
+#
+# Install:  ./scripts/install-git-hooks.sh
+# Bypass:   git commit --no-verify   (only after you have read the finding)
+#
+# This file is tracked; .git/hooks/pre-commit is a symlink to it, so updates
+# ship with the repo.
+
+set -e
+
+root="$(git rev-parse --show-toplevel)"
+exec "$root/scripts/scan-injected-code.sh" --staged
