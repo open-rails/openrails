@@ -337,7 +337,16 @@ func ImportDeclaredSubscriptions(
 			// #835: no first-pull floor here on purpose — the declared snapshot
 			// is dated at AsOf and the operator's declaration IS the
 			// observation, so AsOf itself is the floor.
-			if _, err := convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, asOf, 0, declaredImportLookback, time.Time{}); err != nil {
+			// A lifecycle conflict is an expected per-source business block. Isolate
+			// the convergence attempt in a nested transaction (pgx savepoint) so its
+			// constraint error does not poison the caller-owned book transaction.
+			// Any non-business error still escapes and rolls back the whole book.
+			err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				txdb := db.NewWithPgxTx(tx)
+				_, err := convergeSubscriptionFromSnapshotLookback(ctx, txdb, lc, sub, snap, asOf, 0, declaredImportLookback, time.Time{})
+				return err
+			})
+			if err != nil {
 				var pgErr *pgconn.PgError
 				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 					// Another live row already owns the customer's lifecycle slot
