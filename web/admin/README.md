@@ -7,7 +7,7 @@ This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
 To add components to your app, run the following command:
 
 ```bash
-npx shadcn@latest add button
+pnpm exec shadcn add button
 ```
 
 This will place the ui components in the `src/components` directory.
