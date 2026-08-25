@@ -225,7 +225,7 @@ obeys (`internal/reconcile/never_rollbackable.go`).
 | **P — provider mirror** | `payments`, `subscriptions`, `payment_methods`, `rail_customer_accounts`, `solana_subscriptions`, `checkout_sessions`, refund/dispute mirrors, `rail_refresh_watermarks` | Freely restored; `reconcile pull` is the repair. Six of the eight PSP-tagged tables live here, so **per-PSP scope is native**. |
 | **D — derived** | `entitlements`, product access, credit-lot spendability | **Never restored, always recomputed.** `Converge` rebuilds each effect from the append-only grant log. A restored effect can silently disagree with its grant; a re-derived one cannot. |
 | **C — definitions and policy** | `products`, `prices`, rate cards, meters, `psps`, `merchant_webhooks`, spend limits, `merchant_destructive_policy`, … | Merchant-scoped only, **never PSP-scoped**. No external authority — convergence pushes this outward, so corruption here propagates instead of self-correcting. |
-| **X — outside the transaction** | `public.river_*`, Redis holds and leases, `profiles.*` (AuthKit), Vault secrets, `worker_health`, `probe_verdicts` | Not rollbackable with the schema. Jobs are **quiesced** for the duration, never rewound; Redis holds self-heal. |
+| **X — outside the transaction** | the `river_*` set (host-chosen schema, `public` by default), Redis holds and leases, `profiles.*` (AuthKit), Vault secrets, `worker_health`, `probe_verdicts` | Not rollbackable with the schema. Jobs are **quiesced** for the duration, never rewound; Redis holds self-heal. |
 
 | # | Invariant | Status |
 |---|---|---|

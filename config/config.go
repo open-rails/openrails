@@ -566,7 +566,8 @@ const MigratekitApp = "openrails"
 // embedded↔standalone data move (#544). In embedded mode a host that runs River
 // injects its own client (which owns its schema); OpenRails only uses this when
 // it constructs its own River client (standalone, or embedded with no injected
-// client).
+// client). The embedded engine adopts an injected client's schema everywhere it
+// reads River state, refusing only the billing schema itself.
 const RiverSchema = "public"
 
 // schemaIdentRe restricts the OpenRails schema to a safe SQL identifier: it must
