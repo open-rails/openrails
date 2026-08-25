@@ -28,15 +28,23 @@
 // the portable billing data, and ONLY that.
 //
 // River job-queue tables (river_*) are runtime/infra state, NEVER portable billing
-// data, so they NEVER live in the OpenRails billing schema. River tables ALWAYS
-// live in `public` (config.RiverSchema) — River's own documented default,
-// alongside `public.migrations` and `pgcrypto`. This keeps the OpenRails billing
-// schema 100% portable for the embedded<->standalone data move (#544). A
-// host-supplied client whose Schema() is not `public` is rejected by New.
+// data, so they NEVER live in the OpenRails billing schema — that is what keeps
+// the billing schema 100% portable for the embedded<->standalone data move (#544).
 //
-// Migration safety: River does not auto-migrate its tables across schemas. Hosts
-// or deployments still on an alternate River schema must drain and decommission
-// the old `<schema>.river_*` objects when cutting over to `public`.
+// WHERE the river_* set lives is the client owner's call. When OpenRails
+// constructs its own client (standalone, or embedded without an injected
+// client) it uses `public` (config.RiverSchema) — River's own documented
+// default, alongside `public.migrations` and `pgcrypto`. A HOST-injected
+// client owns its schema: the engine adopts client.Schema() for everything it
+// does with River (progress detection included), refusing only a schema that
+// collides with the billing schema. Two applications embedding OpenRails in
+// one database each keep their own river_* set this way; a shared set would
+// share river_leader, and River's elected leader schedules only its own
+// app's periodic jobs.
+//
+// Migration safety: River does not auto-migrate its tables across schemas. A
+// host that changes its client's schema must drain and decommission the old
+// `<schema>.river_*` objects itself.
 //
 // # Liveness
 //
@@ -50,6 +58,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
@@ -88,8 +97,10 @@ type RiverFleet struct {
 	// QueueBilling is the queue OpenRails' jobs are inserted on; configure it on
 	// the client you return.
 	QueueBilling string
-	// Schema is the schema OpenRails expects River's tables in; your client's
-	// river.Config.Schema must match (empty means River's default, `public`).
+	// Schema is the DEFAULT schema for River's tables. Your client may keep it
+	// or set its own river.Config.Schema — the engine adopts whatever schema
+	// the returned client uses (empty means River's default, `public`). The
+	// one refusal is the billing schema itself; see the schema contract above.
 	Schema string
 }
 
@@ -155,9 +166,11 @@ func (e *Embedded) bindRiver(ctx context.Context, own RiverOwnership) error {
 	if client == nil {
 		return fmt.Errorf("embedded billing: River binder returned a nil client (#895) — OpenRails cannot run its periodic fleet, and every money-moving job would silently never run")
 	}
-	if schema := client.Schema(); schema != "" && schema != config.RiverSchema {
-		return fmt.Errorf("embedded billing: host River client uses schema %q, OpenRails requires %q (#545) — host and billing must share one river_* set", schema, config.RiverSchema)
+	riverSchema, err := resolveHostRiverSchema(client.Schema(), e.app.Config.DB.SchemaName())
+	if err != nil {
+		return err
 	}
+	rt.SetRiverSchema(riverSchema)
 	// OpenRails registers its OWN periodic jobs on the host's client. This is
 	// deliberately not the host's job: a host that registered workers but not
 	// schedules would have a fleet that can work but is never asked to.
@@ -198,4 +211,20 @@ func (e *Embedded) CheckJobProgress(ctx context.Context) (JobProgress, error) {
 		return JobProgress{}, ErrNotInitialized
 	}
 	return e.app.Runtime.RiverProgress(ctx)
+}
+
+// resolveHostRiverSchema decides the schema the engine uses for everything it
+// does with River, from the host client's own schema. Empty means River's
+// default. The billing schema is refused: river_* is runtime state, and
+// placing it inside the portable billing schema breaks the
+// embedded<->standalone data move the schema exists for.
+func resolveHostRiverSchema(clientSchema, billingSchema string) (string, error) {
+	schema := strings.TrimSpace(clientSchema)
+	if schema == "" {
+		schema = config.RiverSchema
+	}
+	if schema == billingSchema {
+		return "", fmt.Errorf("embedded billing: host River client uses the billing schema %q for river_* tables — River state is not portable billing data and must live elsewhere (default %q)", billingSchema, config.RiverSchema)
+	}
+	return schema, nil
 }

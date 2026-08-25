@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -231,7 +232,8 @@ type Runtime struct {
 	CardAbuseGuard *abuse.CardAbuseGuard
 
 	riverStarted        bool
-	externalRiverClient bool // true if River client was provided externally
+	externalRiverClient bool
+	riverSchema         string // true if River client was provided externally
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without
@@ -458,6 +460,24 @@ func (r *Runtime) SetExternalRiverClient(client *river.Client[pgx.Tx]) {
 	r.RiverClient = client
 	r.RiverProducer = client // Use same client for enqueueing
 	r.externalRiverClient = true
+}
+
+// SetRiverSchema records the schema the bound River client keeps its tables
+// in, so out-of-client reads (the progress monitor) look in the same place.
+func (r *Runtime) SetRiverSchema(schema string) {
+	if r == nil {
+		return
+	}
+	r.riverSchema = strings.TrimSpace(schema)
+}
+
+// riverSchemaOrDefault is the schema for every direct read of River's tables:
+// the bound client's schema when a host injected one, else OpenRails' default.
+func (r *Runtime) riverSchemaOrDefault() string {
+	if r.riverSchema != "" {
+		return r.riverSchema
+	}
+	return config.RiverSchema
 }
 
 // HasExternalRiverClient returns true if an external River client was configured.

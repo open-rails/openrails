@@ -8,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/config"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -32,7 +31,7 @@ func (r *Runtime) riverProgressMonitor() *riverjobs.ProgressMonitor {
 		r.progress = &riverjobs.ProgressMonitor{
 			DB:                  r.DB,
 			Pool:                pool,
-			RiverSchema:         config.RiverSchema,
+			RiverSchema:         r.riverSchemaOrDefault(),
 			Clock:               clock,
 			Registrations:       r.workerHealthRegistrations(),
 			NotificationService: r.NotificationService,
@@ -41,9 +40,10 @@ func (r *Runtime) riverProgressMonitor() *riverjobs.ProgressMonitor {
 	return r.progress
 }
 
-// riverStatsPool returns the pool used to read River's own tables. River lives
-// in `public` in the SAME database as the billing schema (#545), so the app
-// pool reads it directly; a dedicated River pool is used when one exists.
+// riverStatsPool returns the pool used to read River's own tables. They live
+// in the SAME database as the billing schema (host-chosen schema, `public` by
+// default, #545), so the app pool reads them directly; a dedicated River pool
+// is used when one exists.
 func (r *Runtime) riverStatsPool() *pgxpool.Pool {
 	if r.riverPool != nil {
 		return r.riverPool
