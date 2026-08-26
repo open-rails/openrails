@@ -14,6 +14,15 @@ you scroll right. It then resolves its C2 from a blockchain dead-drop
 (trongrid / aptos / bsc RPC), XOR-decodes and `eval`s a next stage, and
 re-spawns itself with a detached `child_process`.
 
+A 184-repo sweep in 2026-08 found the same dropper in **ordinary application
+source**, not only in build configs: `bench/surrealdb-ws-bench/bench.ts`
+(appended after `main();`) and `source/index.js` (appended after
+`handleErrors(main)();`). One of those is *base64-encapsulated* —
+`eval("global.o='5-3-160-du';"+atob('…'))` — so its `_$_bb1a` obfuscator table
+exists only inside the encoded blob and no plaintext marker scan can see it.
+Rule 14 exists because every config-scoped rule is blind to that class, and
+rules 2, 5 and 12 are written to survive the encapsulation.
+
 The same actor class also ships browser-extension stealers. A sideloaded fake
 Phantom wallet found on a dev machine (2025-12) exfiltrated the wallet password
 and the full vault on every unlock, and resolved its C2 from an Aptos dead-drop
@@ -51,10 +60,10 @@ self-test on every push and pull request.
 | Rule | Fires on | Why |
 | --- | --- | --- |
 | `R1-whitespace` | >=100 consecutive spaces or >=20 tabs, in a non-Markdown file | The padding that hides the payload. Variant-proof — every observed sample used it. |
-| `R2-eval-decode` | `eval(` on the same line as `atob(` or `Buffer.from(..., 'base64')` | Decode-and-execute. |
+| `R2-eval-decode` | `eval(` anywhere on the same line as `atob(` or `Buffer.from(..., 'base64')` | Decode-and-execute. Not adjacency: `eval("global.o='…';"+atob('…'))` puts a concatenation between the two and is caught exactly like `eval(atob(…))`. |
 | `R3-detached-spawn` | `detached: true` in a file that also uses `child_process` | The persistence primitive: it re-spawns itself outside the build that started it. |
 | `R4-dead-drop` | `trongrid.io`, `aptoslabs.com`, `bsc-dataseed`, `bsc-rpc.publicnode.com` or `eth_getTransactionByHash` **within 1000 characters of** an `eval(`/`atob(`/`child_process`/`detached`/`Buffer.from(...base64)` | Blockchain dead-drop C2 wired to an execution primitive. |
-| `R5-marker` | `_$_<4 hex>`, `global['<name>'] = 'N-N-N'`, `global.<name> = 'N-N-N'` | Known obfuscator markers. Fast path only — the version strings and table names change between variants, so this is never the net. |
+| `R5-marker` | `_$_<4 hex>`, or `global.<any name>` / `global['<any name>']` assigned `'N-N-N'` with any number of further `-<alnum>` segments (`'5-3-160'`, `'5-3-160-du'`, `'5-3-361-du'`) | Known obfuscator markers. The key name is a wildcard and the version suffix is open-ended on purpose: `global.i`, `global['_V']` and `global.o` have all been seen, and `-du` appeared in 2026-08. For the base64-encapsulated variant this line is the *only* cleartext leak. |
 | `R6-config-line` | A build config with a line over 250 chars | Code appended past the last legitimate statement. |
 | `R7-config-interior-ws` | A build config line carrying >=40 whitespace chars **after** its first non-blank | Padding-shape independent: chunked padding (`99 spaces + /**/` repeated) and mixed space/tab runs slip under every run-length limit, but not under a total. |
 | `R8-config-unicode-ws` | **Any** U+00A0, U+1680, U+2000-U+200B, U+202F, U+205F, U+2060, U+3000 or U+FEFF in a build config | 400 no-break spaces pad exactly like 400 spaces and are invisible to an ASCII space-run rule. A build config has no reason to contain one. |
@@ -64,13 +73,23 @@ self-test on every push and pull request.
 | `R11-nul-byte` | A NUL byte in a `.js .jsx .ts .tsx .mjs .cjs .go .php .py .sh` file | Not just an oddity: `grep -I` calls such a file binary and skips it, which silently disables R1-R5, R8 and R12 for it. Scoped to source extensions — unscoped it fires on dozens of legitimate binaries. |
 | `R12-decoded-payload` | A base64 literal passed to `atob(...)` / `Buffer.from(..., 'base64')` — or, in a build config, **any** base64-shaped literal >=32 chars — that decodes to a dead-drop host, a `0x` chain address, an `http(s)://` URL, or an R5 marker | Decode, *then* match. R4 and R5 read plaintext; the fake-Phantom stealer kept its whole C2 URL inside one `atob("…")` and scored clean. |
 | `R13-manifest-meta` | A `manifest.json` whose `"__meta"` object contains a `"client_id"` key | Attacker-written victim fingerprint (`client_id`, `client_os`, `ext_id`, `installed_time`) stashed in a manifest field Chrome ignores and the payload reads back at runtime. |
+| `R14-trailing-append` | A whitespace gap of >=40 chars **between two non-blank characters on a file's last non-blank line**, in any non-Markdown file | Code appended past the terminal statement. The only rule that sees a dropper landing in ordinary application source rather than a build config. |
 
-Rules 1, 6, 7, 8, 9 and 10 are structural and catch a payload whose strings you
-have never seen; rules 2-5 and 12-13 are behavioural and describe what the
-samples actually did. The real 2026-02 config sample trips 1, 5, 6, 7 and 10 —
-its `eval`, `child_process` and C2 hosts are all inside the encoded string
-table, which is exactly why the structural rules carry the weight. The 2025-12
-extension sample trips 12 and 13 only.
+Rules 1, 6, 7, 8, 9, 10 and 14 are structural and catch a payload whose strings
+you have never seen; rules 2-5 and 12-13 are behavioural and describe what the
+samples actually did. Measured against the real samples:
+
+| Sample | Trips |
+| --- | --- |
+| 2026-02 config dropper (`webpack.config.js`) | 1, 5, 6, 7, 10, 14 |
+| 2026-08 classic variant (`postcss.config.mjs`, `_$_46e0`) | 1, 5, 6, 7, 10, 14 |
+| 2026-08 base64-encapsulated, **non-config** (`bench/surrealdb-ws-bench/bench.ts`) | 1, 2, 5, 12, 14 |
+| 2026-08 plaintext variant, **non-config** (`source/index.js`) | 1, 5, 14 |
+| 2025-12 fake-Phantom extension | 12, 13 |
+
+The config samples never trip 3 or 4: their `eval`, `child_process` and C2 hosts
+all live inside the encoded string table, which is exactly why the structural
+rules carry the weight.
 
 ### Why R4 needs corroboration
 
@@ -118,6 +137,12 @@ Every threshold below was measured across all seven trees carrying this scanner
   `client_id` alone turns one true positive into three findings.
 - **The config file set does not include a bare `*rc.js`.** It would match the
   vendored `public/vendor/codemirror/mode/mirc/mirc.js` in both legacy trees.
+- **R14 is anchored to the last line, and that is what makes it free.** The same
+  gap test applied to *every* line costs 9 / 1 / 15 / 11 / 1 / 3 / 2 false
+  positives across the seven trees (aligned trailing comments in Go and PHP);
+  extending it to the last *three* non-blank lines costs 3; and a
+  total-whitespace variant instead of a gap costs up to 158 (minified bundle
+  last lines). Anchored to the final non-blank line with a >=40 gap: **0**.
 
 Binary files are skipped by every rule except R11 (`grep -I`). Without that, raw
 JPEG bytes trip R1: two images in `hentai0-legacy` (`public/img/samplenft.jpg`,

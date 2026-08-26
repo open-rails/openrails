@@ -40,12 +40,20 @@ MAX_CONFIG_STRING=200      # rule 10: longest string literal allowed in a build 
 DEAD_DROP_WINDOW=1000      # rule 4: chars allowed between a C2 host and an eval/spawn
 MIN_B64_LITERAL=16         # rule 12: shortest base64 literal worth decoding
 MAX_DECODE_BYTES=65536     # rule 12: bytes of a decoded literal that get matched
+MAX_TRAILING_GAP=40        # rule 14: whitespace gap allowed inside a file's last line
 
 DEAD_DROP_HOSTS='trongrid\.io|aptoslabs\.com|bsc-dataseed|bsc-rpc\.publicnode\.com|eth_getTransactionByHash'
 
 # Obfuscator markers, generalised past the observed literals (version strings and
 # table names change between variants). Used by rules 5 and 12.
-MARKER_RE='_\$_[0-9a-f]{4}|global\s*(?:\[\s*["\x27][^"\x27]{1,8}["\x27]\s*\]|\.\s*\w{1,8})\s*=\s*["\x27][0-9]+-[0-9]+-[0-9]+["\x27]'
+#
+# The key name is a WILDCARD, not a list - global.i, global['_V'] and global.o
+# have all been seen in the wild. The version string is N-N-N followed by any
+# number of further '-<alnum>' segments: '5-3-160', '5-3-160-du' and
+# '5-3-361-du' are one family. That generalisation is what catches the
+# base64-encapsulated variant, whose ONLY cleartext leak is global.o='5-3-160-du'
+# (its _$_bb1a table lives inside the encoded blob, invisible to a plaintext scan).
+MARKER_RE='_\$_[0-9a-f]{4}|global\s*(?:\[\s*["\x27][^"\x27]{1,16}["\x27]\s*\]|\.\s*[A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*["\x27][0-9]+(?:-[0-9A-Za-z]+){2,}["\x27]'
 
 # Rule 12 — what a decoded literal must contain to be a finding. A dead-drop
 # host, a chain account address, any URL, or a marker. "Decodes cleanly" alone
@@ -274,6 +282,10 @@ if [ "$mode" = self-test ]; then
 	check long-string.config.js R10-config-string
 	check nul-byte.js R11-nul-byte
 	check decoded-c2.js R12-decoded-payload
+	# The 2026-08 field variants: a dropper in ordinary source (not a config),
+	# and the base64-encapsulated form whose only cleartext leak is the marker.
+	check appended-tail.ts R14-trailing-append
+	check b64-encapsulated.js R2-eval-decode R5-marker R12-decoded-payload
 	check tampered-extension/manifest.json R13-manifest-meta
 	# Low-noise guards for rules 12 and 13: ordinary atob of harmless data, and a
 	# wallet manifest whose client_id sits in oauth2, not in a __meta container.
@@ -350,7 +362,46 @@ for f in ${WS_HITS[@]+"${WS_HITS[@]}"}; do
 		}' "$f")
 done
 
-# Rule 2 — decode-and-execute on one line.
+# Rule 14 — code appended past a file's terminal statement, ANY file type. The
+# config-scoped rules (6, 7, 9, 10, and the strict form of 8) are blind to the
+# two 2026-08 samples that landed the dropper in ordinary application source:
+# bench/surrealdb-ws-bench/bench.ts (after `main();`) and source/index.js (after
+# `handleErrors(main)();`). Both share one shape the whole class has: the file's
+# LAST line ends its real code, then a whitespace gap, then more code.
+#
+# Anchoring to the last line is what makes this free. Measured across all seven
+# trees: 0 files. The same gap test applied to EVERY line costs 9/1/15/11/1/3/2
+# false positives (aligned trailing comments in Go and PHP), and a
+# total-whitespace variant costs up to 158 (minified bundles), so neither ships.
+declare -a GAP_CANDIDATES=()
+if [ "${#WS_FILES[@]}" -gt 0 ]; then
+	mapfile -d '' -t GAP_CANDIDATES < <(
+		printf '%s\0' "${WS_FILES[@]}" |
+			xargs -0 --no-run-if-empty grep -lIZP -e "[^ \t][ \t]{${MAX_TRAILING_GAP},}[^ \t]" -- 2>/dev/null || true
+	)
+fi
+for f in ${GAP_CANDIDATES[@]+"${GAP_CANDIDATES[@]}"}; do
+	while IFS='	' read -r lineno gap; do
+		emit R14-trailing-append "$f" "$lineno" \
+			"code appended past the last statement: ${gap}-char whitespace gap inside the file's final line (limit ${MAX_TRAILING_GAP})"
+	done < <(awk -v mg="$MAX_TRAILING_GAP" '
+		$0 ~ /[^ \t\r]/ { last = $0; lastno = FNR }
+		END {
+			if (lastno == 0) exit
+			run = 0; maxrun = 0; seen = 0
+			n = length(last)
+			for (i = 1; i <= n; i++) {
+				c = substr(last, i, 1)
+				if (c == " " || c == "\t") { if (seen) run++ }
+				else { if (seen && run > maxrun) maxrun = run; run = 0; seen = 1 }
+			}
+			if (maxrun >= mg) printf "%d\t%d\n", lastno, maxrun
+		}' "$f")
+done
+
+# Rule 2 — decode-and-execute on one line. Deliberately NOT adjacency: the
+# lookahead finds eval( anywhere on the line and the body finds the decoder
+# anywhere on it, so eval("prefix"+atob('...')) is caught like eval(atob(...)).
 grep_rule R2-eval-decode \
 	"eval() of decoded data" \
 	'^(?=.*(?<![A-Za-z0-9_$])eval\s*\().*(?:atob\s*\(|Buffer\s*\.\s*from\s*\([^)]*base64)' \
