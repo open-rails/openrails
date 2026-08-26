@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"math"
 	"sync"
 	"testing"
 	"time"
@@ -184,13 +185,13 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	// Prove the shared PG->Redis mutex in both interleavings on fresh payers.
 	// First, a durable authorization owns the customer lock before admission:
 	// admission must wait for commit, then read the reduced PG capacity and deny.
-	fundPayer := func() identity.CustomerID {
+	fundPayer := func(amount int64) identity.CustomerID {
 		id := dbtest.EnsureCustomerIDPgx(ctx, t, merchantPool, uuid.NewString())
 		p := identity.CustomerID(id)
 		key, keyErr := service.NewDepositIdempotencyKey("th-005-race", uuid.NewString())
 		require.NoError(t, keyErr)
 		_, depositErr := rt.Service().DepositCredits(merchantCtx, service.DepositCreditsRequest{
-			CustomerID: &p, Invoker: id.String(), Currency: "USD", Amount: 10_000, Key: key,
+			CustomerID: &p, Invoker: id.String(), Currency: "USD", Amount: amount, Key: key,
 		})
 		require.NoError(t, depositErr)
 		return p
@@ -229,7 +230,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 		return admissionResult{decision: decision, err: err}
 	}
 
-	authFirstPayer := fundPayer()
+	authFirstPayer := fundPayer(10_000)
 	authFirstTx, err := rt.emb.App().Runtime.DB.Pool().Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = authFirstTx.Rollback(context.Background()) })
@@ -251,7 +252,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 
 	// Then Redis admission owns the same PG lock through its Lua reservation.
 	// Authorization must wait, then subtract that live Redis hold and refuse.
-	admissionFirstPayer := fundPayer()
+	admissionFirstPayer := fundPayer(10_000)
 	admissionEntered := make(chan struct{})
 	releaseAdmission := make(chan struct{})
 	admissionFirstDone := make(chan admissionResult, 1)
@@ -270,6 +271,34 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.NoError(t, admissionFirst.err)
 	require.True(t, admissionFirst.decision.Allowed)
 	require.ErrorIs(t, <-authorizationDone, service.ErrInsufficientCredits)
+
+	// BIGINT-edge capacity must fail closed: MaxInt64 prepaid plus one unit of
+	// remaining arrears credit cannot wrap into an apparently usable capacity.
+	overflowPayer := fundPayer(10_000)
+	admin, err := pgx.Connect(ctx, dbtest.SharedSuperuserDSN(t))
+	require.NoError(t, err)
+	tag, err := admin.Exec(ctx, `
+		UPDATE openrails.ledger_accounts
+		SET credits_posted = $1, debits_posted = 0
+		WHERE merchant_id = $2
+		  AND customer_id = $3
+		  AND currency = 'USD'
+		  AND account_type = 'customer_balance'
+	`, int64(math.MaxInt64), dbtest.TestMerchantID.UUID(), overflowPayer.UUID())
+	require.NoError(t, err)
+	require.Equal(t, int64(1), tag.RowsAffected())
+	require.NoError(t, admin.Close(ctx))
+	arrears := money.BillingModeArrears
+	require.NoError(t, rt.Service().SetCreditAccountSettings(merchantCtx, overflowPayer, "USD", money.AccountSettingsInput{
+		BillingMode: &arrears,
+	}))
+	require.NoError(t, rt.Service().SetCreditLimit(merchantCtx, overflowPayer, "USD", 1))
+	overflowRequest := newAuthorization(overflowPayer, 1)
+	_, err = openOperationAuthorizationInCommittedTx(ctx, rt, overflowRequest)
+	require.ErrorContains(t, err, "capacity overflow")
+	notInserted, err := rt.GetOperationAuthorization(ctx, overflowRequest.OperationID)
+	require.NoError(t, err)
+	require.Nil(t, notInserted, "overflow refusal must not leave an authorization row")
 }
 
 func requirePayerLockWait(t *testing.T, ctx context.Context, dsn string) {

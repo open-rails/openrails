@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -150,10 +151,14 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 	if err != nil {
 		return nil, fmt.Errorf("read live admission-held capacity: %w", err)
 	}
-	if admissionHeld < 0 {
-		return nil, fmt.Errorf("live admission-held capacity is negative")
+	capacity, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "durable authorization holds")
+	if err != nil {
+		return nil, err
 	}
-	capacity := bal.Balance - bal.HeldBalance - admissionHeld
+	capacity, err = subtractOperationCapacity(capacity, admissionHeld, "redis admission holds")
+	if err != nil {
+		return nil, err
+	}
 	settings, err := txSvc.getAccountSettings(ctx, in.Payer, operationAuthorizationCurrency)
 	if err != nil {
 		return nil, err
@@ -165,9 +170,18 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		if oerr != nil {
 			return nil, oerr
 		}
-		remainingCredit := settings.CreditLimitAmount - outstanding
-		if remainingCredit > 0 {
-			capacity += remainingCredit
+		if settings.CreditLimitAmount < 0 {
+			return nil, fmt.Errorf("operation authorization: credit limit is negative")
+		}
+		if outstanding < 0 {
+			return nil, fmt.Errorf("operation authorization: outstanding owed is negative")
+		}
+		if settings.CreditLimitAmount > outstanding {
+			remainingCredit := settings.CreditLimitAmount - outstanding
+			capacity, err = addOperationCapacity(capacity, remainingCredit)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	if capacity < in.AuthorizedUSDMicros {
@@ -205,6 +219,26 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		return nil, err
 	}
 	return replayOperationAuthorization(existing, in)
+}
+
+func subtractOperationCapacity(capacity, held int64, source string) (int64, error) {
+	if held < 0 {
+		return 0, fmt.Errorf("operation authorization: %s is negative", source)
+	}
+	if capacity < math.MinInt64+held {
+		return 0, fmt.Errorf("operation authorization: capacity underflow subtracting %s", source)
+	}
+	return capacity - held, nil
+}
+
+func addOperationCapacity(capacity, addition int64) (int64, error) {
+	if addition < 0 {
+		return 0, fmt.Errorf("operation authorization: capacity addition is negative")
+	}
+	if capacity > math.MaxInt64-addition {
+		return 0, fmt.Errorf("operation authorization: capacity overflow adding remaining credit")
+	}
+	return capacity + addition, nil
 }
 
 func validateOperationAuthorizationInput(in OperationAuthorizationInput) error {
