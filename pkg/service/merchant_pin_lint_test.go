@@ -34,7 +34,7 @@ var facadeMethodsWithoutAPin = map[string]string{
 	"ReleaseHold":        "frees a Redis reservation (#513); the durable ledger is untouched",
 }
 
-var pinners = []string{"pin", "RunInMerchantConn", "RunInMerchantScope", "MerchantTx", "WithMerchantConn"}
+var pinners = []string{"pin", "RunInMerchantConn", "RunInMerchantScope", "MerchantTx", "WithMerchantConn", "BindMerchantTx"}
 
 func TestEveryExportedFacadeMethodPinsAMerchantConnection(t *testing.T) {
 	fset := token.NewFileSet()

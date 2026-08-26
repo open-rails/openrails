@@ -20,13 +20,18 @@ LIMIT 1;
 -- name: GetAdmissionCapacity :one
 -- Hot-path affordability snapshot for service admit. The customer_balance account
 -- carries Phase-H O(1) counters; money_settings is optional (missing = prepaid,
--- no credit line). Request in-flight holds live in Redis and are subtracted by
--- spendgate, not here.
+-- no credit line). Redis request-admission holds are subtracted by spendgate;
+-- durable operation authorizations are financial reservations and therefore
+-- travel in this Postgres snapshot.
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    -- Holds are Redis-only (#513); the durable ledger has no pending balance, so
-    -- held is always 0 here (the two-phase pending columns were dropped, #512).
-    0::bigint AS held,
+    COALESCE((
+        SELECT SUM(oa.authorized_usd_micros)
+        FROM openrails.operation_authorizations oa
+        WHERE oa.merchant_id = a.merchant_id
+          AND oa.ledger_account_id = a.id
+          AND oa.state = 'open'
+    ), 0)::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
@@ -118,13 +123,21 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 -- name: ListBelowThresholdMoneyAccounts :many
 -- Money-in workers (#239/#240): accounts whose DERIVED available balance
 -- (#512 ledger customer_balance) is under their configured low-balance
--- threshold. Request holds live in Redis and are not part of this durable scan.
+-- threshold. Redis request holds are not part of this durable scan; durable
+-- operation authorizations are.
 WITH avail AS (
     SELECT s.merchant_id, s.customer_id, s.currency,
            s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount,
            s.auto_topup_payment_method_id, s.last_topup_at,
            COALESCE((
-               SELECT a.credits_posted - a.debits_posted
+               SELECT (a.credits_posted - a.debits_posted)
+                    - COALESCE((
+                        SELECT SUM(oa.authorized_usd_micros)
+                        FROM openrails.operation_authorizations oa
+                        WHERE oa.merchant_id = a.merchant_id
+                          AND oa.ledger_account_id = a.id
+                          AND oa.state = 'open'
+                    ), 0)
                FROM openrails.ledger_accounts a
                WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
                  AND a.currency = s.currency AND a.account_type = 'customer_balance'

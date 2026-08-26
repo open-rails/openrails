@@ -888,6 +888,26 @@ type OpenrailsNotificationQueue struct {
 	EmailedAt *time.Time
 }
 
+// Durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
+type OpenrailsOperationAuthorization struct {
+	OperationID         string
+	MerchantID          uuid.UUID
+	PayerID             uuid.UUID
+	RecordOwner         string
+	LedgerAccountID     uuid.UUID
+	AuthorizedUsdMicros int64
+	ClaimReference      string
+	// Exact canonical bytes authored by the embedding host. OpenRails binds them byte-for-byte but does not interpret their format.
+	AuthorizationBodyBytes []byte
+	// Caller-bound SHA-256 of authorization_body_bytes, also rechecked by the database.
+	AuthorizationBodyDigest []byte
+	State                   string
+	TerminalReference       *string
+	CreatedAt               time.Time
+	ReleasedAt              *time.Time
+	SettledAt               *time.Time
+}
+
 // #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).
 type OpenrailsOrphanedEpisode struct {
 	MerchantID uuid.UUID

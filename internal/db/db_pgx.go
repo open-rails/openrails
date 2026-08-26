@@ -192,6 +192,43 @@ func setMerchantLocalGUCPgx(ctx context.Context, tx pgx.Tx, id merchant.ID) erro
 	return nil
 }
 
+// BindMerchantTx scopes a caller-owned transaction to one merchant without
+// taking ownership of its commit or rollback. Embedded hosts use this when one
+// transaction must atomically contain both host rows and OpenRails rows.
+//
+// An already-scoped transaction may be reused only for the same merchant. A
+// different existing pin is refused rather than overwritten: changing it
+// midway through a shared transaction would make earlier and later statements
+// observe different tenants.
+func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id merchant.ID) (context.Context, *DB, error) {
+	if d == nil {
+		return ctx, nil, fmt.Errorf("db: BindMerchantTx on nil DB")
+	}
+	if tx == nil {
+		return ctx, nil, fmt.Errorf("db: BindMerchantTx requires a transaction")
+	}
+	if id.IsZero() {
+		return ctx, nil, fmt.Errorf("db: BindMerchantTx requires a non-zero merchant id")
+	}
+
+	var got string
+	if err := tx.QueryRow(ctx,
+		"SELECT COALESCE(current_setting($1, true), '')", MerchantGUC,
+	).Scan(&got); err != nil {
+		return ctx, nil, fmt.Errorf("db: read %s before binding caller transaction: %w", MerchantGUC, err)
+	}
+	if got != "" && got != id.String() {
+		return ctx, nil, &ErrUnscopedMerchantWork{Op: "BindMerchantTx", Want: id, Got: got}
+	}
+	if got == "" {
+		if err := setMerchantLocalGUCPgx(ctx, tx, id); err != nil {
+			return ctx, nil, err
+		}
+	}
+	ctx = merchant.WithID(ctx, id)
+	return ctx, d.NewWithPgxTx(tx), nil
+}
+
 // lazyMerchantPgxConn is the request's merchant-scoped connection, acquired
 // LAZILY on the first query instead of eagerly in WithMerchantConn, so requests
 // that never touch the database cost zero pool connections (the eager variant

@@ -701,10 +701,13 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // lockBalance is the per-customer spend mutex (#491): it FOR UPDATE-locks the
 // customers row (the serialization point — money_balances is gone), ensuring the
 // row exists first, then returns the DERIVED balance snapshot
-// (Balance = SUM spendable blocks, HeldBalance = active holds + open windows)
-// computed UNDER the lock. Every spend/hold/capture/deposit/expiry path calls
-// this before reading/mutating the customer's blocks so no two mutations on the
-// same customer interleave (no overdraft, atomic hold placement).
+// (Balance = ledger customer-balance counters, HeldBalance = durable open
+// operation authorizations)
+// computed UNDER the lock. HeldBalance includes durable open operation
+// authorizations; Redis request-admission holds remain outside this snapshot.
+// Every spend/hold/capture/deposit/expiry path calls this before
+// reading/mutating the customer's blocks so no two mutations on the same
+// customer interleave (no overdraft, atomic hold placement).
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
@@ -725,9 +728,9 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 }
 
 // deriveBalance computes the balance snapshot from the source of truth: balance
-// = the customer's #512 ledger balance (credits − debits over posted +
-// post_pending transfers), held = open-window unsettled reservations (#335). The
-// caller holds the customers-row lock (#491).
+// = the customer's #512 ledger account counters and held = the sum of durable
+// open operation authorizations linked to that account. The caller holds the
+// customers-row lock (#491).
 func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
 	l := ledger.New(q, tenantID)
 	// A balance READ must never create the account (#534): no account = zero
@@ -742,15 +745,24 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 			return nil, err
 		}
 	}
-	// HeldBalance is always 0 in the durable ledger: admission holds live in Redis
-	// (#513) and the prepaid money_windows reservation was removed (dormant,
-	// superseded by the spendgate). Two-phase ledger holds are not on the live path.
+	var held int64
+	if found {
+		held, err = q.SumOpenOperationAuthorizationMicros(ctx, gen.SumOpenOperationAuthorizationMicrosParams{
+			MerchantID: tenantID, LedgerAccountID: acc,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Redis request-admission holds remain owned by spendgate and are added by
+	// that gate. HeldBalance here is only durable financial reservations linked
+	// to this ledger account, so every ordinary spend path respects them.
 	return &models.MoneyBalance{
 		MerchantID:  tenantID,
 		CustomerID:  payerID,
 		Currency:    cur,
 		Balance:     bal,
-		HeldBalance: 0,
+		HeldBalance: held,
 	}, nil
 }
 
