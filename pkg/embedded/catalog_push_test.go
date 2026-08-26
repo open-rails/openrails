@@ -90,6 +90,7 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 	}
 	if dropletPrice == nil {
 		t.Fatal("droplet has no matrix price")
+		return
 	}
 	// The s-1vcpu-1gb SKU pro-rates per second and caps at its $6/mo price:
 	// a full 720h month exceeds the 672h cap, so it bills exactly the maximum.

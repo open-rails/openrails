@@ -42,6 +42,7 @@ func TestCompileRule_BadWindowAndUnknownParam(t *testing.T) {
 	_, _, ve := compileRule("chargeback_rate_by_rail_account", map[string]any{"threshold": 0.05, "bogus": 1})
 	if ve == nil {
 		t.Fatal("unknown param should error")
+		return
 	}
 	found := false
 	for _, e := range ve.Errors {
