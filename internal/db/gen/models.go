@@ -906,6 +906,22 @@ type OpenrailsOperationAuthorization struct {
 	CreatedAt               time.Time
 	ReleasedAt              *time.Time
 	SettledAt               *time.Time
+	CapturedUsdMicros       int64
+}
+
+// Immutable exact-replay evidence for operation-authorization capture increments. Each row maps deterministically to an existing-ledger capture coordinate; it is not a parallel ledger.
+type OpenrailsOperationAuthorizationSettlement struct {
+	MerchantID   uuid.UUID
+	OperationID  string
+	SettlementID string
+	// Actual incremental provider cost. Cumulative settlement may exceed the authorization and must never be clamped.
+	AmountUsdMicros      int64
+	SettlementBodyBytes  []byte
+	SettlementBodyDigest []byte
+	Final                bool
+	// Opaque host-owned proof for a final provider absence, BillingStop, or zero-window conclusion; OpenRails does not interpret it.
+	FinalReference *string
+	CreatedAt      time.Time
 }
 
 // #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).

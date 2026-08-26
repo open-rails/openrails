@@ -26,7 +26,7 @@ LIMIT 1;
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
     COALESCE((
-        SELECT SUM(oa.authorized_usd_micros)
+        SELECT SUM(GREATEST(oa.authorized_usd_micros - oa.captured_usd_micros, 0))
         FROM openrails.operation_authorizations oa
         WHERE oa.merchant_id = a.merchant_id
           AND oa.ledger_account_id = a.id
@@ -132,7 +132,7 @@ WITH avail AS (
            COALESCE((
                SELECT (a.credits_posted - a.debits_posted)
                     - COALESCE((
-                        SELECT SUM(oa.authorized_usd_micros)
+                        SELECT SUM(GREATEST(oa.authorized_usd_micros - oa.captured_usd_micros, 0))
                         FROM openrails.operation_authorizations oa
                         WHERE oa.merchant_id = a.merchant_id
                           AND oa.ledger_account_id = a.id

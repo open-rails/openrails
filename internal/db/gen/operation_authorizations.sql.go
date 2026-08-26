@@ -12,8 +12,59 @@ import (
 	"github.com/google/uuid"
 )
 
+const applyOperationAuthorizationSettlement = `-- name: ApplyOperationAuthorizationSettlement :one
+UPDATE openrails.operation_authorizations
+SET captured_usd_micros = $1::bigint,
+    state = CASE WHEN $2::boolean THEN 'settled' ELSE state END,
+    terminal_reference = CASE WHEN $2::boolean THEN $3::text ELSE terminal_reference END,
+    settled_at = CASE WHEN $2::boolean THEN $4::timestamptz ELSE settled_at END
+WHERE merchant_id = $5::uuid
+  AND operation_id = $6::text
+  AND state = 'open'
+RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, captured_usd_micros
+`
+
+type ApplyOperationAuthorizationSettlementParams struct {
+	CapturedUsdMicros int64
+	Final             bool
+	FinalReference    *string
+	SettledAt         time.Time
+	MerchantID        uuid.UUID
+	OperationID       string
+}
+
+func (q *Queries) ApplyOperationAuthorizationSettlement(ctx context.Context, arg ApplyOperationAuthorizationSettlementParams) (OpenrailsOperationAuthorization, error) {
+	row := q.db.QueryRow(ctx, applyOperationAuthorizationSettlement,
+		arg.CapturedUsdMicros,
+		arg.Final,
+		arg.FinalReference,
+		arg.SettledAt,
+		arg.MerchantID,
+		arg.OperationID,
+	)
+	var i OpenrailsOperationAuthorization
+	err := row.Scan(
+		&i.OperationID,
+		&i.MerchantID,
+		&i.PayerID,
+		&i.RecordOwner,
+		&i.LedgerAccountID,
+		&i.AuthorizedUsdMicros,
+		&i.ClaimReference,
+		&i.AuthorizationBodyBytes,
+		&i.AuthorizationBodyDigest,
+		&i.State,
+		&i.TerminalReference,
+		&i.CreatedAt,
+		&i.ReleasedAt,
+		&i.SettledAt,
+		&i.CapturedUsdMicros,
+	)
+	return i, err
+}
+
 const getOperationAuthorization = `-- name: GetOperationAuthorization :one
-SELECT operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at
+SELECT operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, captured_usd_micros
 FROM openrails.operation_authorizations
 WHERE merchant_id = $1::uuid
   AND operation_id = $2::text
@@ -42,6 +93,38 @@ func (q *Queries) GetOperationAuthorization(ctx context.Context, arg GetOperatio
 		&i.CreatedAt,
 		&i.ReleasedAt,
 		&i.SettledAt,
+		&i.CapturedUsdMicros,
+	)
+	return i, err
+}
+
+const getOperationAuthorizationSettlement = `-- name: GetOperationAuthorizationSettlement :one
+SELECT merchant_id, operation_id, settlement_id, amount_usd_micros, settlement_body_bytes, settlement_body_digest, final, final_reference, created_at
+FROM openrails.operation_authorization_settlements
+WHERE merchant_id = $1::uuid
+  AND operation_id = $2::text
+  AND settlement_id = $3::text
+`
+
+type GetOperationAuthorizationSettlementParams struct {
+	MerchantID   uuid.UUID
+	OperationID  string
+	SettlementID string
+}
+
+func (q *Queries) GetOperationAuthorizationSettlement(ctx context.Context, arg GetOperationAuthorizationSettlementParams) (OpenrailsOperationAuthorizationSettlement, error) {
+	row := q.db.QueryRow(ctx, getOperationAuthorizationSettlement, arg.MerchantID, arg.OperationID, arg.SettlementID)
+	var i OpenrailsOperationAuthorizationSettlement
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.SettlementID,
+		&i.AmountUsdMicros,
+		&i.SettlementBodyBytes,
+		&i.SettlementBodyDigest,
+		&i.Final,
+		&i.FinalReference,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -70,7 +153,7 @@ INSERT INTO openrails.operation_authorizations (
     $9::bytea
 )
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
-RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at
+RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, captured_usd_micros
 `
 
 type InsertOperationAuthorizationParams struct {
@@ -116,6 +199,68 @@ func (q *Queries) InsertOperationAuthorization(ctx context.Context, arg InsertOp
 		&i.CreatedAt,
 		&i.ReleasedAt,
 		&i.SettledAt,
+		&i.CapturedUsdMicros,
+	)
+	return i, err
+}
+
+const insertOperationAuthorizationSettlement = `-- name: InsertOperationAuthorizationSettlement :one
+INSERT INTO openrails.operation_authorization_settlements (
+    merchant_id,
+    operation_id,
+    settlement_id,
+    amount_usd_micros,
+    settlement_body_bytes,
+    settlement_body_digest,
+    final,
+    final_reference
+) VALUES (
+    $1::uuid,
+    $2::text,
+    $3::text,
+    $4::bigint,
+    $5::bytea,
+    $6::bytea,
+    $7::boolean,
+    $8::text
+)
+ON CONFLICT (merchant_id, operation_id, settlement_id) DO NOTHING
+RETURNING merchant_id, operation_id, settlement_id, amount_usd_micros, settlement_body_bytes, settlement_body_digest, final, final_reference, created_at
+`
+
+type InsertOperationAuthorizationSettlementParams struct {
+	MerchantID           uuid.UUID
+	OperationID          string
+	SettlementID         string
+	AmountUsdMicros      int64
+	SettlementBodyBytes  []byte
+	SettlementBodyDigest []byte
+	Final                bool
+	FinalReference       *string
+}
+
+func (q *Queries) InsertOperationAuthorizationSettlement(ctx context.Context, arg InsertOperationAuthorizationSettlementParams) (OpenrailsOperationAuthorizationSettlement, error) {
+	row := q.db.QueryRow(ctx, insertOperationAuthorizationSettlement,
+		arg.MerchantID,
+		arg.OperationID,
+		arg.SettlementID,
+		arg.AmountUsdMicros,
+		arg.SettlementBodyBytes,
+		arg.SettlementBodyDigest,
+		arg.Final,
+		arg.FinalReference,
+	)
+	var i OpenrailsOperationAuthorizationSettlement
+	err := row.Scan(
+		&i.MerchantID,
+		&i.OperationID,
+		&i.SettlementID,
+		&i.AmountUsdMicros,
+		&i.SettlementBodyBytes,
+		&i.SettlementBodyDigest,
+		&i.Final,
+		&i.FinalReference,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -128,7 +273,7 @@ SET state = 'released',
 WHERE merchant_id = $3::uuid
   AND operation_id = $4::text
   AND state = 'open'
-RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at
+RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, captured_usd_micros
 `
 
 type ReleaseOperationAuthorizationParams struct {
@@ -161,12 +306,13 @@ func (q *Queries) ReleaseOperationAuthorization(ctx context.Context, arg Release
 		&i.CreatedAt,
 		&i.ReleasedAt,
 		&i.SettledAt,
+		&i.CapturedUsdMicros,
 	)
 	return i, err
 }
 
 const sumOpenOperationAuthorizationMicros = `-- name: SumOpenOperationAuthorizationMicros :one
-SELECT COALESCE(SUM(authorized_usd_micros), 0)::bigint AS authorized_usd_micros
+SELECT COALESCE(SUM(GREATEST(authorized_usd_micros - captured_usd_micros, 0)), 0)::bigint AS authorized_usd_micros
 FROM openrails.operation_authorizations
 WHERE merchant_id = $1::uuid
   AND ledger_account_id = $2::uuid

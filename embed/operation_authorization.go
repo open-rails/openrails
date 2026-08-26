@@ -15,6 +15,8 @@ type OperationAuthorization = service.OperationAuthorization
 type OperationAuthorizationState = service.OperationAuthorizationState
 type ReleaseOperationAuthorizationRequest = service.ReleaseOperationAuthorizationRequest
 type OperationAuthorizationConflict = service.OperationAuthorizationConflict
+type OperationAuthorizationSettlementRequest = service.OperationAuthorizationSettlementRequest
+type OperationAuthorizationSettlement = service.OperationAuthorizationSettlement
 
 const (
 	OperationAuthorizationOpen     = service.OperationAuthorizationOpen
@@ -37,6 +39,17 @@ func (r *Runtime) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 		return nil, err
 	}
 	return r.svc.OpenOperationAuthorizationTx(ctx, tx, req)
+}
+
+// SettleOperationAuthorizationTx records one exact actual-cost increment and
+// its existing-ledger capture inside a transaction owned by the embedding host.
+// Provider/BillingStop/final-proof semantics remain host-owned and opaque.
+func (r *Runtime) SettleOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req OperationAuthorizationSettlementRequest) (*OperationAuthorizationSettlement, error) {
+	ctx, err := r.operationAuthorizationContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return r.svc.SettleOperationAuthorizationTx(ctx, tx, req)
 }
 
 // GetOperationAuthorization reads the bound merchant's durable authorization.
