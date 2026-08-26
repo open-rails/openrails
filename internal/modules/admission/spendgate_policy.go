@@ -18,8 +18,8 @@ import (
 // policy registry + invoker_spend_limits. Every window's limit is expressed
 // in the REQUEST currency (FX-converted when a window is denominated in another
 // currency), so the gate runs in a single currency per admit. #513: this read
-// replaces the per-request Postgres budget reservation; nothing on the hot path
-// locks Postgres.
+// replaces the per-request Postgres budget reservation. The final capacity
+// snapshot + Redis reserve now share the existing customer-row money lock.
 type SpendgatePolicyLoader struct {
 	policies *BillingPolicyStore
 	budgets  *InvokerSpendLimitStore
@@ -216,22 +216,18 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 //
 // The policy's declared OutstandingCapAmount wins when set; zero defers to the
 // payer's own arrears credit limit, which stays the per-account lever.
-func payerCapacity(ctx context.Context, moneySvc *money.MoneyService, payer identity.CustomerID, currency string, policy ResolvedPolicy) (available, creditLine, outstanding int64, err error) {
-	capacity, err := moneySvc.GetAdmissionCapacity(ctx, payer, currency)
-	if err != nil {
-		return 0, 0, 0, err
-	}
+func payerCapacity(capacity money.AdmissionCapacity, policy ResolvedPolicy) (available, creditLine, outstanding int64) {
 	available = capacity.Balance - capacity.Held
 	outstanding = capacity.OutstandingOwed
 	if capacity.BillingMode != money.BillingModeArrears {
-		return available, 0, outstanding, nil
+		return available, 0, outstanding
 	}
 	limit := capacity.CreditLimit
 	if policy.OutstandingCapAmount > 0 {
 		limit = policy.OutstandingCapAmount
 	}
 	if limit <= 0 {
-		return available, 0, outstanding, nil
+		return available, 0, outstanding
 	}
 	creditLine = limit
 	if policy.GatesOnOutstandingOwed() {
@@ -240,5 +236,5 @@ func payerCapacity(ctx context.Context, moneySvc *money.MoneyService, payer iden
 			creditLine = 0
 		}
 	}
-	return available, creditLine, outstanding, nil
+	return available, creditLine, outstanding
 }

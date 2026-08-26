@@ -62,7 +62,9 @@ type AdmitResult struct {
 // Admit runs service admission: the delegated wasted-spend cutoff + the single
 // atomic spendgate EVAL (affordability + spend-cap windows + Redis hold). The gate
 // + Postgres→policy loader are built from the runtime per call (both cheap,
-// stateless). #513: no Postgres locks, no per-request budget reservation rows.
+// stateless). The payer's Postgres money lock spans the final capacity read and
+// Redis reserve so durable and Redis reservations cannot consume the same funds;
+// there are still no per-request Postgres reservation rows.
 func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -967,10 +969,10 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 		// debited only when it is positive, but the ROW is written either way:
 		// that is what makes a forgiven report as replay-proof as a charged one.
 		ev, err := s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
-			Payer:     &in.CustomerID,
-			Invoker:   strings.TrimSpace(in.Invoker),
-			Currency:  cur,
-			EventType: wastedSpendEventType,
+			Payer:      &in.CustomerID,
+			Invoker:    strings.TrimSpace(in.Invoker),
+			Currency:   cur,
+			EventType:  wastedSpendEventType,
 			Amount:     chargeable,
 			Key:        wasteKey,
 			Dimensions: map[string]int64{wastedReportedDimension: in.Amount},
@@ -1008,10 +1010,10 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 	// It exists for one reason: to be the thing that says "already seen" when the
 	// flat cutoff counter — a cache — cannot.
 	ev, err := s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
-		Payer:     &in.CustomerID,
-		Invoker:   strings.TrimSpace(in.Invoker),
-		Currency:  cur,
-		EventType: wastedSpendEventType,
+		Payer:      &in.CustomerID,
+		Invoker:    strings.TrimSpace(in.Invoker),
+		Currency:   cur,
+		EventType:  wastedSpendEventType,
 		Amount:     0,
 		Key:        wasteKey,
 		Dimensions: map[string]int64{wastedReportedDimension: in.Amount},

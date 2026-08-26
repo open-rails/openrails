@@ -263,14 +263,6 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyDelegatedSpendNotAllowed}, nil
 	}
 
-	// Unlocked balance + arrears credit line (the gate's affordability inputs).
-	// Phase H makes the settled balance an O(1) ledger account read, so this stays
-	// direct and avoids a staleness window.
-	available, creditLine, outstanding, err := payerCapacity(ctx, a.money, req.CustomerID, req.Currency, resolved)
-	if err != nil {
-		return AdmitDecision{}, err
-	}
-
 	// or#897 accrual rate cap — the cloud quota. Asked BEFORE affordability
 	// because it is a different question: not "can this payer pay for one more
 	// request" but "would what it is about to deploy push it past the rate it is
@@ -293,54 +285,70 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
-	// or#897 outstanding cap: unpaid arrears have consumed the whole credit line,
-	// so nothing more may be spent on credit. Distinct from the affordability
-	// refusal below — a host must be able to tell "your debt is at the cap, pay
-	// it down" from "you are out of prepaid balance". A window_spend_cap payer
-	// never reaches this: its line does not move with debt, so there is no cap
-	// to reach and unpaid invoices are the delinquency gate's business.
-	if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
-		a.recordDenial(ctx, merchantID, req.CustomerID, DenyOutstandingCap)
-		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: DenyOutstandingCap}, nil
-	}
+	// The PostgreSQL customer row is the ONE cross-store capacity mutex. Keep it
+	// locked from this fresh durable-capacity read through the Redis reserve Lua.
+	// Durable operation authorization takes the same lock before reading Redis
+	// held, so neither reservation substrate can race the other with a stale
+	// snapshot. The only ordering is PG -> Redis.
+	var result AdmitDecision
+	denialCode := ""
+	err = a.money.WithLockedAdmissionCapacity(ctx, req.CustomerID, req.Currency, func(capacity money.AdmissionCapacity) error {
+		available, creditLine, outstanding := payerCapacity(capacity, resolved)
 
-	dec, err := a.gate.Admit(ctx, spendgate.AdmitInput{
-		Merchant:       merchantID,
-		Customer:       req.CustomerID.UUID().String(),
-		Currency:       req.Currency,
-		RequestID:      req.SourceID,
-		Invoker:        req.Invoker,
-		Source:         req.Source,
-		Cost:           req.EstimatedAmount,
-		AccountBalance: available,
-		CreditLimit:    creditLine,
-		HoldTTL:        holdTTL(req.ExpiresAt),
-		Policy:         policy,
-		Request:        sgReq,
+		// or#897 outstanding cap: unpaid arrears have consumed the whole credit
+		// line, so nothing more may be spent on credit. A window_spend_cap payer
+		// never reaches this: its line does not move with debt.
+		if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
+			denialCode = DenyOutstandingCap
+			result = AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: denialCode}
+			return nil
+		}
+
+		dec, err := a.gate.Admit(ctx, spendgate.AdmitInput{
+			Merchant:       merchantID,
+			Customer:       req.CustomerID.UUID().String(),
+			Currency:       req.Currency,
+			RequestID:      req.SourceID,
+			Invoker:        req.Invoker,
+			Source:         req.Source,
+			Cost:           req.EstimatedAmount,
+			AccountBalance: available,
+			CreditLimit:    creditLine,
+			HoldTTL:        holdTTL(req.ExpiresAt),
+			Policy:         policy,
+			Request:        sgReq,
+		})
+		if err != nil {
+			return err
+		}
+
+		switch {
+		case dec.Allowed:
+			held, err := a.gate.HeldAmount(ctx, merchantID, req.CustomerID.UUID().String(), req.Currency)
+			if err != nil {
+				return err
+			}
+			result = AdmitDecision{Allowed: true, AvailableAmount: available, HeldAmount: held}
+		case dec.BlockedBalance:
+			denialCode = money.DenyInsufficientBalance
+			if creditLine > 0 {
+				denialCode = money.DenyInsufficientCredit
+			}
+			result = AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: denialCode, AvailableAmount: available}
+		default: // window blocked
+			denialCode = DenyBudgetExceeded
+			result = AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: denialCode, AvailableAmount: available,
+				RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}
+		}
+		return nil
 	})
 	if err != nil {
 		return AdmitDecision{}, err
 	}
-
-	switch {
-	case dec.Allowed:
-		held, herr := a.gate.HeldAmount(ctx, merchantID, req.CustomerID.UUID().String(), req.Currency)
-		if herr != nil {
-			return AdmitDecision{}, herr
-		}
-		return AdmitDecision{Allowed: true, AvailableAmount: available, HeldAmount: held}, nil
-	case dec.BlockedBalance:
-		code := money.DenyInsufficientBalance
-		if creditLine > 0 {
-			code = money.DenyInsufficientCredit
-		}
-		a.recordDenial(ctx, merchantID, req.CustomerID, code)
-		return AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: code, AvailableAmount: available}, nil
-	default: // window blocked
-		a.recordDenial(ctx, merchantID, req.CustomerID, DenyBudgetExceeded)
-		return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyBudgetExceeded, AvailableAmount: available,
-			RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}, nil
+	if denialCode != "" {
+		a.recordDenial(ctx, merchantID, req.CustomerID, denialCode)
 	}
+	return result, nil
 }
 
 // roleStrings maps the invoker's role UUIDs to the strings the spendgate role

@@ -247,6 +247,55 @@ type AdmissionCapacity struct {
 	OutstandingOwed int64
 }
 
+// WithLockedAdmissionCapacity evaluates fn while holding the same PostgreSQL
+// customer-row mutex used by every money mutation and durable operation
+// authorization. The live admission path must execute its Redis reserve Lua
+// inside fn: PG -> Redis is the single cross-store ordering, so a durable
+// reservation cannot commit between this capacity read and hold placement.
+func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string, fn func(AdmissionCapacity) error) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	if fn == nil {
+		return fmt.Errorf("admission capacity callback required")
+	}
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
+		return err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
+	payerID := payer.UUID()
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+			return err
+		}
+		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+			return err
+		}
+		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
+		if _, err := txSvc.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
+			return err
+		}
+		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
+			MerchantID: tenantID,
+			CustomerID: payerID,
+			Currency:   cur,
+		})
+		if err != nil {
+			return err
+		}
+		return fn(admissionCapacityFromRow(row))
+	})
+}
+
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
 // customer_balance counters, optional money_settings, and the payer's arrears
 // account.
@@ -285,13 +334,17 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
+	return admissionCapacityFromRow(row), nil
+}
+
+func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity {
 	return AdmissionCapacity{
 		Balance:         row.Balance,
 		Held:            row.Held,
 		BillingMode:     row.BillingMode,
 		CreditLimit:     row.CreditLimitAmount,
 		OutstandingOwed: row.OutstandingOwed,
-	}, nil
+	}
 }
 
 func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {
@@ -701,10 +754,13 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // lockBalance is the per-customer spend mutex (#491): it FOR UPDATE-locks the
 // customers row (the serialization point — money_balances is gone), ensuring the
 // row exists first, then returns the DERIVED balance snapshot
-// (Balance = SUM spendable blocks, HeldBalance = active holds + open windows)
-// computed UNDER the lock. Every spend/hold/capture/deposit/expiry path calls
-// this before reading/mutating the customer's blocks so no two mutations on the
-// same customer interleave (no overdraft, atomic hold placement).
+// (Balance = ledger customer-balance counters, HeldBalance = durable open
+// operation authorizations)
+// computed UNDER the lock. HeldBalance includes durable open operation
+// authorizations; Redis request-admission holds remain outside this snapshot.
+// Every spend/hold/capture/deposit/expiry path calls this before
+// reading/mutating the customer's blocks so no two mutations on the same
+// customer interleave (no overdraft, atomic hold placement).
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
@@ -725,9 +781,9 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 }
 
 // deriveBalance computes the balance snapshot from the source of truth: balance
-// = the customer's #512 ledger balance (credits − debits over posted +
-// post_pending transfers), held = open-window unsettled reservations (#335). The
-// caller holds the customers-row lock (#491).
+// = the customer's #512 ledger account counters and held = the sum of durable
+// open operation authorizations linked to that account. The caller holds the
+// customers-row lock (#491).
 func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
 	l := ledger.New(q, tenantID)
 	// A balance READ must never create the account (#534): no account = zero
@@ -742,15 +798,24 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 			return nil, err
 		}
 	}
-	// HeldBalance is always 0 in the durable ledger: admission holds live in Redis
-	// (#513) and the prepaid money_windows reservation was removed (dormant,
-	// superseded by the spendgate). Two-phase ledger holds are not on the live path.
+	var held int64
+	if found {
+		held, err = q.SumOpenOperationAuthorizationMicros(ctx, gen.SumOpenOperationAuthorizationMicrosParams{
+			MerchantID: tenantID, LedgerAccountID: acc,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Redis request-admission holds remain owned by spendgate and are added by
+	// that gate. HeldBalance here is only durable financial reservations linked
+	// to this ledger account, so every ordinary spend path respects them.
 	return &models.MoneyBalance{
 		MerchantID:  tenantID,
 		CustomerID:  payerID,
 		Currency:    cur,
 		Balance:     bal,
-		HeldBalance: 0,
+		HeldBalance: held,
 	}, nil
 }
 

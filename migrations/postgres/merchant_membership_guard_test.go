@@ -25,6 +25,9 @@ var reMembershipName = regexp.MustCompile(`(?:^|_)(user|users|member|members|mem
 // Adding an entry here is a DECISION that the column is not merchant-team
 // state — say why.
 var membershipAllowlist = map[string]string{
+	// Tensorhub's immutable billing-record principal, not an OpenRails
+	// merchant member or role.
+	"operation_authorizations.record_owner": "external billing record principal, not team state",
 	// The paying CUSTOMER's receipt email on a subscription row — end-user
 	// billing data, not merchant staff state.
 	"subscriptions.user_email": "customer receipt email, not team state",
