@@ -9,8 +9,12 @@ SET LOCAL lock_timeout = '10s';
 -- RLS is not a substitute for tenant-consistent foreign keys: app inserts can
 -- otherwise name their own merchant_id while referencing another merchant's
 -- globally keyed ledger account.
+CREATE UNIQUE INDEX ledger_accounts_merchant_id_id_key
+    ON openrails.ledger_accounts (merchant_id, id);
+
 ALTER TABLE ONLY openrails.ledger_accounts
-    ADD CONSTRAINT ledger_accounts_merchant_id_id_key UNIQUE (merchant_id, id);
+    ADD CONSTRAINT ledger_accounts_merchant_id_id_key
+    UNIQUE USING INDEX ledger_accounts_merchant_id_id_key;
 
 CREATE TABLE openrails.operation_authorizations (
     operation_id text NOT NULL,
