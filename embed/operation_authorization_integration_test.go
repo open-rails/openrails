@@ -8,12 +8,16 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -21,17 +25,19 @@ import (
 )
 
 // TestOperationAuthorizationLifecycle induces the minimal th-005 contract on
-// real Postgres: funded open, exact replay, changed-body refusal, durable
-// capacity reservation, and idempotent release that restores capacity.
+// real Postgres + Redis: replay/refusal/release and cross-store capacity
+// serialization in both reservation interleavings.
 func TestOperationAuthorizationLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
+	rdb, _ := dbtest.SharedRedisClient(t)
 	rt, err := New(ctx, Options{Options: embedded.Options{
 		Config: &config.Config{
 			Env:      "dev",
 			TestMode: config.CredentialPostureLive,
 			DB:       &config.DBConfig{URL: dsn},
 		},
+		Redis: rdb,
 		River: embedded.RiverManagedByOpenRails(),
 	}})
 	require.NoError(t, err)
@@ -174,6 +180,113 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	}
 	require.Equal(t, 1, openedCount, "one distinct operation may reserve the remaining capacity")
 	require.Equal(t, 1, refusedCount, "the other distinct operation must observe the first reservation")
+
+	// Prove the shared PG->Redis mutex in both interleavings on fresh payers.
+	// First, a durable authorization owns the customer lock before admission:
+	// admission must wait for commit, then read the reduced PG capacity and deny.
+	fundPayer := func() identity.CustomerID {
+		id := dbtest.EnsureCustomerIDPgx(ctx, t, merchantPool, uuid.NewString())
+		p := identity.CustomerID(id)
+		key, keyErr := service.NewDepositIdempotencyKey("th-005-race", uuid.NewString())
+		require.NoError(t, keyErr)
+		_, depositErr := rt.Service().DepositCredits(merchantCtx, service.DepositCreditsRequest{
+			CustomerID: &p, Invoker: id.String(), Currency: "USD", Amount: 10_000, Key: key,
+		})
+		require.NoError(t, depositErr)
+		return p
+	}
+	newAuthorization := func(p identity.CustomerID, amount int64) OperationAuthorizationRequest {
+		operationID := "op-cross-store-" + uuid.NewString()
+		body := []byte(`{"format":"th-auth-v1","operation_id":"` + operationID + `"}`)
+		return OperationAuthorizationRequest{
+			OperationID: operationID, Payer: p, RecordOwner: request.RecordOwner,
+			AuthorizedUSDMicros: amount, ClaimReference: "claim:" + uuid.NewString(),
+			AuthorizationBody: body, AuthorizationBodySHA256: sha256.Sum256(body),
+		}
+	}
+	type admissionResult struct {
+		decision spendgate.Decision
+		err      error
+	}
+	lockedAdmission := func(p identity.CustomerID, requestID string, cost int64, entered chan<- struct{}, release <-chan struct{}) admissionResult {
+		gate := spendgate.New(rdb)
+		var decision spendgate.Decision
+		err := rt.emb.App().Runtime.MoneyService.WithLockedAdmissionCapacity(merchantCtx, p, "USD", func(capacity money.AdmissionCapacity) error {
+			var gateErr error
+			decision, gateErr = gate.Admit(merchantCtx, spendgate.AdmitInput{
+				Merchant: dbtest.TestMerchantID.String(), Customer: p.UUID().String(), Currency: "USD",
+				RequestID: requestID, Cost: cost, AccountBalance: capacity.Balance - capacity.Held,
+				HoldTTL: time.Hour,
+			})
+			if entered != nil {
+				close(entered)
+			}
+			if release != nil {
+				<-release
+			}
+			return gateErr
+		})
+		return admissionResult{decision: decision, err: err}
+	}
+
+	authFirstPayer := fundPayer()
+	authFirstTx, err := rt.emb.App().Runtime.DB.Pool().Begin(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = authFirstTx.Rollback(context.Background()) })
+	_, err = rt.OpenOperationAuthorizationTx(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
+	require.NoError(t, err)
+	admissionStarted := make(chan struct{})
+	admissionDone := make(chan admissionResult, 1)
+	go func() {
+		close(admissionStarted)
+		admissionDone <- lockedAdmission(authFirstPayer, "admit-auth-first-"+uuid.NewString(), 5_000, nil, nil)
+	}()
+	<-admissionStarted
+	requirePayerLockWait(t, ctx, dsn)
+	require.NoError(t, authFirstTx.Commit(ctx))
+	afterAuth := <-admissionDone
+	require.NoError(t, afterAuth.err)
+	require.False(t, afterAuth.decision.Allowed)
+	require.True(t, afterAuth.decision.BlockedBalance)
+
+	// Then Redis admission owns the same PG lock through its Lua reservation.
+	// Authorization must wait, then subtract that live Redis hold and refuse.
+	admissionFirstPayer := fundPayer()
+	admissionEntered := make(chan struct{})
+	releaseAdmission := make(chan struct{})
+	admissionFirstDone := make(chan admissionResult, 1)
+	go func() {
+		admissionFirstDone <- lockedAdmission(admissionFirstPayer, "admit-first-"+uuid.NewString(), 6_000, admissionEntered, releaseAdmission)
+	}()
+	<-admissionEntered
+	authorizationDone := make(chan error, 1)
+	go func() {
+		_, openErr := openOperationAuthorizationInCommittedTx(ctx, rt, newAuthorization(admissionFirstPayer, 5_000))
+		authorizationDone <- openErr
+	}()
+	requirePayerLockWait(t, ctx, dsn)
+	close(releaseAdmission)
+	admissionFirst := <-admissionFirstDone
+	require.NoError(t, admissionFirst.err)
+	require.True(t, admissionFirst.decision.Allowed)
+	require.ErrorIs(t, <-authorizationDone, service.ErrInsufficientCredits)
+}
+
+func requirePayerLockWait(t *testing.T, ctx context.Context, dsn string) {
+	t.Helper()
+	admin, err := pgx.Connect(ctx, dsn)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, admin.Close(context.Background())) }()
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := admin.QueryRow(ctx, `
+			SELECT count(*)
+			FROM pg_stat_activity
+			WHERE wait_event_type = 'Lock'
+			  AND query LIKE '%LockCustomerForSpend%'
+		`).Scan(&waiting)
+		return err == nil && waiting > 0
+	}, 5*time.Second, 10*time.Millisecond, "a contender must be visibly waiting on the shared PostgreSQL payer lock")
 }
 
 func openOperationAuthorizationInCommittedTx(ctx context.Context, rt *Runtime, request OperationAuthorizationRequest) (*OperationAuthorization, error) {

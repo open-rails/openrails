@@ -24,7 +24,7 @@ INSERT INTO openrails.operation_authorizations (
     sqlc.arg(authorization_body_bytes)::bytea,
     sqlc.arg(authorization_body_digest)::bytea
 )
-ON CONFLICT (operation_id) DO NOTHING
+ON CONFLICT (merchant_id, operation_id) DO NOTHING
 RETURNING *;
 
 -- name: GetOperationAuthorization :one

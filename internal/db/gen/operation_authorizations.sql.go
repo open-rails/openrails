@@ -69,7 +69,7 @@ INSERT INTO openrails.operation_authorizations (
     $8::bytea,
     $9::bytea
 )
-ON CONFLICT (operation_id) DO NOTHING
+ON CONFLICT (merchant_id, operation_id) DO NOTHING
 RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at
 `
 

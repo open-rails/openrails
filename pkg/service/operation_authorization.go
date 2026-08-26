@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -18,7 +20,9 @@ type OperationAuthorizationState = money.OperationAuthorizationState
 const (
 	OperationAuthorizationOpen     = money.OperationAuthorizationOpen
 	OperationAuthorizationReleased = money.OperationAuthorizationReleased
-	OperationAuthorizationSettled  = money.OperationAuthorizationSettled
+	// OperationAuthorizationSettled has no public transition in this slice;
+	// settlement requires a future tx-native capture that excludes its own hold.
+	OperationAuthorizationSettled = money.OperationAuthorizationSettled
 )
 
 var (
@@ -33,12 +37,12 @@ type OperationAuthorizationConflict = money.OperationAuthorizationConflict
 // provider operation. OpenRails validates the digest but deliberately does not
 // parse or reserialize AuthorizationBody.
 type OperationAuthorizationRequest struct {
-	OperationID             string
+	OperationID             string // canonical, at most 255 bytes
 	Payer                   identity.CustomerID
-	RecordOwner             string
+	RecordOwner             string // canonical, at most 255 bytes
 	AuthorizedUSDMicros     int64
-	ClaimReference          string
-	AuthorizationBody       []byte
+	ClaimReference          string // canonical, at most 1024 bytes
+	AuthorizationBody       []byte // exact canonical bytes, 1..65536 bytes
 	AuthorizationBodySHA256 [sha256.Size]byte
 }
 
@@ -62,7 +66,7 @@ type OperationAuthorization struct {
 
 type ReleaseOperationAuthorizationRequest struct {
 	OperationID      string
-	ReleaseReference string
+	ReleaseReference string // canonical opaque proof reference, at most 1024 bytes
 }
 
 // OpenOperationAuthorizationTx rides a transaction owned by the embedding
@@ -76,11 +80,15 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	if err != nil {
 		return nil, err
 	}
-	ctx, _, err = rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if rt.RedisClient == nil {
+		return nil, fmt.Errorf("operation authorization unavailable: redis admission capacity is not configured")
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.moneyService().OpenOperationAuthorizationTx(ctx, tx, money.OperationAuthorizationInput{
+	gate := spendgate.New(rt.RedisClient)
+	auth, err := s.moneyService().OpenOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationInput{
 		OperationID:             req.OperationID,
 		Payer:                   req.Payer,
 		RecordOwner:             req.RecordOwner,
@@ -88,6 +96,8 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 		ClaimReference:          req.ClaimReference,
 		AuthorizationBody:       req.AuthorizationBody,
 		AuthorizationBodySHA256: req.AuthorizationBodySHA256,
+	}, func(ctx context.Context) (int64, error) {
+		return gate.HeldAmount(ctx, merchantID.String(), req.Payer.UUID().String(), "USD")
 	})
 	if err != nil {
 		return nil, err

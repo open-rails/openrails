@@ -888,7 +888,7 @@ type OpenrailsNotificationQueue struct {
 	EmailedAt *time.Time
 }
 
-// Durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
+// Merchant-scoped durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.
 type OpenrailsOperationAuthorization struct {
 	OperationID         string
 	MerchantID          uuid.UUID

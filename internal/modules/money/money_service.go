@@ -247,6 +247,55 @@ type AdmissionCapacity struct {
 	OutstandingOwed int64
 }
 
+// WithLockedAdmissionCapacity evaluates fn while holding the same PostgreSQL
+// customer-row mutex used by every money mutation and durable operation
+// authorization. The live admission path must execute its Redis reserve Lua
+// inside fn: PG -> Redis is the single cross-store ordering, so a durable
+// reservation cannot commit between this capacity read and hold placement.
+func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string, fn func(AdmissionCapacity) error) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return fmt.Errorf("payer required")
+	}
+	if fn == nil {
+		return fmt.Errorf("admission capacity callback required")
+	}
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
+		return err
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	tenantID := tid.UUID()
+	payerID := payer.UUID()
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+			return err
+		}
+		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+			return err
+		}
+		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
+		if _, err := txSvc.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
+			return err
+		}
+		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
+			MerchantID: tenantID,
+			CustomerID: payerID,
+			Currency:   cur,
+		})
+		if err != nil {
+			return err
+		}
+		return fn(admissionCapacityFromRow(row))
+	})
+}
+
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
 // customer_balance counters, optional money_settings, and the payer's arrears
 // account.
@@ -285,13 +334,17 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	if err != nil {
 		return AdmissionCapacity{}, err
 	}
+	return admissionCapacityFromRow(row), nil
+}
+
+func admissionCapacityFromRow(row gen.GetAdmissionCapacityRow) AdmissionCapacity {
 	return AdmissionCapacity{
 		Balance:         row.Balance,
 		Held:            row.Held,
 		BillingMode:     row.BillingMode,
 		CreditLimit:     row.CreditLimitAmount,
 		OutstandingOwed: row.OutstandingOwed,
-	}, nil
+	}
 }
 
 func (s *MoneyService) GetTransactions(ctx context.Context, invokerID, currency string, limit, offset int) ([]models.MoneyTransaction, int, error) {

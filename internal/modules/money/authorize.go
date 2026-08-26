@@ -105,9 +105,9 @@ func (s *MoneyService) AuthorizeAndHold(ctx context.Context, in AuthorizeHoldInp
 		// second substrate that ruling removed.
 		//
 		// NOTE (or#897 finding): AuthorizeAndHold has no production caller — the
-		// live admission path is admission.Admitter.Admit -> payerCapacity ->
-		// GetAdmissionCapacity -> the Redis spendgate. Policy enforcement belongs
-		// there, not here.
+		// live admission path is admission.Admitter.Admit ->
+		// WithLockedAdmissionCapacity -> the Redis spendgate. Policy enforcement
+		// belongs there, not here.
 		accountCapacity := available
 		exposure := int64(0)
 		switch {

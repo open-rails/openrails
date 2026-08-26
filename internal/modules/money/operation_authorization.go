@@ -12,20 +12,30 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-const operationAuthorizationCurrency = "USD"
+const (
+	operationAuthorizationCurrency          = "USD"
+	operationAuthorizationMaxIDBytes        = 255
+	operationAuthorizationMaxPrincipalBytes = 255
+	operationAuthorizationMaxReferenceBytes = 1024
+	operationAuthorizationMaxBodyBytes      = 64 << 10
+)
 
 type OperationAuthorizationState string
 
 const (
 	OperationAuthorizationOpen     OperationAuthorizationState = "open"
 	OperationAuthorizationReleased OperationAuthorizationState = "released"
-	OperationAuthorizationSettled  OperationAuthorizationState = "settled"
+	// OperationAuthorizationSettled is a schema terminal state reserved for a
+	// future tx-native capture that excludes its own open reservation. This slice
+	// intentionally exposes no settlement transition.
+	OperationAuthorizationSettled OperationAuthorizationState = "settled"
 )
 
 var (
@@ -77,22 +87,30 @@ type OperationAuthorization struct {
 	Replayed                bool
 }
 
-// OpenOperationAuthorizationTx validates account capacity and inserts (or
-// byte-for-byte replays) an open authorization in a caller-owned transaction.
-// It never commits or rolls back tx. The embedding host can therefore commit
-// this financial reservation atomically with its provider obligation.
-func (s *MoneyService) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, in OperationAuthorizationInput) (*OperationAuthorization, error) {
+// AdmissionHeldReader reads the live Redis request-admission reservation total
+// while the caller holds OpenRails' PostgreSQL customer-row money lock. New
+// admissions take the same lock before mutating Redis, so this snapshot cannot
+// race a new hold into existence.
+type AdmissionHeldReader func(context.Context) (int64, error)
+
+// OpenOperationAuthorizationInTx validates account capacity and inserts (or
+// byte-for-byte replays) an open authorization through the transaction-scoped
+// DB returned by db.BindMerchantTx. It never commits or rolls back the caller's
+// transaction.
+func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, in OperationAuthorizationInput, readAdmissionHeld AdmissionHeldReader) (*OperationAuthorization, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
+	}
+	if txDB == nil {
+		return nil, fmt.Errorf("operation authorization requires a bound transaction")
+	}
+	if readAdmissionHeld == nil {
+		return nil, fmt.Errorf("operation authorization requires live admission-held capacity")
 	}
 	if err := validateOperationAuthorizationInput(in); err != nil {
 		return nil, err
 	}
 	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, txDB, err := s.db.BindMerchantTx(ctx, tx, merchantID)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +142,18 @@ func (s *MoneyService) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.
 		return nil, fmt.Errorf("operation authorization: customer balance ledger account was not materialized")
 	}
 
-	capacity := bal.Balance - bal.HeldBalance
+	// PG -> Redis is the sole cross-store ordering. Live admission takes this
+	// same customer lock across its capacity read and Redis Lua reservation;
+	// while we hold it, no new request hold can appear between this read and the
+	// durable authorization insert. Capture/release may only reduce Redis held.
+	admissionHeld, err := readAdmissionHeld(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read live admission-held capacity: %w", err)
+	}
+	if admissionHeld < 0 {
+		return nil, fmt.Errorf("live admission-held capacity is negative")
+	}
+	capacity := bal.Balance - bal.HeldBalance - admissionHeld
 	settings, err := txSvc.getAccountSettings(ctx, in.Payer, operationAuthorizationCurrency)
 	if err != nil {
 		return nil, err
@@ -163,14 +192,14 @@ func (s *MoneyService) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.
 		return nil, err
 	}
 
-	// A different payer can race on the globally unique operation id because it
-	// takes a different customer lock. Resolve the lost insert as replay or exact
-	// conflict; never manufacture a second operation identity.
+	// A different payer under this merchant can race on the same operation id
+	// because it takes a different customer lock. The merchant-scoped unique key
+	// serializes that identity; resolve the lost insert as replay or exact conflict.
 	existing, err := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, &OperationAuthorizationConflict{Field: "merchant"}
+		return nil, fmt.Errorf("operation authorization conflict row is not visible in its merchant scope")
 	}
 	if err != nil {
 		return nil, err
@@ -179,26 +208,39 @@ func (s *MoneyService) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.
 }
 
 func validateOperationAuthorizationInput(in OperationAuthorizationInput) error {
-	if strings.TrimSpace(in.OperationID) == "" || strings.TrimSpace(in.OperationID) != in.OperationID {
-		return fmt.Errorf("operation_id required in canonical form")
+	if err := validateOperationAuthorizationText("operation_id", in.OperationID, operationAuthorizationMaxIDBytes); err != nil {
+		return err
 	}
 	if in.Payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	if strings.TrimSpace(in.RecordOwner) == "" || strings.TrimSpace(in.RecordOwner) != in.RecordOwner {
-		return fmt.Errorf("record_owner required in canonical form")
+	if err := validateOperationAuthorizationText("record_owner", in.RecordOwner, operationAuthorizationMaxPrincipalBytes); err != nil {
+		return err
 	}
 	if in.AuthorizedUSDMicros <= 0 {
 		return fmt.Errorf("authorized_usd_micros must be positive")
 	}
-	if strings.TrimSpace(in.ClaimReference) == "" || strings.TrimSpace(in.ClaimReference) != in.ClaimReference {
-		return fmt.Errorf("claim_reference required in canonical form")
+	if err := validateOperationAuthorizationText("claim_reference", in.ClaimReference, operationAuthorizationMaxReferenceBytes); err != nil {
+		return err
 	}
 	if len(in.AuthorizationBody) == 0 {
 		return fmt.Errorf("authorization_body required")
 	}
+	if len(in.AuthorizationBody) > operationAuthorizationMaxBodyBytes {
+		return fmt.Errorf("authorization_body exceeds %d bytes", operationAuthorizationMaxBodyBytes)
+	}
 	if got := sha256.Sum256(in.AuthorizationBody); got != in.AuthorizationBodySHA256 {
 		return fmt.Errorf("authorization_body_sha256 does not match authorization_body")
+	}
+	return nil
+}
+
+func validateOperationAuthorizationText(field, value string, maxBytes int) error {
+	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value {
+		return fmt.Errorf("%s required in canonical form", field)
+	}
+	if len(value) > maxBytes {
+		return fmt.Errorf("%s exceeds %d bytes", field, maxBytes)
 	}
 	return nil
 }
@@ -229,8 +271,8 @@ func (s *MoneyService) GetOperationAuthorization(ctx context.Context, operationI
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	if strings.TrimSpace(operationID) == "" || strings.TrimSpace(operationID) != operationID {
-		return nil, fmt.Errorf("operation_id required in canonical form")
+	if err := validateOperationAuthorizationText("operation_id", operationID, operationAuthorizationMaxIDBytes); err != nil {
+		return nil, err
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -261,11 +303,11 @@ func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operat
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	if strings.TrimSpace(operationID) == "" || strings.TrimSpace(operationID) != operationID {
-		return nil, fmt.Errorf("operation_id required in canonical form")
+	if err := validateOperationAuthorizationText("operation_id", operationID, operationAuthorizationMaxIDBytes); err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(releaseReference) == "" || strings.TrimSpace(releaseReference) != releaseReference {
-		return nil, fmt.Errorf("release_reference required in canonical form")
+	if err := validateOperationAuthorizationText("release_reference", releaseReference, operationAuthorizationMaxReferenceBytes); err != nil {
+		return nil, err
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {

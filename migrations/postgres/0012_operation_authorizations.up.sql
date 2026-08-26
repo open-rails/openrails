@@ -6,8 +6,14 @@
 SET LOCAL statement_timeout = '60s';
 SET LOCAL lock_timeout = '10s';
 
+-- RLS is not a substitute for tenant-consistent foreign keys: app inserts can
+-- otherwise name their own merchant_id while referencing another merchant's
+-- globally keyed ledger account.
+ALTER TABLE ONLY openrails.ledger_accounts
+    ADD CONSTRAINT ledger_accounts_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE TABLE openrails.operation_authorizations (
-    operation_id text PRIMARY KEY,
+    operation_id text NOT NULL,
     merchant_id uuid NOT NULL,
     payer_id uuid NOT NULL,
     record_owner text NOT NULL,
@@ -21,22 +27,34 @@ CREATE TABLE openrails.operation_authorizations (
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
     released_at timestamptz,
     settled_at timestamptz,
+    CONSTRAINT operation_authorizations_pkey
+        PRIMARY KEY (merchant_id, operation_id),
     CONSTRAINT operation_authorizations_operation_id_present
         CHECK (operation_id <> '' AND operation_id = btrim(operation_id)),
+    CONSTRAINT operation_authorizations_operation_id_size
+        CHECK (octet_length(operation_id) <= 255),
     CONSTRAINT operation_authorizations_record_owner_present
         CHECK (record_owner <> '' AND record_owner = btrim(record_owner)),
+    CONSTRAINT operation_authorizations_record_owner_size
+        CHECK (octet_length(record_owner) <= 255),
     CONSTRAINT operation_authorizations_claim_reference_present
         CHECK (claim_reference <> '' AND claim_reference = btrim(claim_reference)),
+    CONSTRAINT operation_authorizations_claim_reference_size
+        CHECK (octet_length(claim_reference) <= 1024),
     CONSTRAINT operation_authorizations_amount_positive
         CHECK (authorized_usd_micros > 0),
     CONSTRAINT operation_authorizations_body_present
         CHECK (octet_length(authorization_body_bytes) > 0),
+    CONSTRAINT operation_authorizations_body_size
+        CHECK (octet_length(authorization_body_bytes) <= 65536),
     CONSTRAINT operation_authorizations_digest_shape
         CHECK (octet_length(authorization_body_digest) = 32),
     CONSTRAINT operation_authorizations_digest_matches_body
         CHECK (authorization_body_digest = public.digest(authorization_body_bytes, 'sha256')),
     CONSTRAINT operation_authorizations_state_check
         CHECK (state IN ('open', 'released', 'settled')),
+    CONSTRAINT operation_authorizations_terminal_reference_size
+        CHECK (terminal_reference IS NULL OR octet_length(terminal_reference) <= 1024),
     CONSTRAINT operation_authorizations_terminal_shape CHECK (
         (state = 'open' AND terminal_reference IS NULL AND released_at IS NULL AND settled_at IS NULL)
         OR
@@ -47,15 +65,17 @@ CREATE TABLE openrails.operation_authorizations (
     CONSTRAINT operation_authorizations_merchant_fk
         FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
     CONSTRAINT operation_authorizations_payer_fk
-        FOREIGN KEY (payer_id) REFERENCES openrails.customers(id) ON DELETE RESTRICT,
+        FOREIGN KEY (merchant_id, payer_id)
+        REFERENCES openrails.customers(merchant_id, id) ON DELETE RESTRICT,
     CONSTRAINT operation_authorizations_ledger_account_fk
-        FOREIGN KEY (ledger_account_id) REFERENCES openrails.ledger_accounts(id) ON DELETE RESTRICT
+        FOREIGN KEY (merchant_id, ledger_account_id)
+        REFERENCES openrails.ledger_accounts(merchant_id, id) ON DELETE RESTRICT
 );
 
 ALTER TABLE ONLY openrails.operation_authorizations FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.operation_authorizations IS
-    'Durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.';
+    'Merchant-scoped durable th-005 financial reservations for exact provider-operation bodies. Open rows reserve USD-micro capacity against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire.';
 
 COMMENT ON COLUMN openrails.operation_authorizations.authorization_body_bytes IS
     'Exact canonical bytes authored by the embedding host. OpenRails binds them byte-for-byte but does not interpret their format.';

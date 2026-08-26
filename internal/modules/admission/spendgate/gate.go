@@ -230,8 +230,9 @@ type HoldRef struct {
 	Source   string
 }
 
-// Admit runs the atomic affordability + window check and reserves on success: one
-// round-trip, no Postgres, no locks.
+// Admit runs the Redis-local atomic affordability + window check and reserves on
+// success in one round-trip. Financial callers must hold the PostgreSQL payer
+// money lock across their fresh capacity read and this call; Admitter does so.
 func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 	now := g.now()
 	base := payerBase(in.Merchant, in.Customer, in.Currency)
