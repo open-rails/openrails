@@ -63,19 +63,21 @@ type Context struct {
 	Initiator Initiator
 	Agreement Agreement
 
-	// FirstUse: this charge is the initial transaction of the credential's
-	// agreement sequence (the anchor MITs will reference). Derived from
-	// reference-emptiness at the call site: an instrument with no persisted
-	// reference for the agreement type anchors its sequence on this charge —
-	// which also grandfathers legacy (pre-#297) instruments on their first
-	// post-upgrade charge.
+	// FirstUse: this customer-present charge is the initial transaction of the
+	// credential's agreement sequence (the anchor later transactions reference).
 	FirstUse bool
 
 	// PriorRef is the rail-scoped replay reference captured from the
-	// sequence's initial transaction. Required on MITs when the instrument has
-	// one; empty on first use and on legacy instruments that have not been
-	// re-anchored yet (see Result.CapturedRef).
+	// sequence's initial transaction. It is required for a compliant subsequent
+	// CIT or MIT. Historical merchant-initiated charges may leave it empty only
+	// for the observable best-effort recovery path; new integrations must
+	// always capture and replay it.
 	PriorRef string
+
+	// UnanchoredBestEffort is an explicit availability-first exception for a
+	// merchant-initiated charge whose original reference cannot be recovered.
+	// Rail adapters must never infer this posture from an empty PriorRef.
+	UnanchoredBestEffort bool
 }
 
 // InitialOneTime: cardholder-present charge anchoring the unscheduled
@@ -103,16 +105,38 @@ func RecurringReuse(priorRef string) Context {
 }
 
 // RecurringMIT: merchant-initiated recurring charge (renewal, dunning retry).
-// priorRef "" = legacy instrument: the rail charges reference-less (with a
-// warning at the call site) and the success back-fills the anchor.
+// priorRef must identify the approved initial recurring CIT. Use the explicitly
+// named legacy constructor when no reference can be recovered.
 func RecurringMIT(priorRef string) Context {
 	return Context{Initiator: InitiatorMerchant, Agreement: AgreementRecurring, PriorRef: priorRef}
 }
 
 // UnscheduledMIT: merchant-initiated unscheduled charge (auto top-up,
-// arrears/invoice collection). Same legacy semantics as RecurringMIT.
+// arrears/invoice collection). priorRef must identify the approved initial
+// unscheduled CIT. Use the explicitly named legacy constructor when no
+// reference can be recovered.
 func UnscheduledMIT(priorRef string) Context {
 	return Context{Initiator: InitiatorMerchant, Agreement: AgreementUnscheduled, PriorRef: priorRef}
+}
+
+// LegacyUnanchoredRecurringMIT is the explicit recovery path for historical
+// recurring instruments whose original CIT reference is unrecoverable.
+func LegacyUnanchoredRecurringMIT() Context {
+	return Context{
+		Initiator:            InitiatorMerchant,
+		Agreement:            AgreementRecurring,
+		UnanchoredBestEffort: true,
+	}
+}
+
+// LegacyUnanchoredUnscheduledMIT is the explicit recovery path for historical
+// unscheduled instruments whose original CIT reference is unrecoverable.
+func LegacyUnanchoredUnscheduledMIT() Context {
+	return Context{
+		Initiator:            InitiatorMerchant,
+		Agreement:            AgreementUnscheduled,
+		UnanchoredBestEffort: true,
+	}
 }
 
 // Instrument identifies the stored payment credential to charge, by its
@@ -168,10 +192,10 @@ type Result struct {
 	// the instrumentation.
 	TokenType string
 
-	// CapturedRef is the rail-scoped stored-credential replay reference this
-	// charge established for the request's agreement type — set on first use
-	// and on successful reference-less legacy charges. The caller persists it
-	// on the instrument (write-once). "" = nothing to persist.
+	// CapturedRef is the rail-scoped stored-credential replay reference an
+	// approved initial customer-present charge established for the request's
+	// agreement type. The caller persists it on the instrument (write-once).
+	// "" = nothing to persist.
 	CapturedRef string
 
 	// Declined: parsed hard decline — do not retry with the same instrument.

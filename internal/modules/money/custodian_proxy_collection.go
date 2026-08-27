@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
@@ -54,9 +52,11 @@ func (a *CustodianProxyCollectionAdapter) ChargeSavedMethod(ctx context.Context,
 
 	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
 	if priorRef == "" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"payment_method_id": method.ID,
-		}).Warn("custodian-proxy collection: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
+		priorRef = strings.TrimSpace(method.InitialTransactionID)
+	}
+	credentialContext := charge.UnscheduledMIT(priorRef)
+	if priorRef == "" {
+		credentialContext = charge.LegacyUnanchoredUnscheduledMIT()
 	}
 
 	res, err := a.Charger.WithSource(nmiproxy.Source{
@@ -73,7 +73,7 @@ func (a *CustodianProxyCollectionAdapter) ChargeSavedMethod(ctx context.Context,
 		Currency:    currency,
 		Description: description,
 		OrderRef:    nmiWireOrderRef(req.IdempotencyKey),
-		Context:     charge.UnscheduledMIT(priorRef),
+		Context:     credentialContext,
 	})
 	if err != nil {
 		return ChargeResult{}, err

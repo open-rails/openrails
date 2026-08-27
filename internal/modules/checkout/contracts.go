@@ -44,6 +44,7 @@ type CheckoutRequest struct {
 	CheckoutSessionID string            `json:"-"`
 	CheckoutStartedAt time.Time         `json:"-"`
 	Email             string            `json:"email,omitempty"`
+	NameOnCard        string            `json:"name_on_card,omitempty"`
 	FirstName         string            `json:"first_name,omitempty"`
 	LastName          string            `json:"last_name,omitempty"`
 	Address1          string            `json:"address1,omitempty"`

@@ -5,15 +5,15 @@ name: Live-Gated Integration
 # run NOWHERE. Weekly cron + on-demand, mirroring solana-devnet-integration.yaml.
 #
 # Every job is enforcing (continue-on-error is never set) but the WORKFLOW is
-# not a required check — a sandbox outage must not block merges. Skip-if-absent
-# semantics are preserved: each test t.Skips when its secret is missing, so a
-# fork/missing-secret run is green-but-empty rather than red.
+# not a required check — a sandbox outage must not block merges. The scheduled
+# NMI proof fails when its required credentials are absent; green must mean the
+# tests executed, not that every live test silently skipped.
 #
 # Required GitHub Actions secrets (Settings -> Secrets and variables -> Actions):
 #   NMI_SANDBOX_SECURITY_KEY   — real NMI sandbox account security key (the
 #                                doujins Mobius sandbox; test card 4111 approved).
 #   NMI_WEBHOOK_SIGNING_SECRET — sandbox webhook signing secret (lifecycle e2e).
-#   NMI_TOKENIZATION_KEY       — optional; browser-tokenization legs.
+#   NMI_TOKENIZATION_KEY       — Collect.js browser-tokenization proof.
 #   OPENRAILS_TEST_STRIPE_SECRET_KEY — Stripe TEST-mode key (sk_test_/rk_test_)
 #                                for the live invoice-collection proof (renamed
 #                                from RAILS_STRIPE_SECRET_KEY; the RAILS_ env
@@ -52,10 +52,22 @@ jobs:
           NMI_TOKENIZATION_KEY: ${{ secrets.NMI_TOKENIZATION_KEY }}
         run: |
           if [ -z "${NMI_SANDBOX_SECURITY_KEY}" ]; then
-            echo "NMI_SANDBOX_SECURITY_KEY not set — live tests will self-skip (skip-if-absent preserved)"
+            echo "::error::NMI_SANDBOX_SECURITY_KEY not set — refusing a green-but-empty live proof"
+            exit 1
+          fi
+          if [ -z "${NMI_TOKENIZATION_KEY}" ]; then
+            echo "::error::NMI_TOKENIZATION_KEY not set — Collect.js proof cannot execute"
+            exit 1
+          fi
+          if ! command -v google-chrome >/dev/null 2>&1 &&
+             ! command -v google-chrome-stable >/dev/null 2>&1 &&
+             ! command -v chromium >/dev/null 2>&1 &&
+             ! command -v chromium-browser >/dev/null 2>&1; then
+            echo "::error::Chrome/Chromium not available — Collect.js proof would skip"
+            exit 1
           fi
           bash scripts/test_integration.sh \
-            -run 'TestNMILiveLifecycleE2E|TestLiveSandboxClientSurface|TestChargeOutstanding_NMISandbox_CollectsRealCharge' \
+            -run 'TestNMILiveLifecycleE2E|TestLiveSandboxClientSurface|TestLiveSandboxStoredCredentialCITThenMIT|TestLiveCollectJSTokenVaultCreate|TestChargeOutstanding_NMISandbox_CollectsRealCharge' \
             -v ./tests/ ./internal/integrations/nmi/ ./internal/modules/money/
 
   # Live invoice collection against real provider test accounts (#241/#619):
@@ -121,4 +133,3 @@ jobs:
             echo "::warning::OPENRAILS_TEST_STRIPE_SECRET_KEY repo secret not set — test will self-skip (skip-if-absent preserved)"
           fi
           go test -tags stripe_integration -run TestStripeModelBUpgrade_Integration -v -timeout 900s ./internal/modules/subscriptions/
-

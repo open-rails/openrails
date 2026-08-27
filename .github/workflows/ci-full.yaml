@@ -1,23 +1,17 @@
 name: Validate Code (full)
 
 # FULL pipeline (#855): the complete suite, no path filtering, no scoping.
-# Runs on integration-branch pushes, nightly, and on demand — never on PRs or
-# ordinary branch pushes (PRs get the fast path-filtered pipeline in ci.yaml).
-# Job ids carry a -full suffix so branch-protection required checks (which must
-# point at ci.yaml's PR-scoped jobs) never reference these.
+# Runs weekly and on demand — never on pushes or PRs (PRs get the complete
+# PR pipeline in ci.yaml). Re-running the same complete suite after
+# every merge nearly doubled Actions usage without adding pre-merge evidence.
+# Job ids carry a -full suffix so they cannot be confused with PR statuses.
 #
-# It also PRIMES THE CACHES for every PR. GitHub scopes a cache to the branch
-# that wrote it plus that branch's descendants, so a PR restores from its BASE
-# branch. These jobs therefore mirror ci.yaml's split one-for-one and pass the
-# same `variant` to .github/actions/go-env: a push here leaves a warm build
-# cache for each build configuration the PR pipeline uses. Merging the split
-# back together would silently cost every PR the cold-compile time again.
+# The weekly run also refreshes base-branch caches for the PR pipeline.
 on:
-  push:
-    branches: [ master, dev ]
   schedule:
-    # 05:00 UTC nightly.
-    - cron: '0 5 * * *'
+    # 05:00 UTC Monday. PRs carry the merge gate; this is the complete serial
+    # regression/cross-package backstop.
+    - cron: '0 5 * * 1'
   workflow_dispatch:
 
 concurrency:
@@ -147,6 +141,9 @@ jobs:
         run: bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
       - name: Lint console
         run: pnpm run lint
+        working-directory: web/admin
+      - name: Test console
+        run: pnpm run test
         working-directory: web/admin
       # Full tier keeps the WHOLE-TREE tagged vet that the PR tier narrows to
       # the one package carrying tag-conditional source. Same reasoning as the

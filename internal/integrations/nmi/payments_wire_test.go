@@ -22,22 +22,23 @@ func TestRunSale_WirePinsCentsAmount(t *testing.T) {
 	var body []byte
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ = io.ReadAll(r.Body)
-		fmt.Fprint(w, `{"id":"t1","response":"1","response_text":"APPROVED"}`)
+		fmt.Fprint(w, "response=1&transactionid=t1&responsetext=APPROVED")
 	}))
 	defer server.Close()
 
 	client := newTestClient(t, server.URL)
 	_, err := client.RunSale(context.Background(), SaleParams{
-		CustomerVaultID: "v1",
-		Amount:          moneyutil.Cents(1999), // $19.99 — never 19_990_000
-		Currency:        "USD",
-		OrderID:         "o1",
+		CustomerVaultID:  "v1",
+		Amount:           moneyutil.Cents(1999), // $19.99 — never 19_990_000
+		Currency:         "USD",
+		OrderID:          "o1",
+		StoredCredential: testInitialOneTimeCredential(),
 	})
 	require.NoError(t, err)
 
-	var req map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(body, &req))
-	assert.Equal(t, "19.99", string(req["amount"]), "sale wire amount must be the exact two-decimal cents rendering")
+	req, err := url.ParseQuery(string(body))
+	require.NoError(t, err)
+	assert.Equal(t, "19.99", req.Get("amount"), "sale wire amount must be the exact two-decimal cents rendering")
 }
 
 func TestRefund_WirePinsCentsAmount(t *testing.T) {
@@ -96,10 +97,11 @@ func TestAddRecurringSubscription_WirePinsCentsAmount(t *testing.T) {
 
 			client := newTestClient(t, server.URL)
 			_, err := client.AddRecurringSubscription(context.Background(), RecurringPaymentData{
-				PlanID:          "plan1",
-				CustomerVaultID: "v1",
-				Currency:        "USD",
-				Amount:          tc.cents,
+				PlanID:           "plan1",
+				CustomerVaultID:  "v1",
+				Currency:         "USD",
+				Amount:           tc.cents,
+				StoredCredential: testInitialRecurringCredential(),
 			})
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, form.Get("amount"))

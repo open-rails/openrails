@@ -27,7 +27,7 @@ func testClient(t *testing.T, url string) *NMIClient {
 	return c
 }
 
-func TestTransportAmbiguity_V5Sale(t *testing.T) {
+func TestTransportAmbiguity_StoredCredentialSale(t *testing.T) {
 	tests := []struct {
 		name          string
 		handler       http.HandlerFunc
@@ -48,17 +48,17 @@ func TestTransportAmbiguity_V5Sale(t *testing.T) {
 			wantAmbiguous: true,
 		},
 		{
-			name: "parsed 4xx envelope is clean",
+			name: "HTTP 4xx after direct-post send is ambiguous",
 			handler: func(w http.ResponseWriter, _ *http.Request) {
 				w.WriteHeader(http.StatusBadRequest)
-				fmt.Fprint(w, `{"type":"invalid_request","message":"bad params"}`)
+				fmt.Fprint(w, "response=3&responsetext=bad+params&response_code=300")
 			},
-			wantAmbiguous: false,
+			wantAmbiguous: true,
 		},
 		{
 			name: "parsed decline is clean",
 			handler: func(w http.ResponseWriter, _ *http.Request) {
-				fmt.Fprint(w, `{"id":"t1","response":"2","response_code":"200","response_text":"DECLINED"}`)
+				fmt.Fprint(w, "response=2&response_code=200&responsetext=DECLINED")
 			},
 			wantAmbiguous: false,
 		},
@@ -68,7 +68,7 @@ func TestTransportAmbiguity_V5Sale(t *testing.T) {
 			srv := httptest.NewServer(tt.handler)
 			defer srv.Close()
 			client := testClient(t, srv.URL)
-			_, err := client.RunSale(context.Background(), SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1"})
+			_, err := client.RunSale(context.Background(), SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1", StoredCredential: testInitialOneTimeCredential()})
 			if err == nil {
 				t.Fatal("expected an error")
 			}
@@ -87,13 +87,13 @@ func TestTransportAmbiguity_ConnectionRefused(t *testing.T) {
 	srv.Close()
 	client := testClient(t, url)
 
-	_, err := client.RunSale(context.Background(), SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1"})
+	_, err := client.RunSale(context.Background(), SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1", StoredCredential: testInitialOneTimeCredential()})
 	if !IsTransportAmbiguous(err) {
 		t.Fatalf("connection failure should be transport-ambiguous, got %v", err)
 	}
 
 	// Direct-post mutations too.
-	_, err = client.AddRecurringSubscription(context.Background(), RecurringPaymentData{PlanID: "p", CustomerVaultID: "v1", Currency: "USD"})
+	_, err = client.AddRecurringSubscription(context.Background(), RecurringPaymentData{PlanID: "p", CustomerVaultID: "v1", Currency: "USD", StoredCredential: testInitialRecurringCredential()})
 	if !IsTransportAmbiguous(err) {
 		t.Fatalf("direct-post connection failure should be transport-ambiguous, got %v", err)
 	}
@@ -132,7 +132,7 @@ func TestTransportAmbiguity_ReadsAndGuardsStayClean(t *testing.T) {
 
 	// Read-only guard: clean (nothing was sent).
 	client.ReadOnly = true
-	_, err := client.RunSale(context.Background(), SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1"})
+	_, err := client.RunSale(context.Background(), SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1", StoredCredential: testInitialOneTimeCredential()})
 	if !errors.Is(err, ErrProviderReadOnly) || IsTransportAmbiguous(err) {
 		t.Fatalf("read-only block must be a clean non-ambiguous error, got %v", err)
 	}

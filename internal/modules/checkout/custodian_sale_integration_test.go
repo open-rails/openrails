@@ -455,7 +455,12 @@ func TestPANFirewall(t *testing.T) {
 	req.PaymentToken = "4242424242424242"
 	require.Error(t, RejectPANShapedFields(req))
 
+	req.PaymentToken = ""
+	req.NameOnCard = "Cardholder 4242 4242 4242 4242"
+	require.Error(t, RejectPANShapedFields(req), "canonical name is covered by the PAN firewall")
+
 	// Non-Luhn digit runs (order numbers etc.) pass.
+	req.NameOnCard = ""
 	req.PaymentToken = "1234567890123"
 	require.NoError(t, RejectPANShapedFields(req))
 }

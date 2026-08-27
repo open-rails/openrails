@@ -139,6 +139,7 @@ waitToken:
 		Currency:         "USD",
 		OrderDescription: "collectjs live proof",
 		OrderID:          fmt.Sprintf("collectjs-%d", time.Now().UnixNano()%1e10),
+		StoredCredential: testInitialOneTimeCredential(),
 	})
 	require.NoError(t, err, "token-minted vault must be chargeable")
 	require.NotEmpty(t, sale.TransactionID)

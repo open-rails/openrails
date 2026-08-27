@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -67,6 +68,7 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 
 	pmNew, err := s.RailPaymentMethodService.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
+		NameOnCard:   req.NameOnCard,
 		Provider:     target.PSP,
 		FirstName:    ResolveCheckoutFirstName(req, user),
 		LastName:     ResolveCheckoutLastName(req),
@@ -115,6 +117,10 @@ func paymentMethodMatchesTargetPSP(pm *models.PaymentMethod, target railTarget) 
 }
 
 func ResolveCheckoutFirstName(req *CheckoutRequest, user *UserIdentity) string {
+	if strings.TrimSpace(req.NameOnCard) != "" {
+		first, _ := cardholdername.Parts(req.NameOnCard, "", "")
+		return first
+	}
 	if req.FirstName != "" {
 		return req.FirstName
 	}
@@ -125,6 +131,10 @@ func ResolveCheckoutFirstName(req *CheckoutRequest, user *UserIdentity) string {
 }
 
 func ResolveCheckoutLastName(req *CheckoutRequest) string {
+	if strings.TrimSpace(req.NameOnCard) != "" {
+		_, last := cardholdername.Parts(req.NameOnCard, "", "")
+		return last
+	}
 	if req.LastName != "" {
 		return req.LastName
 	}

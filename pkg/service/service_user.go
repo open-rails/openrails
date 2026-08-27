@@ -250,6 +250,7 @@ func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer
 			Flow:            req.Payment.Flow,
 			Wallet:          req.Payment.Wallet,
 			Email:           req.Payment.Email,
+			NameOnCard:      req.Payment.NameOnCard,
 			FirstName:       req.Payment.FirstName,
 			LastName:        req.Payment.LastName,
 			Address1:        req.Payment.Address1,
@@ -858,6 +859,7 @@ func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req Cr
 	user := &checkout.UserIdentity{ID: userID}
 	pm, err := vaults.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
 		PaymentToken: req.PaymentToken,
+		NameOnCard:   req.NameOnCard,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
 		Address1:     req.Address1,
@@ -914,6 +916,7 @@ func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymen
 	// Build update request
 	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
 		PaymentToken: &req.PaymentToken,
+		NameOnCard:   req.NameOnCard,
 		FirstName:    req.FirstName,
 		LastName:     req.LastName,
 		Address1:     req.Address1,

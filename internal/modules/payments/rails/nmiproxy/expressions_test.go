@@ -172,12 +172,39 @@ func TestSaleFormWirePins(t *testing.T) {
 		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "USD", Context: charge.RecurringMIT("1")}, Source{TokenIntentID: testIntentID}, testGW, nil); err == nil {
 			t.Fatal("MIT from a token intent must error")
 		}
+		if _, err := SaleForm(baseReq(charge.RecurringMIT("")), Source{TokenID: testTokenID}, testGW, nil); err == nil {
+			t.Fatal("reference-less recurring MIT must error")
+		}
+		if _, err := SaleForm(baseReq(charge.UnscheduledMIT("")), Source{TokenID: testTokenID}, testGW, nil); err == nil {
+			t.Fatal("reference-less unscheduled MIT must error")
+		}
+		if _, err := SaleForm(baseReq(charge.OneTimeReuse("")), Source{TokenID: testTokenID}, testGW, nil); err == nil {
+			t.Fatal("reference-less subsequent CIT must error")
+		}
 		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "USD", Context: charge.InitialRecurring()},
 			Source{Via: ViaNetworkToken, NetworkTokenID: testNTID}, testGW, nil); err == nil {
 			t.Fatal("NT CIT without cryptogram must error")
 		}
 		if _, err := SaleForm(charge.Request{AmountMinor: 199, Currency: "USD", OrderRef: strings.Repeat("x", 51), Context: charge.InitialOneTime()}, Source{TokenID: testTokenID}, testGW, nil); err == nil {
 			t.Fatal("51-char order id must error, never truncate")
+		}
+	})
+
+	t.Run("explicit legacy MIT keeps indicators and omits only the anchor", func(t *testing.T) {
+		form, err := SaleForm(
+			baseReq(charge.LegacyUnanchoredUnscheduledMIT()),
+			Source{TokenID: testTokenID},
+			testGW,
+			nil,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if form.Get("initiated_by") != "merchant" || form.Get("stored_credential_indicator") != "used" {
+			t.Fatalf("best-effort MIT lost its COF indicators: %v", form)
+		}
+		if form.Has("initial_transaction_id") {
+			t.Fatalf("unavailable anchor must be omitted: %v", form)
 		}
 	})
 }
@@ -198,6 +225,23 @@ func TestChargerOutcomes(t *testing.T) {
 		AmountMinor: 199, Currency: "USD", OrderRef: "ord-1",
 		Context: charge.RecurringMIT("9001"),
 	}
+
+	t.Run("reference-less MIT fails before proxy", func(t *testing.T) {
+		var calls int
+		c, srv := newCharger(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.WriteHeader(http.StatusInternalServerError)
+		})
+		defer srv.Close()
+		invalid := req
+		invalid.Context = charge.RecurringMIT("")
+		if _, err := c.Charge(context.Background(), invalid); err == nil {
+			t.Fatal("reference-less recurring MIT must error")
+		}
+		if calls != 0 {
+			t.Fatalf("invalid MIT reached the proxy %d times", calls)
+		}
+	})
 
 	t.Run("approval", func(t *testing.T) {
 		c, srv := newCharger(func(w http.ResponseWriter, r *http.Request) {

@@ -45,7 +45,7 @@ type RecurringPaymentData struct {
 	// enrollment charge — the portal's recurring initial CIT "MUST INCLUDE"
 	// billing_method=recurring + initiated_by=customer +
 	// stored_credential_indicator=stored (billing_method is already always sent
-	// by this lane). nil preserves the legacy shape.
+	// by this lane). It is required.
 	StoredCredential *StoredCredential
 }
 
@@ -78,7 +78,7 @@ type ManualRebillParams struct {
 	// StoredCredential carries the recurring-MIT credential-on-file fields
 	// (#297): initiated_by=merchant + stored_credential_indicator=used +
 	// initial_transaction_id=<recurring sequence anchor> + billing_method=
-	// recurring. nil preserves the legacy shape.
+	// recurring. It is required.
 	StoredCredential *StoredCredential
 }
 

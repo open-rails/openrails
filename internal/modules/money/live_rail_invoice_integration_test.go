@@ -146,6 +146,11 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	})
 
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), railCustomerRef)
+	anchor := createNMISandboxUnscheduledAnchor(t, client, railCustomerRef, "live-nmi-anchor-")
+	_, err = pool.Exec(ctx,
+		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
+		pm, anchor)
+	require.NoError(t, err)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
 	})

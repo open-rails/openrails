@@ -132,14 +132,15 @@ type CheckoutPayment struct {
 	Wallet      string // Solana wallet address
 
 	// Billing details (CCBill/Stripe)
-	Email     string
-	FirstName string
-	LastName  string
-	Address1  string
-	City      string
-	State     string
-	Zip       string
-	Country   string
+	Email      string
+	NameOnCard string // Canonical full name; first/last are legacy aliases.
+	FirstName  string
+	LastName   string
+	Address1   string
+	City       string
+	State      string
+	Zip        string
+	Country    string
 
 	// Card details (for display, from tokenization)
 	LastFour   string
@@ -386,6 +387,7 @@ type SubscriptionSummary struct {
 // CreatePaymentMethodRequest specifies payment method creation parameters.
 type CreatePaymentMethodRequest struct {
 	PaymentToken string // NMI Collect.js token
+	NameOnCard   string // Canonical full name; first/last are legacy aliases.
 	FirstName    string
 	LastName     string
 	Address1     string
@@ -405,7 +407,8 @@ type CreatePaymentMethodRequest struct {
 
 // UpdatePaymentMethodRequest specifies payment method update parameters.
 type UpdatePaymentMethodRequest struct {
-	PaymentToken string // Fresh single-use token for the replacement card
+	PaymentToken string  // Fresh single-use token for the replacement card
+	NameOnCard   *string // Canonical full name; first/last are legacy aliases.
 	FirstName    *string
 	LastName     *string
 	Address1     *string

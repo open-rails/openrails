@@ -49,12 +49,12 @@ func TestStalledGatewayHonorsCallerContext(t *testing.T) {
 			_, err := client.ListCustomersPage(ctx, "", 10, "")
 			return err
 		}},
-		{"v5 mutation (RunSale)", func(ctx context.Context) error {
-			_, err := client.RunSale(ctx, SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1"})
+		{"stored-credential mutation (RunSale)", func(ctx context.Context) error {
+			_, err := client.RunSale(ctx, SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1", StoredCredential: testInitialOneTimeCredential()})
 			return err
 		}},
 		{"classic direct-post (AddRecurringSubscription)", func(ctx context.Context) error {
-			_, err := client.AddRecurringSubscription(ctx, RecurringPaymentData{PlanID: "p", CustomerVaultID: "v1", Currency: "USD"})
+			_, err := client.AddRecurringSubscription(ctx, RecurringPaymentData{PlanID: "p", CustomerVaultID: "v1", Currency: "USD", StoredCredential: testInitialRecurringCredential()})
 			return err
 		}},
 		{"classic query (SearchTransactions)", func(ctx context.Context) error {
@@ -103,12 +103,12 @@ func TestCancelledMutationStaysAmbiguous(t *testing.T) {
 		name string
 		call func(context.Context) error
 	}{
-		{"v5 sale", func(ctx context.Context) error {
-			_, err := client.RunSale(ctx, SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1"})
+		{"stored-credential sale", func(ctx context.Context) error {
+			_, err := client.RunSale(ctx, SaleParams{CustomerVaultID: "v1", Amount: 100, Currency: "USD", OrderID: "o1", StoredCredential: testInitialOneTimeCredential()})
 			return err
 		}},
 		{"classic direct-post", func(ctx context.Context) error {
-			_, err := client.AddRecurringSubscription(ctx, RecurringPaymentData{PlanID: "p", CustomerVaultID: "v1", Currency: "USD"})
+			_, err := client.AddRecurringSubscription(ctx, RecurringPaymentData{PlanID: "p", CustomerVaultID: "v1", Currency: "USD", StoredCredential: testInitialRecurringCredential()})
 			return err
 		}},
 	} {

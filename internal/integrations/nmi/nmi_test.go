@@ -74,11 +74,12 @@ func TestAttemptManualRebill_SendsStableOrderReferences(t *testing.T) {
 	client.QueryURL = server.URL
 
 	resp, err := client.AttemptManualRebill(context.Background(), ManualRebillParams{
-		VaultID:        "vault_123",
-		BillingID:      "billing_123",
-		SubscriptionID: "sub_123",
-		OrderID:        "rebill-subscription-period",
-		PONumber:       "rebill-subscription-period",
+		VaultID:          "vault_123",
+		BillingID:        "billing_123",
+		SubscriptionID:   "sub_123",
+		OrderID:          "rebill-subscription-period",
+		PONumber:         "rebill-subscription-period",
+		StoredCredential: testRecurringMITCredential(),
 	})
 	require.NoError(t, err)
 	require.NotNil(t, resp)
@@ -107,7 +108,7 @@ func TestReadOnlyBlocksAllDirectPostMutations(t *testing.T) {
 	// representative mutation transports; both must be blocked.
 	err = client.DeleteRecurringSubscription(context.Background(), "12345")
 	require.ErrorIs(t, err, ErrProviderReadOnly)
-	_, err = client.AttemptManualRebill(context.Background(), ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s"})
+	_, err = client.AttemptManualRebill(context.Background(), ManualRebillParams{VaultID: "v", BillingID: "b", SubscriptionID: "s", StoredCredential: testRecurringMITCredential()})
 	require.ErrorIs(t, err, ErrProviderReadOnly)
 }
 
@@ -308,6 +309,7 @@ func TestRunSale_BillingTargetedUsesClassic(t *testing.T) {
 		Currency:         "USD",
 		OrderDescription: "targeted",
 		OrderID:          "ord-1",
+		StoredCredential: testInitialOneTimeCredential(),
 	})
 	require.NoError(t, err)
 	require.Equal(t, "txn_targeted_1", resp.TransactionID)
@@ -361,10 +363,11 @@ func TestAddRecurringSubscription_BillingTargeted(t *testing.T) {
 
 	client := newTestClient(t, server.URL)
 	_, err := client.AddRecurringSubscription(context.Background(), RecurringPaymentData{
-		PlanID:          "plan-1",
-		CustomerVaultID: "vault-9",
-		BillingID:       "bill-2",
-		Currency:        "USD",
+		PlanID:           "plan-1",
+		CustomerVaultID:  "vault-9",
+		BillingID:        "bill-2",
+		Currency:         "USD",
+		StoredCredential: testInitialRecurringCredential(),
 	})
 	require.NoError(t, err)
 	require.Equal(t, "bill-2", seen.Get("billing_id"))

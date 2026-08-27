@@ -30,6 +30,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -324,6 +325,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	if looksLikePAN(req.IdempotencyKey) {
 		return nil, fmt.Errorf("%w: idempotency key contains invalid card input", ErrCheckoutSessionValidation)
 	}
+	canonicalizeCheckoutPaymentName(&req.Payment)
 
 	fingerprint := checkoutSessionRequestFingerprint(req)
 	req.IdempotencyKey = scopeIdempotencyKey(user.ID, req.IdempotencyKey)
@@ -383,6 +385,21 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	}
 
 	return resp, nil
+}
+
+func canonicalizeCheckoutPaymentName(payment *CheckoutSessionPaymentRequest) {
+	if payment == nil {
+		return
+	}
+	full := strings.TrimSpace(payment.NameOnCard)
+	if full != "" {
+		payment.NameOnCard = full
+		payment.FirstName, payment.LastName = cardholdername.Parts(full, "", "")
+		return
+	}
+	payment.FirstName = strings.TrimSpace(payment.FirstName)
+	payment.LastName = strings.TrimSpace(payment.LastName)
+	payment.NameOnCard = cardholdername.Canonical("", payment.FirstName, payment.LastName)
 }
 
 func checkoutSessionRequestFingerprint(req *CheckoutSessionCreateRequest) string {
@@ -777,6 +794,7 @@ func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
 		PaymentMethodID: payment.PaymentMethodID,
 		PaymentToken:    payment.PaymentToken,
 		Email:           payment.Email,
+		NameOnCard:      payment.NameOnCard,
 		FirstName:       payment.FirstName,
 		LastName:        payment.LastName,
 		Address1:        payment.Address1,
@@ -1606,6 +1624,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		Metadata:          session.Metadata,
 		CheckoutStartedAt: session.CreatedAt,
 		Email:             payment.Email,
+		NameOnCard:        payment.NameOnCard,
 		FirstName:         payment.FirstName,
 		LastName:          payment.LastName,
 		Address1:          payment.Address1,
@@ -1679,9 +1698,10 @@ func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutS
 }
 
 func requireBillingFields(payment *CheckoutSessionPaymentRequest) error {
+	hasName := strings.TrimSpace(payment.NameOnCard) != "" ||
+		(strings.TrimSpace(payment.FirstName) != "" && strings.TrimSpace(payment.LastName) != "")
 	if strings.TrimSpace(payment.Email) == "" ||
-		strings.TrimSpace(payment.FirstName) == "" ||
-		strings.TrimSpace(payment.LastName) == "" ||
+		!hasName ||
 		strings.TrimSpace(payment.Address1) == "" ||
 		strings.TrimSpace(payment.City) == "" ||
 		strings.TrimSpace(payment.Zip) == "" ||
@@ -1707,6 +1727,7 @@ func (s *CheckoutSessionService) buildRailFields(rail string, payment *CheckoutS
 	addField(fields, "flow", payment.Flow)
 	addField(fields, "wallet", payment.Wallet)
 	addField(fields, "email", payment.Email)
+	addField(fields, "name_on_card", payment.NameOnCard)
 	addField(fields, "first_name", payment.FirstName)
 	addField(fields, "last_name", payment.LastName)
 	addField(fields, "address1", payment.Address1)

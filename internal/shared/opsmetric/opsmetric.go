@@ -31,6 +31,10 @@ const (
 	// MetricRetentionSweep is one retention pass: how many merchants had due
 	// work, how many rows each sweep removed, and how long it took.
 	MetricRetentionSweep = "retention.sweep"
+
+	// MetricNMIUnanchoredMIT counts availability-first NMI charges for which
+	// the original credential-on-file transaction ID was unrecoverable.
+	MetricNMIUnanchoredMIT = "nmi.stored_credential.unanchored_mit"
 )
 
 // Emit writes one metric line. Info level: these are measurements, not

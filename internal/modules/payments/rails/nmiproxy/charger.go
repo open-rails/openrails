@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
 // Rail is the rail vocabulary value (payment_methods.rail / payments.rail).
@@ -73,6 +74,19 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	src := c.Source
 	if strings.TrimSpace(src.TokenID) == "" && strings.TrimSpace(src.TokenIntentID) == "" {
 		src.TokenID = strings.TrimSpace(req.Instrument.MethodRef)
+	}
+	if nmidirect.StoredCredentialFor(req.Context).IsUnanchoredMIT() {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"payment_method_id": req.Instrument.PaymentMethodID,
+			"rail":              req.Instrument.Rail,
+			"agreement":         req.Context.Agreement,
+			"order_ref":         req.OrderRef,
+		}).Warn("nmiproxy: sending best-effort MIT without the stored-credential anchor")
+		opsmetric.Emit(ctx, opsmetric.MetricNMIUnanchoredMIT, log.Fields{
+			"transport":         "custodian_proxy",
+			"payment_method_id": req.Instrument.PaymentMethodID,
+			"agreement":         req.Context.Agreement,
+		})
 	}
 
 	if src.via() == ViaNetworkToken {
@@ -167,9 +181,9 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 		TransactionID: strings.TrimSpace(sale.TransactionID),
 		TokenType:     tokenType,
 	}
-	// Reference-less charge anchors the agreement sequence (identical to
-	// nmidirect: the replay ref IS NMI's transactionid).
-	if strings.TrimSpace(req.Context.PriorRef) == "" {
+	// Only an approved initial CIT establishes the agreement sequence anchor
+	// (identical to nmidirect: the replay ref is NMI's transactionid).
+	if req.Context.FirstUse && req.Context.Initiator == charge.InitiatorCustomer {
 		res.CapturedRef = res.TransactionID
 	}
 	return res, nil

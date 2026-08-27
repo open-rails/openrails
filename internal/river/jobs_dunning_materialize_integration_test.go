@@ -70,6 +70,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 		InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
+	dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, paymentMethodID)
 
 	// In-window: period ended a day ago on a 30-day cycle (window is weeks).
 	periodEnd := now.Add(-24 * time.Hour)

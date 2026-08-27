@@ -38,6 +38,23 @@ func lastForm(t *testing.T, forms *[]url.Values) url.Values {
 	return (*forms)[len(*forms)-1]
 }
 
+func testInitialOneTimeCredential() *StoredCredential {
+	return &StoredCredential{InitiatedBy: InitiatedByCustomer, Indicator: IndicatorStored}
+}
+
+func testInitialRecurringCredential() *StoredCredential {
+	return &StoredCredential{InitiatedBy: InitiatedByCustomer, Indicator: IndicatorStored, Recurring: true}
+}
+
+func testRecurringMITCredential() *StoredCredential {
+	return &StoredCredential{
+		InitiatedBy:          InitiatedByMerchant,
+		Indicator:            IndicatorUsed,
+		InitialTransactionID: "initial-transaction-1",
+		Recurring:            true,
+	}
+}
+
 func TestRunSale_StoredCredentialRoutesClassicWithCITFields(t *testing.T) {
 	server, forms := classicFormServer(t)
 	client := newTestClient(t, server.URL)
@@ -94,10 +111,17 @@ func TestRunSale_StoredCredentialMITCarriesReference(t *testing.T) {
 }
 
 func TestRunSale_StoredCredentialValidation(t *testing.T) {
-	server, _ := classicFormServer(t)
+	server, forms := classicFormServer(t)
 	client := newTestClient(t, server.URL)
 
 	_, err := client.RunSale(context.Background(), SaleParams{
+		CustomerVaultID: "v1",
+		Amount:          moneyutil.Cents(100),
+		Currency:        "USD",
+	})
+	require.ErrorContains(t, err, "indicators are required")
+
+	_, err = client.RunSale(context.Background(), SaleParams{
 		CustomerVaultID:  "v1",
 		Amount:           moneyutil.Cents(100),
 		Currency:         "USD",
@@ -112,6 +136,41 @@ func TestRunSale_StoredCredentialValidation(t *testing.T) {
 		StoredCredential: &StoredCredential{InitiatedBy: InitiatedByCustomer, Indicator: "maybe"},
 	})
 	require.ErrorContains(t, err, "indicator")
+
+	_, err = client.RunSale(context.Background(), SaleParams{
+		CustomerVaultID: "v1",
+		Amount:          moneyutil.Cents(100),
+		Currency:        "USD",
+		StoredCredential: &StoredCredential{
+			InitiatedBy: InitiatedByMerchant,
+			Indicator:   IndicatorStored,
+		},
+	})
+	require.ErrorContains(t, err, "must be customer initiated")
+
+	_, err = client.RunSale(context.Background(), SaleParams{
+		CustomerVaultID: "v1",
+		Amount:          moneyutil.Cents(100),
+		Currency:        "USD",
+		StoredCredential: &StoredCredential{
+			InitiatedBy: InitiatedByCustomer,
+			Indicator:   IndicatorUsed,
+		},
+	})
+	require.ErrorContains(t, err, "requires initial_transaction_id")
+
+	_, err = client.RunSale(context.Background(), SaleParams{
+		CustomerVaultID: "v1",
+		Amount:          moneyutil.Cents(100),
+		Currency:        "USD",
+		StoredCredential: &StoredCredential{
+			InitiatedBy:          InitiatedByCustomer,
+			Indicator:            IndicatorStored,
+			InitialTransactionID: "stale-reference",
+		},
+	})
+	require.ErrorContains(t, err, "must not carry initial_transaction_id")
+	require.Empty(t, *forms, "invalid stored-credential requests must not reach NMI")
 }
 
 func TestAddRecurringSubscription_StoredCredentialRecurringCIT(t *testing.T) {
@@ -176,12 +235,11 @@ func TestAttemptManualRebill_StoredCredentialRecurringMIT(t *testing.T) {
 	assert.Equal(t, "9876543210", form.Get("initial_transaction_id"))
 }
 
-func TestAttemptManualRebill_LegacyReferenceLessMITOmitsInitialTransactionID(t *testing.T) {
-	var form url.Values
+func TestAttemptManualRebill_ReferenceLessMITFailsBeforeNetwork(t *testing.T) {
+	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		form = r.Form
-		fmt.Fprint(w, "response=1&transactionid=t5")
+		requests++
+		t.Error("reference-less MIT must not reach NMI")
 	}))
 	defer server.Close()
 
@@ -196,9 +254,35 @@ func TestAttemptManualRebill_LegacyReferenceLessMITOmitsInitialTransactionID(t *
 			Recurring:   true,
 		},
 	})
+	require.ErrorContains(t, err, "requires initial_transaction_id")
+	assert.Zero(t, requests)
+}
+
+func TestAttemptManualRebill_ExplicitUnanchoredMITUsesBestEffortWire(t *testing.T) {
+	var form url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		form = r.Form
+		fmt.Fprint(w, "response=1&transactionid=t-best-effort")
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	resp, err := client.AttemptManualRebill(context.Background(), ManualRebillParams{
+		VaultID:        "v1",
+		BillingID:      "b1",
+		SubscriptionID: "sub1",
+		StoredCredential: &StoredCredential{
+			InitiatedBy:        InitiatedByMerchant,
+			Indicator:          IndicatorUsed,
+			Recurring:          true,
+			AllowUnanchoredMIT: true,
+		},
+	})
 	require.NoError(t, err)
+	require.True(t, resp.Success)
 	assert.Equal(t, "merchant", form.Get("initiated_by"))
 	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
-	_, hasInitial := form["initial_transaction_id"]
-	assert.False(t, hasInitial, "legacy instrument charges reference-less; the key is omitted, never sent empty")
+	assert.Equal(t, "recurring", form.Get("billing_method"))
+	assert.NotContains(t, form, "initial_transaction_id", "only the unavailable anchor is omitted")
 }
