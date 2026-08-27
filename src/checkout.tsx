@@ -30,7 +30,7 @@ import {
   TerminalView,
 } from "#orck/components/states"
 import { CompactSummary, OrderSummary } from "#orck/components/summary"
-import { collectExpiry, useCollectJS } from "#orck/lib/collect"
+import { useCollectJS } from "#orck/lib/collect"
 import {
   emptyNMIBilling,
   nmiBillingSchema,
@@ -68,6 +68,18 @@ export interface CheckoutProps {
 }
 
 const SOLANA_POLL_INTERVAL_MS = 3_000
+
+function navigateTop(redirectURL: string): void {
+  const parsed = new URL(redirectURL)
+  if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
+    throw new Error("The payment provider returned an invalid redirect")
+  }
+
+  // Cross-origin frames may navigate their top-level browsing context, but
+  // cannot read methods such as Location.assign from the top window.
+  const target = window.top ?? window
+  target.location.href = parsed.href
+}
 
 function solanaAmountLabel(
   session: CheckoutSession,
@@ -282,11 +294,6 @@ export function Checkout({
           payment_token: tokenized.token,
           ...parsed.data,
         }
-        const lastFour = tokenized.card?.number?.replace(/\D/g, "").slice(-4)
-        if (lastFour) request.last_four = lastFour
-        if (tokenized.card?.type) request.card_type = tokenized.card.type
-        const expiry = collectExpiry(tokenized.card?.exp)
-        if (expiry) request.expiry_date = expiry
       }
       if (active.driver === "solana_pay") {
         const tokenSymbol =
@@ -300,8 +307,7 @@ export function Checkout({
       if (!mounted.current) return
       if (active.driver === "redirect" && result.redirect_url) {
         onCompleteRef.current?.(result)
-        const target = window.top ?? window
-        target.location.assign(result.redirect_url)
+        navigateTop(result.redirect_url)
         return
       }
       if (

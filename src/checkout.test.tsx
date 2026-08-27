@@ -427,15 +427,13 @@ describe("Checkout", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Pay / }))
 
     await waitFor(() => {
-      expect(pay).toHaveBeenCalledWith(
-        expect.objectContaining({
-          option_id: "option_nmi",
-          payment_token: expect.any(String),
-          name_on_card: "李 小龍",
-          country: "JP",
-          zip: "100-0001",
-        })
-      )
+      expect(pay).toHaveBeenCalledWith({
+        option_id: "option_nmi",
+        payment_token: "preview_payment_token",
+        name_on_card: "李 小龍",
+        country: "JP",
+        zip: "100-0001",
+      })
     })
   })
 

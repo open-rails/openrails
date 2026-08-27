@@ -367,12 +367,3 @@ export function useCollectJS(config: {
 
   return { ready: ready || preview, preview, loadError, tokenize }
 }
-
-// collectExpiry converts Collect.js "MMYY"/"MM/YY" spellings into the
-// engine's "MM/YY" display format.
-export function collectExpiry(exp?: string): string | undefined {
-  if (!exp) return undefined
-  const digits = exp.replace(/\D/g, "")
-  if (digits.length !== 4) return undefined
-  return `${digits.slice(0, 2)}/${digits.slice(2)}`
-}

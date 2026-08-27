@@ -1,6 +1,6 @@
 {
   "name": "openrails-checkout",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Embeddable hosted checkout components for OpenRails.",
   "type": "module",
   "license": "FSL-1.1-ALv2",
@@ -43,6 +43,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:browser": "playwright test",
     "format": "prettier --write \"**/*.{css,ts,tsx,json,md}\"",
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
     "prepublishOnly": "pnpm check"
@@ -67,6 +68,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@microsoft/api-extractor": "^7.58.12",
+    "@playwright/test": "1.60.0",
     "@solana/kit": "^6.10.0",
     "@solana/pay": "^1.0.26",
     "@solana/sysvars": "^5.5.1",

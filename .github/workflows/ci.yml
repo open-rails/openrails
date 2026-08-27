@@ -43,5 +43,11 @@ jobs:
       - name: Check package
         run: pnpm check
 
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test cross-origin checkout
+        run: pnpm test:browser
+
       - name: Verify publish contents
         run: npm pack --dry-run
