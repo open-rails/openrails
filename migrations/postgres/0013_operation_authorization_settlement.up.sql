@@ -29,7 +29,7 @@ ALTER TABLE openrails.operation_authorizations
             AND settlement_body_digest = public.digest(settlement_body_bytes, 'sha256')
             AND terminal_reference = 'sha256:' || encode(settlement_body_digest, 'hex')
         )
-    );
+    ) NOT VALID;
 
 COMMENT ON COLUMN openrails.operation_authorizations.settlement_rated_usd_micros IS
     'One host-rated final customer settlement. It may exceed authorized_usd_micros and must never be clamped.';
