@@ -272,19 +272,18 @@ func TestListCheckoutRailOptionsForPrice_ReturnsExecutableSelectors(t *testing.T
 		require.Equal(t, models.CheckoutSessionModeSubscription, mode, option.Selector)
 
 		payment := &CheckoutSessionPaymentRequest{Rail: option.Selector}
+		user := &UserIdentity{ID: uuid.NewString()}
 		switch option.Rail {
 		case "nmi":
 			payment.PaymentToken = "token_test"
 		case "ccbill":
-			payment.Email = "buyer@example.test"
-			payment.FirstName = "Test"
-			payment.LastName = "Buyer"
-			payment.Address1 = "1 Test Street"
-			payment.City = "Testville"
+			verifiedEmail := "buyer@example.test"
+			user.Email = &verifiedEmail
+			payment.NameOnCard = "Test Buyer"
 			payment.Zip = "12345"
 			payment.Country = "US"
 		}
-		require.NoError(t, svc.validatePayment(routingContext(), option.Selector, payment, &UserIdentity{ID: uuid.NewString()}), option.Selector)
+		require.NoError(t, svc.validatePayment(routingContext(), option.Selector, payment, user), option.Selector)
 	}
 }
 

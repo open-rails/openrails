@@ -170,9 +170,8 @@ POST /v1/me/checkout
     "payment_method_id": "pm_...",   // saved card — mobius/stripe
     "payment_token": "tok_...",      // fresh browser-tokenized card — mobius/stripe
     "token_symbol": "USDC",          // solana
-    "email": "...", "name_on_card": "...",
-    "address1": "...", "city": "...", "state": "...", "zip": "...", "country": "US"
-  },                                 // billing fields required for ccbill/stripe
+    "name_on_card": "...", "zip": "...", "country": "US"
+  },                                 // CCBill minimum; street/city/state optional
   "metadata": { "source": "web" }
 }
 ```
@@ -184,6 +183,14 @@ Render `name_on_card` as one visible input with `autocomplete="cc-name"`.
 OpenRails keeps that full value canonical and projects it onto provider-specific
 first/last fields only at the rail boundary. Legacy `first_name` and `last_name`
 request aliases remain accepted for existing integrations.
+
+CCBill uses the authenticated account's verified email; do not treat a browser
+`payment.email` value as identity. Its hosted-card API requires name, country,
+and postal code, while street, city, and state are optional. Omitting those
+optional fields from this request does not reconfigure the hosted FlexForm:
+disable or make its Address Fields optional separately in CCBill FlexForms
+Admin when that is the desired customer experience. Stripe hosted Checkout
+collects its own customer and billing fields.
 
 #### Letting the merchant route
 

@@ -81,16 +81,21 @@ billed amounts against the catalog (2% tolerance) and reject a
 
 CCBill is redirect-only and **subscription-only** (one-time purchases are
 rejected). `POST /v1/checkout` (or `/v1/me/checkout`) with
-`payment.rail: "ccbill"` plus billing details (`email`, `first_name`,
-`last_name`, `address1`, `city`, `state`, `zip`, `country`) returns
+`payment.rail: "ccbill"` plus a canonical `name_on_card`, `zip`, and ISO-3166
+alpha-2 `country` returns
 `requires_action` with a redirect URL:
 
 ```
 https://api.ccbill.com/wap-frontflex/flexforms/{flex_id}?clientAccnum=…&clientSubacc=…&formName=…&username=…&email=…&reservationId=…&signature=…
 ```
 
-- The buyer must have a **verified email and a username** — the webhook
-  resolves the user by username.
+- The buyer must have a **verified account email and a username** — OpenRails
+  takes the email from the authenticated server-side identity, not the browser
+  billing payload, and the webhook resolves the user by username.
+- `address1`, `city`, and `state` are optional. OpenRails forwards real values
+  when supplied but omits absent values; it never manufactures address
+  placeholders. Configure the matching Address Fields separately in CCBill's
+  FlexForms Admin if the hosted form should not collect them.
 - `reservationId` carries the OpenRails checkout-session id; the
   `NewSaleSuccess` webhook echoes it back and marks the session `succeeded`.
 - `signature` is `sha256(username + salt)`, added when the salt is configured.

@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -69,6 +70,86 @@ func TestCheckoutSessionRequestFingerprintIncludesRedirectURLs(t *testing.T) {
 	require.Equal(t, checkoutSessionRequestFingerprint(&base), checkoutSessionRequestFingerprint(&trimmed))
 }
 
+func TestCCBillFingerprintUsesExecutedEmailProjection(t *testing.T) {
+	requestA := &CheckoutSessionCreateRequest{
+		PriceID: "price_11111111-1111-1111-1111-111111111111",
+		Payment: CheckoutSessionPaymentRequest{
+			Rail:       "merchant-ccbill",
+			Email:      "browser-a@example.test",
+			NameOnCard: "Buyer Example",
+			Zip:        "10001",
+			Country:    "US",
+		},
+	}
+	requestB := *requestA
+	requestB.Payment.Email = "browser-b@example.test"
+	verifiedEmail := "verified@example.test"
+	user := &UserIdentity{ID: "user_123", Email: &verifiedEmail}
+
+	require.Equal(t,
+		checkoutSessionRequestFingerprintForRail(requestA, user, "ccbill"),
+		checkoutSessionRequestFingerprintForRail(&requestB, user, "ccbill"),
+		"ignored browser email must not create an idempotency conflict",
+	)
+	require.NotEqual(t,
+		checkoutSessionRequestFingerprintForRail(requestA, user, "stripe"),
+		checkoutSessionRequestFingerprintForRail(&requestB, user, "stripe"),
+		"other rails retain their browser request projection",
+	)
+}
+
+func TestCCBillFingerprintBindsAuthoritativeVerifiedEmail(t *testing.T) {
+	req := &CheckoutSessionCreateRequest{
+		PriceID: "price_11111111-1111-1111-1111-111111111111",
+		Payment: CheckoutSessionPaymentRequest{
+			Rail:       "merchant-ccbill",
+			Email:      "browser@example.test",
+			NameOnCard: "Buyer Example",
+			Zip:        "10001",
+			Country:    "US",
+		},
+	}
+	firstEmail := "first-verified@example.test"
+	secondEmail := "second-verified@example.test"
+
+	require.NotEqual(t,
+		checkoutSessionRequestFingerprintForRail(req, &UserIdentity{ID: "user_123", Email: &firstEmail}, "ccbill"),
+		checkoutSessionRequestFingerprintForRail(req, &UserIdentity{ID: "user_123", Email: &secondEmail}, "ccbill"),
+		"a changed authoritative identity must conflict rather than replay another identity's form",
+	)
+}
+
+func TestDecodeCCBillIdempotencyUsesAuthoritativeEmailProjection(t *testing.T) {
+	req := &CheckoutSessionCreateRequest{
+		PriceID: "price_11111111-1111-1111-1111-111111111111",
+		Payment: CheckoutSessionPaymentRequest{
+			Rail:       "merchant-ccbill",
+			Email:      "first-browser@example.test",
+			NameOnCard: "Buyer Example",
+			Zip:        "10001",
+			Country:    "US",
+		},
+	}
+	verifiedEmail := "verified@example.test"
+	user := &UserIdentity{ID: "user_123", Email: &verifiedEmail}
+	response := &CheckoutSessionResponse{Payment: CheckoutSessionPaymentResponse{Rail: "ccbill"}}
+	payload, err := json.Marshal(checkoutSessionIdempotencyResult{
+		RequestFingerprint: checkoutSessionRequestFingerprintForRail(req, user, "ccbill"),
+		Response:           response,
+	})
+	require.NoError(t, err)
+
+	retry := *req
+	retry.Payment.Email = "different-browser@example.test"
+	got, err := decodeCheckoutSessionIdempotencyResult(payload, &retry, user)
+	require.NoError(t, err)
+	require.Equal(t, response, got)
+
+	changedEmail := "changed-verified@example.test"
+	_, err = decodeCheckoutSessionIdempotencyResult(payload, &retry, &UserIdentity{ID: "user_123", Email: &changedEmail})
+	require.ErrorIs(t, err, ErrCheckoutSessionConflict)
+}
+
 func TestCanonicalizeCheckoutPaymentName(t *testing.T) {
 	canonical := CheckoutSessionPaymentRequest{
 		NameOnCard: "  李  小龍  ",
@@ -87,16 +168,63 @@ func TestCanonicalizeCheckoutPaymentName(t *testing.T) {
 	require.Equal(t, "la Vega", legacy.LastName)
 }
 
-func TestRequireBillingFieldsAcceptsCanonicalMononym(t *testing.T) {
+func TestValidateCCBillInputAcceptsMinimalBillingIdentity(t *testing.T) {
+	verifiedEmail := "prince@example.test"
 	payment := &CheckoutSessionPaymentRequest{
-		Email:      "prince@example.test",
+		Email:      "spoofed-browser@example.test",
 		NameOnCard: "Prince",
-		Address1:   "1 Main St",
-		City:       "Minneapolis",
 		Zip:        "55401",
 		Country:    "US",
 	}
-	require.NoError(t, requireBillingFields(payment))
+	svc := &CheckoutSessionService{}
+	user := &UserIdentity{ID: "user_123", Email: &verifiedEmail}
+
+	require.NoError(t, svc.validateCCBillInput(payment, user))
+	fields := svc.buildRailFields("ccbill", payment, user)
+	require.Equal(t, verifiedEmail, fields["email"])
+	require.NotContains(t, fields, "address1")
+	require.NotContains(t, fields, "city")
+	require.NotContains(t, fields, "state")
+}
+
+func TestValidateCCBillInputRequiresCanonicalNameVerifiedEmailCountryAndPostal(t *testing.T) {
+	verifiedEmail := "buyer@example.test"
+	validPayment := CheckoutSessionPaymentRequest{NameOnCard: "Buyer Example", Zip: "10001", Country: "US"}
+	validUser := &UserIdentity{ID: "user_123", Email: &verifiedEmail}
+
+	tests := []struct {
+		name    string
+		payment CheckoutSessionPaymentRequest
+		user    *UserIdentity
+		want    string
+	}{
+		{name: "name", payment: CheckoutSessionPaymentRequest{Zip: "10001", Country: "US"}, user: validUser, want: "name_on_card"},
+		{name: "postal", payment: CheckoutSessionPaymentRequest{NameOnCard: "Buyer Example", Country: "US"}, user: validUser, want: "zip"},
+		{name: "country", payment: CheckoutSessionPaymentRequest{NameOnCard: "Buyer Example", Zip: "10001"}, user: validUser, want: "country"},
+		{name: "non-letter country", payment: CheckoutSessionPaymentRequest{NameOnCard: "Buyer Example", Zip: "10001", Country: "12"}, user: validUser, want: "country"},
+		{name: "verified email", payment: validPayment, user: &UserIdentity{ID: "user_123"}, want: "verified email"},
+	}
+
+	svc := &CheckoutSessionService{}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := svc.validateCCBillInput(&tt.payment, tt.user)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), tt.want)
+		})
+	}
+}
+
+func TestValidateCCBillInputCanonicalizesCountryAndPostal(t *testing.T) {
+	verifiedEmail := "buyer@example.test"
+	payment := &CheckoutSessionPaymentRequest{NameOnCard: "Buyer Example", Zip: " 10001 ", Country: " us "}
+
+	require.NoError(t, (&CheckoutSessionService{}).validateCCBillInput(
+		payment,
+		&UserIdentity{ID: "user_123", Email: &verifiedEmail},
+	))
+	require.Equal(t, "10001", payment.Zip)
+	require.Equal(t, "US", payment.Country)
 }
 
 func TestValidatePaymentRejectsStripeSavedPaymentMethod(t *testing.T) {

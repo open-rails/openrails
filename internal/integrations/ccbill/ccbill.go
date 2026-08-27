@@ -10,7 +10,9 @@ import (
 	"github.com/open-rails/openrails/config"
 )
 
-// GenerateFlexFormURLParams contains parameters for generating CCBill FlexForm URLs for subscription payments
+// GenerateFlexFormURLParams contains parameters for generating CCBill FlexForm
+// URLs for subscription payments. Address1, City, and State are optional and
+// are omitted from the provider URL when empty.
 type GenerateFlexFormURLParams struct {
 	Username      string `json:"username"`
 	Email         string `json:"email"`
@@ -84,16 +86,22 @@ func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*
 	q.Set("password", params.Password)
 	q.Set("customer_fname", params.CustomerFName)
 	q.Set("customer_lname", params.CustomerLName)
-	q.Set("address1", params.Address1)
-	q.Set("city", params.City)
-	q.Set("state", params.State)
-	q.Set("zipcode", params.ZipCode)
-	q.Set("country", params.Country)
+	setOptional(q, "address1", params.Address1)
+	setOptional(q, "city", params.City)
+	setOptional(q, "state", params.State)
+	q.Set("zipcode", strings.TrimSpace(params.ZipCode))
+	q.Set("country", strings.TrimSpace(params.Country))
 	if reservationID := strings.TrimSpace(params.ReservationID); reservationID != "" {
 		q.Set("reservationId", reservationID)
 	}
 
 	return c.flexFormResponse(params.FlexID, q), nil
+}
+
+func setOptional(query url.Values, key, value string) {
+	if value = strings.TrimSpace(value); value != "" {
+		query.Set(key, value)
+	}
 }
 
 func (c *CCBillClient) computeSignature(query url.Values) string {

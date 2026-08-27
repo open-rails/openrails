@@ -158,13 +158,22 @@ func TestHTTPAPIErrorIncludesRequestID(t *testing.T) {
 func TestHTTPGetUserFromContext(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/x", nil)
 	r = r.WithContext(billingauth.SetUserContext(r.Context(), billingauth.UserContext{
-		UserID: "u-1", Username: "ada", Roles: []string{"admin"},
+		UserID: "u-1", Username: "ada", Email: "ada@example.test", EmailVerified: true, Roles: []string{"admin"},
 	}))
 	req := NewHTTP(httptest.NewRecorder(), r, nil)
 
 	u := req.GetUser()
-	if u == nil || u.ID != "u-1" || u.Username != "ada" {
+	if u == nil || u.ID != "u-1" || u.Username != "ada" || u.Email == nil || *u.Email != "ada@example.test" {
 		t.Fatalf("GetUser = %+v", u)
+	}
+
+	unverified := httptest.NewRequest(http.MethodGet, "/x", nil)
+	unverified = unverified.WithContext(billingauth.SetUserContext(unverified.Context(), billingauth.UserContext{
+		UserID: "u-2", Email: "unverified@example.test", EmailVerified: false,
+	}))
+	got := NewHTTP(httptest.NewRecorder(), unverified, nil).GetUser()
+	if got == nil || got.Email != nil {
+		t.Fatalf("unverified GetUser = %+v", got)
 	}
 }
 

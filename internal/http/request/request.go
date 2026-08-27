@@ -304,7 +304,7 @@ func (r *Request) GetUser() *checkout.UserIdentity {
 			Username: uc.Username,
 			Roles:    uc.Roles,
 		}
-		if uc.Email != "" {
+		if uc.EmailVerified && uc.Email != "" {
 			email := uc.Email
 			user.Email = &email
 		}

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/mail"
 	"strconv"
 	"strings"
 	"time"
@@ -327,7 +326,6 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	}
 	canonicalizeCheckoutPaymentName(&req.Payment)
 
-	fingerprint := checkoutSessionRequestFingerprint(req)
 	req.IdempotencyKey = scopeIdempotencyKey(user.ID, req.IdempotencyKey)
 
 	claimed := false
@@ -339,7 +337,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 		if exists {
 			switch rec.Status {
 			case IdempotencyStatusSuccess:
-				cached, err := decodeCheckoutSessionIdempotencyResult(rec.Result, fingerprint)
+				cached, err := decodeCheckoutSessionIdempotencyResult(rec.Result, req, user)
 				if err != nil {
 					return nil, err
 				}
@@ -380,6 +378,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	}
 
 	if claimed && s.idempotencyService != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
+		fingerprint := checkoutSessionRequestFingerprintForRail(req, user, resp.Payment.Rail)
 		payload, _ := json.Marshal(checkoutSessionIdempotencyResult{RequestFingerprint: fingerprint, Response: resp})
 		_ = s.idempotencyService.Complete(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey, payload)
 	}
@@ -403,8 +402,23 @@ func canonicalizeCheckoutPaymentName(payment *CheckoutSessionPaymentRequest) {
 }
 
 func checkoutSessionRequestFingerprint(req *CheckoutSessionCreateRequest) string {
+	return checkoutSessionRequestFingerprintForRail(req, nil, "")
+}
+
+// checkoutSessionRequestFingerprintForRail hashes the inputs the resolved rail
+// actually executes. CCBill ignores browser payment.email and takes the verified
+// account email from UserIdentity, so its idempotency projection must do the
+// same. Other rails retain the request payload unchanged.
+func checkoutSessionRequestFingerprintForRail(req *CheckoutSessionCreateRequest, user *UserIdentity, resolvedRail string) string {
 	if req == nil {
 		return ""
+	}
+	payment := req.Payment
+	if strings.EqualFold(strings.TrimSpace(resolvedRail), string(models.RailCCBill)) {
+		payment.Email = ""
+		if user != nil && user.Email != nil {
+			payment.Email = strings.TrimSpace(*user.Email)
+		}
 	}
 	payload, _ := json.Marshal(struct {
 		PriceID    string
@@ -416,7 +430,7 @@ func checkoutSessionRequestFingerprint(req *CheckoutSessionCreateRequest) string
 	}{
 		PriceID:    strings.TrimSpace(req.PriceID),
 		Mode:       strings.TrimSpace(req.Mode),
-		Payment:    req.Payment,
+		Payment:    payment,
 		Metadata:   normalizeMetadata(req.Metadata),
 		SuccessURL: strings.TrimSpace(req.SuccessURL),
 		CancelURL:  strings.TrimSpace(req.CancelURL),
@@ -425,9 +439,10 @@ func checkoutSessionRequestFingerprint(req *CheckoutSessionCreateRequest) string
 	return hex.EncodeToString(sum[:])
 }
 
-func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, fingerprint string) (*CheckoutSessionResponse, error) {
+func decodeCheckoutSessionIdempotencyResult(payload json.RawMessage, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	var cached checkoutSessionIdempotencyResult
 	if err := json.Unmarshal(payload, &cached); err == nil && cached.Response != nil {
+		fingerprint := checkoutSessionRequestFingerprintForRail(req, user, cached.Response.Payment.Rail)
 		if cached.RequestFingerprint != "" && fingerprint != "" && cached.RequestFingerprint != fingerprint {
 			return nil, fmt.Errorf("%w: idempotency key reused with different checkout session parameters", ErrCheckoutSessionConflict)
 		}
@@ -530,13 +545,13 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	requestFingerprint := ""
 	if idempotencyKey != "" {
 		sessionID = idempotentCheckoutSessionID(price.MerchantID, idempotencyKey)
-		requestFingerprint = checkoutSessionRequestFingerprint(req)
+		requestFingerprint = checkoutSessionRequestFingerprintForRail(req, user, rail)
 	}
 	railState := map[string]any{}
 	if requestFingerprint != "" {
 		railState[checkoutSessionFingerprintKey] = requestFingerprint
 	}
-	railFields := s.buildRailFields(rail, &req.Payment)
+	railFields := s.buildRailFields(rail, &req.Payment, user)
 	if pspSelector != "" && pspSelector != rail {
 		railFields[checkoutSessionPSPFieldKey] = pspSelector
 	}
@@ -779,7 +794,7 @@ func (s *CheckoutSessionService) validatePayment(ctx context.Context, rail strin
 	case rail == "solana":
 		return s.validateSolanaInput(payment)
 	case rail == "ccbill":
-		return s.validateCCBillInput(payment)
+		return s.validateCCBillInput(payment, user)
 	default:
 		return fmt.Errorf("%w: unsupported rail", ErrCheckoutSessionValidation)
 	}
@@ -871,10 +886,20 @@ func (s *CheckoutSessionService) validateSolanaInput(payment *CheckoutSessionPay
 	return nil
 }
 
-// validateCCBillInput requires billing fields: CCBill's FlexForm flow submits
-// them with the charge, so they are genuinely consumed.
-func (s *CheckoutSessionService) validateCCBillInput(payment *CheckoutSessionPaymentRequest) error {
-	return requireBillingFields(payment)
+// validateCCBillInput requires the canonical name, country, and postal code
+// consumed by CCBill. The email comes from the authenticated, verified customer
+// identity rather than the browser request. Street, city, and state are
+// optional in CCBill's hosted-card contract.
+func (s *CheckoutSessionService) validateCCBillInput(payment *CheckoutSessionPaymentRequest, user *UserIdentity) error {
+	if payment == nil {
+		return fmt.Errorf("%w: payment is required", ErrCheckoutSessionValidation)
+	}
+	if err := validateCCBillBillingIdentity(payment.NameOnCard, payment.Zip, payment.Country, user); err != nil {
+		return fmt.Errorf("%w: %v", ErrCheckoutSessionValidation, err)
+	}
+	payment.Zip = strings.TrimSpace(payment.Zip)
+	payment.Country = strings.ToUpper(strings.TrimSpace(payment.Country))
+	return nil
 }
 
 func (s *CheckoutSessionService) initializeSession(ctx context.Context, session *models.CheckoutSession, payment *CheckoutSessionPaymentRequest, successURL, cancelURL string, user *UserIdentity) error {
@@ -1697,36 +1722,26 @@ func (s *CheckoutSessionService) applyCheckoutResponse(session *models.CheckoutS
 	return nil
 }
 
-func requireBillingFields(payment *CheckoutSessionPaymentRequest) error {
-	hasName := strings.TrimSpace(payment.NameOnCard) != "" ||
-		(strings.TrimSpace(payment.FirstName) != "" && strings.TrimSpace(payment.LastName) != "")
-	if strings.TrimSpace(payment.Email) == "" ||
-		!hasName ||
-		strings.TrimSpace(payment.Address1) == "" ||
-		strings.TrimSpace(payment.City) == "" ||
-		strings.TrimSpace(payment.Zip) == "" ||
-		strings.TrimSpace(payment.Country) == "" {
-		return fmt.Errorf("%w: billing fields are required", ErrCheckoutSessionValidation)
-	}
-	if _, err := mail.ParseAddress(strings.TrimSpace(payment.Email)); err != nil {
-		return fmt.Errorf("%w: email is invalid", ErrCheckoutSessionValidation)
-	}
-	if len(strings.TrimSpace(payment.Country)) != 2 {
-		return fmt.Errorf("%w: country must be ISO-3166 alpha-2", ErrCheckoutSessionValidation)
-	}
-	return nil
-}
-
-func (s *CheckoutSessionService) buildRailFields(rail string, payment *CheckoutSessionPaymentRequest) map[string]any {
+func (s *CheckoutSessionService) buildRailFields(rail string, payment *CheckoutSessionPaymentRequest, user *UserIdentity) map[string]any {
 	fields := map[string]any{
 		"rail": rail,
+	}
+	if payment == nil {
+		return fields
+	}
+	email := payment.Email
+	if rail == string(models.RailCCBill) {
+		email = ""
+		if user != nil && user.Email != nil {
+			email = *user.Email
+		}
 	}
 
 	addField(fields, "payment_method_id", payment.PaymentMethodID)
 	addField(fields, "token_symbol", payment.TokenSymbol)
 	addField(fields, "flow", payment.Flow)
 	addField(fields, "wallet", payment.Wallet)
-	addField(fields, "email", payment.Email)
+	addField(fields, "email", email)
 	addField(fields, "name_on_card", payment.NameOnCard)
 	addField(fields, "first_name", payment.FirstName)
 	addField(fields, "last_name", payment.LastName)
