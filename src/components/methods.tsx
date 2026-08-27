@@ -79,6 +79,7 @@ export function MethodBody({
 }) {
   return (
     <div
+      aria-hidden={hidden || undefined}
       className={cn(
         "grid gap-3.5 pt-1 pb-[18px] pl-[26px]",
         hidden && "hidden"

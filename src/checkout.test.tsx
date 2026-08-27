@@ -69,6 +69,89 @@ describe("Checkout", () => {
     expect(screen.getByText("Crypto")).toBeInTheDocument()
   })
 
+  it("renders one native cardholder identity with browser autofill semantics", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            rails: [checkoutOption("nmi")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    const form = await screen.findByRole("form", { name: "Secure payment" })
+    expect(form).toHaveAttribute("autocomplete", "on")
+    expect(form).toHaveAttribute("name", "openrails-checkout")
+
+    const names = screen.getAllByLabelText("Name on card")
+    expect(names).toHaveLength(1)
+    expect(names[0]).toHaveAttribute("name", "name_on_card")
+    expect(names[0]).toHaveAttribute("autocomplete", "cc-name")
+    expect(screen.queryByLabelText("First name")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Last name")).not.toBeInTheDocument()
+
+    const country = screen.getByLabelText("Country")
+    expect(country).toBeInstanceOf(HTMLSelectElement)
+    expect(country).toHaveAttribute("name", "country")
+    expect(country).toHaveAttribute("autocomplete", "billing country")
+
+    const initialPostal = screen.getByLabelText("Postal code")
+    expect(initialPostal).toHaveAttribute("name", "zip")
+    expect(initialPostal).toHaveAttribute("autocomplete", "billing postal-code")
+    expect(initialPostal).toBeRequired()
+
+    fireEvent.change(country, { target: { value: "IE" } })
+    expect(screen.getByLabelText("Postal code (optional)")).not.toBeRequired()
+
+    fireEvent.change(country, { target: { value: "US" } })
+    const usPostal = screen.getByLabelText("ZIP code")
+    expect(usPostal).toBeRequired()
+    expect(usPostal).toHaveAttribute("inputmode", "numeric")
+    expect(usPostal).toHaveAttribute("pattern", "[0-9]{5}(?:-[0-9]{4})?")
+  })
+
+  it("keeps inactive rail billing controls hidden, disabled, and uniquely identified", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            rails: [checkoutOption("nmi"), checkoutOption("ccbill")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    const form = await screen.findByRole("form", { name: "Secure payment" })
+    expect(screen.getAllByLabelText("Name on card")).toHaveLength(1)
+
+    fireEvent.click(screen.getByText("CCBill"))
+
+    const names = screen.getAllByLabelText("Name on card")
+    expect(names).toHaveLength(2)
+    expect(
+      names.filter((field) => !field.hasAttribute("disabled"))
+    ).toHaveLength(1)
+    expect(
+      names.find((field) => field.id.includes("-card-name-on-card"))
+    ).toBeDisabled()
+    expect(
+      names.find((field) => field.id.includes("-ccbill-name-on-card"))
+    ).not.toBeDisabled()
+
+    const ids = [...form.querySelectorAll<HTMLElement>("[id]")].map(
+      (field) => field.id
+    )
+    expect(new Set(ids).size).toBe(ids.length)
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue to CCBill" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter a valid email"
+    )
+  })
+
   it("renders expired sessions terminally", async () => {
     render(
       <Checkout
@@ -176,24 +259,34 @@ describe("Checkout", () => {
     await screen.findByRole("button", { name: "Continue to CCBill" })
     for (const [label, value] of [
       ["Email", "jane@example.com"],
-      ["First name", "Jane"],
-      ["Last name", "Tester"],
+      ["Name on card", "Jane Tester"],
       ["Address", "123 Main St"],
       ["City", "Springfield"],
-      ["ZIP", "62704"],
-      ["State (optional)", "IL"],
-      ["Country", "us"],
+      ["State / region (optional)", "IL"],
     ]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } })
     }
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "US" },
+    })
+    fireEvent.change(screen.getByLabelText("ZIP code"), {
+      target: { value: "62704" },
+    })
+
+    const name = screen.getByLabelText("Name on card")
+    expect(name).toHaveAttribute("name", "name_on_card")
+    expect(name).toHaveAttribute("autocomplete", "cc-name")
+    expect(screen.getByLabelText("Address")).toHaveAttribute(
+      "autocomplete",
+      "billing address-line1"
+    )
     fireEvent.click(screen.getByRole("button", { name: "Continue to CCBill" }))
 
     await waitFor(() => {
       expect(pay).toHaveBeenCalledWith({
         option_id: "option_ccbill",
         email: "jane@example.com",
-        first_name: "Jane",
-        last_name: "Tester",
+        name_on_card: "Jane Tester",
         address1: "123 Main St",
         city: "Springfield",
         state: "IL",
@@ -322,6 +415,15 @@ describe("Checkout", () => {
     fireEvent.click(
       await screen.findByRole("radio", { name: "Use a new card" })
     )
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "李 小龍" },
+    })
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "JP" },
+    })
+    fireEvent.change(screen.getByLabelText("Postal code"), {
+      target: { value: "100-0001" },
+    })
     fireEvent.click(screen.getByRole("button", { name: /^Pay / }))
 
     await waitFor(() => {
@@ -329,6 +431,9 @@ describe("Checkout", () => {
         expect.objectContaining({
           option_id: "option_nmi",
           payment_token: expect.any(String),
+          name_on_card: "李 小龍",
+          country: "JP",
+          zip: "100-0001",
         })
       )
     })
@@ -564,6 +669,23 @@ describe("CheckoutModal", () => {
           "background-color": expect.any(String),
           color: expect.any(String),
         }),
+        fields: {
+          ccnumber: {
+            selector: expect.stringMatching(/^#orck-.+-cc-number$/),
+            title: "Card number",
+            placeholder: "1234 1234 1234 1234",
+          },
+          ccexp: {
+            selector: expect.stringMatching(/^#orck-.+-cc-expiry$/),
+            title: "Expiration date",
+            placeholder: "MM / YY",
+          },
+          cvv: {
+            selector: expect.stringMatching(/^#orck-.+-cc-cvv$/),
+            title: "Card security code",
+            placeholder: "CVC",
+          },
+        },
       })
     )
     expect(configure).toHaveBeenCalledTimes(1)

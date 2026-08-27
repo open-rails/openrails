@@ -11,6 +11,7 @@ import {
   appearanceTheme,
   type CheckoutAppearance,
 } from "#orck/appearance"
+import { CardBillingFields } from "#orck/components/billing-fields"
 import { CardFields } from "#orck/components/card-fields"
 import { CCBillFields } from "#orck/components/ccbill-fields"
 import {
@@ -30,6 +31,11 @@ import {
 } from "#orck/components/states"
 import { CompactSummary, OrderSummary } from "#orck/components/summary"
 import { collectExpiry, useCollectJS } from "#orck/lib/collect"
+import {
+  emptyNMIBilling,
+  nmiBillingSchema,
+  type NMIBilling,
+} from "#orck/lib/billing"
 import { formatMoney } from "#orck/lib/money"
 import { cn } from "#orck/lib/utils"
 import type { CheckoutSource } from "#orck/source"
@@ -96,6 +102,8 @@ export function Checkout({
   const [payError, setPayError] = React.useState<string>()
   const [billing, setBilling] =
     React.useState<CCBillBilling>(emptyCCBillBilling)
+  const [cardBilling, setCardBilling] =
+    React.useState<NMIBilling>(emptyNMIBilling)
   const [solanaURL, setSolanaURL] = React.useState<string>()
   const mounted = React.useRef(true)
   const phaseRef = React.useRef(phase)
@@ -259,9 +267,21 @@ export function Checkout({
       if (active.driver === "collect_js" && usingSavedMethod) {
         request = { option_id: active.id, payment_method_id: savedMethodID }
       } else if (active.driver === "collect_js") {
+        const parsed = nmiBillingSchema.safeParse(cardBilling)
+        if (!parsed.success) {
+          setPayError(
+            parsed.error.issues[0]?.message ?? "Check the billing details"
+          )
+          changePhase("ready")
+          return
+        }
         const tokenized = await collect.tokenize()
         if (!mounted.current) return
-        request = { option_id: active.id, payment_token: tokenized.token }
+        request = {
+          option_id: active.id,
+          payment_token: tokenized.token,
+          ...parsed.data,
+        }
         const lastFour = tokenized.card?.number?.replace(/\D/g, "").slice(-4)
         if (lastFour) request.last_four = lastFour
         if (tokenized.card?.type) request.card_type = tokenized.card.type
@@ -340,6 +360,7 @@ export function Checkout({
   }, [
     active,
     billing,
+    cardBilling,
     changePhase,
     collect,
     phase,
@@ -436,7 +457,18 @@ export function Checkout({
       : ""
 
   const paymentColumn = session ? (
-    <div className="grid content-start gap-4">
+    <form
+      id={`orck-${uid}-payment-form`}
+      name="openrails-checkout"
+      aria-label="Secure payment"
+      autoComplete="on"
+      noValidate
+      className="grid content-start gap-4"
+      onSubmit={(event) => {
+        event.preventDefault()
+        void pay()
+      }}
+    >
       <CompactSummary
         session={session}
         className={cn(
@@ -476,21 +508,25 @@ export function Checkout({
                     idPrefix={`orck-${uid}-saved`}
                   />
                 ) : null}
-                <CardFields
-                  hidden={usingSavedMethod}
-                  ids={cardIds}
-                  preview={collect.preview}
-                  error={
-                    isActive
-                      ? (collect.loadError ??
-                        (payError &&
-                        active?.driver === "collect_js" &&
-                        !usingSavedMethod
-                          ? payError
-                          : undefined))
-                      : undefined
-                  }
-                />
+                <div
+                  className={cn("grid gap-3", usingSavedMethod && "hidden")}
+                  aria-hidden={usingSavedMethod || undefined}
+                >
+                  <CardBillingFields
+                    idPrefix={`orck-${uid}-card`}
+                    value={cardBilling}
+                    onChange={(next) => {
+                      setCardBilling(next)
+                      setPayError(undefined)
+                    }}
+                    disabled={processing || !isActive || usingSavedMethod}
+                  />
+                  <CardFields
+                    ids={cardIds}
+                    preview={collect.preview}
+                    error={isActive ? collect.loadError : undefined}
+                  />
+                </div>
               </MethodBody>
             )
           }
@@ -544,10 +580,7 @@ export function Checkout({
           )
         }}
       />
-      {payError &&
-      active &&
-      (active.driver !== "collect_js" || usingSavedMethod) &&
-      active.rail !== "ccbill" ? (
+      {payError && active && active.rail !== "ccbill" ? (
         <p className="text-destructive text-[13px]" role="alert">
           {payError}
         </p>
@@ -561,11 +594,10 @@ export function Checkout({
             !usingSavedMethod &&
             (!collect.ready || Boolean(collect.loadError))
           }
-          onClick={() => void pay()}
         />
       ) : null}
       <TrustLine />
-    </div>
+    </form>
   ) : null
 
   return (

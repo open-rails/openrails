@@ -1,0 +1,42 @@
+# Payment form contract
+
+`Checkout` renders one real `<form autocomplete="on">` and submits through its
+native submit event. Every host-owned billing field has a stable `id`, `name`,
+label, and standards-based autocomplete token.
+
+## NMI new cards
+
+The host collects only:
+
+- `name_on_card` — one visible “Name on card” input with `autocomplete="cc-name"`;
+- `country` — a native ISO-3166 country select with `autocomplete="billing country"`;
+- `zip` — a country-aware ZIP/postal input with `autocomplete="billing postal-code"`.
+
+Postal code is optional for countries and territories without a universal
+postal-code requirement. The UI keeps a postal code when the customer supplies
+one. It does not collect street, city, or state for NMI.
+
+Card number, expiration, and CVC remain inside NMI Collect.js cross-origin
+iframes. NMI owns those inner inputs, including their browser-autofill behavior;
+host markup cannot assign `cc-number`, `cc-exp`, or `cc-csc` to them. The
+Collect.js configuration supplies the supported field titles and placeholders,
+and the outer host page provides stable labelled containers. Verify saved-card
+autofill against the real gateway in each supported browser because a DOM unit
+test cannot inspect or control the cross-origin fields.
+
+A new-card payment request includes the one-time `payment_token` plus canonical
+`name_on_card`, uppercase ISO country in `country`, and `zip`. Paying with an
+existing saved method sends only `payment_method_id`; it does not overwrite the
+stored billing identity with empty form values.
+
+## CCBill
+
+CCBill uses the same single `name_on_card` field but retains email and the full
+billing address required for its hosted hand-off: address, city, optional
+state/region, postal code, and country. The checkout package never exposes
+separate first- and last-name inputs. OpenRails performs any provider-specific
+name projection at the CCBill boundary.
+
+Version 0.2 requires a checkout host whose pay endpoint accepts
+`name_on_card`. Legacy `first_name` and `last_name` are no longer emitted by
+this package.

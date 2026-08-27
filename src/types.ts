@@ -112,10 +112,10 @@ export const payRequestSchema = z.object({
   last_four: z.string().optional(),
   card_type: z.string().optional(),
   expiry_date: z.string().optional(),
-  // Billing identity (required by the ccbill rail).
+  // Canonical billing identity. NMI new-card checkout sends name/country/ZIP;
+  // CCBill additionally requires the full address fields.
   email: z.string().optional(),
-  first_name: z.string().optional(),
-  last_name: z.string().optional(),
+  name_on_card: z.string().optional(),
   address1: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),

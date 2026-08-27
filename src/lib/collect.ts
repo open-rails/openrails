@@ -224,10 +224,25 @@ export function useCollectJS(config: {
           placeholderCss: {
             color: placeholderColor,
           },
+          // Collect.js owns the cross-origin inputs and therefore controls
+          // their autocomplete behavior. Titles and placeholders are the
+          // accessibility/browser hints its public field API supports.
           fields: {
-            ccnumber: { selector: number, placeholder: "1234 1234 1234 1234" },
-            ccexp: { selector: expiry, placeholder: "MM / YY" },
-            cvv: { selector: cvv, placeholder: "CVC" },
+            ccnumber: {
+              selector: number,
+              title: "Card number",
+              placeholder: "1234 1234 1234 1234",
+            },
+            ccexp: {
+              selector: expiry,
+              title: "Expiration date",
+              placeholder: "MM / YY",
+            },
+            cvv: {
+              selector: cvv,
+              title: "Card security code",
+              placeholder: "CVC",
+            },
           },
           fieldsAvailableCallback: () => settle(() => setReady(true)),
           timeoutDuration: TIMEOUT_MS,

@@ -7,22 +7,19 @@ export function PayButton({
   label,
   processing,
   disabled,
-  onClick,
 }: {
   label: string
   processing: boolean
   disabled?: boolean
-  onClick: () => void
 }) {
   return (
     <Button
-      type="button"
+      type="submit"
       className={cn(
         "h-[42px] w-full rounded-[10px] text-sm font-semibold tabular-nums",
         processing && "opacity-75"
       )}
       disabled={disabled || processing}
-      onClick={onClick}
     >
       {processing ? (
         <>
