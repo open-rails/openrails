@@ -310,8 +310,7 @@ func replayOperationAuthorization(row gen.OpenrailsOperationAuthorization, in Op
 }
 
 // SettleOperationAuthorizationInTx performs the one host-rated final customer
-// settlement
-// through the existing double-entry ledger in a caller-owned transaction. It
+// settlement through the existing double-entry ledger in a caller-owned transaction. It
 // never calls request admission and never commits or rolls back the transaction.
 //
 // The payer row is the money mutex. Terminally settling before the ledger helper

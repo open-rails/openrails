@@ -910,7 +910,7 @@ type OpenrailsOperationAuthorization struct {
 	SettlementRatedUsdMicros *int64
 	// Exact canonical final-settlement bytes authored by the embedding host. OpenRails binds but does not interpret them.
 	SettlementBodyBytes []byte
-	// Caller-bound SHA-256 of settlement_body_bytes, also rechecked by the database.
+	// OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.
 	SettlementBodyDigest []byte
 }
 

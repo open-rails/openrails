@@ -114,8 +114,8 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-// SettleOperationAuthorizationTx posts one host-rated final customer settlement through the
-// existing ledger inside a transaction owned by the embedding host. It neither
+// SettleOperationAuthorizationTx posts one host-rated final customer settlement
+// through the existing ledger inside a transaction owned by the embedding host. It neither
 // commits nor rolls back tx and does not touch request-admission state.
 func (s *Service) SettleOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req OperationAuthorizationSettlementRequest) (*OperationAuthorization, error) {
 	rt, err := s.runtime()
