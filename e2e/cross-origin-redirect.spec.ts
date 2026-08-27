@@ -16,11 +16,11 @@ test("CCBill navigates the merchant host from the payment origin iframe", async 
   const checkout = page.frameLocator('iframe[title="Secure checkout"]')
   await checkout.getByLabel("Email").fill("jane@example.com")
   await checkout.getByLabel("Name on card").fill("Jane Tester")
-  await checkout.getByLabel("Address").fill("123 Main St")
-  await checkout.getByLabel("City").fill("Springfield")
-  await checkout.getByLabel("State / region (optional)").fill("IL")
   await checkout.getByLabel("Country").selectOption("US")
   await checkout.getByLabel("ZIP code").fill("62704")
+  await expect(checkout.getByLabel("Address")).toHaveCount(0)
+  await expect(checkout.getByLabel("City")).toHaveCount(0)
+  await expect(checkout.getByLabel("State / region (optional)")).toHaveCount(0)
 
   await Promise.all([
     page.waitForURL("https://merchant.example/ccbill/complete"),

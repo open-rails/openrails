@@ -109,8 +109,9 @@ export const payRequestSchema = z.object({
   option_id: z.string(),
   payment_token: z.string().optional(),
   payment_method_id: z.string().optional(),
-  // Canonical billing identity. NMI new-card checkout sends name/country/ZIP;
-  // CCBill additionally requires the full address fields.
+  // Canonical billing identity. The compact card paths send only their
+  // required fields; optional address fields remain available to an explicit
+  // provider-specific source that models them.
   email: z.string().optional(),
   name_on_card: z.string().optional(),
   address1: z.string().optional(),

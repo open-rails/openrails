@@ -33,12 +33,14 @@ stored billing identity with empty form values.
 
 ## CCBill
 
-CCBill uses the same single `name_on_card` field but retains email and the full
-billing address required for its hosted hand-off: address, city, optional
-state/region, postal code, and country. The checkout package never exposes
-separate first- and last-name inputs. OpenRails performs any provider-specific
-name projection at the CCBill boundary.
+For CCBill REST/tokenized-card hand-off, the host collects only email, the same
+single `name_on_card`, country, and postal code. Street, city, and state are
+optional to CCBill and are not collected by this card flow. The customer's IP
+is required by CCBill but remains server-derived rather than browser-supplied.
+The checkout package never exposes separate first- and last-name inputs.
+OpenRails performs any provider-specific name projection at the CCBill
+boundary.
 
-Version 0.2.1 requires a checkout host whose pay endpoint accepts
+Version 0.2.3 requires a checkout host whose pay endpoint accepts
 `name_on_card`. Legacy `first_name` and `last_name` are no longer emitted by
 this package.

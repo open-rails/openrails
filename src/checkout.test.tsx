@@ -249,7 +249,7 @@ describe("Checkout", () => {
     expect(pay).not.toHaveBeenCalled()
   })
 
-  it("submits completed CCBill billing details", async () => {
+  it("submits only the required CCBill card billing details", async () => {
     const pay = vi.fn<CheckoutSource["pay"]>().mockResolvedValue({
       status: "failed",
       failure_message: "Test stop",
@@ -260,9 +260,6 @@ describe("Checkout", () => {
     for (const [label, value] of [
       ["Email", "jane@example.com"],
       ["Name on card", "Jane Tester"],
-      ["Address", "123 Main St"],
-      ["City", "Springfield"],
-      ["State / region (optional)", "IL"],
     ]) {
       fireEvent.change(screen.getByLabelText(label), { target: { value } })
     }
@@ -273,13 +270,25 @@ describe("Checkout", () => {
       target: { value: "62704" },
     })
 
+    const email = screen.getByLabelText("Email")
+    expect(email).toHaveAttribute("name", "email")
+    expect(email).toHaveAttribute("autocomplete", "email")
     const name = screen.getByLabelText("Name on card")
     expect(name).toHaveAttribute("name", "name_on_card")
     expect(name).toHaveAttribute("autocomplete", "cc-name")
-    expect(screen.getByLabelText("Address")).toHaveAttribute(
+    expect(screen.getByLabelText("Country")).toHaveAttribute(
       "autocomplete",
-      "billing address-line1"
+      "billing country"
     )
+    expect(screen.getByLabelText("ZIP code")).toHaveAttribute(
+      "autocomplete",
+      "billing postal-code"
+    )
+    expect(screen.queryByLabelText("Address")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("City")).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText("State / region (optional)")
+    ).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Continue to CCBill" }))
 
     await waitFor(() => {
@@ -287,9 +296,6 @@ describe("Checkout", () => {
         option_id: "option_ccbill",
         email: "jane@example.com",
         name_on_card: "Jane Tester",
-        address1: "123 Main St",
-        city: "Springfield",
-        state: "IL",
         zip: "62704",
         country: "US",
       })

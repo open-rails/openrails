@@ -1,6 +1,5 @@
-// CCBill requires a complete billing address before it can build the hosted
-// FlexForms hand-off. Name stays canonical in this UI and on the wire;
-// OpenRails performs any provider-specific split at its boundary.
+// CCBill REST/tokenized-card hand-off uses the compact billing identity below.
+// Name stays canonical; the server derives IP and performs provider projection.
 import {
   BillingTextField,
   CountryField,
@@ -50,30 +49,12 @@ export function CCBillFields({
         maxLength={200}
         required
       />
-      <BillingTextField
-        id={`${idPrefix}-address`}
-        name="address1"
-        label="Address"
-        value={value.address1}
-        onChange={set("address1")}
-        autoComplete="billing address-line1"
-        placeholder="123 Main St"
-        disabled={disabled}
-        maxLength={200}
-        required
-      />
       <div className="grid grid-cols-2 gap-3">
-        <BillingTextField
-          id={`${idPrefix}-city`}
-          name="city"
-          label="City"
-          value={value.city}
-          onChange={set("city")}
-          autoComplete="billing address-level2"
-          placeholder="Springfield"
+        <CountryField
+          id={`${idPrefix}-country`}
+          value={value.country}
+          onChange={set("country")}
           disabled={disabled}
-          maxLength={100}
-          required
         />
         <PostalField
           id={`${idPrefix}-zip`}
@@ -82,25 +63,6 @@ export function CCBillFields({
           onChange={set("zip")}
           disabled={disabled}
           required
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <BillingTextField
-          id={`${idPrefix}-state`}
-          name="state"
-          label="State / region (optional)"
-          value={value.state ?? ""}
-          onChange={set("state")}
-          autoComplete="billing address-level1"
-          placeholder="IL"
-          disabled={disabled}
-          maxLength={100}
-        />
-        <CountryField
-          id={`${idPrefix}-country`}
-          value={value.country}
-          onChange={set("country")}
-          disabled={disabled}
         />
       </div>
       {error ? (
