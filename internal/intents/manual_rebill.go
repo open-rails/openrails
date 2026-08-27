@@ -189,15 +189,12 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	}
 
 	// #297: a dunning retry is a merchant-initiated RECURRING charge — carry
-	// the credential-on-file indicators plus the recurring sequence anchor.
-	// Legacy instrument without an anchor: charge reference-less (networks
-	// tolerate it on legacy credentials) and back-fill from the success.
+	// the credential-on-file indicators plus the approved recurring sequence
+	// anchor. A reference-less MIT is non-compliant; park it before any network
+	// request until a customer-present transaction establishes the sequence.
 	priorRef := strings.TrimSpace(pm.StoredCredentialRecurringRef)
 	if priorRef == "" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"payment_method_id": pm.ID,
-			"subscription_id":   sub.ID,
-		}).Warn("manual rebill: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
+		return Parked("payment method has no recurring stored-credential anchor; customer-initiated re-enrollment is required")
 	}
 
 	rebillResp, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{

@@ -24,8 +24,9 @@ type SaleParams struct {
 	OrderDescription string
 	OrderID          string
 	// StoredCredential carries the CIT/MIT credential-on-file fields (#297).
-	// Non-nil routes the sale through classic Direct Post — the lane the NMI
-	// portal documents the fields on. nil preserves the legacy shape.
+	// It is required and is sent through classic Direct Post, the lane on which
+	// NMI documents initiated_by, stored_credential_indicator, and the sequence
+	// reference.
 	StoredCredential *StoredCredential
 }
 
@@ -46,16 +47,10 @@ type RefundResponse struct {
 	ResponseText  string
 }
 
-// RunSale charges a vaulted customer via POST /v5/payments/sale using the
-// top-level customer_vault:{id} object (the live-verified vault-sale form;
-// the documented payment_details.customer_vault_id is rejected).
-//
-// BILLING-TARGETED sales go through classic Direct Post DELIBERATELY: the live
-// v5 sale rejects every billing-selection shape (customer_vault.billing_id,
-// top-level billing_id, payment_details.* — all "extra parameters",
-// live-verified 2026-07-02) and always charges the priority-1 entry, while
-// classic sale + billing_id charges the exact card (same lane the dunning
-// rebill already uses).
+// RunSale charges a vaulted customer through classic Direct Post. All sales
+// in this package use a stored credential, and this is the NMI lane whose wire
+// contract exposes the required credential-on-file fields. It also supports
+// billing_id so a shared vault can target one exact card.
 func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
@@ -75,7 +70,7 @@ func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleRespon
 	if orderDesc == "" {
 		orderDesc = "One-time purchase"
 	}
-	// v5 caps order_details.id at 50 chars (live-verified). The order id is the
+	// NMI caps orderid at 50 chars (live-verified). The order id is the
 	// correlation handle evidence probes search by — refuse loudly rather than
 	// silently truncate it into an unfindable reference.
 	if len(params.OrderID) > 50 {
@@ -85,41 +80,12 @@ func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleRespon
 		return nil, err
 	}
 
-	// Stored-credential (CIT/MIT) sales go classic DELIBERATELY (#297): the
-	// integration portal documents initiated_by / stored_credential_indicator /
-	// initial_transaction_id on the Direct Post variables (v5 nests them under
-	// cit_mit, but the classic vault-sale lane is the one already live-verified
-	// here — billing-targeted sales and dunning rebills ride it today).
-	if billingID := strings.TrimSpace(params.BillingID); billingID != "" || params.StoredCredential != nil {
-		return c.runClassicSale(ctx, params, currency, orderDesc, billingID)
-	}
-
-	req := v5PaymentRequest{
-		Amount:        centsJSONAmount(params.Amount),
-		Currency:      currency,
-		CustomerVault: &v5CustomerVaultRef{ID: params.CustomerVaultID},
-		OrderDetails:  &v5OrderDetails{ID: params.OrderID, OrderDescription: orderDesc},
-	}
-
-	var txn v5Transaction
-	if err := c.sendV5Request(ctx, http.MethodPost, "/payments/sale", req, &txn); err != nil {
-		return nil, err
-	}
-	if !txn.approved() {
-		return nil, newV5TransactionError("sale failed", &txn)
-	}
-
-	return &SaleResponse{
-		TransactionID: txn.ID,
-		Authcode:      txn.AuthCode,
-		ResponseText:  txn.ResponseText,
-	}, nil
+	return c.runClassicSale(ctx, params, currency, orderDesc, strings.TrimSpace(params.BillingID))
 }
 
 // runClassicSale charges a vault via classic Direct Post (type=sale +
-// customer_vault_id): billingID targets ONE specific billing entry (see the
-// RunSale doc for why v5 cannot do this); "" charges the priority-1 entry.
-// Stored-credential fields ride this lane (#297).
+// customer_vault_id): billingID targets ONE specific billing entry; ""
+// charges the priority-1 entry. Stored-credential fields ride this lane (#297).
 func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
 	values := url.Values{
 		"type":              {"sale"},

@@ -177,6 +177,9 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	}
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, params)
 	require.NoError(t, err)
+	if rails.IsNMI(models.Rail(rail)) {
+		dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, pm)
+	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm)
 	})

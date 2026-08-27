@@ -111,10 +111,10 @@ tasks:
       - bash scripts/nmi_query.sh {{if .TXN_ID}}--transaction-id "{{.TXN_ID}}"{{end}} {{if .SUB_ID}}--subscription-id "{{.SUB_ID}}"{{end}}
 
   e2e-nmi-live:
-    desc: Run the live NMI sandbox payment lifecycle E2E (Go integration test against the real sandbox; needs NMI_SANDBOX_SECURITY_KEY in .env)
+    desc: Run the live NMI sandbox lifecycle and COF CIT-to-MIT proofs (needs NMI_SANDBOX_SECURITY_KEY in .env)
     dotenv: ['.env']
     cmds:
-      - bash scripts/test_integration.sh ./tests -run TestNMILiveLifecycleE2E
+      - bash scripts/test_integration.sh -run 'TestNMILiveLifecycleE2E|TestLiveSandboxStoredCredentialCITThenMIT' -v ./tests/ ./internal/integrations/nmi/
 
   sqlc:
     desc: Regenerate internal/db/gen from internal/db/queries and vet every query (PREPARE against a fresh DB built from migrations/)

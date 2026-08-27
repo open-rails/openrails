@@ -55,7 +55,7 @@ jobs:
             echo "NMI_SANDBOX_SECURITY_KEY not set — live tests will self-skip (skip-if-absent preserved)"
           fi
           bash scripts/test_integration.sh \
-            -run 'TestNMILiveLifecycleE2E|TestLiveSandboxClientSurface|TestChargeOutstanding_NMISandbox_CollectsRealCharge' \
+            -run 'TestNMILiveLifecycleE2E|TestLiveSandboxClientSurface|TestLiveSandboxStoredCredentialCITThenMIT|TestChargeOutstanding_NMISandbox_CollectsRealCharge' \
             -v ./tests/ ./internal/integrations/nmi/ ./internal/modules/money/
 
   # Live invoice collection against real provider test accounts (#241/#619):
@@ -121,4 +121,3 @@ jobs:
             echo "::warning::OPENRAILS_TEST_STRIPE_SECRET_KEY repo secret not set — test will self-skip (skip-if-absent preserved)"
           fi
           go test -tags stripe_integration -run TestStripeModelBUpgrade_Integration -v -timeout 900s ./internal/modules/subscriptions/
-

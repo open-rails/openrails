@@ -52,17 +52,14 @@ func (f *fakeClassicNMIGateway) form(t *testing.T, i int) url.Values {
 	return f.forms[i]
 }
 
-// TestChargeOutstanding_StoredCredentialMITAndBackfill is the #297 collection
+// TestChargeOutstanding_StoredCredentialMITRequiresAnchor is the #297 collection
 // proof over the charge seam (ChargeOutstanding → ScopedCharger →
 // NMICollectionAdapter → nmidirect.Charger → classic Direct Post):
 //
-//  1. a LEGACY instrument (no stored-credential reference) collects as a
-//     reference-less unscheduled MIT (initiated_by=merchant +
-//     stored_credential_indicator=used, no initial_transaction_id) — the
-//     deliberate fail-open policy — and the success BACK-FILLS the anchor;
-//  2. the next collection on the SAME instrument replays the persisted anchor
-//     as initial_transaction_id.
-func TestChargeOutstanding_StoredCredentialMITAndBackfill(t *testing.T) {
+//  1. an instrument with no approved CIT anchor fails before any NMI request;
+//  2. after a customer-present anchor is recorded, collection sends the
+//     compliant merchant+used+initial_transaction_id MIT.
+func TestChargeOutstanding_StoredCredentialMITRequiresAnchor(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	cleanupInvoiceRows(t, pool, ctx, payer)
 
@@ -76,28 +73,15 @@ func TestChargeOutstanding_StoredCredentialMITAndBackfill(t *testing.T) {
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 
-	// Legacy instrument: seeded with NO stored-credential references.
+	// Instrument starts with no stored-credential references.
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), "vault-297-"+uuid.NewString()[:8])
+	_, err = pool.Exec(ctx,
+		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = '' WHERE id = $1", pm)
+	require.NoError(t, err)
 
 	charger := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
-
-	openAndCollect := func(sourceID string) {
-		t.Helper()
-		_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-			BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
-		})
-		require.NoError(t, err)
-		require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 2_000_000))
-		_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", sourceID, 150*10_000)
-		require.NoError(t, err)
-		_, err = svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
-		require.NoError(t, err)
-		n, err := svc.ChargeOutstanding(ctx, charger, 0)
-		require.NoError(t, err)
-		require.Equal(t, 1, n)
-	}
 
 	refOf := func() string {
 		t.Helper()
@@ -107,21 +91,39 @@ func TestChargeOutstanding_StoredCredentialMITAndBackfill(t *testing.T) {
 		return ref
 	}
 
-	// Leg 1: legacy reference-less MIT + backfill.
-	require.Empty(t, refOf(), "legacy instrument starts unanchored")
-	openAndCollect("297-leg1-" + uuid.NewString()[:8])
+	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
+		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+	})
+	require.NoError(t, err)
+	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 2_000_000))
+	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "297-anchor-"+uuid.NewString()[:8], 150*10_000)
+	require.NoError(t, err)
+	_, err = svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+	require.NoError(t, err)
+
+	// Leg 1: no anchor means no network request.
+	require.Empty(t, refOf(), "instrument starts without an agreement anchor")
+	n, err := svc.ChargeOutstanding(ctx, charger, 0)
+	require.ErrorContains(t, err, "no unscheduled stored-credential anchor")
+	require.Zero(t, n)
+	fake.mu.Lock()
+	assert.Empty(t, fake.forms, "reference-less MIT must not reach NMI")
+	fake.mu.Unlock()
+	assert.Empty(t, refOf())
+
+	// Leg 2: a customer-present transaction establishes the anchor; collection
+	// replays it without replacing it with an MIT transaction.
+	const anchor = "approved-cit-297"
+	_, err = pool.Exec(ctx,
+		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
+		pm, anchor)
+	require.NoError(t, err)
+	n, err = svc.ChargeOutstanding(ctx, charger, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
 	form := fake.form(t, 0)
 	assert.Equal(t, "merchant", form.Get("initiated_by"))
 	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
-	_, hasInitial := form["initial_transaction_id"]
-	assert.False(t, hasInitial, "legacy instrument charges reference-less (fail-open policy)")
-	assert.Equal(t, "txn-297-1", refOf(), "success back-fills the unscheduled anchor write-once")
-
-	// Leg 2: the anchored instrument replays the reference.
-	openAndCollect("297-leg2-" + uuid.NewString()[:8])
-	form = fake.form(t, 1)
-	assert.Equal(t, "merchant", form.Get("initiated_by"))
-	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
-	assert.Equal(t, "txn-297-1", form.Get("initial_transaction_id"), "MIT carries the persisted anchor")
-	assert.Equal(t, "txn-297-1", refOf(), "anchor is write-once — never overwritten by later charges")
+	assert.Equal(t, anchor, form.Get("initial_transaction_id"), "MIT carries the approved CIT anchor")
+	assert.Equal(t, anchor, refOf(), "MIT never overwrites the CIT anchor")
 }

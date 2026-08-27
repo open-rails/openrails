@@ -127,10 +127,24 @@ doesn't surprise you:
   `Authorization` header value — no `Bearer`/scheme.
 - **Classic Direct Post survivors.** Subscription enrollment stays on
   `recurring=add_subscription` (atomic first-charge + enroll + delayed start;
-  v5 has no equivalent), as do manual rebills and subscription updates — the
+  v5 has no equivalent). Stored-card sales and manual rebills also use Classic
+  so every authorization carries NMI's `initiated_by` and
+  `stored_credential_indicator`; every subsequent CIT/MIT additionally carries
+  its agreement's initial NMI transaction ID. Incomplete combinations fail
+  before network I/O. Subscription updates stay on Classic because the
   documented `PATCH /v5/subscriptions/{id}` returns `E_ROUTE_NOT_FOUND` on the
-  live gateway. Transaction search stays on `query.php` (v5 has no
-  list/search).
+  live gateway. Transaction search stays on `query.php` (v5 has no list/search).
+- **Legacy methods need a sequence anchor.** An imported or historical payment
+  method without the appropriate recurring or unscheduled initial transaction
+  ID cannot be charged off-session. OpenRails parks the operation before NMI;
+  the customer must complete a customer-present transaction to establish the
+  applicable agreement sequence.
+- **Confirm recurring classification per processor.** OpenRails sends
+  `billing_method=recurring` on the initial recurring CIT and later recurring
+  charges, matching NMI's Credential on File guide. The Classic API reference
+  also documents `initial_recurring` and says processor support varies; obtain
+  written confirmation from the ISO/acquirer before changing this value for a
+  merchant account.
 - **Cancelled subscriptions are deleted.** NMI tombstones cancelled recurring
   records; `GET /v5/subscriptions/{id}` answers 404. OpenRails treats "gone at
   NMI" as a terminal state, not an error.

@@ -102,6 +102,7 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 		Currency:         "USD",
 		OrderDescription: "live client-surface probe",
 		OrderID:          orderID,
+		StoredCredential: testInitialOneTimeCredential(),
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, sale.TransactionID)
@@ -191,6 +192,7 @@ func TestLiveSandboxClientSurface(t *testing.T) {
 		Currency:         "USD",
 		OrderDescription: "live multi-entry targeted probe",
 		OrderID:          "live-multi-" + runID[:10],
+		StoredCredential: testInitialOneTimeCredential(),
 	})
 	require.NoError(t, err)
 	txn2, found, err := client.GetPayment(context.Background(), targeted.TransactionID)

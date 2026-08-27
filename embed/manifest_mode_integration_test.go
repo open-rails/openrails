@@ -155,8 +155,8 @@ func merchantSecretRowCount(t *testing.T, pool *pgxpool.Pool, ctx context.Contex
 	return n
 }
 
-// fakeNMI serves the v5 sale endpoint and records the Authorization (security
-// key) each charge arrived with.
+// fakeNMI serves the stored-credential Direct Post sale and records the
+// security key each charge arrived with.
 func fakeNMI(t *testing.T) (*httptest.Server, *[]string) {
 	t.Helper()
 	var keys []string
@@ -164,9 +164,12 @@ func fakeNMI(t *testing.T) (*httptest.Server, *[]string) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/plans":
 			_, _ = w.Write([]byte(`{"plans":[],"next_cursor":null,"has_more":false}`))
-		case r.Method == http.MethodPost && r.URL.Path == "/payments/sale":
-			keys = append(keys, r.Header.Get("Authorization"))
-			_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_manifest_mode","response":"1","response_text":"SUCCESS","response_code":"100"}`))
+		case r.Method == http.MethodPost:
+			require.NoError(t, r.ParseForm())
+			keys = append(keys, r.Form.Get("security_key"))
+			require.Equal(t, "customer", r.Form.Get("initiated_by"))
+			require.Equal(t, "stored", r.Form.Get("stored_credential_indicator"))
+			_, _ = w.Write([]byte("response=1&transactionid=txn_manifest_mode&responsetext=SUCCESS&response_code=100"))
 		default:
 			http.Error(w, "unexpected NMI request", http.StatusNotFound)
 		}
@@ -186,7 +189,10 @@ func chargeViaStorePlane(t *testing.T, ctx context.Context, rt *embed.Runtime, i
 		Config:      runtime.Config,
 		DB:          runtime.DB,
 		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
-		Endpoints:   money.CollectionEndpoints{NMIV5BaseURL: baseURL},
+		Endpoints: money.CollectionEndpoints{
+			NMIV5BaseURL:     baseURL,
+			NMIDirectPostURL: baseURL,
+		},
 	}
 	mctx := merchant.WithID(ctx, id)
 	client, ok, err := builder.ResolveNMIClient(mctx, id.UUID(), nil)
@@ -198,6 +204,10 @@ func chargeViaStorePlane(t *testing.T, ctx context.Context, rt *embed.Runtime, i
 		CustomerVaultID: "vault-manifest-mode",
 		Amount:          moneyutil.Cents(500),
 		Currency:        "USD",
+		StoredCredential: &nmi.StoredCredential{
+			InitiatedBy: nmi.InitiatedByCustomer,
+			Indicator:   nmi.IndicatorStored,
+		},
 	})
 	return err
 }

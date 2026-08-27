@@ -697,8 +697,11 @@ func (suite *TestContainerSuite) CreateTestPaymentMethod(userID string) *models.
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}
+	pm.StoredCredentialRecurringRef = "txn_recurring_initial_" + pm.ID.String()
+	pm.StoredCredentialUnscheduledRef = "txn_unscheduled_initial_" + pm.ID.String()
 
 	suite.InsertPaymentMethod(ctx, pm)
+	dbtest.SeedNMIStoredCredentialRefs(ctx, suite.t, suite.Pool, pm.ID)
 
 	return pm
 }
@@ -755,8 +758,15 @@ func (suite *TestContainerSuite) CreateTestPaymentMethodWithOptions(opts Payment
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}
+	if opts.Rail == models.RailNMI {
+		pm.StoredCredentialRecurringRef = "txn_recurring_initial_" + pm.ID.String()
+		pm.StoredCredentialUnscheduledRef = "txn_unscheduled_initial_" + pm.ID.String()
+	}
 
 	suite.InsertPaymentMethod(ctx, pm)
+	if opts.Rail == models.RailNMI {
+		dbtest.SeedNMIStoredCredentialRefs(ctx, suite.t, suite.Pool, pm.ID)
+	}
 
 	return pm
 }

@@ -108,6 +108,9 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 			InitialTransactionID: "txn_initial_" + uuid.New().String(), CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
+		if vaultRefs {
+			dbtest.SeedNMIStoredCredentialRefs(ctx, t, dbi.Qx(ctx), pmID)
+		}
 
 		periodEnd := now.Add(-periodEndAgo)
 		periodStart := periodEnd.Add(-time.Duration(cycleHours) * time.Hour)

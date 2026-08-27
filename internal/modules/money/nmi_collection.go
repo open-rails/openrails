@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	log "github.com/sirupsen/logrus"
 )
 
 // NMICollectionAdapter collects invoices and top-ups from NMI customer
@@ -60,18 +59,16 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen
 		description = "OpenRails invoice collection"
 	}
 
-	// Legacy-instrument policy (#297): a stored card with no unscheduled
-	// replay reference charges reference-less (initiated_by=merchant +
-	// stored_credential_indicator=used, no initial_transaction_id) — the
-	// networks tolerate missing references on legacy credentials, and refusing
-	// would break collection for every pre-migration card. The success anchors
-	// the sequence: ScopedCharger persists Result.CapturedRef write-once.
+	// NMI requires every subsequent CIT/MIT to reference the approved initial
+	// transaction. Never send a reference-less off-session charge: the customer
+	// must complete a customer-present transaction to establish this agreement
+	// sequence first.
 	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
 	if priorRef == "" {
-		log.WithContext(ctx).WithFields(log.Fields{
-			"payment_method_id": method.ID,
-			"rail":              rail,
-		}).Warn("nmi collection: instrument has no stored-credential reference; charging reference-less MIT and back-filling on success (#297)")
+		return ChargeResult{}, fmt.Errorf(
+			"nmi collection: payment method %s has no unscheduled stored-credential anchor; customer-initiated re-enrollment is required",
+			method.ID,
+		)
 	}
 
 	res, err := a.Charger.Charge(ctx, charge.Request{

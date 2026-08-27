@@ -178,6 +178,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 		CreatedAt:            now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
+	dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, paymentMethodID)
 
 	periodEnd := periodStart.Add(simCycleHours * time.Hour)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{

@@ -125,14 +125,16 @@ contract host orchestrators use. Two editions:
 
 ### NMI live sandbox lifecycle
 
-`task e2e-nmi-live` — a Go integration test
-(`tests/nmi_live_lifecycle_e2e_test.go`) against a **real NMI sandbox
-account**: registers a live NMI provider, ensures a sandbox recurring plan,
-vaults a sandbox test card server-side (the Customer Vault equivalent of
-browser Collect.js tokenization — OpenRails never accepts a raw PAN), runs
-one-off + subscription checkouts, verifies remote state via NMI's Query API,
-verifies signed webhook ingestion + idempotent replay, and cancels. Requires
-`NMI_SANDBOX_SECURITY_KEY` (loaded from `.env`; the test skips without it).
+`task e2e-nmi-live` runs two Go integration tests against a **real NMI sandbox
+account**. `TestNMILiveLifecycleE2E` registers a live NMI provider, ensures a
+sandbox recurring plan, vaults a sandbox test card server-side (the Customer
+Vault equivalent of browser Collect.js tokenization — OpenRails never accepts
+a raw PAN), runs one-off + subscription checkouts, verifies remote state via
+NMI's Query API, verifies signed webhook ingestion + idempotent replay, and
+cancels. `TestLiveSandboxStoredCredentialCITThenMIT` executes an initial
+customer-initiated stored-card transaction and a subsequent merchant-initiated
+transaction tied to the initial NMI transaction ID. Requires
+`NMI_SANDBOX_SECURITY_KEY` (loaded from `.env`; the tests skip without it).
 Sandbox test cards move no real money; charge amounts are randomized per run
 to dodge NMI duplicate-transaction checks.
 

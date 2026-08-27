@@ -54,7 +54,7 @@ func TestStoredCredentialFor_ContextMapping(t *testing.T) {
 			nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used", InitialTransactionID: "ref-4"},
 		},
 		{
-			"legacy reference-less MIT stays 'used' with no reference",
+			"reference-less MIT maps to an invalid used credential",
 			charge.UnscheduledMIT(""),
 			nmi.StoredCredential{InitiatedBy: "merchant", Indicator: "used"},
 		},
@@ -64,6 +64,9 @@ func TestStoredCredentialFor_ContextMapping(t *testing.T) {
 			got := StoredCredentialFor(tc.ctx)
 			require.NotNil(t, got)
 			assert.Equal(t, tc.want, *got)
+			if tc.ctx.Initiator == charge.InitiatorMerchant && tc.ctx.PriorRef == "" {
+				require.ErrorContains(t, got.Validate(), "requires initial_transaction_id")
+			}
 		})
 	}
 }
@@ -91,7 +94,7 @@ func baseRequest(ctx charge.Context) charge.Request {
 	}
 }
 
-func TestCharger_SuccessCapturesRefOnlyWhenUnanchored(t *testing.T) {
+func TestCharger_InitialCITCapturesRefAndAnchoredMITReplaysIt(t *testing.T) {
 	var form url.Values
 	c := newChargerAgainst(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
@@ -99,19 +102,31 @@ func TestCharger_SuccessCapturesRefOnlyWhenUnanchored(t *testing.T) {
 		fmt.Fprint(w, "response=1&transactionid=txn-99&authcode=OK&response_code=100")
 	})
 
-	// No prior reference: the success anchors the sequence.
-	res, err := c.Charge(context.Background(), baseRequest(charge.UnscheduledMIT("")))
+	// The customer-present initial CIT anchors the sequence.
+	res, err := c.Charge(context.Background(), baseRequest(charge.InitialOneTime()))
 	require.NoError(t, err)
 	assert.Equal(t, "txn-99", res.TransactionID)
-	assert.Equal(t, "txn-99", res.CapturedRef, "reference-less charge anchors on its own transaction id")
-	assert.Equal(t, "merchant", form.Get("initiated_by"))
-	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
+	assert.Equal(t, "txn-99", res.CapturedRef, "initial CIT anchors on its transaction id")
+	assert.Equal(t, "customer", form.Get("initiated_by"))
+	assert.Equal(t, "stored", form.Get("stored_credential_indicator"))
 
 	// Anchored: nothing new to capture, the anchor rides the wire.
 	res, err = c.Charge(context.Background(), baseRequest(charge.UnscheduledMIT("anchor-1")))
 	require.NoError(t, err)
 	assert.Empty(t, res.CapturedRef)
 	assert.Equal(t, "anchor-1", form.Get("initial_transaction_id"))
+}
+
+func TestCharger_ReferenceLessMITFailsBeforeNetwork(t *testing.T) {
+	requests := 0
+	c := newChargerAgainst(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		t.Error("reference-less MIT must not reach NMI")
+	})
+
+	_, err := c.Charge(context.Background(), baseRequest(charge.UnscheduledMIT("")))
+	require.ErrorContains(t, err, "requires initial_transaction_id")
+	assert.Zero(t, requests)
 }
 
 func TestCharger_HardDeclineIsResultNotError(t *testing.T) {

@@ -341,7 +341,16 @@ func parseDirectResponse(response string) (url.Values, error) {
 		// A 200 body arrived but is unreadable: the mutation likely executed.
 		return nil, ambiguous(fmt.Errorf("failed to parse response: %s", response))
 	}
-	return output, nil
+	// url.ParseQuery accepts arbitrary text as a key, so parsing alone does not
+	// prove that NMI returned a usable mutation result. Without the gateway's
+	// response discriminator, the charge may have executed and must be verified
+	// rather than treated as a clean decline.
+	switch strings.TrimSpace(output.Get("response")) {
+	case "1", "2", "3":
+		return output, nil
+	default:
+		return nil, ambiguous(fmt.Errorf("direct response carried no valid response code"))
+	}
 }
 
 func isDirectResponseApproved(output url.Values) bool {

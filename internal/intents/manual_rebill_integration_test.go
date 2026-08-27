@@ -121,9 +121,12 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
-	exec(`INSERT INTO openrails.payment_methods (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref, initial_transaction_id, merchant_id)
-	      VALUES ($1, $2, 'mobius', $3, $4, $5, $6, $7)`,
-		paymentMethodID, userID, fx.pspID, "vault-"+suffix, "bill-"+suffix, "txn-init-"+suffix, tenantID)
+	exec(`INSERT INTO openrails.payment_methods
+	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
+	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
+	      VALUES ($1, $2, 'mobius', $3, $4, $5, $6, $7, $8)`,
+		paymentMethodID, userID, fx.pspID, "vault-"+suffix, "bill-"+suffix,
+		"txn-init-"+suffix, "txn-recurring-init-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, rail_subscription_id, payment_method_id,
 	         current_period_starts_at, current_period_ends_at, started_at, next_retry_at, retry_attempts, customer_id, merchant_id, psp_id)

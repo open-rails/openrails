@@ -30,11 +30,10 @@ func StoredCredentialFor(c charge.Context) *nmi.StoredCredential {
 	default:
 		sc.InitiatedBy = nmi.InitiatedByCustomer
 	}
-	// The sequence's initial transaction sends indicator=stored; everything
-	// after sends used. A merchant-initiated charge is never the initial
-	// transaction — a reference-less MIT (legacy instrument) still sends used,
-	// just without initial_transaction_id, and the success anchors the
-	// sequence (Result.CapturedRef).
+	// The sequence's initial customer-present transaction sends
+	// indicator=stored; everything after sends used with the initial reference.
+	// Invalid reference-less subsequent charges are rejected by Validate before
+	// the request reaches NMI.
 	if c.FirstUse && c.Initiator == charge.InitiatorCustomer {
 		sc.Indicator = nmi.IndicatorStored
 	} else {
@@ -99,9 +98,9 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		TransactionID: strings.TrimSpace(sale.TransactionID),
 		TokenType:     charge.TokenTypePSPToken,
 	}
-	// A charge that ran without a replay reference anchors the credential's
-	// agreement sequence: NMI's reference IS its gateway transactionid.
-	if strings.TrimSpace(req.Context.PriorRef) == "" {
+	// Only an approved initial CIT establishes the agreement sequence anchor:
+	// NMI's reference is its gateway transactionid.
+	if req.Context.FirstUse && req.Context.Initiator == charge.InitiatorCustomer {
 		res.CapturedRef = res.TransactionID
 	}
 	return res, nil

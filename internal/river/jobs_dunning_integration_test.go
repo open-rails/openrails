@@ -132,6 +132,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		UpdatedAt:            now,
 	})
 	require.NoError(t, err)
+	dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, paymentMethodID)
 
 	periodEnd := now.Add(-1 * time.Minute)
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)
@@ -302,6 +303,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		CreatedAt:            now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
+	dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, paymentMethodID)
 
 	periodEnd := now.Add(-1 * time.Minute)
 	periodStart := periodEnd.Add(-30 * 24 * time.Hour)

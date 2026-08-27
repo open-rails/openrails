@@ -13,9 +13,8 @@ import (
 
 // #297 dunning proof: every manual rebill is a merchant-initiated RECURRING
 // credential-on-file charge. An anchored instrument replays its recurring
-// reference as initial_transaction_id; a legacy (unanchored) instrument
-// charges reference-less — the deliberate fail-open policy — and the success
-// back-fills the anchor for every later retry.
+// reference as initial_transaction_id; an unanchored instrument parks before
+// any network request until a customer-present transaction establishes it.
 
 func (fx rebillFixture) recurringRef(t *testing.T) string {
 	t.Helper()
@@ -56,21 +55,16 @@ func TestManualRebill_AnchoredInstrumentSendsRecurringMIT(t *testing.T) {
 	assert.Equal(t, "anchor-297-rec", fx.recurringRef(t), "existing anchor is never overwritten")
 }
 
-func TestManualRebill_LegacyInstrumentChargesReferenceLessAndBackfills(t *testing.T) {
+func TestManualRebill_MissingAnchorParksBeforeNetwork(t *testing.T) {
 	fx := seedPastDueSubscription(t)
+	fx.setRecurringRef(t, "")
 	fake, client := newFakeNMIRebillGateway(t)
 
-	require.Empty(t, fx.recurringRef(t), "legacy instrument starts unanchored")
+	require.Empty(t, fx.recurringRef(t), "instrument starts unanchored")
 
 	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
 	require.NoError(t, err)
-	require.Equal(t, StatusSucceeded, row.Status)
-
-	form := fake.saleForm.Load().(url.Values)
-	assert.Equal(t, "merchant", form.Get("initiated_by"))
-	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
-	_, hasInitial := form["initial_transaction_id"]
-	assert.False(t, hasInitial, "legacy instrument charges reference-less (fail-open policy)")
-
-	assert.Equal(t, fake.txnID, fx.recurringRef(t), "success back-fills the recurring anchor")
+	require.Equal(t, StatusPending, row.Status, "missing compliance anchor parks the intent for repair")
+	assert.Zero(t, fake.saleCalls.Load(), "missing anchor must fail before any NMI sale")
+	assert.Empty(t, fx.recurringRef(t), "a merchant-initiated transaction can never establish the CIT anchor")
 }

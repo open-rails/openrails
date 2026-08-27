@@ -139,6 +139,7 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 		require.Equal(t, "0.05", r.Form.Get("amount"))
 		require.Equal(t, "merchant", r.Form.Get("initiated_by"))
 		require.Equal(t, "used", r.Form.Get("stored_credential_indicator"))
+		require.Equal(t, "txn_unscheduled_initial_"+pm.String(), r.Form.Get("initial_transaction_id"))
 		seen <- struct{}{}
 		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&authcode=OK&transactionid=txn_store_only_nmi&response_code=100"))
 	}))

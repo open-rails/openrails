@@ -3,6 +3,7 @@
 package money_test
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -12,8 +13,30 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/stretchr/testify/require"
 )
+
+func createNMISandboxUnscheduledAnchor(t *testing.T, client *nmi.NMIClient, vaultID, orderPrefix string) string {
+	t.Helper()
+	// Keep the initial-CIT amount in a disjoint band from the collection charge
+	// so repeated sandbox runs do not trip NMI duplicate detection.
+	amount := moneyutil.Cents(210 + time.Now().UnixNano()%80)
+	resp, err := client.RunSale(context.Background(), nmi.SaleParams{
+		CustomerVaultID:  vaultID,
+		Amount:           amount,
+		Currency:         money.DefaultCurrency,
+		OrderDescription: "OpenRails stored-credential anchor",
+		OrderID:          orderPrefix + time.Now().UTC().Format("150405.000000000"),
+		StoredCredential: &nmi.StoredCredential{
+			InitiatedBy: nmi.InitiatedByCustomer,
+			Indicator:   nmi.IndicatorStored,
+		},
+	})
+	require.NoError(t, err, "real NMI sandbox initial CIT failed")
+	require.NotEmpty(t, resp.TransactionID, "initial CIT must return the stored-credential anchor")
+	return resp.TransactionID
+}
 
 // TestChargeOutstanding_NMISandbox_CollectsRealCharge is the opt-in proof for
 // openrails #619: it drives OpenRails' REAL invoice-collection path
@@ -72,6 +95,11 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	// The payment method OpenRails will collect against: rail=mobius (NMI-backed),
 	// rail_customer_ref = the sandbox vault id.
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), railCustomerRef)
+	anchor := createNMISandboxUnscheduledAnchor(t, client, railCustomerRef, "nmi-anchor-619-")
+	_, err = pool.Exec(ctx,
+		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
+		pm, anchor)
+	require.NoError(t, err)
 
 	// Build the owed OpenRails invoice from real arrears state. owed is in ledger
 	// internal units (1e4 per cent). Randomize within the simulator's approving
@@ -129,13 +157,12 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	require.Equal(t, string(models.RailNMI), rail)
 	require.NotEmpty(t, railPaymentID, "OpenRails must record the real NMI sandbox transaction id")
 
-	// #297: the collection ran as a reference-less MIT on a legacy (unanchored)
-	// instrument, so the success must back-fill the unscheduled sequence anchor
-	// with the real sandbox transaction id.
+	// #297: the collection is a subsequent MIT and must preserve the approved
+	// customer-present transaction as its unscheduled sequence anchor.
 	var storedRef string
 	require.NoError(t, pool.QueryRow(ctx,
 		"SELECT stored_credential_unscheduled_ref FROM openrails.payment_methods WHERE id = $1", pm).Scan(&storedRef))
-	require.Equal(t, railPaymentID, storedRef, "successful collection must anchor the stored-credential sequence (#297)")
+	require.Equal(t, anchor, storedRef, "MIT must preserve the approved initial-CIT anchor")
 
-	t.Logf("APPROVED: OpenRails invoice %s settled via NMI sandbox; real transaction id = %s (stored-credential anchor persisted)", inv.ID, railPaymentID)
+	t.Logf("APPROVED: OpenRails invoice %s settled via NMI sandbox; MIT transaction id = %s, CIT anchor = %s", inv.ID, railPaymentID, anchor)
 }

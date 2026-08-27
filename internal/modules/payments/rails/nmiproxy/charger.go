@@ -167,9 +167,9 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 		TransactionID: strings.TrimSpace(sale.TransactionID),
 		TokenType:     tokenType,
 	}
-	// Reference-less charge anchors the agreement sequence (identical to
-	// nmidirect: the replay ref IS NMI's transactionid).
-	if strings.TrimSpace(req.Context.PriorRef) == "" {
+	// Only an approved initial CIT establishes the agreement sequence anchor
+	// (identical to nmidirect: the replay ref is NMI's transactionid).
+	if req.Context.FirstUse && req.Context.Initiator == charge.InitiatorCustomer {
 		res.CapturedRef = res.TransactionID
 	}
 	return res, nil
