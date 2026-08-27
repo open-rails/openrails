@@ -21,6 +21,30 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+func TestProviderBillingQuiescence(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		name string
+		raw  string
+		want time.Duration
+	}{
+		{name: "conservative default", want: 24 * time.Hour},
+		{name: "configured", raw: "36h", want: 36 * time.Hour},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := (&Config{ProviderBillingQuiescenceInterval: tt.raw}).ProviderBillingQuiescence()
+			require.NoError(t, err)
+			require.Equal(t, tt.want, got)
+		})
+	}
+
+	for _, raw := range []string{"0", "500ms", "-1h", "tomorrow"} {
+		_, err := (&Config{ProviderBillingQuiescenceInterval: raw}).ProviderBillingQuiescence()
+		require.Error(t, err)
+	}
+}
+
 // SEC-18: a deployment that never declared its environment must not boot. It
 // used to silently read as development, which is the posture that keeps
 // merchant secrets in PLAINTEXT and stops requiring an RLS-enforcing DB role.
