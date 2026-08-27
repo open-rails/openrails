@@ -102,7 +102,7 @@ describe("Checkout", () => {
     expect(initialPostal).toHaveAttribute("autocomplete", "billing postal-code")
     expect(initialPostal).toBeRequired()
 
-    fireEvent.change(country, { target: { value: "IE" } })
+    fireEvent.change(country, { target: { value: "AG" } })
     expect(screen.getByLabelText("Postal code (optional)")).not.toBeRequired()
 
     fireEvent.change(country, { target: { value: "US" } })

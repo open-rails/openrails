@@ -12,9 +12,11 @@ The host collects only:
 - `country` — a native ISO-3166 country select with `autocomplete="billing country"`;
 - `zip` — a country-aware ZIP/postal input with `autocomplete="billing postal-code"`.
 
-Postal code is optional for countries and territories without a universal
-postal-code requirement. The UI keeps a postal code when the customer supplies
-one. It does not collect street, city, or state for NMI.
+Postal code is optional for the 53 ISO-3166 alpha-2 countries and territories
+in the Universal Postal Union's September 2025
+[list of countries which do not require postal codes](https://www.upu.int/UPU/media/upu/documents/PostCode/General-Addressing-Issues.pdf).
+The UI keeps a postal code when the customer supplies one. It does not collect
+street, city, or state for NMI.
 
 Card number, expiration, and CVC remain inside NMI Collect.js cross-origin
 iframes. NMI owns those inner inputs, including their browser-autofill behavior;
@@ -37,6 +39,6 @@ state/region, postal code, and country. The checkout package never exposes
 separate first- and last-name inputs. OpenRails performs any provider-specific
 name projection at the CCBill boundary.
 
-Version 0.2 requires a checkout host whose pay endpoint accepts
+Version 0.2.1 requires a checkout host whose pay endpoint accepts
 `name_on_card`. Legacy `first_name` and `last_name` are no longer emitted by
 this package.
