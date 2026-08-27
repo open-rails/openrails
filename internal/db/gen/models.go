@@ -1141,6 +1141,53 @@ type OpenrailsProductUsageLimitBinding struct {
 	UpdatedAt     time.Time
 }
 
+// Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.
+type OpenrailsProviderBillingObservation struct {
+	MerchantID              uuid.UUID
+	OperationID             string
+	ObservationID           string
+	NormalizedQuery         string
+	QueryStart              time.Time
+	QueryEnd                time.Time
+	RawBodyAvailable        bool
+	RawBodyBytes            []byte
+	RawBodyDigest           []byte
+	NormalizedRecordsBytes  []byte
+	NormalizedRecordsDigest []byte
+	ProviderCostUsdMicros   *int64
+	HasNegativeRecord       bool
+	RefusalKind             *string
+	CoversLifetime          bool
+	QualificationReason     string
+	ObservedAt              time.Time
+}
+
+// OpenRails-owned th-045 post-absence qualification state for one operation authorization. Eligible is an operator quiescence policy fact, never provider-attested finality.
+type OpenrailsProviderBillingQualification struct {
+	MerchantID                     uuid.UUID
+	OperationID                    string
+	Provider                       string
+	ProviderResourceID             string
+	ProviderLifetimeStart          time.Time
+	ProviderLifetimeEnd            time.Time
+	ProviderAbsentAt               time.Time
+	ProviderAbsenceReference       string
+	BillingStopReference           string
+	WindowsClosedAt                time.Time
+	WindowsClosedReference         string
+	LifecycleEvidenceBytes         []byte
+	LifecycleEvidenceDigest        []byte
+	QuiescenceSeconds              int64
+	State                          string
+	Reason                         string
+	BaselineObservationID          *string
+	QualifiedObservationID         *string
+	QualifiedProviderCostUsdMicros *int64
+	QualifiedAt                    *time.Time
+	CreatedAt                      time.Time
+	UpdatedAt                      time.Time
+}
+
 // Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail.
 type OpenrailsPsp struct {
 	ID         uuid.UUID

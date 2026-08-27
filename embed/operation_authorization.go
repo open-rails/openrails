@@ -23,9 +23,10 @@ const (
 )
 
 var (
-	ErrOperationAuthorizationConflict = service.ErrOperationAuthorizationConflict
-	ErrOperationAuthorizationNotFound = service.ErrOperationAuthorizationNotFound
-	ErrOperationAuthorizationNotOpen  = service.ErrOperationAuthorizationNotOpen
+	ErrOperationAuthorizationConflict           = service.ErrOperationAuthorizationConflict
+	ErrOperationAuthorizationNotFound           = service.ErrOperationAuthorizationNotFound
+	ErrOperationAuthorizationNotOpen            = service.ErrOperationAuthorizationNotOpen
+	ErrOperationAuthorizationHasBillingEvidence = service.ErrOperationAuthorizationHasBillingEvidence
 )
 
 // OpenOperationAuthorizationTx reserves account capacity inside a transaction
@@ -50,7 +51,8 @@ func (r *Runtime) GetOperationAuthorization(ctx context.Context, operationID str
 
 // ReleaseOperationAuthorization releases capacity after the host proves the
 // provider create did not occur. Provider readback semantics stay host-owned;
-// OpenRails only binds the opaque release reference.
+// OpenRails only binds the opaque release reference. Once provider-billing
+// qualification exists, release is permanently refused.
 func (r *Runtime) ReleaseOperationAuthorization(ctx context.Context, req ReleaseOperationAuthorizationRequest) (*OperationAuthorization, error) {
 	ctx, err := r.operationAuthorizationContext(ctx)
 	if err != nil {

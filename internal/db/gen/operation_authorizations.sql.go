@@ -136,6 +136,12 @@ SET state = 'released',
 WHERE merchant_id = $3::uuid
   AND operation_id = $4::text
   AND state = 'open'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM openrails.provider_billing_qualifications qualification
+      WHERE qualification.merchant_id = openrails.operation_authorizations.merchant_id
+        AND qualification.operation_id = openrails.operation_authorizations.operation_id
+  )
 RETURNING operation_id, merchant_id, payer_id, record_owner, ledger_account_id, authorized_usd_micros, claim_reference, authorization_body_bytes, authorization_body_digest, state, terminal_reference, created_at, released_at, settled_at, settlement_provider_cost_usd_micros, settlement_rated_usd_micros, settlement_body_bytes, settlement_body_digest
 `
 

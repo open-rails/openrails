@@ -1,0 +1,76 @@
+package money
+
+import (
+	"math"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	base := ProviderBillingObservationInput{
+		OperationID:     "op-1",
+		ObservationID:   "obs-1",
+		NormalizedQuery: "podId=provider-resource-1",
+		QueryStart:      now.Add(-time.Hour),
+		QueryEnd:        now,
+		RawBody:         []byte(`[]`),
+		Lifecycle: ProviderBillingLifecycleEvidence{
+			Provider: "provider", ProviderResourceID: "provider-resource-1",
+			ProviderLifetimeStart: now.Add(-time.Hour), ProviderLifetimeEnd: now.Add(-time.Minute),
+			ProviderAbsentAt: now, ProviderAbsenceReference: "absence:1",
+			BillingStopReference: "billing-stop:1", WindowsClosedAt: now,
+			WindowsClosedReference: "windows:1", LifecycleEvidenceBody: []byte(`{"absent":true}`),
+		},
+	}
+
+	for _, kind := range []string{"schema_ambiguity", "submicro_amount", "amount_overflow"} {
+		in := base
+		in.Refusal = &ProviderBillingObservationRefusal{Kind: ProviderBillingEvidenceRefusalKind(kind)}
+		require.NoError(t, validateProviderBillingInput(in))
+		prepared, err := prepareProviderBillingObservation(in)
+		require.NoError(t, err)
+		require.Equal(t, kind, *prepared.refusalKind)
+		require.True(t, prepared.rawAvailable)
+
+		in.RawBody = nil
+		require.ErrorContains(t, validateProviderBillingInput(in), "requires exact bounded raw body")
+	}
+
+	tooLarge := base
+	tooLarge.RawBody = nil
+	tooLarge.Refusal = &ProviderBillingObservationRefusal{Kind: ProviderBillingRefusalResponseTooLarge}
+	require.NoError(t, validateProviderBillingInput(tooLarge))
+	prepared, err := prepareProviderBillingObservation(tooLarge)
+	require.NoError(t, err)
+	require.False(t, prepared.rawAvailable)
+	tooLarge.RawBody = []byte("partial")
+	require.ErrorContains(t, validateProviderBillingInput(tooLarge), "cannot retain partial raw body")
+
+	overflow := base
+	overflow.Records = []ProviderBillingRecord{
+		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Hour), AmountUSDMicros: math.MaxInt64, TimeBilledMS: 1},
+		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Minute), AmountUSDMicros: 1, TimeBilledMS: 1},
+	}
+	_, err = prepareProviderBillingObservation(overflow)
+	require.ErrorContains(t, err, "total USD micros overflow")
+
+	negative := base
+	negative.Records = []ProviderBillingRecord{{
+		ProviderResourceID: base.Lifecycle.ProviderResourceID,
+		BucketStart:        now.Add(-time.Hour), AmountUSDMicros: -1, TimeBilledMS: 1,
+	}}
+	prepared, err = prepareProviderBillingObservation(negative)
+	require.NoError(t, err)
+	require.True(t, prepared.hasNegative)
+
+	nanosecondTime := base
+	nanosecondTime.QueryEnd = nanosecondTime.QueryEnd.Add(time.Nanosecond)
+	require.ErrorContains(t, validateProviderBillingInput(nanosecondTime), "PostgreSQL-exact microsecond precision")
+
+	zeroLifetime := base
+	zeroLifetime.Lifecycle.ProviderLifetimeEnd = zeroLifetime.Lifecycle.ProviderLifetimeStart
+	require.ErrorContains(t, validateProviderBillingInput(zeroLifetime), "must be after provider_lifetime_start")
+}

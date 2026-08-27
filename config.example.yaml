@@ -13,6 +13,10 @@ host: 0.0.0.0
 port: 3053
 api_url: http://localhost:3053
 
+# Minimum separation between two equal post-absence provider-billing reads.
+# Empty defaults to 24h; values must be positive whole-second Go durations.
+# provider_billing_quiescence_interval: 24h
+
 logger:
   level: info       # debug | info | warn | error | fatal | panic
 

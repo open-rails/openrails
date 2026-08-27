@@ -212,6 +212,13 @@ type Config struct {
 	// Env: CATALOG_RECONCILIATION_INTERVAL.
 	CatalogReconciliationInterval string `koanf:"catalog_reconciliation_interval,omitempty"`
 
+	// ProviderBillingQuiescenceInterval is the minimum separation between two
+	// equal normalized post-absence billing observations before OpenRails may
+	// call an operation authorization settlement eligible. Empty defaults to a
+	// conservative 24h. It must be a positive Go duration. Env:
+	// PROVIDER_BILLING_QUIESCENCE_INTERVAL.
+	ProviderBillingQuiescenceInterval string `koanf:"provider_billing_quiescence_interval,omitempty"`
+
 	// TrustedProxies lists CIDRs (e.g. "10.0.0.0/8") whose X-Forwarded-For is
 	// trusted (#746: one proxy-aware client-IP resolver for rate limiting,
 	// abuse tracking, webhook IPAddress recording, and the CCBill IP
@@ -254,6 +261,30 @@ func (cfg *Config) CatalogReconciliationSchedule() (interval time.Duration, enab
 		return 0, false, nil
 	}
 	return d, true, nil
+}
+
+// ProviderBillingQuiescence returns the policy used for new qualifications.
+// The chosen duration is persisted per operation, so later config changes do
+// not retroactively weaken an existing reservation's evidence requirement.
+func (cfg *Config) ProviderBillingQuiescence() (time.Duration, error) {
+	raw := ""
+	if cfg != nil {
+		raw = strings.TrimSpace(cfg.ProviderBillingQuiescenceInterval)
+	}
+	if raw == "" {
+		return 24 * time.Hour, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("provider_billing_quiescence_interval %q is not a Go duration (e.g. 24h): %w", raw, err)
+	}
+	if d < time.Second {
+		return 0, fmt.Errorf("provider_billing_quiescence_interval must be at least one second")
+	}
+	if d%time.Second != 0 {
+		return 0, fmt.Errorf("provider_billing_quiescence_interval must use whole seconds")
+	}
+	return d, nil
 }
 
 const (
@@ -1158,6 +1189,9 @@ func Validate(cfg *Config) error {
 	// Malformed catalog_reconciliation_interval refuses to boot (#712): the old
 	// env knob silently fell back to 1h on a typo.
 	if _, _, err := cfg.CatalogReconciliationSchedule(); err != nil {
+		return err
+	}
+	if _, err := cfg.ProviderBillingQuiescence(); err != nil {
 		return err
 	}
 

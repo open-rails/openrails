@@ -40,9 +40,10 @@ const (
 )
 
 var (
-	ErrOperationAuthorizationConflict = errors.New("operation_authorization_conflict")
-	ErrOperationAuthorizationNotFound = errors.New("operation_authorization_not_found")
-	ErrOperationAuthorizationNotOpen  = errors.New("operation_authorization_not_open")
+	ErrOperationAuthorizationConflict           = errors.New("operation_authorization_conflict")
+	ErrOperationAuthorizationNotFound           = errors.New("operation_authorization_not_found")
+	ErrOperationAuthorizationNotOpen            = errors.New("operation_authorization_not_open")
+	ErrOperationAuthorizationHasBillingEvidence = errors.New("operation_authorization_has_billing_evidence")
 )
 
 // OperationAuthorizationConflict means an operation id already committed with
@@ -488,7 +489,9 @@ func (s *MoneyService) GetOperationAuthorization(ctx context.Context, operationI
 // ReleaseOperationAuthorization terminally releases an open reservation after
 // the embedding host has proven the provider create did not happen. OpenRails
 // binds the caller's opaque proof reference but owns no provider ambiguity
-// logic. Repeating the same release is an idempotent replay.
+// logic. Any durable provider-billing qualification proves this path advanced
+// beyond release eligibility and is refused. Repeating the same release is an
+// idempotent replay when no such qualification exists.
 func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operationID, releaseReference string) (*OperationAuthorization, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -507,6 +510,18 @@ func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operat
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
 		q := gen.New(tx)
+		ensureNoBillingEvidence := func() error {
+			_, qualificationErr := q.GetProviderBillingQualificationForUpdate(ctx, gen.GetProviderBillingQualificationForUpdateParams{
+				MerchantID: merchantID.UUID(), OperationID: operationID,
+			})
+			if qualificationErr == nil {
+				return ErrOperationAuthorizationHasBillingEvidence
+			}
+			if errors.Is(qualificationErr, pgx.ErrNoRows) {
+				return nil
+			}
+			return qualificationErr
+		}
 		row, getErr := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
 			MerchantID: merchantID.UUID(), OperationID: operationID,
 		})
@@ -525,6 +540,9 @@ func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operat
 		})
 		if getErr != nil {
 			return getErr
+		}
+		if evidenceErr := ensureNoBillingEvidence(); evidenceErr != nil {
+			return evidenceErr
 		}
 		switch OperationAuthorizationState(row.State) {
 		case OperationAuthorizationReleased:
@@ -546,6 +564,31 @@ func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operat
 			TerminalReference: releaseReference,
 			ReleasedAt:        s.now().UTC(),
 		})
+		if errors.Is(releaseErr, pgx.ErrNoRows) {
+			current, rereadErr := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
+				MerchantID: merchantID.UUID(), OperationID: operationID,
+			})
+			if rereadErr != nil {
+				return rereadErr
+			}
+			switch OperationAuthorizationState(current.State) {
+			case OperationAuthorizationReleased:
+				if current.TerminalReference == nil || *current.TerminalReference != releaseReference {
+					return &OperationAuthorizationConflict{Field: "release_reference"}
+				}
+				out = operationAuthorizationFromRow(current, true)
+				return nil
+			case OperationAuthorizationSettled:
+				return ErrOperationAuthorizationNotOpen
+			case OperationAuthorizationOpen:
+				if evidenceErr := ensureNoBillingEvidence(); evidenceErr != nil {
+					return evidenceErr
+				}
+				return ErrOperationAuthorizationNotOpen
+			default:
+				return fmt.Errorf("operation authorization has invalid state %q", current.State)
+			}
+		}
 		if releaseErr != nil {
 			return releaseErr
 		}

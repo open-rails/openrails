@@ -55,6 +55,8 @@ func resetMoneyLedger(t *testing.T, _ *pgxpool.Pool, ctx context.Context) {
 	for _, table := range []string{
 		"openrails.invoice_payments",
 		"openrails.usage_events",
+		"openrails.provider_billing_observations",
+		"openrails.provider_billing_qualifications",
 		"openrails.operation_authorizations",
 		"openrails.ledger_transfers",
 		"openrails.grants",

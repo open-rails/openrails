@@ -24,9 +24,10 @@ const (
 )
 
 var (
-	ErrOperationAuthorizationConflict = money.ErrOperationAuthorizationConflict
-	ErrOperationAuthorizationNotFound = money.ErrOperationAuthorizationNotFound
-	ErrOperationAuthorizationNotOpen  = money.ErrOperationAuthorizationNotOpen
+	ErrOperationAuthorizationConflict           = money.ErrOperationAuthorizationConflict
+	ErrOperationAuthorizationNotFound           = money.ErrOperationAuthorizationNotFound
+	ErrOperationAuthorizationNotOpen            = money.ErrOperationAuthorizationNotOpen
+	ErrOperationAuthorizationHasBillingEvidence = money.ErrOperationAuthorizationHasBillingEvidence
 )
 
 type OperationAuthorizationConflict = money.OperationAuthorizationConflict
