@@ -33,14 +33,15 @@ stored billing identity with empty form values.
 
 ## CCBill
 
-For CCBill credit-card hand-off, the host uses the common compact requirement:
-email, the same single `name_on_card`, country, and postal code. CCBill's
-FlexForms Address Fields are configurable for credit-card forms, so OpenRails
-does not collect street, city, or state in this flow. The customer's IP remains
-server-derived rather than browser-supplied. The checkout package never
-exposes separate first- and last-name inputs. OpenRails performs any
-provider-specific name projection at the CCBill boundary.
+For CCBill credit-card hand-off, the browser supplies only the same single
+`name_on_card`, country, and postal code. OpenRails binds the authenticated
+account's verified email and derives the customer's IP server-side; the browser
+cannot override either value. CCBill's FlexForms Address Fields are
+configurable for credit-card forms, so OpenRails does not collect street, city,
+or state in this flow. The checkout package never exposes separate first- and
+last-name inputs. OpenRails performs any provider-specific name projection at
+the CCBill boundary.
 
-Version 0.2.3 requires a checkout host whose pay endpoint accepts
+Version 0.2.4 requires a checkout host whose pay endpoint accepts
 `name_on_card`. Legacy `first_name` and `last_name` are no longer emitted by
 this package.

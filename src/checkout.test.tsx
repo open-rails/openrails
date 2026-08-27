@@ -148,7 +148,7 @@ describe("Checkout", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Continue to CCBill" }))
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Enter a valid email"
+      "Name on card is required"
     )
   })
 
@@ -244,7 +244,7 @@ describe("Checkout", () => {
     )
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Enter a valid email"
+      "Name on card is required"
     )
     expect(pay).not.toHaveBeenCalled()
   })
@@ -257,12 +257,9 @@ describe("Checkout", () => {
     render(<Checkout source={ccbillSource(pay)} />)
 
     await screen.findByRole("button", { name: "Continue to CCBill" })
-    for (const [label, value] of [
-      ["Email", "jane@example.com"],
-      ["Name on card", "Jane Tester"],
-    ]) {
-      fireEvent.change(screen.getByLabelText(label), { target: { value } })
-    }
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "Jane Tester" },
+    })
     fireEvent.change(screen.getByLabelText("Country"), {
       target: { value: "US" },
     })
@@ -270,9 +267,7 @@ describe("Checkout", () => {
       target: { value: "62704" },
     })
 
-    const email = screen.getByLabelText("Email")
-    expect(email).toHaveAttribute("name", "email")
-    expect(email).toHaveAttribute("autocomplete", "email")
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument()
     const name = screen.getByLabelText("Name on card")
     expect(name).toHaveAttribute("name", "name_on_card")
     expect(name).toHaveAttribute("autocomplete", "cc-name")
@@ -294,7 +289,6 @@ describe("Checkout", () => {
     await waitFor(() => {
       expect(pay).toHaveBeenCalledWith({
         option_id: "option_ccbill",
-        email: "jane@example.com",
         name_on_card: "Jane Tester",
         zip: "62704",
         country: "US",

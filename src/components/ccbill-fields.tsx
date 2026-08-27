@@ -1,5 +1,5 @@
-// CCBill credit-card hand-off uses the compact billing identity below.
-// Name stays canonical; the server derives IP and performs provider projection.
+// CCBill credit-card hand-off uses the compact billing identity below. Name
+// stays canonical; the server binds verified email/IP and projects the provider.
 import {
   BillingTextField,
   CountryField,
@@ -24,19 +24,6 @@ export function CCBillFields({
     onChange({ ...value, [key]: next })
   return (
     <>
-      <BillingTextField
-        id={`${idPrefix}-email`}
-        name="email"
-        label="Email"
-        value={value.email}
-        onChange={set("email")}
-        autoComplete="email"
-        placeholder="jane@example.com"
-        disabled={disabled}
-        type="email"
-        maxLength={320}
-        required
-      />
       <BillingTextField
         id={`${idPrefix}-name-on-card`}
         name="name_on_card"
