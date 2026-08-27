@@ -11,8 +11,11 @@ import (
 	"fmt"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
+
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
 // StoredCredentialFor maps the rail-agnostic CIT/MIT context onto NMI's
@@ -22,7 +25,8 @@ import (
 // dunning) that charge NMI schedule objects instead of (instrument, amount).
 func StoredCredentialFor(c charge.Context) *nmi.StoredCredential {
 	sc := &nmi.StoredCredential{
-		Recurring: c.Agreement == charge.AgreementRecurring,
+		Recurring:          c.Agreement == charge.AgreementRecurring,
+		AllowUnanchoredMIT: c.UnanchoredBestEffort,
 	}
 	switch c.Initiator {
 	case charge.InitiatorMerchant:
@@ -32,8 +36,8 @@ func StoredCredentialFor(c charge.Context) *nmi.StoredCredential {
 	}
 	// The sequence's initial customer-present transaction sends
 	// indicator=stored; everything after sends used with the initial reference.
-	// Invalid reference-less subsequent charges are rejected by Validate before
-	// the request reaches NMI.
+	// A merchant-initiated legacy fallback may lack the reference; it remains
+	// merchant+used and is made observable before the request reaches NMI.
 	if c.FirstUse && c.Initiator == charge.InitiatorCustomer {
 		sc.Indicator = nmi.IndicatorStored
 	} else {
@@ -69,6 +73,20 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	if req.AmountMinor <= 0 {
 		return charge.Result{}, errors.New("charge amount must be positive")
 	}
+	storedCredential := StoredCredentialFor(req.Context)
+	if storedCredential.IsUnanchoredMIT() {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"payment_method_id": req.Instrument.PaymentMethodID,
+			"rail":              req.Instrument.Rail,
+			"agreement":         req.Context.Agreement,
+			"order_ref":         req.OrderRef,
+		}).Warn("nmi: sending best-effort MIT without the stored-credential anchor")
+		opsmetric.Emit(ctx, opsmetric.MetricNMIUnanchoredMIT, log.Fields{
+			"transport":         "direct",
+			"payment_method_id": req.Instrument.PaymentMethodID,
+			"agreement":         req.Context.Agreement,
+		})
+	}
 
 	sale, err := c.Client.RunSale(ctx, nmi.SaleParams{
 		CustomerVaultID:  railCustomerRef,
@@ -77,7 +95,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 		Currency:         req.Currency,
 		OrderDescription: req.Description,
 		OrderID:          req.OrderRef,
-		StoredCredential: StoredCredentialFor(req.Context),
+		StoredCredential: storedCredential,
 	})
 	if err != nil {
 		var pmErr *nmi.CustomerVaultError

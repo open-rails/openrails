@@ -93,7 +93,7 @@ handlers are also mounted under `/v1/me/checkout/*` (delegated token) and
   - `rail` (optional) — a configured PSP key (e.g. `mobius`) or reserved rail (`ccbill`, `solana`, `stripe`). Naming one pins it (never silently switched); omitting it hands the choice to the merchant's routing policy, which falls through unavailable PSPs and records the decision on the session's `routing_reason` (or#288)
   - `payment_method_id` or `payment_token` for NMI-backed rails / Stripe
   - `token_symbol` for `solana`; `flow` — `transfer_request` (default) or `transaction_request` (`wallet` required)
-  - billing details for `ccbill`/`stripe`: `email`, `first_name`, `last_name`, `address1`, `city`, `state`, `zip`, `country`
+  - billing details for `ccbill`/`stripe`: `email`, `name_on_card`, `address1`, `city`, `state`, `zip`, `country`; legacy `first_name`/`last_name` aliases remain accepted
 - `metadata` (optional string map)
 
 Response: checkout session with `payment` details, `next_action`

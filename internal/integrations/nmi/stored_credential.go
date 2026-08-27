@@ -32,7 +32,11 @@ import (
 type StoredCredential struct {
 	InitiatedBy          string // "customer" | "merchant"
 	Indicator            string // "stored" | "used"
-	InitialTransactionID string // "" only on the initial customer-initiated transaction
+	InitialTransactionID string // "" on the initial CIT or a legacy best-effort MIT fallback
+	// AllowUnanchoredMIT must be set explicitly by a legacy recovery caller.
+	// It never makes the request network-compliant; it only keeps historical
+	// subscriptions chargeable when the original reference is unrecoverable.
+	AllowUnanchoredMIT bool
 	// Recurring: stamp billing_method=recurring (recurring-agreement charge).
 	// False = unscheduled credential-on-file: no billing_method on the wire.
 	Recurring bool
@@ -70,11 +74,24 @@ func (sc *StoredCredential) Validate() error {
 			return errors.New("initial stored credential transaction must not carry initial_transaction_id")
 		}
 	case IndicatorUsed:
-		if initialTransactionID == "" {
+		if initialTransactionID == "" && !(sc.InitiatedBy == InitiatedByMerchant && sc.AllowUnanchoredMIT) {
 			return errors.New("subsequent stored credential transaction requires initial_transaction_id")
 		}
 	}
 	return nil
+}
+
+// IsUnanchoredMIT reports the legacy recovery posture where OpenRails still
+// sends the required merchant/used indicators but cannot replay the original
+// NMI transaction ID. NMI requires that ID for a fully compliant MIT; this
+// exceptional path exists only to avoid stranding historical subscriptions
+// whose anchor was never captured.
+func (sc *StoredCredential) IsUnanchoredMIT() bool {
+	return sc != nil &&
+		sc.InitiatedBy == InitiatedByMerchant &&
+		sc.Indicator == IndicatorUsed &&
+		sc.AllowUnanchoredMIT &&
+		strings.TrimSpace(sc.InitialTransactionID) == ""
 }
 
 // ApplyToForm stamps the credential-on-file fields onto a classic Direct Post

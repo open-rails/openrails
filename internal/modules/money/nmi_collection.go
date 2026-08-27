@@ -60,15 +60,16 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen
 	}
 
 	// NMI requires every subsequent CIT/MIT to reference the approved initial
-	// transaction. Never send a reference-less off-session charge: the customer
-	// must complete a customer-present transaction to establish this agreement
-	// sequence first.
+	// transaction. Replay it whenever captured; historical rows without it use
+	// the charger's observable best-effort merchant+used fallback so collection
+	// remains available while still surfacing the compliance exception.
 	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
 	if priorRef == "" {
-		return ChargeResult{}, fmt.Errorf(
-			"nmi collection: payment method %s has no unscheduled stored-credential anchor; customer-initiated re-enrollment is required",
-			method.ID,
-		)
+		priorRef = strings.TrimSpace(method.InitialTransactionID)
+	}
+	credentialContext := charge.UnscheduledMIT(priorRef)
+	if priorRef == "" {
+		credentialContext = charge.LegacyUnanchoredUnscheduledMIT()
 	}
 
 	res, err := a.Charger.Charge(ctx, charge.Request{
@@ -82,7 +83,7 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen
 		Currency:    currency,
 		Description: description,
 		OrderRef:    nmiWireOrderRef(req.IdempotencyKey),
-		Context:     charge.UnscheduledMIT(priorRef),
+		Context:     credentialContext,
 	})
 	if err != nil {
 		return ChargeResult{}, err

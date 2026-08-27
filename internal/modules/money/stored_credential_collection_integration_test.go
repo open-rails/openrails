@@ -52,14 +52,14 @@ func (f *fakeClassicNMIGateway) form(t *testing.T, i int) url.Values {
 	return f.forms[i]
 }
 
-// TestChargeOutstanding_StoredCredentialMITRequiresAnchor is the #297 collection
+// TestChargeOutstanding_StoredCredentialMITFallbacks is the #297 collection
 // proof over the charge seam (ChargeOutstanding → ScopedCharger →
 // NMICollectionAdapter → nmidirect.Charger → classic Direct Post):
 //
-//  1. an instrument with no approved CIT anchor fails before any NMI request;
-//  2. after a customer-present anchor is recorded, collection sends the
-//     compliant merchant+used+initial_transaction_id MIT.
-func TestChargeOutstanding_StoredCredentialMITRequiresAnchor(t *testing.T) {
+//  1. a missing agreement-scoped anchor uses the legacy initial transaction;
+//  2. a fully unanchored historical row still sends merchant+used best effort;
+//  3. an agreement-scoped anchor always wins and rides initial_transaction_id.
+func TestChargeOutstanding_StoredCredentialMITFallbacks(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	cleanupInvoiceRows(t, pool, ctx, payer)
 
@@ -76,7 +76,7 @@ func TestChargeOutstanding_StoredCredentialMITRequiresAnchor(t *testing.T) {
 	// Instrument starts with no stored-credential references.
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailNMI), "vault-297-"+uuid.NewString()[:8])
 	_, err = pool.Exec(ctx,
-		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = '' WHERE id = $1", pm)
+		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = '', initial_transaction_id = 'legacy-initial-297' WHERE id = $1", pm)
 	require.NoError(t, err)
 
 	charger := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
@@ -101,18 +101,41 @@ func TestChargeOutstanding_StoredCredentialMITRequiresAnchor(t *testing.T) {
 	_, err = svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	// Leg 1: no anchor means no network request.
-	require.Empty(t, refOf(), "instrument starts without an agreement anchor")
+	// Leg 1: no scoped anchor uses the older vault-creation transaction ID.
+	require.Empty(t, refOf(), "instrument starts without an agreement-scoped anchor")
 	n, err := svc.ChargeOutstanding(ctx, charger, 0)
-	require.ErrorContains(t, err, "no unscheduled stored-credential anchor")
-	require.Zero(t, n)
-	fake.mu.Lock()
-	assert.Empty(t, fake.forms, "reference-less MIT must not reach NMI")
-	fake.mu.Unlock()
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	legacyForm := fake.form(t, 0)
+	assert.Equal(t, "merchant", legacyForm.Get("initiated_by"))
+	assert.Equal(t, "used", legacyForm.Get("stored_credential_indicator"))
+	assert.Equal(t, "legacy-initial-297", legacyForm.Get("initial_transaction_id"))
 	assert.Empty(t, refOf())
 
-	// Leg 2: a customer-present transaction establishes the anchor; collection
+	// Leg 2: when neither reference can be recovered, do the explicit
+	// availability-first MIT and omit only initial_transaction_id.
+	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "297-unanchored-"+uuid.NewString()[:8], 150*10_000)
+	require.NoError(t, err)
+	_, err = svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-2*time.Hour), time.Now().Add(2*time.Hour))
+	require.NoError(t, err)
+	_, err = pool.Exec(ctx,
+		"UPDATE openrails.payment_methods SET initial_transaction_id = '' WHERE id = $1", pm)
+	require.NoError(t, err)
+	n, err = svc.ChargeOutstanding(ctx, charger, 0)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	unanchoredForm := fake.form(t, 1)
+	assert.Equal(t, "merchant", unanchoredForm.Get("initiated_by"))
+	assert.Equal(t, "used", unanchoredForm.Get("stored_credential_indicator"))
+	assert.NotContains(t, unanchoredForm, "initial_transaction_id")
+	assert.Empty(t, refOf(), "fallback MIT is not promoted as an initial CIT")
+
+	// Leg 3: a customer-present transaction establishes the scoped anchor; collection
 	// replays it without replacing it with an MIT transaction.
+	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "297-anchored-"+uuid.NewString()[:8], 150*10_000)
+	require.NoError(t, err)
+	_, err = svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-3*time.Hour), time.Now().Add(3*time.Hour))
+	require.NoError(t, err)
 	const anchor = "approved-cit-297"
 	_, err = pool.Exec(ctx,
 		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
@@ -121,7 +144,7 @@ func TestChargeOutstanding_StoredCredentialMITRequiresAnchor(t *testing.T) {
 	n, err = svc.ChargeOutstanding(ctx, charger, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
-	form := fake.form(t, 0)
+	form := fake.form(t, 2)
 	assert.Equal(t, "merchant", form.Get("initiated_by"))
 	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
 	assert.Equal(t, anchor, form.Get("initial_transaction_id"), "MIT carries the approved CIT anchor")

@@ -170,7 +170,7 @@ POST /v1/me/checkout
     "payment_method_id": "pm_...",   // saved card — mobius/stripe
     "payment_token": "tok_...",      // fresh browser-tokenized card — mobius/stripe
     "token_symbol": "USDC",          // solana
-    "email": "...", "first_name": "...", "last_name": "...",
+    "email": "...", "name_on_card": "...",
     "address1": "...", "city": "...", "state": "...", "zip": "...", "country": "US"
   },                                 // billing fields required for ccbill/stripe
   "metadata": { "source": "web" }
@@ -179,6 +179,11 @@ POST /v1/me/checkout
 
 Send an `Idempotency-Key` header on create — retries with the same key replay the
 original response instead of double-charging.
+
+Render `name_on_card` as one visible input with `autocomplete="cc-name"`.
+OpenRails keeps that full value canonical and projects it onto provider-specific
+first/last fields only at the rail boundary. Legacy `first_name` and `last_name`
+request aliases remain accepted for existing integrations.
 
 #### Letting the merchant route
 
@@ -252,7 +257,7 @@ sequenceDiagram
 ### Payment methods
 
 `POST /v1/me/payment-methods` takes a Collect.js `payment_token` plus billing details
-(`first_name`, `last_name`, `address1`, `city`, `state`, `zip`, `country`, optional
+(`name_on_card`, `address1`, `city`, `state`, `zip`, `country`, optional
 `email`/`phone`) and creates an NMI vault record. `PUT /:id` replaces an NMI card and
 requires the Collect.js `payment_token`, `last_four`, `card_type`, and `expiry_date`
 returned by tokenization. Checkout with a fresh `payment_token` also persists a payment method

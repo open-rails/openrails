@@ -20,6 +20,7 @@ func RejectPANShapedFields(req *CheckoutRequest) error {
 		"bt_token_intent_id": req.BTTokenIntentID,
 		"payment_method_id":  req.PaymentMethodID,
 		"email":              req.Email,
+		"name_on_card":       req.NameOnCard,
 		"first_name":         req.FirstName,
 		"last_name":          req.LastName,
 		"address1":           req.Address1,

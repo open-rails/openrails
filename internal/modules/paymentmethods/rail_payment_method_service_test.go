@@ -25,6 +25,20 @@ type fakePaymentMethodStore struct {
 	created []*models.PaymentMethod
 }
 
+func TestNMINamePartsPrefersCanonicalFullNameAndAcceptsMononym(t *testing.T) {
+	first, last := nmiNameParts("Stale", "Alias", "María José Carreño Quiñones")
+	require.Equal(t, "María", first)
+	require.Equal(t, "José Carreño Quiñones", last)
+
+	first, last = nmiNameParts("", "", "Prince")
+	require.Equal(t, "Prince", first)
+	require.Empty(t, last)
+
+	first, last = nmiNameParts("María de", "la Vega", "")
+	require.Equal(t, "María de", first)
+	require.Equal(t, "la Vega", last)
+}
+
 func (f *fakePaymentMethodStore) Create(_ context.Context, method *models.PaymentMethod) error {
 	f.created = append(f.created, method)
 	return nil

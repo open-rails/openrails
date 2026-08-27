@@ -46,6 +46,12 @@ func TestCheckoutSessionRequestFingerprintIncludesRedirectURLs(t *testing.T) {
 				req.CancelURL = "https://other.example.test/billing?checkout=cancelled"
 			},
 		},
+		{
+			name: "name on card changes",
+			mutate: func(req *CheckoutSessionCreateRequest) {
+				req.Payment.NameOnCard = "María José Carreño Quiñones"
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -61,6 +67,36 @@ func TestCheckoutSessionRequestFingerprintIncludesRedirectURLs(t *testing.T) {
 	trimmed.SuccessURL = "  " + base.SuccessURL + "  "
 	trimmed.CancelURL = "  " + base.CancelURL + "  "
 	require.Equal(t, checkoutSessionRequestFingerprint(&base), checkoutSessionRequestFingerprint(&trimmed))
+}
+
+func TestCanonicalizeCheckoutPaymentName(t *testing.T) {
+	canonical := CheckoutSessionPaymentRequest{
+		NameOnCard: "  李  小龍  ",
+		FirstName:  "ignored",
+		LastName:   "legacy",
+	}
+	canonicalizeCheckoutPaymentName(&canonical)
+	require.Equal(t, "李  小龍", canonical.NameOnCard, "canonical full value preserves internal spacing")
+	require.Equal(t, "李", canonical.FirstName)
+	require.Equal(t, "小龍", canonical.LastName)
+
+	legacy := CheckoutSessionPaymentRequest{FirstName: "María de", LastName: "la Vega"}
+	canonicalizeCheckoutPaymentName(&legacy)
+	require.Equal(t, "María de la Vega", legacy.NameOnCard)
+	require.Equal(t, "María de", legacy.FirstName, "legacy explicit split is preserved")
+	require.Equal(t, "la Vega", legacy.LastName)
+}
+
+func TestRequireBillingFieldsAcceptsCanonicalMononym(t *testing.T) {
+	payment := &CheckoutSessionPaymentRequest{
+		Email:      "prince@example.test",
+		NameOnCard: "Prince",
+		Address1:   "1 Main St",
+		City:       "Minneapolis",
+		Zip:        "55401",
+		Country:    "US",
+	}
+	require.NoError(t, requireBillingFields(payment))
 }
 
 func TestValidatePaymentRejectsStripeSavedPaymentMethod(t *testing.T) {

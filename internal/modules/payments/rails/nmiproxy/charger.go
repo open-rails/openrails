@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
 // Rail is the rail vocabulary value (payment_methods.rail / payments.rail).
@@ -73,6 +74,19 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	src := c.Source
 	if strings.TrimSpace(src.TokenID) == "" && strings.TrimSpace(src.TokenIntentID) == "" {
 		src.TokenID = strings.TrimSpace(req.Instrument.MethodRef)
+	}
+	if nmidirect.StoredCredentialFor(req.Context).IsUnanchoredMIT() {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"payment_method_id": req.Instrument.PaymentMethodID,
+			"rail":              req.Instrument.Rail,
+			"agreement":         req.Context.Agreement,
+			"order_ref":         req.OrderRef,
+		}).Warn("nmiproxy: sending best-effort MIT without the stored-credential anchor")
+		opsmetric.Emit(ctx, opsmetric.MetricNMIUnanchoredMIT, log.Fields{
+			"transport":         "custodian_proxy",
+			"payment_method_id": req.Instrument.PaymentMethodID,
+			"agreement":         req.Context.Agreement,
+		})
 	}
 
 	if src.via() == ViaNetworkToken {

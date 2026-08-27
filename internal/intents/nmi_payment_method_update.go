@@ -40,6 +40,7 @@ type NMIPaymentMethodUpdatePayload struct {
 	RailCustomerRef string    `json:"rail_customer_ref"`
 	RailMethodRef   string    `json:"rail_method_ref,omitempty"`
 	PaymentToken    string    `json:"payment_token"`
+	NameOnCard      string    `json:"name_on_card,omitempty"`
 	FirstName       string    `json:"first_name,omitempty"`
 	LastName        string    `json:"last_name,omitempty"`
 	Address1        string    `json:"address1,omitempty"`
@@ -191,7 +192,7 @@ func (h *NMIPaymentMethodUpdateHandler) Execute(ctx context.Context, intent gen.
 	if !payload.TargetCard.matches(confirmed) {
 		return Ambiguous("card replacement accepted, but NMI has not confirmed the requested masked card")
 	}
-	return h.finalize(ctx, intent, pm, confirmed, "provider_confirmed_inline")
+	return h.finalize(ctx, intent, pm, confirmed, payload.NameOnCard, "provider_confirmed_inline")
 }
 
 func (h *NMIPaymentMethodUpdateHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
@@ -248,7 +249,7 @@ func (h *NMIPaymentMethodUpdateHandler) dependencies(ctx context.Context, intent
 func (h *NMIPaymentMethodUpdateHandler) reconcile(ctx context.Context, intent gen.OpenrailsRailIntent, payload NMIPaymentMethodUpdatePayload, pm *models.PaymentMethod, remote, old nmiCard) Outcome {
 	switch {
 	case payload.TargetCard.matches(remote):
-		return h.finalize(ctx, intent, pm, remote, "provider_confirmed_by_read")
+		return h.finalize(ctx, intent, pm, remote, payload.NameOnCard, "provider_confirmed_by_read")
 	case old.complete() && old.matches(remote):
 		return retokenizeTerminal("NMI still has the original card; the single-use replacement token cannot be submitted again")
 	default:
@@ -259,7 +260,7 @@ func (h *NMIPaymentMethodUpdateHandler) reconcile(ctx context.Context, intent ge
 	}
 }
 
-func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, pm *models.PaymentMethod, remote nmiCard, confirmation string) Outcome {
+func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen.OpenrailsRailIntent, pm *models.PaymentMethod, remote nmiCard, nameOnCard, confirmation string) Outcome {
 	latest, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, pm.ID)
 	if err != nil {
 		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
@@ -270,6 +271,12 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 	latest.LastFour = stringPtr(remote.LastFour)
 	latest.CardType = stringPtr(remote.CardType)
 	latest.ExpiryDate = stringPtr(remote.ExpiryDate)
+	if name := strings.TrimSpace(nameOnCard); name != "" {
+		if latest.Metadata == nil {
+			latest.Metadata = map[string]any{}
+		}
+		latest.Metadata["name_on_card"] = name
+	}
 	latest.UpdatedAt = h.now()
 	finalize := h.finalizeWrite
 	if finalize == nil {
@@ -420,6 +427,7 @@ func (t *PaymentMethodUpdateThrough) ExecutePaymentMethodUpdate(ctx context.Cont
 		RailCustomerRef: pm.RailCustomerRef,
 		RailMethodRef:   pm.RailMethodRef,
 		PaymentToken:    strings.TrimSpace(*req.PaymentToken),
+		NameOnCard:      valueOrEmpty(req.NameOnCard),
 		FirstName:       valueOrEmpty(req.FirstName),
 		LastName:        valueOrEmpty(req.LastName),
 		Address1:        valueOrEmpty(req.Address1),

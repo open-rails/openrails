@@ -523,8 +523,8 @@ func (s *CheckoutService) processCCBillSubscription(
 	flexFormParams := &ccbill.GenerateFlexFormURLParams{
 		Username:      user.Username,
 		Email:         *user.Email,
-		CustomerFName: req.FirstName,
-		CustomerLName: req.LastName,
+		CustomerFName: ResolveCheckoutFirstName(req, user),
+		CustomerLName: DefaultIfEmpty(ResolveCheckoutLastName(req), ResolveCheckoutFirstName(req, user)),
 		Address1:      req.Address1,
 		City:          req.City,
 		State:         req.State,

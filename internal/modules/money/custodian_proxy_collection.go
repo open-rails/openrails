@@ -52,10 +52,11 @@ func (a *CustodianProxyCollectionAdapter) ChargeSavedMethod(ctx context.Context,
 
 	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
 	if priorRef == "" {
-		return ChargeResult{}, fmt.Errorf(
-			"custodian-proxy collection: payment method %s has no unscheduled stored-credential anchor; customer-initiated re-enrollment is required",
-			method.ID,
-		)
+		priorRef = strings.TrimSpace(method.InitialTransactionID)
+	}
+	credentialContext := charge.UnscheduledMIT(priorRef)
+	if priorRef == "" {
+		credentialContext = charge.LegacyUnanchoredUnscheduledMIT()
 	}
 
 	res, err := a.Charger.WithSource(nmiproxy.Source{
@@ -72,7 +73,7 @@ func (a *CustodianProxyCollectionAdapter) ChargeSavedMethod(ctx context.Context,
 		Currency:    currency,
 		Description: description,
 		OrderRef:    nmiWireOrderRef(req.IdempotencyKey),
-		Context:     charge.UnscheduledMIT(priorRef),
+		Context:     credentialContext,
 	})
 	if err != nil {
 		return ChargeResult{}, err

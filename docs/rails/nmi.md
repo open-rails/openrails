@@ -130,15 +130,20 @@ doesn't surprise you:
   v5 has no equivalent). Stored-card sales and manual rebills also use Classic
   so every authorization carries NMI's `initiated_by` and
   `stored_credential_indicator`; every subsequent CIT/MIT additionally carries
-  its agreement's initial NMI transaction ID. Incomplete combinations fail
-  before network I/O. Subscription updates stay on Classic because the
+  its agreement's initial NMI transaction ID whenever OpenRails captured it.
+  Implicit incomplete combinations fail before network I/O. Subscription updates stay on Classic because the
   documented `PATCH /v5/subscriptions/{id}` returns `E_ROUTE_NOT_FOUND` on the
   live gateway. Transaction search stays on `query.php` (v5 has no list/search).
-- **Legacy methods need a sequence anchor.** An imported or historical payment
-  method without the appropriate recurring or unscheduled initial transaction
-  ID cannot be charged off-session. OpenRails parks the operation before NMI;
-  the customer must complete a customer-present transaction to establish the
-  applicable agreement sequence.
+- **Legacy anchor recovery is availability-first and observable.** OpenRails
+  first uses the agreement-scoped recurring/unscheduled reference, then the
+  older vault-creation `initial_transaction_id`. If neither survived migration,
+  an explicitly marked legacy MIT still sends `initiated_by=merchant` and
+  `stored_credential_indicator=used`, omitting only the unavailable reference.
+  That final path emits the `nmi.stored_credential.unanchored_mit` operational
+  metric and a structured warning. It avoids stranding subscriptions, but it is
+  not fully network-compliant: NMI requires the original CIT reference on every
+  subsequent transaction. A successful fallback MIT is never persisted as if
+  it were the original CIT anchor.
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference

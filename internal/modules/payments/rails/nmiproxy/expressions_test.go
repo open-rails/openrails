@@ -189,6 +189,24 @@ func TestSaleFormWirePins(t *testing.T) {
 			t.Fatal("51-char order id must error, never truncate")
 		}
 	})
+
+	t.Run("explicit legacy MIT keeps indicators and omits only the anchor", func(t *testing.T) {
+		form, err := SaleForm(
+			baseReq(charge.LegacyUnanchoredUnscheduledMIT()),
+			Source{TokenID: testTokenID},
+			testGW,
+			nil,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if form.Get("initiated_by") != "merchant" || form.Get("stored_credential_indicator") != "used" {
+			t.Fatalf("best-effort MIT lost its COF indicators: %v", form)
+		}
+		if form.Has("initial_transaction_id") {
+			t.Fatalf("unavailable anchor must be omitted: %v", form)
+		}
+	})
 }
 
 // TestChargerOutcomes drives the Charger against a fake BT proxy to pin the

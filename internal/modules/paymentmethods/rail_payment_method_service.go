@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -212,6 +213,14 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 	}
 
 	firstName, lastName := nmiNameParts(req.FirstName, req.LastName, req.NameOnCard)
+	canonicalName := cardholdername.Canonical(req.NameOnCard, req.FirstName, req.LastName)
+	metadata := req.Metadata
+	if canonicalName != "" {
+		if metadata == nil {
+			metadata = map[string]any{}
+		}
+		metadata["name_on_card"] = canonicalName
+	}
 	// NMI sandbox accounts refuse any customer email that is not the account
 	// owner's own address (403 E_ACCESS_DENIED), which fails vault creation
 	// outright. The email is not needed to vault a card, so omit it in test
@@ -270,7 +279,7 @@ func (s *RailPaymentMethodService) CreatePaymentMethod(ctx context.Context, user
 		LastFour:             stringPtrOrNil(sanitizeLastFour(req.LastFour)),
 		ExpiryDate:           stringPtrOrNil(sanitizeExpiryDate(req.ExpiryDate)),
 		CardType:             stringPtrOrNil(sanitizeCardType(req.CardType)),
-		Metadata:             req.Metadata,
+		Metadata:             metadata,
 	}
 	if pspID != nil {
 		pm.PspID = *pspID
@@ -449,19 +458,7 @@ func (s *RailPaymentMethodService) buildNMIClient(provider string, cfg *config.N
 }
 
 func nmiNameParts(firstName, lastName, nameOnCard string) (string, string) {
-	firstName = strings.TrimSpace(firstName)
-	lastName = strings.TrimSpace(lastName)
-	if firstName != "" || lastName != "" {
-		return firstName, lastName
-	}
-	parts := strings.Fields(strings.TrimSpace(nameOnCard))
-	if len(parts) == 0 {
-		return "", ""
-	}
-	if len(parts) == 1 {
-		return parts[0], ""
-	}
-	return parts[0], strings.Join(parts[1:], " ")
+	return cardholdername.Parts(nameOnCard, firstName, lastName)
 }
 
 func sanitizeLastFour(value string) string {
@@ -625,7 +622,9 @@ func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
 	req.LastFour = &lastFour
 	req.CardType = &cardType
 	req.ExpiryDate = &expiry
-	if req.NameOnCard != nil && req.FirstName == nil && req.LastName == nil {
+	if req.NameOnCard != nil {
+		canonical := cardholdername.Canonical(*req.NameOnCard, "", "")
+		req.NameOnCard = &canonical
 		first, last := nmiNameParts("", "", *req.NameOnCard)
 		req.FirstName = &first
 		req.LastName = &last

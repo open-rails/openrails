@@ -24,6 +24,7 @@ type CheckoutSessionPaymentRequest struct {
 	Flow            string
 	Wallet          string
 	Email           string
+	NameOnCard      string
 	FirstName       string
 	LastName        string
 	Address1        string

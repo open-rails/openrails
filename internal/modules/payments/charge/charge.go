@@ -68,9 +68,16 @@ type Context struct {
 	FirstUse bool
 
 	// PriorRef is the rail-scoped replay reference captured from the
-	// sequence's initial transaction. Required on every subsequent CIT or MIT;
-	// empty only on the initial customer-present transaction.
+	// sequence's initial transaction. It is required for a compliant subsequent
+	// CIT or MIT. Historical merchant-initiated charges may leave it empty only
+	// for the observable best-effort recovery path; new integrations must
+	// always capture and replay it.
 	PriorRef string
+
+	// UnanchoredBestEffort is an explicit availability-first exception for a
+	// merchant-initiated charge whose original reference cannot be recovered.
+	// Rail adapters must never infer this posture from an empty PriorRef.
+	UnanchoredBestEffort bool
 }
 
 // InitialOneTime: cardholder-present charge anchoring the unscheduled
@@ -98,16 +105,38 @@ func RecurringReuse(priorRef string) Context {
 }
 
 // RecurringMIT: merchant-initiated recurring charge (renewal, dunning retry).
-// priorRef must identify the approved initial recurring CIT.
+// priorRef must identify the approved initial recurring CIT. Use the explicitly
+// named legacy constructor when no reference can be recovered.
 func RecurringMIT(priorRef string) Context {
 	return Context{Initiator: InitiatorMerchant, Agreement: AgreementRecurring, PriorRef: priorRef}
 }
 
 // UnscheduledMIT: merchant-initiated unscheduled charge (auto top-up,
 // arrears/invoice collection). priorRef must identify the approved initial
-// unscheduled CIT.
+// unscheduled CIT. Use the explicitly named legacy constructor when no
+// reference can be recovered.
 func UnscheduledMIT(priorRef string) Context {
 	return Context{Initiator: InitiatorMerchant, Agreement: AgreementUnscheduled, PriorRef: priorRef}
+}
+
+// LegacyUnanchoredRecurringMIT is the explicit recovery path for historical
+// recurring instruments whose original CIT reference is unrecoverable.
+func LegacyUnanchoredRecurringMIT() Context {
+	return Context{
+		Initiator:            InitiatorMerchant,
+		Agreement:            AgreementRecurring,
+		UnanchoredBestEffort: true,
+	}
+}
+
+// LegacyUnanchoredUnscheduledMIT is the explicit recovery path for historical
+// unscheduled instruments whose original CIT reference is unrecoverable.
+func LegacyUnanchoredUnscheduledMIT() Context {
+	return Context{
+		Initiator:            InitiatorMerchant,
+		Agreement:            AgreementUnscheduled,
+		UnanchoredBestEffort: true,
+	}
 }
 
 // Instrument identifies the stored payment credential to charge, by its

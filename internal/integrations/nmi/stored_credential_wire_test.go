@@ -257,3 +257,32 @@ func TestAttemptManualRebill_ReferenceLessMITFailsBeforeNetwork(t *testing.T) {
 	require.ErrorContains(t, err, "requires initial_transaction_id")
 	assert.Zero(t, requests)
 }
+
+func TestAttemptManualRebill_ExplicitUnanchoredMITUsesBestEffortWire(t *testing.T) {
+	var form url.Values
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		form = r.Form
+		fmt.Fprint(w, "response=1&transactionid=t-best-effort")
+	}))
+	defer server.Close()
+
+	client := newTestClient(t, server.URL)
+	resp, err := client.AttemptManualRebill(context.Background(), ManualRebillParams{
+		VaultID:        "v1",
+		BillingID:      "b1",
+		SubscriptionID: "sub1",
+		StoredCredential: &StoredCredential{
+			InitiatedBy:        InitiatedByMerchant,
+			Indicator:          IndicatorUsed,
+			Recurring:          true,
+			AllowUnanchoredMIT: true,
+		},
+	})
+	require.NoError(t, err)
+	require.True(t, resp.Success)
+	assert.Equal(t, "merchant", form.Get("initiated_by"))
+	assert.Equal(t, "used", form.Get("stored_credential_indicator"))
+	assert.Equal(t, "recurring", form.Get("billing_method"))
+	assert.NotContains(t, form, "initial_transaction_id", "only the unavailable anchor is omitted")
+}
