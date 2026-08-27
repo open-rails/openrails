@@ -906,6 +906,14 @@ type OpenrailsOperationAuthorization struct {
 	CreatedAt               time.Time
 	ReleasedAt              *time.Time
 	SettledAt               *time.Time
+	// Qualified final provider-cost basis supplied by the OpenRails evidence qualifier.
+	SettlementProviderCostUsdMicros *int64
+	// OpenRails-owned final customer settlement. The permanent pass-through contract maps qualified provider cost directly, so this equals settlement_provider_cost_usd_micros; it may exceed authorization and is never clamped.
+	SettlementRatedUsdMicros *int64
+	// Exact canonical bytes authored by the OpenRails evidence qualifier from provider observations and lifecycle evidence.
+	SettlementBodyBytes []byte
+	// OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.
+	SettlementBodyDigest []byte
 }
 
 // #690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).

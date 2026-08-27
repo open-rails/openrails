@@ -20,9 +20,7 @@ type OperationAuthorizationState = money.OperationAuthorizationState
 const (
 	OperationAuthorizationOpen     = money.OperationAuthorizationOpen
 	OperationAuthorizationReleased = money.OperationAuthorizationReleased
-	// OperationAuthorizationSettled has no public transition in this slice;
-	// settlement requires a future tx-native capture that excludes its own hold.
-	OperationAuthorizationSettled = money.OperationAuthorizationSettled
+	OperationAuthorizationSettled  = money.OperationAuthorizationSettled
 )
 
 var (
@@ -47,21 +45,25 @@ type OperationAuthorizationRequest struct {
 }
 
 type OperationAuthorization struct {
-	OperationID             string
-	MerchantID              uuid.UUID
-	Payer                   identity.CustomerID
-	RecordOwner             string
-	LedgerAccountID         uuid.UUID
-	AuthorizedUSDMicros     int64
-	ClaimReference          string
-	AuthorizationBody       []byte
-	AuthorizationBodySHA256 [sha256.Size]byte
-	State                   OperationAuthorizationState
-	TerminalReference       string
-	CreatedAt               time.Time
-	ReleasedAt              *time.Time
-	SettledAt               *time.Time
-	Replayed                bool
+	OperationID                     string
+	MerchantID                      uuid.UUID
+	Payer                           identity.CustomerID
+	RecordOwner                     string
+	LedgerAccountID                 uuid.UUID
+	AuthorizedUSDMicros             int64
+	ClaimReference                  string
+	AuthorizationBody               []byte
+	AuthorizationBodySHA256         [sha256.Size]byte
+	State                           OperationAuthorizationState
+	TerminalReference               string
+	SettlementProviderCostUSDMicros *int64
+	SettlementRatedUSDMicros        *int64
+	SettlementBody                  []byte
+	SettlementBodySHA256            [sha256.Size]byte
+	CreatedAt                       time.Time
+	ReleasedAt                      *time.Time
+	SettledAt                       *time.Time
+	Replayed                        bool
 }
 
 type ReleaseOperationAuthorizationRequest struct {
@@ -136,20 +138,24 @@ func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *Operat
 		return nil
 	}
 	return &OperationAuthorization{
-		OperationID:             auth.OperationID,
-		MerchantID:              auth.MerchantID,
-		Payer:                   auth.Payer,
-		RecordOwner:             auth.RecordOwner,
-		LedgerAccountID:         auth.LedgerAccountID,
-		AuthorizedUSDMicros:     auth.AuthorizedUSDMicros,
-		ClaimReference:          auth.ClaimReference,
-		AuthorizationBody:       auth.AuthorizationBody,
-		AuthorizationBodySHA256: auth.AuthorizationBodySHA256,
-		State:                   auth.State,
-		TerminalReference:       auth.TerminalReference,
-		CreatedAt:               auth.CreatedAt,
-		ReleasedAt:              auth.ReleasedAt,
-		SettledAt:               auth.SettledAt,
-		Replayed:                auth.Replayed,
+		OperationID:                     auth.OperationID,
+		MerchantID:                      auth.MerchantID,
+		Payer:                           auth.Payer,
+		RecordOwner:                     auth.RecordOwner,
+		LedgerAccountID:                 auth.LedgerAccountID,
+		AuthorizedUSDMicros:             auth.AuthorizedUSDMicros,
+		ClaimReference:                  auth.ClaimReference,
+		AuthorizationBody:               auth.AuthorizationBody,
+		AuthorizationBodySHA256:         auth.AuthorizationBodySHA256,
+		State:                           auth.State,
+		TerminalReference:               auth.TerminalReference,
+		SettlementProviderCostUSDMicros: auth.SettlementProviderCostUSDMicros,
+		SettlementRatedUSDMicros:        auth.SettlementRatedUSDMicros,
+		SettlementBody:                  auth.SettlementBody,
+		SettlementBodySHA256:            auth.SettlementBodySHA256,
+		CreatedAt:                       auth.CreatedAt,
+		ReleasedAt:                      auth.ReleasedAt,
+		SettledAt:                       auth.SettledAt,
+		Replayed:                        auth.Replayed,
 	}
 }
