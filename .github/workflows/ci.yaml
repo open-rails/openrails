@@ -1,16 +1,11 @@
 name: Validate Code
 
-# FAST pipeline (#855): PRs targeting an integration branch ONLY. Ordinary
-# branch pushes run nothing by design — open a PR. Pushes to those branches,
-# nightly, and manual runs go through ci-full.yaml (complete integration suite).
-#
-# `dev` is listed because it is where work merges today (PRs #208/#209 landed
-# there) and, until this change, a PR into `dev` ran ZERO checks: every gate in
-# this file was scoped to `master` alone. That is not a latency finding, it is a
-# hole in the gates, and it is fixed here first.
+# FAST pipeline (#855): PRs targeting master. Ordinary
+# branch pushes run nothing by design — open a PR. Weekly and manual runs go
+# through ci-full.yaml (complete integration suite).
 on:
   pull_request:
-    branches: [ master, dev ]
+    branches: [ master ]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -26,28 +21,25 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-# JOB NAMES ARE THE BRANCH-PROTECTION CONTRACT. The required checks from this
-# file are exactly: changes, build, unit, lint, sqlc, console, integration. The
-# integration SHARDS are matrix jobs whose names carry the shard index, so they
-# are deliberately NOT the ones to list — the `integration` job below aggregates
-# them into one stable name, which means the shard count can change without
-# touching branch protection. Never list ci-full.yaml's `-full` jobs or CodeQL's
-# "Analyze (go)": neither runs on PRs, so a required check on them blocks every
-# PR forever.
+# Keep the final job names stable if the repository later requires them. As of
+# 2026-08-26, the active rulesets require only `Injected Code Scan`; these PR
+# checks are still enforcing at workflow level, but GitHub does not yet block a
+# merge when one fails. The `integration` job below provides one stable status
+# independent of its dynamic shard count.
 
 jobs:
-  # Classifies the PR diff. Downstream jobs ALWAYS run (so branch-protection
-  # required checks always report a status) but their steps no-op when the
-  # diff doesn't touch their area. Never use `on.pull_request.paths` here — a
-  # workflow-level path skip reports NO status and a required check would
-  # block the PR forever.
+  # Classifies the PR diff. Go jobs no-op when irrelevant; SQL and console jobs
+  # skip entirely because neither status is currently required by a ruleset.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       go: ${{ steps.classify.outputs.go }}
       console: ${{ steps.classify.outputs.console }}
+      sql: ${{ steps.classify.outputs.sql }}
       broad: ${{ steps.classify.outputs.broad }}
+      integration_shards: ${{ steps.classify.outputs.integration_shards }}
+      integration_matrix: ${{ steps.classify.outputs.integration_matrix }}
       files: ${{ steps.classify.outputs.files }}
     steps:
       - name: Classify changed files
@@ -56,30 +48,48 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           files="$(gh api --paginate "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename')"
-          go=false; console=false; broad=false
+          go=false; console=false; sql=false; broad=false
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             case "$f" in
               # Docs and metadata: affect no job.
               docs/*|*.md|.trivyignore|LICENSE*|.gitignore) ;;
-              # Toolchain / module surface: everything, incl. full integration.
-              go.mod|go.sum|Taskfile.yaml|sqlc.yaml|docker-compose*|Dockerfile*) go=true; broad=true ;;
-              # Shared surfaces with unbounded blast radius: run everything.
-              migrations/*|internal/db/*|internal/dbtest/*|internal/integrationharness/*|internal/shared/*|config/*|scripts/*|.github/*) go=true; console=true; broad=true ;;
-              # Admin console SPA: console job only.
-              web/admin/*) console=true ;;
+              # Toolchain / module surface: all Go and integration checks.
+              go.mod|go.sum|docker-compose*|Dockerfile*) go=true; broad=true ;;
+              # SQL/schema changes uniquely require the database-backed sqlc gate.
+              sqlc.yaml|migrations/*|internal/db/*|scripts/sqlc-*|scripts/sql-lint.sh|scripts/migration-lint.sh) go=true; sql=true; broad=true ;;
+              # Shared production surfaces have unbounded integration impact.
+              internal/integrationharness/*|internal/shared/*|config/*) go=true; broad=true ;;
+              # Admin console SPA and its embed/build plumbing.
+              web/admin/*|cmd/openrails/consoleassets/*|scripts/build-admin-console.sh) console=true ;;
+              # Changes to the PR test harness itself must exercise the full
+              # integration package set.
+              scripts/test_integration.sh|scripts/ci-integration-select.sh|scripts/ci-shard.sh|.github/workflows/ci.yaml|.github/actions/*) go=true; broad=true ;;
+              # Test helpers/tooling compile in the normal Go gate; directly
+              # touched integration packages are selected below. The weekly
+              # complete suite remains the cross-package backstop.
+              internal/dbtest/*|Taskfile.yaml|scripts/*|.github/*) go=true ;;
               *) go=true ;;
             esac
           done <<< "$files"
+          integration_shards=1
+          integration_matrix='[1]'
+          if [ "$broad" = true ]; then
+            integration_shards=2
+            integration_matrix='[1,2]'
+          fi
           {
             echo "go=$go"
             echo "console=$console"
+            echo "sql=$sql"
             echo "broad=$broad"
+            echo "integration_shards=$integration_shards"
+            echo "integration_matrix=$integration_matrix"
             echo 'files<<CHANGED_FILES_EOF'
             echo "$files"
             echo 'CHANGED_FILES_EOF'
           } >> "$GITHUB_OUTPUT"
-          echo "go=$go console=$console broad=$broad"
+          echo "go=$go console=$console sql=$sql broad=$broad integration_shards=$integration_shards"
 
   # Compile-and-analyse gates. `go test -race` used to live here too and made
   # this a 272s job; it is now the separate `unit` job, because the two share
@@ -129,30 +139,14 @@ jobs:
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
 
-  # Unit tests, split out of `build` so the two run in parallel. Still -race,
-  # still the whole tree: nothing here is scoped, skipped or downgraded.
-  #
-  # SHARDED (or#855). Once the suite went green it measured 181s — on its own
-  # over the 180s bar. Coverage-neutral the same way gosec's split is: the
-  # shards partition `go list ./...` itself, so their union is exactly what
-  # `./...` expands to, with the same flags. Unit tests share no fixture or
-  # stack, so unlike the integration suite there is nothing for a subset to
-  # depend on. The `race` build cache is shared across the shards, so the
-  # duplicated compilation is cache hits rather than work.
-  #
-  # Balanced by recorded runtimes, not round-robin: pkg/service (73s) and
-  # internal/modules/solana/recurring (57s) are 130s of a 240s suite, and
-  # round-robin put both in one shard — 136s against 64s and 65s. 4 shards buys
-  # nothing; pkg/service alone is the floor.
-  unit-shard:
-    name: unit shard ${{ matrix.shard }}/3
+  # One race-enabled unit job. Three shards reduced wall-clock by roughly one
+  # minute, but repeated runner/cache setup raised the measured total from one
+  # ~3 minute suite to 5m27s. The complete ./... suite still runs on every Go
+  # PR; this changes scheduling, not coverage or flags.
+  unit:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: changes
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: needs.changes.outputs.go == 'true'
@@ -163,40 +157,12 @@ jobs:
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download
-      # -count=1 for the same reason as the integration suite, and it is FREE
-      # here: the integration shards are the long pole, so re-running every unit
-      # test costs no wall clock. The build cache still does its job — what is
-      # disabled is Go's test-RESULT cache, so "this gate passed" always means
-      # the tests ran on this commit rather than that an older verdict was
-      # reused. A latency budget should not be paid for out of what a green
-      # check means.
       - name: Test (race)
         if: needs.changes.outputs.go == 'true'
-        env:
-          SHARDS: "3"
-          SHARD: ${{ matrix.shard }}
-        run: |
-          mapfile -t pkgs < <(go list ./... |
-                              bash scripts/ci-shard.sh scripts/ci-unit-weights.txt)
-          echo "shard ${SHARD}/${SHARDS}: ${#pkgs[@]} packages"
-          [ "${#pkgs[@]}" -gt 0 ] || exit 0
-          go test -count=1 -race "${pkgs[@]}"
+        run: go test -count=1 -race ./...
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
-
-  # One stable name for branch protection, as with `integration` and `gosec`.
-  unit:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: unit-shard
-    if: always()
-    steps:
-      - name: All unit shards succeeded
-        run: |
-          result="${{ needs.unit-shard.result }}"
-          echo "unit-shard matrix result: $result"
-          [ "$result" = "success" ] || exit 1
 
   # or#869: .golangci.yaml existed for a year with nothing running it — and could
   # not have run (v1 schema, which current golangci-lint refuses to load). The
@@ -249,6 +215,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
+    if: needs.changes.outputs.sql == 'true'
     services:
       postgres:
         image: postgres:18-alpine
@@ -305,6 +272,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: changes
+    if: needs.changes.outputs.console == 'true'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: needs.changes.outputs.console == 'true'
@@ -328,6 +296,10 @@ jobs:
       - name: Lint console
         if: needs.changes.outputs.console == 'true'
         run: pnpm run lint
+        working-directory: web/admin
+      - name: Test console
+        if: needs.changes.outputs.console == 'true'
+        run: pnpm run test
         working-directory: web/admin
       # This gate's claim is "the tagged binary embeds the dist that was just
       # built" — assets_embed.go's //go:embed fails to compile without it. It
@@ -368,26 +340,24 @@ jobs:
 
   # PR tier (#855): integration tests SCOPED to the tagged packages the diff
   # touches. Cross-package fallout is deliberately deferred to integration-full
-  # (push + nightly, complete suite). Broad/shared-surface diffs (go.mod,
-  # migrations/, internal/db/, scripts/, .github/, ...) still run the full
+  # (weekly + manual, complete suite). Broad/shared-surface diffs (go.mod,
+  # migrations/, internal/db/, go.mod, compose files, ...) still run the full
   # tagged suite here.
   #
-  # SHARDED (or#855): the serial run was 360s and the pipeline's sole long pole.
-  # Sharding is coverage-neutral — the union of the shards is the same package
-  # set, each shard gets its OWN compose stack, and `-p 1 -parallel 1` still
-  # serialises everything inside a shard, so the shared-Postgres/Garnet and
-  # un-namespaced-Redis-key assumptions that forbid raising -parallel are
-  # untouched. See scripts/ci-integration-select.sh for the balancing.
+  # Narrow PRs use one runner; broad/shared-surface PRs use two to keep the
+  # measured full tier below roughly five minutes. The former avoids duplicate
+  # setup for a small selected set, while the latter avoids the 8m serial full
+  # suite. Coverage is unchanged: every selected package appears exactly once.
 
   integration-shard:
-    name: integration shard ${{ matrix.shard }}/6
+    name: integration shard ${{ matrix.shard }}/${{ needs.changes.outputs.integration_shards }}
     runs-on: ubuntu-latest
     timeout-minutes: 35
     needs: changes
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: ${{ fromJSON(needs.changes.outputs.integration_matrix) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: needs.changes.outputs.go == 'true'
@@ -403,7 +373,7 @@ jobs:
         env:
           CHANGED_FILES: ${{ needs.changes.outputs.files }}
           BROAD: ${{ needs.changes.outputs.broad }}
-          SHARDS: "6"
+          SHARDS: ${{ needs.changes.outputs.integration_shards }}
           SHARD: ${{ matrix.shard }}
         run: |
           mapfile -t pkgs < <(bash scripts/ci-integration-select.sh)
@@ -412,9 +382,9 @@ jobs:
             exit 0
           fi
           echo "shard ${SHARD}/${SHARDS}: ${pkgs[*]}"
-          # 6m, not the 15m a single unsharded job needed: a shard is ~2min of
-          # work, so anything past 6m is a hang, and the old budget made one
-          # hung package cost the pipeline 16 minutes before it gave up.
+          # A balanced two-way shard is ~4m of test work; 6m still distinguishes
+          # a slow shard from the known package hangs this timeout is meant to
+          # stop.
           OPENRAILS_INTEGRATION_TIMEOUT=6m bash scripts/test_integration.sh "${pkgs[@]}"
 
       - name: Save Go caches

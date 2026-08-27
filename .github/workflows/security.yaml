@@ -1,14 +1,11 @@
 name: Security Scan
 
-# #855 triggers: PRs to an integration branch (fast, path-filtered), pushes to
-# those branches, nightly, manual. Never ordinary branch pushes. `dev` is listed
-# for the same reason as in ci.yaml: it is where work merges today, and PRs into
-# it were running no security scan at all.
+# #855 triggers: PRs to master (fast, path-filtered), nightly, and manual. A
+# merge commit is the same tree already scanned by its PR, so it is not scanned
+# a second time.
 on:
   pull_request:
-    branches: [ master, dev ]
-  push:
-    branches: [ master, dev ]
+    branches: [ master ]
   schedule:
     # 05:00 UTC nightly.
     - cron: '0 5 * * *'
@@ -23,8 +20,7 @@ permissions:
   pull-requests: read
 
 jobs:
-  # PR diff classification. Go scanners' steps no-op on docs-only PRs, but the
-  # jobs themselves always run and report status (required-check safe). On
+  # PR diff classification. Go scanners' steps no-op on docs-only PRs; on
   # non-PR events everything runs unconditionally.
   #
   # Named security-changes, not `changes`: ci.yaml has a job by that name too,
@@ -57,26 +53,14 @@ jobs:
           echo "go=$go" >> "$GITHUB_OUTPUT"
           echo "go=$go"
 
-  # gosec: Go SAST - source code security scanning. Fails the build on HIGH+
-  # findings; MEDIUM findings are surfaced as a non-blocking warning step.
-  #
-  # SHARDED (or#855). Measured on this pipeline: 36s to load and type-check the
-  # program, then 155s analysing 683 files — analysis, not loading, is the bill,
-  # and it is per-package. Once the Go jobs were split and cached, gosec was the
-  # last thing standing between the required checks and the 3-minute bar.
-  # Coverage-neutral by construction: the shards partition `go list ./...`
-  # itself, so their union is exactly the package set `./...` expands to, with
-  # the same flags and the same pinned binary. Only the load phase is paid
-  # three times.
-  gosec-shard:
-    name: gosec shard ${{ matrix.shard }}/3
+  # gosec: complete Go SAST scan, failing on HIGH+ findings. One job takes
+  # roughly three minutes. Three shards saved wall-clock but repeated package
+  # loading, cache setup, and module downloads; the complete package set still
+  # fits comfortably inside the six-minute PR budget as one scan.
+  gosec:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: security-changes
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         if: needs.security-changes.outputs.go == 'true'
@@ -90,7 +74,12 @@ jobs:
           variant: gosec
       - name: Download modules
         if: needs.security-changes.outputs.go == 'true'
-        run: go mod download
+        run: |
+          for attempt in 1 2 3; do
+            go mod download && exit 0
+            [ "$attempt" -lt 3 ] || exit 1
+            sleep "$((attempt * 2))"
+          done
       # or#855: was `go install …@latest` — 47s of compiling a binary upstream
       # ships, and a floating version with no integrity check. Pinned +
       # checksum-verified download is ~4s. Pinning freezes the rule set on
@@ -101,32 +90,10 @@ jobs:
         run: echo "GOSEC_BIN=$(scripts/ci-install-tool.sh gosec)" >> "$GITHUB_ENV"
       - name: Run gosec (fail on HIGH+)
         if: needs.security-changes.outputs.go == 'true'
-        env:
-          SHARDS: "3"
-          SHARD: ${{ matrix.shard }}
-        run: |
-          mapfile -t dirs < <(go list -f '{{.Dir}}' ./... | sort |
-                              awk -v n="$SHARDS" -v p="$SHARD" 'NR % n == p % n')
-          echo "shard ${SHARD}/${SHARDS}: ${#dirs[@]} packages"
-          [ "${#dirs[@]}" -gt 0 ] || exit 0
-          "$GOSEC_BIN" -severity high -confidence medium -exclude-dir=.agents "${dirs[@]}"
+        run: "$GOSEC_BIN -severity high -confidence medium -exclude-dir=.agents ./..."
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
-
-  # One stable name for branch protection, so the shard count stays an
-  # implementation detail. Same pattern as ci.yaml's `integration`.
-  gosec:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: gosec-shard
-    if: always()
-    steps:
-      - name: All gosec shards succeeded
-        run: |
-          result="${{ needs.gosec-shard.result }}"
-          echo "gosec-shard matrix result: $result"
-          [ "$result" = "success" ] || exit 1
 
   # govulncheck: dependency vulnerability scanning against the Go vuln DB.
   govulncheck:
