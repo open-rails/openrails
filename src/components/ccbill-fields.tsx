@@ -1,4 +1,4 @@
-// CCBill REST/tokenized-card hand-off uses the compact billing identity below.
+// CCBill credit-card hand-off uses the compact billing identity below.
 // Name stays canonical; the server derives IP and performs provider projection.
 import {
   BillingTextField,

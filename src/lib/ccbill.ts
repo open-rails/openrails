@@ -1,5 +1,5 @@
-// CCBill REST/tokenized-card identity. The customer's IP remains server-owned;
-// street, city, and state are optional to CCBill and are not collected here.
+// CCBill credit-card identity. The customer's IP remains server-owned; street,
+// city, and state are configurable FlexForms fields and are not collected here.
 import { z } from "zod"
 
 import { countryCodeSchema, nameOnCardSchema } from "#orck/lib/billing"
