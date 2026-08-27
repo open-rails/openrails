@@ -34,6 +34,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -510,9 +511,9 @@ func (s *CheckoutService) processCCBillSubscription(
 		return nil, fmt.Errorf("price %s is not configured for CCBill", price.ID)
 	}
 
-	// User must have verified email for CCBill payments
-	if user.Email == nil || strings.TrimSpace(*user.Email) == "" {
-		return nil, errors.New("verified email required for CCBill payments")
+	canonicalName := cardholdername.Canonical(req.NameOnCard, req.FirstName, req.LastName)
+	if err := validateCCBillBillingIdentity(canonicalName, req.Zip, req.Country, user); err != nil {
+		return nil, err
 	}
 
 	// User must have a username for CCBill (used for webhook resolution via profiles.users)
@@ -520,16 +521,17 @@ func (s *CheckoutService) processCCBillSubscription(
 		return nil, errors.New("username required for CCBill payments")
 	}
 
+	firstName, lastName := cardholdername.Parts(canonicalName, "", "")
 	flexFormParams := &ccbill.GenerateFlexFormURLParams{
 		Username:      user.Username,
-		Email:         *user.Email,
-		CustomerFName: ResolveCheckoutFirstName(req, user),
-		CustomerLName: DefaultIfEmpty(ResolveCheckoutLastName(req), ResolveCheckoutFirstName(req, user)),
-		Address1:      req.Address1,
-		City:          req.City,
-		State:         req.State,
-		ZipCode:       req.Zip,
-		Country:       req.Country,
+		Email:         strings.TrimSpace(*user.Email),
+		CustomerFName: firstName,
+		CustomerLName: lastName,
+		Address1:      strings.TrimSpace(req.Address1),
+		City:          strings.TrimSpace(req.City),
+		State:         strings.TrimSpace(req.State),
+		ZipCode:       strings.TrimSpace(req.Zip),
+		Country:       strings.ToUpper(strings.TrimSpace(req.Country)),
 		FlexID:        flexID,
 		FormName:      formName,
 		ReservationID: req.CheckoutSessionID,

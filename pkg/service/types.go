@@ -131,7 +131,9 @@ type CheckoutPayment struct {
 	Flow        string // "transfer_request" or "transaction_request"
 	Wallet      string // Solana wallet address
 
-	// Billing details (CCBill/Stripe)
+	// Billing details. CCBill requires the canonical name, postal code, and
+	// country; its verified email comes from CheckoutCustomerIdentity. Street,
+	// city, and state are optional. Stripe hosted Checkout collects its own.
 	Email      string
 	NameOnCard string // Canonical full name; first/last are legacy aliases.
 	FirstName  string

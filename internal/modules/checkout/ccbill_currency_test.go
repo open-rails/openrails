@@ -53,6 +53,14 @@ func ccbillTestUser() *UserIdentity {
 	return &UserIdentity{ID: uuid.NewString(), Username: "alice", Email: &email}
 }
 
+func ccbillTestPayment() *CheckoutRequest {
+	return &CheckoutRequest{
+		NameOnCard: "Alice Example",
+		Zip:        "10001",
+		Country:    "US",
+	}
+}
+
 // #819: a EUR-priced product must reach CCBill AS EUR. Before the fix the
 // FlexForm always carried currencyCode=840 (USD), so the customer was charged
 // $19.99 for a €19.99 product and the webhook then rejected the membership on
@@ -60,7 +68,7 @@ func ccbillTestUser() *UserIdentity {
 func TestCCBillCheckoutSendsThePriceCurrency(t *testing.T) {
 	ctx, svc := ccbillCheckoutService(t)
 
-	resp, err := svc.processCCBillSubscription(ctx, &CheckoutRequest{}, ccbillTestUser(), ccbillPrice("eur"))
+	resp, err := svc.processCCBillSubscription(ctx, ccbillTestPayment(), ccbillTestUser(), ccbillPrice("eur"))
 	require.NoError(t, err)
 	parsed, err := url.Parse(resp.RedirectURL)
 	require.NoError(t, err)
@@ -72,7 +80,7 @@ func TestCCBillCheckoutSendsThePriceCurrency(t *testing.T) {
 func TestCCBillCheckoutRefusesUnbillableCurrency(t *testing.T) {
 	ctx, svc := ccbillCheckoutService(t)
 
-	resp, err := svc.processCCBillSubscription(ctx, &CheckoutRequest{}, ccbillTestUser(), ccbillPrice("sek"))
+	resp, err := svc.processCCBillSubscription(ctx, ccbillTestPayment(), ccbillTestUser(), ccbillPrice("sek"))
 	require.Error(t, err)
 	require.Nil(t, resp)
 	require.Contains(t, err.Error(), "sek")
@@ -83,7 +91,7 @@ func TestCCBillCheckoutRefusesUnbillableCurrency(t *testing.T) {
 func TestCCBillCheckoutRefusesMissingCurrency(t *testing.T) {
 	ctx, svc := ccbillCheckoutService(t)
 
-	resp, err := svc.processCCBillSubscription(ctx, &CheckoutRequest{}, ccbillTestUser(), ccbillPrice(""))
+	resp, err := svc.processCCBillSubscription(ctx, ccbillTestPayment(), ccbillTestUser(), ccbillPrice(""))
 	require.Error(t, err)
 	require.Nil(t, resp)
 }
@@ -102,4 +110,29 @@ func TestCCBillUpgradeSendsThePriceCurrency(t *testing.T) {
 	parsed, err := url.Parse(resp.RedirectURL)
 	require.NoError(t, err)
 	require.Equal(t, "978", parsed.Query().Get("currencyCode"))
+}
+
+func TestCCBillCheckoutRequiresOnlyMinimalBillingIdentity(t *testing.T) {
+	ctx, svc := ccbillCheckoutService(t)
+	req := &CheckoutRequest{
+		Email:      "spoofed-browser@example.test",
+		NameOnCard: "  Alice Example  ",
+		Zip:        " 10001 ",
+		Country:    " us ",
+	}
+
+	resp, err := svc.processCCBillSubscription(ctx, req, ccbillTestUser(), ccbillPrice("usd"))
+	require.NoError(t, err)
+	parsed, err := url.Parse(resp.RedirectURL)
+	require.NoError(t, err)
+	query := parsed.Query()
+
+	require.Equal(t, "alice@example.com", query.Get("email"), "authenticated verified email wins over browser input")
+	require.Equal(t, "Alice", query.Get("customer_fname"))
+	require.Equal(t, "Example", query.Get("customer_lname"))
+	require.Equal(t, "10001", query.Get("zipcode"))
+	require.Equal(t, "US", query.Get("country"))
+	require.False(t, query.Has("address1"))
+	require.False(t, query.Has("city"))
+	require.False(t, query.Has("state"))
 }

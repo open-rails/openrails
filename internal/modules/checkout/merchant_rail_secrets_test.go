@@ -248,7 +248,11 @@ func TestCheckoutCCBillSubscriptionUsesMerchantSecret(t *testing.T) {
 	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{rail: "ccbill", environment: "live", accountID: "945280-0000"})
 
 	email := "alice@example.com"
-	resp, err := svc.processCCBillSubscription(ctx, &CheckoutRequest{}, &UserIdentity{
+	resp, err := svc.processCCBillSubscription(ctx, &CheckoutRequest{
+		NameOnCard: "Alice Example",
+		Zip:        "10001",
+		Country:    "US",
+	}, &UserIdentity{
 		ID:       "user-1",
 		Email:    &email,
 		Username: "alice",
