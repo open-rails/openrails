@@ -39,7 +39,7 @@ func TestProviderBillingQuiescence(t *testing.T) {
 		})
 	}
 
-	for _, raw := range []string{"0", "500ms", "-1h", "tomorrow"} {
+	for _, raw := range []string{"0", "500ms", "1500ms", "-1h", "tomorrow"} {
 		_, err := (&Config{ProviderBillingQuiescenceInterval: raw}).ProviderBillingQuiescence()
 		require.Error(t, err)
 	}

@@ -29,7 +29,7 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 	for _, kind := range []string{"schema_ambiguity", "submicro_amount", "amount_overflow", "response_too_large"} {
 		in := base
 		in.RawBody = nil
-		in.Refusal = &ProviderBillingObservationRefusal{Kind: kind}
+		in.Refusal = &ProviderBillingObservationRefusal{Kind: ProviderBillingEvidenceRefusalKind(kind)}
 		require.NoError(t, validateProviderBillingInput(in))
 		prepared, err := prepareProviderBillingObservation(in)
 		require.NoError(t, err)

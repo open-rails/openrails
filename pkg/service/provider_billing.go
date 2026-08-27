@@ -17,6 +17,7 @@ type ProviderBillingQualificationState = money.ProviderBillingQualificationState
 type ProviderBillingQualificationReason = money.ProviderBillingQualificationReason
 type ProviderBillingLifecycleEvidence = money.ProviderBillingLifecycleEvidence
 type ProviderBillingRecord = money.ProviderBillingRecord
+type ProviderBillingEvidenceRefusalKind = money.ProviderBillingEvidenceRefusalKind
 type ProviderBillingObservationRefusal = money.ProviderBillingObservationRefusal
 type ProviderBillingObservationRequest = money.ProviderBillingObservationInput
 type ProviderBillingObservationConflict = money.ProviderBillingObservationConflict
@@ -34,11 +35,17 @@ const (
 	ProviderBillingNegativeOrCorrective     = money.ProviderBillingNegativeOrCorrective
 	ProviderBillingDecreasingProviderCost   = money.ProviderBillingDecreasingProviderCost
 	ProviderBillingEligible                 = money.ProviderBillingEligible
+
+	ProviderBillingRefusalSchemaAmbiguity  = money.ProviderBillingRefusalSchemaAmbiguity
+	ProviderBillingRefusalSubmicroAmount   = money.ProviderBillingRefusalSubmicroAmount
+	ProviderBillingRefusalAmountOverflow   = money.ProviderBillingRefusalAmountOverflow
+	ProviderBillingRefusalResponseTooLarge = money.ProviderBillingRefusalResponseTooLarge
 )
 
 var (
-	ErrProviderBillingObservationConflict  = money.ErrProviderBillingObservationConflict
-	ErrProviderBillingQualificationRefused = money.ErrProviderBillingQualificationRefused
+	ErrProviderBillingObservationConflict   = money.ErrProviderBillingObservationConflict
+	ErrProviderBillingQualificationRefused  = money.ErrProviderBillingQualificationRefused
+	ErrProviderBillingQualificationNotFound = money.ErrProviderBillingQualificationNotFound
 )
 
 type ProviderBillingQualification struct {

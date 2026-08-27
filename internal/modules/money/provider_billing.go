@@ -50,8 +50,9 @@ const (
 )
 
 var (
-	ErrProviderBillingObservationConflict  = errors.New("provider_billing_observation_conflict")
-	ErrProviderBillingQualificationRefused = errors.New("provider_billing_qualification_refused")
+	ErrProviderBillingObservationConflict   = errors.New("provider_billing_observation_conflict")
+	ErrProviderBillingQualificationRefused  = errors.New("provider_billing_qualification_refused")
+	ErrProviderBillingQualificationNotFound = errors.New("provider_billing_qualification_not_found")
 )
 
 type ProviderBillingObservationConflict struct {
@@ -59,7 +60,7 @@ type ProviderBillingObservationConflict struct {
 }
 
 func (e *ProviderBillingObservationConflict) Error() string {
-	return fmt.Sprintf("provider billing observation id reused with changed %s", e.Field)
+	return fmt.Sprintf("provider billing evidence conflicts on %s", e.Field)
 }
 
 func (e *ProviderBillingObservationConflict) Unwrap() error {
@@ -86,11 +87,20 @@ type ProviderBillingRecord struct {
 	TimeBilledMS       int64
 }
 
+type ProviderBillingEvidenceRefusalKind string
+
+const (
+	ProviderBillingRefusalSchemaAmbiguity  ProviderBillingEvidenceRefusalKind = "schema_ambiguity"
+	ProviderBillingRefusalSubmicroAmount   ProviderBillingEvidenceRefusalKind = "submicro_amount"
+	ProviderBillingRefusalAmountOverflow   ProviderBillingEvidenceRefusalKind = "amount_overflow"
+	ProviderBillingRefusalResponseTooLarge ProviderBillingEvidenceRefusalKind = "response_too_large"
+)
+
 // ProviderBillingObservationRefusal is a stable typed refusal supplied by a
 // provider adapter or SDK. OpenRails persists it but never parses provider raw
 // bodies. RawBody may be empty when the provider response exceeded its bound.
 type ProviderBillingObservationRefusal struct {
-	Kind string
+	Kind ProviderBillingEvidenceRefusalKind
 }
 
 type ProviderBillingObservationInput struct {
@@ -168,6 +178,9 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 	}
 	if quiescence < time.Second {
 		return nil, fmt.Errorf("provider billing quiescence must be at least one second")
+	}
+	if quiescence%time.Second != 0 {
+		return nil, fmt.Errorf("provider billing quiescence must use whole seconds")
 	}
 	if err := validateProviderBillingInput(in); err != nil {
 		return nil, err
@@ -254,6 +267,15 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 	}
 
 	now := s.now().UTC()
+	if now.Before(qual.ProviderAbsentAt) {
+		return nil, fmt.Errorf("provider billing observation precedes provider absence")
+	}
+	if now.Before(qual.WindowsClosedAt) {
+		return nil, fmt.Errorf("provider billing observation precedes rental-window closure")
+	}
+	if in.QueryEnd.After(now) {
+		return nil, fmt.Errorf("provider billing query ends after observation time")
+	}
 	state, reason, baselineID, qualifiedID, qualifiedCost, qualifiedAt, err := evaluateProviderBillingObservation(
 		ctx, q, qual, in, prepared, now,
 	)
@@ -349,6 +371,9 @@ func evaluateProviderBillingObservation(
 		return ProviderBillingQualificationRefused, ProviderBillingDecreasingProviderCost, qual.BaselineObservationID, nil, nil, nil, nil
 	}
 	if *prepared.providerCost != *baseline.ProviderCostUsdMicros ||
+		baseline.NormalizedQuery != in.NormalizedQuery ||
+		!baseline.QueryStart.Equal(in.QueryStart) ||
+		!baseline.QueryEnd.Equal(in.QueryEnd) ||
 		!bytes.Equal(prepared.normalizedRecordsDigest[:], baseline.NormalizedRecordsDigest) {
 		id := in.ObservationID
 		return ProviderBillingQualificationPending, ProviderBillingObservationChanged, &id, nil, nil, nil, nil
@@ -403,8 +428,8 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 	if in.Lifecycle.ProviderAbsentAt.Before(in.Lifecycle.ProviderLifetimeEnd) {
 		return fmt.Errorf("provider_absent_at precedes provider_lifetime_end")
 	}
-	if in.Lifecycle.WindowsClosedAt.Before(in.Lifecycle.ProviderLifetimeStart) {
-		return fmt.Errorf("windows_closed_at precedes provider_lifetime_start")
+	if in.Lifecycle.WindowsClosedAt.Before(in.Lifecycle.ProviderLifetimeEnd) {
+		return fmt.Errorf("windows_closed_at precedes provider_lifetime_end")
 	}
 	if !in.QueryEnd.After(in.QueryStart) {
 		return fmt.Errorf("query_end must be after query_start")
@@ -429,8 +454,16 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 		if len(in.Records) != 0 {
 			return fmt.Errorf("refused provider billing observation cannot include normalized records")
 		}
-		if err := validateOperationAuthorizationText("refusal_kind", in.Refusal.Kind, operationAuthorizationMaxPrincipalBytes); err != nil {
+		if err := validateOperationAuthorizationText("refusal_kind", string(in.Refusal.Kind), operationAuthorizationMaxPrincipalBytes); err != nil {
 			return err
+		}
+		switch in.Refusal.Kind {
+		case ProviderBillingRefusalSchemaAmbiguity,
+			ProviderBillingRefusalSubmicroAmount,
+			ProviderBillingRefusalAmountOverflow,
+			ProviderBillingRefusalResponseTooLarge:
+		default:
+			return fmt.Errorf("unsupported provider billing refusal kind %q", in.Refusal.Kind)
 		}
 	}
 	return nil
@@ -443,7 +476,7 @@ func prepareProviderBillingObservation(in ProviderBillingObservationInput) (prep
 		coversLifetime: !in.QueryStart.After(in.Lifecycle.ProviderLifetimeStart) && !in.QueryEnd.Before(in.Lifecycle.ProviderLifetimeEnd),
 	}
 	if in.Refusal != nil {
-		kind := in.Refusal.Kind
+		kind := string(in.Refusal.Kind)
 		prepared.refusalKind = &kind
 		prepared.coversLifetime = false
 		return prepared, nil
@@ -656,7 +689,7 @@ func (s *MoneyService) GetProviderBillingQualification(ctx context.Context, oper
 		MerchantID: merchantID.UUID(), OperationID: operationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderBillingQualificationNotFound
 	}
 	if err != nil {
 		return nil, err

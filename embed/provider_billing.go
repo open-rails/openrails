@@ -12,6 +12,7 @@ type ProviderBillingQualificationState = service.ProviderBillingQualificationSta
 type ProviderBillingQualificationReason = service.ProviderBillingQualificationReason
 type ProviderBillingLifecycleEvidence = service.ProviderBillingLifecycleEvidence
 type ProviderBillingRecord = service.ProviderBillingRecord
+type ProviderBillingEvidenceRefusalKind = service.ProviderBillingEvidenceRefusalKind
 type ProviderBillingObservationRefusal = service.ProviderBillingObservationRefusal
 type ProviderBillingObservationRequest = service.ProviderBillingObservationRequest
 type ProviderBillingObservationConflict = service.ProviderBillingObservationConflict
@@ -30,11 +31,17 @@ const (
 	ProviderBillingNegativeOrCorrective     = service.ProviderBillingNegativeOrCorrective
 	ProviderBillingDecreasingProviderCost   = service.ProviderBillingDecreasingProviderCost
 	ProviderBillingEligible                 = service.ProviderBillingEligible
+
+	ProviderBillingRefusalSchemaAmbiguity  = service.ProviderBillingRefusalSchemaAmbiguity
+	ProviderBillingRefusalSubmicroAmount   = service.ProviderBillingRefusalSubmicroAmount
+	ProviderBillingRefusalAmountOverflow   = service.ProviderBillingRefusalAmountOverflow
+	ProviderBillingRefusalResponseTooLarge = service.ProviderBillingRefusalResponseTooLarge
 )
 
 var (
-	ErrProviderBillingObservationConflict  = service.ErrProviderBillingObservationConflict
-	ErrProviderBillingQualificationRefused = service.ErrProviderBillingQualificationRefused
+	ErrProviderBillingObservationConflict   = service.ErrProviderBillingObservationConflict
+	ErrProviderBillingQualificationRefused  = service.ErrProviderBillingQualificationRefused
+	ErrProviderBillingQualificationNotFound = service.ErrProviderBillingQualificationNotFound
 )
 
 // RecordProviderBillingObservationTx appends one provider-neutral read and

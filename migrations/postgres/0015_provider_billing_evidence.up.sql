@@ -43,7 +43,7 @@ CREATE TABLE openrails.provider_billing_qualifications (
     CONSTRAINT provider_billing_qualification_lifetime_shape CHECK (
         provider_lifetime_end >= provider_lifetime_start
         AND provider_absent_at >= provider_lifetime_end
-        AND windows_closed_at >= provider_lifetime_start
+        AND windows_closed_at >= provider_lifetime_end
     ),
     CONSTRAINT provider_billing_qualification_reference_shape CHECK (
         provider_absence_reference <> ''

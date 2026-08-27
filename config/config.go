@@ -281,6 +281,9 @@ func (cfg *Config) ProviderBillingQuiescence() (time.Duration, error) {
 	if d < time.Second {
 		return 0, fmt.Errorf("provider_billing_quiescence_interval must be at least one second")
 	}
+	if d%time.Second != 0 {
+		return 0, fmt.Errorf("provider_billing_quiescence_interval must use whole seconds")
+	}
 	return d, nil
 }
 
