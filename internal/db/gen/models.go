@@ -906,11 +906,11 @@ type OpenrailsOperationAuthorization struct {
 	CreatedAt               time.Time
 	ReleasedAt              *time.Time
 	SettledAt               *time.Time
-	// Qualified final provider-cost basis supplied with exact evidence by the embedding caller.
+	// Qualified final provider-cost basis supplied by the OpenRails evidence qualifier.
 	SettlementProviderCostUsdMicros *int64
 	// OpenRails-owned final customer settlement. The permanent pass-through contract maps qualified provider cost directly, so this equals settlement_provider_cost_usd_micros; it may exceed authorization and is never clamped.
 	SettlementRatedUsdMicros *int64
-	// Exact canonical final-settlement bytes authored by the embedding host. OpenRails binds but does not interpret them.
+	// Exact canonical bytes authored by the OpenRails evidence qualifier from provider observations and lifecycle evidence.
 	SettlementBodyBytes []byte
 	// OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.
 	SettlementBodyDigest []byte

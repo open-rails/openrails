@@ -37,13 +37,13 @@ ALTER TABLE openrails.operation_authorizations
     ) NOT VALID;
 
 COMMENT ON COLUMN openrails.operation_authorizations.settlement_provider_cost_usd_micros IS
-    'Qualified final provider-cost basis supplied with exact evidence by the embedding caller.';
+    'Qualified final provider-cost basis supplied by the OpenRails evidence qualifier.';
 
 COMMENT ON COLUMN openrails.operation_authorizations.settlement_rated_usd_micros IS
     'OpenRails-owned final customer settlement. The permanent pass-through contract maps qualified provider cost directly, so this equals settlement_provider_cost_usd_micros; it may exceed authorization and is never clamped.';
 
 COMMENT ON COLUMN openrails.operation_authorizations.settlement_body_bytes IS
-    'Exact canonical final-settlement bytes authored by the embedding host. OpenRails binds but does not interpret them.';
+    'Exact canonical bytes authored by the OpenRails evidence qualifier from provider observations and lifecycle evidence.';
 
 COMMENT ON COLUMN openrails.operation_authorizations.settlement_body_digest IS
     'OpenRails-derived SHA-256 of settlement_body_bytes, also rechecked by the database and used as the canonical terminal reference.';

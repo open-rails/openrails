@@ -82,6 +82,8 @@ func TestPassThroughProviderCostSettlementLifecycle(t *testing.T) {
 	_, err = open(otherAuthorization)
 	require.NoError(t, err)
 
+	// Opaque fixture bytes from the future evidence qualifier; this internal
+	// settlement mechanism does not itself decide eligibility.
 	finalBody := []byte(`{"format":"th-settlement-v1","provider_cost_usd_micros":8000,"qualified":true}`)
 	finalInput := money.PassThroughProviderCostSettlementInput{
 		OperationID: mainAuthorization.OperationID, ProviderCostUSDMicros: 8_000, SettlementBody: finalBody,
