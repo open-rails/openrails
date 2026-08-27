@@ -48,12 +48,14 @@ func resetMoneyLedger(t *testing.T, _ *pgxpool.Pool, ctx context.Context) {
 	// is a fixture privilege no production role has, so the reset asks for the
 	// owner rather than the grant being widened to let a test DELETE.
 	pool := dbtest.SharedSuperuserPGXPool(t)
-	// FK-safe order: invoice_payments/usage_events reference ledger_transfers
-	// (#705 ledger_transfer_id FKs), so they go first; transfers before
-	// accounts; grants after (self-FK ok in one statement).
+	// FK-safe order: invoice_payments/usage_events reference ledger_transfers,
+	// and operation_authorizations reference ledger_accounts. Delete those
+	// dependents first; transfers before accounts; grants after (self-FK ok in
+	// one statement).
 	for _, table := range []string{
 		"openrails.invoice_payments",
 		"openrails.usage_events",
+		"openrails.operation_authorizations",
 		"openrails.ledger_transfers",
 		"openrails.grants",
 		"openrails.ledger_accounts",
