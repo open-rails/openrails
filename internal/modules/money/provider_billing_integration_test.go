@@ -5,6 +5,7 @@ package money_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -121,6 +122,11 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	require.Equal(t, money.OperationAuthorizationSettled, settled.Authorization.State)
 	require.NotNil(t, settled.QualifiedProviderCostUSDMicros)
 	require.Zero(t, *settled.QualifiedProviderCostUSDMicros)
+	require.Contains(t, string(settled.Authorization.SettlementBody), `"observation_id":"observation-1"`)
+	require.Contains(t, string(settled.Authorization.SettlementBody), `"observation_id":"observation-2"`)
+	rawDigest := sha256.Sum256(first.RawBody)
+	require.Contains(t, string(settled.Authorization.SettlementBody), hex.EncodeToString(rawDigest[:]),
+		"terminal settlement evidence must bind the exact qualified provider body")
 
 	refusedAuth := open("th-045-refused")
 	refusedLifecycle := lifecycle

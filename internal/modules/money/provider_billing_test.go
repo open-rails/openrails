@@ -53,4 +53,8 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 	prepared, err := prepareProviderBillingObservation(negative)
 	require.NoError(t, err)
 	require.True(t, prepared.hasNegative)
+
+	nanosecondTime := base
+	nanosecondTime.QueryEnd = nanosecondTime.QueryEnd.Add(time.Nanosecond)
+	require.ErrorContains(t, validateProviderBillingInput(nanosecondTime), "PostgreSQL-exact microsecond precision")
 }

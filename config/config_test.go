@@ -242,6 +242,16 @@ func TestLoad_EnvMapping(t *testing.T) {
 		require.Equal(t, 30*time.Minute, interval)
 	})
 
+	t.Run("maps PROVIDER_BILLING_QUIESCENCE_INTERVAL to the top-level key", func(t *testing.T) {
+		t.Setenv("PROVIDER_BILLING_QUIESCENCE_INTERVAL", "36h")
+
+		cfg, err := Load("nonexistent-config.yaml")
+		require.NoError(t, err)
+		interval, err := cfg.ProviderBillingQuiescence()
+		require.NoError(t, err)
+		require.Equal(t, 36*time.Hour, interval)
+	})
+
 	t.Run("malformed CATALOG_RECONCILIATION_INTERVAL refuses to boot (#712)", func(t *testing.T) {
 		t.Setenv("CATALOG_RECONCILIATION_INTERVAL", "30minutes")
 

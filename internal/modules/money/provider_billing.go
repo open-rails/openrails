@@ -321,7 +321,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 
 	auth := operationAuthorizationFromRow(authRow, false)
 	if state == ProviderBillingQualificationEligible {
-		body, err := providerBillingSettlementBody(qual)
+		body, err := providerBillingSettlementBody(ctx, q, qual)
 		if err != nil {
 			return nil, err
 		}
@@ -421,6 +421,9 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 		if value.IsZero() || !providerBillingTimeIsUTC(value) {
 			return fmt.Errorf("%s must be a nonzero UTC time", field)
 		}
+		if value.Nanosecond()%1_000 != 0 {
+			return fmt.Errorf("%s must use PostgreSQL-exact microsecond precision", field)
+		}
 	}
 	if in.Lifecycle.ProviderLifetimeEnd.Before(in.Lifecycle.ProviderLifetimeStart) {
 		return fmt.Errorf("provider_lifetime_end precedes provider_lifetime_start")
@@ -489,6 +492,9 @@ func prepareProviderBillingObservation(in ProviderBillingObservationInput) (prep
 		}
 		if record.BucketStart.IsZero() || !providerBillingTimeIsUTC(record.BucketStart) {
 			return prepared, fmt.Errorf("provider billing record %d bucket_start must be nonzero UTC", i)
+		}
+		if record.BucketStart.Nanosecond()%1_000 != 0 {
+			return prepared, fmt.Errorf("provider billing record %d bucket_start must use PostgreSQL-exact microsecond precision", i)
 		}
 		if record.TimeBilledMS < 0 {
 			return prepared, fmt.Errorf("provider billing record %d has negative time_billed_ms", i)
@@ -601,31 +607,66 @@ func equalOptionalString(a, b *string) bool {
 }
 
 type providerBillingSettlementManifest struct {
-	Contract                       string `json:"contract"`
-	OperationID                    string `json:"operation_id"`
-	Provider                       string `json:"provider"`
-	ProviderResourceID             string `json:"provider_resource_id"`
-	LifecycleEvidenceSHA256        string `json:"lifecycle_evidence_sha256"`
-	BaselineObservationID          string `json:"baseline_observation_id"`
-	QualifiedObservationID         string `json:"qualified_observation_id"`
-	QualifiedProviderCostUSDMicros int64  `json:"qualified_provider_cost_usd_micros"`
-	QuiescenceSeconds              int64  `json:"quiescence_seconds"`
-	QualifiedAt                    string `json:"qualified_at"`
+	Contract                       string                               `json:"contract"`
+	OperationID                    string                               `json:"operation_id"`
+	Provider                       string                               `json:"provider"`
+	ProviderResourceID             string                               `json:"provider_resource_id"`
+	ProviderLifetimeStart          string                               `json:"provider_lifetime_start"`
+	ProviderLifetimeEnd            string                               `json:"provider_lifetime_end"`
+	ProviderAbsentAt               string                               `json:"provider_absent_at"`
+	ProviderAbsenceReference       string                               `json:"provider_absence_reference"`
+	BillingStopReference           string                               `json:"billing_stop_reference"`
+	WindowsClosedAt                string                               `json:"windows_closed_at"`
+	WindowsClosedReference         string                               `json:"windows_closed_reference"`
+	LifecycleEvidenceSHA256        string                               `json:"lifecycle_evidence_sha256"`
+	BaselineObservation            providerBillingSettlementObservation `json:"baseline_observation"`
+	QualifiedObservation           providerBillingSettlementObservation `json:"qualified_observation"`
+	QualifiedProviderCostUSDMicros int64                                `json:"qualified_provider_cost_usd_micros"`
+	QuiescenceSeconds              int64                                `json:"quiescence_seconds"`
+	QualifiedAt                    string                               `json:"qualified_at"`
 }
 
-func providerBillingSettlementBody(row gen.OpenrailsProviderBillingQualification) ([]byte, error) {
+type providerBillingSettlementObservation struct {
+	ObservationID           string `json:"observation_id"`
+	NormalizedQuerySHA256   string `json:"normalized_query_sha256"`
+	QueryStart              string `json:"query_start"`
+	QueryEnd                string `json:"query_end"`
+	RawBodySHA256           string `json:"raw_body_sha256"`
+	NormalizedRecordsSHA256 string `json:"normalized_records_sha256"`
+}
+
+func providerBillingSettlementBody(ctx context.Context, q *gen.Queries, row gen.OpenrailsProviderBillingQualification) ([]byte, error) {
 	if row.BaselineObservationID == nil || row.QualifiedObservationID == nil ||
 		row.QualifiedProviderCostUsdMicros == nil || row.QualifiedAt == nil {
 		return nil, fmt.Errorf("eligible provider billing qualification is incomplete")
+	}
+	baseline, err := q.GetProviderBillingObservation(ctx, gen.GetProviderBillingObservationParams{
+		MerchantID: row.MerchantID, OperationID: row.OperationID, ObservationID: *row.BaselineObservationID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load baseline provider billing evidence: %w", err)
+	}
+	qualified, err := q.GetProviderBillingObservation(ctx, gen.GetProviderBillingObservationParams{
+		MerchantID: row.MerchantID, OperationID: row.OperationID, ObservationID: *row.QualifiedObservationID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load qualified provider billing evidence: %w", err)
 	}
 	body, err := json.Marshal(providerBillingSettlementManifest{
 		Contract:                       "openrails/pass-through-provider-cost",
 		OperationID:                    row.OperationID,
 		Provider:                       row.Provider,
 		ProviderResourceID:             row.ProviderResourceID,
+		ProviderLifetimeStart:          row.ProviderLifetimeStart.UTC().Format(time.RFC3339Nano),
+		ProviderLifetimeEnd:            row.ProviderLifetimeEnd.UTC().Format(time.RFC3339Nano),
+		ProviderAbsentAt:               row.ProviderAbsentAt.UTC().Format(time.RFC3339Nano),
+		ProviderAbsenceReference:       row.ProviderAbsenceReference,
+		BillingStopReference:           row.BillingStopReference,
+		WindowsClosedAt:                row.WindowsClosedAt.UTC().Format(time.RFC3339Nano),
+		WindowsClosedReference:         row.WindowsClosedReference,
 		LifecycleEvidenceSHA256:        hex.EncodeToString(row.LifecycleEvidenceDigest),
-		BaselineObservationID:          *row.BaselineObservationID,
-		QualifiedObservationID:         *row.QualifiedObservationID,
+		BaselineObservation:            providerBillingSettlementObservationFromRow(baseline),
+		QualifiedObservation:           providerBillingSettlementObservationFromRow(qualified),
 		QualifiedProviderCostUSDMicros: *row.QualifiedProviderCostUsdMicros,
 		QuiescenceSeconds:              row.QuiescenceSeconds,
 		QualifiedAt:                    row.QualifiedAt.UTC().Format(time.RFC3339Nano),
@@ -634,6 +675,18 @@ func providerBillingSettlementBody(row gen.OpenrailsProviderBillingQualification
 		return nil, fmt.Errorf("author provider billing settlement body: %w", err)
 	}
 	return body, nil
+}
+
+func providerBillingSettlementObservationFromRow(row gen.OpenrailsProviderBillingObservation) providerBillingSettlementObservation {
+	queryDigest := sha256.Sum256([]byte(row.NormalizedQuery))
+	return providerBillingSettlementObservation{
+		ObservationID:           row.ObservationID,
+		NormalizedQuerySHA256:   hex.EncodeToString(queryDigest[:]),
+		QueryStart:              row.QueryStart.UTC().Format(time.RFC3339Nano),
+		QueryEnd:                row.QueryEnd.UTC().Format(time.RFC3339Nano),
+		RawBodySHA256:           hex.EncodeToString(row.RawBodyDigest),
+		NormalizedRecordsSHA256: hex.EncodeToString(row.NormalizedRecordsDigest),
+	}
 }
 
 func providerBillingQualificationFromRow(row gen.OpenrailsProviderBillingQualification, auth *OperationAuthorization, replayed bool) *ProviderBillingQualification {
