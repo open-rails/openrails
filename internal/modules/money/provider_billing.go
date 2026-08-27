@@ -425,8 +425,8 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 			return fmt.Errorf("%s must use PostgreSQL-exact microsecond precision", field)
 		}
 	}
-	if in.Lifecycle.ProviderLifetimeEnd.Before(in.Lifecycle.ProviderLifetimeStart) {
-		return fmt.Errorf("provider_lifetime_end precedes provider_lifetime_start")
+	if !in.Lifecycle.ProviderLifetimeEnd.After(in.Lifecycle.ProviderLifetimeStart) {
+		return fmt.Errorf("provider_lifetime_end must be after provider_lifetime_start")
 	}
 	if in.Lifecycle.ProviderAbsentAt.Before(in.Lifecycle.ProviderLifetimeEnd) {
 		return fmt.Errorf("provider_absent_at precedes provider_lifetime_end")
@@ -744,7 +744,7 @@ func (s *MoneyService) GetProviderBillingQualification(ctx context.Context, oper
 		return nil, err
 	}
 	q := s.db.Gen(ctx)
-	row, err := q.GetProviderBillingQualification(ctx, gen.GetProviderBillingQualificationParams{
+	row, err := q.GetProviderBillingQualificationWithAuthorization(ctx, gen.GetProviderBillingQualificationWithAuthorizationParams{
 		MerchantID: merchantID.UUID(), OperationID: operationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -753,9 +753,6 @@ func (s *MoneyService) GetProviderBillingQualification(ctx context.Context, oper
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.GetOperationAuthorization(ctx, operationID)
-	if err != nil {
-		return nil, err
-	}
-	return providerBillingQualificationFromRow(row, auth, false), nil
+	auth := operationAuthorizationFromRow(row.OpenrailsOperationAuthorization, false)
+	return providerBillingQualificationFromRow(row.OpenrailsProviderBillingQualification, auth, false), nil
 }

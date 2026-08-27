@@ -20,6 +20,7 @@ import (
 
 func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	svc, dbi, _, payer, cur, ctx := moneyInEnvWithDB(t)
+	owner := dbtest.SharedSuperuserPGXPool(t)
 	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
 	clock := clockwork.NewFakeClockAt(now)
 	svc.SetClock(clock)
@@ -88,6 +89,22 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	require.Equal(t, money.ProviderBillingAwaitingEqualObservation, firstResult.Reason)
 	require.Equal(t, money.OperationAuthorizationOpen, firstResult.Authorization.State,
 		"an empty provider response is zero-cost evidence, not finality")
+	_, err = svc.ReleaseOperationAuthorization(ctx, mainAuth.OperationID, "provider-create-refused")
+	require.ErrorIs(t, err, money.ErrOperationAuthorizationHasBillingEvidence,
+		"durable billing evidence makes release an invalid terminal path")
+	pendingReplay, err := record(first, true)
+	require.NoError(t, err)
+	require.True(t, pendingReplay.Replayed)
+	require.Equal(t, money.OperationAuthorizationOpen, pendingReplay.Authorization.State,
+		"exact observation replay cannot report an authorization released around its qualification")
+
+	_, err = owner.Exec(ctx, `
+		UPDATE openrails.provider_billing_qualifications
+		SET provider_lifetime_end = provider_lifetime_start
+		WHERE merchant_id = $1 AND operation_id = $2`,
+		dbtest.TestMerchantID.UUID(), mainAuth.OperationID,
+	)
+	require.Error(t, err, "Postgres must refuse a zero-length provider-confirmed lifetime")
 
 	changedReplay := first
 	changedReplay.RawBody = []byte("[ ]")
@@ -115,8 +132,46 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	require.Equal(t, money.OperationAuthorizationOpen, stored.Authorization.State,
 		"qualification and ledger settlement must roll back together")
 
-	settled, err := record(second, true)
+	settleTx, err := owner.Begin(ctx)
 	require.NoError(t, err)
+	defer func() { _ = settleTx.Rollback(context.Background()) }()
+	_, err = settleTx.Exec(ctx, "LOCK TABLE openrails.operation_authorizations IN ACCESS EXCLUSIVE MODE")
+	require.NoError(t, err)
+	settleCtx, settleDB, err := dbi.BindMerchantTx(ctx, settleTx, dbtest.TestMerchantID)
+	require.NoError(t, err)
+	settled, err := svc.RecordProviderBillingObservationInTx(settleCtx, settleDB, second, 24*time.Hour)
+	require.NoError(t, err)
+	type qualificationRead struct {
+		result *money.ProviderBillingQualification
+		err    error
+	}
+	readDone := make(chan qualificationRead, 1)
+	go func() {
+		result, readErr := svc.GetProviderBillingQualification(ctx, mainAuth.OperationID)
+		readDone <- qualificationRead{result: result, err: readErr}
+	}()
+	require.Eventually(t, func() bool {
+		var waiting bool
+		queryErr := owner.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_catalog.pg_locks
+				WHERE relation = 'openrails.operation_authorizations'::regclass
+				  AND mode = 'AccessShareLock'
+				  AND NOT granted
+			)`).Scan(&waiting)
+		return queryErr == nil && waiting
+	}, 5*time.Second, 10*time.Millisecond, "qualification read must reach the authorization table lock")
+	require.NoError(t, settleTx.Commit(ctx))
+	snapshot := <-readDone
+	require.NoError(t, snapshot.err)
+	before := snapshot.result.State == money.ProviderBillingQualificationPending &&
+		snapshot.result.Authorization.State == money.OperationAuthorizationOpen
+	after := snapshot.result.State == money.ProviderBillingQualificationEligible &&
+		snapshot.result.Authorization.State == money.OperationAuthorizationSettled
+	require.True(t, before || after,
+		"one joined read must return a pre-commit or post-commit pair, got qualification=%s authorization=%s",
+		snapshot.result.State, snapshot.result.Authorization.State)
 	require.Equal(t, money.ProviderBillingQualificationEligible, settled.State)
 	require.Equal(t, money.ProviderBillingEligible, settled.Reason)
 	require.Equal(t, money.OperationAuthorizationSettled, settled.Authorization.State)
@@ -146,9 +201,11 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	require.Equal(t, money.ProviderBillingQualificationRefused, refused.State)
 	require.Equal(t, money.ProviderBillingProviderEvidenceRefused, refused.Reason)
 	require.Equal(t, money.OperationAuthorizationOpen, refused.Authorization.State)
+	_, err = svc.ReleaseOperationAuthorization(ctx, refusedAuth.OperationID, "provider-create-refused")
+	require.ErrorIs(t, err, money.ErrOperationAuthorizationHasBillingEvidence,
+		"refused evidence remains durable and cannot be erased through authorization release")
 
 	var raw []byte
-	owner := dbtest.SharedSuperuserPGXPool(t)
 	err = owner.QueryRow(ctx, `
 		SELECT raw_body_bytes
 		FROM openrails.provider_billing_observations

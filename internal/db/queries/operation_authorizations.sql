@@ -62,4 +62,10 @@ SET state = 'released',
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text
   AND state = 'open'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM openrails.provider_billing_qualifications qualification
+      WHERE qualification.merchant_id = openrails.operation_authorizations.merchant_id
+        AND qualification.operation_id = openrails.operation_authorizations.operation_id
+  )
 RETURNING *;

@@ -51,48 +51,6 @@ func (q *Queries) GetProviderBillingObservation(ctx context.Context, arg GetProv
 	return i, err
 }
 
-const getProviderBillingQualification = `-- name: GetProviderBillingQualification :one
-SELECT merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_provider_cost_usd_micros, qualified_at, created_at, updated_at
-FROM openrails.provider_billing_qualifications
-WHERE merchant_id = $1::uuid
-  AND operation_id = $2::text
-`
-
-type GetProviderBillingQualificationParams struct {
-	MerchantID  uuid.UUID
-	OperationID string
-}
-
-func (q *Queries) GetProviderBillingQualification(ctx context.Context, arg GetProviderBillingQualificationParams) (OpenrailsProviderBillingQualification, error) {
-	row := q.db.QueryRow(ctx, getProviderBillingQualification, arg.MerchantID, arg.OperationID)
-	var i OpenrailsProviderBillingQualification
-	err := row.Scan(
-		&i.MerchantID,
-		&i.OperationID,
-		&i.Provider,
-		&i.ProviderResourceID,
-		&i.ProviderLifetimeStart,
-		&i.ProviderLifetimeEnd,
-		&i.ProviderAbsentAt,
-		&i.ProviderAbsenceReference,
-		&i.BillingStopReference,
-		&i.WindowsClosedAt,
-		&i.WindowsClosedReference,
-		&i.LifecycleEvidenceBytes,
-		&i.LifecycleEvidenceDigest,
-		&i.QuiescenceSeconds,
-		&i.State,
-		&i.Reason,
-		&i.BaselineObservationID,
-		&i.QualifiedObservationID,
-		&i.QualifiedProviderCostUsdMicros,
-		&i.QualifiedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getProviderBillingQualificationForUpdate = `-- name: GetProviderBillingQualificationForUpdate :one
 SELECT merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_start, provider_lifetime_end, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_provider_cost_usd_micros, qualified_at, created_at, updated_at
 FROM openrails.provider_billing_qualifications
@@ -132,6 +90,74 @@ func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, 
 		&i.QualifiedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getProviderBillingQualificationWithAuthorization = `-- name: GetProviderBillingQualificationWithAuthorization :one
+SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_start, q.provider_lifetime_end, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_provider_cost_usd_micros, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.payer_id, a.record_owner, a.ledger_account_id, a.authorized_usd_micros, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_provider_cost_usd_micros, a.settlement_rated_usd_micros, a.settlement_body_bytes, a.settlement_body_digest
+FROM openrails.provider_billing_qualifications q
+JOIN openrails.operation_authorizations a
+  ON a.merchant_id = q.merchant_id
+ AND a.operation_id = q.operation_id
+WHERE q.merchant_id = $1::uuid
+  AND q.operation_id = $2::text
+`
+
+type GetProviderBillingQualificationWithAuthorizationParams struct {
+	MerchantID  uuid.UUID
+	OperationID string
+}
+
+type GetProviderBillingQualificationWithAuthorizationRow struct {
+	OpenrailsProviderBillingQualification OpenrailsProviderBillingQualification
+	OpenrailsOperationAuthorization       OpenrailsOperationAuthorization
+}
+
+func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.Context, arg GetProviderBillingQualificationWithAuthorizationParams) (GetProviderBillingQualificationWithAuthorizationRow, error) {
+	row := q.db.QueryRow(ctx, getProviderBillingQualificationWithAuthorization, arg.MerchantID, arg.OperationID)
+	var i GetProviderBillingQualificationWithAuthorizationRow
+	err := row.Scan(
+		&i.OpenrailsProviderBillingQualification.MerchantID,
+		&i.OpenrailsProviderBillingQualification.OperationID,
+		&i.OpenrailsProviderBillingQualification.Provider,
+		&i.OpenrailsProviderBillingQualification.ProviderResourceID,
+		&i.OpenrailsProviderBillingQualification.ProviderLifetimeStart,
+		&i.OpenrailsProviderBillingQualification.ProviderLifetimeEnd,
+		&i.OpenrailsProviderBillingQualification.ProviderAbsentAt,
+		&i.OpenrailsProviderBillingQualification.ProviderAbsenceReference,
+		&i.OpenrailsProviderBillingQualification.BillingStopReference,
+		&i.OpenrailsProviderBillingQualification.WindowsClosedAt,
+		&i.OpenrailsProviderBillingQualification.WindowsClosedReference,
+		&i.OpenrailsProviderBillingQualification.LifecycleEvidenceBytes,
+		&i.OpenrailsProviderBillingQualification.LifecycleEvidenceDigest,
+		&i.OpenrailsProviderBillingQualification.QuiescenceSeconds,
+		&i.OpenrailsProviderBillingQualification.State,
+		&i.OpenrailsProviderBillingQualification.Reason,
+		&i.OpenrailsProviderBillingQualification.BaselineObservationID,
+		&i.OpenrailsProviderBillingQualification.QualifiedObservationID,
+		&i.OpenrailsProviderBillingQualification.QualifiedProviderCostUsdMicros,
+		&i.OpenrailsProviderBillingQualification.QualifiedAt,
+		&i.OpenrailsProviderBillingQualification.CreatedAt,
+		&i.OpenrailsProviderBillingQualification.UpdatedAt,
+		&i.OpenrailsOperationAuthorization.OperationID,
+		&i.OpenrailsOperationAuthorization.MerchantID,
+		&i.OpenrailsOperationAuthorization.PayerID,
+		&i.OpenrailsOperationAuthorization.RecordOwner,
+		&i.OpenrailsOperationAuthorization.LedgerAccountID,
+		&i.OpenrailsOperationAuthorization.AuthorizedUsdMicros,
+		&i.OpenrailsOperationAuthorization.ClaimReference,
+		&i.OpenrailsOperationAuthorization.AuthorizationBodyBytes,
+		&i.OpenrailsOperationAuthorization.AuthorizationBodyDigest,
+		&i.OpenrailsOperationAuthorization.State,
+		&i.OpenrailsOperationAuthorization.TerminalReference,
+		&i.OpenrailsOperationAuthorization.CreatedAt,
+		&i.OpenrailsOperationAuthorization.ReleasedAt,
+		&i.OpenrailsOperationAuthorization.SettledAt,
+		&i.OpenrailsOperationAuthorization.SettlementProviderCostUsdMicros,
+		&i.OpenrailsOperationAuthorization.SettlementRatedUsdMicros,
+		&i.OpenrailsOperationAuthorization.SettlementBodyBytes,
+		&i.OpenrailsOperationAuthorization.SettlementBodyDigest,
 	)
 	return i, err
 }

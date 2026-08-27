@@ -69,4 +69,8 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 	nanosecondTime := base
 	nanosecondTime.QueryEnd = nanosecondTime.QueryEnd.Add(time.Nanosecond)
 	require.ErrorContains(t, validateProviderBillingInput(nanosecondTime), "PostgreSQL-exact microsecond precision")
+
+	zeroLifetime := base
+	zeroLifetime.Lifecycle.ProviderLifetimeEnd = zeroLifetime.Lifecycle.ProviderLifetimeStart
+	require.ErrorContains(t, validateProviderBillingInput(zeroLifetime), "must be after provider_lifetime_start")
 }

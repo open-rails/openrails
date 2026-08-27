@@ -35,11 +35,14 @@ INSERT INTO openrails.provider_billing_qualifications (
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
 RETURNING *;
 
--- name: GetProviderBillingQualification :one
-SELECT *
-FROM openrails.provider_billing_qualifications
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND operation_id = sqlc.arg(operation_id)::text;
+-- name: GetProviderBillingQualificationWithAuthorization :one
+SELECT sqlc.embed(q), sqlc.embed(a)
+FROM openrails.provider_billing_qualifications q
+JOIN openrails.operation_authorizations a
+  ON a.merchant_id = q.merchant_id
+ AND a.operation_id = q.operation_id
+WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND q.operation_id = sqlc.arg(operation_id)::text;
 
 -- name: GetProviderBillingQualificationForUpdate :one
 SELECT *
