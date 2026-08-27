@@ -45,32 +45,25 @@ type OperationAuthorizationRequest struct {
 }
 
 type OperationAuthorization struct {
-	OperationID              string
-	MerchantID               uuid.UUID
-	Payer                    identity.CustomerID
-	RecordOwner              string
-	LedgerAccountID          uuid.UUID
-	AuthorizedUSDMicros      int64
-	ClaimReference           string
-	AuthorizationBody        []byte
-	AuthorizationBodySHA256  [sha256.Size]byte
-	State                    OperationAuthorizationState
-	TerminalReference        string
-	SettlementRatedUSDMicros *int64
-	SettlementBody           []byte
-	SettlementBodySHA256     [sha256.Size]byte
-	CreatedAt                time.Time
-	ReleasedAt               *time.Time
-	SettledAt                *time.Time
-	Replayed                 bool
-}
-
-// OperationAuthorizationSettlementRequest is the one exact host-rated final
-// customer settlement. RatedUSDMicros may be zero for a host-proven zero window.
-type OperationAuthorizationSettlementRequest struct {
-	OperationID    string // canonical, at most 255 bytes
-	RatedUSDMicros int64
-	SettlementBody []byte // exact canonical bytes, 1..65536 bytes
+	OperationID                     string
+	MerchantID                      uuid.UUID
+	Payer                           identity.CustomerID
+	RecordOwner                     string
+	LedgerAccountID                 uuid.UUID
+	AuthorizedUSDMicros             int64
+	ClaimReference                  string
+	AuthorizationBody               []byte
+	AuthorizationBodySHA256         [sha256.Size]byte
+	State                           OperationAuthorizationState
+	TerminalReference               string
+	SettlementProviderCostUSDMicros *int64
+	SettlementRatedUSDMicros        *int64
+	SettlementBody                  []byte
+	SettlementBodySHA256            [sha256.Size]byte
+	CreatedAt                       time.Time
+	ReleasedAt                      *time.Time
+	SettledAt                       *time.Time
+	Replayed                        bool
 }
 
 type ReleaseOperationAuthorizationRequest struct {
@@ -114,33 +107,6 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-// SettleOperationAuthorizationTx posts one host-rated final customer settlement
-// through the existing ledger inside a transaction owned by the embedding host. It neither
-// commits nor rolls back tx and does not touch request-admission state.
-func (s *Service) SettleOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req OperationAuthorizationSettlementRequest) (*OperationAuthorization, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	settlement, err := s.moneyService().SettleOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationSettlementInput{
-		OperationID:    req.OperationID,
-		RatedUSDMicros: req.RatedUSDMicros,
-		SettlementBody: req.SettlementBody,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return operationAuthorizationFromMoney(settlement), nil
-}
-
 func (s *Service) GetOperationAuthorization(ctx context.Context, operationID string) (*OperationAuthorization, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
@@ -172,23 +138,24 @@ func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *Operat
 		return nil
 	}
 	return &OperationAuthorization{
-		OperationID:              auth.OperationID,
-		MerchantID:               auth.MerchantID,
-		Payer:                    auth.Payer,
-		RecordOwner:              auth.RecordOwner,
-		LedgerAccountID:          auth.LedgerAccountID,
-		AuthorizedUSDMicros:      auth.AuthorizedUSDMicros,
-		ClaimReference:           auth.ClaimReference,
-		AuthorizationBody:        auth.AuthorizationBody,
-		AuthorizationBodySHA256:  auth.AuthorizationBodySHA256,
-		State:                    auth.State,
-		TerminalReference:        auth.TerminalReference,
-		SettlementRatedUSDMicros: auth.SettlementRatedUSDMicros,
-		SettlementBody:           auth.SettlementBody,
-		SettlementBodySHA256:     auth.SettlementBodySHA256,
-		CreatedAt:                auth.CreatedAt,
-		ReleasedAt:               auth.ReleasedAt,
-		SettledAt:                auth.SettledAt,
-		Replayed:                 auth.Replayed,
+		OperationID:                     auth.OperationID,
+		MerchantID:                      auth.MerchantID,
+		Payer:                           auth.Payer,
+		RecordOwner:                     auth.RecordOwner,
+		LedgerAccountID:                 auth.LedgerAccountID,
+		AuthorizedUSDMicros:             auth.AuthorizedUSDMicros,
+		ClaimReference:                  auth.ClaimReference,
+		AuthorizationBody:               auth.AuthorizationBody,
+		AuthorizationBodySHA256:         auth.AuthorizationBodySHA256,
+		State:                           auth.State,
+		TerminalReference:               auth.TerminalReference,
+		SettlementProviderCostUSDMicros: auth.SettlementProviderCostUSDMicros,
+		SettlementRatedUSDMicros:        auth.SettlementRatedUSDMicros,
+		SettlementBody:                  auth.SettlementBody,
+		SettlementBodySHA256:            auth.SettlementBodySHA256,
+		CreatedAt:                       auth.CreatedAt,
+		ReleasedAt:                      auth.ReleasedAt,
+		SettledAt:                       auth.SettledAt,
+		Replayed:                        auth.Replayed,
 	}
 }

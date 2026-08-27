@@ -22,7 +22,7 @@ import (
 
 const (
 	operationAuthorizationCurrency          = "USD"
-	operationAuthorizationSettlementSource  = "operation_authorization_settlement"
+	operationAuthorizationPassThroughSource = "operation_authorization_pass_through_provider_cost"
 	operationAuthorizationMaxIDBytes        = 255
 	operationAuthorizationMaxPrincipalBytes = 255
 	operationAuthorizationMaxReferenceBytes = 1024
@@ -34,9 +34,8 @@ type OperationAuthorizationState string
 const (
 	OperationAuthorizationOpen     OperationAuthorizationState = "open"
 	OperationAuthorizationReleased OperationAuthorizationState = "released"
-	// OperationAuthorizationSettled is a schema terminal state reserved for a
-	// future tx-native capture that excludes its own open reservation. This slice
-	// intentionally exposes no settlement transition.
+	// OperationAuthorizationSettled is terminal after the permanent
+	// pass-through-provider-cost settlement contract runs.
 	OperationAuthorizationSettled OperationAuthorizationState = "settled"
 )
 
@@ -72,30 +71,31 @@ type OperationAuthorizationInput struct {
 }
 
 type OperationAuthorization struct {
-	OperationID              string
-	MerchantID               uuid.UUID
-	Payer                    identity.CustomerID
-	RecordOwner              string
-	LedgerAccountID          uuid.UUID
-	AuthorizedUSDMicros      int64
-	ClaimReference           string
-	AuthorizationBody        []byte
-	AuthorizationBodySHA256  [sha256.Size]byte
-	State                    OperationAuthorizationState
-	TerminalReference        string
-	SettlementRatedUSDMicros *int64
-	SettlementBody           []byte
-	SettlementBodySHA256     [sha256.Size]byte
-	CreatedAt                time.Time
-	ReleasedAt               *time.Time
-	SettledAt                *time.Time
-	Replayed                 bool
+	OperationID                     string
+	MerchantID                      uuid.UUID
+	Payer                           identity.CustomerID
+	RecordOwner                     string
+	LedgerAccountID                 uuid.UUID
+	AuthorizedUSDMicros             int64
+	ClaimReference                  string
+	AuthorizationBody               []byte
+	AuthorizationBodySHA256         [sha256.Size]byte
+	State                           OperationAuthorizationState
+	TerminalReference               string
+	SettlementProviderCostUSDMicros *int64
+	SettlementRatedUSDMicros        *int64
+	SettlementBody                  []byte
+	SettlementBodySHA256            [sha256.Size]byte
+	CreatedAt                       time.Time
+	ReleasedAt                      *time.Time
+	SettledAt                       *time.Time
+	Replayed                        bool
 }
 
-type OperationAuthorizationSettlementInput struct {
-	OperationID    string
-	RatedUSDMicros int64
-	SettlementBody []byte
+type PassThroughProviderCostSettlementInput struct {
+	OperationID           string
+	ProviderCostUSDMicros int64
+	SettlementBody        []byte
 }
 
 // AdmissionHeldReader reads the live Redis request-admission reservation total
@@ -309,22 +309,23 @@ func replayOperationAuthorization(row gen.OpenrailsOperationAuthorization, in Op
 	return operationAuthorizationFromRow(row, true), nil
 }
 
-// SettleOperationAuthorizationInTx performs the one host-rated final customer
-// settlement through the existing double-entry ledger in a caller-owned transaction. It
-// never calls request admission and never commits or rolls back the transaction.
+// SettlePassThroughProviderCostInTx applies OpenRails' permanent pass-through
+// provider-cost rating and performs the final customer settlement through the
+// existing double-entry ledger in a caller-owned transaction. It never calls
+// request admission and never commits or rolls back the transaction.
 //
 // The payer row is the money mutex. Terminally settling before the ledger helper
 // excludes this authorization's full hold while every other open authorization
-// stays held. The pre-authorized helper never re-gates: a rated settlement
+// stays held. The pre-authorized helper never re-gates: the rated settlement
 // above the authorization is posted as owed/overdraft truth rather than clamped.
-func (s *MoneyService) SettleOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, in OperationAuthorizationSettlementInput) (*OperationAuthorization, error) {
+func (s *MoneyService) SettlePassThroughProviderCostInTx(ctx context.Context, txDB *db.DB, in PassThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if txDB == nil {
 		return nil, fmt.Errorf("operation authorization settlement requires a bound transaction")
 	}
-	if err := validateOperationAuthorizationSettlementInput(in); err != nil {
+	if err := validatePassThroughProviderCostSettlementInput(in); err != nil {
 		return nil, err
 	}
 	merchantID, err := merchant.Require(ctx)
@@ -354,7 +355,7 @@ func (s *MoneyService) SettleOperationAuthorizationInTx(ctx context.Context, txD
 	}
 	switch OperationAuthorizationState(row.State) {
 	case OperationAuthorizationSettled:
-		return replayOperationAuthorizationSettlement(row, in)
+		return replayPassThroughProviderCostSettlement(row, in)
 	case OperationAuthorizationReleased:
 		return nil, ErrOperationAuthorizationNotOpen
 	case OperationAuthorizationOpen:
@@ -362,9 +363,10 @@ func (s *MoneyService) SettleOperationAuthorizationInTx(ctx context.Context, txD
 		return nil, fmt.Errorf("operation authorization has invalid state %q", row.State)
 	}
 
-	key := operationAuthorizationSettlementKey(in.OperationID)
-	if in.RatedUSDMicros > 0 {
-		committed, err := key.requireSameAmount(ctx, q, merchantID.UUID(), payer.UUID(), operationAuthorizationCurrency, in.RatedUSDMicros)
+	key := passThroughProviderCostSettlementKey(in.OperationID)
+	ratedUSDMicros := in.ProviderCostUSDMicros
+	if ratedUSDMicros > 0 {
+		committed, err := key.requireSameAmount(ctx, q, merchantID.UUID(), payer.UUID(), operationAuthorizationCurrency, ratedUSDMicros)
 		if err != nil {
 			return nil, err
 		}
@@ -374,14 +376,15 @@ func (s *MoneyService) SettleOperationAuthorizationInTx(ctx context.Context, txD
 	}
 	settlementDigest := sha256.Sum256(in.SettlementBody)
 	terminalReference := fmt.Sprintf("sha256:%x", settlementDigest[:])
-	settled, err := q.SettleOperationAuthorization(ctx, gen.SettleOperationAuthorizationParams{
-		SettlementRatedUsdMicros: in.RatedUSDMicros,
-		SettlementBodyBytes:      in.SettlementBody,
-		SettlementBodyDigest:     settlementDigest[:],
-		TerminalReference:        terminalReference,
-		SettledAt:                s.now().UTC(),
-		MerchantID:               merchantID.UUID(),
-		OperationID:              in.OperationID,
+	settled, err := q.SettleOperationAuthorizationPassThroughProviderCost(ctx, gen.SettleOperationAuthorizationPassThroughProviderCostParams{
+		SettlementProviderCostUsdMicros: in.ProviderCostUSDMicros,
+		SettlementRatedUsdMicros:        ratedUSDMicros,
+		SettlementBodyBytes:             in.SettlementBody,
+		SettlementBodyDigest:            settlementDigest[:],
+		TerminalReference:               terminalReference,
+		SettledAt:                       s.now().UTC(),
+		MerchantID:                      merchantID.UUID(),
+		OperationID:                     in.OperationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrOperationAuthorizationNotOpen
@@ -390,9 +393,9 @@ func (s *MoneyService) SettleOperationAuthorizationInTx(ctx context.Context, txD
 		return nil, err
 	}
 
-	if in.RatedUSDMicros > 0 {
+	if ratedUSDMicros > 0 {
 		_, _, applied, err := txSvc.spendBalanceThenOwedTx(
-			ctx, q, payer, row.RecordOwner, operationAuthorizationCurrency, key, in.RatedUSDMicros, true,
+			ctx, q, payer, row.RecordOwner, operationAuthorizationCurrency, key, ratedUSDMicros, true,
 		)
 		if err != nil {
 			return nil, err
@@ -404,17 +407,17 @@ func (s *MoneyService) SettleOperationAuthorizationInTx(ctx context.Context, txD
 	return operationAuthorizationFromRow(settled, false), nil
 }
 
-func operationAuthorizationSettlementKey(operationID string) IdempotencyKey {
+func passThroughProviderCostSettlementKey(operationID string) IdempotencyKey {
 	digest := sha256.Sum256([]byte(operationID))
-	return MustIdempotencyKey(OpCapture, operationAuthorizationSettlementSource, fmt.Sprintf("%x", digest[:]))
+	return MustIdempotencyKey(OpCapture, operationAuthorizationPassThroughSource, fmt.Sprintf("%x", digest[:]))
 }
 
-func validateOperationAuthorizationSettlementInput(in OperationAuthorizationSettlementInput) error {
+func validatePassThroughProviderCostSettlementInput(in PassThroughProviderCostSettlementInput) error {
 	if err := validateOperationAuthorizationText("operation_id", in.OperationID, operationAuthorizationMaxIDBytes); err != nil {
 		return err
 	}
-	if in.RatedUSDMicros < 0 {
-		return fmt.Errorf("rated_usd_micros must be nonnegative")
+	if in.ProviderCostUSDMicros < 0 {
+		return fmt.Errorf("provider_cost_usd_micros must be nonnegative")
 	}
 	if len(in.SettlementBody) == 0 {
 		return fmt.Errorf("settlement_body required")
@@ -425,9 +428,12 @@ func validateOperationAuthorizationSettlementInput(in OperationAuthorizationSett
 	return nil
 }
 
-func replayOperationAuthorizationSettlement(row gen.OpenrailsOperationAuthorization, in OperationAuthorizationSettlementInput) (*OperationAuthorization, error) {
-	if row.SettlementRatedUsdMicros == nil {
-		return nil, fmt.Errorf("settled operation authorization has no settlement amount")
+func replayPassThroughProviderCostSettlement(row gen.OpenrailsOperationAuthorization, in PassThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
+	if row.SettlementProviderCostUsdMicros == nil || row.SettlementRatedUsdMicros == nil {
+		return nil, fmt.Errorf("settled operation authorization has incomplete settlement amounts")
+	}
+	if *row.SettlementProviderCostUsdMicros != *row.SettlementRatedUsdMicros {
+		return nil, fmt.Errorf("settled operation authorization violates pass-through provider-cost rating")
 	}
 	digest := sha256.Sum256(row.SettlementBodyBytes)
 	terminalReference := fmt.Sprintf("sha256:%x", digest[:])
@@ -438,7 +444,7 @@ func replayOperationAuthorizationSettlement(row gen.OpenrailsOperationAuthorizat
 		field string
 		same  bool
 	}{
-		{"rated_usd_micros", *row.SettlementRatedUsdMicros == in.RatedUSDMicros},
+		{"provider_cost_usd_micros", *row.SettlementProviderCostUsdMicros == in.ProviderCostUSDMicros},
 		{"settlement_body", bytes.Equal(row.SettlementBodyBytes, in.SettlementBody)},
 	}
 	for _, check := range checks {
@@ -559,23 +565,24 @@ func operationAuthorizationFromRow(row gen.OpenrailsOperationAuthorization, repl
 	var settlementDigest [sha256.Size]byte
 	copy(settlementDigest[:], row.SettlementBodyDigest)
 	return &OperationAuthorization{
-		OperationID:              row.OperationID,
-		MerchantID:               row.MerchantID,
-		Payer:                    identity.CustomerID(row.PayerID),
-		RecordOwner:              row.RecordOwner,
-		LedgerAccountID:          row.LedgerAccountID,
-		AuthorizedUSDMicros:      row.AuthorizedUsdMicros,
-		ClaimReference:           row.ClaimReference,
-		AuthorizationBody:        bytes.Clone(row.AuthorizationBodyBytes),
-		AuthorizationBodySHA256:  digest,
-		State:                    OperationAuthorizationState(row.State),
-		TerminalReference:        terminalReference,
-		SettlementRatedUSDMicros: row.SettlementRatedUsdMicros,
-		SettlementBody:           bytes.Clone(row.SettlementBodyBytes),
-		SettlementBodySHA256:     settlementDigest,
-		CreatedAt:                row.CreatedAt,
-		ReleasedAt:               row.ReleasedAt,
-		SettledAt:                row.SettledAt,
-		Replayed:                 replayed,
+		OperationID:                     row.OperationID,
+		MerchantID:                      row.MerchantID,
+		Payer:                           identity.CustomerID(row.PayerID),
+		RecordOwner:                     row.RecordOwner,
+		LedgerAccountID:                 row.LedgerAccountID,
+		AuthorizedUSDMicros:             row.AuthorizedUsdMicros,
+		ClaimReference:                  row.ClaimReference,
+		AuthorizationBody:               bytes.Clone(row.AuthorizationBodyBytes),
+		AuthorizationBodySHA256:         digest,
+		State:                           OperationAuthorizationState(row.State),
+		TerminalReference:               terminalReference,
+		SettlementProviderCostUSDMicros: row.SettlementProviderCostUsdMicros,
+		SettlementRatedUSDMicros:        row.SettlementRatedUsdMicros,
+		SettlementBody:                  bytes.Clone(row.SettlementBodyBytes),
+		SettlementBodySHA256:            settlementDigest,
+		CreatedAt:                       row.CreatedAt,
+		ReleasedAt:                      row.ReleasedAt,
+		SettledAt:                       row.SettledAt,
+		Replayed:                        replayed,
 	}
 }

@@ -15,7 +15,6 @@ type OperationAuthorization = service.OperationAuthorization
 type OperationAuthorizationState = service.OperationAuthorizationState
 type ReleaseOperationAuthorizationRequest = service.ReleaseOperationAuthorizationRequest
 type OperationAuthorizationConflict = service.OperationAuthorizationConflict
-type OperationAuthorizationSettlementRequest = service.OperationAuthorizationSettlementRequest
 
 const (
 	OperationAuthorizationOpen     = service.OperationAuthorizationOpen
@@ -38,17 +37,6 @@ func (r *Runtime) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 		return nil, err
 	}
 	return r.svc.OpenOperationAuthorizationTx(ctx, tx, req)
-}
-
-// SettleOperationAuthorizationTx records one exact host-rated final customer
-// settlement through the existing ledger inside an embedding-host transaction.
-// Provider evidence, rating, and finality semantics remain host-owned.
-func (r *Runtime) SettleOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req OperationAuthorizationSettlementRequest) (*OperationAuthorization, error) {
-	ctx, err := r.operationAuthorizationContext(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return r.svc.SettleOperationAuthorizationTx(ctx, tx, req)
 }
 
 // GetOperationAuthorization reads the bound merchant's durable authorization.

@@ -40,9 +40,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND ledger_account_id = sqlc.arg(ledger_account_id)::uuid
   AND state = 'open';
 
--- name: SettleOperationAuthorization :one
+-- name: SettleOperationAuthorizationPassThroughProviderCost :one
 UPDATE openrails.operation_authorizations
 SET state = 'settled',
+    settlement_provider_cost_usd_micros = sqlc.arg(settlement_provider_cost_usd_micros)::bigint,
     settlement_rated_usd_micros = sqlc.arg(settlement_rated_usd_micros)::bigint,
     settlement_body_bytes = sqlc.arg(settlement_body_bytes)::bytea,
     settlement_body_digest = sqlc.arg(settlement_body_digest)::bytea,
