@@ -158,6 +158,23 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, refusedInput.RawBody, raw, "typed SDK refusal retains exact bounded provider bytes")
 
+	_, err = owner.Exec(ctx, `
+		UPDATE openrails.provider_billing_observations
+		SET raw_body_available = false,
+		    raw_body_bytes = ''::bytea,
+		    raw_body_digest = public.digest(''::bytea, 'sha256')
+		WHERE merchant_id = $1 AND operation_id = $2 AND observation_id = $3`,
+		dbtest.TestMerchantID.UUID(), refusedAuth.OperationID, refusedInput.ObservationID,
+	)
+	require.Error(t, err, "Postgres must refuse discarding exact bytes from a bounded parser refusal")
+	_, err = owner.Exec(ctx, `
+		UPDATE openrails.provider_billing_observations
+		SET refusal_kind = 'response_too_large'
+		WHERE merchant_id = $1 AND operation_id = $2 AND observation_id = $3`,
+		dbtest.TestMerchantID.UUID(), refusedAuth.OperationID, refusedInput.ObservationID,
+	)
+	require.Error(t, err, "Postgres must refuse retaining partial bytes from an oversized response")
+
 	negativeAuth := open("th-045-negative")
 	negativeLifecycle := refusedLifecycle
 	negativeLifecycle.ProviderResourceID = "pod-negative"

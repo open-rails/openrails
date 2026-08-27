@@ -174,6 +174,15 @@ CREATE TABLE openrails.provider_billing_observations (
             AND NOT has_negative_record
             AND NOT covers_lifetime
             AND qualification_reason = 'provider_evidence_refused'
+            AND (
+                (refusal_kind IN ('schema_ambiguity', 'submicro_amount', 'amount_overflow')
+                 AND raw_body_available
+                 AND octet_length(raw_body_bytes) > 0)
+                OR
+                (refusal_kind = 'response_too_large'
+                 AND NOT raw_body_available
+                 AND octet_length(raw_body_bytes) = 0)
+            )
         )
     ),
     CONSTRAINT provider_billing_observation_reason_shape CHECK (

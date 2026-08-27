@@ -463,8 +463,14 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 		switch in.Refusal.Kind {
 		case ProviderBillingRefusalSchemaAmbiguity,
 			ProviderBillingRefusalSubmicroAmount,
-			ProviderBillingRefusalAmountOverflow,
-			ProviderBillingRefusalResponseTooLarge:
+			ProviderBillingRefusalAmountOverflow:
+			if len(in.RawBody) == 0 {
+				return fmt.Errorf("provider billing refusal %q requires exact bounded raw body", in.Refusal.Kind)
+			}
+		case ProviderBillingRefusalResponseTooLarge:
+			if len(in.RawBody) != 0 {
+				return fmt.Errorf("provider billing refusal %q cannot retain partial raw body", in.Refusal.Kind)
+			}
 		default:
 			return fmt.Errorf("unsupported provider billing refusal kind %q", in.Refusal.Kind)
 		}

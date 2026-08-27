@@ -26,23 +26,35 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 		},
 	}
 
-	for _, kind := range []string{"schema_ambiguity", "submicro_amount", "amount_overflow", "response_too_large"} {
+	for _, kind := range []string{"schema_ambiguity", "submicro_amount", "amount_overflow"} {
 		in := base
-		in.RawBody = nil
 		in.Refusal = &ProviderBillingObservationRefusal{Kind: ProviderBillingEvidenceRefusalKind(kind)}
 		require.NoError(t, validateProviderBillingInput(in))
 		prepared, err := prepareProviderBillingObservation(in)
 		require.NoError(t, err)
 		require.Equal(t, kind, *prepared.refusalKind)
-		require.False(t, prepared.rawAvailable)
+		require.True(t, prepared.rawAvailable)
+
+		in.RawBody = nil
+		require.ErrorContains(t, validateProviderBillingInput(in), "requires exact bounded raw body")
 	}
+
+	tooLarge := base
+	tooLarge.RawBody = nil
+	tooLarge.Refusal = &ProviderBillingObservationRefusal{Kind: ProviderBillingRefusalResponseTooLarge}
+	require.NoError(t, validateProviderBillingInput(tooLarge))
+	prepared, err := prepareProviderBillingObservation(tooLarge)
+	require.NoError(t, err)
+	require.False(t, prepared.rawAvailable)
+	tooLarge.RawBody = []byte("partial")
+	require.ErrorContains(t, validateProviderBillingInput(tooLarge), "cannot retain partial raw body")
 
 	overflow := base
 	overflow.Records = []ProviderBillingRecord{
 		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Hour), AmountUSDMicros: math.MaxInt64, TimeBilledMS: 1},
 		{ProviderResourceID: base.Lifecycle.ProviderResourceID, BucketStart: now.Add(-time.Minute), AmountUSDMicros: 1, TimeBilledMS: 1},
 	}
-	_, err := prepareProviderBillingObservation(overflow)
+	_, err = prepareProviderBillingObservation(overflow)
 	require.ErrorContains(t, err, "total USD micros overflow")
 
 	negative := base
@@ -50,7 +62,7 @@ func TestPrepareProviderBillingObservationRefusalsAndOverflow(t *testing.T) {
 		ProviderResourceID: base.Lifecycle.ProviderResourceID,
 		BucketStart:        now.Add(-time.Hour), AmountUSDMicros: -1, TimeBilledMS: 1,
 	}}
-	prepared, err := prepareProviderBillingObservation(negative)
+	prepared, err = prepareProviderBillingObservation(negative)
 	require.NoError(t, err)
 	require.True(t, prepared.hasNegative)
 
