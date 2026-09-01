@@ -44,8 +44,24 @@ type AdmitInput struct {
 	AccrualRateDeltaPerHour int64
 	Source                  string
 	SourceID                string
-	ExpiresAtUnix           int64
+	// ExpiresAtUnix is the deadline of the job this admit covers — REQUIRED
+	// when EstimatedAmount places a hold; the hold lives exactly that long
+	// unless captured, released or extended.
+	ExpiresAtUnix int64
 }
+
+// ErrHoldDeadlineRequired is returned by Admit when EstimatedAmount places a
+// hold and no ExpiresAtUnix was declared.
+var ErrHoldDeadlineRequired = admission.ErrHoldDeadlineRequired
+
+// ErrHoldDeadlinePassed is returned by Admit/ExtendHold when the declared
+// deadline is already in the past.
+var ErrHoldDeadlinePassed = admission.ErrHoldDeadlinePassed
+
+// ErrHoldNotFound is returned by ExtendHold when no live hold exists for the
+// request id: it was captured, released, or lapsed at its declared deadline.
+// The caller must re-admit; a lapsed hold is never resurrected.
+var ErrHoldNotFound = errors.New("hold not found for request_id")
 
 // AdmitResult is the unified admission decision returned to the host.
 type AdmitResult struct {
@@ -112,12 +128,13 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		WithDelinquency(s.delinquencyService()).
 		WithAccrualRateMeter(admission.NewAccrualRateMeter(s.rt.DB))
 
+	// The hold's lifetime is the caller's declared job deadline, never a
+	// default of ours (xs-007 row 33): the Admitter refuses a hold that
+	// declares none (ErrHoldDeadlineRequired). A job that outlives its
+	// estimate re-declares through ExtendHold.
 	var exp time.Time
-	switch {
-	case in.ExpiresAtUnix > 0:
+	if in.ExpiresAtUnix > 0 {
 		exp = time.Unix(in.ExpiresAtUnix, 0).UTC()
-	case in.EstimatedAmount > 0:
-		exp = s.now().Add(time.Hour)
 	}
 	source := in.Source
 	if source == "" {

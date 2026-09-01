@@ -66,12 +66,15 @@ type BootstrapOptions struct {
 }
 
 // Bootstrap initialises core services, caches, and auth verifier.
-func Bootstrap(cfg *config.Config) (*App, error) {
-	return BootstrapWithOptions(cfg, nil)
+func Bootstrap(ctx context.Context, cfg *config.Config) (*App, error) {
+	return BootstrapWithOptions(ctx, cfg, nil)
 }
 
 // BootstrapWithOptions initialises core services with optional overrides.
-func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, error) {
+// BootstrapWithOptions builds the application graph. ctx is the BOOT context:
+// it bounds the wait for the database (xs-007 row 40 — a process asked to
+// stop while its database is failing over stops; nothing else ends the wait).
+func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *BootstrapOptions) (*App, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -99,7 +102,7 @@ func BootstrapWithOptions(cfg *config.Config, opts *BootstrapOptions) (*App, err
 		dbOverride = dbo
 	}
 
-	runtime, err := buildRuntimeWithOverrides(cfg, &runtimeOverrides{
+	runtime, err := buildRuntimeWithOverrides(ctx, cfg, &runtimeOverrides{
 		DB: dbOverride,
 		Redis: func() *redis.Client {
 			if opts != nil {

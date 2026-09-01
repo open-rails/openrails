@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/business"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -74,6 +75,7 @@ func (w BusinessCycleWorker) Work(ctx context.Context, _ *river.Job[BusinessCycl
 			continue
 		}
 		merchantID := merchant.ID(*mid)
+		progress.Mark(ctx, "business cycle merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "business dunning cycle", func(mctx context.Context) error {
 			res, err := svc.EvaluateMerchant(mctx, now)
 			payers += res.Payers

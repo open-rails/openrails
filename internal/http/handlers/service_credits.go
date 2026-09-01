@@ -643,6 +643,43 @@ func ServiceReleaseHold(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"ok": true})
 }
 
+type serviceExtendHoldRequest struct {
+	ExpiresAt int64 `json:"expires_at"`
+}
+
+// ServiceExtendHold re-declares a live hold's deadline (xs-007 row 33).
+func ServiceExtendHold(r *httprequest.Request) {
+	requestID := strings.TrimSpace(r.Param("id"))
+	if requestID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "request_id required")
+		return
+	}
+	var req serviceExtendHoldRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	if req.ExpiresAt <= 0 {
+		r.ErrorJSON(http.StatusBadRequest, "expires_at required")
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	err = svc.ExtendHold(r.Request.Context(), requestID, time.Unix(req.ExpiresAt, 0).UTC())
+	switch {
+	case err == nil:
+		r.SuccessJSON(map[string]any{"ok": true})
+	case errors.Is(err, billingservice.ErrHoldNotFound):
+		r.ErrorJSON(http.StatusNotFound, "hold_not_found")
+	case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
+		r.ErrorJSON(http.StatusBadRequest, "expires_at already passed")
+	default:
+		r.ErrorJSON(http.StatusInternalServerError, "extend failed")
+	}
+}
+
 func ServiceGetInvokerCredits(r *httprequest.Request) {
 	invokerID := strings.TrimSpace(r.Param("invoker"))
 	if invokerID == "" {

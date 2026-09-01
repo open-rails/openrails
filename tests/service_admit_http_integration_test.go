@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -72,6 +73,7 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 		return map[string]any{
 			"customer_id": payerID.String(), "invoker": "user:a", "invoker_type": "payer",
 			"currency": money.DefaultCurrency, "estimated_amount": amount, "request_id": reqID,
+			"expires_at": time.Now().Add(time.Hour).Unix(),
 		}
 	}
 	type admitResp struct {

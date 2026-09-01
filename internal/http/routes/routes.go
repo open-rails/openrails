@@ -266,6 +266,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	admissions := group.Group("/admissions")
 	admissions.Handle(http.MethodPost, "/:id/capture", h(httphandlers.ServiceCaptureHold), admissionMW...)
 	admissions.Handle(http.MethodPost, "/:id/release", h(httphandlers.ServiceReleaseHold), admissionMW...)
+	admissions.Handle(http.MethodPost, "/:id/extend", h(httphandlers.ServiceExtendHold), admissionMW...)
 
 	usage := group.Group("/usage")
 	usage.Handle(http.MethodPost, "/report", h(httphandlers.ServiceRecordUsage), admissionMW...)

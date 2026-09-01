@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -60,6 +61,7 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 		if railSubID == "" {
 			continue
 		}
+		progress.Mark(ctx, "ccbill datalink subscription "+railSubID)
 		localByRailID[railSubID] = struct{}{}
 		if _, ok := remoteActive[railSubID]; !ok {
 			missingRemote++

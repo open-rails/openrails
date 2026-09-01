@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -20,6 +21,7 @@ type ledger interface {
 	ClaimByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error)
 	ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error)
 	ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error)
+	RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (bool, error)
 	ExpireOverdue(ctx context.Context, now time.Time) (int64, error)
 	MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, evidence map[string]any) error
 	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
@@ -32,8 +34,14 @@ type ledger interface {
 }
 
 const (
-	// DefaultLease bounds one claim: an executor that dies mid-batch frees its
-	// rows for reclaim after this long.
+	// DefaultLease is the silence an executor is allowed before its claim is
+	// treated as abandoned. It is NOT how long a handler may run: the claim is
+	// renewed every lease/4 for as long as the handler is executing
+	// (renewClaimWhile, xs-007 row 32), so a lapsed lease means an executor
+	// that stopped beating — dead, partitioned, or wedged — never a refund or
+	// charge that is simply taking its time at the provider. Before the beat,
+	// a refund still in flight at t=2m was handed to a second executor with
+	// only the per-type verify-before-write between that and a double move.
 	DefaultLease = 2 * time.Minute
 	// DefaultBatchSize bounds one run's claim.
 	DefaultBatchSize = 50
@@ -138,6 +146,7 @@ func (r *Runner) RunExecuteOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
+		progress.Mark(ctx, "intent execute "+intent.ID.String())
 		r.executeOne(ctx, intent, &stats)
 	}
 	return stats, nil
@@ -221,7 +230,9 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 		r.park(ctx, logEntry, stats, intent.ID, now, "mutation log unavailable: "+err.Error())
 		return
 	}
+	stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
 	outcome := handler.Execute(ctx, intent)
+	stopBeat()
 	if err := r.logExternalMutation(ctx, intent, mutationLogPhase(outcome), outcome.Reason, outcome.Evidence); err != nil {
 		logEntry.WithError(err).Error("intent executor: external mutation result log failed")
 	}
@@ -283,6 +294,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	stats.Claimed = len(claimed)
 
 	for _, intent := range claimed {
+		progress.Mark(ctx, "intent verify "+intent.ID.String())
 		// Pin the intent's merchant for merchant-scoped verify/repair writes
 		// (#336) and its PSP for their provenance (or#893) — a verifier's repair
 		// writes the same mirror rows the executor would have.
@@ -312,9 +324,57 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 			continue
 		}
 		// Verification is read-only: no mode gate.
-		r.apply(ctx, logEntry, &stats, handler, intent, handler.Verify(ctx, intent), true)
+		stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
+		outcome := handler.Verify(ctx, intent)
+		stopBeat()
+		r.apply(ctx, logEntry, &stats, handler, intent, outcome, true)
 	}
 	return stats, nil
+}
+
+// renewClaimWhile beats the intent's lease every lease/4 until the returned
+// stop is called — the same shape as the webhook pending-lease heartbeat
+// (#678). A beat that finds the lease already lapsed is logged loudly: the
+// handler keeps running (a provider call cannot be un-made), and the outcome
+// it produces is still recorded — the per-type verify-before-write of whoever
+// claimed the row next is the remaining guard, exactly as before the beat.
+// Renewal failures (DB unreachable) are logged and retried on the next beat.
+func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, id uuid.UUID) func() {
+	lease := r.lease()
+	hbCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := r.newTicker(lease / 4)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-hbCtx.Done():
+				return
+			case <-ticker.Chan():
+			}
+			now := r.now()
+			renewed, err := r.Store.RenewClaim(hbCtx, id, now, now.Add(lease))
+			switch {
+			case err != nil && hbCtx.Err() == nil:
+				logEntry.WithError(err).Warn("intent lease renewal failed; retrying next beat")
+			case err == nil && !renewed:
+				logEntry.Error("intent lease lapsed while the handler was still running; another executor may now hold it (its verify-before-write is the guard)")
+				return
+			}
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func (r *Runner) newTicker(d time.Duration) clockwork.Ticker {
+	if r.Clock != nil {
+		return r.Clock.NewTicker(d)
+	}
+	return clockwork.NewRealClock().NewTicker(d)
 }
 
 // apply writes one classified outcome back to the ledger. verifying selects

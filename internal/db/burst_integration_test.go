@@ -34,7 +34,7 @@ func TestMerchantConn_BurstDoesNotWedge(t *testing.T) {
 	} else {
 		dsn += "?pool_max_conns=5"
 	}
-	d, err := NewDB(&config.DBConfig{URL: dsn})
+	d, err := NewDB(t.Context(), &config.DBConfig{URL: dsn})
 	require.NoError(t, err)
 	defer d.Close()
 
@@ -88,7 +88,7 @@ func TestMerchantConn_LazyConnNotAcquiredWithoutUse(t *testing.T) {
 	} else {
 		dsn += "?pool_max_conns=2"
 	}
-	d, err := NewDB(&config.DBConfig{URL: dsn})
+	d, err := NewDB(t.Context(), &config.DBConfig{URL: dsn})
 	require.NoError(t, err)
 	defer d.Close()
 

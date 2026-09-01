@@ -86,7 +86,7 @@ func hostedTestConfig(dsn, issuer string) *config.Config {
 
 func newHostApp(t *testing.T, cfg *config.Config) *embedded.Embedded {
 	t.Helper()
-	e, err := embedded.New(embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()})
+	e, err := embedded.New(context.Background(), embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()})
 	require.NoError(t, err, "embedded.New")
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 	return e

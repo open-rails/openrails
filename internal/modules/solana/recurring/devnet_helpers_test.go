@@ -241,7 +241,7 @@ func ensureATA(ctx context.Context, t *testing.T, rc *solanaint.RPCClient, raw *
 	require.NoError(t, err)
 	sig, err := raw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true})
 	require.NoError(t, err)
-	_, _ = rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, 60*time.Second)
+	_, _ = rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, solanaint.ChainTerminal{})
 }
 
 // transferUSDC moves `amount` of `mint` from the funder's ATA to the recipient's
@@ -261,7 +261,7 @@ func transferUSDC(ctx context.Context, t *testing.T, rc *solanaint.RPCClient, ra
 	require.NoError(t, err)
 	sig, err := raw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true})
 	require.NoError(t, err)
-	out, werr := rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, 60*time.Second)
+	out, werr := rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, solanaint.ChainTerminal{})
 	require.NoError(t, werr)
 	require.Nil(t, out.OnChainError(), "USDC funding transfer failed")
 }
@@ -279,7 +279,7 @@ func fundSOL(ctx context.Context, t *testing.T, rc *solanaint.RPCClient, raw *rp
 	require.NoError(t, err)
 	sig, err := raw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true})
 	require.NoError(t, err)
-	_, _ = rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, 60*time.Second)
+	_, _ = rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, solanaint.ChainTerminal{})
 }
 
 // signerFor returns a single-key Solana signer callback.
@@ -310,7 +310,7 @@ func signAndSendBase64(ctx context.Context, t *testing.T, rc *solanaint.RPCClien
 		require.NoError(t, err)
 		sig, err := raw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true, PreflightCommitment: rpc.CommitmentConfirmed})
 		require.NoError(t, err)
-		out, werr := rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, 90*time.Second)
+		out, werr := rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, solanaint.ChainTerminal{})
 		require.NoError(t, werr)
 		require.Nil(t, out.OnChainError(), "tx %s failed on-chain", sig)
 	}
@@ -334,7 +334,7 @@ func trySignSend(ctx context.Context, t *testing.T, raw *rpc.Client, rc *solanai
 		if err != nil {
 			return err.Error(), false
 		}
-		out, werr := rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, 90*time.Second)
+		out, werr := rc.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, solanaint.ChainTerminal{})
 		if werr != nil {
 			return werr.Error(), false
 		}
@@ -369,7 +369,7 @@ func completePartialAndSend(ctx context.Context, t *testing.T, rc *solanaint.RPC
 
 	txid, err := raw.SendTransactionWithOpts(ctx, tx, rpc.TransactionOpts{SkipPreflight: true, PreflightCommitment: rpc.CommitmentConfirmed})
 	require.NoError(t, err)
-	out, werr := rc.WatchTransaction(ctx, txid, rpc.CommitmentConfirmed, 90*time.Second)
+	out, werr := rc.WatchTransaction(ctx, txid, rpc.CommitmentConfirmed, solanaint.ChainTerminal{})
 	require.NoError(t, werr)
 	require.Nil(t, out.OnChainError(), "co-signed tx %s failed on-chain", txid)
 }

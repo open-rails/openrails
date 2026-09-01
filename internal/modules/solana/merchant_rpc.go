@@ -3,7 +3,6 @@ package solana
 import (
 	"context"
 	"fmt"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -150,10 +149,10 @@ func (r *MerchantChainReader) GetTokenBalanceForMint(ctx context.Context, owner 
 	return client.GetTokenBalanceForMint(ctx, owner, mint)
 }
 
-func (r *MerchantChainReader) WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, timeout time.Duration) (*solanarpc.TransactionOutcome, error) {
+func (r *MerchantChainReader) WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal solanarpc.ChainTerminal) (*solanarpc.TransactionOutcome, error) {
 	client, err := r.client(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return client.WatchTransaction(ctx, sig, commitment, timeout)
+	return client.WatchTransaction(ctx, sig, commitment, terminal)
 }

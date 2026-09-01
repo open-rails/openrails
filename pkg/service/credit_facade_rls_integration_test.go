@@ -35,7 +35,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	payer := identity.CustomerIDFromString(uuid.NewString())
 
 	// Seed merchant as super (super bypasses RLS). Money needs no credit-type row (#472).
-	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
+	super, err := db.NewDB(t.Context(), &config.DBConfig{URL: superDSN})
 	require.NoError(t, err)
 	defer super.Close()
 	_, err = super.Pool().Exec(ctx,
@@ -44,7 +44,7 @@ func TestCreditFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	require.NoError(t, err)
 
 	// Facade connected as the unprivileged openrails_app role (RLS ENFORCES).
-	appDB, err := db.NewDB(&config.DBConfig{URL: appRoleDSN})
+	appDB, err := db.NewDB(t.Context(), &config.DBConfig{URL: appRoleDSN})
 	require.NoError(t, err)
 	defer appDB.Close()
 	posture, err := appDB.CheckRLSPosture(ctx)

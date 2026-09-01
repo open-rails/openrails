@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -180,6 +181,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 			return ctx.Err()
 		default:
 		}
+		progress.Mark(ctx, "solana crank subscription "+row.ID.String())
 		// Per-row isolation: a failure on one subscriber never aborts the batch.
 		//
 		// #674 write-through: durable intent first (keyed on the persisted

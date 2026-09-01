@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -24,7 +23,7 @@ type fakeConfirmRPC struct {
 	gotComm rpc.CommitmentType
 }
 
-func (f *fakeConfirmRPC) WatchTransaction(_ context.Context, sig solanago.Signature, comm rpc.CommitmentType, _ time.Duration) (*solanaint.TransactionOutcome, error) {
+func (f *fakeConfirmRPC) WatchTransaction(_ context.Context, sig solanago.Signature, comm rpc.CommitmentType, _ solanaint.ChainTerminal) (*solanaint.TransactionOutcome, error) {
 	f.called = true
 	f.gotSig = sig
 	f.gotComm = comm

@@ -486,7 +486,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	for _, mutate := range sc.configMutators {
 		mutate(cfg)
 	}
-	assembled, err := serverboot.NewServer(cfg, &serverboot.Options{
+	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{
 		Clock:                  sc.clock,
 		ConfiguredMerchant:     sc.configuredMerchant,
 		Authenticator:          sc.authenticator,

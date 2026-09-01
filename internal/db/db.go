@@ -31,8 +31,16 @@ type DB struct {
 	rw schemaRewriter
 }
 
+// Connect retry pacing (xs-007 row 40). There is deliberately NO overall
+// budget: a database that is not reachable yet is observed by the ping that
+// fails, and the only thing that ends the wait is the caller's context — a
+// process asked to stop (SIGTERM), or a test that gave up. The 60 s cap this
+// replaced turned a two-minute failover into a fatal boot and a crash loop;
+// a process that is waiting is not ready (no listener, no /readyz), which is
+// the truthful state, and it becomes ready the moment the ping succeeds.
+// Each ping is a single I/O call with its own bound; the delay between them
+// backs off to a poll cadence.
 const (
-	dbConnectMaxWait     = 60 * time.Second
 	dbConnectBaseDelay   = time.Second
 	dbConnectMaxDelay    = 5 * time.Second
 	dbConnectPingTimeout = 5 * time.Second
@@ -42,7 +50,10 @@ const (
 	dbConnMaxIdleTime = 15 * time.Minute
 )
 
-func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
+// NewDB opens the application pool and waits for the database to answer.
+// ctx bounds the wait: it is the boot context (cancelled by SIGTERM in the
+// standalone binary), never a package clock.
+func NewDB(ctx context.Context, cfg *config.DBConfig) (_ *DB, err error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("database config is nil")
 	}
@@ -50,8 +61,11 @@ func NewDB(cfg *config.DBConfig) (_ *DB, err error) {
 	if url == "" {
 		return nil, fmt.Errorf("missing database configuration (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
-	pool, err := newTunedPGXPool(context.Background(), url, cfg.SQLTrace)
+	pool, err := newTunedPGXPool(ctx, url, cfg.SQLTrace)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +114,7 @@ func NewPGXPoolWithRetry(ctx context.Context, connString string) (*pgxpool.Pool,
 }
 
 func pingWithRetry(ctx context.Context, ping func(context.Context) error, label string) error {
-	deadline := time.Now().Add(dbConnectMaxWait)
+	started := time.Now()
 	delay := dbConnectBaseDelay
 	var lastErr error
 	for {
@@ -111,13 +125,11 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 			return nil
 		}
 		if ctx.Err() != nil {
-			return fmt.Errorf("failed to connect to %s: %w", label, ctx.Err())
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("failed to connect to %s after %s: %w", label, dbConnectMaxWait, lastErr)
+			return fmt.Errorf("failed to connect to %s after %s (last: %v): %w", label, time.Since(started).Round(time.Second), lastErr, ctx.Err())
 		}
 
-		logrus.WithError(lastErr).Warnf("%s ping failed; retrying in %s", label, delay.Round(100*time.Millisecond))
+		logrus.WithError(lastErr).WithField("waiting_for", time.Since(started).Round(time.Second).String()).
+			Warnf("%s ping failed; retrying in %s (no deadline: the caller's context ends the wait)", label, delay.Round(100*time.Millisecond))
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -127,7 +139,7 @@ func pingWithRetry(ctx context.Context, ping func(context.Context) error, label 
 				default:
 				}
 			}
-			return fmt.Errorf("failed to connect to %s: %w", label, ctx.Err())
+			return fmt.Errorf("failed to connect to %s after %s (last: %v): %w", label, time.Since(started).Round(time.Second), lastErr, ctx.Err())
 		case <-timer.C:
 		}
 		if delay < dbConnectMaxDelay {

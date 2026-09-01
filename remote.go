@@ -278,6 +278,19 @@ func (c *remote) Release(ctx context.Context, requestID string) error {
 	return c.do(ctx, http.MethodPost, path, nil, nil)
 }
 
+// ExtendHold implements Client (handler ServiceExtendHold).
+func (c *remote) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
+	if strings.TrimSpace(requestID) == "" {
+		return invalidErr("extend requires request_id")
+	}
+	if expiresAt.IsZero() {
+		return invalidErr("extend requires expires_at")
+	}
+	path := "/v1/merchant/admissions/" + url.PathEscape(strings.TrimSpace(requestID)) + "/extend"
+	body := map[string]any{"expires_at": expiresAt.Unix()}
+	return c.do(ctx, http.MethodPost, path, body, nil)
+}
+
 // Balance implements Client (handler ServiceGetCreditsBalance).
 func (c *remote) Balance(ctx context.Context, customerID string) (*BalanceResponse, error) {
 	q := url.Values{}

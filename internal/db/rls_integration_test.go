@@ -47,7 +47,7 @@ func newDBRetry(t *testing.T, dsn string) *DB {
 	t.Helper()
 	var lastErr error
 	for i := 0; i < 8; i++ {
-		d, err := NewDB(&config.DBConfig{URL: dsn})
+		d, err := NewDB(t.Context(), &config.DBConfig{URL: dsn})
 		if err == nil {
 			return d
 		}

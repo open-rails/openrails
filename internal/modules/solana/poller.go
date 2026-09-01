@@ -632,7 +632,6 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransa
 		refPtr,
 		expectedMemo,
 		solanarpc.MemoPresenceOptional,
-		solanaPaymentExpiryDeadline(pending),
 	); err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"reference": reference,
@@ -642,14 +641,6 @@ func (p *SolanaPayPoller) verifyPayment(ctx context.Context, txSvc *SolanaTransa
 	}
 
 	return true
-}
-
-func solanaPaymentExpiryDeadline(pending *PendingSolanaPayment) *time.Time {
-	if pending == nil || pending.ExpiresAt.IsZero() {
-		return nil
-	}
-	expiresAt := pending.ExpiresAt.UTC()
-	return &expiresAt
 }
 
 // processConfirmedPayment uses CheckoutService.RegisterPurchase to record payment and grant entitlements.
@@ -741,6 +732,21 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 		} else {
 			purchasedAt = bt
 		}
+	}
+	// xs-007 row 35: a landing after the quote expired is honoured — the
+	// buyer signed the quoted token amount and it settled. The lateness is
+	// recorded because it is the merchant's rate exposure, not the buyer's
+	// fault; the quote's TTL is price validity, not a refusal of settled money.
+	if purchasedAt != nil && !pending.ExpiresAt.IsZero() && purchasedAt.After(pending.ExpiresAt) {
+		log.WithFields(log.Fields{
+			"reference":        reference,
+			"signature":        signature,
+			"quote_expired_at": pending.ExpiresAt.UTC().Format(time.RFC3339),
+			"landed_at":        purchasedAt.UTC().Format(time.RFC3339),
+			"late_by":          purchasedAt.Sub(pending.ExpiresAt).Round(time.Second).String(),
+			"token":            pending.Token,
+			"token_amount":     pending.TokenAmount,
+		}).Warn("Solana payment landed after its quote expired; honouring the settled transfer at the quoted token amount")
 	}
 
 	// Use the unified RegisterPurchase to record payment and grant entitlements

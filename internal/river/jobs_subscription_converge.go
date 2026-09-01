@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -42,10 +43,18 @@ const (
 	// provider read via the unique-job dedup below.
 	SubscriptionConvergeDebounce = 5 * time.Second
 
-	// subscriptionConvergeSnoozeFor / GiveUpAfter bound the settlement-lag
-	// snooze loop (pending NMI signups whose charge hasn't appeared yet).
+	// subscriptionConvergeSnoozeFor paces the settlement-lag snooze loop
+	// (pending NMI signups whose charge hasn't appeared yet): one provider
+	// read per minute per pending signup. The loop ENDS on observation, not
+	// on a clock (xs-007 row 38): the subscription leaving `pending` (the
+	// fetched charge or decline, or checkout expiry — the converge then
+	// returns something other than ErrConvergeRetryLater), or the provider
+	// refresh pull having covered this rail since the job was born
+	// (webhook_health.last_pull_at, stamped after every completed pass) —
+	// from then on the pull re-reads the same provider evidence on its own
+	// cadence, and this job's snooze would only duplicate it. It used to give
+	// up after 24 h whether or not anything else had looked.
 	subscriptionConvergeSnoozeFor     = time.Minute
-	subscriptionConvergeGiveUpAfter   = 24 * time.Hour
 	subscriptionConvergeMissingClient = "converge: rail client not configured"
 )
 
@@ -177,10 +186,12 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 		return nil
 	}
 	if errors.Is(err, webhooks.ErrConvergeRetryLater) {
-		if time.Since(job.CreatedAt) > subscriptionConvergeGiveUpAfter {
+		if covered, pulledAt := w.pullCoveredSince(mctx, args, job.CreatedAt); covered {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"rail": args.Rail, "reference": args.SubscriptionReference,
-			}).Warn("subscription converge: provider evidence never settled; giving up (pull sweep owns it now)")
+				"job_created_at": job.CreatedAt.UTC().Format(time.RFC3339),
+				"last_pull_at":   pulledAt.UTC().Format(time.RFC3339),
+			}).Info("subscription converge: provider evidence not settled and the refresh pull has covered this rail since; handing off to the pull")
 			return nil
 		}
 		return river.JobSnooze(subscriptionConvergeSnoozeFor)
@@ -188,6 +199,33 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	// Retryable: provider API down / transient DB failure — the job IS the
 	// dirty mark; River backoff re-fetches and converges later. Access intact.
 	return err
+}
+
+// pullCoveredSince reports whether a provider-refresh pull for the rail has
+// completed after `since` — the observed hand-off signal for the snooze loop.
+// A read failure is "not covered": the job keeps snoozing, which costs one
+// provider read a minute, whereas a wrong hand-off could leave a pending
+// signup to a pull that never runs.
+func (w *SubscriptionConvergeWorker) pullCoveredSince(mctx context.Context, args SubscriptionConvergeArgs, since time.Time) (bool, time.Time) {
+	var pulledAt *time.Time
+	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
+		var qerr error
+		pulledAt, qerr = w.DB.Gen(cctx).GetWebhookPullWatermark(cctx, gen.GetWebhookPullWatermarkParams{
+			MerchantID: args.MerchantID, Rail: args.Rail,
+		})
+		if qerr != nil && db.IsNotFound(qerr) {
+			pulledAt, qerr = nil, nil
+		}
+		return qerr
+	})
+	if err != nil {
+		log.WithContext(mctx).WithError(err).WithField("rail", args.Rail).Warn("subscription converge: pull watermark read failed; keeping the snooze")
+		return false, time.Time{}
+	}
+	if pulledAt == nil || !pulledAt.After(since) {
+		return false, time.Time{}
+	}
+	return true, *pulledAt
 }
 
 func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args SubscriptionConvergeArgs) (uuid.UUID, error) {

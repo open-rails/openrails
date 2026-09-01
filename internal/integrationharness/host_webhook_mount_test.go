@@ -43,7 +43,7 @@ func TestHostRoutedWebhookMountHTTP(t *testing.T) {
 		Auth:     &config.AuthConfig{Issuer: "https://host-webhook-controlplane.test"},
 	}
 
-	e, err := embedded.New(embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()})
+	e, err := embedded.New(context.Background(), embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 

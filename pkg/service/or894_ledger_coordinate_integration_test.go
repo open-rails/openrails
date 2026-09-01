@@ -5,6 +5,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -60,7 +61,8 @@ func TestOr894_WasteOverageThenCaptureOfTheSameRequestChargesBoth(t *testing.T) 
 	admit, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: pid.String(), InvokerType: string(identity.InvokerTypePayer),
 		Currency: money.DefaultCurrency, EstimatedAmount: 900_000,
-		Source: "invoke", SourceID: requestID,
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "invoke", SourceID: requestID,
 	})
 	require.NoError(t, err)
 	require.True(t, admit.Allowed)

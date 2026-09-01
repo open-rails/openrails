@@ -974,6 +974,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		Resource:        measure,
 		Currency:        "USD",
 		EstimatedAmount: 60,
+		ExpiresAt:       holdDeadline(),
 		RequestID:       firstID,
 		Source:          "catalog-usage-limit",
 	}})
@@ -989,6 +990,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		Resource:        measure,
 		Currency:        "USD",
 		EstimatedAmount: 50,
+		ExpiresAt:       holdDeadline(),
 		RequestID:       secondID,
 		Source:          "catalog-usage-limit",
 	}})
@@ -1022,6 +1024,7 @@ func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
 		Resource:        measure,
 		Currency:        "USD",
 		EstimatedAmount: 150,
+		ExpiresAt:       holdDeadline(),
 		RequestID:       upgradeID,
 		Source:          "catalog-usage-limit",
 	}})
@@ -1362,6 +1365,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 		Resource:        "vm-small",
 		Currency:        "USD",
 		EstimatedAmount: 2_500,
+		ExpiresAt:       holdDeadline(),
 		RequestID:       requestID,
 		Source:          "native-lifecycle",
 	}})
@@ -1805,4 +1809,11 @@ func exampleUsageRateCardCount(m catalog.Manifest) int {
 		}
 	}
 	return n
+}
+
+// holdDeadline is the declared deadline every hold-placing admit must carry
+// (xs-007 row 33): an hour from now, as a job would declare.
+func holdDeadline() *int64 {
+	v := time.Now().Add(time.Hour).Unix()
+	return &v
 }

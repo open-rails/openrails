@@ -5,6 +5,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -142,7 +143,8 @@ func TestOr891_ServiceCaptureRefusesAChangedAmount(t *testing.T) {
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:z", InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 5_000,
-		Source: "admit", SourceID: reqID,
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "admit", SourceID: reqID,
 	})
 	require.NoError(t, err)
 	require.True(t, res.Allowed)

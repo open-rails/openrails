@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -57,6 +58,7 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 
 	var delivered, failed int
 	for _, mid := range merchantIDs {
+		progress.Mark(ctx, "notification email merchant "+mid.String())
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			rows, err := w.DB.Gen(ctx).ListUndeliveredNotifications(ctx, gen.ListUndeliveredNotificationsParams{

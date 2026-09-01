@@ -240,6 +240,7 @@ func or897RateAdmit(payer identity.CustomerID, deltaPerHour int64) billingservic
 	return billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 1000,
+		ExpiresAtUnix:           time.Now().Add(time.Hour).Unix(),
 		AccrualRateDeltaPerHour: deltaPerHour,
 		SourceID:                uuid.NewString(), Source: "usage",
 	}

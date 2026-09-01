@@ -32,6 +32,7 @@ var facadeMethodsWithoutAPin = map[string]string{
 	"GetSupportedTokens": "reads the merchant's Solana rail CONFIG off the runtime, never a table",
 	"HandleWebhook":      "the merchant is not known until the payload is authenticated; the webhook path pins after it resolves one",
 	"ReleaseHold":        "frees a Redis reservation (#513); the durable ledger is untouched",
+	"ExtendHold":         "re-declares a Redis reservation's deadline (xs-007 row 33); the durable ledger is untouched",
 }
 
 var pinners = []string{"pin", "RunInMerchantConn", "RunInMerchantScope", "MerchantTx", "WithMerchantConn", "BindMerchantTx"}

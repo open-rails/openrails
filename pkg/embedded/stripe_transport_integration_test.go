@@ -55,7 +55,7 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 		DB:                &config.DBConfig{URL: appDSN},
 		Auth:              &config.AuthConfig{Issuer: "https://stripe-seam-" + sfx + ".openrails.test"},
 	}
-	e, err := New(Options{
+	e, err := New(context.Background(), Options{
 		Config:          cfg,
 		PGXPool:         pool,
 		River:           RiverManagedByOpenRails(),
@@ -124,7 +124,7 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 
 // A live-credential posture must never accept a redirected transport.
 func TestEmbeddedStripeTransportSeam_RefusedOnLiveCredentials(t *testing.T) {
-	_, err := New(Options{
+	_, err := New(context.Background(), Options{
 		Config: &config.Config{
 			Env:      "production",
 			TestMode: config.CredentialPostureLive,

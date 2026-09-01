@@ -92,6 +92,9 @@ func (f *fakeLedger) ClaimDue(context.Context, time.Time, time.Time, int64) ([]g
 func (f *fakeLedger) ClaimDueVerify(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsRailIntent, error) {
 	return f.dueVerify, nil
 }
+func (f *fakeLedger) RenewClaim(context.Context, uuid.UUID, time.Time, time.Time) (bool, error) {
+	return true, nil
+}
 func (f *fakeLedger) ExpireOverdue(context.Context, time.Time) (int64, error) { return 0, nil }
 func (f *fakeLedger) LogExternalMutation(_ context.Context, p MutationLogParams) error {
 	if f.logErr != nil {

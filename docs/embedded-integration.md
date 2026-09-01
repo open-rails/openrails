@@ -193,6 +193,16 @@ Once injected, OpenRails enqueues through your client and never builds its own;
 (`AddWorkersTo` / `GetPeriodicJobs` / `SetRiverClient`) exists for hosts that need
 finer control.
 
+**No job clock.** Your `river.Config.JobTimeout` (River's default is one minute)
+does not apply to OpenRails' workers: each declares `Timeout() = -1` and ends
+on observed lack of progress instead — a job that reports no progress past
+3× its declared cadence (floored at 30 min) is cancelled with the reason on the
+job row. While a job runs it also beats `river_job.attempted_at`, so your
+`RescueStuckJobsAfter` measures silence from a dead process, never the age of
+a live job (a dunning pass over many merchants may legitimately outlive it).
+Both need the pool you gave OpenRails to be able to write River's tables (it is
+the pool River itself writes through).
+
 ### 5. Declaring the merchant
 
 Idempotent — call on every boot: create-if-missing, reconcile-if-present. The first

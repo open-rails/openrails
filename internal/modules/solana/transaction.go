@@ -147,6 +147,9 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 		return nil, err
 	}
 
+	// Price validity for the wallet's display, nothing more (xs-007 row 35):
+	// the chain bounds when a built transaction can still land (its
+	// blockhash), and a landing is verified by content, not by this clock.
 	expiresAt := s.now().Add(10 * time.Minute)
 
 	log.WithFields(log.Fields{
@@ -178,7 +181,14 @@ func isNativeTokenSymbol(symbol string) bool {
 // additionally checks the #713 purchase memo under memoPolicy: a present memo
 // must always match; absence fails only when OpenRails built the transaction
 // (or#893 — see solana.PurchaseMemoPolicy).
-func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanarpc.PurchaseMemoPolicy, processedNotAfter *time.Time) error {
+//
+// xs-007 row 35: there is deliberately no "processed after the quote expired"
+// refusal here. A transfer that LANDED on-chain moved the buyer's money; the
+// quote's expiry governs whether the offer is still presented, never whether
+// settled money counts. Refusing a late landing left the buyer paid and
+// unserved. What is verified is the content: recipient, mint, the exact token
+// amount that was quoted and signed, reference and memo.
+func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanarpc.PurchaseMemoPolicy) error {
 	rpc := s.rpcClient(ctx)
 	if rpc == nil {
 		return fmt.Errorf("solana rpc client unavailable")
@@ -207,7 +217,6 @@ func (s *SolanaTransactionService) VerifyTransactionWithContent(ctx context.Cont
 		ExpectedReference:   reference,
 		ExpectedMemoLocalID: expectedMemoLocalID,
 		ExpectedMemoPolicy:  memoPolicy,
-		ProcessedNotAfter:   processedNotAfter,
 	})
 }
 

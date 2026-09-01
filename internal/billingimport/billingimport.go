@@ -209,7 +209,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	}
 	asOf := opts.Book.AsOf.UTC()
 
-	database, err := openDB(opts.Config, opts.PGXPool)
+	database, err := openDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return res, err
 	}
@@ -425,7 +425,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 }
 
 // openDB wraps a caller pool (borrowed; Close is a no-op) or opens from config.
-func openDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
+func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if pool != nil {
 		schema := config.DefaultSchema
 		if cfg != nil && cfg.DB != nil {
@@ -436,7 +436,7 @@ func openDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, fmt.Errorf("config database is required")
 	}
-	database, err := db.NewDB(cfg.DB)
+	database, err := db.NewDB(ctx, cfg.DB)
 	if err != nil {
 		return nil, fmt.Errorf("open postgres: %w", err)
 	}

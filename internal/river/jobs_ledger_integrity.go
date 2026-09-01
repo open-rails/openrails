@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -73,6 +74,7 @@ func (w LedgerIntegrityWorker) Work(ctx context.Context, job *river.Job[LedgerIn
 	var checked, breached int
 	for _, mid := range merchantIDs {
 		merchantID := merchant.ID(mid)
+		progress.Mark(ctx, "ledger integrity merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "ledger integrity audit", func(mctx context.Context) error {
 			// Scoped to this merchant twice over: the RLS policy on the
 			// connection, and the explicit merchant predicate.

@@ -66,6 +66,14 @@ type AdmissionClient interface {
 	Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error
 	// Release frees the admission/authorize hold request_id without charging.
 	Release(ctx context.Context, requestID string) error
+	// ExtendHold re-declares the deadline of the live hold request_id: the job
+	// it covers is still running and will now finish by expiresAt. A hold
+	// lives exactly as long as its owner declared (AdmitRequest.ExpiresAt,
+	// required with EstimatedAmount) — there is no default — so a job that
+	// outlives its estimate extends before the deadline or loses the hold.
+	// ErrNotFound when nothing live exists to extend (captured, released, or
+	// lapsed): re-admit; a lapsed hold is never resurrected.
+	ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error
 	// GetTrustLevel returns the payer's current trust level (#477) for one currency:
 	// the value OpenRails auto-maintains from same-currency cumulative paid spend
 	// against the persisted schedule (#476), or a manual admin override. Empty
@@ -290,7 +298,10 @@ type AdmitRequest struct {
 	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty"`
 	RequestID               string `json:"request_id"`
 	Source                  string `json:"source,omitempty"`
-	ExpiresAt               *int64 `json:"expires_at,omitempty"`
+	// ExpiresAt (unix seconds) is the deadline of the job this admit covers.
+	// REQUIRED when EstimatedAmount places a hold: the hold lives that long
+	// unless captured, released or extended (ExtendHold). Refused otherwise.
+	ExpiresAt *int64 `json:"expires_at,omitempty"`
 	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget-scope policy gates this request's spend in
 	// the same admit verdict. The host reads them from the delegated

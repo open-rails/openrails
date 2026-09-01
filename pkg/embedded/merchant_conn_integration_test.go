@@ -52,7 +52,7 @@ func TestEmbedded_RunInMerchantConn(t *testing.T) {
 		DB:                &config.DBConfig{URL: appDSN},
 		Auth:              &config.AuthConfig{Issuer: "https://merchant-conn-" + sfx + ".openrails.test"},
 	}
-	e, err := New(Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
+	e, err := New(context.Background(), Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 	require.NoError(t, err, "boot as the openrails_app role")
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 

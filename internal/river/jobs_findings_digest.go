@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -54,6 +55,7 @@ func (w FindingsDigestWorker) Work(ctx context.Context, _ *river.Job[FindingsDig
 	var swept int
 	var digested int64
 	for _, mid := range merchantIDs {
+		progress.Mark(ctx, "findings digest merchant "+mid.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(mid), "findings digest", func(mctx context.Context) error {
 			stats, err := w.Alerts.DigestFindings(mctx)
 			if err != nil {

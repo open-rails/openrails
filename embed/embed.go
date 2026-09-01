@@ -109,7 +109,7 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
-	emb, err := embedded.New(opts.Options)
+	emb, err := embedded.New(ctx, opts.Options)
 	if err != nil {
 		return nil, err
 	}

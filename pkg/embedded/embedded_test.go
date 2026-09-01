@@ -1,6 +1,7 @@
 package embedded
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -74,17 +75,17 @@ func TestApplyEmbeddedDefaultsExplicitDisableYieldsPassthrough(t *testing.T) {
 // New() surfaces the same errors — asserted without a real DB, since the
 // posture/defaults checks run before anything DB-dependent.
 func TestNewRejectsMissingConfig(t *testing.T) {
-	_, err := New(Options{})
+	_, err := New(context.Background(), Options{})
 	require.ErrorContains(t, err, "config is required")
 }
 
 func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
 	cfg := &config.Config{} // no Env, no TestMode, no DB
-	_, err := New(Options{Config: cfg, River: RiverManagedByOpenRails()})
+	_, err := New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.ErrorContains(t, err, "config.Env is required")
 
 	cfg = &config.Config{Env: "development"}
-	_, err = New(Options{Config: cfg, River: RiverManagedByOpenRails()})
+	_, err = New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.ErrorContains(t, err, "config.TestMode is required")
 }
 
@@ -93,11 +94,11 @@ func TestNewRejectsUnsetPostureBeforeTouchingTheDatabase(t *testing.T) {
 // engine back, because every read API would keep working while the money stops.
 func TestNewRequiresRiverOwnership(t *testing.T) {
 	cfg := &config.Config{Env: "development", TestMode: config.CredentialPostureSandbox}
-	_, err := New(Options{Config: cfg})
+	_, err := New(context.Background(), Options{Config: cfg})
 	require.ErrorIs(t, err, ErrRiverRequired)
 
 	// And the declaration is the ONLY thing that changes: with it, construction
 	// proceeds far enough to reach the ordinary DB-dependent failure.
-	_, err = New(Options{Config: cfg, River: RiverManagedByOpenRails()})
+	_, err = New(context.Background(), Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.NotErrorIs(t, err, ErrRiverRequired)
 }

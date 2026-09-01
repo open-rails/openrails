@@ -240,6 +240,19 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 	})
 }
 
+// RenewClaim extends a live lease while the handler runs (xs-007 row 32).
+// false means the lease had already lapsed — another executor may own the row
+// now, and this one must not write over it without its per-type verify.
+func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (bool, error) {
+	n, err := s.db.Gen(ctx).RenewRailIntentClaim(ctx, gen.RenewRailIntentClaimParams{
+		ID: id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+	})
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
 // merchant-pin requirement as ClaimDue (or#862).
 func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.OpenrailsRailIntent, error) {

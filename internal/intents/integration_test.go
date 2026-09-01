@@ -33,6 +33,9 @@ type fakeNMI struct {
 	deleteCalls  atomic.Int64
 	deleteStatus atomic.Int64 // optional HTTP status for the delete (0 = 200)
 	psid         string
+	// deleteHold, when set, makes the delete block until it is closed — a
+	// provider that is slow, not down.
+	deleteHold chan struct{}
 }
 
 func newFakeNMI(t *testing.T, psid string, present bool) (*fakeNMI, *nmi.NMIClient) {
@@ -53,6 +56,9 @@ func newFakeNMI(t *testing.T, psid string, present bool) (*fakeNMI, *nmi.NMIClie
 			}
 		case http.MethodDelete:
 			f.deleteCalls.Add(1)
+			if f.deleteHold != nil {
+				<-f.deleteHold
+			}
 			if st := f.deleteStatus.Load(); st != 0 {
 				w.WriteHeader(int(st))
 				fmt.Fprint(w, `{"type":"internalError","error_code":"E_INTERNAL","message":"delete failed"}`)
@@ -679,4 +685,57 @@ func TestClaimLeaseReclaim(t *testing.T) {
 	require.NoError(t, err)
 	require.GreaterOrEqual(t, stats.Claimed, 1)
 	assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
+}
+
+// TestClaimLeaseHeartbeat_SlowHandlerIsNotTakenOver (xs-007 row 32): a
+// handler mid-provider-call renews its claim, so a second executor arriving
+// after several lease lengths finds nothing to claim. The only difference from
+// TestClaimLeaseReclaim is that this executor is alive — and that is the only
+// thing the lease is allowed to measure.
+func TestClaimLeaseHeartbeat_SlowHandlerIsNotTakenOver(t *testing.T) {
+	fx := seedCancelledNMISubscription(t, time.Now().Add(-time.Minute))
+	fake, client := newFakeNMI(t, fx.psid, true)
+	fake.deleteHold = make(chan struct{})
+	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
+
+	const lease = 300 * time.Millisecond
+	first := fx.runner(client, fullModeConfig())
+	first.Lease = lease
+	second := fx.runner(client, fullModeConfig())
+	second.Lease = lease
+
+	firstDone := make(chan Stats, 1)
+	go func() {
+		stats, err := first.RunExecuteOnce(context.Background())
+		require.NoError(t, err)
+		firstDone <- stats
+	}()
+
+	// The first executor is inside the provider call.
+	require.Eventually(t, func() bool { return fake.deleteCalls.Load() == 1 }, 10*time.Second, 10*time.Millisecond)
+	claimedAtStart := fx.intent(t, row.ID).ClaimedUntil
+	require.NotNil(t, claimedAtStart)
+
+	// Several leases later the row is still held, because the beat kept it.
+	time.Sleep(4 * lease)
+	held := fx.intent(t, row.ID)
+	require.Equal(t, StatusInFlight, held.Status)
+	require.NotNil(t, held.ClaimedUntil)
+	require.True(t, held.ClaimedUntil.After(*claimedAtStart), "claimed_until was renewed: %s -> %s", claimedAtStart, held.ClaimedUntil)
+	require.True(t, held.ClaimedUntil.After(time.Now()), "the renewed lease is live")
+
+	stats, err := second.RunExecuteOnce(context.Background())
+	require.NoError(t, err)
+	assert.Zero(t, stats.Claimed, "a live executor's intent is not handed to a second one")
+	assert.EqualValues(t, 1, fake.deleteCalls.Load(), "the provider saw exactly one delete")
+
+	close(fake.deleteHold)
+	select {
+	case stats := <-firstDone:
+		assert.Equal(t, 1, stats.Succeeded)
+	case <-time.After(10 * time.Second):
+		t.Fatal("first executor did not finish after the provider answered")
+	}
+	assert.Equal(t, StatusSucceeded, fx.intent(t, row.ID).Status)
+	assert.EqualValues(t, 1, fake.deleteCalls.Load())
 }

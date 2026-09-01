@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -100,6 +101,7 @@ func (w *PaymentMethodNoticeWorker) Work(ctx context.Context, job *river.Job[Pay
 			continue
 		}
 		merchantID := merchant.ID(*mid)
+		progress.Mark(ctx, "payment method notices merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "payment method notice ladder", func(mctx context.Context) error {
 			counts, err := w.sendMerchantRungs(mctx, now)
 			sent += counts.sent

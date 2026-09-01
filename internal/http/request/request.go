@@ -1,6 +1,7 @@
 package request
 
 import (
+	"context"
 	"encoding"
 	"encoding/json"
 	"errors"
@@ -85,6 +86,36 @@ func NewWithTransport(runtime *app.Runtime, r *http.Request, t Transport) *Reque
 // NewHTTP builds a net/http-backed Request (embedded surface) — no gin.
 func NewHTTP(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
 	return NewWithTransport(runtime, r, newHTTPTransport(w, r))
+}
+
+// writeDeadliner is implemented by transports that own a connection whose
+// write deadline a route budget must lift (the net/http one).
+type writeDeadliner interface {
+	SetWriteDeadline(deadline time.Time) error
+}
+
+// Budget bounds the handler's own work by d — the route's declared budget,
+// derived from the provider round-trips it makes — and lifts the connection's
+// write deadline for the duration (xs-007 row 37).
+//
+// A server-level WriteTimeout is set when the request is read, before the
+// handler knows what it is about to do. The standalone server used to carry
+// 30 s while the payment-method replacement route declared 50 s: the provider
+// write committed at the provider, the durable rows landed, and the client
+// received EOF instead of the response. A host mounting this handler in its
+// own server can carry any number. The route is the only place that knows its
+// budget, so the route is where the connection learns it: the write deadline
+// is cleared here for the request's life and the route's ctx is the one bound.
+// Response bodies here are small JSON; their write completes into the socket
+// buffer regardless of the peer, so no second clock is needed after the
+// budget ends.
+func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) {
+	if wd, ok := r.t.(writeDeadliner); ok {
+		if err := wd.SetWriteDeadline(time.Time{}); err != nil {
+			logrus.WithError(err).WithField("request_id", r.RequestID()).Debug("route budget: connection write deadline could not be lifted")
+		}
+	}
+	return context.WithTimeout(r.Request.Context(), d)
 }
 
 func (r *Request) AbortJSON(code int, msg string) {
@@ -411,6 +442,13 @@ type httpTransport struct {
 
 func newHTTPTransport(w http.ResponseWriter, r *http.Request) *httpTransport {
 	return &httpTransport{w: w, r: r, kv: map[string]any{}}
+}
+
+// SetWriteDeadline reaches the connection through net/http's
+// ResponseController, which unwraps the middleware writers (statusWriter,
+// captureWriter) via their Unwrap.
+func (h *httpTransport) SetWriteDeadline(deadline time.Time) error {
+	return http.NewResponseController(h.w).SetWriteDeadline(deadline)
 }
 
 func (h *httpTransport) WriteJSON(code int, body any) {

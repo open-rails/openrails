@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -101,6 +102,7 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 			continue
 		}
 		merchantID := merchant.ID(*mid)
+		progress.Mark(ctx, "stripe webhook reconcile merchant "+merchantID.String())
 		// The directory carries the slug (openrails.merchants is policy-free);
 		// the PSP rows are the merchant's own and are read under its GUC.
 		row, err := w.DB.GenDirectory().GetPlatformMerchant(ctx, merchantID.UUID())
