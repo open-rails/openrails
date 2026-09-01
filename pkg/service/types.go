@@ -73,7 +73,7 @@ type GetPricesOptions struct {
 // Price represents a billing price.
 type Price struct {
 	ID         string
-	UnitAmount int64  // Amount in the currency's smallest unit
+	UnitAmount int64  // Currency micros (1e6 per major unit), NOT cents
 	Currency   string // e.g., "usd"
 	Type       string // "one_time" or "recurring"
 	Recurring  *RecurringInfo

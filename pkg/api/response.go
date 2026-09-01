@@ -38,7 +38,7 @@ type PriceObject struct {
 	// this price's substance-version chain — usable anywhere `id` is accepted.
 	Key        string         `json:"key,omitempty"`
 	Object     string         `json:"object"`      // Always "price"
-	UnitAmount int64          `json:"unit_amount"` // In the currency's smallest unit
+	UnitAmount int64          `json:"unit_amount"` // Currency micros (1e6 per major unit), NOT cents
 	Currency   string         `json:"currency"`
 	Type       string         `json:"type,omitempty"`      // one_time or recurring
 	Recurring  *RecurringInfo `json:"recurring,omitempty"` // null for one-time purchases
