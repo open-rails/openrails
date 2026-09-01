@@ -3,7 +3,6 @@ package solana
 import (
 	"context"
 	"testing"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/programs/system"
@@ -54,26 +53,6 @@ func TestVerifyTransferRequiresExpectedContentFields(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "expected reference is required")
 	})
-}
-
-func TestValidateTransferProcessedNotAfter(t *testing.T) {
-	t.Parallel()
-
-	processed := solanago.UnixTimeSeconds(time.Date(2026, time.May, 21, 12, 0, 0, 0, time.UTC).Unix())
-	deadline := processed.Time().Add(time.Second)
-	result := &rpc.GetTransactionResult{BlockTime: &processed}
-
-	require.NoError(t, validateTransferProcessedNotAfter(result, &deadline))
-
-	deadline = processed.Time().Add(-time.Second)
-	err := validateTransferProcessedNotAfter(result, &deadline)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "processed after payment expiry")
-
-	deadline = processed.Time()
-	err = validateTransferProcessedNotAfter(&rpc.GetTransactionResult{}, &deadline)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "block time not available")
 }
 
 func TestFindTransferMatchRejectsSystemTransferWhenSPLMintExpected(t *testing.T) {

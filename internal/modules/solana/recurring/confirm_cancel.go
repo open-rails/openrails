@@ -3,7 +3,6 @@ package recurring
 import (
 	"context"
 	"fmt"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
@@ -18,7 +17,7 @@ import (
 // *solanaint.RPCClient). It does NOT assert success — the returned outcome
 // reports the on-chain result via Succeeded()/OnChainError().
 type cancelConfirmRPC interface {
-	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, timeout time.Duration) (*solanaint.TransactionOutcome, error)
+	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal solanaint.ChainTerminal) (*solanaint.TransactionOutcome, error)
 }
 
 // membershipCanceller is the minimal lifecycle surface ConfirmCancel needs to
@@ -53,18 +52,18 @@ type ConfirmCancelService struct {
 	rpc        cancelConfirmRPC
 	canceller  membershipCanceller
 	commitment rpc.CommitmentType
-	timeout    time.Duration
 }
 
 // NewConfirmCancelService builds a ConfirmCancelService. It confirms to the
-// Confirmed commitment (a confirmed cancel will not roll back in practice) with
-// the RPC client's default watch timeout.
+// Confirmed commitment (a confirmed cancel will not roll back in practice).
+// The signature was built and sent by the WALLET, so its blockhash — the
+// chain's own terminal — is unknown here: the watch runs until the caller's
+// context ends (xs-007 row 36), never on a clock of this package.
 func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller membershipCanceller) *ConfirmCancelService {
 	return &ConfirmCancelService{
 		rpc:        rpcClient,
 		canceller:  canceller,
 		commitment: rpc.CommitmentConfirmed,
-		timeout:    0, // 0 -> RPCClient.WatchTransaction default
 	}
 }
 
@@ -85,10 +84,10 @@ func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.
 		return fmt.Errorf("recurring: invalid signature: %w", err)
 	}
 
-	outcome, err := s.rpc.WatchTransaction(ctx, sig, s.commitment, s.timeout)
+	outcome, err := s.rpc.WatchTransaction(ctx, sig, s.commitment, solanaint.ChainTerminal{})
 	if err != nil {
 		// Never observed at the requested commitment (still pending, RPC down, or
-		// timed out). Do NOT mirror — the on-chain cancel is not proven.
+		// the caller's context ended). Do NOT mirror — the on-chain cancel is not proven.
 		return fmt.Errorf("recurring: confirm cancel signature %s: %w", signature, err)
 	}
 	if !outcome.Succeeded() {

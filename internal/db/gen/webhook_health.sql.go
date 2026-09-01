@@ -12,6 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
+const getWebhookPullWatermark = `-- name: GetWebhookPullWatermark :one
+SELECT last_pull_at
+FROM openrails.webhook_health
+WHERE merchant_id = $1::uuid
+  AND rail = $2::text
+`
+
+type GetWebhookPullWatermarkParams struct {
+	MerchantID uuid.UUID
+	Rail       string
+}
+
+// The rail's last completed provider-refresh pull (xs-007 row 38): the
+// subscription-converge snooze hands off once a pull has covered the rail
+// since the job was born. RLS-scoped.
+func (q *Queries) GetWebhookPullWatermark(ctx context.Context, arg GetWebhookPullWatermarkParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, getWebhookPullWatermark, arg.MerchantID, arg.Rail)
+	var last_pull_at *time.Time
+	err := row.Scan(&last_pull_at)
+	return last_pull_at, err
+}
+
 const listWebhookExpectedRails = `-- name: ListWebhookExpectedRails :many
 SELECT s.rail, count(*) AS billable
 FROM openrails.subscriptions s

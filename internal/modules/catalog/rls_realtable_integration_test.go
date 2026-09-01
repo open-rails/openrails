@@ -46,7 +46,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	productB := uuid.NewString()
 	keyA := "prod-a-" + suffix
 	keyB := "prod-b-" + suffix
-	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
+	super, err := db.NewDB(t.Context(), &config.DBConfig{URL: superDSN})
 	require.NoError(t, err)
 	defer super.Close()
 	for _, stmt := range []string{
@@ -63,7 +63,7 @@ func TestRLSRealTable_ProductRepo_Under_OpenRailsApp(t *testing.T) {
 	}
 
 	// Connect as the unprivileged openrails_app role (RLS ENFORCES).
-	app, err := db.NewDB(&config.DBConfig{URL: appDSN})
+	app, err := db.NewDB(t.Context(), &config.DBConfig{URL: appDSN})
 	require.NoError(t, err)
 	defer app.Close()
 	posture, err := app.CheckRLSPosture(ctx)

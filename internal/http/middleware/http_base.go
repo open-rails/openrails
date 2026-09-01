@@ -224,6 +224,10 @@ func (s *statusWriter) Write(b []byte) (int, error) {
 	return s.ResponseWriter.Write(b)
 }
 
+// Unwrap lets http.ResponseController reach the underlying connection
+// (route budgets lift the write deadline through it, xs-007 row 37).
+func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
+
 func (s *statusWriter) status() int {
 	if s.code == 0 {
 		return http.StatusOK

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -94,6 +95,7 @@ func (w ProviderIntentExecuteWorker) Work(ctx context.Context, _ *river.Job[Prov
 
 	var total intents.Stats
 	for _, mid := range merchantIDs {
+		progress.Mark(ctx, "intent executor merchant "+mid.String())
 		var stats intents.Stats
 		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(mid), "provider intent executor", func(ctx context.Context) error {
 			var e error
@@ -165,6 +167,7 @@ func (w ProviderIntentVerifyWorker) Work(ctx context.Context, _ *river.Job[Provi
 
 	var total intents.Stats
 	for _, mid := range merchantIDs {
+		progress.Mark(ctx, "intent verifier merchant "+mid.String())
 		var stats intents.Stats
 		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(mid), "provider intent verifier", func(ctx context.Context) error {
 			var e error

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	authcore "github.com/open-rails/authkit/embedded"
@@ -186,6 +187,7 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
+		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-denied-" + uuid.NewString(),
 	}}})
 	require.Equalf(t, http.StatusForbidden, status,
@@ -203,6 +205,7 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
+		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-allowed-" + uuid.NewString(),
 	}}})
 	require.Equalf(t, http.StatusOK, status,
@@ -230,6 +233,7 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
+		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-glob-" + uuid.NewString(),
 	}}})
 	require.Equalf(t, http.StatusOK, status,
@@ -279,6 +283,7 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
+		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-user-denied-" + uuid.NewString(),
 	}}})
 	require.Equalf(t, http.StatusForbidden, status,
@@ -291,6 +296,7 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 		"invoker_type":     "payer",
 		"currency":         "usd",
 		"estimated_amount": 100,
+		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-user-allowed-" + uuid.NewString(),
 	}}})
 	require.Equalf(t, http.StatusOK, status,

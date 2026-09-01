@@ -57,6 +57,15 @@ ON CONFLICT (merchant_id, rail) DO UPDATE SET
     last_pull_at = EXCLUDED.last_pull_at,
     updated_at = now();
 
+-- name: GetWebhookPullWatermark :one
+-- The rail's last completed provider-refresh pull (xs-007 row 38): the
+-- subscription-converge snooze hands off once a pull has covered the rail
+-- since the job was born. RLS-scoped.
+SELECT last_pull_at
+FROM openrails.webhook_health
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND rail = sqlc.arg(rail)::text;
+
 -- name: ListWebhookExpectedRails :many
 -- Expectation gate for the webhook_silence template: rails that are ARMED
 -- (declared in psps; archived rows count — drain accounts

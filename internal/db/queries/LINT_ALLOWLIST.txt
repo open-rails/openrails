@@ -25,6 +25,7 @@ PERMANENT internal/bootstrap/merchant_dump.go       # dump/restore over a dynami
 PERMANENT internal/bootstrap/merchant_manifest.go   # dump/restore over a dynamic table list
 PERMANENT pkg/embedded/catalog_dump.go              # dump/restore over a dynamic table list
 PERMANENT internal/river/progress.go                # reads River's OWN river_job table (not OpenRails' schema)
+PERMANENT internal/river/job_liveness.go            # beats River's OWN river_job.attempted_at (River has no heartbeat API)
 
 # --- PERMANENT: privileged, runs before merchant context/RLS exists ---------
 PERMANENT internal/crypto/dek_store_db.go      # DEK bootstrap on the privileged pool

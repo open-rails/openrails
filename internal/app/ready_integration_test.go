@@ -90,7 +90,7 @@ func TestReady_FullStackGreenAndNamesVaultOutage(t *testing.T) {
 	require.NotNil(t, rt.Merchants)
 	require.NotNil(t, rt.MerchantSecretPing, "a Vault-backed arm must wire a live-reachability probe")
 
-	producer, producerPool, err := buildRiverProducer(cfg)
+	producer, producerPool, err := buildRiverProducer(context.Background(), cfg)
 	require.NoError(t, err)
 	t.Cleanup(func() { producerPool.Close() })
 	rt.RiverProducer = producer

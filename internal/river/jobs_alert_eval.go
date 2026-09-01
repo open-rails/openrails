@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -50,6 +51,7 @@ func (w AlertEvalWorker) Work(ctx context.Context, _ *river.Job[AlertEvalArgs]) 
 	var total alerting.EvalStats
 	var swept int
 	for _, mid := range merchantIDs {
+		progress.Mark(ctx, "alert eval merchant "+mid.String())
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		stats, err := w.Alerts.EvaluateMerchant(mctx)
 		if err != nil {

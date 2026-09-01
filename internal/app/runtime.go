@@ -370,7 +370,7 @@ func (r *Runtime) InitRiver(ctx context.Context) error {
 	}
 	// #895: health bookkeeping rides on each worker (addTrackedWorker), not on
 	// the client, so it cannot be omitted by whoever builds the client.
-	client, pool, err := buildRiverClient(r.Config, workers, nil)
+	client, pool, err := buildRiverClient(ctx, r.Config, workers, nil)
 	if err != nil {
 		return err
 	}

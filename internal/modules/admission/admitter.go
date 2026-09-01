@@ -16,6 +16,7 @@ package admission
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"time"
@@ -154,7 +155,7 @@ type AdmitRequest struct {
 	AccrualRateDeltaPerHour int64
 	Source                  string    // idempotency namespace (e.g. "usage")
 	SourceID                string    // idempotency id (request id) — the hold key
-	ExpiresAt               time.Time // hold expiry
+	ExpiresAt               time.Time // the owner's declared job deadline; REQUIRED when EstimatedAmount > 0
 }
 
 // AdmitDecision is the unified outcome.
@@ -185,6 +186,12 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 	// No money axis → nothing to gate (admission has no non-money axis post-#513).
 	if req.EstimatedAmount <= 0 {
 		return AdmitDecision{Allowed: true}, nil
+	}
+	// A hold is about to be placed: its lifetime is the owner's declared
+	// deadline, checked before any gate runs so a refusal costs nothing.
+	holdLifetime, err := holdTTL(req.ExpiresAt, time.Now())
+	if err != nil {
+		return AdmitDecision{}, err
 	}
 
 	// Trust level resolution: explicit > graduated (#298) > lowest default (#300).
@@ -314,7 +321,7 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 			Cost:           req.EstimatedAmount,
 			AccountBalance: available,
 			CreditLimit:    creditLine,
-			HoldTTL:        holdTTL(req.ExpiresAt),
+			HoldTTL:        holdLifetime,
 			Policy:         policy,
 			Request:        sgReq,
 		})
@@ -363,15 +370,27 @@ func roleStrings(roles []uuid.UUID) []string {
 	return out
 }
 
-// holdTTL bounds an abandoned hold: the caller's expiry when set, else 1h.
-func holdTTL(expiresAt time.Time) time.Duration {
+// ErrHoldDeadlineRequired: a request that places a money hold must say how
+// long the job owning it will run (xs-007 row 33). The hold used to default
+// to one hour, after which `held` was recomputed without it and the still-
+// running job's spend was admitted twice over. There is no default here: the
+// caller's deadline is the only source for "abandoned", and a job that runs
+// past it re-declares through ExtendHold.
+var ErrHoldDeadlineRequired = errors.New("admission: expires_at is required when estimated_amount places a hold")
+
+// ErrHoldDeadlinePassed: the declared deadline is already in the past.
+var ErrHoldDeadlinePassed = errors.New("admission: expires_at is already in the past")
+
+// holdTTL derives the hold's lifetime from the caller's declared deadline.
+func holdTTL(expiresAt time.Time, now time.Time) (time.Duration, error) {
 	if expiresAt.IsZero() {
-		return time.Hour
+		return 0, ErrHoldDeadlineRequired
 	}
-	if d := time.Until(expiresAt); d > 0 {
-		return d
+	d := expiresAt.Sub(now)
+	if d <= 0 {
+		return 0, ErrHoldDeadlinePassed
 	}
-	return time.Hour
+	return d, nil
 }
 
 // effectiveWastedCurrency validates the wasted-spend windows resolve to one

@@ -56,8 +56,19 @@ type fakeBT struct {
 	byKey      map[string]string
 	uploads    map[string]string // job id -> uploaded CSV
 	results    map[string]string // job id -> result CSV (absent = still working)
+	states     map[string]string // job id -> state override (e.g. "failed")
 	pollCalls  int
 	jobCounter int
+}
+
+// failJob makes the custodian report the job as failed on the next poll.
+func (f *fakeBT) failJob(jobID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.states == nil {
+		f.states = map[string]string{}
+	}
+	f.states[jobID] = "failed"
 }
 
 func newFakeBT(t *testing.T) *fakeBT {
@@ -95,6 +106,9 @@ func newFakeBT(t *testing.T) *fakeBT {
 		defer f.mu.Unlock()
 		f.pollCalls++
 		body := map[string]any{"id": id, "state": "processing", "upload_url": f.srv.URL + "/au-upload/" + id}
+		if st, ok := f.states[id]; ok {
+			body["state"] = st
+		}
 		if _, ok := f.results[id]; ok {
 			body["state"] = "completed"
 			body["download_url"] = f.srv.URL + "/au-download/" + id
@@ -780,4 +794,42 @@ func TestAccountUpdaterSubmitIsCustodianAddressedNotPSPAddressed(t *testing.T) {
 	require.Nil(t, logPSP)
 	require.NotNil(t, logCustodian, "the attempt is recorded against the custodian it was sent to")
 	require.Equal(t, m.custID, *logCustodian)
+}
+
+// xs-007 row 34: a submitted batch ends on the custodian's verdict, never on
+// a clock. Weeks of "processing" keep it open (and keep its cards out of a
+// second paid batch); a "failed" verdict abandons it.
+func TestAccountUpdaterSubmittedBatchEndsOnTheCustodianVerdictNotAClock(t *testing.T) {
+	fx := newAUFixture(t)
+	m := fx.seedMerchant(true, true, 14)
+	fx.build()
+	fx.seedInstrument(m, instrumentOpts{renewsIn: 4 * 24 * time.Hour})
+
+	_, err := fx.worker.RunPass(fx.ctx)
+	require.NoError(t, err)
+	batch := fx.batches(m)[0]
+	require.Equal(t, "submitted", batch.Status)
+
+	// The batch has been sitting for a month; the custodian still says
+	// "processing". The old 14-day deadline would have abandoned it here.
+	_, err = m.pool.Exec(fx.ctx, `UPDATE openrails.account_updater_batches SET submitted_at = now() - interval '30 days', created_at = now() - interval '30 days' WHERE id = $1`, batch.ID)
+	require.NoError(t, err)
+	fx.build()
+	result, err := fx.worker.RunPass(fx.ctx)
+	require.NoError(t, err)
+	require.Zero(t, result.BatchesAbandoned, "a slow custodian is not a failed one")
+	stillOpen := fx.batches(m)
+	require.Len(t, stillOpen, 1)
+	require.Equal(t, "submitted", stillOpen[0].Status)
+	require.Equal(t, 1, fx.bt.creates(), "no second paid batch while the first is open")
+
+	// The custodian's own verdict ends it.
+	fx.bt.failJob(batch.JobRef)
+	fx.build()
+	result, err = fx.worker.RunPass(fx.ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, result.BatchesAbandoned)
+	failed := fx.batches(m)[0]
+	require.Equal(t, "failed", failed.Status)
+	require.Contains(t, failed.Failure, "custodian reported job state failed")
 }

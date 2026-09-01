@@ -272,6 +272,7 @@ func admitDelegatedSpend(t *testing.T, srv *httptest.Server, payer uuid.UUID, in
 	body, err := json.Marshal(map[string]any{"items": []map[string]any{{
 		"customer_id": payer.String(), "invoker": invoker, "invoker_type": "delegated",
 		"currency": currency, "estimated_amount": amount, "request_id": requestID,
+		"expires_at": time.Now().Add(time.Hour).Unix(),
 	}}})
 	require.NoError(t, err)
 	req, err := http.NewRequest(http.MethodPost, srv.URL+"/v1/merchant/admissions", bytes.NewReader(body))

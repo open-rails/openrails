@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -27,8 +28,8 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	scopedOutPayer := uuid.NewString()
 
 	items := []serviceAdmitRequest{
-		{CustomerID: allowedPayer, Invoker: "user:a", EstimatedAmount: 100, RequestID: "r1"},
-		{CustomerID: brokePayer, Invoker: "user:b", EstimatedAmount: 100, RequestID: "r2"},
+		{CustomerID: allowedPayer, Invoker: "user:a", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r1"},
+		{CustomerID: brokePayer, Invoker: "user:b", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r2"},
 		{CustomerID: "not-a-uuid", Invoker: "user:c", RequestID: "r3"},
 		{CustomerID: abuseLimitedPayer, Invoker: "user:d", RequestID: "r4"},
 		{CustomerID: erroringPayer, Invoker: "user:e", RequestID: "r5"},
@@ -126,4 +127,11 @@ func TestServiceAdmitBatchVerdicts_LogsTheCause(t *testing.T) {
 	require.Contains(t, logged, "billing_policy_bindings", "the cause must reach the operator log")
 	require.Contains(t, logged, "42P01", "including the SQLSTATE that names the failure class")
 	require.Contains(t, logged, payer, "and be attributable to a payer")
+}
+
+// holdDeadline is the declared deadline every hold-placing admit must carry
+// (xs-007 row 33): an hour from now, as a job would declare.
+func holdDeadline() *int64 {
+	v := time.Now().Add(time.Hour).Unix()
+	return &v
 }

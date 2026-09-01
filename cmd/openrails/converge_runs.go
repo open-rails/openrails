@@ -60,7 +60,7 @@ func convergeOpenDB(cmd *cobra.Command, merchantSlug string) (*db.DB, merchant.I
 	if cfg == nil || cfg.DB == nil {
 		return nil, merchant.ID{}, fmt.Errorf("config not loaded")
 	}
-	database, err := db.NewDB(cfg.DB)
+	database, err := db.NewDB(cmd.Context(), cfg.DB)
 	if err != nil {
 		return nil, merchant.ID{}, fmt.Errorf("open postgres: %w", err)
 	}

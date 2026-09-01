@@ -148,7 +148,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 		mints = append(mints, mint)
 	}
 
-	ctx, cancel := context.WithTimeout(r.Request.Context(), 10*time.Second)
+	ctx, cancel := r.Budget(10 * time.Second)
 	defer cancel()
 
 	prices := make(map[string]float64, len(symbols))

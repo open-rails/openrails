@@ -145,7 +145,10 @@ func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvide
 	return client, nil
 }
 
-func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
+func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// Create clock early so it can be passed to services.
 	clock := runtimeClock(overrides)
 
@@ -160,7 +163,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 		}
 		database = overrides.DB
 	} else {
-		database, err = createDatabase(cfg)
+		database, err = createDatabase(ctx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create db: %w", err)
 		}
@@ -365,7 +368,7 @@ func buildRuntimeWithOverrides(cfg *config.Config, overrides *runtimeOverrides) 
 
 	// River producer is always initialized in the runtime so HTTP handlers can enqueue jobs
 	// even when workers run in a separate process.
-	if producer, pool, err := buildRiverProducer(cfg); err != nil {
+	if producer, pool, err := buildRiverProducer(ctx, cfg); err != nil {
 		return nil, fmt.Errorf("init river producer: %w", err)
 	} else {
 		runtime.RiverProducer = producer
@@ -456,7 +459,7 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
-func buildRiverProducer(cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
+func buildRiverProducer(ctx context.Context, cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
 	if cfg.DB == nil {
 		return nil, nil, fmt.Errorf("missing database configuration for River producer")
 	}
@@ -464,7 +467,7 @@ func buildRiverProducer(cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Poo
 	if dbURL == "" {
 		return nil, nil, fmt.Errorf("missing database configuration for River producer (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
-	pool, err := db.NewPGXPoolWithRetry(context.Background(), dbURL)
+	pool, err := db.NewPGXPoolWithRetry(ctx, dbURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed creating pgx pool for River producer: %w", err)
 	}
@@ -480,8 +483,8 @@ func buildRiverProducer(cfg *config.Config) (*river.Client[pgx.Tx], *pgxpool.Poo
 	return client, pool, nil
 }
 
-func createDatabase(cfg *config.Config) (*db.DB, error) {
-	database, err := db.NewDB(cfg.DB)
+func createDatabase(ctx context.Context, cfg *config.Config) (*db.DB, error) {
+	database, err := db.NewDB(ctx, cfg.DB)
 	if err != nil {
 		return nil, err
 	}
@@ -925,7 +928,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	}, nil
 }
 
-func buildRiverClient(cfg *config.Config, workers *river.Workers, middleware []rivertype.Middleware) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
+func buildRiverClient(ctx context.Context, cfg *config.Config, workers *river.Workers, middleware []rivertype.Middleware) (*river.Client[pgx.Tx], *pgxpool.Pool, error) {
 	if cfg.DB == nil {
 		return nil, nil, fmt.Errorf("missing database configuration for River")
 	}
@@ -933,7 +936,7 @@ func buildRiverClient(cfg *config.Config, workers *river.Workers, middleware []r
 	if dbURL == "" {
 		return nil, nil, fmt.Errorf("missing database configuration for River (DB_URL or DB_HOST/DB_PORT/etc.)")
 	}
-	pool, err := db.NewPGXPoolWithRetry(context.Background(), dbURL)
+	pool, err := db.NewPGXPoolWithRetry(ctx, dbURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed creating pgx pool for River: %w", err)
 	}
@@ -945,6 +948,15 @@ func buildRiverClient(cfg *config.Config, workers *river.Workers, middleware []r
 			riverjobs.QueueBilling:         {MaxWorkers: standaloneRiverBillingQueueMaxWorkers},
 			riverjobs.QueueProviderRefresh: {MaxWorkers: standaloneRiverProviderRefreshQueueMaxWorkers},
 		},
+		// xs-007 row 31: -1 is River's "never cancel on elapsed time". Every
+		// OpenRails worker already declares it (healthTrackedWorker.Timeout);
+		// stating it on the client too means a worker registered outside
+		// addTrackedWorker cannot silently inherit River's 1-minute default.
+		// Jobs end on observed lack of progress (riverjobs.JobLivenessMiddleware).
+		// RescueStuckJobsAfter is left at River's default: with the liveness
+		// beat refreshing attempted_at it measures silence from a dead process,
+		// not the age of a live job.
+		JobTimeout: riverNoJobTimeout,
 		Schema:     standaloneRiverSchema(cfg),
 		Workers:    workers,
 		Middleware: middleware,

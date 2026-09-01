@@ -33,7 +33,7 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 		DB:                &config.DBConfig{URL: appDSN},
 		Auth:              &config.AuthConfig{Issuer: "https://declare-psp-" + suffix + ".openrails.test"},
 	}
-	engine, err := New(Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
+	engine, err := New(context.Background(), Options{Config: cfg, PGXPool: pool, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = engine.Close(context.Background()) })
 

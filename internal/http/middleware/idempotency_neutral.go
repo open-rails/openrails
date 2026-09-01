@@ -74,6 +74,9 @@ func (c *captureWriter) Write(b []byte) (int, error) {
 	return c.ResponseWriter.Write(b)
 }
 
+// Unwrap lets http.ResponseController reach the underlying connection.
+func (c *captureWriter) Unwrap() http.ResponseWriter { return c.ResponseWriter }
+
 func isMutatingMethod(m string) bool {
 	switch m {
 	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:

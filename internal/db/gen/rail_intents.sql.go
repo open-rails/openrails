@@ -1015,6 +1015,35 @@ func (q *Queries) ParkRailIntent(ctx context.Context, arg ParkRailIntentParams) 
 	return result.RowsAffected(), nil
 }
 
+const renewRailIntentClaim = `-- name: RenewRailIntentClaim :execrows
+UPDATE openrails.rail_intents
+SET claimed_until = $1::timestamptz,
+    updated_at = now()
+WHERE id = $2
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND claimed_until IS NOT NULL
+  AND claimed_until > $3::timestamptz
+`
+
+type RenewRailIntentClaimParams struct {
+	LeaseUntil time.Time
+	ID         uuid.UUID
+	Now        time.Time
+}
+
+// Renews a live claim while its handler runs (xs-007 row 32): the executor
+// beats this every lease/4, so claimed_until measures SILENCE from a dead
+// executor rather than how long a provider call may take. Renewal is refused
+// once the lease has lapsed — by then another executor may hold the row, and a
+// late beat must not steal it back. Returns rows affected (0 = lost).
+func (q *Queries) RenewRailIntentClaim(ctx context.Context, arg RenewRailIntentClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewRailIntentClaim, arg.LeaseUntil, arg.ID, arg.Now)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const supersedeRailIntentsBySubject = `-- name: SupersedeRailIntentsBySubject :execrows
 
 UPDATE openrails.rail_intents

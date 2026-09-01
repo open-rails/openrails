@@ -149,62 +149,32 @@ func isNotFoundError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "not found")
 }
 
-// ConfirmTransaction waits for a transaction to be confirmed
+// ConfirmTransaction waits for an already-seen signature to reach the
+// requested commitment. It is the verify path's wait (a signature discovered
+// on-chain, e.g. by GetSignaturesForAddress), so the chain terminal is not
+// known here; the wait ends when the commitment is reached, the chain reports
+// an on-chain error, or the caller's context ends (xs-007 row 36 — it used to
+// give up at 60 s and call a landing at 61 s a failure).
 func (c *RPCClient) ConfirmTransaction(ctx context.Context, signature solanago.Signature, commitment rpc.CommitmentType) error {
-	timeout := 60 * time.Second
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("transaction confirmation timeout for %s", signature.String())
-		case <-ticker.C:
-			status, err := c.fallback.GetSignatureStatuses(ctx, true, signature)
-			if err != nil {
-				log.WithError(err).Warn("Failed to get signature status")
-				continue
-			}
-
-			if len(status.Value) > 0 && status.Value[0] != nil {
-				sigStatus := status.Value[0]
-
-				// Check for errors
-				if sigStatus.Err != nil {
-					return fmt.Errorf("transaction failed: %v", sigStatus.Err)
-				}
-
-				// Check if confirmed at desired level
-				if sigStatus.ConfirmationStatus != "" {
-					switch commitment {
-					case rpc.CommitmentProcessed:
-						if sigStatus.ConfirmationStatus == rpc.ConfirmationStatusProcessed ||
-							sigStatus.ConfirmationStatus == rpc.ConfirmationStatusConfirmed ||
-							sigStatus.ConfirmationStatus == rpc.ConfirmationStatusFinalized {
-							return nil
-						}
-					case rpc.CommitmentConfirmed:
-						if sigStatus.ConfirmationStatus == rpc.ConfirmationStatusConfirmed ||
-							sigStatus.ConfirmationStatus == rpc.ConfirmationStatusFinalized {
-							return nil
-						}
-					case rpc.CommitmentFinalized:
-						if sigStatus.ConfirmationStatus == rpc.ConfirmationStatusFinalized {
-							return nil
-						}
-					}
-				}
-			}
-		}
+	outcome, err := c.WatchTransaction(ctx, signature, commitment, ChainTerminal{})
+	if err != nil {
+		return fmt.Errorf("transaction confirmation for %s: %w", signature.String(), err)
 	}
+	if outcome.Err != nil {
+		return fmt.Errorf("transaction failed: %v", outcome.Err)
+	}
+	return nil
 }
 
 // GetLatestBlockhash gets the latest blockhash for transaction creation
 func (c *RPCClient) GetLatestBlockhash(ctx context.Context) (solanago.Hash, error) {
 	return c.fallback.GetLatestBlockhash(ctx)
+}
+
+// LatestBlockhash gets the latest blockhash together with the chain terminal
+// (lastValidBlockHeight) a transaction built on it must be watched against.
+func (c *RPCClient) LatestBlockhash(ctx context.Context) (RecentBlockhash, error) {
+	return c.fallback.LatestBlockhash(ctx)
 }
 
 // GetMinimumBalanceForRentExemption returns the minimum balance needed for rent exemption

@@ -158,14 +158,36 @@ func (m *ProgressMonitor) staleMultiplier() int {
 	if m.StaleMultiplier > 0 {
 		return m.StaleMultiplier
 	}
-	return 3
+	return defaultStaleMultiplier
 }
 
 func (m *ProgressMonitor) minStale() time.Duration {
 	if m.MinStale > 0 {
 		return m.MinStale
 	}
-	return 30 * time.Minute
+	return defaultMinStale
+}
+
+// The ONE staleness rule of this package, shared by the fleet monitor (is this
+// kind late?) and the per-job liveness middleware (is this running job
+// wedged? — job_liveness.go, xs-007 row 31): no progress within k x the
+// kind's declared cadence, floored so a tight cadence does not turn one slow
+// provider round-trip into a stall. Neither number decides on its own; the
+// cadence the worker declared at registration is what "late" is measured
+// against.
+const (
+	defaultStaleMultiplier = 3
+	defaultMinStale        = 30 * time.Minute
+)
+
+// staleThreshold applies the rule. period <= 0 is an on-demand kind: there is
+// no cadence to multiply, so the floor is the whole tolerance.
+func staleThreshold(period time.Duration, multiplier int, minStale time.Duration) time.Duration {
+	threshold := period * time.Duration(multiplier)
+	if threshold < minStale {
+		threshold = minStale
+	}
+	return threshold
 }
 
 func (m *ProgressMonitor) reAlertEvery() time.Duration {
@@ -303,10 +325,7 @@ func (m *ProgressMonitor) fleetVerdict(report ProgressReport, now time.Time) str
 	if m.Pool == nil {
 		return "" // river_job unreadable by configuration; per-kind detail still applies
 	}
-	threshold := report.ShortestPeriod * time.Duration(m.staleMultiplier())
-	if threshold < m.minStale() {
-		threshold = m.minStale()
-	}
+	threshold := staleThreshold(report.ShortestPeriod, m.staleMultiplier(), m.minStale())
 	// Boot grace: never alarm on a window the process was not alive for.
 	if now.Sub(m.startedAt) < threshold {
 		return ""
@@ -413,10 +432,7 @@ func evaluateKindProgress(row gen.OpenrailsWorkerHealth, kp KindProgress, now ti
 	if period <= 0 {
 		period = time.Duration(*row.ExpectedPeriodSeconds) * time.Second
 	}
-	threshold := period * time.Duration(staleMultiplier)
-	if threshold < minStale {
-		threshold = minStale
-	}
+	threshold := staleThreshold(period, staleMultiplier, minStale)
 	progress := laterOf(kp.LastCompletedAt, row.LastSuccessAt)
 	if progress == nil {
 		if now.Sub(row.RegisteredAt) > threshold {

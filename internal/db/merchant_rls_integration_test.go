@@ -197,7 +197,7 @@ func TestMerchantTx_ScopesGUC(t *testing.T) {
 	seedTenantsAndEntitlements(t, ctx, superDSN, tA, tB)
 
 	// Open over the APP role so RLS applies.
-	d, err := NewDB(&config.DBConfig{URL: appDSN})
+	d, err := NewDB(t.Context(), &config.DBConfig{URL: appDSN})
 	require.NoError(t, err)
 	defer d.Close()
 

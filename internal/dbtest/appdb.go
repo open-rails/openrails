@@ -16,7 +16,7 @@ import (
 // cleanup.
 func OpenAppDB(t *testing.T, dsn string) *db.DB {
 	t.Helper()
-	d, err := db.NewDB(&config.DBConfig{URL: dsn})
+	d, err := db.NewDB(t.Context(), &config.DBConfig{URL: dsn})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = d.Close() })
 	return d

@@ -65,11 +65,14 @@ type Options struct {
 }
 
 // NewServer constructs the application runtime and the HTTP server graph
-// together.
-func NewServer(cfg *config.Config, opts *Options) (*Result, error) {
+// together. ctx is the boot context (see app.BootstrapWithOptions).
+func NewServer(ctx context.Context, cfg *config.Config, opts *Options) (*Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	// #711: the bootstrap.Options relay layer is gone — call the app
 	// composition root directly.
-	application, err := app.BootstrapWithOptions(cfg, &app.BootstrapOptions{
+	application, err := app.BootstrapWithOptions(ctx, cfg, &app.BootstrapOptions{
 		PGXPool:            optsValue(opts, func(o *Options) *pgxpool.Pool { return o.PGXPool }),
 		Redis:              optsValue(opts, func(o *Options) *redis.Client { return o.Redis }),
 		Cache:              optsValue(opts, func(o *Options) cache.Cache { return o.Cache }),

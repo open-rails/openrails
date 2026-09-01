@@ -70,6 +70,7 @@ func TestLocalClientAdmit(t *testing.T) {
 			InvokerType:     openrails.InvokerTypePayer,
 			Currency:        "USD",
 			EstimatedAmount: 10_000,
+			ExpiresAt:       holdDeadline(),
 			Source:          "localclient-admit-test",
 			RequestID:       "localclient-admit-" + customerID.String(),
 		})
@@ -106,6 +107,7 @@ func TestLocalClientAdmit(t *testing.T) {
 			InvokerType:     openrails.InvokerTypePayer,
 			Currency:        "USD",
 			EstimatedAmount: 10_000,
+			ExpiresAt:       holdDeadline(),
 			Source:          "localclient-admit-test",
 			RequestID:       "localclient-admit-unbound",
 		})

@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/httpx"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -54,13 +55,33 @@ const (
 	// mint a SECOND paid job, so the batch is dropped and its instruments
 	// become due again.
 	accountUpdaterSubmitDeadline = intents.AccountUpdaterIdempotencyWindow
-
-	// accountUpdaterResultDeadline abandons a submitted batch the custodian
-	// never answered. Batch VAU turnaround is days, not weeks; a batch older
-	// than this is a support ticket, and holding the open-batch slot forever
-	// would block every later cycle.
-	accountUpdaterResultDeadline = 14 * 24 * time.Hour
 )
+
+// A SUBMITTED batch is abandoned only on the custodian's own word (xs-007 row
+// 34). It used to be abandoned after 14 days of silence, which re-dued its
+// instruments into a SECOND paid batch while the first might still be
+// processing — the code's own log said "silence is not evidence" and then
+// acted on it. Now the job's state (failed / cancelled) or the custodian's
+// own expires_at is the only terminal; a job that is merely slow stays open
+// and is polled every pass, and the open-batch row is exactly what stops a
+// later cycle from paying for the same cards again.
+//
+// The vocabulary is Basis Theory's Account Updater job `state`; unknown states
+// are treated as "still working" — the safe reading, since a wrong "failed"
+// costs a paid batch and a wrong "working" costs one more poll.
+func accountUpdaterJobTerminalFailure(job *basistheory.AccountUpdaterJob, now time.Time) (reason string, terminal bool) {
+	if job == nil {
+		return "", false
+	}
+	switch strings.ToLower(strings.TrimSpace(job.State)) {
+	case "failed", "cancelled", "canceled":
+		return "custodian reported job state " + strings.ToLower(strings.TrimSpace(job.State)), true
+	}
+	if job.ExpiresAt != nil && !job.ExpiresAt.IsZero() && now.After(*job.ExpiresAt) {
+		return "custodian expired the job at " + job.ExpiresAt.UTC().Format(time.RFC3339) + " without results", true
+	}
+	return "", false
+}
 
 type AccountUpdaterBatchArgs struct{}
 
@@ -152,6 +173,7 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 		}
 		merchantID := *mid
 		result.IngestMerchants = append(result.IngestMerchants, merchantID)
+		progress.Mark(ctx, "account updater ingest merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "account updater ingest", func(mctx context.Context) error {
 			return w.ingestMerchant(mctx, merchantID, now, &result)
 		}); err != nil {
@@ -206,6 +228,7 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 		}
 		merchantID := *mid
 		result.SubmitMerchants = append(result.SubmitMerchants, merchantID)
+		progress.Mark(ctx, "account updater submit merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "account updater submit", func(mctx context.Context) error {
 			return w.submitMerchant(mctx, merchantID, now, &result)
 		}); err != nil {
@@ -275,6 +298,7 @@ func (w AccountUpdaterBatchWorker) ingestMerchant(ctx context.Context, mid uuid.
 	logger := log.WithContext(ctx).WithFields(log.Fields{"worker": KindAccountUpdaterBatch, "merchant_id": mid})
 	var errs error
 	for _, batch := range batches {
+		progress.Mark(ctx, "account updater batch "+batch.ID.String())
 		jobRef := strings.TrimSpace(batch.JobRef)
 		if batch.Status == "pending" || jobRef == "" {
 			// Never reached the custodian. The submit intent retries it; past
@@ -309,17 +333,22 @@ func (w AccountUpdaterBatchWorker) ingestMerchant(ctx context.Context, mid uuid.
 			errs = errors.Join(errs, fmt.Errorf("record poll for batch %s: %w", batch.ID, err))
 		}
 		if strings.TrimSpace(job.DownloadURL) == "" {
-			// Still working. Abandon only if the custodian has gone silent for
-			// far longer than a batch can honestly take.
-			if batch.SubmittedAt != nil && now.Sub(*batch.SubmittedAt) > accountUpdaterResultDeadline {
-				if err := w.abandon(ctx, mid, batch.ID, now, "custodian returned no results within "+accountUpdaterResultDeadline.String()); err != nil {
+			// No results yet. The custodian's own verdict is the only thing
+			// that ends a batch without them; silence is not evidence.
+			if reason, terminal := accountUpdaterJobTerminalFailure(job, now); terminal {
+				if err := w.abandon(ctx, mid, batch.ID, now, reason); err != nil {
 					errs = errors.Join(errs, err)
 					continue
 				}
 				result.BatchesAbandoned++
-				logger.WithFields(log.Fields{"batch_id": batch.ID, "job_ref": jobRef}).
-					Error("Account updater: batch abandoned without results; operator action required (no card was parked — silence is not evidence)")
+				logger.WithFields(log.Fields{"batch_id": batch.ID, "job_ref": jobRef, "job_state": job.State}).
+					Error("Account updater: batch abandoned on the custodian's verdict; operator action required (no card was parked)")
+				continue
 			}
+			logger.WithFields(log.Fields{
+				"batch_id": batch.ID, "job_ref": jobRef, "job_state": job.State,
+				"submitted_at": batch.SubmittedAt,
+			}).Info("Account updater: custodian still working; batch stays open")
 			continue
 		}
 

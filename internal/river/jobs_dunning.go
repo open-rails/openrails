@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -209,6 +210,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 			continue
 		}
 		merchantID := merchant.ID(*mid)
+		progress.Mark(ctx, "dunning merchant "+merchantID.String())
 		// The pin AND the proof it took: every read and write below runs under
 		// this merchant's app.merchant_id, exactly as a request would.
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "dunning pass", func(mctx context.Context) error {
@@ -230,6 +232,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 			}).Info("Dunning: processing due subscriptions")
 
 			for _, sub := range dueSubscriptions {
+				progress.Mark(mctx, "dunning subscription "+sub.ID.String())
 				outcome := w.processSubscription(mctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
 				// #511 Phase E: re-converge this customer inline after the dunning
 				// transition (past_due / grace / terminal cancel / renewal) — already

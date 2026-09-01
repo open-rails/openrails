@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/riverqueue/river"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
+	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -30,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
@@ -544,4 +546,68 @@ func mustDedupService(t *testing.T, dbi *db.DB) *webhooks.DeduplicationService {
 	svc, err := webhooks.NewDeduplicationService(nil, dbi)
 	require.NoError(t, err)
 	return svc
+}
+
+// xs-007 row 38: the settlement-lag snooze ends on observation. A pending NMI
+// signup whose charge the provider has not shown yet snoozes; once the
+// provider-refresh pull has covered the rail since the job was born, the job
+// hands off to it. No 24-hour clock decides either way.
+func TestSubscriptionConverge_SnoozeHandsOffOnObservedPullCoverage(t *testing.T) {
+	dsn := dbtest.SharedPostgresDSN(t)
+	dbi := dbtest.OpenAppDB(t, dsn)
+	baseCtx := dbtest.WithTestMerchant(context.Background())
+	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
+
+	f := seedConvergeE2ESubscription(t, dbi, baseCtx, "nmi", "nmi_pend_"+uuid.NewString()[:8])
+	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		_, err := dbi.Qx(ctx).Exec(ctx, `UPDATE openrails.subscriptions SET status = 'pending', created_at = now() - interval '2 days' WHERE id = $1`, f.subID)
+		return err
+	}))
+	t.Cleanup(func() {
+		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.webhook_health WHERE merchant_id = $1 AND rail = 'nmi'`, f.merchantID)
+			return nil
+		})
+	})
+
+	// Fake NMI: the signup charge is not visible (empty sale probe) and the
+	// recurring record is alive — pure settlement lag.
+	subJSON := fmt.Sprintf(`{"object":"subscription","id":"%s","next_billing_date":"%s"}`, f.railSubID, f.newEnd.Format("2006-01-02"))
+	nmiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(subJSON))
+			return
+		}
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
+	}))
+	t.Cleanup(nmiSrv.Close)
+	nmiClient, err := nmi.NewClient("nmi", &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
+	require.NoError(t, err)
+	nmiClient.DirectPostURL = nmiSrv.URL
+	nmiClient.QueryURL = nmiSrv.URL
+	nmiClient.V5BaseURL = nmiSrv.URL
+
+	worker := buildConvergeWorker(dbi, "")
+	worker.StripeProber = nil
+	worker.NMIResolver = fakeDunningNMIResolver{client: nmiClient}
+
+	jobCreated := time.Now().UTC().Add(-3 * 24 * time.Hour) // far past the old 24 h give-up
+	job := &river.Job[SubscriptionConvergeArgs]{
+		JobRow: &rivertype.JobRow{ID: 1, Kind: KindSubscriptionConverge, CreatedAt: jobCreated},
+		Args:   SubscriptionConvergeArgs{MerchantID: f.merchantID, Rail: "nmi", SubscriptionReference: f.railSubID},
+	}
+
+	// A pull that ran BEFORE the job was born is not coverage: snooze.
+	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		return webhookhealth.StampPull(ctx, dbi, "nmi", jobCreated.Add(-time.Hour))
+	}))
+	err = worker.Work(context.Background(), job)
+	var snooze *rivertype.JobSnoozeError
+	require.ErrorAs(t, err, &snooze, "evidence not settled and nobody else has looked since: the job keeps its own watch (age is not a reason to stop)")
+
+	// A pull completed since the job was born: the pull owns the row now.
+	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		return webhookhealth.StampPull(ctx, dbi, "nmi", time.Now().UTC())
+	}))
+	require.NoError(t, worker.Work(context.Background(), job), "handed off on observed pull coverage")
 }

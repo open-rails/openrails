@@ -94,7 +94,13 @@ type Embedded struct {
 	stripeTransportInstalled bool
 }
 
-func New(opts Options) (*Embedded, error) {
+// New builds an engine. ctx is the boot context: it bounds the wait for the
+// database and nothing else does (xs-007 row 40); the standalone binary hands
+// in one that SIGTERM cancels.
+func New(ctx context.Context, opts Options) (*Embedded, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if opts.Config == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -117,7 +123,7 @@ func New(opts Options) (*Embedded, error) {
 	// root directly.) Rail credentials are NEVER boot options (#788): rails
 	// arm per merchant through the manifest (MODE 1) or the management API
 	// (MODE 2) into psps + the merchant secret store.
-	application, err := app.BootstrapWithOptions(opts.Config, &app.BootstrapOptions{
+	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
 		PGXPool: opts.PGXPool,
 		Redis:   opts.Redis,
 		Cache:   opts.Cache,
@@ -131,7 +137,6 @@ func New(opts Options) (*Embedded, error) {
 		stripeapi.SetBaseTransport(opts.StripeTransport)
 		e.stripeTransportInstalled = true
 	}
-	ctx := context.Background()
 	if err := e.bindRiver(ctx, opts.River); err != nil {
 		_ = application.Close(ctx)
 		return nil, err

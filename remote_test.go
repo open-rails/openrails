@@ -66,7 +66,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}
 
 	if _, err := client.AdmitBatch(context.Background(), []AdmitRequest{{
-		CustomerID: "cust_1", TrustLevel: "gold", EstimatedAmount: 1, RequestID: "req_1",
+		CustomerID: "cust_1", TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: "req_1",
 	}}); err != nil {
 		t.Fatalf("AdmitBatch: %v", err)
 	}
@@ -317,4 +317,11 @@ func TestNewRemoteInvalidBaseURL(t *testing.T) {
 			t.Fatalf("base %q: expected descriptive base URL error, got %v", base, err)
 		}
 	}
+}
+
+// holdDeadline is the declared deadline every hold-placing admit must carry
+// (xs-007 row 33): an hour from now, as a job would declare.
+func holdDeadline() *int64 {
+	v := time.Now().Add(time.Hour).Unix()
+	return &v
 }

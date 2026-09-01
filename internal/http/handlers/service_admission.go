@@ -125,6 +125,14 @@ func serviceAdmitBatchVerdicts(
 			continue
 		}
 		res, err := admit(ctx, admitInputFromRequest(item, *payer))
+		switch {
+		case errors.Is(err, billingservice.ErrHoldDeadlineRequired):
+			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "expires_at required when estimated_amount places a hold"}
+			continue
+		case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
+			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "expires_at already passed"}
+			continue
+		}
 		if err != nil {
 			// th#1627: the wire string stays stable and non-leaky (it reaches the
 			// host's tenant boundary), but the CAUSE must not be discarded — a 500

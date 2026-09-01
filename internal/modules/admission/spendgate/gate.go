@@ -125,9 +125,34 @@ for i=1,n do
   end
   rec = rec .. '|' .. cntKey
 end
-redis.call('SET', KEYS[2], rec, 'PX', holdTtl)
+if holdTtl > 0 then
+  redis.call('SET', KEYS[2], rec, 'PX', holdTtl)
+else
+  redis.call('SET', KEYS[2], rec)
+end
 redis.call('SADD', KEYS[3], KEYS[2])
 return {1, 0}
+`)
+
+// extendScript re-declares a live hold's lifetime (xs-007 row 33): the owner
+// has said its job will now run until a later deadline. A hold that is
+// already gone (settled or lapsed) is NOT resurrected — its reservation was
+// recomputed away, and re-reserving here would skip the affordability gate.
+// Returns 1 if extended, 0 if there was nothing live to extend. The request
+// pointer lives in another hash slot and is moved by a separate command, as
+// Capture/Release do.
+// KEYS: [1]=hold:<reqID>. ARGV: [1]=untilMs (0 = no expiry).
+var extendScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 0 then
+  return 0
+end
+local untilMs = tonumber(ARGV[1])
+if untilMs > 0 then
+  redis.call('PEXPIREAT', KEYS[1], untilMs)
+else
+  redis.call('PERSIST', KEYS[1])
+end
+return 1
 `)
 
 // captureScript settles an admitted request that SUCCEEDED: free the reservation
@@ -182,7 +207,10 @@ return 1
 // (over-reserved → mild under-admission) — self-healed lazily (#676): when the
 // affordability gate would deny, the admit script recomputes held = Σ live hold
 // records (via the "<base>:holds" index set) and re-checks, so an abandoned admit
-// blocks at most until the next denied admit after its hold TTL.
+// blocks at most until the next denied admit after its hold TTL. That TTL is
+// the owner's declared deadline, never a default of this package (xs-007 row
+// 33): "abandoned" means the job said it would be done by then and was not
+// heard from — Extend is how a job that is still running says otherwise.
 type Gate struct {
 	rdb redis.Cmdable
 	now func() time.Time
@@ -207,15 +235,19 @@ type Decision struct {
 // AdmitInput is one admission request.
 type AdmitInput struct {
 	Merchant, Customer, Currency string
-	RequestID                    string        // idempotency key (provider/tensorhub request id)
-	Invoker                      string        // recorded so capture's durable ledger write carries attribution
-	Source                       string        // admit-time source namespace (informational; NOT part of the capture coordinate since or#907)
-	Cost                         int64         // estimate, minor units
-	AccountBalance               int64         // caller's ledger balance snapshot for (payer,currency), minor units
-	CreditLimit                  int64         // arrears credit line (0 = prepaid); affordability floor = -CreditLimit
-	HoldTTL                      time.Duration // bounds an abandoned hold's life (default 1h)
-	Policy                       Policy
-	Request                      Request
+	RequestID                    string // idempotency key (provider/tensorhub request id)
+	Invoker                      string // recorded so capture's durable ledger write carries attribution
+	Source                       string // admit-time source namespace (informational; NOT part of the capture coordinate since or#907)
+	Cost                         int64  // estimate, minor units
+	AccountBalance               int64  // caller's ledger balance snapshot for (payer,currency), minor units
+	CreditLimit                  int64  // arrears credit line (0 = prepaid); affordability floor = -CreditLimit
+	// HoldTTL is how long the hold lives unless settled: the OWNER'S declared
+	// deadline for the job it covers (xs-007 row 33), passed down by the
+	// Admitter — this primitive has no opinion of its own. <= 0 means the hold
+	// lives until captured or released.
+	HoldTTL time.Duration
+	Policy  Policy
+	Request Request
 }
 
 // HoldRef is the payer coordinates a request's hold was placed under, recovered
@@ -239,8 +271,8 @@ func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 	wins := in.Policy.EffectiveWindows(in.Request)
 
 	holdTTL := in.HoldTTL
-	if holdTTL <= 0 {
-		holdTTL = time.Hour
+	if holdTTL < 0 {
+		holdTTL = 0
 	}
 	keys := []string{base + ":held", base + ":hold:" + in.RequestID, base + ":holds"}
 	argv := make([]any, 0, 6+len(wins)*4)
@@ -275,6 +307,7 @@ func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
 		// (caller won't render an unsettleable request); the leaked reservation
 		// self-heals via the hold TTL + blocked-admit recompute.
 		ptr := strings.Join([]string{in.Customer, in.Currency, in.Invoker, in.Source}, reqPtrSep)
+		// go-redis: expiration 0 = no expiry, matching the record above.
 		if err := g.rdb.Set(ctx, reqPtrKey(in.Merchant, in.RequestID), ptr, holdTTL).Err(); err != nil {
 			return Decision{}, fmt.Errorf("spendgate: record admit pointer: %w", err)
 		}
@@ -324,6 +357,40 @@ func (g *Gate) Capture(ctx context.Context, in CaptureInput) error {
 	}
 	g.rdb.Del(ctx, reqPtrKey(in.Merchant, in.RequestID))
 	return nil
+}
+
+// ExtendInput re-declares a live hold's deadline.
+type ExtendInput struct {
+	Merchant, Customer, Currency, RequestID string
+	// Until is the owner's new deadline; zero means the hold no longer expires.
+	Until time.Time
+}
+
+// Extend moves a live hold's expiry to in.Until. ok=false when there is no
+// live hold to extend (settled or already lapsed) — the owner must re-admit.
+func (g *Gate) Extend(ctx context.Context, in ExtendInput) (bool, error) {
+	base := payerBase(in.Merchant, in.Customer, in.Currency)
+	var untilMs int64
+	if !in.Until.IsZero() {
+		untilMs = in.Until.UnixMilli()
+	}
+	n, err := extendScript.Run(ctx, g.rdb, []string{base + ":hold:" + in.RequestID}, untilMs).Int64()
+	if err != nil {
+		return false, err
+	}
+	if n != 1 {
+		return false, nil
+	}
+	ptr := reqPtrKey(in.Merchant, in.RequestID)
+	if untilMs > 0 {
+		err = g.rdb.PExpireAt(ctx, ptr, in.Until).Err()
+	} else {
+		err = g.rdb.Persist(ctx, ptr).Err()
+	}
+	if err != nil {
+		return false, fmt.Errorf("spendgate: extend admit pointer: %w", err)
+	}
+	return true, nil
 }
 
 // ReleaseInput backs out an admitted-but-uncharged request (failure path).

@@ -3,7 +3,6 @@ package solana
 import (
 	"context"
 	"fmt"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -48,9 +47,11 @@ type Signer interface {
 // blockhashProvider is the subset of *RPCClient the tx builder needs. Declared
 // as an interface so BuildSignSubmit is unit-testable without a live RPC.
 type blockhashProvider interface {
-	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
+	// LatestBlockhash returns the blockhash WITH its chain terminal, so the
+	// confirmation watch ends on the chain's word (xs-007 row 36).
+	LatestBlockhash(ctx context.Context) (RecentBlockhash, error)
 	SendTransaction(ctx context.Context, tx *solanago.Transaction) (solanago.Signature, error)
-	SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, timeout time.Duration) (*TransactionOutcome, error)
+	SubmitAndConfirm(ctx context.Context, tx *solanago.Transaction, terminal ChainTerminal) (*TransactionOutcome, error)
 }
 
 // BuildSignSubmit assembles a single-signer transaction (the merchant is
@@ -120,12 +121,12 @@ func BuildSignSubmitWithPayerPresubmit(
 	if len(instructions) == 0 {
 		return solanago.Signature{}, fmt.Errorf("solana: at least one instruction is required")
 	}
-	blockhash, err := rpc.GetLatestBlockhash(ctx)
+	blockhash, err := rpc.LatestBlockhash(ctx)
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: get recent blockhash: %w", err)
 	}
 
-	tx, err := solanago.NewTransaction(instructions, blockhash, solanago.TransactionPayer(payer))
+	tx, err := solanago.NewTransaction(instructions, blockhash.Hash, solanago.TransactionPayer(payer))
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: build transaction: %w", err)
 	}
@@ -153,7 +154,8 @@ func BuildSignSubmitWithPayerPresubmit(
 	// transaction has actually landed. SubmitAndConfirm surfaces a reverted tx via
 	// the outcome's on-chain error (with the program's Custom code) so the cranker
 	// can classify it (#270) instead of silently "succeeding" on a failed pull.
-	outcome, err := rpc.SubmitAndConfirm(ctx, tx, 0)
+	// The watch ends on the blockhash's own last valid height, never a clock.
+	outcome, err := rpc.SubmitAndConfirm(ctx, tx, blockhash.Terminal())
 	if err != nil {
 		return solanago.Signature{}, fmt.Errorf("solana: submit/confirm transaction: %w", err)
 	}

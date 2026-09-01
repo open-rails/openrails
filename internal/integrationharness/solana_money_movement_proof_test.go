@@ -284,6 +284,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 		Resource:        "vm-small",
 		Currency:        "USD",
 		EstimatedAmount: 2_500,
+		ExpiresAt:       holdDeadline(),
 		RequestID:       requestID,
 		Source:          "solana-money-movement",
 	}})
@@ -378,7 +379,7 @@ func maybeRunOnChainLeg(t *testing.T, ctx context.Context, rpcClient *solanaint.
 	require.NoError(t, err)
 	tx.Signatures = []solanago.Signature{sig}
 
-	outcome, err := rpcClient.SubmitAndConfirm(ctx, tx, 90*time.Second)
+	outcome, err := rpcClient.SubmitAndConfirm(ctx, tx, solanaint.ChainTerminal{})
 	if err != nil {
 		t.Logf("on-chain leg: submit/confirm failed (devnet flaky, non-fatal): %v", err)
 		return
@@ -421,7 +422,7 @@ func submitSigned(t *testing.T, ctx context.Context, rpcClient *solanaint.RPCCli
 	sig, err := priv.Sign(msg)
 	require.NoError(t, err, label)
 	tx.Signatures = []solanago.Signature{sig}
-	outcome, err := rpcClient.SubmitAndConfirm(ctx, tx, 90*time.Second)
+	outcome, err := rpcClient.SubmitAndConfirm(ctx, tx, solanaint.ChainTerminal{})
 	if err != nil {
 		t.Logf("on-chain leg: %q submit/confirm failed (non-fatal): %v", label, err)
 		return false

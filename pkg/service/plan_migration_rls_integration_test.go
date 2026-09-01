@@ -38,7 +38,7 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	superDSN, appRoleDSN := dbtest.SharedRLSPostgres(t)
 
 	merchantID := uuid.NewString()
-	super, err := db.NewDB(&config.DBConfig{URL: superDSN})
+	super, err := db.NewDB(t.Context(), &config.DBConfig{URL: superDSN})
 	require.NoError(t, err)
 	defer super.Close()
 	_, err = super.Pool().Exec(ctx,
@@ -46,7 +46,7 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 		merchantID, "merchant-pm-"+merchantID[:8])
 	require.NoError(t, err)
 
-	appDB, err := db.NewDB(&config.DBConfig{URL: appRoleDSN})
+	appDB, err := db.NewDB(t.Context(), &config.DBConfig{URL: appRoleDSN})
 	require.NoError(t, err)
 	defer appDB.Close()
 	posture, err := appDB.CheckRLSPosture(ctx)
@@ -142,7 +142,7 @@ func TestFacadeRefusesWithoutAMerchant(t *testing.T) {
 	ctx := context.Background()
 	_, appRoleDSN := dbtest.SharedRLSPostgres(t)
 
-	appDB, err := db.NewDB(&config.DBConfig{URL: appRoleDSN})
+	appDB, err := db.NewDB(t.Context(), &config.DBConfig{URL: appRoleDSN})
 	require.NoError(t, err)
 	defer appDB.Close()
 

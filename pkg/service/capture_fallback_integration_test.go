@@ -5,6 +5,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -77,6 +78,7 @@ func TestCaptureHold_RedisFlushFallback(t *testing.T) {
 		InvokerType:     "payer",
 		Currency:        money.DefaultCurrency,
 		EstimatedAmount: 500,
+		ExpiresAtUnix:   time.Now().Add(time.Hour).Unix(),
 		Source:          "usage",
 		SourceID:        reqID,
 	})
@@ -123,6 +125,7 @@ func TestCaptureHold_FallbackRetryIsIdempotent(t *testing.T) {
 		InvokerType:     "payer",
 		Currency:        money.DefaultCurrency,
 		EstimatedAmount: 500,
+		ExpiresAtUnix:   time.Now().Add(time.Hour).Unix(),
 		Source:          "usage",
 		SourceID:        reqID,
 	})

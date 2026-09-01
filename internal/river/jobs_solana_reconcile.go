@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -83,6 +84,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		if row.LastSignature == nil || *row.LastSignature == "" {
 			continue
 		}
+		progress.Mark(ctx, "solana reconcile subscription "+row.ID.String())
 		sig := *row.LastSignature
 		_, perr := paymentRepo.GetByTransactionID(ctx, models.RailSolana, sig)
 		if perr == nil {

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -122,6 +123,7 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 		body := map[string]any{"items": []map[string]any{{
 			"customer_id": payerID.String(), "invoker": invoker, "invoker_type": "delegated",
 			"currency": money.DefaultCurrency, "estimated_amount": amount, "request_id": reqID,
+			"expires_at": time.Now().Add(time.Hour).Unix(),
 		}}}
 		data, mErr := json.Marshal(body)
 		require.NoError(t, mErr)

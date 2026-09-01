@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -184,6 +185,7 @@ func (w *ProviderRefreshSchedulerWorker) Work(ctx context.Context, _ *river.Job[
 	// to refresh — always skip it before enqueue.
 	var enqueued, deduped, skipped, failed, slot int
 	for _, mid := range merchantIDs {
+		progress.Mark(ctx, "refresh scheduler merchant "+mid.String())
 		ok, err := w.merchantHasRailAccounts(ctx, mid)
 		if err != nil {
 			// Fail open: a broken predicate must not starve refresh.
@@ -543,6 +545,7 @@ func (w *ProviderRefreshWorker) runProviderEventWindows(ctx context.Context, mid
 		if !until.After(since) {
 			break
 		}
+		progress.Mark(ctx, fmt.Sprintf("refresh %s window %s..%s", provider, since.Format(time.RFC3339), until.Format(time.RFC3339)))
 		params := reconcile.RunParams{
 			Mode:        mode,
 			Mutations:   &reconcile.LocalMutationPolicy{Insert: true, Overwrite: true},

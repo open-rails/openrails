@@ -43,7 +43,7 @@ func TestStandaloneRouteSurface(t *testing.T) {
 		cfg.Redis = &config.RedisConfig{Addr: h.Redis.Options().Addr}
 	}
 
-	assembled, err := serverboot.NewServer(cfg, &serverboot.Options{})
+	assembled, err := serverboot.NewServer(context.Background(), cfg, &serverboot.Options{})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = assembled.App.Close(context.Background()) })
 

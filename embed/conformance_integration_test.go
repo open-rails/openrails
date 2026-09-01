@@ -301,6 +301,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		InvokerType:     "payer",
 		Currency:        env.currency,
 		EstimatedAmount: 10_000,
+		ExpiresAt:       holdDeadline(),
 		Source:          "conformance",
 		RequestID:       holdID,
 	})
@@ -322,6 +323,7 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 		Resource:        env.resource,
 		Currency:        env.currency,
 		EstimatedAmount: 10_000_000_000,
+		ExpiresAt:       holdDeadline(),
 		RequestID:       requestPrefix + "-admit-2",
 		Source:          "admit",
 	})
@@ -383,8 +385,8 @@ func runScript(t *testing.T, ctx context.Context, c openrails.Client, env script
 	// isolation, the batch call itself succeeds.
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
 		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 0, RequestID: requestPrefix + "-batch-1", Source: "admit"},
-		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 10_000_000_000, RequestID: requestPrefix + "-batch-2"},
-		{CustomerID: "not-a-uuid", Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1, RequestID: requestPrefix + "-batch-3"},
+		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 10_000_000_000, ExpiresAt: holdDeadline(), RequestID: requestPrefix + "-batch-2"},
+		{CustomerID: "not-a-uuid", Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: requestPrefix + "-batch-3"},
 		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: -1, RequestID: requestPrefix + "-batch-4"},
 	})
 	require.NoError(t, err, "%s admit-batch", env.side)
@@ -605,4 +607,11 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	)
 	_, err := badStandalone.Balance(ctx, payerStandalone.String())
 	require.ErrorIs(t, err, openrails.ErrUnauthorized)
+}
+
+// holdDeadline is the declared deadline every hold-placing admit must carry
+// (xs-007 row 33): an hour from now, as a job would declare.
+func holdDeadline() *int64 {
+	v := time.Now().Add(time.Hour).Unix()
+	return &v
 }

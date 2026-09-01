@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -79,6 +80,7 @@ func (w CreditExpiryWorker) Work(ctx context.Context, job *river.Job[CreditExpir
 			continue
 		}
 		merchantID := *mid
+		progress.Mark(ctx, "credit expiry merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchant.ID(merchantID), "credit expiry sweep", func(ctx context.Context) error {
 			rows, err := w.DB.Gen(ctx).ListCustomersWithLapsedCreditLots(ctx, gen.ListCustomersWithLapsedCreditLotsParams{
 				AsOf: now, BatchSize: batchSize32,

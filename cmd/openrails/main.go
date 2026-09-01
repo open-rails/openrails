@@ -142,9 +142,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	startWorkers := !noWorkers
 	config.LogStartupStatus(cfg)
 
+	// xs-007 row 40: the boot waits for the database for as long as it takes
+	// — a failover, a slow start — and only an operator's stop signal ends the
+	// wait. While waiting the process is not listening, which is exactly what
+	// "not ready" means to whoever is probing it; the 60 s budget this
+	// replaced turned a two-minute failover into a crash loop.
+	bootCtx, stopBoot := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopBoot()
+
 	// ConsoleAssets is nil unless this binary was built with
 	// `-tags console_assets` (#754: `task build-console-binary` / Dockerfile).
-	embeddedApp, err := embedded.New(embedded.Options{
+	embeddedApp, err := embedded.New(bootCtx, embedded.Options{
 		Config:        cfg,
 		ConsoleAssets: consoleassets.FS(),
 		// Standalone keeps self-provisioning (#895): OpenRails builds and runs
@@ -152,8 +160,13 @@ func runServer(cmd *cobra.Command, args []string) error {
 		River: embedded.RiverManagedByOpenRails(),
 	})
 	if err != nil {
+		if bootCtx.Err() != nil {
+			log.WithError(err).Info("Shutdown requested while booting; exiting")
+			return nil
+		}
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
+	stopBoot()
 	cleanupOnError := true
 	defer func() {
 		if cleanupOnError {
@@ -205,12 +218,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("build billing http handler: %w", err)
 	}
+	// xs-007 row 37: no request-wide WriteTimeout. It was set before the
+	// handler knew its work, and at 30 s it sat below a route's own 50 s
+	// budget: a payment-method replacement committed at the provider and the
+	// client got EOF. A route that has a budget declares it
+	// (httprequest.Request.Budget) and owns its deadline; every provider and
+	// database call underneath carries its own I/O bound. What stays is what
+	// observes the PEER, not the work: ReadHeaderTimeout and ReadTimeout bound
+	// a client that opened a connection and is not sending its request
+	// (slowloris — bytes not arriving is the observation), IdleTimeout bounds
+	// a keep-alive connection between requests.
 	publicSrv := &http.Server{
 		Handler:           publicHandler,
 		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
@@ -308,10 +330,18 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 	config.LogStartupStatus(cfg)
 
-	application, err := app.Bootstrap(cfg)
+	// xs-007 row 40: see runServer — the database wait ends on a stop signal.
+	bootCtx, stopBoot := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopBoot()
+	application, err := app.Bootstrap(bootCtx, cfg)
 	if err != nil {
+		if bootCtx.Err() != nil {
+			log.WithError(err).Info("Shutdown requested while booting; exiting")
+			return nil
+		}
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
+	stopBoot()
 	cleanupOnError := true
 	defer func() {
 		if cleanupOnError {

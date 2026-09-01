@@ -4,7 +4,6 @@ import (
 	"context"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
@@ -353,7 +352,7 @@ func (s *stubSolanaTransactionService) BuildPaymentTransactionFromQuote(ctx cont
 	return nil, nil
 }
 
-func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanaint.PurchaseMemoPolicy, processedNotAfter *time.Time) error {
+func (s *stubSolanaTransactionService) VerifyTransactionWithContent(ctx context.Context, signature string, expectedAmount uint64, expectedRecipient string, expectedTokenMint string, expectedPayer string, expectedReference *string, expectedMemoLocalID uuid.UUID, memoPolicy solanaint.PurchaseMemoPolicy) error {
 	return nil
 }
 

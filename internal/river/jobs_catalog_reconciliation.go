@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -92,6 +93,7 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 			continue
 		}
 		merchantID := merchant.ID(*mid)
+		progress.Mark(ctx, "catalog reconciliation merchant "+merchantID.String())
 		if err := w.DB.RunInMerchantScope(ctx, merchantID, "catalog reconciliation", func(mctx context.Context) error {
 			return w.reconcileMerchant(mctx)
 		}); err != nil {

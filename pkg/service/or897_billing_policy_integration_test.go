@@ -374,6 +374,7 @@ func or897Admit(payer identity.CustomerID, amount int64) billingservice.AdmitInp
 	return billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: amount,
-		SourceID: uuid.NewString(), Source: "usage",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		SourceID:      uuid.NewString(), Source: "usage",
 	}
 }

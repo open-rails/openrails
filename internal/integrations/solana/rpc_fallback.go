@@ -512,6 +512,36 @@ func (c *RPCFallbackClient) GetLatestBlockhash(ctx context.Context) (solanago.Ha
 	return blockhash, err
 }
 
+// LatestBlockhash gets the latest blockhash WITH the chain terminal it carries
+// (lastValidBlockHeight), with automatic failover.
+func (c *RPCFallbackClient) LatestBlockhash(ctx context.Context) (RecentBlockhash, error) {
+	var out RecentBlockhash
+	err := c.withFallback(ctx, "GetLatestBlockhash", func(client *rpc.Client) error {
+		resp, err := client.GetLatestBlockhash(ctx, rpc.CommitmentFinalized)
+		if err != nil {
+			return err
+		}
+		out = RecentBlockhash{Hash: resp.Value.Blockhash, LastValidBlockHeight: resp.Value.LastValidBlockHeight}
+		return nil
+	})
+	return out, err
+}
+
+// GetBlockHeight returns the cluster's current block height at the given
+// commitment, with automatic failover.
+func (c *RPCFallbackClient) GetBlockHeight(ctx context.Context, commitment rpc.CommitmentType) (uint64, error) {
+	var height uint64
+	err := c.withFallback(ctx, "GetBlockHeight", func(client *rpc.Client) error {
+		h, err := client.GetBlockHeight(ctx, commitment)
+		if err != nil {
+			return err
+		}
+		height = h
+		return nil
+	})
+	return height, err
+}
+
 // GetMinimumBalanceForRentExemption returns the minimum balance with automatic failover.
 func (c *RPCFallbackClient) GetMinimumBalanceForRentExemption(ctx context.Context, dataSize uint64) (uint64, error) {
 	var balance uint64

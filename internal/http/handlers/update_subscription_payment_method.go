@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -58,7 +57,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Request.Context(), 15*time.Second)
+	ctx, cancel := r.Budget(15 * time.Second)
 	defer cancel()
 
 	subscription, err := r.State.SubscriptionService.GetByID(ctx, subscriptionID)

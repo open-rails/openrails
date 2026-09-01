@@ -69,6 +69,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 			InvokerType:     openrails.InvokerTypePayer,
 			Currency:        "USD",
 			EstimatedAmount: 10_000,
+			ExpiresAt:       holdDeadline(),
 			Source:          "or868-b3",
 			RequestID:       "or868-b3-" + customerID.String(),
 		})

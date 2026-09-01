@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -228,7 +227,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 
 	// The NMI transport has a 25-second ceiling. Leave enough time for the
 	// local write while still completing before the browser's 30-second cap.
-	ctx, cancel := context.WithTimeout(r.Request.Context(), createPaymentMethodTimeout)
+	ctx, cancel := r.Budget(createPaymentMethodTimeout)
 	defer cancel()
 
 	email := strings.TrimSpace(req.Email)
@@ -411,7 +410,7 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		ExpiryDate:   body.ExpiryDate,
 	}
 
-	ctx, cancel := context.WithTimeout(r.Request.Context(), updatePaymentMethodTimeout)
+	ctx, cancel := r.Budget(updatePaymentMethodTimeout)
 	defer cancel()
 
 	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, updateReq)

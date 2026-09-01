@@ -279,7 +279,7 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 		return res, nil
 	}
 
-	database, err := openDB(opts.Config, opts.PGXPool)
+	database, err := openDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return res, err
 	}
@@ -525,7 +525,7 @@ func (p *planner) targetPSPID() *uuid.UUID {
 	return &id
 }
 
-func openDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
+func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if pool != nil {
 		schema := config.DefaultSchema
 		if cfg != nil && cfg.DB != nil {
@@ -536,7 +536,7 @@ func openDB(cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
 	if cfg == nil || cfg.DB == nil {
 		return nil, errors.New("custody migration: config database is required")
 	}
-	database, err := db.NewDB(cfg.DB)
+	database, err := db.NewDB(ctx, cfg.DB)
 	if err != nil {
 		return nil, fmt.Errorf("custody migration: open postgres: %w", err)
 	}

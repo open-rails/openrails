@@ -32,7 +32,11 @@ const (
 	solanaPayKeyPrefix       = "solana_pay:"
 	solanaPayConsumedPrefix  = "solana_pay_consumed:"
 
-	// TTL for pending payments
+	// pendingPaymentTTL is how long a QUOTE is offered — the Redis pending
+	// record and the price it carries. It is price validity, never a refusal
+	// of settled money (xs-007 row 35): the poller keeps discovering the
+	// reference through the durable checkout session after this lapses, and a
+	// transfer that lands late is honoured at the quoted token amount.
 	pendingPaymentTTL = 15 * time.Minute
 	consumedRefTTL    = 24 * time.Hour
 )

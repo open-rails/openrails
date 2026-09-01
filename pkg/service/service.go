@@ -559,6 +559,47 @@ func (s *Service) ReleaseHold(ctx context.Context, requestID string) error {
 	return gate.Release(ctx, spendgate.ReleaseInput{Merchant: mid, Customer: ref.Customer, Currency: ref.Currency, RequestID: requestID})
 }
 
+// ExtendHold re-declares the deadline of a live admission hold (xs-007 row
+// 33): the job that owns request_id is still running and will now finish by
+// expiresAt. Idempotent. ErrHoldNotFound when nothing live exists to extend.
+func (s *Service) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return fmt.Errorf("request_id required")
+	}
+	if expiresAt.IsZero() {
+		return ErrHoldDeadlineRequired
+	}
+	if !expiresAt.After(s.now()) {
+		return ErrHoldDeadlinePassed
+	}
+	if s.rt == nil || s.rt.RedisClient == nil {
+		return fmt.Errorf("extend unavailable: redis not configured")
+	}
+	mid, err := serviceMerchantID(ctx)
+	if err != nil {
+		return err
+	}
+	gate := spendgate.New(s.rt.RedisClient)
+	ref, ok, err := gate.Resolve(ctx, mid, requestID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrHoldNotFound
+	}
+	extended, err := gate.Extend(ctx, spendgate.ExtendInput{
+		Merchant: mid, Customer: ref.Customer, Currency: ref.Currency, RequestID: requestID, Until: expiresAt.UTC(),
+	})
+	if err != nil {
+		return err
+	}
+	if !extended {
+		return ErrHoldNotFound
+	}
+	return nil
+}
+
 func serviceMerchantID(ctx context.Context) (string, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

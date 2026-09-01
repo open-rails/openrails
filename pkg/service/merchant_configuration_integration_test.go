@@ -214,7 +214,8 @@ func TestMerchantConfiguration_ConfiguredDelegatedInvokerWindowDenies(t *testing
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:configured", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "blocked-configured",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "blocked-configured",
 	})
 	require.NoError(t, err)
 	require.False(t, res.Allowed, "invoker over the CONFIGURED $1 window must be denied")
@@ -241,7 +242,8 @@ func TestMerchantConfiguration_EURWasteCountsAgainstUSDInvokerCutoff(t *testing.
 	admit, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:fx-cutoff", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "blocked-fx-cutoff",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "blocked-fx-cutoff",
 	})
 	require.NoError(t, err)
 	require.False(t, admit.Allowed)
@@ -265,7 +267,8 @@ func TestMerchantConfiguration_UnsetFallsBackToDefault(t *testing.T) {
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:default", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "ok-default",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "ok-default",
 	})
 	require.NoError(t, err)
 	require.True(t, res.Allowed, "$2 wasted is under the $5 default backstop -> allowed")
@@ -285,7 +288,8 @@ func TestMerchantConfiguration_EmptyConfigFallsBackToDefault(t *testing.T) {
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:empty-config", InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "ok-empty-config",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "ok-empty-config",
 	})
 	require.NoError(t, err)
 	require.True(t, res.Allowed, "$2 wasted is under the $5 default backstop -> allowed")
@@ -346,7 +350,8 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	resA, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payerA, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "blocked-payer-a",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "blocked-payer-a",
 	})
 	require.NoError(t, err)
 	require.False(t, resA.Allowed, "payer A's invoker is over the merchant-wide $1 policy")
@@ -354,7 +359,8 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	resB, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "allowed-payer-b",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "allowed-payer-b",
 	})
 	require.NoError(t, err)
 	require.True(t, resB.Allowed, "same invoker label under payer B must not inherit payer A's Redis usage")
@@ -367,7 +373,8 @@ func TestMerchantConfiguration_MerchantWideDelegatedInvokerWindowPayerScopedUsag
 	resB, err = svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payerB, Invoker: invoker, InvokerType: string(identity.InvokerTypeDelegated), TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "blocked-payer-b",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "blocked-payer-b",
 	})
 	require.NoError(t, err)
 	require.False(t, resB.Allowed, "the same merchant-wide policy still applies to payer B's invoker")
@@ -437,7 +444,8 @@ func TestWastedSpendDirectPayer_DoesNotHitDelegatedInvokerCutoff(t *testing.T) {
 		CustomerID: payer, Invoker: "API-key:payer-owned", InvokerType: string(identity.InvokerTypePayer),
 		TrustLevel: "free", Resource: "r",
 		Currency: money.DefaultCurrency, EstimatedAmount: 100,
-		Source: "usage", SourceID: "direct-admit",
+		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
+		Source:        "usage", SourceID: "direct-admit",
 	})
 	require.NoError(t, err)
 	require.True(t, res.Allowed, "direct payer credentials are charged after grace, not cut off by delegated invoker policy")

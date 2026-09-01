@@ -130,6 +130,11 @@ created by River's migrator rather than `migrations/`, and lives in a schema
 named at runtime (`config.RiverSchema`). sqlc has no type information for it and
 could not express the schema-qualified name anyway. Only the schema is
 interpolated, after an identifier check; the kind list is a bound parameter.
+`internal/river/job_liveness.go` is PERMANENT for the same reason, and it
+WRITES: while an OpenRails job runs it refreshes that job's
+`river_job.attempted_at` — the one column River's rescuer reads to decide a
+running job is stuck — because River has no heartbeat API (xs-007 row 31). One
+UPDATE by primary key; only the schema is interpolated, after the same check.
 
 `LockUsageEventsForMeterCorrection` is also PERMANENT, but remains in sqlc: it
 holds a table-level transaction lock so an event insert cannot race a meter's

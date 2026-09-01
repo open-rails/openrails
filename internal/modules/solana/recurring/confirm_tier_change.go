@@ -20,7 +20,7 @@ import (
 // SUCCEEDED on-chain (satisfied by *solanaint.RPCClient). Solana is the source of
 // truth: we only mirror into the DB after observing the confirmed switch.
 type tierChangeConfirmRPC interface {
-	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, timeout time.Duration) (*solanaint.TransactionOutcome, error)
+	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal solanaint.ChainTerminal) (*solanaint.TransactionOutcome, error)
 }
 
 // tierChangeLifecycle is the membership surface the mirror drives (satisfied by
@@ -126,13 +126,13 @@ type ConfirmTierChangeService struct {
 	network    string
 	tokens     map[string]config.TokenConfig
 	commitment rpc.CommitmentType
-	timeout    time.Duration
 	now        func() time.Time
 }
 
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. It confirms to
-// the Confirmed commitment with the RPC client's default watch timeout. network
-// ("mainnet"/"devnet") resolves the recurring mint for the new row.
+// the Confirmed commitment; the wallet-built signature carries no known chain
+// terminal, so the watch runs until the caller's context ends (xs-007 row
+// 36). network ("mainnet"/"devnet") resolves the recurring mint for the new row.
 func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		rpc:        rpcClient,
@@ -141,7 +141,6 @@ func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierC
 		network:    network,
 		tokens:     normalizeRecurringTokens(firstTokenMap(tokens)),
 		commitment: rpc.CommitmentConfirmed,
-		timeout:    0, // 0 -> RPCClient.WatchTransaction default
 		now:        time.Now,
 	}
 }
@@ -196,7 +195,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if err != nil {
 		return nil, fmt.Errorf("recurring: invalid signature: %w", err)
 	}
-	outcome, err := s.rpc.WatchTransaction(ctx, sig, s.commitment, s.timeout)
+	outcome, err := s.rpc.WatchTransaction(ctx, sig, s.commitment, solanaint.ChainTerminal{})
 	if err != nil {
 		return nil, fmt.Errorf("recurring: confirm tier-change signature %s: %w", in.Signature, err)
 	}

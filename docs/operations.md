@@ -548,6 +548,14 @@ up. "start" = RunOnStart.
 The health checker seeds `openrails.worker_health` and raises durable repair
 alerts when a periodic kind stops completing.
 
+No job runs under a clock (xs-007). River's one-minute `JobTimeout` default is
+overridden to "never" on every OpenRails worker; a running job is cancelled
+only when it reports no progress past the same staleness rule the health
+checker uses for its kind (3× the declared cadence, floored at 30 min), and
+the job row records what it last reported. A job that dies with its process
+is reclaimed by River's rescuer, which measures silence from the job's last
+liveness beat rather than from its start.
+
 ### Health endpoints
 
 `GET /health/live` (liveness) and `GET /health/ready` (readiness;
