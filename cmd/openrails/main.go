@@ -218,19 +218,21 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("build billing http handler: %w", err)
 	}
-	// xs-007 row 37: no request-wide Read/WriteTimeout. Both were set before
-	// the handler knew its work, and the write one (30 s) sat below a route's
-	// own 50 s budget: a payment-method replacement committed at the provider
-	// and the client got EOF. A route that has a budget declares it
+	// xs-007 row 37: no request-wide WriteTimeout. It was set before the
+	// handler knew its work, and at 30 s it sat below a route's own 50 s
+	// budget: a payment-method replacement committed at the provider and the
+	// client got EOF. A route that has a budget declares it
 	// (httprequest.Request.Budget) and owns its deadline; every provider and
 	// database call underneath carries its own I/O bound. What stays is what
-	// observes the PEER, not the work: ReadHeaderTimeout bounds a client that
-	// opened a connection and sends no request line (slowloris), IdleTimeout
-	// bounds a keep-alive connection between requests.
+	// observes the PEER, not the work: ReadHeaderTimeout and ReadTimeout bound
+	// a client that opened a connection and is not sending its request
+	// (slowloris — bytes not arriving is the observation), IdleTimeout bounds
+	// a keep-alive connection between requests.
 	publicSrv := &http.Server{
 		Handler:           publicHandler,
 		Addr:              fmt.Sprintf("%s:%d", cfg.Host, cfg.Port),
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
