@@ -124,7 +124,9 @@ type Price struct {
 	ProductID  uuid.UUID `json:"product_id"`
 	// Archived: retired. Not purchasable, but grandfathered subscriptions keep
 	// billing it indefinitely.
-	Archived bool   `json:"archived"`
+	Archived bool `json:"archived"`
+	// Amount is in currency micros (1e6 per major unit); rails convert to
+	// their own minor units at charge time (moneyutil.NativeToRailMinorExact).
 	Amount   int64  `json:"amount"`
 	Currency string `json:"currency"`
 
