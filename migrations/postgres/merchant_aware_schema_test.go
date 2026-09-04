@@ -804,8 +804,8 @@ CREATE UNIQUE INDEX uq_widgets_code ON openrails.widgets USING btree (merchant_i
 // currency column must carry the shape CHECK, so a new table cannot re-open
 // the drift that made a dev DB's payments.currency 100% lowercase.
 //
-// The CHECK constrains SHAPE (ISO-4217 alpha-3 upper, or a qualified
-// custom-credit unit slug/name); MEMBERSHIP stays in the Go registry, which is
+// The CHECK constrains SHAPE (built-in uppercase code or an immutable
+// custom-credit UUID); MEMBERSHIP stays in the Go registry, which is
 // where per-currency scale lives and where it can change without a migration.
 func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 	schema := loadAllSchema(t)
@@ -830,8 +830,14 @@ func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 		t.Fatal("no currency shape CHECK found in any migration (GAP-6): every currency column must carry one")
 	}
 	reDropShape := regexp.MustCompile(`DROP CONSTRAINT (?:IF EXISTS )?([a-z0-9_]+_currency_shape)`)
-	for _, m := range reDropShape.FindAllStringSubmatch(schema, -1) {
-		t.Errorf("migration drops the currency shape CHECK %q — GAP-6 requires every currency column keep it", m[1])
+	for _, loc := range reDropShape.FindAllStringSubmatchIndex(schema, -1) {
+		name := schema[loc[2]:loc[3]]
+		// A forward-only identity cutover replaces the CHECK atomically. Every
+		// drop must be followed by a replacement; a final drop still fails.
+		replacement := regexp.MustCompile(`ADD CONSTRAINT ` + regexp.QuoteMeta(name) + `\s+CHECK\s*\(`)
+		if !replacement.MatchString(schema[loc[1]:]) {
+			t.Errorf("migration drops currency shape CHECK %q without replacing it", name)
+		}
 	}
 
 	// Coverage is asserted PER COLUMN, not by trusting that some loop ran: a
@@ -841,7 +847,7 @@ func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 	for _, tbl := range withCurrency {
 		if !strings.Contains(schema, tbl+"_currency_shape") {
 			t.Errorf("table %q declares a currency column with no %s_currency_shape CHECK (GAP-6): "+
-				"shape (upper-case alpha-3, or a qualified custom-credit slug/name) is a DATABASE fact", tbl, tbl)
+				"shape (uppercase built-in code or immutable custom-credit UUID) is a DATABASE fact", tbl, tbl)
 		}
 	}
 

@@ -418,6 +418,10 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 		return nil, err
 	}
 
+	displayCurrency, err := s.DisplayCurrency(ctx, currency)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]InvokerSpendWindow, 0, len(usage))
 	for _, u := range usage {
 		remaining := u.Limit - u.Used
@@ -429,7 +433,7 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 			Key:           u.Key,
 			WindowSeconds: int64(u.Duration / time.Second),
 			Limit:         u.Limit,
-			Currency:      currency,
+			Currency:      displayCurrency,
 			Used:          u.Used,
 			Reserved:      u.Reserved,
 			Remaining:     remaining,

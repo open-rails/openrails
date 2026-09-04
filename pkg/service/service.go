@@ -367,15 +367,16 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 	ref, ok, rerr := gate.Resolve(ctx, mid, req.RequestID)
 	if !ok || rerr != nil {
 		fbCustomer := strings.TrimSpace(req.CustomerID)
-		fbCurrency, unitErr := s.resolveCurrency(ctx, req.Currency)
-		if unitErr != nil {
-			return nil, unitErr
-		}
+		fbCurrency := strings.TrimSpace(req.Currency)
 		if fbCustomer == "" || fbCurrency == "" {
 			if rerr != nil {
 				return nil, rerr
 			}
 			return nil, fmt.Errorf("hold not found for request_id %q", req.RequestID)
+		}
+		fbCurrency, unitErr := s.resolveCurrency(ctx, fbCurrency)
+		if unitErr != nil {
+			return nil, unitErr
 		}
 		ref = spendgate.HoldRef{
 			Customer: fbCustomer,

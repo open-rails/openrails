@@ -3,8 +3,10 @@ package money
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -41,5 +43,25 @@ func TestResolveUnitBuiltin(t *testing.T) {
 	}
 	if _, _, err := s.ResolveUnit(context.Background(), "doge"); err == nil {
 		t.Error("unknown built-in must error")
+	}
+}
+
+func TestCustomCreditCanonicalIdentity(t *testing.T) {
+	id := uuid.New()
+	code := CreditUnitCode(id)
+	got, err := creditUnitID(code)
+	if err != nil || got != id {
+		t.Fatalf("canonical identity did not round trip: %s %v", got, err)
+	}
+	if NormalizeCurrency(" "+code+" ") != code {
+		t.Fatal("normalization changed canonical UUID spelling")
+	}
+	if !errors.Is(RequireBillingCurrency(code), ErrBillingUnitRequired) {
+		t.Fatal("UUID credits reached billing")
+	}
+	for _, invalid := range []string{"former-owner/tokens", "credit:", CreditUnitCode(uuid.Nil), strings.ToUpper(code), "credit:" + strings.ReplaceAll(id.String(), "-", "")} {
+		if _, err := creditUnitID(invalid); err == nil {
+			t.Errorf("accepted noncanonical identity %q", invalid)
+		}
 	}
 }

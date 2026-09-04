@@ -52,6 +52,24 @@ ON CONFLICT (merchant_id, name) DO UPDATE SET decimals = 2, active = true`, dbte
 	require.NoError(t, err)
 	require.Equal(t, int64(350), bal.Balance)
 
+	spendKey, err := money.NewIdempotencyKey(money.OpSpend, "custom-test", uuid.NewString())
+	require.NoError(t, err)
+	spend := money.SpendParams{Payer: &payer, Invoker: payer.UUID().String(), Currency: unit, Amount: 50, Key: spendKey}
+	spent, err := svc.SpendCredits(ctx, spend)
+	require.NoError(t, err)
+	require.Equal(t, unit, spent.Currency)
+	replay, err := svc.SpendCredits(ctx, spend)
+	require.NoError(t, err)
+	require.True(t, replay.Replayed)
+	spend.Key, err = money.NewIdempotencyKey(money.OpSpend, "custom-test", uuid.NewString())
+	require.NoError(t, err)
+	spend.Amount = 301
+	_, err = svc.SpendCredits(ctx, spend)
+	require.ErrorIs(t, err, money.ErrInsufficientCredits)
+	bal, err = svc.GetBalanceForCustomer(ctx, payer, unit)
+	require.NoError(t, err)
+	require.EqualValues(t, 300, bal.Balance)
+
 	// (3) invariant: a billing op (owed accrual) on the qualified unit is rejected.
 	_, err = svc.AccrueOwed(ctx, payer, unit, "billing", uuid.NewString(), 100)
 	require.Error(t, err)

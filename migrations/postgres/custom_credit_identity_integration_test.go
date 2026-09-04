@@ -58,3 +58,33 @@ func TestCustomCreditIdentityCutoverRefusesMutableState(t *testing.T) {
 		})
 	}
 }
+
+func TestCustomCreditIdentityFinalCurrencyConstraints(t *testing.T) {
+	ctx := context.Background()
+	pool := dbtest.SharedSuperuserPGXPool(t)
+	rows, err := pool.Query(ctx, `SELECT c.relname, COALESCE(k.convalidated,false)
+ FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+ JOIN pg_namespace n ON n.oid=c.relnamespace
+ LEFT JOIN pg_constraint k ON k.conrelid=c.oid AND k.conname=c.relname||'_currency_shape'
+ WHERE n.nspname='openrails' AND a.attname='currency' AND NOT a.attisdropped AND c.relkind='r'`)
+	require.NoError(t, err)
+	count := 0
+	for rows.Next() {
+		var name string
+		var valid bool
+		require.NoError(t, rows.Scan(&name, &valid))
+		require.True(t, valid, "%s needs a validated currency constraint", name)
+		count++
+	}
+	rows.Close()
+	require.NoError(t, rows.Err())
+	require.GreaterOrEqual(t, count, 16)
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	mid := uuid.New()
+	_, err = tx.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status) VALUES($1,$2,'active')`, mid, "shape-"+mid.String())
+	require.NoError(t, err)
+	_, err = tx.Exec(ctx, `INSERT INTO openrails.ledger_accounts(merchant_id,account_type,currency) VALUES($1,'world','former-owner/tokens')`, mid)
+	require.ErrorContains(t, err, "ledger_accounts_currency_shape")
+}
