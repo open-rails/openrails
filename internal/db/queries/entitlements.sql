@@ -113,15 +113,6 @@ WHERE ent.entitlement = sqlc.arg(entitlement)::text
 ORDER BY ent.customer_id
 LIMIT sqlc.arg(lim)::int;
 
--- name: ListActiveEntitlementRecords :many
-SELECT * FROM openrails.entitlements ent
-WHERE ent.customer_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.start_at <= sqlc.arg(at)::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > sqlc.arg(at)::timestamptz)
-ORDER BY ent.start_at ASC;
-
 -- name: ListActiveEntitlementRecordsMerchant :many
 SELECT * FROM openrails.entitlements ent
 WHERE ent.merchant_id = $1

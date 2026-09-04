@@ -559,7 +559,7 @@ SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, t
 WHERE merchant_id = $1::uuid
   AND customer_id = $2::uuid
   AND currency = $3::text
-ORDER BY created_at DESC
+ORDER BY created_at DESC, id DESC
 LIMIT $5::int OFFSET $4::int
 `
 

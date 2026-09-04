@@ -24,11 +24,12 @@ INSERT INTO openrails.reprice_batches (
 RETURNING *;
 
 -- name: GetRepriceBatchByID :one
-SELECT * FROM openrails.reprice_batches WHERE id = $1;
+SELECT * FROM openrails.reprice_batches WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: ListRepriceBatchesByPriceKey :many
 SELECT * FROM openrails.reprice_batches
-WHERE price_key = sqlc.arg(price_key)::text
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND price_key = sqlc.arg(price_key)::text
 ORDER BY created_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 

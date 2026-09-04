@@ -79,7 +79,8 @@ ORDER BY created_at DESC;
 
 -- name: ListPaymentsByCustomer :many
 SELECT * FROM openrails.payments purch
-WHERE purch.customer_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.customer_id = sqlc.arg(customer_id)::uuid
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC;
@@ -180,13 +181,15 @@ WHERE id = $1
 
 -- name: CountPaymentsByCustomer :one
 SELECT count(*) FROM openrails.payments purch
-WHERE purch.customer_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.customer_id = sqlc.arg(customer_id)::uuid
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND purch.deleted_at IS NULL;
 
 -- name: ListPaymentsByCustomerPaged :many
 SELECT * FROM openrails.payments purch
-WHERE purch.customer_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.customer_id = sqlc.arg(customer_id)::uuid
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC

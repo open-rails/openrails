@@ -14,7 +14,7 @@ import (
 // client — all decoupled from *service.Service.
 type Applier interface {
 	GetProductByKey(ctx context.Context, key string) (*billingservice.CatalogProduct, error)
-	ListProducts(ctx context.Context, opts billingservice.ListProductsOptions) ([]billingservice.CatalogProduct, int64, error)
+	ListProducts(ctx context.Context, opts billingservice.ListProductsOptions) (billingservice.CatalogPage[billingservice.CatalogProduct], error)
 	CreateProduct(ctx context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error)
 	UpdateProduct(ctx context.Context, id uuid.UUID, req billingservice.UpdateProductRequest) (*billingservice.CatalogProduct, error)
 	DeactivateProduct(ctx context.Context, id uuid.UUID) (*billingservice.CatalogProduct, error)
