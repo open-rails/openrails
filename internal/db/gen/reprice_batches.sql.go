@@ -122,11 +122,16 @@ func (q *Queries) CreateRepriceBatch(ctx context.Context, arg CreateRepriceBatch
 }
 
 const getRepriceBatchByID = `-- name: GetRepriceBatchByID :one
-SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches WHERE id = $1
+SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
-func (q *Queries) GetRepriceBatchByID(ctx context.Context, id uuid.UUID) (OpenrailsRepriceBatch, error) {
-	row := q.db.QueryRow(ctx, getRepriceBatchByID, id)
+type GetRepriceBatchByIDParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetRepriceBatchByID(ctx context.Context, arg GetRepriceBatchByIDParams) (OpenrailsRepriceBatch, error) {
+	row := q.db.QueryRow(ctx, getRepriceBatchByID, arg.MerchantID, arg.ID)
 	var i OpenrailsRepriceBatch
 	err := row.Scan(
 		&i.ID,
@@ -148,19 +153,26 @@ func (q *Queries) GetRepriceBatchByID(ctx context.Context, id uuid.UUID) (Openra
 
 const listRepriceBatchesByPriceKey = `-- name: ListRepriceBatchesByPriceKey :many
 SELECT id, merchant_id, price_key, to_price_id, effective_at, subscriptions_matched, subscriptions_scheduled, subscriptions_skipped, created_at, kind, source_price_id, fallback_policy, subscriptions_blocked FROM openrails.reprice_batches
-WHERE price_key = $1::text
+WHERE merchant_id = $1::uuid
+  AND price_key = $2::text
 ORDER BY created_at DESC
-LIMIT $3::int OFFSET $2::int
+LIMIT $4::int OFFSET $3::int
 `
 
 type ListRepriceBatchesByPriceKeyParams struct {
+	MerchantID uuid.UUID
 	PriceKey   string
 	PageOffset int32
 	PageLimit  int32
 }
 
 func (q *Queries) ListRepriceBatchesByPriceKey(ctx context.Context, arg ListRepriceBatchesByPriceKeyParams) ([]OpenrailsRepriceBatch, error) {
-	rows, err := q.db.Query(ctx, listRepriceBatchesByPriceKey, arg.PriceKey, arg.PageOffset, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listRepriceBatchesByPriceKey,
+		arg.MerchantID,
+		arg.PriceKey,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

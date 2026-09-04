@@ -96,7 +96,7 @@ func TestQueryPerformance(t *testing.T) {
 			// Stored instruments for the fat customer (ORDER BY created_at DESC, no LIMIT).
 			Name: "payment_methods_by_customer", MaxExecutionMS: 75, MaxSharedReadBlocks: 64,
 			SQL:           gen.QueryText["ListPaymentMethodsByCustomer"],
-			Args:          []any{seed.FatCustomerID},
+			Args:          []any{merchantID, seed.FatCustomerID},
 			ForbidSeqScan: []string{"payment_methods"},
 		},
 		{

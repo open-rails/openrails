@@ -161,11 +161,15 @@ func (r *PaymentMethodRepo) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*models.PaymentMethod, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomer(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListPaymentMethodsByCustomer(ctx, gen.ListPaymentMethodsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, err
 	}
@@ -173,18 +177,23 @@ func (r *PaymentMethodRepo) GetByUserID(ctx context.Context, userID string) ([]*
 }
 
 func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*models.PaymentMethod, int64, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	total, err := q.CountPaymentMethodsByCustomer(ctx, tsid)
+	total, err := q.CountPaymentMethodsByCustomer(ctx, gen.CountPaymentMethodsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, 0, err
 	}
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := q.ListPaymentMethodsByCustomerPaged(ctx, gen.ListPaymentMethodsByCustomerPagedParams{
+		MerchantID: tid.UUID(),
 		CustomerID: tsid,
 		PageLimit:  limit32,
 		PageOffset: offset32,

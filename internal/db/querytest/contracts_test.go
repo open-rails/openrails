@@ -160,7 +160,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		PspID:                account.ID,
 	})
 	require.NoError(t, err)
-	methods, err := q.ListPaymentMethodsByCustomer(ctx, customerID)
+	methods, err := q.ListPaymentMethodsByCustomer(ctx, gen.ListPaymentMethodsByCustomerParams{MerchantID: merchantID, CustomerID: customerID})
 	require.NoError(t, err)
 	require.Len(t, methods, 1)
 	require.Equal(t, paymentMethodID, methods[0].ID)

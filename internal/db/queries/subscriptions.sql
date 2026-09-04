@@ -131,7 +131,9 @@ LIMIT 1;
 
 -- name: ListActiveSubscriptionsByCustomer :many
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.customer_id = $1 AND sub.status = 'active'
+WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND sub.customer_id = sqlc.arg(customer_id)::uuid
+  AND sub.status = 'active'
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC;
 

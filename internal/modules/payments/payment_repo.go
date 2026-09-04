@@ -251,11 +251,15 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 }
 
 func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models.Payment, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListPaymentsByCustomer(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListPaymentsByCustomer(ctx, gen.ListPaymentsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, err
 	}
@@ -417,18 +421,23 @@ func (r *PaymentRepo) CompleteProviderAttemptInPlace(ctx context.Context, attemp
 }
 
 func (r *PaymentRepo) GetPaginatedByUserID(ctx context.Context, userID string, page, pageSize int) ([]*models.Payment, int, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, 0, err
 	}
 	q := r.db.Gen(ctx)
-	count, err := q.CountPaymentsByCustomer(ctx, tsid)
+	count, err := q.CountPaymentsByCustomer(ctx, gen.CountPaymentsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, 0, err
 	}
 	pageSize32, _ := safecast.Convert[int32](pageSize)
 	pageOffset32, _ := safecast.Convert[int32]((page - 1) * pageSize)
 	rows, err := q.ListPaymentsByCustomerPaged(ctx, gen.ListPaymentsByCustomerPagedParams{
+		MerchantID: tid.UUID(),
 		CustomerID: tsid,
 		PageLimit:  pageSize32,
 		PageOffset: pageOffset32,
