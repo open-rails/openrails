@@ -65,6 +65,12 @@ DELETE FROM openrails.subscriptions WHERE id = $1
 SELECT * FROM openrails.subscriptions WHERE id = $1
   AND deleted_at IS NULL;
 
+-- name: GetSubscriptionByIDForUpdate :one
+-- Lifecycle read-modify-writes hold this lock through their transaction.
+SELECT * FROM openrails.subscriptions WHERE id = $1
+  AND deleted_at IS NULL
+FOR UPDATE;
+
 -- name: ListSubscriptionsByIDs :many
 SELECT * FROM openrails.subscriptions WHERE id = ANY(sqlc.arg(ids)::uuid[])
   AND deleted_at IS NULL;

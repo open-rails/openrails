@@ -207,7 +207,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	var existingPendingSub *models.Subscription
 	if params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "" {
-		found, err := subService.GetByRailSubscriptionID(ctx, string(params.Rail), strings.TrimSpace(*params.RailSubscriptionID))
+		found, err := subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(params.Rail), strings.TrimSpace(*params.RailSubscriptionID))
 		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing subscription by rail subscription ID: %w", err)
 		}
@@ -591,8 +591,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		paymentService := payments.NewPaymentService(db, s.Clock())
 		entitlementService.SetClock(s.Clock())
 
-		// Find subscription - use rail name for gateway lookup
-		subscription, err := subService.GetByRailSubscriptionID(ctx, string(params.Rail), params.RailSubscriptionID)
+		// Lock before checking terminal state or preparing a full-row update.
+		subscription, err := subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
 		if err != nil {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"rail":                 params.Rail,
@@ -1040,7 +1040,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock())
 		entitlementService.SetClock(s.Clock())
 
-		subscription, err := subService.GetByRailSubscriptionID(ctx, string(params.Rail), railSubID)
+		subscription, err := subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(params.Rail), railSubID)
 		if err != nil {
 			return fmt.Errorf("failed to get subscription for reactivation: %w", err)
 		}
@@ -1193,9 +1193,9 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		var err error
 
 		if params.SubscriptionID != nil {
-			subscription, err = subService.GetByID(ctx, *params.SubscriptionID)
+			subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
 		} else if params.RailSubscriptionID != nil && params.Rail != nil {
-			subscription, err = subService.GetByRailSubscriptionID(ctx, string(*params.Rail), *params.RailSubscriptionID)
+			subscription, err = subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
 		} else {
 			return fmt.Errorf("either subscription_id or rail details must be provided")
 		}
@@ -1632,7 +1632,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		entSvc := entitlements.NewEntitlementService(db, s.Clock())
 		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 
-		subscription, err := subService.GetByID(ctx, subscriptionID)
+		subscription, err := subService.subscriptionRepo.GetByIDForUpdate(ctx, subscriptionID)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for expiration")
 			return fmt.Errorf("subscription not found: %w", err)
@@ -1811,7 +1811,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		entSvc := entitlements.NewEntitlementService(db, s.Clock())
 		entSvc.SetClock(s.Clock()) // Propagate clock for testing
 
-		subscription, err := subService.GetByID(ctx, *params.SubscriptionID)
+		subscription, err := subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for failure flow")
 			return fmt.Errorf("subscription not found: %w", err)
