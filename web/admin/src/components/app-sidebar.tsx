@@ -53,6 +53,7 @@ const nav: NavItem[] = [
   { title: "Customers", url: "/customers", icon: UserGroupIcon },
   { title: "Subscriptions", url: "/subscriptions", icon: RepeatIcon },
   { title: "Payments", url: "/payments", icon: CreditCardIcon },
+  { title: "Invoices", url: "/invoices", icon: CreditCardIcon },
   {
     title: "Catalog",
     url: "/catalog",
