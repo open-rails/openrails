@@ -162,6 +162,7 @@ func TestUnindexedFilterAllowsOnlyGuaranteedPrimaryKeyPoints(t *testing.T) {
 		{"primary key only inside OR", "id = $2 OR cancel_feedback = $3", true},
 		{"column expression is not unique", "lower(id::text) = $2 AND cancel_feedback = $3", true},
 		{"other relation key", "other.id = $2 AND cancel_feedback = $3", true},
+		{"unaliased self-join key", "subscriptions.id = $2 AND cancel_feedback = $3", true},
 		{"set of keys is not one row", "id = ANY($2) AND cancel_feedback = $3", true},
 	}
 	for _, tc := range cases {

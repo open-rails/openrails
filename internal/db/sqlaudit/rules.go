@@ -199,7 +199,10 @@ func filterPinsPrimaryKey(scan planNode, cat *Catalog) bool {
 			return false
 		}
 		qualifier := ref.Fields[0].GetString_().GetSval()
-		return qualifier == scan.RelationName || scan.Alias != "" && qualifier == scan.Alias
+		if scan.Alias != "" {
+			return qualifier == scan.Alias
+		}
+		return qualifier == scan.RelationName
 	}
 	pinned = func(node *pgq.Node) bool {
 		if node == nil {
