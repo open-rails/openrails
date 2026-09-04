@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -13,7 +14,8 @@ import (
 
 // Custom credits (#475): merchant-defined consumable units (api-credits, gold-coins)
 // with NO fixed FX, NEVER billed in. They reuse the money ledger primitives and
-// the `currency` column, addressed by a QUALIFIED code `merchant-slug/name`.
+// the `currency` column, addressed internally by credit:<registry UUID>.
+// External merchant-slug/name values resolve once at the service boundary.
 // Unqualified codes (`usd`) remain built-in currencies (#474).
 
 // ErrBillingUnitRequired is returned when a billing-layer path (invoice / owed /
@@ -24,17 +26,54 @@ var ErrBillingUnitRequired = errors.New("money: billing requires a built-in curr
 // IsQualifiedUnit reports whether a unit code is a qualified custom-credit code
 // (`merchant-slug/name`) rather than an unqualified built-in currency.
 func IsQualifiedUnit(code string) bool {
-	return strings.Contains(code, "/")
+	return strings.Contains(code, "/") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(code)), "credit:")
 }
 
-// splitQualified splits `slug/name`; both parts must be non-empty.
-func splitQualified(code string) (slug, name string, ok bool) {
-	i := strings.IndexByte(code, '/')
-	if i <= 0 || i >= len(code)-1 {
-		return "", "", false
+// CreditUnitCode is the immutable spelling stored in ledger, grant and hold keys.
+func CreditUnitCode(id uuid.UUID) string { return "credit:" + id.String() }
+
+func creditUnitID(code string) (uuid.UUID, error) {
+	if !strings.HasPrefix(code, "credit:") {
+		return uuid.Nil, fmt.Errorf("custom credit unit must use its immutable registry identity")
 	}
-	slug, name = strings.TrimSpace(code[:i]), strings.TrimSpace(code[i+1:])
-	return slug, name, slug != "" && name != ""
+	id, err := uuid.Parse(strings.TrimPrefix(code, "credit:"))
+	if err != nil || id == uuid.Nil || CreditUnitCode(id) != code {
+		return uuid.Nil, fmt.Errorf("invalid custom credit identity %q", code)
+	}
+	return id, nil
+}
+
+// CustomUnitCode resolves a name inside the already authorized merchant.
+func (s *MoneyService) CustomUnitCode(ctx context.Context, name string) (string, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	row, err := s.db.Gen(ctx).GetCustomCreditType(ctx, gen.GetCustomCreditTypeParams{MerchantID: mid.UUID(), Name: name})
+	if err != nil {
+		return "", err
+	}
+	if !row.Active {
+		return "", fmt.Errorf("custom credit unit is inactive")
+	}
+	return CreditUnitCode(row.ID), nil
+}
+
+// CustomUnitName projects the stable registry name for an owned unit UUID.
+func (s *MoneyService) CustomUnitName(ctx context.Context, code string) (string, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	id, err := creditUnitID(code)
+	if err != nil {
+		return "", err
+	}
+	row, err := s.db.Gen(ctx).GetCustomCreditTypeByID(ctx, gen.GetCustomCreditTypeByIDParams{MerchantID: mid.UUID(), ID: id})
+	if err != nil {
+		return "", err
+	}
+	return row.Name, nil
 }
 
 // RequireBillingCurrency lives in currency.go alongside the registry; it rejects
@@ -42,9 +81,8 @@ func splitQualified(code string) (slug, name string, ok bool) {
 
 // ResolveUnit resolves a ledger unit code to its minor-unit decimals.
 // Unqualified codes resolve against the built-in currency registry (#474).
-// Qualified codes (`merchant-slug/name`) resolve against the ctx merchant's
-// custom_credit_types: the slug must name the ctx merchant and the type must be
-// active. Unknown / cross-merchant / inactive units are rejected.
+// Custom UUIDs resolve against the ctx merchant's existing registry.
+// Human-readable names never reach this stored-unit path.
 func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals int, builtin bool, err error) {
 	if !IsQualifiedUnit(code) {
 		d, ok := moneyutil.CurrencyScale(code)
@@ -56,26 +94,17 @@ func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals i
 	if s == nil || s.db == nil {
 		return 0, false, fmt.Errorf("money service not initialized")
 	}
-	slug, name, ok := splitQualified(code)
-	if !ok {
-		return 0, false, fmt.Errorf("money: malformed custom credit code %q", code)
+	id, err := creditUnitID(code)
+	if err != nil {
+		return 0, false, err
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-	// The qualifying slug must name the ctx merchant — a custom unit is only valid
-	// in its owning merchant's ledger (RLS scopes the lookup too).
-	tr, err := s.db.Gen(ctx).GetMerchantBySlug(ctx, slug)
+	ct, err := s.db.Gen(ctx).GetCustomCreditTypeByID(ctx, gen.GetCustomCreditTypeByIDParams{MerchantID: tid.UUID(), ID: id})
 	if err != nil {
-		return 0, false, fmt.Errorf("money: unknown custom credit unit %q: %w", code, err)
-	}
-	if tr.ID != tid.UUID() {
-		return 0, false, fmt.Errorf("money: custom credit unit %q not owned by ctx merchant", code)
-	}
-	ct, err := s.db.Gen(ctx).GetCustomCreditType(ctx, gen.GetCustomCreditTypeParams{MerchantID: tid.UUID(), Name: name})
-	if err != nil {
-		return 0, false, fmt.Errorf("money: unknown custom credit unit %q: %w", code, err)
+		return 0, false, fmt.Errorf("unknown custom credit identity for merchant: %w", err)
 	}
 	if !ct.Active {
 		return 0, false, fmt.Errorf("money: custom credit unit %q is inactive", code)
@@ -83,10 +112,7 @@ func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals i
 	return int(ct.Decimals), false, nil
 }
 
-// normalizeUnit normalizes a built-in currency (uppercase, "" → default) but
-// leaves a qualified custom-credit code (`slug/name`) verbatim — uppercasing
-// would corrupt it. Ledger consumption paths use this in place of
-// normalizeCurrency so the `currency` column hosts both kinds (#475).
+// normalizeUnit preserves canonical custom UUID spelling and uppercases ISO codes.
 func normalizeUnit(code string) string {
 	if IsQualifiedUnit(code) {
 		return strings.TrimSpace(code)

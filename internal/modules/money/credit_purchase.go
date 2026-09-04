@@ -20,7 +20,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
@@ -190,26 +189,11 @@ ORDER BY cpp.ordinal`, tid.UUID(), productKey, currency, provider)
 }
 
 func (s *MoneyService) qualifyCatalogCreditUnit(ctx context.Context, unit string) (string, error) {
-	unit = strings.ToLower(strings.TrimSpace(unit))
-	if unit == "" {
-		return "", fmt.Errorf("credit purchase unit required")
+	code := normalizeUnit(unit)
+	if _, _, err := s.ResolveUnit(ctx, code); err != nil {
+		return "", err
 	}
-	if !IsQualifiedUnit(unit) {
-		if _, ok := moneyutil.CurrencyScale(unit); ok {
-			return normalizeUnit(unit), nil
-		}
-		tid, err := merchant.Require(ctx)
-		if err != nil {
-			return "", err
-		}
-		var slug string
-		// merchants is a global (no-RLS) table, but Qx applies the #471 schema rewrite.
-		if err := s.db.Qx(ctx).QueryRow(ctx, `SELECT slug FROM openrails.merchants WHERE id = $1`, tid.UUID()).Scan(&slug); err != nil {
-			return "", err
-		}
-		unit = slug + "/" + unit
-	}
-	return normalizeUnit(unit), nil
+	return code, nil
 }
 
 func checkCreditPurchaseSpend(row catalogCreditPurchaseRow, spend int64) error {

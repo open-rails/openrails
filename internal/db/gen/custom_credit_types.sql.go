@@ -11,6 +11,33 @@ import (
 	"github.com/google/uuid"
 )
 
+const ensureCustomCreditType = `-- name: EnsureCustomCreditType :one
+INSERT INTO openrails.custom_credit_types(id,merchant_id,name,decimals,active)
+VALUES(uuidv7(),$1::uuid,$2::text,0,true)
+ON CONFLICT(merchant_id,name) DO UPDATE SET active=true,updated_at=now()
+RETURNING id, merchant_id, name, decimals, active, created_at, updated_at
+`
+
+type EnsureCustomCreditTypeParams struct {
+	MerchantID uuid.UUID
+	Name       string
+}
+
+func (q *Queries) EnsureCustomCreditType(ctx context.Context, arg EnsureCustomCreditTypeParams) (OpenrailsCustomCreditType, error) {
+	row := q.db.QueryRow(ctx, ensureCustomCreditType, arg.MerchantID, arg.Name)
+	var i OpenrailsCustomCreditType
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Name,
+		&i.Decimals,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCustomCreditType = `-- name: GetCustomCreditType :one
 
 SELECT id, merchant_id, name, decimals, active, created_at, updated_at FROM openrails.custom_credit_types
@@ -27,6 +54,31 @@ type GetCustomCreditTypeParams struct {
 // catalog_credit_balances.unit); this read backs ResolveUnit.
 func (q *Queries) GetCustomCreditType(ctx context.Context, arg GetCustomCreditTypeParams) (OpenrailsCustomCreditType, error) {
 	row := q.db.QueryRow(ctx, getCustomCreditType, arg.MerchantID, arg.Name)
+	var i OpenrailsCustomCreditType
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Name,
+		&i.Decimals,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCustomCreditTypeByID = `-- name: GetCustomCreditTypeByID :one
+SELECT id, merchant_id, name, decimals, active, created_at, updated_at FROM openrails.custom_credit_types
+WHERE merchant_id=$1::uuid AND id=$2::uuid
+`
+
+type GetCustomCreditTypeByIDParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetCustomCreditTypeByID(ctx context.Context, arg GetCustomCreditTypeByIDParams) (OpenrailsCustomCreditType, error) {
+	row := q.db.QueryRow(ctx, getCustomCreditTypeByID, arg.MerchantID, arg.ID)
 	var i OpenrailsCustomCreditType
 	err := row.Scan(
 		&i.ID,

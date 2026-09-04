@@ -29,7 +29,7 @@ func normalizeCurrency(c string) string {
 // sibling modules that key native-money rows by currency but still rely on this
 // package's registry as the source of truth.
 func NormalizeCurrency(c string) string {
-	return normalizeCurrency(c)
+	return normalizeUnit(c)
 }
 
 // RequireBillingCurrency enforces the #474/#475 invariant at the billing layer:
