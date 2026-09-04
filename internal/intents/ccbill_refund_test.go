@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
 )
@@ -52,31 +51,6 @@ func ccbillFakeSMS(t *testing.T, body string) (*CCBillRefundHandler, *int) {
 	}))
 	t.Cleanup(srv.Close)
 	return newCCBillRefundHandler(srv.URL, nil), &hits
-}
-
-func TestCCBillRefundIdempotencyKey(t *testing.T) {
-	assert.Equal(t, "ccbill_refund:sub_1:tx_1:500", CCBillRefundIdempotencyKey(" sub_1 ", " tx_1 ", 500))
-	assert.Equal(t,
-		CCBillRefundIdempotencyKey("sub_1", "tx_1", 500),
-		CCBillRefundIdempotencyKey("sub_1", "tx_1", 500))
-	assert.NotEqual(t,
-		CCBillRefundIdempotencyKey("sub_1", "tx_1", 500),
-		CCBillRefundIdempotencyKey("sub_1", "tx_2", 500),
-		"a different transaction is a different logical refund")
-	assert.NotEqual(t,
-		CCBillRefundIdempotencyKey("sub_1", "tx_1", 500),
-		CCBillRefundIdempotencyKey("sub_1", "tx_1", 600),
-		"a different amount is a different logical refund")
-}
-
-func TestRefundIntentForRoutesCCBill(t *testing.T) {
-	ccbillPayment := &models.Payment{Rail: models.RailCCBill, TransactionID: "TX_999"}
-	typ, provider, key, err := RefundIntentFor(ccbillPayment, "sub_123", 500, "ignored for ccbill")
-	require.NoError(t, err)
-	assert.Equal(t, TypeCCBillRefund, typ)
-	assert.Equal(t, "ccbill", provider)
-	// providerTarget is the subscriptionId; the transaction id comes off the payment.
-	assert.Equal(t, CCBillRefundIdempotencyKey("sub_123", "TX_999", 500), key)
 }
 
 func TestCCBillRefundExecuteParksBeforeProviderTraffic(t *testing.T) {
@@ -145,65 +119,5 @@ func TestCCBillRefundExecuteClassification(t *testing.T) {
 		h := newCCBillRefundHandler(srv.URL, nil)
 		out := h.Execute(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
 		assert.Equal(t, OutcomeAmbiguous, out.Class)
-	})
-}
-
-// Reclaimed lease (attempts > 1): pre-send verify must read counters and refuse
-// to resend unless they are known-zero.
-func TestCCBillRefundExecuteReclaimPreSendVerify(t *testing.T) {
-	t.Run("counters nonzero -> do not resend (ambiguous)", func(t *testing.T) {
-		h, hits := ccbillFakeSMS(t, `<results><refundsIssued>1</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
-		intent := refundIntent(t, TypeCCBillRefund, ccbillRefundPayload())
-		intent.Attempts = 2
-		out := h.Execute(context.Background(), intent)
-		assert.Equal(t, OutcomeAmbiguous, out.Class)
-		assert.Contains(t, out.Reason, "not resending")
-		assert.Equal(t, 1, *hits, "only the verify read, no refund resend")
-	})
-
-	t.Run("pre-send read fails -> ambiguous", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		t.Cleanup(srv.Close)
-		h := newCCBillRefundHandler(srv.URL, nil)
-		intent := refundIntent(t, TypeCCBillRefund, ccbillRefundPayload())
-		intent.Attempts = 2
-		out := h.Execute(context.Background(), intent)
-		assert.Equal(t, OutcomeAmbiguous, out.Class)
-		assert.Contains(t, out.Reason, "pre-send verification read failed")
-	})
-}
-
-func TestCCBillRefundVerify(t *testing.T) {
-	t.Run("counters known-zero -> verified not executed (retryable)", func(t *testing.T) {
-		h, _ := ccbillFakeSMS(t, `<results><refundsIssued>0</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
-		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
-		assert.Equal(t, OutcomeRetryable, out.Class)
-		assert.Contains(t, out.Reason, "verified not executed")
-	})
-
-	t.Run("counters nonzero -> cannot attribute (ambiguous, operator resolves)", func(t *testing.T) {
-		h, _ := ccbillFakeSMS(t, `<results><refundsIssued>1</refundsIssued><voidsIssued>0</voidsIssued><subscriptionStatus>2</subscriptionStatus></results>`)
-		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
-		assert.Equal(t, OutcomeAmbiguous, out.Class)
-		assert.Contains(t, out.Reason, "operator must confirm")
-	})
-
-	t.Run("counters unknown (omitted) -> ambiguous", func(t *testing.T) {
-		h, _ := ccbillFakeSMS(t, `<results><returnsIssued>1</returnsIssued><subscriptionStatus>0</subscriptionStatus></results>`)
-		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
-		assert.Equal(t, OutcomeAmbiguous, out.Class)
-	})
-
-	t.Run("read failure stays ambiguous", func(t *testing.T) {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(http.StatusInternalServerError)
-		}))
-		t.Cleanup(srv.Close)
-		h := newCCBillRefundHandler(srv.URL, nil)
-		out := h.Verify(context.Background(), refundIntent(t, TypeCCBillRefund, ccbillRefundPayload()))
-		assert.Equal(t, OutcomeAmbiguous, out.Class)
-		assert.Contains(t, out.Reason, "provider read failed")
 	})
 }

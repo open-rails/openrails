@@ -140,7 +140,8 @@ const maxRedirects = 5
 // Client returns an http.Client that can only reach addresses this policy
 // allows. Enforcement is at the dialer (post-DNS, per connection) so DNS
 // rebinding between retries cannot slip past, and CheckRedirect re-validates
-// every hop.
+// every hop. Environment proxies are deliberately ignored: the socket peer
+// would be the proxy, whose DNS/network view this dialer cannot validate.
 func (p Policy) Client(timeout time.Duration) *http.Client {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -159,7 +160,6 @@ func (p Policy) Client(timeout time.Duration) *http.Client {
 	return &http.Client{
 		Timeout: timeout,
 		Transport: &http.Transport{
-			Proxy:                 http.ProxyFromEnvironment,
 			DialContext:           dialer.DialContext,
 			ForceAttemptHTTP2:     true,
 			MaxIdleConnsPerHost:   4,
