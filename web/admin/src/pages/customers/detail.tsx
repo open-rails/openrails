@@ -608,7 +608,7 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
     adminMutations.grantCustomerProductAccess(queryClient, customerId)
   )
   const { data: products } = useQuery({
-    ...adminQueries.products(),
+    ...adminQueries.allProducts(),
     enabled: open,
   })
   const form = useForm({
@@ -766,7 +766,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
     adminMutations.recordCustomerOffChannelPayment(queryClient, customerId)
   )
   const { data: prices } = useQuery({
-    ...adminQueries.prices(),
+    ...adminQueries.allPrices(),
     enabled: open,
   })
   const form = useForm({

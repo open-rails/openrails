@@ -12,6 +12,7 @@ import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
+import { PaginationFooter } from "@/components/pagination-footer"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -249,9 +250,9 @@ export function MeterDetailPage() {
   const navigate = useNavigate()
   const [overrideOffset, setOverrideOffset] = React.useState(0)
   const meterQuery = useQuery(adminQueries.usageMeter(meterKey))
-  const metersQuery = useQuery(adminQueries.usageMeters(PAGE_SIZE, 0))
+  const metersQuery = useQuery(adminQueries.allUsageMeters())
   const productsQuery = useQuery(
-    adminQueries.products({ errorAction: "Load products for metering" })
+    adminQueries.allProducts({ errorAction: "Load products for metering" })
   )
   const overridesQuery = useQuery(
     adminQueries.usageMeterOverrides(meterKey, PAGE_SIZE, overrideOffset)
@@ -704,49 +705,6 @@ function MeterDetailSkeleton() {
       <Skeleton className="h-28 w-full" />
       <Skeleton className="h-36 w-full" />
       <Skeleton className="h-40 w-full" />
-    </div>
-  )
-}
-
-function PaginationFooter({
-  total,
-  limit,
-  offset,
-  loading,
-  onChange,
-}: {
-  total: number
-  limit: number
-  offset: number
-  loading: boolean
-  onChange: (offset: number) => void
-}) {
-  if (total <= limit) return null
-  return (
-    <div className="flex items-center justify-between text-sm text-muted-foreground">
-      <span className="tabular-nums">
-        {offset + 1}–{Math.min(offset + limit, total)} of {total}
-      </span>
-      <div className="flex gap-1">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Previous page"
-          disabled={offset <= 0 || loading}
-          onClick={() => onChange(Math.max(0, offset - limit))}
-        >
-          <HugeiconsIcon icon={ArrowLeft01Icon} className="size-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Next page"
-          disabled={offset + limit >= total || loading}
-          onClick={() => onChange(offset + limit)}
-        >
-          <HugeiconsIcon icon={ArrowRight01Icon} className="size-4" />
-        </Button>
-      </div>
     </div>
   )
 }

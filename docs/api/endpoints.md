@@ -319,14 +319,14 @@ manifest and reboot instead. Reads stay live.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec`, `credits_spec` |
-| GET | `/v1/merchant/catalog/products` | List products |
+| GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `active_only` filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
 | PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
 | POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
 | POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |
 | POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids or select declarative provider config; recurring Solana defaults to USDC, accepts `token: USD1`, or resolves an attached `plan_pda`) |
-| GET | `/v1/merchant/catalog/prices` | List prices |
+| GET | `/v1/merchant/catalog/prices` | Paginated prices; `product_id`, `currency`, `type`, `active_only` filters |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}` | Price by key |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | The key's version chain, most-recent-first |
 | GET | `/v1/merchant/catalog/prices/{id}` | One price |
@@ -339,6 +339,13 @@ manifest and reboot instead. Reads stay live.
 | POST | `/v1/merchant/catalog/publish` | Push OpenRails definitions to providers |
 | POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (read permission; never mutates) |
 | POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only, exempt from the manifest guard) |
+
+Catalog product and price lists return `{items, total, limit, offset}`. `limit`
+and `offset` are the effective query values: nonpositive limits default to 100,
+limits above 1000 clamp to 1000, and negative offsets become zero. Advance by the
+returned `offset + limit`; a product-scoped price list follows the same paging
+contract. Ties in creation time are ordered by ID. Catalog screens page these
+results; selectors and manifest pruning explicitly traverse every page.
 
 ### Payment providers (`/v1/merchant/payment-providers`)
 

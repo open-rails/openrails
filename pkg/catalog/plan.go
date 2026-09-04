@@ -118,19 +118,24 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 		if opts.ArchiveMissingProducts {
 			// Products dropped from the manifest -> archive. Scope to active products
 			// in this tier group.
-			existing, _, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{
-				ActiveOnly: true,
-				TierGroup:  group.Key,
-				Limit:      1000,
-			})
-			if err != nil {
-				return nil, fmt.Errorf("list active products for tier group %s: %w", group.Key, err)
-			}
-			for i := range existing {
-				if _, ok := declared[existing[i].Key]; ok {
-					continue
+			for offset := 0; ; {
+				page, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{ActiveOnly: true, TierGroup: group.Key, Limit: 1000, Offset: offset})
+				if err != nil {
+					return nil, fmt.Errorf("list active products for tier group %s: %w", group.Key, err)
 				}
-				gp.RemovedProducts = append(gp.RemovedProducts, existing[i])
+				for _, product := range page.Items {
+					if _, ok := declared[product.Key]; !ok {
+						gp.RemovedProducts = append(gp.RemovedProducts, product)
+					}
+				}
+				next := page.Offset + page.Limit
+				if int64(next) >= page.Total {
+					break
+				}
+				if len(page.Items) == 0 || next <= offset {
+					return nil, fmt.Errorf("catalog pagination made no progress for tier group %s", group.Key)
+				}
+				offset = next
 			}
 		}
 

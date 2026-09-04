@@ -70,7 +70,7 @@ func (f *fakeApplier) GetProductByKey(_ context.Context, key string) (*billingse
 	return nil, fmt.Errorf("product not found: %s", key)
 }
 
-func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) ([]billingservice.CatalogProduct, int64, error) {
+func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) (billingservice.CatalogPage[billingservice.CatalogProduct], error) {
 	var out []billingservice.CatalogProduct
 	for _, p := range f.products {
 		if opts.ActiveOnly && p.Archived {
@@ -81,7 +81,7 @@ func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListPr
 		}
 		out = append(out, *p)
 	}
-	return out, int64(len(out)), nil
+	return billingservice.CatalogPage[billingservice.CatalogProduct]{Items: out, Total: int64(len(out)), Limit: len(out)}, nil
 }
 
 func (f *fakeApplier) CreateProduct(_ context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error) {
@@ -461,4 +461,3 @@ func TestApply_DrivesFacade(t *testing.T) {
 		t.Fatalf("expert should be deactivated via facade, got %v", f.deactivatedProds)
 	}
 }
-
