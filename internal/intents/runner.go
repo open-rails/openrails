@@ -258,6 +258,15 @@ func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.Op
 	if err != nil {
 		return gen.OpenrailsRailIntent{}, err
 	}
+	return r.ExecuteByID(ctx, row.ID)
+}
+
+// ExecuteByID runs committed work without enqueuing or changing its payload.
+func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
+	row, err := r.Store.Get(ctx, id)
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
 	switch row.Status {
 	case StatusPending, StatusFailedRetryable:
 		// claimable below

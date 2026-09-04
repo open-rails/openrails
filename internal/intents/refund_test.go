@@ -3,7 +3,6 @@ package intents
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
@@ -45,36 +44,19 @@ func testRefundPayload() RefundPayload {
 	}
 }
 
-func TestRefundIdempotencyKeysAreContentAddressed(t *testing.T) {
-	assert.Equal(t, "nmi_refund:txn_1:500", NMIRefundIdempotencyKey(" txn_1 ", 500))
-	assert.Equal(t, NMIRefundIdempotencyKey("txn_1", 500), NMIRefundIdempotencyKey("txn_1", 500))
-	assert.NotEqual(t, NMIRefundIdempotencyKey("txn_1", 500), NMIRefundIdempotencyKey("txn_1", 600),
-		"a different amount is a different logical refund")
-
-	// Stripe keys include the reason and MATCH the provider Idempotency-Key
-	// derivation, so ledger dedupe and Stripe dedupe agree.
-	assert.Equal(t, "openrails-refund:ch_1:500:unspecified", StripeRefundIntentIdempotencyKey("ch_1", 500, ""))
-	assert.NotEqual(t,
-		StripeRefundIntentIdempotencyKey("ch_1", 500, "duplicate"),
-		StripeRefundIntentIdempotencyKey("ch_1", 500, "fraudulent"))
-}
-
-func TestRefundIntentForRoutesByRail(t *testing.T) {
-	stripePayment := &models.Payment{Rail: models.RailStripe}
-	typ, provider, key, err := RefundIntentFor(stripePayment, "ch_1", 500, "")
-	require.NoError(t, err)
-	assert.Equal(t, TypeStripeRefund, typ)
-	assert.Equal(t, "stripe", provider)
-	assert.Equal(t, StripeRefundIntentIdempotencyKey("ch_1", 500, ""), key)
-
-	nmiPayment := &models.Payment{Rail: models.RailNMI}
-	typ, provider, key, err = RefundIntentFor(nmiPayment, "txn_1", 500, "ignored for nmi")
-	require.NoError(t, err)
-	assert.Equal(t, TypeNMIRefund, typ)
-	assert.Equal(t, "nmi", provider)
-	assert.Equal(t, NMIRefundIdempotencyKey("txn_1", 500), key)
-
-	_, _, _, err = RefundIntentFor(nil, "x", 1, "")
+func TestRefundOperationIdentity(t *testing.T) {
+	id := uuid.New()
+	assert.Equal(t, RefundIdempotencyKey(id, "key"), RefundIdempotencyKey(id, " key "))
+	assert.NotEqual(t, RefundIdempotencyKey(id, "key"), RefundIdempotencyKey(id, "other"))
+	assert.NotEqual(t, RefundIdempotencyKey(id, "key"), RefundIdempotencyKey(uuid.New(), "key"))
+	for rail, want := range map[models.Rail]string{models.RailStripe: TypeStripeRefund, models.RailNMI: TypeNMIRefund, models.RailCCBill: TypeCCBillRefund} {
+		typ, provider, key, err := RefundIntentFor(&models.Payment{ID: id, Rail: rail}, "key")
+		require.NoError(t, err)
+		assert.Equal(t, want, typ)
+		assert.Equal(t, string(rail), provider)
+		assert.Equal(t, RefundIdempotencyKey(id, "key"), key)
+	}
+	_, _, _, err := RefundIntentFor(nil, "key")
 	require.Error(t, err)
 }
 
@@ -122,90 +104,6 @@ func TestNMIRefundUnusablePayloadIsTerminal(t *testing.T) {
 	intent.Payload = []byte(`{"amount_cents": 0}`)
 	out := h.Execute(context.Background(), intent)
 	assert.Equal(t, OutcomeTerminal, out.Class)
-}
-
-// TestNMIRefundFindRefundParsesQueryShapes: the verifier read recognizes a
-// successful refund action on the original transaction (GET /v5/payments/{id}),
-// matched on amount; failed refund actions never count. The action id (the
-// refund's own transaction id) wins when NMI reports one.
-func TestNMIRefundFindRefundParsesQueryShapes(t *testing.T) {
-	payload := testRefundPayload() // 500 cents
-	cases := []struct {
-		name      string
-		status    int
-		body      string
-		wantFound bool
-		wantTxnID string
-		wantErr   bool
-	}{
-		{
-			name: "refund action with its own transaction id",
-			body: `{"object":"transaction","id":"txn_original","actions":[
-				{"id":"txn_original","type":"sale","success":true,"amount":"10.00"},
-				{"id":"txn_refund","type":"refund","success":true,"amount":"5.00"}
-			]}`,
-			wantFound: true,
-			wantTxnID: "txn_refund",
-		},
-		{
-			name: "refund action without an id falls back to the original",
-			body: `{"object":"transaction","id":"txn_original","actions":[
-				{"type":"sale","success":true,"amount":"10.00"},
-				{"type":"refund","success":true,"amount":"-5.00"}
-			]}`,
-			wantFound: true,
-			wantTxnID: "txn_original",
-		},
-		{
-			name: "amount mismatch is not our refund",
-			body: `{"object":"transaction","id":"txn_original","actions":[
-				{"type":"refund","success":true,"amount":"3.00"}
-			]}`,
-			wantFound: false,
-		},
-		{
-			name: "failed refund action does not count",
-			body: `{"object":"transaction","id":"txn_original","actions":[
-				{"type":"refund","success":false,"amount":"5.00"}
-			]}`,
-			wantFound: false,
-		},
-		{
-			name:      "no refund anywhere",
-			body:      `{"object":"transaction","id":"txn_original","actions":[{"type":"sale","success":true,"amount":"10.00"}]}`,
-			wantFound: false,
-		},
-		{
-			name:    "transaction unknown at provider is an error, not a silent no",
-			status:  http.StatusNotFound,
-			body:    `{"type":"notFound","error_code":"E_NOT_FOUND","message":"payment not found"}`,
-			wantErr: true,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if tc.status != 0 {
-					w.WriteHeader(tc.status)
-				}
-				fmt.Fprint(w, tc.body)
-			}))
-			t.Cleanup(srv.Close)
-			client := newTestNMIClient(t, srv.URL)
-			h := NewNMIRefundHandler(nil, fakeNMIResolver{client: client}, nil)
-
-			txnID, found, err := h.findRefund(context.Background(), client, payload)
-			if tc.wantErr {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			assert.Equal(t, tc.wantFound, found)
-			if tc.wantFound {
-				assert.Equal(t, tc.wantTxnID, txnID)
-			}
-		})
-	}
 }
 
 // fakeStripeRefundAPI scripts the Stripe surface for handler unit tests.

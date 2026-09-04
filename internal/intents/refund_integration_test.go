@@ -161,7 +161,7 @@ func (fx refundFixture) enqueueParams(amountCents int64) EnqueueParams {
 		IntentType:     TypeNMIRefund,
 		PaymentID:      &paymentID,
 		Payload:        fx.payload(amountCents),
-		IdempotencyKey: NMIRefundIdempotencyKey(fx.originalTxn, amountCents),
+		IdempotencyKey: RefundIdempotencyKey(fx.paymentID, "it-key"),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         OriginAdmin,
 		OriginReason:   "integration test",
@@ -248,71 +248,32 @@ func TestNMIRefundParksUnderReadonlyAndDrainsUnderFull(t *testing.T) {
 	assert.Equal(t, "txn_refund_1", txn)
 }
 
-// TestNMIRefundAmbiguousResolvedByVerifier: a transport failure mid-refund
-// parks as unknown_needs_verify (never blind-retried); the verifier reads the
-// transaction report and finalizes off what actually happened.
-func TestNMIRefundAmbiguousResolvedByVerifier(t *testing.T) {
-	t.Run("refund landed -> succeeded", func(t *testing.T) {
-		fx := seedRefundablePayment(t, 500)
-		fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
-		fake.refundStatus.Store(http.StatusBadGateway)
-
-		row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
-		require.NoError(t, err)
-		require.Equal(t, StatusUnknownNeedsVerify, row.Status, "a possibly-sent refund must verify, not retry")
-		status, _, _ := fx.reservation(t)
-		assert.Equal(t, "pending", status)
-
-		fake.refunded.Store(true) // the refund actually landed
-		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
-		require.NoError(t, err)
-		_, err = fx.refundRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
-		require.NoError(t, err)
-
-		got := fx.intentByID(t, row.ID)
-		assert.Equal(t, StatusSucceeded, got.Status)
-		assert.NotEmpty(t, got.Payload, "#607: refund payload retained on the succeeded tombstone")
-		status, txn, _ := fx.reservation(t)
-		assert.Equal(t, "completed", status)
-		assert.Equal(t, "txn_refund_1", txn)
-		assert.EqualValues(t, 1, fake.refundCalls.Load(), "verification never re-sends the refund")
-	})
-
-	t.Run("refund verified absent -> retried with verify-first guard", func(t *testing.T) {
-		fx := seedRefundablePayment(t, 500)
-		fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
-		fake.refundStatus.Store(http.StatusBadGateway)
-
-		row, err := fx.refundRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
-		require.NoError(t, err)
-		require.Equal(t, StatusUnknownNeedsVerify, row.Status)
-
-		// Verifier: no refund at the provider -> verified not executed.
-		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
-		require.NoError(t, err)
-		_, err = fx.refundRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
-		require.NoError(t, err)
-		require.Equal(t, StatusFailedRetryable, fx.intentByID(t, row.ID).Status)
-
-		// Gateway recovers; the retry re-verifies before sending (attempts>1).
-		fake.refundStatus.Store(0)
-		queryCallsBefore := fake.queryCalls.Load()
-		_, err = fx.db.Pool().Exec(context.Background(),
-			"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
-		require.NoError(t, err)
-		_, err = fx.refundRunner(client, fullModeConfig()).RunExecuteOnce(context.Background())
-		require.NoError(t, err)
-
-		assert.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
-		assert.Greater(t, fake.queryCalls.Load(), queryCallsBefore, "re-execution of a money mover verifies by reading first")
-		// Two wire calls total: the original 502'd send and the post-verify
-		// retry — but only ONE refund was ever processed by the gateway.
-		assert.EqualValues(t, 2, fake.refundCalls.Load())
-		status, _, _ := fx.reservation(t)
-		assert.Equal(t, "completed", status)
-	})
+// An equal-size refund action or a currently empty read cannot attribute a lost
+// response to this operation. Keep the reservation and never resend blindly.
+func TestNMIRefundLostResponseNeedsExactReceipt(t *testing.T) {
+	for _, priorRefund := range []bool{false, true} {
+		t.Run(fmt.Sprint(priorRefund), func(t *testing.T) {
+			fx := seedRefundablePayment(t, 500)
+			fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
+			fake.refundStatus.Store(http.StatusBadGateway)
+			runner := fx.refundRunner(client, fullModeConfig())
+			row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+			require.NoError(t, err)
+			require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+			fake.refunded.Store(priorRefund)
+			_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+			require.NoError(t, err)
+			_, err = runner.RunVerifyOnce(context.Background())
+			require.NoError(t, err)
+			got := fx.intentByID(t, row.ID)
+			assert.Equal(t, StatusUnknownNeedsVerify, got.Status)
+			require.NotNil(t, got.LastFailureReason)
+			assert.Contains(t, *got.LastFailureReason, "operator must verify")
+			status, _, _ := fx.reservation(t)
+			assert.Equal(t, "pending", status)
+			assert.EqualValues(t, 1, fake.refundCalls.Load())
+		})
+	}
 }
 
 // fakeDataLinkDenyRefund serves an action-aware DataLink SMS: the refund action
@@ -378,7 +339,7 @@ func TestCCBillRefundDenialBoundedRetryThenTerminal(t *testing.T) {
 			ProviderTarget:        "sub_x", // CCBill subscriptionId (arbitrary here)
 			ProviderTransactionID: "tx_x",
 		},
-		IdempotencyKey: CCBillRefundIdempotencyKey("sub_x", "tx_x", 500),
+		IdempotencyKey: RefundIdempotencyKey(fx.paymentID, "it-key"),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         OriginAdmin,
 		OriginReason:   "integration test",
@@ -537,7 +498,7 @@ func (fx refundFixture) stripeEnqueueParams(t *testing.T, amountCents int64) Enq
 	payload := fx.payload(amountCents)
 	payload.ProviderTarget = "ch_1"
 	params.Payload = payload
-	params.IdempotencyKey = StripeRefundIntentIdempotencyKey("ch_1", amountCents, "")
+	params.IdempotencyKey = RefundIdempotencyKey(fx.paymentID, "it-key")
 	return params
 }
 
@@ -553,7 +514,7 @@ func TestStripeRefundSynchronousSuccessCarriesIdempotencyKey(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, StatusSucceeded, row.Status)
 
-	wantKey := StripeRefundIntentIdempotencyKey("ch_1", 500, "")
+	wantKey := RefundIdempotencyKey(fx.paymentID, "it-key")
 	assert.Equal(t, wantKey, stripe.gotIdemKey.Load(), "Stripe Idempotency-Key = the intent idempotency_key")
 	assert.Equal(t, wantKey, stripe.gotMetadata.Load(), "metadata mirror makes the refund re-findable by reads")
 
@@ -577,7 +538,7 @@ func TestStripeRefundAmbiguousResolvedByVerifier(t *testing.T) {
 
 	// The refund DID get created server-side despite the 500.
 	stripe.created.Store(true)
-	stripe.gotMetadata.Store(StripeRefundIntentIdempotencyKey("ch_1", 500, ""))
+	stripe.gotMetadata.Store(RefundIdempotencyKey(fx.paymentID, "it-key"))
 	_, err = fx.db.Pool().Exec(context.Background(),
 		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
 	require.NoError(t, err)
