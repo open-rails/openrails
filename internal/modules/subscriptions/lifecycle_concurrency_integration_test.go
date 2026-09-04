@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
 // The first clock read in renewal follows its subscription read and terminal
@@ -141,7 +142,7 @@ func waitForLifecycleContention(t *testing.T, ctx context.Context, database *db.
 }
 
 func TestStaleLifecycleSnapshotPreservesChargeback(t *testing.T) {
-	for _, action := range []string{"park_unknown", "enter_past_due", "resolve_unknown"} {
+	for _, action := range []string{"park_unknown", "enter_past_due", "resolve_unknown", "late_retryable_failure", "late_card_failure", "expiration", "merchant_cancel"} {
 		t.Run(action, func(t *testing.T) {
 			ctx := dbtest.WithTestMerchant(t.Context())
 			database := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
@@ -166,6 +167,14 @@ func TestStaleLifecycleSnapshotPreservesChargeback(t *testing.T) {
 			case "resolve_unknown":
 				paidEnd := now.Add(60 * 24 * time.Hour)
 				err = lifecycle.ResolveUnknownSubscription(ctx, database, snapshot, ResolveRenewed, &paidEnd, time.Time{})
+			case "late_retryable_failure":
+				err = lifecycle.FailMembership(ctx, &FailMembershipParams{SubscriptionID: &subID, Rail: models.RailSolana})
+			case "late_card_failure":
+				err = lifecycle.FailMembership(ctx, &FailMembershipParams{SubscriptionID: &subID, Rail: models.RailSolana, Decline: collection.DeclineFixPaymentMethod})
+			case "expiration":
+				err = lifecycle.ExpireMembership(ctx, subID)
+			case "merchant_cancel":
+				err = lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subID, CancelType: models.CancelTypeMerchant, RevokeAccess: true})
 			}
 			require.NoError(t, err)
 			current, err := repo.GetByID(ctx, subID)

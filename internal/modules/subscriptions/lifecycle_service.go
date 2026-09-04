@@ -1205,6 +1205,11 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 
+		// A late event must preserve the existing cancellation and its terminal reason.
+		if subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
+			return nil
+		}
+
 		// Capture values for the completion log after transaction
 		subscriptionID = subscription.ID
 		userID = subscription.CustomerID.String()
@@ -1660,6 +1665,11 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			return fmt.Errorf("subscription not found: %w", err)
 		}
 
+		// A late event must preserve the existing cancellation and its terminal reason.
+		if subscription.Status == models.StatusCancelled {
+			return nil
+		}
+
 		// Update subscription status - Wave 18: expired = cancelled (never rebill again)
 		now := s.now()
 		subscription.Status = models.StatusCancelled
@@ -1837,6 +1847,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if err != nil {
 			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for failure flow")
 			return fmt.Errorf("subscription not found: %w", err)
+		}
+
+		// A late event must preserve the existing cancellation and its terminal reason.
+		if subscription.Status == models.StatusCancelled {
+			return nil
 		}
 
 		// Capture values for event logging
