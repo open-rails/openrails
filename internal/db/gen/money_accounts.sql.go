@@ -461,29 +461,6 @@ func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTi
 	return err
 }
 
-const stampMoneyAccountTopupAt = `-- name: StampMoneyAccountTopupAt :exec
-UPDATE openrails.money_settings
-SET last_topup_at = $3, updated_at = $3
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $4
-`
-
-type StampMoneyAccountTopupAtParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Now        *time.Time
-	Currency   string
-}
-
-func (q *Queries) StampMoneyAccountTopupAt(ctx context.Context, arg StampMoneyAccountTopupAtParams) error {
-	_, err := q.db.Exec(ctx, stampMoneyAccountTopupAt,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Now,
-		arg.Currency,
-	)
-	return err
-}
-
 const upsertMoneyAccountSettings = `-- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_settings (
     merchant_id, customer_id, currency, billing_mode,

@@ -3,8 +3,8 @@ SELECT * FROM openrails.auto_topup_episodes
 WHERE merchant_id = $1 AND intent_id = $2;
 
 -- name: InsertAutoTopupEpisode :one
-INSERT INTO openrails.auto_topup_episodes (intent_id, merchant_id, customer_id, currency, reserved_at)
-VALUES ($1, $2, $3, $4, $5) RETURNING *;
+INSERT INTO openrails.auto_topup_episodes (intent_id, merchant_id, customer_id, currency, reserved_at, amount_native)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING *;
 
 -- name: AutoTopupSafetyCounts :one
 SELECT count(*) FILTER (WHERE reserved_at > sqlc.arg(day_start)::timestamptz)::bigint AS daily,

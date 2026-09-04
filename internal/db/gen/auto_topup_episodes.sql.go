@@ -107,7 +107,7 @@ func (q *Queries) FinalizeAutoTopupEpisode(ctx context.Context, arg FinalizeAuto
 }
 
 const getAutoTopupEpisode = `-- name: GetAutoTopupEpisode :one
-SELECT intent_id, merchant_id, customer_id, currency, reserved_at, receipt, finalized_at FROM openrails.auto_topup_episodes
+SELECT intent_id, merchant_id, customer_id, currency, reserved_at, amount_native, receipt, finalized_at FROM openrails.auto_topup_episodes
 WHERE merchant_id = $1 AND intent_id = $2
 `
 
@@ -125,6 +125,7 @@ func (q *Queries) GetAutoTopupEpisode(ctx context.Context, arg GetAutoTopupEpiso
 		&i.CustomerID,
 		&i.Currency,
 		&i.ReservedAt,
+		&i.AmountNative,
 		&i.Receipt,
 		&i.FinalizedAt,
 	)
@@ -132,16 +133,17 @@ func (q *Queries) GetAutoTopupEpisode(ctx context.Context, arg GetAutoTopupEpiso
 }
 
 const insertAutoTopupEpisode = `-- name: InsertAutoTopupEpisode :one
-INSERT INTO openrails.auto_topup_episodes (intent_id, merchant_id, customer_id, currency, reserved_at)
-VALUES ($1, $2, $3, $4, $5) RETURNING intent_id, merchant_id, customer_id, currency, reserved_at, receipt, finalized_at
+INSERT INTO openrails.auto_topup_episodes (intent_id, merchant_id, customer_id, currency, reserved_at, amount_native)
+VALUES ($1, $2, $3, $4, $5, $6) RETURNING intent_id, merchant_id, customer_id, currency, reserved_at, amount_native, receipt, finalized_at
 `
 
 type InsertAutoTopupEpisodeParams struct {
-	IntentID   uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	ReservedAt time.Time
+	IntentID     uuid.UUID
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	Currency     string
+	ReservedAt   time.Time
+	AmountNative int64
 }
 
 func (q *Queries) InsertAutoTopupEpisode(ctx context.Context, arg InsertAutoTopupEpisodeParams) (OpenrailsAutoTopupEpisode, error) {
@@ -151,6 +153,7 @@ func (q *Queries) InsertAutoTopupEpisode(ctx context.Context, arg InsertAutoTopu
 		arg.CustomerID,
 		arg.Currency,
 		arg.ReservedAt,
+		arg.AmountNative,
 	)
 	var i OpenrailsAutoTopupEpisode
 	err := row.Scan(
@@ -159,6 +162,7 @@ func (q *Queries) InsertAutoTopupEpisode(ctx context.Context, arg InsertAutoTopu
 		&i.CustomerID,
 		&i.Currency,
 		&i.ReservedAt,
+		&i.AmountNative,
 		&i.Receipt,
 		&i.FinalizedAt,
 	)

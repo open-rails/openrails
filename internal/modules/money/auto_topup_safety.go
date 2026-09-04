@@ -69,6 +69,9 @@ func (s *MoneyService) ReserveAutoTopup(ctx context.Context, in AutoTopupEpisode
 		}
 		prior, err := q.GetAutoTopupEpisode(ctx, gen.GetAutoTopupEpisodeParams{MerchantID: tid.UUID(), IntentID: in.IntentID})
 		if err == nil {
+			if prior.CustomerID != in.CustomerID || prior.Currency != st.Currency {
+				return fmt.Errorf("topup episode identity conflicts")
+			}
 			existing = &prior
 			return nil
 		}
@@ -97,7 +100,7 @@ func (s *MoneyService) ReserveAutoTopup(ctx context.Context, in AutoTopupEpisode
 		if counts.Pending > 0 || counts.Daily >= int64(policy.MaxDaily) || counts.Weekly >= int64(policy.MaxWeekly) || counts.Monthly >= int64(policy.MaxMonthly) {
 			return fmt.Errorf("%w: cap or unresolved episode", ErrAutoTopupSafety)
 		}
-		_, err = q.InsertAutoTopupEpisode(ctx, gen.InsertAutoTopupEpisodeParams{IntentID: in.IntentID, MerchantID: tid.UUID(), CustomerID: in.CustomerID, Currency: st.Currency, ReservedAt: now})
+		_, err = q.InsertAutoTopupEpisode(ctx, gen.InsertAutoTopupEpisodeParams{IntentID: in.IntentID, MerchantID: tid.UUID(), CustomerID: in.CustomerID, Currency: st.Currency, ReservedAt: now, AmountNative: in.Amount})
 		return err
 	})
 	return existing, err
@@ -179,6 +182,9 @@ func (s *MoneyService) FinalizeAutoTopupReceipt(ctx context.Context, in AutoTopu
 		if err != nil {
 			return err
 		}
+		if ep.CustomerID != in.CustomerID || ep.Currency != st.Currency {
+			return fmt.Errorf("topup episode identity conflicts")
+		}
 		if err := json.Unmarshal(ep.Receipt, &receipt); err != nil {
 			return fmt.Errorf("topup has no definitive receipt: %w", err)
 		}
@@ -197,7 +203,7 @@ func (s *MoneyService) FinalizeAutoTopupReceipt(ctx context.Context, in AutoTopu
 			}
 			payer := identity.CustomerID(in.CustomerID)
 			sourceID := "topup:" + in.IntentID.String()
-			params := DepositParams{CustomerID: &payer, Invoker: payer.String(), Currency: in.Currency, Amount: in.Amount, Source: "auto_topup", SourceID: &sourceID}
+			params := DepositParams{CustomerID: &payer, Invoker: payer.String(), Currency: in.Currency, Amount: ep.AmountNative, Source: "auto_topup", SourceID: &sourceID}
 			if st.DefaultCreditExpiryHours != nil && *st.DefaultCreditExpiryHours > 0 {
 				expiry := now.Add(time.Duration(*st.DefaultCreditExpiryHours) * time.Hour)
 				params.ExpiresAt = &expiry
@@ -222,4 +228,35 @@ func (s *MoneyService) FinalizeAutoTopupReceipt(ctx context.Context, in AutoTopu
 		return err
 	})
 	return receipt, err
+}
+
+// AutoTopupStatus exposes safety state without treating pending money as credit.
+type AutoTopupStatus struct {
+	Enabled             bool                         `json:"enabled"`
+	ConsecutiveDeclines int32                        `json:"consecutive_declines"`
+	Daily               int64                        `json:"daily"`
+	Weekly              int64                        `json:"weekly"`
+	Monthly             int64                        `json:"monthly"`
+	Pending             bool                         `json:"pending"`
+	Policy              models.AutoTopupSafetyPolicy `json:"policy"`
+}
+
+func (s *MoneyService) GetAutoTopupStatus(ctx context.Context, payer identity.CustomerID, currency string) (*AutoTopupStatus, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	st, err := s.GetAccountSettings(ctx, payer, currency)
+	if err != nil {
+		return nil, err
+	}
+	policy, err := s.autoTopupPolicy(ctx)
+	if err != nil {
+		return nil, err
+	}
+	counts, err := topupCounts(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID(), normalizeCurrency(currency), s.now())
+	if err != nil {
+		return nil, err
+	}
+	return &AutoTopupStatus{Enabled: st.AutoTopupEnabled, ConsecutiveDeclines: st.AutoTopupFailures, Daily: counts.Daily, Weekly: counts.Weekly, Monthly: counts.Monthly, Pending: counts.Pending > 0, Policy: policy}, nil
 }

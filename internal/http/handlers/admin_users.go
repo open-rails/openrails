@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -41,14 +42,15 @@ type adminUserBillingProfile struct {
 }
 
 type adminCreditBalanceResponse struct {
-	Currency              string `json:"currency"`
-	TrustLevel            string `json:"trust_level,omitempty"`
-	DisplayName           string `json:"display_name"`
-	Unit                  string `json:"unit"`
-	DecimalPlaces         int    `json:"decimal_places"`
-	Balance               int64  `json:"balance"`
-	HeldBalance           int64  `json:"held_balance"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
+	AutoTopup             *money.AutoTopupStatus `json:"auto_topup,omitempty"`
+	Currency              string                 `json:"currency"`
+	TrustLevel            string                 `json:"trust_level,omitempty"`
+	DisplayName           string                 `json:"display_name"`
+	Unit                  string                 `json:"unit"`
+	DecimalPlaces         int                    `json:"decimal_places"`
+	Balance               int64                  `json:"balance"`
+	HeldBalance           int64                  `json:"held_balance"`
+	OutstandingOwedAmount int64                  `json:"outstanding_owed_amount"`
 }
 
 type adminSubscriptionPath struct {
@@ -161,8 +163,14 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 					return
 				}
 				var owed int64
+				var topup *money.AutoTopupStatus
 				balanceTrust := ""
 				if builtin {
+					topup, err = r.State.MoneyService.GetAutoTopupStatus(ctx, payer, bal.Currency)
+					if err != nil {
+						r.ErrorJSON(http.StatusInternalServerError, "failed to load auto-topup safety")
+						return
+					}
 					owed, err = r.State.MoneyService.GetOutstandingOwed(ctx, payer, bal.Currency)
 					if err != nil {
 						r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
@@ -174,6 +182,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 				}
 				profile.CreditBalance = append(profile.CreditBalance, adminCreditBalanceResponse{
 					Currency:              bal.Currency,
+					AutoTopup:             topup,
 					TrustLevel:            balanceTrust,
 					DisplayName:           bal.Currency,
 					Unit:                  bal.Currency,

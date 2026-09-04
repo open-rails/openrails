@@ -55,6 +55,7 @@ import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { CollectionDefaultBadges } from "./collection-default-badges"
 import { CustomerUsageRatesSection } from "./usage-rates"
+import { AutoTopupSafetySummary } from "./auto-topup-safety"
 import { CustomerCreditSupportSection } from "./credits"
 
 export function CustomerDetailPage() {
@@ -121,6 +122,7 @@ export function CustomerDetailPage() {
                     b.decimal_places
                   )}
                 </p>
+                <AutoTopupSafetySummary status={b.auto_topup} />
               </CardContent>
             </Card>
           ))}

@@ -146,6 +146,7 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	if err != nil {
 		return nil, err
 	}
+	wasEnabled := cur.AutoTopupEnabled
 	// Apply overrides onto the current/default view.
 	if in.BillingMode != nil {
 		cur.BillingMode = *in.BillingMode
@@ -198,7 +199,7 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	}); err != nil {
 		return nil, err
 	}
-	if in.AutoTopupEnabled != nil && *in.AutoTopupEnabled {
+	if in.AutoTopupEnabled != nil && *in.AutoTopupEnabled && !wasEnabled {
 		if err := s.db.Gen(ctx).ResetAutoTopupFailures(ctx, gen.ResetAutoTopupFailuresParams{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur.Currency}); err != nil {
 			return nil, err
 		}

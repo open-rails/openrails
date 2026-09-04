@@ -10,6 +10,7 @@ CREATE TABLE openrails.auto_topup_episodes (
     customer_id uuid NOT NULL,
     currency text NOT NULL,
     reserved_at timestamptz NOT NULL,
+    amount_native bigint NOT NULL CHECK (amount_native > 0),
     receipt jsonb,
     finalized_at timestamptz,
     FOREIGN KEY (merchant_id, customer_id, currency)

@@ -76,6 +76,7 @@ type selfAccountSettingsRequest struct {
 }
 
 type selfAccountSettingsResponse struct {
+	AutoTopupFailures      int32      `json:"auto_topup_failures"`
 	Currency               string     `json:"currency"`
 	LowBalanceThreshold    *int64     `json:"low_balance_threshold,omitempty"`
 	AutoTopupEnabled       bool       `json:"auto_topup_enabled"`
@@ -136,6 +137,7 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	}
 	r.SuccessJSON(selfAccountSettingsResponse{
 		Currency:               settings.Currency,
+		AutoTopupFailures:      settings.AutoTopupFailures,
 		LowBalanceThreshold:    settings.LowBalanceThreshold,
 		AutoTopupEnabled:       settings.AutoTopupEnabled,
 		AutoTopupAmount:        settings.AutoTopupAmount,

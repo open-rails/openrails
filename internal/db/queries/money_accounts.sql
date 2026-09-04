@@ -103,11 +103,6 @@ WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = sqlc.arg(currency);
 
--- name: StampMoneyAccountTopupAt :exec
-UPDATE openrails.money_settings
-SET last_topup_at = sqlc.arg(now), updated_at = sqlc.arg(now)
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
-
 -- name: SetMoneyAccountTier :exec
 -- Sets the tier AND its source (#476). 'admin' = an explicit override that
 -- auto-graduation must not overwrite; 'auto' = schedule-driven.
