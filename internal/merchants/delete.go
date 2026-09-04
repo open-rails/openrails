@@ -505,7 +505,12 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 			return fmt.Errorf("merchants: tombstone merchant: %w", err)
 		}
 
-		affected, _ := json.Marshal(counts)
+		completionCounts := make(map[string]any, len(counts)+1)
+		for table, count := range counts {
+			completionCounts[table] = count
+		}
+		completionCounts["database_purged"] = true
+		affected, _ := json.Marshal(completionCounts)
 		if err := txq.MarkMerchantDatabasePurged(ctx, gen.MarkMerchantDatabasePurgedParams{MerchantID: id.UUID(), ID: runID, Affected: affected}); err != nil {
 			return err
 		}
