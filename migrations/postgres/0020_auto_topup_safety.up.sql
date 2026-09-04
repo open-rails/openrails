@@ -8,7 +8,7 @@ ALTER TABLE openrails.money_settings
     ADD COLUMN auto_topup_failures bigint NOT NULL DEFAULT 0 CHECK (auto_topup_failures >= 0);
 
 CREATE TABLE openrails.auto_topup_episodes (
-    intent_id uuid PRIMARY KEY,
+    intent_id uuid NOT NULL,
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     currency text NOT NULL,
@@ -17,6 +17,7 @@ CREATE TABLE openrails.auto_topup_episodes (
     amount_native bigint NOT NULL CHECK (amount_native > 0),
     receipt jsonb,
     finalized_at timestamptz,
+    PRIMARY KEY (merchant_id, intent_id),
     FOREIGN KEY (merchant_id, customer_id, currency)
         REFERENCES openrails.money_settings (merchant_id, customer_id, currency) ON DELETE CASCADE
 );
