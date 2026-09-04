@@ -157,3 +157,22 @@ func (c *ControlPlane) IsAdmin(ctx context.Context, merchantRef, userID string) 
 	}
 	return c.Core().Can(ctx, strings.TrimSpace(userID), authcore.SubjectKindUser, MerchantType, ref, PermMerchantSettingsRead)
 }
+
+func (c *ControlPlane) MerchantGroupIDResolver() merchants.GroupIDResolver {
+	return func(ctx context.Context, groupID string) (string, error) {
+		if c == nil || c.Core() == nil {
+			return "", ErrNoControlPlane
+		}
+		group, err := c.Core().GroupInstanceByID(ctx, groupID)
+		if errors.Is(err, authkit.ErrGroupNotFound) {
+			return "", merchants.ErrMerchantNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		if group.Persona != MerchantType {
+			return "", merchants.ErrMerchantNotFound
+		}
+		return group.InstanceSlug, nil
+	}
+}

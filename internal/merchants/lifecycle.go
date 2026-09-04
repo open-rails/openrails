@@ -96,6 +96,7 @@ type Service struct {
 	// that miss the directory table retry through the authkit merchant-group
 	// namespace (which follows ak#264 tombstones). Nil = table-only.
 	groupSlugResolver GroupSlugResolver
+	groupIDResolver   GroupIDResolver
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
