@@ -24,15 +24,10 @@ INSERT INTO openrails.subscription_reprices (
 )
 RETURNING *;
 
--- SEC-18 NOTE: this by-id surface still has NO application-level merchant
--- predicate; RLS is its only control. A GUC-derived predicate (the fix used for
--- the reconciliation findings) is wrong HERE because RepriceRepo is shared with
--- the plan-migration batch/re-driver paths, which do not consistently pin a
--- merchant connection — it would trade a hardening for an availability bug of
--- exactly the #824 shape. The honest fix is threading merchant.ID through the
--- repo, same as the by-customer admin surface. Tracked in SEC-18.
+-- Merchant identity is explicit so both request and context-scoped worker calls
+-- are isolated without depending on a connection-local GUC.
 -- name: GetSubscriptionRepriceByID :one
-SELECT * FROM openrails.subscription_reprices WHERE id = $1;
+SELECT * FROM openrails.subscription_reprices WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- The subscription's current scheduled reprice, if any (at most one by
 -- uq_subscription_reprices_one_scheduled) — used both to refuse a second
@@ -45,7 +40,8 @@ LIMIT 1;
 
 -- name: ListSubscriptionReprices :many
 SELECT * FROM openrails.subscription_reprices
-WHERE (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(subscription_id)::uuid IS NULL OR subscription_id = sqlc.narg(subscription_id)::uuid)
   AND (sqlc.narg(reprice_batch_id)::uuid IS NULL OR reprice_batch_id = sqlc.narg(reprice_batch_id)::uuid)
   AND (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
 ORDER BY created_at DESC
@@ -55,7 +51,7 @@ LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 UPDATE openrails.subscription_reprices SET
     status = 'canceled',
     canceled_at = now()
-WHERE id = sqlc.arg(id) AND status = 'scheduled';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status = 'scheduled';
 
 -- name: ApplySubscriptionReprice :execrows
 UPDATE openrails.subscription_reprices SET

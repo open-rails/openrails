@@ -428,11 +428,15 @@ func (r *SubscriptionRepo) GetByRailMetadataValue(ctx context.Context, rail, key
 }
 
 func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByCustomer(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByCustomer(ctx, gen.ListActiveSubscriptionsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, err
 	}

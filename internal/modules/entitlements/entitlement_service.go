@@ -201,14 +201,7 @@ func (s *EntitlementService) ListActiveRecords(ctx context.Context, userID strin
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).ListActiveEntitlementRecords(ctx, gen.ListActiveEntitlementRecordsParams{
-		CustomerID: tsid,
-		At:         at,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return models.EntitlementsFromGen(rows), nil
+	return s.ListActiveRecordsByCustomer(ctx, tsid, at)
 }
 
 func (s *EntitlementService) ListActiveRecordsByCustomer(ctx context.Context, tenantSubjectID uuid.UUID, at time.Time) ([]models.Entitlement, error) {
