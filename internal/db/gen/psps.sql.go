@@ -355,12 +355,14 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, arg ListPSPsForMercha
 const listRailArmedMerchants = `-- name: ListRailArmedMerchants :many
 SELECT merchant_id FROM openrails.psp_rail_merchant_ids(
     $1::text[],
-    $2::int)
+    $2::int,
+    $3::uuid)
 `
 
 type ListRailArmedMerchantsParams struct {
-	Rails         []string
-	MerchantLimit int32
+	Rails           []string
+	MerchantLimit   int32
+	AfterMerchantID *uuid.UUID
 }
 
 // CROSS-MERCHANT: merchants armed on one of the named rails, through migration
@@ -370,7 +372,7 @@ type ListRailArmedMerchantsParams struct {
 // version-bumped. Ids only — each merchant's PSP rows are read inside its own
 // scope.
 func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedMerchantsParams) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listRailArmedMerchants, arg.Rails, arg.MerchantLimit)
+	rows, err := q.db.Query(ctx, listRailArmedMerchants, arg.Rails, arg.MerchantLimit, arg.AfterMerchantID)
 	if err != nil {
 		return nil, err
 	}
