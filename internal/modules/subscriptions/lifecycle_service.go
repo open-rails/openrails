@@ -1389,28 +1389,51 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 	return nil
 }
 
+// withLockedSubscription refreshes a caller snapshot under the same row lock
+// used by interactive lifecycle operations. Reconciliation/dunning snapshots can
+// become stale while provider evidence is fetched, so their guards must inspect
+// the locked current row too.
+func withLockedSubscription(ctx context.Context, database *db.DB, snapshot *models.Subscription, apply func(context.Context, *db.DB, *models.Subscription) error) error {
+	if database == nil || snapshot == nil {
+		return errors.New("subscription mutation requires a database and subscription")
+	}
+	var current *models.Subscription
+	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := database.NewWithPgxTx(tx)
+		var err error
+		current, err = NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, snapshot.ID)
+		if err != nil {
+			return err
+		}
+		return apply(ctx, txdb, current)
+	})
+	if err == nil {
+		*snapshot = *current
+	}
+	return err
+}
+
 // ApplyLocalPastDue is the side-effect-free LOCAL transition of an active sub
 // into dunning (past_due), grace dated to the supplied instant (the missed
 // period end). #664: an already-exhausted grace is later parked as `unknown` by
 // grace_exhausted, never terminated — FailMembership owns terminal
 // cancellation. Grace is set only when none exists. No-op unless active; runs
-// on the supplied `dbb` (caller owns atomicity).
+// under a row lock on the supplied `dbb`; an outer transaction may extend atomicity.
 func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, dbb *db.DB, sub *models.Subscription, graceEndsAt time.Time) error {
-	if dbb == nil || sub == nil {
-		return fmt.Errorf("apply local past_due: db handle and subscription are required")
-	}
-	if sub.Status != models.StatusActive {
-		return nil // idempotent: only an active sub enters dunning here
-	}
-	sub.Status = models.StatusPastDue
-	if sub.GraceEndsAt == nil {
-		ge := graceEndsAt
-		sub.GraceEndsAt = &ge
-	}
-	if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
-		return fmt.Errorf("apply local past_due: update subscription %s: %w", sub.ID, err)
-	}
-	return nil
+	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
+		if sub.Status != models.StatusActive {
+			return nil // idempotent: only an active sub enters dunning here
+		}
+		sub.Status = models.StatusPastDue
+		if sub.GraceEndsAt == nil {
+			ge := graceEndsAt
+			sub.GraceEndsAt = &ge
+		}
+		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
+			return fmt.Errorf("apply local past_due: update subscription %s: %w", sub.ID, err)
+		}
+		return nil
+	})
 }
 
 // ApplyLocalUnknown parks a subscription as `unknown` (#632/#664): a
@@ -1420,19 +1443,18 @@ func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, db
 // grace/retry scheduling; keeps retry_attempts/last_retry_at as attempt
 // evidence.
 func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
-	if dbb == nil || sub == nil {
-		return fmt.Errorf("apply local unknown: db handle and subscription are required")
-	}
-	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
-		return nil // idempotent: only active/past_due rows enter verification limbo
-	}
-	sub.Status = models.StatusUnknown
-	sub.GraceEndsAt = nil
-	sub.NextRetryAt = nil
-	if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
-		return fmt.Errorf("apply local unknown: update subscription %s: %w", sub.ID, err)
-	}
-	return nil
+	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
+		if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+			return nil // idempotent: only active/past_due rows enter verification limbo
+		}
+		sub.Status = models.StatusUnknown
+		sub.GraceEndsAt = nil
+		sub.NextRetryAt = nil
+		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, s.now()); err != nil {
+			return fmt.Errorf("apply local unknown: update subscription %s: %w", sub.ID, err)
+		}
+		return nil
+	})
 }
 
 // UnknownResolution is the provider-confirmed outcome for an `unknown` subscription,
@@ -1476,112 +1498,112 @@ const (
 // provider's confirmed period end (used by ResolveRenewed); graceEndsAt dates the
 // dunning grace window (ResolvePastDue), normally the missed period end.
 func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Context, dbb *db.DB, sub *models.Subscription, res UnknownResolution, newPeriodEnd *time.Time, graceEndsAt time.Time) error {
-	if dbb == nil || sub == nil {
-		return fmt.Errorf("resolve unknown: db handle and subscription are required")
-	}
-	if sub.Status != models.StatusUnknown {
-		return nil // idempotent
-	}
-	now := s.now()
-	switch res {
-	case ResolveUnreachable:
-		return nil // stay unknown; #633 retries with backoff
-	case ResolveRenewed:
-		sub.Status = models.StatusActive
-		if newPeriodEnd != nil {
-			// New period starts at the prior period end (or now if unknown), ends at
-			// the provider-confirmed end. The renewal payment is backfilled by #634.
-			start := now
-			if sub.CurrentPeriodEndsAt != nil {
-				start = *sub.CurrentPeriodEndsAt
+	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
+		if sub.Status != models.StatusUnknown {
+			return nil // idempotent
+		}
+		now := s.now()
+		switch res {
+		case ResolveUnreachable:
+			return nil // stay unknown; #633 retries with backoff
+		case ResolveRenewed:
+			sub.Status = models.StatusActive
+			if newPeriodEnd != nil {
+				// New period starts at the prior period end (or now if unknown), ends at
+				// the provider-confirmed end. The renewal payment is backfilled by #634.
+				start := now
+				if sub.CurrentPeriodEndsAt != nil {
+					start = *sub.CurrentPeriodEndsAt
+				}
+				if newPeriodEnd.After(start) {
+					sub.CurrentPeriodStartsAt = &start
+					end := *newPeriodEnd
+					sub.CurrentPeriodEndsAt = &end
+				}
 			}
-			if newPeriodEnd.After(start) {
-				sub.CurrentPeriodStartsAt = &start
+			sub.ClearRetrySchedule()
+			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+				return fmt.Errorf("resolve unknown (renewed) %s: %w", sub.ID, err)
+			}
+			return nil
+		case ResolveAdopted:
+			// Period END only — start untouched, no entitlement windows written
+			// (adoption alone never grants access; a real charge renews).
+			sub.Status = models.StatusActive
+			if newPeriodEnd != nil {
 				end := *newPeriodEnd
 				sub.CurrentPeriodEndsAt = &end
 			}
-		}
-		sub.ClearRetrySchedule()
-		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
-			return fmt.Errorf("resolve unknown (renewed) %s: %w", sub.ID, err)
-		}
-		return nil
-	case ResolveAdopted:
-		// Period END only — start untouched, no entitlement windows written
-		// (adoption alone never grants access; a real charge renews).
-		sub.Status = models.StatusActive
-		if newPeriodEnd != nil {
-			end := *newPeriodEnd
-			sub.CurrentPeriodEndsAt = &end
-		}
-		sub.ClearRetrySchedule()
-		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
-			return fmt.Errorf("resolve unknown (adopted) %s: %w", sub.ID, err)
-		}
-		return nil
-	case ResolvePastDue:
-		sub.Status = models.StatusPastDue
-		if sub.GraceEndsAt == nil {
-			ge := graceEndsAt
-			sub.GraceEndsAt = &ge
-		}
-		if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
-			return fmt.Errorf("resolve unknown (past_due) %s: %w", sub.ID, err)
-		}
-		return nil
-	case ResolveCancelled, ResolveCancelledRemoteAlive:
-		asOf := now
-		if sub.CurrentPeriodEndsAt != nil {
-			asOf = *sub.CurrentPeriodEndsAt
-		}
-		fb := "cancelled at provider (converged from unknown)"
-		// #679 queue-always: the remote sub may still exist and keep retrying
-		// (stale decline, roster didn't confirm gone) — durably record the
-		// deferred NMI delete like FailMembership.
-		scheduleDelete := false
-		// or#842: the automated delete is due after a cooling-off window, not at
-		// `now`. The handler's relevance re-check supersedes it if this row stops
-		// being a cancelled-awaiting-delete one in the meantime, so a convergence
-		// we got wrong never reaches the provider.
-		deleteAt := SystemDeferredDeleteAt(sub, now)
-		if res == ResolveCancelledRemoteAlive {
-			fb = "renewal declined beyond dunning window (converged from unknown)"
-			if rails.RemoteDeleteOnTerminalCancel(sub.Rail) && sub.RailSubscriptionID != "" {
-				if s.deferDelete != nil {
-					sub.DeletionScheduledAt = &deleteAt
-					scheduleDelete = true
-				} else {
-					log.WithContext(ctx).WithFields(log.Fields{
-						"subscription_id":      sub.ID,
-						"rail":                 sub.Rail,
-						"rail_subscription_id": sub.RailSubscriptionID,
-					}).Warn("no deferred-delete scheduler wired: nmi_delete intent NOT queued; remote rail subscription may still be retrying (wiring gap)")
+			sub.ClearRetrySchedule()
+			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+				return fmt.Errorf("resolve unknown (adopted) %s: %w", sub.ID, err)
+			}
+			return nil
+		case ResolvePastDue:
+			sub.Status = models.StatusPastDue
+			if sub.GraceEndsAt == nil {
+				ge := graceEndsAt
+				sub.GraceEndsAt = &ge
+			}
+			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
+				return fmt.Errorf("resolve unknown (past_due) %s: %w", sub.ID, err)
+			}
+			return nil
+		case ResolveCancelled, ResolveCancelledRemoteAlive:
+			asOf := now
+			if sub.CurrentPeriodEndsAt != nil {
+				asOf = *sub.CurrentPeriodEndsAt
+			}
+			fb := "cancelled at provider (converged from unknown)"
+			// #679 queue-always: the remote sub may still exist and keep retrying
+			// (stale decline, roster didn't confirm gone) — durably record the
+			// deferred NMI delete like FailMembership.
+			scheduleDelete := false
+			// or#842: the automated delete is due after a cooling-off window, not at
+			// `now`. The handler's relevance re-check supersedes it if this row stops
+			// being a cancelled-awaiting-delete one in the meantime, so a convergence
+			// we got wrong never reaches the provider.
+			deleteAt := SystemDeferredDeleteAt(sub, now)
+			if res == ResolveCancelledRemoteAlive {
+				fb = "renewal declined beyond dunning window (converged from unknown)"
+				if rails.RemoteDeleteOnTerminalCancel(sub.Rail) && sub.RailSubscriptionID != "" {
+					if s.deferDelete != nil {
+						sub.DeletionScheduledAt = &deleteAt
+						scheduleDelete = true
+					} else {
+						log.WithContext(ctx).WithFields(log.Fields{
+							"subscription_id":      sub.ID,
+							"rail":                 sub.Rail,
+							"rail_subscription_id": sub.RailSubscriptionID,
+						}).Warn("no deferred-delete scheduler wired: nmi_delete intent NOT queued; remote rail subscription may still be retrying (wiring gap)")
+					}
 				}
 			}
-		}
-		lcArgs := LocalCancellation{
-			EndedAt:       now,
-			CancelType:    models.CancelTypeExpired,
-			Feedback:      &fb,
-			RevokeReason:  models.EntitlementRevokeDunning,
-			RevokeAsOf:    asOf,
-			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
-		}
-		if !scheduleDelete {
-			return s.ApplyLocalCancellation(ctx, dbb, sub, lcArgs)
-		}
-		// Marker + intent commit atomically, same invariant as FailMembership:
-		// no crash window between the cancellation UPDATE and the enqueue.
-		return dbb.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-			txdb := db.NewWithPgxTx(tx)
-			if err := s.ApplyLocalCancellation(ctx, txdb, sub, lcArgs); err != nil {
-				return err
+			lcArgs := LocalCancellation{
+				EndedAt:       now,
+				CancelType:    models.CancelTypeExpired,
+				Feedback:      &fb,
+				RevokeReason:  models.EntitlementRevokeDunning,
+				RevokeAsOf:    asOf,
+				RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
 			}
-			return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, deleteAt)
-		})
-	default:
-		return fmt.Errorf("resolve unknown: unknown resolution %d", res)
-	}
+			if !scheduleDelete {
+				return s.ApplyLocalCancellation(ctx, dbb, sub, lcArgs)
+			}
+			// Marker + intent commit atomically, same invariant as FailMembership:
+			// no crash window between the cancellation UPDATE and the enqueue.
+			return dbb.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+				txdb := db.NewWithPgxTx(tx)
+				if err := s.ApplyLocalCancellation(ctx, txdb, sub, lcArgs); err != nil {
+					return err
+				}
+				return s.deferDelete.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, deleteAt)
+			})
+		default:
+			return fmt.Errorf("resolve unknown: unknown resolution %d", res)
+		}
+
+	})
 }
 
 // cancelSolanaSubscriptionCascade flips the linked openrails.solana_subscriptions

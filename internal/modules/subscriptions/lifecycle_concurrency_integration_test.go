@@ -139,3 +139,40 @@ func waitForLifecycleContention(t *testing.T, ctx context.Context, database *db.
 		}
 	}
 }
+
+func TestStaleLifecycleSnapshotPreservesChargeback(t *testing.T) {
+	for _, action := range []string{"park_unknown", "enter_past_due", "resolve_unknown"} {
+		t.Run(action, func(t *testing.T) {
+			ctx := dbtest.WithTestMerchant(t.Context())
+			database := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+			now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+			productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
+			insertCatalogAndSub(ctx, t, database, now, 30, productID, priceID, subID, uuid.NewString(), now, now.Add(30*24*time.Hour))
+			if action == "resolve_unknown" {
+				_, err := database.Pool().Exec(ctx, "UPDATE openrails.subscriptions SET status='unknown' WHERE id=$1", subID)
+				require.NoError(t, err)
+			}
+			repo := NewSubscriptionRepo(database)
+			snapshot, err := repo.GetByID(ctx, subID)
+			require.NoError(t, err)
+			lifecycle := newLifecycleForTest(database)
+			lifecycle.SetClock(clockwork.NewFakeClockAt(now))
+			require.NoError(t, lifecycle.CancelMembership(ctx, &CancelMembershipParams{SubscriptionID: &subID, CancelType: models.CancelTypeChargeback, RevokeAccess: true}))
+			switch action {
+			case "park_unknown":
+				err = lifecycle.ApplyLocalUnknown(ctx, database, snapshot)
+			case "enter_past_due":
+				err = lifecycle.ApplyLocalPastDue(ctx, database, snapshot, now.Add(24*time.Hour))
+			case "resolve_unknown":
+				paidEnd := now.Add(60 * 24 * time.Hour)
+				err = lifecycle.ResolveUnknownSubscription(ctx, database, snapshot, ResolveRenewed, &paidEnd, time.Time{})
+			}
+			require.NoError(t, err)
+			current, err := repo.GetByID(ctx, subID)
+			require.NoError(t, err)
+			require.Equal(t, models.StatusCancelled, current.Status)
+			require.NotNil(t, current.CancelType)
+			require.Equal(t, models.CancelTypeChargeback, *current.CancelType)
+		})
+	}
+}
