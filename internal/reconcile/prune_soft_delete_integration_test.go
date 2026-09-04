@@ -226,7 +226,7 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 		_, err = q.GetSubscriptionByRailSubID(ctx, gen.GetSubscriptionByRailSubIDParams{Rail: "nmi", RailSubscriptionID: f.railSub})
 		require.Error(t, err, "provider-id lookup must not see a pruned row")
 
-		live, err := q.ListActiveSubscriptionsByCustomer(ctx, f.customer)
+		live, err := q.ListActiveSubscriptionsByCustomer(ctx, gen.ListActiveSubscriptionsByCustomerParams{MerchantID: merchantID, CustomerID: f.customer})
 		require.NoError(t, err)
 		require.Empty(t, live, "the customer's active list must not include a pruned sub")
 
