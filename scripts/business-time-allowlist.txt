@@ -1,64 +1,107 @@
-# path|fragment|classification|reason
-#
-# Classifications:
-# - business_time_boundary: fallback or boundary default when no runtime clock was supplied.
-# - infrastructure_time: cache, queue, rate-limit, replay, cleanup, or process timing.
-# - external_protocol_time: timestamps exchanged with external systems or freshness metadata.
-# - db_audit_timestamp: persistence audit/default timestamp, not domain state.
-
-internal/modules/payments/solana_support.go|QuotedAt: time.Now()|external_protocol_time|quote freshness metadata
-internal/modules/payments/solana_support.go|quotedAt := time.Now()|external_protocol_time|quote freshness metadata
-internal/modules/payments/processor_customer_service.go|now := time.Now().UTC()|db_audit_timestamp|processor customer record audit timestamp
-internal/modules/payments/payment.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/payments/payment.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
-internal/river/jobs_cleanup.go|clockwork.NewRealClock()|business_time_boundary|worker fallback when no runtime clock was supplied
-internal/modules/analytics/admin_metrics_service.go|clockwork.NewRealClock()|business_time_boundary|metrics service default at construction boundary
-internal/modules/analytics/admin_metrics_service.go|time.Now().UTC()|infrastructure_time|admin metrics dashboard period default
-internal/river/jobs_webhooks.go|args.ReceivedAt = time.Now()|infrastructure_time|queue receipt timestamp
-internal/modules/vault/vault_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/vault/vault_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
-internal/river/jobs_hold_expiry.go|clockwork.NewRealClock()|business_time_boundary|worker fallback when no runtime clock was supplied
-internal/db/repo/subscription.go|time.Now()|business_time_boundary|compatibility fallback for callers that have not passed business time
-internal/modules/analytics/event_log_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/analytics/event_log_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
-internal/river/jobs_dunning.go|return time.Now()|business_time_boundary|worker fallback when no runtime clock was supplied
-pkg/service/service_definition_catalog.go|time.Now().UTC()|db_audit_timestamp|catalog admin create/update timestamp
-internal/river/jobs_credit_expiry.go|clockwork.NewRealClock()|business_time_boundary|worker fallback when no runtime clock was supplied
-internal/modules/credits/credit_type_service.go|ct.CreatedAt = time.Now().UTC()|db_audit_timestamp|credit type create timestamp
-internal/river/jobs_subscription_manage.go|now := time.Now().UTC()|business_time_boundary|subscription management worker not yet clock-injected
-internal/modules/credits/credits_service.go|clockwork.NewRealClock()|business_time_boundary|service default at construction boundary
-internal/modules/credits/credits_service.go|return time.Now().UTC()|business_time_boundary|service fallback when no runtime clock was supplied
-pkg/service/service_admin.go|time.Now().UTC()|business_time_boundary|service facade fallback pending full clock plumbing
-internal/http/handlers/admin_metrics.go|now := time.Now().UTC()|infrastructure_time|dashboard query default
-pkg/service/service.go|return time.Now()|business_time_boundary|service facade fallback when no runtime clock was supplied
-internal/http/handlers/solana_supported_tokens.go|quotedAt := time.Now()|external_protocol_time|token quote metadata
-internal/modules/subscriptions/stripe_service.go|startDate = time.Now().UTC().Unix()|external_protocol_time|Stripe subscription search default
-internal/modules/webhooks/ccbill.go|return time.Now()|business_time_boundary|webhook service fallback when dispatcher clock missing
-internal/modules/checkout/session_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/subscriptions/admin_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/idempotency/service.go|time.Now()|infrastructure_time|idempotency TTL/cache lifecycle
-internal/modules/webhooks/nmi.go|return time.Now()|business_time_boundary|webhook service fallback when dispatcher clock missing
-internal/modules/subscriptions/subscription.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/subscriptions/subscription.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
-internal/modules/webhooks/replay/service.go|startTime := time.Now()|infrastructure_time|replay operation duration measurement
-internal/modules/webhooks/stripe.go|return time.Now()|business_time_boundary|webhook service fallback when dispatcher clock missing
-internal/modules/checkout/service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/checkout/purchase_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
-internal/modules/checkout/purchase_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/http/handlers/admin_users.go|now := time.Now()|business_time_boundary|admin handler fallback pending full request clock cleanup
-internal/modules/subscriptions/lifecycle_service.go|clockwork.NewRealClock()|business_time_boundary|service default at construction boundary
-internal/modules/subscriptions/lifecycle_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/subscriptions/email_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/subscriptions/user_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/entitlements/entitlement_service.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/entitlements/entitlement_service.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
-internal/modules/solana/support.go|QuotedAt: time.Now()|external_protocol_time|quote freshness metadata
-internal/modules/solana/support.go|quotedAt := time.Now()|external_protocol_time|quote freshness metadata
-internal/modules/solana/transaction.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/http/handlers/entitlements.go|queryTime := time.Now()|business_time_boundary|admin handler fallback pending full request clock cleanup
-internal/http/handlers/entitlements.go|now := time.Now()|business_time_boundary|admin handler fallback pending full request clock cleanup
-internal/modules/solana/pay.go|return time.Now()|business_time_boundary|service fallback when no runtime clock was supplied
-internal/modules/solana/pay.go|clockwork.NewRealClock()|business_time_boundary|constructor default when no runtime clock was supplied
-internal/modules/solana/poller.go|time.Now()|infrastructure_time|poller retry/backoff state
-internal/modules/admission/policy.go|now := time.Now().UTC()|db_audit_timestamp|billing-policy / spend-limit row created_at+updated_at audit timestamps
-internal/modules/admission/accrual_rate.go|return time.Now().UTC()|business_time_boundary|accrual-rate meter fallback when no runtime clock was supplied
+# Exact reviewed physical-clock boundaries. No path-wide or fragment exceptions.
+# path|trimmed source line|classification|reason|reviewed occurrence count
+internal/http/handlers/payment_methods.go|now := time.Now().UTC()|external_protocol_time|Payment network card expiry uses the actual calendar|1
+internal/http/handlers/solana_recurring.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/http/handlers/solana_supported_tokens.go|quotedAt := time.Now()|external_protocol_time|Oracle quote freshness uses physical time|1
+internal/http/handlers/webhook.go|ReceivedAt:     time.Now(),|infrastructure_time|Physical webhook receipt timestamp|2
+internal/http/handlers/webhook.go|ReceivedAt: time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1
+internal/http/handlers/webhook_basistheory.go|ReceivedAt:     time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1
+internal/modules/admission/accrual_rate.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/admission/admitter.go|a.denials.Record(ctx, merchantID, customer.UUID().String(), code, time.Now())|infrastructure_time|Request deadline/hold lifetime and denial observation use physical time|1
+internal/modules/admission/admitter.go|holdLifetime, err := holdTTL(req.ExpiresAt, time.Now())|infrastructure_time|Request deadline/hold lifetime and denial observation use physical time|1
+internal/modules/admission/policy.go|now := time.Now().UTC()|db_audit_timestamp|Policy and binding creation and update audit timestamp|3
+internal/modules/alerting/service.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/business/cycle.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/catalog/stripe_webhooks.go|now = time.Now()|business_time_boundary|Provider rollover default only when explicit Now is unset|2
+internal/modules/checkout/custodian_sale.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
+internal/modules/checkout/custodian_sale.go|now := time.Now().UTC()|db_audit_timestamp|New saved payment method creation and update audit timestamp|1
+internal/modules/checkout/nmi_sale_service.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
+internal/modules/checkout/purchase_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/checkout/service.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
+internal/modules/checkout/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/checkout/session_repo.go|now = time.Now()|db_audit_timestamp|Default updated_at timestamp; expiry lookup requires caller time|1
+internal/modules/checkout/session_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/copilot/service.go|d.Clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/copilot/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/dashboard/dashboard.go|return validateWidgetsAt(widgets, time.Now().UTC())|business_time_boundary|Standalone convenience validation; explicit-time API used by clock-aware services|1
+internal/modules/dashboard/service.go|d.Clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/delinquency/service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/entitlements/entitlement_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/grants/grants.go|now = func() time.Time { return time.Now().UTC() }|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/grants/grants.go|now:      func() time.Time { return time.Now().UTC() },|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/merchantconfig/store.go|now := time.Now().UTC()|db_audit_timestamp|Configuration creation and update audit timestamp|1
+internal/modules/metrics/validate.go|return ValidateAt(q, time.Now().UTC())|business_time_boundary|Standalone convenience validation; explicit-time API used by clock-aware services|1
+internal/modules/money/invoice_items.go|now := time.Now().UTC()|db_audit_timestamp|Pending item created_at; invoice_at is required from the caller|1
+internal/modules/money/money_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/paymentmethods/rail_payment_method_service.go|databaseStartedAt := time.Now()|infrastructure_time|Elapsed provider/database operation duration|1
+internal/modules/paymentmethods/rail_payment_method_service.go|providerStartedAt := time.Now()|infrastructure_time|Elapsed provider/database operation duration|1
+internal/modules/paymentmethods/rail_payment_method_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/paymentmethods/rail_payment_method_service.go|startedAt := time.Now()|infrastructure_time|Elapsed provider/database operation duration|1
+internal/modules/payments/payment.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/payments/rail_customer_service.go|now := time.Now().UTC()|db_audit_timestamp|Provider customer creation audit timestamp|1
+internal/modules/payments/stripe_card.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
+internal/modules/productaccess/product_access_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/replaycache/service.go|CreatedAt: time.Now(),|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|3
+internal/modules/replaycache/service.go|entry.expiresAt = time.Now().Add(s.ttl)|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
+internal/modules/replaycache/service.go|entry.record.CreatedAt = time.Now()|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
+internal/modules/replaycache/service.go|expiresAt: time.Now().Add(ttl),|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
+internal/modules/replaycache/service.go|if time.Now().Before(entry.expiresAt) {|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
+internal/modules/replaycache/service.go|now := time.Now()|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|2
+internal/modules/replaycache/service.go|record.CreatedAt = time.Now()|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
+internal/modules/solana/pay.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/solana/poller.go|if time.Now().Before(next) {|infrastructure_time|Provider polling retry and backoff eligibility|1
+internal/modules/solana/poller.go|p.retryAfter[reference] = time.Now().Add(backoff)|infrastructure_time|Provider polling retry and backoff eligibility|2
+internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:             time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
+internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:  time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
+internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt: time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
+internal/modules/solana/solanasubs/subscription_repo.go|now := time.Now().UTC()|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
+internal/modules/solana/support.go|quotedAt := time.Now()|external_protocol_time|Oracle quote freshness uses physical time|1
+internal/modules/solana/support.go|return &TokenQuote{Units: 0, Amount: FormatBaseUnits(0, decimals), FXRate: 1.0, FXCurrency: currency, QuotedAt: time.Now()}, nil|external_protocol_time|Oracle quote freshness uses physical time|1
+internal/modules/solana/transaction.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/admin_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/email_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/lifecycle_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/notification_service.go|if err := s.repo.MarkEmailed(ctx, notification.ID, time.Now().UTC()); err != nil {|infrastructure_time|Actual email delivery completion stamp|1
+internal/modules/subscriptions/reprice_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/stripe_service.go|startDate = time.Now().UTC().Unix()|external_protocol_time|Default provider event search window uses physical time|1
+internal/modules/subscriptions/subscription.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/subscription_repo.go|now = time.Now()|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|2
+internal/modules/subscriptions/subscription_repo.go|return r.GetActiveSubscriptionAt(ctx, userID, time.Now())|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|1
+internal/modules/subscriptions/subscription_repo.go|return r.UpdateAt(ctx, s, time.Now())|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|1
+internal/modules/subscriptions/user_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/subscriptions/user_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/webhookhealth/recorder.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/webhooks/basistheory.go|CompletedAt:  time.Now().UTC(),|external_protocol_time|Account updater completion receipt timestamp|1
+internal/modules/webhooks/ccbill.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/webhooks/converge_nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/webhooks/converge_stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/webhooks/ledger_repair_alert.go|now = time.Now()|business_time_boundary|Default repair alert time only when caller supplied no time|1
+internal/modules/webhooks/nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/modules/webhooks/stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/job_liveness.go|tracker := progress.NewTracker(time.Now())|infrastructure_time|Worker progress tracker elapsed-time origin|1
+internal/river/jobs_admission_denials.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_business_cycle.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_catalog_reconciliation.go|now := time.Now().UTC()|infrastructure_time|Provider catalog drift observation timestamp|1
+internal/river/jobs_cleanup.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_converge_sweep.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_credit_expiry.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_credit_money_in.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
+internal/river/jobs_credit_money_in.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
+internal/river/jobs_delinquency.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_dunning.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_maintenance.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_payment_method_notices.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_provider_intents.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_provider_refresh.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_provider_refresh.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|2
+internal/river/jobs_solana_crank.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_solana_reconcile.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/river/jobs_subscription_converge.go|ScheduledAt: time.Now().Add(debounce),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
+internal/river/progress.go|return time.Now().UTC()|infrastructure_time|Worker heartbeat and elapsed-work observation|1
+internal/river/progress.go|ticker = clockwork.NewRealClock().NewTicker(m.interval())|infrastructure_time|Worker heartbeat and elapsed-work observation|1
+internal/river/worker_health.go|now := time.Now().UTC()|infrastructure_time|Worker heartbeat observation; optional clock override supported|1
+pkg/service/price_key.go|if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, key, time.Now().UTC()); err != nil {|db_audit_timestamp|Catalog key movement audit timestamp|1
+pkg/service/service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+pkg/service/service_definition_catalog.go|now := time.Now().UTC()|db_audit_timestamp|Catalog creation and update audit timestamp|2
+pkg/service/service_definition_catalog_admin.go|if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, updated.Key, time.Now().UTC()); err != nil {|db_audit_timestamp|Catalog key movement audit timestamp|1
+pkg/service/service_webhooks.go|ReceivedAt: time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1

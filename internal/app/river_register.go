@@ -167,6 +167,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		return fmt.Errorf("add cancel subscription worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.ResumeSubscriptionWorker{
+		Clock:                        r.Clock,
 		DB:                           r.DB,
 		Config:                       r.Config,
 		Rails:                        r.RailConfigs,
