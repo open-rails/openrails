@@ -21,7 +21,7 @@ UPDATE openrails.destructive_runs
 SET status=sqlc.arg(status)::text,
     finished_at=CASE WHEN sqlc.arg(status)::text='completed' THEN now() ELSE NULL END,
     affected=COALESCE(affected,'{}'::jsonb) || jsonb_build_object(
-      'external_secrets_deleted',sqlc.arg(deleted)::int,
+      'external_secrets_deleted',sqlc.arg(deleted)::bigint,
       'secret_cleanup_error',sqlc.narg(error)::text,'secret_cleanup_attempted_at',now())
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 

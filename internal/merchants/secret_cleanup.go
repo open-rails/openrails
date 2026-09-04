@@ -87,7 +87,7 @@ func clearMerchantSecretCache(store MerchantSecretStore, id merchant.ID) {
 	}
 }
 
-func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id merchant.ID, plan SecretCleanupPlan) (int, error) {
+func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id merchant.ID, plan SecretCleanupPlan) (int64, error) {
 	target, ok := baseSecretStore(store).(secretCleanupTarget)
 	if !ok {
 		return 0, fmt.Errorf("captured external secret backend is not configured")
@@ -114,7 +114,7 @@ func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id merchant.
 		}
 		all[name] = struct{}{}
 	}
-	deleted := 0
+	var deleted int64
 	var failure error
 	for name := range all {
 		if err := store.Delete(ctx, id, name); err != nil {
@@ -176,7 +176,7 @@ func (s *Service) RetrySecretCleanup(ctx context.Context, id merchant.ID, runID 
 			text := err.Error()
 			message = &text
 		}
-		_, updateErr := q.RecordMerchantSecretCleanup(ctx, gen.RecordMerchantSecretCleanupParams{MerchantID: id.UUID(), ID: runID, Status: status, Error: message, Deleted: int32(deleted)})
+		_, updateErr := q.RecordMerchantSecretCleanup(ctx, gen.RecordMerchantSecretCleanupParams{MerchantID: id.UUID(), ID: runID, Status: status, Error: message, Deleted: deleted})
 		return updateErr
 	})
 	if err != nil {

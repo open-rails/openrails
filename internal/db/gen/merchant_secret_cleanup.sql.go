@@ -120,14 +120,14 @@ UPDATE openrails.destructive_runs
 SET status=$1::text,
     finished_at=CASE WHEN $1::text='completed' THEN now() ELSE NULL END,
     affected=COALESCE(affected,'{}'::jsonb) || jsonb_build_object(
-      'external_secrets_deleted',$2::int,
+      'external_secrets_deleted',$2::bigint,
       'secret_cleanup_error',$3::text,'secret_cleanup_attempted_at',now())
 WHERE merchant_id=$4::uuid AND id=$5::uuid
 `
 
 type RecordMerchantSecretCleanupParams struct {
 	Status     string
-	Deleted    int32
+	Deleted    int64
 	Error      *string
 	MerchantID uuid.UUID
 	ID         uuid.UUID
