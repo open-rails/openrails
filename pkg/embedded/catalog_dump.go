@@ -216,10 +216,11 @@ ORDER BY key`, merchantID)
 
 func dumpCatalogCreditBalances(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]catalog.CreditBalance, error) {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT key, unit, expires_hours
-FROM openrails.catalog_credit_balances
-WHERE merchant_id = $1
-ORDER BY key`, merchantID)
+SELECT b.key, b.unit, c.name, b.expires_hours
+FROM openrails.catalog_credit_balances b
+LEFT JOIN openrails.custom_credit_types c ON c.merchant_id=b.merchant_id AND 'credit:'||c.id::text=b.unit
+WHERE b.merchant_id = $1
+ORDER BY b.key`, merchantID)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog credit balances: %w", err)
 	}
@@ -228,8 +229,15 @@ ORDER BY key`, merchantID)
 	for rows.Next() {
 		var b catalog.CreditBalance
 		var expires sql.NullInt64
-		if err := rows.Scan(&b.Key, &b.Unit, &expires); err != nil {
+		var name sql.NullString
+		if err := rows.Scan(&b.Key, &b.Unit, &name, &expires); err != nil {
 			return nil, err
+		}
+		if strings.HasPrefix(b.Unit, "credit:") {
+			if !name.Valid {
+				return nil, fmt.Errorf("catalog credit balance %q has no owned unit identity", b.Key)
+			}
+			b.Unit = name.String
 		}
 		if expires.Valid {
 			b.ExpiresDefault = hoursSpec(int(expires.Int64))

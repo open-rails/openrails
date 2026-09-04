@@ -21,6 +21,7 @@ DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM openrails.payment_settlement_events WHERE currency LIKE '%/%') THEN RAISE EXCEPTION 'custom credit identity cutover: openrails.payment_settlement_events contains mutable unit codes. Inventory the affected merchant/customer rows and decide how to recreate this pre-launch data; migration performs no history rewrite.'; END IF;
  IF EXISTS(SELECT 1 FROM openrails.checkout_sessions WHERE currency LIKE '%/%') THEN RAISE EXCEPTION 'custom credit identity cutover: openrails.checkout_sessions contains mutable unit codes. Inventory the affected merchant/customer rows and decide how to recreate this pre-launch data; migration performs no history rewrite.'; END IF;
  IF EXISTS(SELECT 1 FROM openrails.grants WHERE currency LIKE '%/%') THEN RAISE EXCEPTION 'custom credit identity cutover: openrails.grants contains mutable unit codes. Inventory the affected merchant/customer rows and decide how to recreate this pre-launch data; migration performs no history rewrite.'; END IF;
+ IF EXISTS(SELECT 1 FROM openrails.catalog_credit_balances WHERE unit !~ '^[A-Z0-9]{3,12}$' AND unit !~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') THEN RAISE EXCEPTION 'custom credit identity cutover: catalog_credit_balances has name-based units. Export and explicitly recreate these mutable catalog definitions after upgrade; financial history is never rewritten.'; END IF;
 END $$;
 
 ALTER TABLE openrails.metered_rating_watermarks DROP CONSTRAINT metered_rating_watermarks_currency_shape;
@@ -96,3 +97,6 @@ ALTER TABLE openrails.grants ADD CONSTRAINT grants_currency_shape CHECK(currency
 ALTER TABLE openrails.grants VALIDATE CONSTRAINT grants_currency_shape;
 
 COMMENT ON TABLE openrails.custom_credit_types IS 'Merchant-owned custom credit identities and scales. Financial rows reference credit:<id>; external names resolve through the current merchant namespace.';
+
+ALTER TABLE openrails.catalog_credit_balances ADD CONSTRAINT catalog_credit_balances_unit_identity CHECK(unit ~ '^[A-Z0-9]{3,12}$' OR unit ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
+ALTER TABLE openrails.catalog_credit_balances VALIDATE CONSTRAINT catalog_credit_balances_unit_identity;

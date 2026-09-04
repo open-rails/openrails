@@ -10,7 +10,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -59,8 +58,8 @@ func (s *MoneyService) InsertCaptureUsageEvent(ctx context.Context, p CaptureUsa
 	if p.Amount < 0 {
 		return fmt.Errorf("amount must be >= 0")
 	}
-	cur := normalizeCurrency(p.Currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(p.Currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return err
 	}
 	now := s.now()
@@ -148,8 +147,8 @@ func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.Cu
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	groupBy = strings.TrimSpace(groupBy)
@@ -204,8 +203,8 @@ func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource, curre
 	if resource == "" {
 		return nil, fmt.Errorf("resource required")
 	}
-	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	var out []ResourceRevenueDailyRow

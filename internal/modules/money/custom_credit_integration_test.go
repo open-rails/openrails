@@ -26,7 +26,8 @@ INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, acti
 VALUES (uuidv7(), $1, 'gold', 2, true)
 ON CONFLICT (merchant_id, name) DO UPDATE SET decimals = 2, active = true`, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
-	unit := dbtest.TestMerchantSlug + "/gold" // "test/gold"
+	unit, err := svc.CustomUnitCode(ctx, "gold")
+	require.NoError(t, err)
 
 	// ResolveUnit returns the custom decimals, not a built-in.
 	dec, builtin, err := svc.ResolveUnit(ctx, unit)

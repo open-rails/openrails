@@ -17,8 +17,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -56,7 +58,9 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	t.Cleanup(func() { _ = redis.Close() })
 	require.NoError(t, redis.Ping(ctx).Err())
 	ms := money.NewMoneyService(database)
-	rt := &app.Runtime{DB: database, MoneyService: ms, EntitlementService: entitlements.NewEntitlementService(database), RedisClient: redis}
+	directory, err := merchants.NewDirectoryService(db.WrapPool(database.Pool(), ""))
+	require.NoError(t, err)
+	rt := &app.Runtime{Merchants: directory, DB: database, MoneyService: ms, EntitlementService: entitlements.NewEntitlementService(database), RedisClient: redis}
 	mux := http.NewServeMux()
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, Options{Gate: creditSupportGate{actor: uuid.NewString()}})
 	customer := identity.CustomerID(uuid.New())

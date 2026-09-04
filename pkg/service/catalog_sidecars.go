@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -95,6 +97,24 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSideca
 	if err != nil {
 		return err
 	}
+	balances := append([]CatalogCreditBalanceSpec(nil), req.CreditBalances...)
+	for i := range balances {
+		unit := strings.TrimSpace(balances[i].Unit)
+		if strings.Contains(unit, "/") {
+			slug, name, _ := strings.Cut(unit, "/")
+			if s.rt.Merchants == nil {
+				return fmt.Errorf("merchant naming authority is not configured")
+			}
+			owner, err := s.rt.Merchants.GetBySlug(ctx, slug)
+			if err != nil {
+				return err
+			}
+			if owner.ID != tid {
+				return fmt.Errorf("credit unit belongs to another merchant")
+			}
+			balances[i].Unit = name
+		}
+	}
 	return dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		if err := syncUsageLimits(ctx, tx, tid.UUID(), req.UsageLimits); err != nil {
 			return err
@@ -108,7 +128,7 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, req SyncCatalogSideca
 		if _, err := tx.Exec(ctx, `DELETE FROM openrails.catalog_credit_purchase_prices WHERE merchant_id = $1`, tid.UUID()); err != nil {
 			return err
 		}
-		if err := syncCreditBalances(ctx, tx, tid.UUID(), req.CreditBalances); err != nil {
+		if err := syncCreditBalances(ctx, tx, tid.UUID(), balances); err != nil {
 			return err
 		}
 		if err := syncCreditPurchases(ctx, tx, tid.UUID(), req.CreditPurchases); err != nil {
@@ -220,16 +240,17 @@ func syncCreditBalances(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, ba
 	for _, spec := range balances {
 		key := strings.TrimSpace(spec.Key)
 		keys = append(keys, key)
+		code, err := defineCustomCreditUnit(ctx, tx, merchantID, key, spec.Unit)
+		if err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_balances (merchant_id, key, unit, expires_hours)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (merchant_id, key) DO UPDATE
 SET unit = EXCLUDED.unit, expires_hours = EXCLUDED.expires_hours, updated_at = now()`,
-			merchantID, key, strings.TrimSpace(spec.Unit), spec.ExpiresHours); err != nil {
+			merchantID, key, code, spec.ExpiresHours); err != nil {
 			return fmt.Errorf("upsert credit balance %q: %w", key, err)
-		}
-		if err := defineCustomCreditUnit(ctx, tx, merchantID, key, spec.Unit); err != nil {
-			return err
 		}
 	}
 	if len(keys) == 0 {
@@ -248,35 +269,31 @@ SET unit = EXCLUDED.unit, expires_hours = EXCLUDED.expires_hours, updated_at = n
 // ACTIVE: grants/balances may still reference the unit, and entitlements must
 // never be lost to catalog churn. Decimals are 0 (credits are whole units;
 // decimals only scale display).
-func defineCustomCreditUnit(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, balanceKey, unit string) error {
-	unit = strings.ToLower(strings.TrimSpace(unit))
-	name := unit
-	if slug, qualified, ok := strings.Cut(unit, "/"); ok {
-		// A qualified unit is only resolvable in its owning merchant's ledger —
-		// declaring another merchant's slug would push an unusable balance.
-		var merchantSlug string
-		if err := tx.QueryRow(ctx, `SELECT slug FROM openrails.merchants WHERE id = $1`, merchantID).Scan(&merchantSlug); err != nil {
-			return fmt.Errorf("resolve merchant slug: %w", err)
+func defineCustomCreditUnit(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, balanceKey, unit string) (string, error) {
+	unit = strings.TrimSpace(unit)
+	if _, builtin := moneyutil.CurrencyScale(unit); builtin {
+		return money.NormalizeCurrency(unit), nil
+	}
+	if strings.HasPrefix(unit, "credit:") {
+		id, err := uuid.Parse(strings.TrimPrefix(unit, "credit:"))
+		if err != nil {
+			return "", fmt.Errorf("invalid custom unit identity")
 		}
-		if slug != merchantSlug {
-			return fmt.Errorf("credit balance %q unit %q is qualified with slug %q, not this merchant's %q", balanceKey, unit, slug, merchantSlug)
+		row, err := gen.New(tx).GetCustomCreditTypeByID(ctx, gen.GetCustomCreditTypeByIDParams{MerchantID: merchantID, ID: id})
+		if err != nil {
+			return "", err
 		}
-		name = qualified
-	} else if _, builtin := moneyutil.CurrencyScale(unit); builtin {
-		return nil
+		return money.CreditUnitCode(row.ID), nil
 	}
-	if name == "" || strings.ContainsAny(name, "/ ") {
-		return fmt.Errorf("credit balance %q has invalid custom credit unit %q", balanceKey, unit)
+	name := strings.ToLower(unit)
+	if name == "" || strings.ContainsAny(name, "/ :") {
+		return "", fmt.Errorf("credit balance %q has invalid unit %q", balanceKey, unit)
 	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, active)
-VALUES (uuidv7(), $1, $2, 0, true)
-ON CONFLICT (merchant_id, name) DO UPDATE
-SET active = true, updated_at = now()`,
-		merchantID, name); err != nil {
-		return fmt.Errorf("define custom credit unit %q: %w", unit, err)
+	row, err := gen.New(tx).EnsureCustomCreditType(ctx, gen.EnsureCustomCreditTypeParams{MerchantID: merchantID, Name: name})
+	if err != nil {
+		return "", err
 	}
-	return nil
+	return money.CreditUnitCode(row.ID), nil
 }
 
 func syncCreditPurchases(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, purchases []CatalogCreditPurchasePriceSpec) error {

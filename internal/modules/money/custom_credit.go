@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -24,7 +25,7 @@ import (
 var ErrBillingUnitRequired = errors.New("money: billing requires a built-in currency, not a custom credit unit")
 
 // IsQualifiedUnit reports whether a unit code is a qualified custom-credit code
-// (`merchant-slug/name`) rather than an unqualified built-in currency.
+// (public `merchant-slug/name` or internal `credit:UUID`).
 func IsQualifiedUnit(code string) bool {
 	return strings.Contains(code, "/") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(code)), "credit:")
 }

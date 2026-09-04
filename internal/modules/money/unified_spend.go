@@ -8,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -52,8 +51,8 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 	if err := params.Key.RequireOperation(OpSpend); err != nil {
 		return nil, err
 	}
-	cur := normalizeCurrency(params.Currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(params.Currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -119,7 +118,10 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 // actual charge and is idempotent on (merchant, payer, currency, source,
 // source_id).
 //
-// #513 decision 8: capture RECORDS REALITY UNCONDITIONALLY. The Redis spendgate
+// Custom units consume existing credits only; insufficient funding refuses the
+// capture without creating debt. The overdraft policy below applies to ISO units.
+//
+// #513 decision 8: ISO capture RECORDS REALITY UNCONDITIONALLY. The Redis spendgate
 // at admit time is the ONLY gate, and concurrent admits may bounded-over-admit.
 // Capture therefore must NOT re-gate the credit line: it draws the prepaid
 // balance first and records any remainder as owed/overdraft (even for a prepaid
@@ -136,8 +138,8 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 	if err := params.Key.RequireOperation(OpCapture); err != nil {
 		return nil, err
 	}
-	cur := normalizeCurrency(params.Currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
+	cur := normalizeUnit(params.Currency)
+	if err := s.validateUnit(ctx, cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -216,6 +218,7 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 // point) and handled idempotency. Returns the amounts drawn from balance and
 // accrued to owed (either may be 0).
 //
+// Custom units always require sufficient prepaid balance. For ISO units,
 // preAuthorized selects the gating contract:
 //   - false (immediate SpendCredits): the remainder is GATED by the account's
 //     credit line — a prepaid payer (no/zero credit line) or a spend that would
@@ -241,7 +244,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		return 0, 0, false, fmt.Errorf("spend: idempotency key required")
 	}
 	now := s.now()
-	cur := normalizeCurrency(currency)
+	cur := normalizeUnit(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, 0, false, err
@@ -282,6 +285,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	fromOwed := amount - fromBalance
 
 	if fromOwed > 0 {
+		if IsQualifiedUnit(cur) {
+			return 0, 0, false, ErrInsufficientCredits
+		}
 		if preAuthorized {
 			// Pre-authorized capture never re-gates: the remainder becomes
 			// owed/overdraft regardless of the credit line. Ensure a settings row

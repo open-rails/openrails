@@ -26,7 +26,22 @@ func (s *Service) ListCreditGrants(ctx context.Context, payer identity.CustomerI
 		return nil, err
 	}
 	defer release()
-	return s.moneyService().ListCreditGrants(ctx, payer, currency, limit, offset)
+	code, err := s.resolveCurrency(ctx, currency)
+	if err != nil {
+		return nil, err
+	}
+	page, err := s.moneyService().ListCreditGrants(ctx, payer, code, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	display, err := s.DisplayCurrency(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	for i := range page.Grants {
+		page.Grants[i].Currency = display
+	}
+	return page, nil
 }
 
 func (s *Service) RevokeCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID, reason string) (*CreditGrantRevocation, error) {
@@ -39,12 +54,17 @@ func (s *Service) RevokeCreditGrant(ctx context.Context, payer identity.Customer
 	if err != nil {
 		return nil, err
 	}
-	return s.moneyService().RevokeCreditGrant(ctx, payer, grantID, reason, func(ctx context.Context, currency string) (int64, error) {
+	result, err := s.moneyService().RevokeCreditGrant(ctx, payer, grantID, reason, func(ctx context.Context, currency string) (int64, error) {
 		if s.rt.RedisClient == nil {
 			return 0, fmt.Errorf("credit revocation unavailable: live admission holds cannot be checked")
 		}
 		return spendgate.New(s.rt.RedisClient).HeldAmount(ctx, mid.String(), payer.UUID().String(), currency)
 	})
+	if err != nil {
+		return nil, err
+	}
+	result.Grant.Currency, err = s.DisplayCurrency(ctx, result.Grant.Currency)
+	return result, err
 }
 
 // CreditUnitDecimals returns the existing registry's scale for a selected unit.
@@ -54,6 +74,10 @@ func (s *Service) CreditUnitDecimals(ctx context.Context, currency string) (int,
 		return 0, err
 	}
 	defer release()
-	decimals, _, err := s.moneyService().ResolveUnit(ctx, currency)
+	code, err := s.resolveCurrency(ctx, currency)
+	if err != nil {
+		return 0, err
+	}
+	decimals, _, err := s.moneyService().ResolveUnit(ctx, code)
 	return decimals, err
 }

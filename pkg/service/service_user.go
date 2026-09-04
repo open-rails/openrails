@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
@@ -1117,7 +1116,7 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.resolveCurrency(ctx, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -1130,12 +1129,18 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	if err != nil {
 		return nil, fmt.Errorf("get credit balance: %w", err)
 	}
-	decimals, _ := moneyutil.CurrencyScale(bal.Currency)
-
+	decimals, _, err := s.moneyService().ResolveUnit(ctx, bal.Currency)
+	if err != nil {
+		return nil, err
+	}
+	display, err := s.DisplayCurrency(ctx, bal.Currency)
+	if err != nil {
+		return nil, err
+	}
 	return &CreditBalance{
-		Currency:      bal.Currency,
-		DisplayName:   bal.Currency,
-		Unit:          bal.Currency,
+		Currency:      display,
+		DisplayName:   display,
+		Unit:          display,
 		DecimalPlaces: decimals,
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
@@ -1168,7 +1173,15 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency st
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer could not be resolved from subject")
 	}
-	transactions, total, err := s.moneyService().GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
+	canonical, err := s.resolveCurrency(ctx, currency)
+	if err != nil {
+		return nil, err
+	}
+	display, err := s.DisplayCurrency(ctx, canonical)
+	if err != nil {
+		return nil, err
+	}
+	transactions, total, err := s.moneyService().GetTransactionsByCustomer(ctx, payer, canonical, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get credit transactions: %w", err)
 	}
@@ -1179,7 +1192,7 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency st
 			ID:              t.ID,
 			CustomerID:      t.CustomerID,
 			Invoker:         t.Invoker,
-			Currency:        t.Currency,
+			Currency:        display,
 			Amount:          t.Amount,
 			TransactionType: t.TransactionType,
 			Source:          t.Source,
