@@ -76,7 +76,7 @@ SELECT * FROM openrails.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
   AND currency = sqlc.arg(currency)::text
-ORDER BY created_at DESC
+ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(lim)::int OFFSET sqlc.arg(off)::int;
 
 -- name: CountLedgerTransfersByCustomer :one

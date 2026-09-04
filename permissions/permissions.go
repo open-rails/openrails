@@ -52,6 +52,9 @@ const (
 	// balance. Owner-level (merchant:*) by default, grantable narrowly by a
 	// host with custom roles.
 	MerchantCreditsGrant = "merchant:credits:grant"
+	// MerchantCreditsRevoke controls removal of a credit grant remainder.
+	// It is distinct from minting credit and from refunding a payment.
+	MerchantCreditsRevoke = "merchant:credits:revoke"
 	// MerchantMembersRead gates reading the merchant team roster and pending
 	// invites (#760: GET /v1/merchant/team[/invites]). Deliberately the SAME
 	// string as AuthKit's per-persona members:read built-in, so the OpenRails

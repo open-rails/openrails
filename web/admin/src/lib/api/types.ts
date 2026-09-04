@@ -108,6 +108,7 @@ export interface RawProductAccessGrant {
 }
 
 export interface PaymentMethodResponse {
+  collection_default_currencies?: string[]
   id: string // pm_...
   object: "payment_method"
   type: string

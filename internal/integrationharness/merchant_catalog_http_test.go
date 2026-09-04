@@ -1441,7 +1441,7 @@ func (a httpCatalogApplier) GetProductByKey(_ context.Context, key string) (*bil
 	return &out, nil
 }
 
-func (a httpCatalogApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) ([]billingservice.CatalogProduct, int64, error) {
+func (a httpCatalogApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) (billingservice.CatalogPage[billingservice.CatalogProduct], error) {
 	q := url.Values{}
 	if opts.TierGroup != "" {
 		q.Set("tier_group", opts.TierGroup)
@@ -1461,14 +1461,11 @@ func (a httpCatalogApplier) ListProducts(_ context.Context, opts billingservice.
 	}
 	status, body := requestJSON(a.t, http.MethodGet, u, a.token, nil)
 	if status != http.StatusOK {
-		return nil, 0, fmt.Errorf("list products: status %d: %s", status, string(body))
+		return billingservice.CatalogPage[billingservice.CatalogProduct]{}, fmt.Errorf("list products: status %d: %s", status, string(body))
 	}
-	var page struct {
-		Items []billingservice.CatalogProduct `json:"items"`
-		Total int64                           `json:"total"`
-	}
+	var page billingservice.CatalogPage[billingservice.CatalogProduct]
 	require.NoError(a.t, json.Unmarshal(body, &page))
-	return page.Items, page.Total, nil
+	return page, nil
 }
 
 func (a httpCatalogApplier) CreateProduct(_ context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error) {

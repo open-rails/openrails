@@ -123,7 +123,11 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	if r.State.PaymentMethodService != nil {
 		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, path.UserID); err == nil && len(pms) > 0 {
-			profile.PaymentMethods = paymentMethodsToAPI(pms, paymentMethodCharges(r, pms))
+			methods, ok := paymentMethodsWithCollectionDefaults(r, customerID, pms)
+			if !ok {
+				return
+			}
+			profile.PaymentMethods = methods
 		}
 	}
 	if r.State.MoneyService != nil {
@@ -151,21 +155,29 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 				return
 			}
 			for _, bal := range balances {
-				owed, err := r.State.MoneyService.GetOutstandingOwed(ctx, payer, bal.Currency)
+				decimals, builtin, err := r.State.MoneyService.ResolveUnit(ctx, bal.Currency)
 				if err != nil {
-					r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
+					r.ErrorJSON(http.StatusInternalServerError, "failed to resolve credit currency")
 					return
 				}
+				var owed int64
 				balanceTrust := ""
-				if tl, err := r.State.MoneyService.GetTrustLevel(ctx, payer, bal.Currency); err == nil {
-					balanceTrust = tl
+				if builtin {
+					owed, err = r.State.MoneyService.GetOutstandingOwed(ctx, payer, bal.Currency)
+					if err != nil {
+						r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
+						return
+					}
+					if tl, err := r.State.MoneyService.GetTrustLevel(ctx, payer, bal.Currency); err == nil {
+						balanceTrust = tl
+					}
 				}
 				profile.CreditBalance = append(profile.CreditBalance, adminCreditBalanceResponse{
 					Currency:              bal.Currency,
 					TrustLevel:            balanceTrust,
 					DisplayName:           bal.Currency,
 					Unit:                  bal.Currency,
-					DecimalPlaces:         currencyDecimals(bal.Currency),
+					DecimalPlaces:         decimals,
 					Balance:               bal.Balance,
 					HeldBalance:           bal.HeldBalance,
 					OutstandingOwedAmount: owed,
@@ -196,8 +208,11 @@ func GetAdminUserPaymentMethods(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment methods")
 		return
 	}
-	charges := paymentMethodCharges(r, pms)
-	r.SuccessJSON(map[string]any{"object": "list", "data": paymentMethodsToAPI(pms, charges)})
+	methods, ok := paymentMethodsWithCollectionDefaults(r, identity.CustomerIDFromString(path.UserID), pms)
+	if !ok {
+		return
+	}
+	r.SuccessJSON(map[string]any{"object": "list", "data": methods})
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {

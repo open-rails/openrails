@@ -30,21 +30,16 @@ SELECT * FROM openrails.products WHERE NOT archived;
 -- name: ListAllProducts :many
 SELECT * FROM openrails.products;
 
--- name: CountActiveProducts :one
-SELECT count(*) FROM openrails.products WHERE NOT archived;
+-- name: CountProductsFiltered :one
+SELECT count(*) FROM openrails.products
+WHERE (NOT sqlc.arg(active_only)::boolean OR NOT archived)
+  AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)));
 
--- name: ListActiveProductsPaged :many
+-- name: ListProductsFiltered :many
 SELECT * FROM openrails.products
-WHERE NOT archived
-ORDER BY created_at DESC
-LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
-
--- name: CountAllProducts :one
-SELECT count(*) FROM openrails.products;
-
--- name: ListAllProductsPaged :many
-SELECT * FROM openrails.products
-ORDER BY created_at DESC
+WHERE (NOT sqlc.arg(active_only)::boolean OR NOT archived)
+  AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)))
+ORDER BY created_at DESC, id DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: UpdateProduct :execrows

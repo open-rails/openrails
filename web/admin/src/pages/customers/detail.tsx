@@ -45,19 +45,23 @@ import {
 import {
   formatDate,
   formatMicros,
+  formatUnits,
   microsFromInput,
   shortId,
 } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import { adminQueries } from "@/lib/queries"
+import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
+import { CollectionDefaultBadges } from "./collection-default-badges"
 import { CustomerUsageRatesSection } from "./usage-rates"
+import { CustomerCreditSupportSection } from "./credits"
 
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { data: profile, isPending: loading } = useQuery(
     adminQueries.customer(customerId)
   )
@@ -106,11 +110,17 @@ export function CustomerDetailPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-lg font-semibold">
-                  {formatMicros(b.balance, b.currency)}
+                  {formatUnits(b.balance, b.currency, b.decimal_places)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  held {formatMicros(b.held_balance, b.currency)} · owed{" "}
-                  {formatMicros(b.outstanding_owed_amount, b.currency)}
+                  held{" "}
+                  {formatUnits(b.held_balance, b.currency, b.decimal_places)} ·
+                  owed{" "}
+                  {formatUnits(
+                    b.outstanding_owed_amount,
+                    b.currency,
+                    b.decimal_places
+                  )}
                 </p>
               </CardContent>
             </Card>
@@ -118,6 +128,10 @@ export function CustomerDetailPage() {
         </div>
       )}
 
+      <CustomerCreditSupportSection
+        customerId={customerId}
+        currencies={profile.credit_balance.map((balance) => balance.currency)}
+      />
       <CustomerUsageRatesSection customerId={customerId} />
       <CustomerInvoiceProfileSection customerId={customerId} />
 
@@ -240,6 +254,17 @@ export function CustomerDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm">Payment methods</CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  void queryClient.invalidateQueries({
+                    queryKey: queryKeys.customer(customerId),
+                  })
+                }
+              >
+                Refresh payment methods
+              </Button>
             </CardHeader>
             <CardContent>
               {profile.payment_methods.length === 0 ? (
@@ -258,6 +283,9 @@ export function CustomerDetailPage() {
                         {pm.rail} · exp {pm.card?.exp_month ?? "??"}/
                         {pm.card?.exp_year ?? "????"}
                       </p>
+                      <CollectionDefaultBadges
+                        currencies={pm.collection_default_currencies}
+                      />
                       {pm.health?.expiry_status &&
                         pm.health.expiry_status !== "valid" && (
                           <Badge
@@ -594,7 +622,7 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
     adminMutations.grantCustomerProductAccess(queryClient, customerId)
   )
   const { data: products } = useQuery({
-    ...adminQueries.products(),
+    ...adminQueries.allProducts(),
     enabled: open,
   })
   const form = useForm({
@@ -752,7 +780,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
     adminMutations.recordCustomerOffChannelPayment(queryClient, customerId)
   )
   const { data: prices } = useQuery({
-    ...adminQueries.prices(),
+    ...adminQueries.allPrices(),
     enabled: open,
   })
   const form = useForm({
