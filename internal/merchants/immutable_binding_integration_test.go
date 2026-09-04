@@ -83,6 +83,36 @@ func TestProvisionKeepsImmutableGroupOwnership(t *testing.T) {
 			require.Equal(t, id, got.ID.String())
 		}
 	})
+	t.Run("authoritative names override stale local projections", func(t *testing.T) {
+		nextGroup := uuid.NewString()
+		next, _, err := svc.Provision(ctx, ProvisionRequest{Slug: slug + "-next", PermissionGroupID: nextGroup})
+		require.NoError(t, err)
+		bound, err := NewDirectoryService(svc.pool)
+		require.NoError(t, err)
+		bound.WithGroupSlugResolver(func(_ context.Context, name string) (string, string, error) {
+			switch name {
+			case slug:
+				return nextGroup, slug, nil
+			case slug + "-current", slug + "-alias":
+				return group, slug + "-current", nil
+			default:
+				return "", "", ErrMerchantNotFound
+			}
+		})
+		got, err := bound.GetBySlug(ctx, slug)
+		require.NoError(t, err)
+		require.Equal(t, next.ID, got.ID, "old local slug cannot override the new AuthKit owner")
+		for _, name := range []string{slug + "-current", slug + "-alias"} {
+			got, err := bound.GetBySlug(ctx, name)
+			require.NoError(t, err)
+			require.Equal(t, first.ID, got.ID)
+			route, err := bound.ResolveBySlug(ctx, name)
+			require.NoError(t, err)
+			require.Equal(t, first.ID, route.MerchantID)
+		}
+		_, err = bound.GetBySlug(ctx, slug+"-next")
+		require.ErrorIs(t, err, ErrMerchantNotFound, "expired projection cannot resolve after authority says not found")
+	})
 	t.Run("retired binding cannot create a new billing identity", func(t *testing.T) {
 		_, err := raw.Exec(ctx, `UPDATE openrails.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, first.ID.UUID())
 		require.NoError(t, err)

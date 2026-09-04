@@ -200,16 +200,23 @@ func (s *Service) Get(ctx context.Context, id merchant.ID) (*Merchant, error) {
 	return s.merchantByID(ctx, id)
 }
 
-// GetBySlug returns the merchant directory row by slug. A miss retries
-// through the authkit group namespace when the or#914 rename-forwarding seam
-// is wired (renamed-away slugs forward via their ak#264 tombstones).
+// GetBySlug uses AuthKit as the naming authority when configured. A stale local
+// display projection must never override alias expiry or a new name owner.
+// AuthKit-free hosts resolve their explicitly configured local directory.
 func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error) {
 	norm := normalizeSlug(slug)
-	m, err := s.merchantBySlug(ctx, norm)
-	if errors.Is(err, ErrMerchantNotFound) {
-		return s.merchantByGroupFallback(ctx, norm)
+	if s.groupSlugResolver != nil {
+		return s.merchantByGroupName(ctx, norm)
 	}
-	return m, err
+	return s.merchantBySlug(ctx, norm)
+}
+
+// GetByGroupID selects the billing identity already authorized by the caller.
+func (s *Service) GetByGroupID(ctx context.Context, groupID string) (*Merchant, error) {
+	if strings.TrimSpace(groupID) == "" {
+		return nil, ErrPermissionGroupRequired
+	}
+	return s.merchantByGroupID(ctx, groupID)
 }
 
 // DirectoryRef is a merchant's public-facing directory identity: the slug it is
