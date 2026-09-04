@@ -115,7 +115,7 @@ func TestVaultUUIDPathsSurviveRenameAndReclaim(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	manifest := bootstrap.MerchantConfig{Custodians: map[string]bootstrap.CustodianConfig{
-		"vault-test": {"basis_theory": bootstrap.CustodianAccountConfig{AccountID: "bt-tenant-test", Secrets: map[string]string{"api_key": "private-bootstrap-key"}}},
+		"vault-test": {"basis_theory": bootstrap.CustodianAccountConfig{AccountID: "bt-tenant-test", Settings: map[string]any{"public_api_key": "public-bootstrap-key"}, Secrets: map[string]string{"api_key": "private-bootstrap-key"}}},
 	}}
 	require.NoError(t, f.database.RunInMerchantScope(ctx, f.id, "bootstrap seed", func(ctx context.Context) error {
 		return bootstrap.SeedMerchantManifestSecretPlane(ctx, f.cfg, f.id, manifest, f.store.Secrets, nil)
