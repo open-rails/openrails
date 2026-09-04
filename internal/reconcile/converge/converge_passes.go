@@ -574,15 +574,21 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				// Terminal cancel through the shared core. A never-confirmed pending
 				// sub has no entitlements/money to unwind (RevokeSources empty); the
 				// Solana cascade is a tolerant no-op when no row was ever enrolled.
-				sub, err := subscriptions.NewSubscriptionRepo(p.e.DB).GetByID(ctx, subID)
-				if err != nil {
-					return fmt.Errorf("life: load stale-pending subscription %s: %w", subID, err)
-				}
-				fb := "pending stale (never confirmed)"
-				return p.e.lifecycle.ApplyLocalCancellation(ctx, p.e.DB, sub, subscriptions.LocalCancellation{
-					EndedAt:    now,
-					CancelType: models.CancelTypeExpired,
-					Feedback:   &fb,
+				return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+					txdb := p.e.DB.NewWithPgxTx(tx)
+					sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subID)
+					if err != nil {
+						return fmt.Errorf("life: load stale-pending subscription %s: %w", subID, err)
+					}
+					if sub.Status != models.StatusPending {
+						return nil
+					}
+					fb := "pending stale (never confirmed)"
+					return p.e.lifecycle.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
+						EndedAt:    now,
+						CancelType: models.CancelTypeExpired,
+						Feedback:   &fb,
+					})
 				})
 			},
 		})

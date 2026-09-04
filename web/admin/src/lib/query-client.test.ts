@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ApiError } from "@/lib/api/client"
-import { adminQueries, collectUsageMeterPages, queryKeys } from "@/lib/queries"
+import { adminQueries, collectCatalogPages, queryKeys } from "@/lib/queries"
 import { queryClient, shouldRetry } from "@/lib/query-client"
 import { toastApiError } from "@/lib/toast"
 
@@ -169,7 +169,7 @@ describe("query keys", () => {
         writes_allowed: true,
       })
 
-    const result = await collectUsageMeterPages(loadPage)
+    const result = await collectCatalogPages(loadPage)
 
     expect(loadPage).toHaveBeenNthCalledWith(1, 200, 0, undefined)
     expect(loadPage).toHaveBeenNthCalledWith(2, 200, 1, undefined)

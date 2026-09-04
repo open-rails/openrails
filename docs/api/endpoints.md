@@ -160,10 +160,24 @@ on-chain prepare/confirm routes above.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset` |
+| GET | `/v1/me/payment-methods` | List stored methods with currency-qualified collection defaults. Query: `limit`, `offset` |
 | POST | `/v1/me/payment-methods` | Store an NMI card. Body: `payment_token` (Collect.js) + billing details |
 | PUT | `/v1/me/payment-methods/{id}` | Durably replace an NMI card. Requires tokenization's `payment_token`, `last_four`, `card_type`, and `expiry_date`; billing fields are optional. Returns the updated method when confirmed, `202` with no body while converging, `409 payment_method_update_retry_required` when a fresh token is required, or `502 payment_method_update_failed` for a terminal provider conflict. |
 | DELETE | `/v1/me/payment-methods/{id}` | Delete an NMI method through the durable provider-aware workflow. Returns `204` when complete, `202` while provider convergence continues, and an error when refused/failed. Stripe cards are managed through Stripe Billing Portal. |
+
+Saved-method lists and merchant customer profiles include
+`collection_default_currencies` on each method that is the current invoice
+collection choice for those billing currencies (for example, `["EUR", "USD"]`).
+An absent or empty list indicates no collection-default badge for that method.
+This reads the existing policy: an explicit invoice collection method wins;
+otherwise the configured top-up method remains the existing fallback. It does
+not change provider-managed subscription defaults or select a checkout method.
+
+The admin payment-method card labels each currency separately. Refresh payment
+methods invalidates both the customer profile and saved-method query caches.
+Completed customer-initiated deletion removes the local method and clears its
+settings references through foreign keys; when an explicit choice is removed,
+an existing top-up fallback can become the displayed collection choice.
 
 ### Checkout (delegated)
 
@@ -305,14 +319,14 @@ manifest and reboot instead. Reads stay live.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec`, `credits_spec` |
-| GET | `/v1/merchant/catalog/products` | List products |
+| GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `active_only` filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
 | PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
 | POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
 | POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |
 | POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids or select declarative provider config; recurring Solana defaults to USDC, accepts `token: USD1`, or resolves an attached `plan_pda`) |
-| GET | `/v1/merchant/catalog/prices` | List prices |
+| GET | `/v1/merchant/catalog/prices` | Paginated prices; `product_id`, `currency`, `type`, `active_only` filters |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}` | Price by key |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | The key's version chain, most-recent-first |
 | GET | `/v1/merchant/catalog/prices/{id}` | One price |
@@ -325,6 +339,13 @@ manifest and reboot instead. Reads stay live.
 | POST | `/v1/merchant/catalog/publish` | Push OpenRails definitions to providers |
 | POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (read permission; never mutates) |
 | POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only, exempt from the manifest guard) |
+
+Catalog product and price lists return `{items, total, limit, offset}`. `limit`
+and `offset` are the effective query values: nonpositive limits default to 100,
+limits above 1000 clamp to 1000, and negative offsets become zero. Advance by the
+returned `offset + limit`; a product-scoped price list follows the same paging
+contract. Ties in creation time are ordered by ID. Catalog screens page these
+results; selectors and manifest pruning explicitly traverse every page.
 
 ### Payment providers (`/v1/merchant/payment-providers`)
 

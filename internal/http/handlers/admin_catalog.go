@@ -98,17 +98,12 @@ func AdminListProducts(r *httprequest.Request) {
 	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
 		opts.ActiveOnly = parseBool(v)
 	}
-	items, total, err := svc.ListProducts(r.Request.Context(), opts)
+	page, err := svc.ListProducts(r.Request.Context(), opts)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogProduct]{
-		Items:  items,
-		Total:  total,
-		Limit:  opts.Limit,
-		Offset: opts.Offset,
-	})
+	r.JSON(http.StatusOK, page)
 }
 
 func AdminGetProduct(r *httprequest.Request) {
@@ -229,32 +224,17 @@ func AdminListPrices(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	// If product_id query param is set, scope to that product's prices.
-	if pidRaw := strings.TrimSpace(r.Query("product_id")); pidRaw != "" {
-		pid, err := uuid.Parse(pidRaw)
-		if err != nil || pid == uuid.Nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
-			return
-		}
-		activeOnly := parseBool(r.Query("active_only"))
-		items, err := svc.ListPricesByProduct(r.Request.Context(), pid, activeOnly)
-		if err != nil {
-			writeCatalogError(r, err)
-			return
-		}
-		r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogPrice]{
-			Items:  items,
-			Total:  int64(len(items)),
-			Limit:  len(items),
-			Offset: 0,
-		})
-		return
-	}
-
-	// Otherwise paginate across all prices with filters.
 	filter := catalog.PriceFilter{
 		Currency: strings.ToLower(strings.TrimSpace(r.Query("currency"))),
 		Type:     strings.TrimSpace(r.Query("type")),
+	}
+	if raw := strings.TrimSpace(r.Query("product_id")); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil {
+			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
+			return
+		}
+		filter.ProductID = &id
 	}
 	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
 		archived := !parseBool(v)
@@ -262,17 +242,12 @@ func AdminListPrices(r *httprequest.Request) {
 	}
 	limit := parseIntDefault(r.Query("limit"), 100)
 	offset := parseIntDefault(r.Query("offset"), 0)
-	items, total, err := svc.ListPrices(r.Request.Context(), filter, limit, offset)
+	page, err := svc.ListPrices(r.Request.Context(), filter, limit, offset)
 	if err != nil {
 		writeCatalogError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[billingservice.CatalogPrice]{
-		Items:  items,
-		Total:  total,
-		Limit:  limit,
-		Offset: offset,
-	})
+	r.JSON(http.StatusOK, page)
 }
 
 func AdminGetPrice(r *httprequest.Request) {

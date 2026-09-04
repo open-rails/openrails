@@ -599,6 +599,53 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (Openra
 	return i, err
 }
 
+const getSubscriptionByIDForUpdate = `-- name: GetSubscriptionByIDForUpdate :one
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions WHERE id = $1
+  AND deleted_at IS NULL
+FOR UPDATE
+`
+
+// Lifecycle read-modify-writes hold this lock through their transaction.
+func (q *Queries) GetSubscriptionByIDForUpdate(ctx context.Context, id uuid.UUID) (OpenrailsSubscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByIDForUpdate, id)
+	var i OpenrailsSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.ProductID,
+		&i.Status,
+		&i.Rail,
+		&i.RailSubscriptionID,
+		&i.UserEmail,
+		&i.PaymentMethodID,
+		&i.CurrentPeriodStartsAt,
+		&i.CurrentPeriodEndsAt,
+		&i.StartedAt,
+		&i.EndedAt,
+		&i.GraceEndsAt,
+		&i.ScheduledPriceID,
+		&i.LastRetryAt,
+		&i.RetryAttempts,
+		&i.NextRetryAt,
+		&i.CancelledAt,
+		&i.CancelType,
+		&i.CancelFeedback,
+		&i.EntitlementsSpecSnapshot,
+		&i.CreditsSpecSnapshot,
+		&i.GatewayResponse,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TierGroup,
+		&i.DeletionScheduledAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+	)
+	return i, err
+}
+
 const getSubscriptionByRailMetadataValue = `-- name: GetSubscriptionByRailMetadataValue :one
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
 WHERE sub.rail = $1

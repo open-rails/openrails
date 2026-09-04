@@ -50,13 +50,15 @@ import {
 } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import { adminQueries } from "@/lib/queries"
+import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
+import { CollectionDefaultBadges } from "./collection-default-badges"
 import { CustomerUsageRatesSection } from "./usage-rates"
 
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { data: profile, isPending: loading } = useQuery(
     adminQueries.customer(customerId)
   )
@@ -238,6 +240,17 @@ export function CustomerDetailPage() {
           <Card>
             <CardHeader>
               <CardTitle className="text-sm">Payment methods</CardTitle>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  void queryClient.invalidateQueries({
+                    queryKey: queryKeys.customer(customerId),
+                  })
+                }
+              >
+                Refresh payment methods
+              </Button>
             </CardHeader>
             <CardContent>
               {profile.payment_methods.length === 0 ? (
@@ -256,6 +269,9 @@ export function CustomerDetailPage() {
                         {pm.rail} · exp {pm.card?.exp_month ?? "??"}/
                         {pm.card?.exp_year ?? "????"}
                       </p>
+                      <CollectionDefaultBadges
+                        currencies={pm.collection_default_currencies}
+                      />
                       {pm.health?.expiry_status &&
                         pm.health.expiry_status !== "valid" && (
                           <Badge
@@ -592,7 +608,7 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
     adminMutations.grantCustomerProductAccess(queryClient, customerId)
   )
   const { data: products } = useQuery({
-    ...adminQueries.products(),
+    ...adminQueries.allProducts(),
     enabled: open,
   })
   const form = useForm({
@@ -750,7 +766,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
     adminMutations.recordCustomerOffChannelPayment(queryClient, customerId)
   )
   const { data: prices } = useQuery({
-    ...adminQueries.prices(),
+    ...adminQueries.allPrices(),
     enabled: open,
   })
   const form = useForm({

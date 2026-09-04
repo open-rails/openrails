@@ -285,60 +285,56 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 	feedback := reason
 
 	switch {
-	case rails.IsNMI(sub.Rail):
-		scheduleDelete := sub.RailSubscriptionID != ""
-		if scheduleDelete {
-			sub.DeletionScheduledAt = &now
-		}
-		lcArgs := subscriptions.LocalCancellation{
-			EndedAt:       now,
-			CancelType:    models.CancelTypeMerchant,
-			Feedback:      &feedback,
-			RevokeReason:  models.EntitlementRevokeAdmin,
-			RevokeAsOf:    now,
-			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
-		}
-		if scheduleDelete {
-			scheduler := intents.NewNMIDeleteScheduler(r.State.DB, r.State.RateCeiling(), intents.OriginAdmin, reason)
-			if err := r.State.DB.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-				txdb := db.NewWithPgxTx(tx)
-				if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, sub, lcArgs); err != nil {
-					return err
-				}
-				return scheduler.WithTx(tx).ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now)
+	case rails.IsNMI(sub.Rail), sub.Rail == models.RailCCBill:
+		localResult := make(map[string]any)
+		err := r.State.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+			txdb := r.State.DB.NewWithPgxTx(tx)
+			sub, err := subscriptions.NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, subID)
+			if err != nil {
+				return fmt.Errorf("lock subscription %s: %w", subID, err)
+			}
+			if sub.Status == models.StatusCancelled {
+				localResult["cancel"] = "noop_already_cancelled"
+				return nil
+			}
+			if !rails.IsNMI(sub.Rail) && sub.Rail != models.RailCCBill {
+				return fmt.Errorf("subscription %s rail changed before cancellation; retry", subID)
+			}
+			scheduleDelete := sub.RailSubscriptionID != ""
+			if scheduleDelete && rails.IsNMI(sub.Rail) {
+				sub.DeletionScheduledAt = &now
+			}
+			if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, txdb, sub, subscriptions.LocalCancellation{
+				EndedAt: now, CancelType: models.CancelTypeMerchant, Feedback: &feedback,
+				RevokeReason: models.EntitlementRevokeAdmin, RevokeAsOf: now,
+				RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
 			}); err != nil {
 				return fmt.Errorf("cancel subscription %s: %w", subID, err)
 			}
-			result["delete_intent"] = "queued"
-		} else if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, r.State.DB, sub, lcArgs); err != nil {
-			return fmt.Errorf("cancel subscription %s: %w", subID, err)
-		}
-		result["cancel"] = "cancelled"
-		result["subscription_id"] = subID.String()
-		return nil
-	case sub.Rail == models.RailCCBill:
-		// #696: local cancel + durable ccbill_cancel_subscription intent
-		// (queue-always — mode/credentials gate execution, never the enqueue),
-		// mirroring the NMI branch. The executor drains it through the DataLink
-		// SMS choke point and verifies via viewSubscriptionStatus.
-		if err := r.State.SubscriptionLifecycleService.ApplyLocalCancellation(ctx, r.State.DB, sub, subscriptions.LocalCancellation{
-			EndedAt:       now,
-			CancelType:    models.CancelTypeMerchant,
-			Feedback:      &feedback,
-			RevokeReason:  models.EntitlementRevokeAdmin,
-			RevokeAsOf:    now,
-			RevokeSources: []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace},
-		}); err != nil {
-			return fmt.Errorf("cancel subscription %s: %w", subID, err)
-		}
-		result["cancel"] = "cancelled"
-		result["subscription_id"] = subID.String()
-		if sub.RailSubscriptionID != "" {
-			if err := intents.NewCCBillCancelScheduler(r.State.DB, r.State.RateCeiling(), intents.OriginAdmin, reason).
-				ScheduleCCBillCancel(ctx, sub.CustomerID.String(), sub.ID); err != nil {
-				return fmt.Errorf("local cancel applied but ccbill cancel intent enqueue failed: %w", err)
+			if scheduleDelete {
+				if rails.IsNMI(sub.Rail) {
+					if err := intents.NewNMIDeleteScheduler(txdb, r.State.RateCeiling(), intents.OriginAdmin, reason).
+						ScheduleNMIDelete(ctx, sub.CustomerID.String(), sub.ID, now); err != nil {
+						return err
+					}
+					localResult["delete_intent"] = "queued"
+				} else {
+					if err := intents.NewCCBillCancelScheduler(txdb, r.State.RateCeiling(), intents.OriginAdmin, reason).
+						ScheduleCCBillCancel(ctx, sub.CustomerID.String(), sub.ID); err != nil {
+						return err
+					}
+					localResult["cancel_intent"] = "queued"
+				}
 			}
-			result["cancel_intent"] = "queued"
+			localResult["cancel"] = "cancelled"
+			localResult["subscription_id"] = subID.String()
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		for key, value := range localResult {
+			result[key] = value
 		}
 		return nil
 	case sub.Rail == models.RailStripe:
@@ -366,7 +362,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 }
 
 // refundPaymentForFinding executes the refund through the EXISTING admin
-// refund producer: reservation + content-addressed rail intent
+// refund producer: reservation + durable rail intent
 // (effectively-once), recorded on the payments ledger by the handler's
 // finalize — identical to POST /merchant/payments/{id}/refunds. The
 // idempotency key is derived from the finding, so a re-approve retries the

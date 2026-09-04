@@ -70,7 +70,7 @@ WHERE (sqlc.narg(archived)::boolean IS NULL OR price.archived = sqlc.narg(archiv
   AND (sqlc.narg(product_id)::uuid IS NULL OR price.product_id = sqlc.narg(product_id)::uuid)
   AND (NOT sqlc.arg(only_recurring)::boolean OR price.auto_renew)
   AND (NOT sqlc.arg(only_one_time)::boolean OR NOT price.auto_renew)
-ORDER BY price.created_at DESC
+ORDER BY price.created_at DESC, price.id DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetPriceByNMIPlan :one
