@@ -409,6 +409,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 
 func (w *ProviderRefreshWorker) runCCBillDataLinkLane(ctx context.Context, dataLink *ccbill.DataLinkClient) error {
 	return CCBillReconciler{
+		Clock:               w.Clock,
 		DB:                  w.DB,
 		DataLink:            dataLink,
 		NotificationService: w.NotificationService,

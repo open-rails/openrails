@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -79,7 +78,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		return
 	}
 	ctx := r.Request.Context()
-	now := time.Now()
+	now := r.Clock.Now()
 	profile := adminUserBillingProfile{
 		CustomerID:     customerID.UUID().String(),
 		Subscriptions:  []models.Subscription{},
@@ -326,7 +325,7 @@ func AdminResumeSubscription(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "subscription not found")
 		return
 	}
-	now := time.Now().UTC()
+	now := r.Clock.Now().UTC()
 	if !subscriptions.Resumable(sub, now) {
 		r.ErrorJSON(http.StatusBadRequest, "subscription is not resumable")
 		return

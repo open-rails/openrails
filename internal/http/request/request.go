@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/shared/iputil"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
@@ -78,7 +79,7 @@ func NewWithTransport(runtime *app.Runtime, r *http.Request, t Transport) *Reque
 	return &Request{
 		State:   runtime,
 		Request: r,
-		Clock:   clock,
+		Clock:   timeutil.FirstClock(clock),
 		t:       t,
 	}
 }

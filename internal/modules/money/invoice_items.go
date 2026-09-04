@@ -34,10 +34,9 @@ func insertPendingInvoiceItemTx(
 		return fmt.Errorf("invoice item source_type and source_id required")
 	}
 	if invoiceAt.IsZero() {
-		invoiceAt = time.Now().UTC()
-	} else {
-		invoiceAt = invoiceAt.UTC()
+		return fmt.Errorf("invoice item timestamp required")
 	}
+	invoiceAt = invoiceAt.UTC()
 	if metadata == nil {
 		metadata = map[string]any{}
 	}

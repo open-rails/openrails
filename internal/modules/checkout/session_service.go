@@ -2304,7 +2304,7 @@ func (s *CheckoutSessionService) FindOpenByUserPriceRail(ctx context.Context, us
 	if s.repo == nil {
 		return nil, ErrCheckoutSessionNotFound
 	}
-	session, err := s.repo.GetLatestOpenByUserPriceRail(ctx, userID, priceID, rail)
+	session, err := s.repo.GetLatestOpenByUserPriceRail(ctx, userID, priceID, rail, s.now())
 	if err != nil {
 		if db.IsNotFound(err) {
 			return nil, nil

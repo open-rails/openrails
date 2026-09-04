@@ -121,10 +121,21 @@ func (s *UserSubscriptionService) now() time.Time {
 // UserSubscriptionResponse represents a user's subscription with enriched data
 type UserSubscriptionResponse struct {
 	*models.Subscription
+	// EvaluatedAt binds derived eligibility flags to the service's business clock.
+	EvaluatedAt      time.Time        `json:"-"`
 	Price            *models.Price    `json:"-"`
 	ScheduledPrice   *models.Price    `json:"-"`
 	ScheduledProduct *models.Product  `json:"-"`
 	Access           *UserAccessGrant `json:"access,omitempty"`
+}
+
+// EvaluationTime defaults only for responses constructed without a service.
+// Service reads stamp EvaluatedAt before either HTTP or library serialization.
+func (r *UserSubscriptionResponse) EvaluationTime() time.Time {
+	if !r.EvaluatedAt.IsZero() {
+		return r.EvaluatedAt.UTC()
+	}
+	return time.Now().UTC()
 }
 
 // MarshalJSON keeps user-facing subscription payloads on the same Stripe-like
@@ -164,7 +175,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		// Resumability surface — derived from the single shared predicate so the
 		// HTTP serialization stays in lockstep with the resume handler, the worker,
 		// and the library DTO.
-		now := time.Now().UTC()
+		now := r.EvaluationTime()
 		out := userSubscriptionJSON{
 			ID:                    r.Subscription.ID,
 			CustomerID:            r.Subscription.CustomerID.String(),
@@ -413,6 +424,7 @@ func (s *UserSubscriptionService) enrichSubscriptionResponse(ctx context.Context
 	if resp == nil || resp.Subscription == nil {
 		return
 	}
+	resp.EvaluatedAt = s.now().UTC()
 	if resp.Subscription.PriceID != uuid.Nil && s.PriceService != nil {
 		if price, err := s.PriceService.GetByID(ctx, resp.Subscription.PriceID); err == nil {
 			resp.Price = price
