@@ -400,3 +400,14 @@ SELECT merchant_id FROM openrails.due_rail_intent_merchant_ids(
 SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
     sqlc.arg(now)::timestamptz,
     sqlc.arg(merchant_limit)::int);
+
+-- name: ConsumeCCBillRefundRefusal :execrows
+-- A proven refusal authorizes one new send. Consume it first so lease recovery
+-- cannot mistake an earlier refusal for the outcome of an interrupted retry.
+UPDATE openrails.rail_intents
+SET last_failure_reason = NULL
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id = sqlc.arg(id)::uuid
+  AND attempts = sqlc.arg(attempts)::int
+  AND status = 'in_flight'
+  AND last_failure_reason = sqlc.arg(reason)::text;
