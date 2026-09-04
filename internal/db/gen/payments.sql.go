@@ -83,8 +83,6 @@ type CompleteRefundReservationParams struct {
 	Metadata      []byte
 }
 
-// The rail confirmed the reversal and named it, so the row now records real
-// (negative) money movement (or#827).
 func (q *Queries) CompleteRefundReservation(ctx context.Context, arg CompleteRefundReservationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeRefundReservation, arg.ID, arg.TransactionID, arg.Metadata)
 	if err != nil {
@@ -1434,6 +1432,29 @@ type MergeStripePaymentMetadataParams struct {
 
 func (q *Queries) MergeStripePaymentMetadata(ctx context.Context, arg MergeStripePaymentMetadataParams) error {
 	_, err := q.db.Exec(ctx, mergeStripePaymentMetadata, arg.Patch, arg.TransactionID)
+	return err
+}
+
+const recordRefundProviderReceipt = `-- name: RecordRefundProviderReceipt :exec
+UPDATE openrails.payments
+SET metadata = COALESCE(metadata, '{}'::jsonb)
+    || jsonb_build_object('provider_refund_id', $1::text)
+WHERE merchant_id = $2::uuid
+  AND id = $3::uuid
+  AND status = 'pending'
+`
+
+type RecordRefundProviderReceiptParams struct {
+	ProviderRefundID string
+	MerchantID       uuid.UUID
+	ReservationID    uuid.UUID
+}
+
+// The rail confirmed the reversal and named it, so the row now records real
+// (negative) money movement (or#827).
+// Capture the provider's exact success before retryable local finalization.
+func (q *Queries) RecordRefundProviderReceipt(ctx context.Context, arg RecordRefundProviderReceiptParams) error {
+	_, err := q.db.Exec(ctx, recordRefundProviderReceipt, arg.ProviderRefundID, arg.MerchantID, arg.ReservationID)
 	return err
 }
 
