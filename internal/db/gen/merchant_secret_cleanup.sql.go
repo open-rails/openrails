@@ -66,7 +66,7 @@ SELECT r.id, r.merchant_id, r.psp_id, r.kind, r.actor, r.started_at, r.finished_
 JOIN openrails.merchants m ON m.id=r.merchant_id
 WHERE r.merchant_id=$1::uuid AND r.id=$2::uuid
   AND r.kind='merchant_purge' AND m.deleted_at IS NOT NULL
-  AND r.coverage->>'database_purged'='true'
+  AND r.affected->>'database_purged'='true'
 FOR UPDATE OF r,m
 `
 
@@ -100,8 +100,7 @@ func (q *Queries) LockMerchantSecretCleanupRun(ctx context.Context, arg LockMerc
 
 const markMerchantDatabasePurged = `-- name: MarkMerchantDatabasePurged :exec
 UPDATE openrails.destructive_runs
-SET coverage=coverage || '{"database_purged":true}'::jsonb,
-    affected=$1::jsonb
+SET affected=$1::jsonb || '{"database_purged":true}'::jsonb
 WHERE merchant_id=$2::uuid AND id=$3::uuid
 `
 
@@ -120,8 +119,9 @@ const recordMerchantSecretCleanup = `-- name: RecordMerchantSecretCleanup :execr
 UPDATE openrails.destructive_runs
 SET status=$1::text,
     finished_at=CASE WHEN $1::text='completed' THEN now() ELSE NULL END,
-    affected=COALESCE(affected,'{}'::jsonb) || jsonb_build_object('external_secrets_deleted',$2::int),
-    coverage=coverage || jsonb_build_object('secret_cleanup_error',$3::text,'secret_cleanup_attempted_at',now())
+    affected=COALESCE(affected,'{}'::jsonb) || jsonb_build_object(
+      'external_secrets_deleted',$2::int,
+      'secret_cleanup_error',$3::text,'secret_cleanup_attempted_at',now())
 WHERE merchant_id=$4::uuid AND id=$5::uuid
 `
 

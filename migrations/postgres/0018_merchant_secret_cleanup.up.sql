@@ -11,7 +11,7 @@ BEGIN
  RETURN QUERY SELECT r.merchant_id,r.id FROM openrails.destructive_runs r
  JOIN openrails.merchants m ON m.id=r.merchant_id
  WHERE r.kind='merchant_purge' AND r.status IN ('running','failed')
-   AND r.coverage->>'database_purged'='true' AND r.coverage ? 'secret_cleanup'
+   AND r.affected->>'database_purged'='true' AND r.coverage ? 'secret_cleanup'
    AND m.deleted_at IS NOT NULL AND (p_after IS NULL OR r.id>p_after)
  ORDER BY r.id LIMIT p_limit;
 END;
@@ -20,4 +20,4 @@ REVOKE ALL ON FUNCTION openrails.pending_merchant_secret_cleanups(uuid,integer) 
 GRANT EXECUTE ON FUNCTION openrails.pending_merchant_secret_cleanups(uuid,integer) TO openrails_app;
 CREATE INDEX destructive_runs_pending_secret_cleanup_idx ON openrails.destructive_runs(id)
  WHERE kind='merchant_purge' AND status IN ('running','failed')
- AND coverage->>'database_purged'='true' AND coverage ? 'secret_cleanup';
+ AND affected->>'database_purged'='true' AND coverage ? 'secret_cleanup';

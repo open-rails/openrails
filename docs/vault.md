@@ -187,3 +187,31 @@ OpenRails sends the serialized transaction message to `transit/sign/<key>` (raw 
 merchant's on-chain address — from `transit/keys/<key>`. Transit works with either secret backend
 and in both merchant-source modes. A Transit key rotation mints a new keypair, so it carries the
 same on-chain identity caveat as any signer change.
+
+## Merchant purge cleanup
+
+A committed merchant purge records its immutable Vault address/namespace and UUID
+root in `destructive_runs.coverage.secret_cleanup`. Database completion is stored
+in `affected.database_purged`; the original authorization/inventory proof remains
+immutable. The run stays `running` or `failed` until every secret version has been
+deleted and a fresh root listing is empty. An external failure returns
+`merchant secret cleanup pending` instead of reporting a complete purge.
+
+The `openrails.merchant_secret_cleanup` worker retries committed, tombstoned
+purges every five minutes and on startup. It re-lists the captured UUID root, so
+credentials written after inventory but before tombstoning are included. A
+changed Vault address, namespace, or mount is refused: restore the original
+backend configuration to finish its outstanding cleanup. No secret values are
+stored in the journal.
+
+Runtime Vault writes and purge tombstoning take the same merchant row lock.
+Writes that finish first are swept; writes after tombstoning are rejected.
+Request-pinned database connections are reused. Direct operator writes to Vault
+bypass OpenRails lifecycle locks: stop writing a purged UUID's subtree and remove
+any per-merchant Vault credentials/policies before erasure. The process-level
+Vault credential cannot prevent an independently authorized operator from
+recreating a secret after cleanup.
+
+This does not enable merchant purge on an HTTP or CLI surface. Its existing
+inventory/confirmation/destructive-policy requirements and unwired-purge guard
+remain in place.

@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -73,7 +74,7 @@ func newVaultPurgeFixture(t *testing.T) *vaultPurgeFixture {
 			}
 		}
 		proxy.ServeHTTP(w, r)
-		if f.blockWrite.Load() && r.Method == "LIST" && strings.Contains(r.URL.Path, "/metadata/") {
+		if f.blockWrite.Load() && (r.Method == "LIST" || r.URL.Query().Get("list") == "true") && strings.Contains(r.URL.Path, "/metadata/") {
 			f.inventoryOnce.Do(func() { close(f.inventoryRead) })
 		}
 	}))
@@ -113,6 +114,12 @@ func TestVaultUUIDPathsSurviveRenameAndReclaim(t *testing.T) {
 	f := newVaultPurgeFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	manifest := bootstrap.MerchantConfig{Custodians: map[string]bootstrap.CustodianConfig{
+		"vault-test": {"basistheory": bootstrap.CustodianAccountConfig{AccountID: "bt-tenant-test", Secrets: map[string]string{"api_key": "private-bootstrap-key"}}},
+	}}
+	require.NoError(t, f.database.RunInMerchantScope(ctx, f.id, "bootstrap seed", func(ctx context.Context) error {
+		return bootstrap.SeedMerchantManifestSecretPlane(ctx, f.cfg, f.id, manifest, f.store.Secrets, nil)
+	}))
 	name, err := merchants.PSPSecretName("stripe", "test", "acct_uuid", "webhook_signing_secret")
 	require.NoError(t, err)
 	require.NoError(t, f.database.RunInMerchantScope(ctx, f.id, "test write", func(ctx context.Context) error {
@@ -190,6 +197,8 @@ func TestVaultPurgeIncludesWriteCommittedAfterInventory(t *testing.T) {
 	f := newVaultPurgeFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	var release sync.Once
+	defer release.Do(func() { close(f.releaseWrite) })
 	inventory, err := f.service.TakePurgeInventory(ctx, f.id)
 	require.NoError(t, err)
 	name, _ := merchants.PSPSecretName("stripe", "test", "acct_race", "webhook_signing_secret")
@@ -224,7 +233,7 @@ func TestVaultPurgeIncludesWriteCommittedAfterInventory(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("purge inventory was not read")
 	}
-	close(f.releaseWrite)
+	release.Do(func() { close(f.releaseWrite) })
 	require.NoError(t, <-writeResult)
 	require.NoError(t, <-purged)
 	names, err := f.store.Secrets.List(ctx, f.id)
