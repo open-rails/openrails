@@ -78,11 +78,16 @@ const cancelSubscriptionReprice = `-- name: CancelSubscriptionReprice :execrows
 UPDATE openrails.subscription_reprices SET
     status = 'canceled',
     canceled_at = now()
-WHERE id = $1 AND status = 'scheduled'
+WHERE merchant_id = $1::uuid AND id = $2 AND status = 'scheduled'
 `
 
-func (q *Queries) CancelSubscriptionReprice(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, cancelSubscriptionReprice, id)
+type CancelSubscriptionRepriceParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) CancelSubscriptionReprice(ctx context.Context, arg CancelSubscriptionRepriceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, cancelSubscriptionReprice, arg.MerchantID, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -258,18 +263,18 @@ func (q *Queries) GetScheduledRepriceForSubscription(ctx context.Context, subscr
 }
 
 const getSubscriptionRepriceByID = `-- name: GetSubscriptionRepriceByID :one
-SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices WHERE id = $1
+SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
-// SEC-18 NOTE: this by-id surface still has NO application-level merchant
-// predicate; RLS is its only control. A GUC-derived predicate (the fix used for
-// the reconciliation findings) is wrong HERE because RepriceRepo is shared with
-// the plan-migration batch/re-driver paths, which do not consistently pin a
-// merchant connection — it would trade a hardening for an availability bug of
-// exactly the #824 shape. The honest fix is threading merchant.ID through the
-// repo, same as the by-customer admin surface. Tracked in SEC-18.
-func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, id uuid.UUID) (OpenrailsSubscriptionReprice, error) {
-	row := q.db.QueryRow(ctx, getSubscriptionRepriceByID, id)
+type GetSubscriptionRepriceByIDParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// Merchant identity is explicit so both request and context-scoped worker calls
+// are isolated without depending on a connection-local GUC.
+func (q *Queries) GetSubscriptionRepriceByID(ctx context.Context, arg GetSubscriptionRepriceByIDParams) (OpenrailsSubscriptionReprice, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionRepriceByID, arg.MerchantID, arg.ID)
 	var i OpenrailsSubscriptionReprice
 	err := row.Scan(
 		&i.ID,
@@ -371,14 +376,16 @@ func (q *Queries) ListRedrivablePlanChangeMerchants(ctx context.Context, merchan
 
 const listSubscriptionReprices = `-- name: ListSubscriptionReprices :many
 SELECT id, merchant_id, subscription_id, from_price_id, to_price_id, effective_at, status, reprice_batch_id, created_at, applied_at, canceled_at, acknowledged_short_notice, kind, blocked_reason FROM openrails.subscription_reprices
-WHERE ($1::uuid IS NULL OR subscription_id = $1::uuid)
-  AND ($2::uuid IS NULL OR reprice_batch_id = $2::uuid)
-  AND ($3::text IS NULL OR status = $3::text)
+WHERE merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR subscription_id = $2::uuid)
+  AND ($3::uuid IS NULL OR reprice_batch_id = $3::uuid)
+  AND ($4::text IS NULL OR status = $4::text)
 ORDER BY created_at DESC
-LIMIT $5::int OFFSET $4::int
+LIMIT $6::int OFFSET $5::int
 `
 
 type ListSubscriptionRepricesParams struct {
+	MerchantID     uuid.UUID
 	SubscriptionID *uuid.UUID
 	RepriceBatchID *uuid.UUID
 	Status         *string
@@ -388,6 +395,7 @@ type ListSubscriptionRepricesParams struct {
 
 func (q *Queries) ListSubscriptionReprices(ctx context.Context, arg ListSubscriptionRepricesParams) ([]OpenrailsSubscriptionReprice, error) {
 	rows, err := q.db.Query(ctx, listSubscriptionReprices,
+		arg.MerchantID,
 		arg.SubscriptionID,
 		arg.RepriceBatchID,
 		arg.Status,

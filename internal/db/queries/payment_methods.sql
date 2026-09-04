@@ -31,16 +31,19 @@ DELETE FROM openrails.payment_methods WHERE id = $1;
 
 -- name: ListPaymentMethodsByCustomer :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.customer_id = $1
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pm.customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY pm.created_at DESC;
 
 -- name: CountPaymentMethodsByCustomer :one
 SELECT count(*) FROM openrails.payment_methods pm
-WHERE pm.customer_id = $1;
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pm.customer_id = sqlc.arg(customer_id)::uuid;
 
 -- name: ListPaymentMethodsByCustomerPaged :many
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.customer_id = $1
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pm.customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY pm.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 

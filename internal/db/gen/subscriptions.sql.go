@@ -923,13 +923,20 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndTierGroup(ctx context.Conte
 
 const listActiveSubscriptionsByCustomer = `-- name: ListActiveSubscriptionsByCustomer :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
-WHERE sub.customer_id = $1 AND sub.status = 'active'
+WHERE sub.merchant_id = $1::uuid
+  AND sub.customer_id = $2::uuid
+  AND sub.status = 'active'
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
 `
 
-func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, customerID uuid.UUID) ([]OpenrailsSubscription, error) {
-	rows, err := q.db.Query(ctx, listActiveSubscriptionsByCustomer, customerID)
+type ListActiveSubscriptionsByCustomerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, arg ListActiveSubscriptionsByCustomerParams) ([]OpenrailsSubscription, error) {
+	rows, err := q.db.Query(ctx, listActiveSubscriptionsByCustomer, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}
