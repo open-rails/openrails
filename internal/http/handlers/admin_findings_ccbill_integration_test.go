@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -204,7 +205,7 @@ func TestFindingsQueueApproveCCBillCancelAndRefund(t *testing.T) {
 	assert.Equal(t, "completed", refundStatus)
 	// CCBill has no discrete provider refund id; the recorded ref composes the
 	// subscription + original transaction (ccbillRefundProviderRef).
-	assert.Equal(t, "ccbill_refund:"+psid+":"+txnID, refundTxn)
+	assert.True(t, strings.HasPrefix(refundTxn, "ccbill_refund:"+psid+":"+txnID+":"))
 
 	row := fx.findingRow(refundFinding)
 	assert.Equal(t, "fixed", row.Status)

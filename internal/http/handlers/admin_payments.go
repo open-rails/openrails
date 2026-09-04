@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ccoveille/go-safecast/v2"
@@ -22,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -45,15 +42,6 @@ type refundRequest struct {
 }
 
 const adminRefundIdempotencyHeader = "Idempotency-Key"
-
-var adminRefundLocks sync.Map
-
-func lockAdminRefund(paymentID string) func() {
-	value, _ := adminRefundLocks.LoadOrStore(paymentID, &sync.Mutex{})
-	mu := value.(*sync.Mutex)
-	mu.Lock()
-	return mu.Unlock
-}
 
 func adminRefundLockKey(paymentID string) int64 {
 	h := fnv.New64a()
@@ -99,9 +87,6 @@ func AdminRefundPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, adminRefundIdempotencyHeader+" is required")
 		return
 	}
-	unlock := lockAdminRefund(paymentID.String())
-	defer unlock()
-
 	refund, status, err := executeAdminRefund(r.Request.Context(), r, paymentID, req, idempotencyKey)
 	if err != nil {
 		status, message := adminRefundErrorResponse(err)
@@ -112,28 +97,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 		r.ErrorJSON(status, message)
 		return
 	}
-	if req.RevokeAccess {
-		if err := revokeAccessForRefund(r, paymentID); err != nil {
-			log.WithError(err).WithField("payment_id", paymentID).Error("admin refund succeeded but access revocation failed")
-			r.ErrorJSON(http.StatusInternalServerError, "refund succeeded but access revocation failed")
-			return
-		}
-	}
 	r.JSON(status, PaymentToAPI(refund, nil))
-}
-
-func revokeAccessForRefund(r *httprequest.Request, paymentID uuid.UUID) error {
-	if r.State.EntitlementService != nil {
-		if err := r.State.EntitlementService.EndActiveByPayment(r.Request.Context(), paymentID, models.EntitlementRevokeRefund); err != nil {
-			return err
-		}
-	}
-	if svc := productAccessService(r); svc != nil {
-		if _, err := svc.RevokeProductAccessByPayment(r.Request.Context(), paymentID, models.ProductAccessRevokeRefund); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID uuid.UUID, req refundRequest, idempotencyKey string) (*models.Payment, int, error) {
@@ -159,7 +123,7 @@ func executeAdminRefund(ctx context.Context, r *httprequest.Request, paymentID u
 	if err != nil {
 		return nil, 0, err
 	}
-	return issuePreparedAdminRefund(ctx, r, r.State.PaymentService, prepared, req, idempotencyKey)
+	return issuePreparedAdminRefund(ctx, r, prepared)
 }
 
 type adminRefundStatusError struct {
@@ -182,19 +146,8 @@ func adminRefundErrorResponse(err error) (int, string) {
 }
 
 type adminRefundPrepared struct {
-	existing    *models.Payment
-	payment     *models.Payment
-	reservation *models.Payment
-	// amountCents is req.Amount (micros) converted at the provider boundary:
-	// NMI and Stripe both refund in cents (typed, #671). Exact conversion —
-	// sub-cent micros are rejected in prepare, never rounded.
-	amountCents          moneyutil.Cents
-	stripeRefundTargetID string
-	nmiClient            *nmi.NMIClient
-	// CCBill refund coordinates: the DataLink voidOrRefundTransaction key
-	// (subscription.rail_subscription_id) + the original transaction id.
-	ccbillSubscriptionID string
-	ccbillTransactionID  string
+	reservationID uuid.UUID
+	intentID      uuid.UUID
 }
 
 // refundAmountCents converts an admin refund request amount (internal units at
@@ -219,14 +172,11 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		if !adminRefundMatchesRequest(existing, req) {
 			return nil, adminRefundHTTPError(http.StatusConflict, "idempotency key was already used for a different refund request")
 		}
-		switch strings.ToLower(strings.TrimSpace(existing.Status)) {
-		case "", "completed":
-			return &adminRefundPrepared{existing: existing}, nil
-		case "pending":
-			return nil, adminRefundHTTPError(http.StatusConflict, "refund request is already pending")
-		default:
-			return nil, adminRefundHTTPError(http.StatusConflict, "refund request already failed; retry with a new idempotency key")
+		var intentID uuid.UUID
+		if err := txDB.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.rail_intents WHERE payment_id=$1 AND idempotency_key=$2`, paymentID, intents.RefundIdempotencyKey(paymentID, idempotencyKey)).Scan(&intentID); err != nil {
+			return nil, fmt.Errorf("load refund intent: %w", err)
 		}
+		return &adminRefundPrepared{reservationID: existing.ID, intentID: intentID}, nil
 	} else if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load existing refund request: %w", err)
 	}
@@ -238,9 +188,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		return nil, adminRefundHTTPError(http.StatusBadRequest, err.Error())
 	}
 
-	prepared := &adminRefundPrepared{payment: payment, amountCents: moneyutil.Cents(amountCents)}
 	var stripeRefundTargetID string
-	var nmiClient *nmi.NMIClient
 	var ccbillSubscriptionID, ccbillTransactionID string
 	switch {
 	case payment.Rail == models.RailCCBill:
@@ -279,22 +227,46 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		if cerr != nil || !ok || client == nil {
 			return nil, adminRefundHTTPError(http.StatusInternalServerError, "payment rail not configured")
 		}
-		nmiClient = client
 	default:
 		return nil, adminRefundHTTPError(http.StatusBadRequest, fmt.Sprintf("refunds not supported for rail: %s", payment.Rail))
 	}
-	prepared.stripeRefundTargetID = stripeRefundTargetID
-	prepared.nmiClient = nmiClient
-	prepared.ccbillSubscriptionID = ccbillSubscriptionID
-	prepared.ccbillTransactionID = ccbillTransactionID
 
 	reservationMetadata := adminRefundMetadata(idempotencyKey, req, "pending", "")
 	reservation, err := paymentService.ReserveRefund(ctx, paymentID, adminRefundReservationTransactionID(paymentID, idempotencyKey), req.Amount, reservationMetadata)
 	if err != nil {
 		return nil, fmt.Errorf("reserve refund: %w", err)
 	}
-	prepared.reservation = reservation
-	return prepared, nil
+	if payment.PspID == nil {
+		return nil, adminRefundHTTPError(http.StatusConflict, "payment carries no PSP; it cannot be refunded on a rail")
+	}
+	providerTarget := payment.TransactionID
+	if payment.Rail == models.RailStripe {
+		providerTarget = stripeRefundTargetID
+	}
+	if payment.Rail == models.RailCCBill {
+		providerTarget = ccbillSubscriptionID
+	}
+	intentType, provider, intentKey, err := intents.RefundIntentFor(payment, idempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	intent, err := intents.NewStoreGated(txDB, r.State.RateCeiling()).Enqueue(ctx, intents.EnqueueParams{
+		MerchantID: mid.UUID(), Provider: provider, IntentType: intentType,
+		SubscriptionID: payment.SubscriptionID, PaymentID: &payment.ID, PspID: *payment.PspID,
+		Payload: intents.RefundPayload{OriginalPaymentID: payment.ID, ReservationID: reservation.ID,
+			AmountCents: amountCents, Reason: strings.TrimSpace(req.Reason), RevokeAccess: req.RevokeAccess,
+			ProviderTarget: providerTarget, ProviderTransactionID: ccbillTransactionID},
+		IdempotencyKey: intentKey, NextAttemptAt: r.Clock.Now().UTC(),
+		Origin: intents.OriginAdmin, OriginReason: "admin refund request",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enqueue refund intent: %w", err)
+	}
+	return &adminRefundPrepared{reservationID: reservation.ID, intentID: intent.ID}, nil
 }
 
 // ccbillManualRefundError: this specific payment can't resolve its CCBill
@@ -336,7 +308,8 @@ func adminRefundMatchesRequest(existing *models.Payment, req refundRequest) bool
 	if amount != req.Amount {
 		return false
 	}
-	return strings.TrimSpace(adminRefundMetadataString(existing.Metadata, "admin_refund_reason")) == strings.TrimSpace(req.Reason)
+	revoke, _ := existing.Metadata["admin_refund_revoke_access"].(bool)
+	return revoke == req.RevokeAccess && strings.TrimSpace(adminRefundMetadataString(existing.Metadata, "admin_refund_reason")) == strings.TrimSpace(req.Reason)
 }
 
 func adminRefundMetadataString(metadata map[string]any, key string) string {
@@ -354,135 +327,26 @@ func adminRefundMetadataString(metadata map[string]any, key string) string {
 	return str
 }
 
-// releaseAdminRefundReservation marks a refund reservation failed after the
-// provider-side refund could not be issued (intent-build error, an unexpected
-// rail reaching the issue stage, or a conflicting in-flight refund). A
-// failure to release is surfaced as 500 reservation_release_failed rather than
-// swallowed: a silently stranded `pending` reservation would otherwise block
-// this idempotency key from ever retrying. cause is the original trigger.
-func releaseAdminRefundReservation(ctx context.Context, paymentService *payments.PaymentService, reservationID uuid.UUID, cause error) error {
-	if err := paymentService.MarkFailed(ctx, reservationID); err != nil {
-		log.WithError(err).WithFields(log.Fields{
-			"reservation_id": reservationID,
-			"cause":          cause,
-		}).Error("admin refund: could not release reservation after refund error; reservation stranded in pending")
-		return adminRefundHTTPError(http.StatusInternalServerError, "reservation_release_failed")
-	}
-	return nil
-}
-
-// issuePreparedAdminRefund executes the provider-side money movement through
-// the intent ledger (#358 phase B): enqueue an admin-origin refund intent and
-// run it synchronously through the gate/execute/classify pipeline. The local
-// reservation flow is unchanged — the intent handler's finalize completes the
-// reservation on success (also when the success only lands later via the
-// scheduled executor/verifier) and releases it on a terminal refusal.
-func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, paymentService *payments.PaymentService, prepared *adminRefundPrepared, req refundRequest, idempotencyKey string) (*models.Payment, int, error) {
-	if prepared == nil {
-		return nil, 0, errors.New("refund preparation is required")
-	}
-	if prepared.existing != nil {
-		return prepared.existing, http.StatusCreated, nil
-	}
-	if prepared.payment == nil || prepared.reservation == nil {
-		return nil, 0, errors.New("refund preparation is incomplete")
-	}
-
-	var providerTarget, providerTransactionID string
-	switch {
-	case prepared.payment.Rail == models.RailStripe:
-		providerTarget = prepared.stripeRefundTargetID
-	case prepared.payment.Rail == models.RailCCBill:
-		// CCBill refunds against the subscriptionId; the transaction id narrows
-		// the refund to this specific charge.
-		providerTarget = prepared.ccbillSubscriptionID
-		providerTransactionID = prepared.ccbillTransactionID
-	case rails.IsNMI(prepared.payment.Rail):
-		providerTarget = prepared.payment.TransactionID
-	default:
-		// Unreachable by construction: prepareAdminRefund already rejects
-		// unsupported rails before a reservation exists. Reaching here means the
-		// issue-stage switch drifted from the prepare-stage guard — an internal
-		// invariant violation, not a user error.
-		cause := fmt.Errorf("rail %s reached refund issue stage unguarded", prepared.payment.Rail)
-		log.WithError(cause).WithField("payment_id", prepared.payment.ID).Error("admin refund: issue-stage rail switch drifted from prepare-stage guard")
-		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, cause); relErr != nil {
-			return nil, 0, relErr
-		}
-		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "refund processing error")
-	}
-
-	intentType, provider, intentKey, err := intents.RefundIntentFor(prepared.payment, providerTarget, prepared.amountCents, req.Reason)
+// The reservation and intent are already committed. Request cancellation cannot
+// discard the work; the scheduled executor can finish the same operation.
+func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepared *adminRefundPrepared) (*models.Payment, int, error) {
+	intent, err := r.State.IntentRunner().ExecuteByID(ctx, prepared.intentID)
 	if err != nil {
-		log.WithError(err).WithField("payment_id", prepared.payment.ID).Warn("admin refund: building refund intent failed")
-		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, err); relErr != nil {
-			return nil, 0, relErr
-		}
-		return nil, 0, adminRefundHTTPError(http.StatusBadRequest, err.Error())
+		return nil, 0, fmt.Errorf("execute refund intent: %w", err)
 	}
-
-	paymentRowID := prepared.payment.ID
-	tid, err := merchant.Require(ctx)
+	paymentService := r.State.PaymentService
+	// Finalization and access revocation commit together, before the intent's
+	// success transition. Recover that outcome even if its lease expired there.
+	refund, err := paymentService.GetByID(ctx, prepared.reservationID)
 	if err != nil {
-		return nil, 0, adminRefundHTTPError(http.StatusInternalServerError, "no merchant resolved on request")
+		return nil, 0, err
 	}
-	// The charge's own provenance is the only honest answer to "which account
-	// refunds this?" — an off-rail payment has no provider to refund through.
-	if prepared.payment.PspID == nil {
-		return nil, 0, adminRefundHTTPError(http.StatusConflict, "payment carries no PSP; it was not taken through a provider and cannot be refunded on a rail")
+	if payments.PaymentStatusCompleted(refund.Status) {
+		return refund, http.StatusCreated, nil
 	}
-	pspID := *prepared.payment.PspID
-	intent, err := r.State.IntentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID:     tid.UUID(),
-		Provider:       provider,
-		IntentType:     intentType,
-		SubscriptionID: prepared.payment.SubscriptionID,
-		PaymentID:      &paymentRowID,
-		// or#893: a refund is executed against the account that took the charge.
-		PspID: pspID,
-		Payload: intents.RefundPayload{
-			OriginalPaymentID:     prepared.payment.ID,
-			ReservationID:         prepared.reservation.ID,
-			AmountCents:           prepared.amountCents,
-			Reason:                strings.TrimSpace(req.Reason),
-			ProviderTarget:        providerTarget,
-			ProviderTransactionID: providerTransactionID,
-		},
-		IdempotencyKey: intentKey,
-		NextAttemptAt:  time.Now().UTC(),
-		Origin:         intents.OriginAdmin,
-		OriginReason:   "admin refund request",
-	})
-	if err != nil {
-		return nil, 0, fmt.Errorf("enqueue refund intent: %w", err)
-	}
-
-	// The intent identity is content-addressed (payment + amount [+ reason]):
-	// a conflict pointing at a DIFFERENT reservation means this exact refund
-	// was already requested through another admin idempotency key. Never
-	// re-execute it — release this reservation and surface the conflict.
-	var intentPayload intents.RefundPayload
-	if len(intent.Payload) > 0 {
-		_ = json.Unmarshal(intent.Payload, &intentPayload)
-	}
-	if intentPayload.ReservationID != prepared.reservation.ID {
-		cause := fmt.Errorf("content-addressed refund intent already bound to reservation %s", intentPayload.ReservationID)
-		if relErr := releaseAdminRefundReservation(ctx, paymentService, prepared.reservation.ID, cause); relErr != nil {
-			return nil, 0, relErr
-		}
-		if intent.Status == intents.StatusSucceeded {
-			return nil, 0, adminRefundHTTPError(http.StatusConflict, "an identical refund (same payment, amount and reason) was already issued")
-		}
-		return nil, 0, adminRefundHTTPError(http.StatusConflict, "an identical refund request is already in progress")
-	}
-
 	switch intent.Status {
 	case intents.StatusSucceeded:
-		refund, err := paymentService.GetByID(ctx, prepared.reservation.ID)
-		if err != nil {
-			return nil, 0, fmt.Errorf("refund issued but failed to load: %w", err)
-		}
-		return refund, http.StatusCreated, nil
+		return nil, 0, errors.New("successful refund intent has an incomplete reservation")
 	case intents.StatusFailedTerminal:
 		message := "refund failed"
 		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
@@ -504,11 +368,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, payme
 				return ""
 			}(),
 		}).Warn("admin refund queued on the provider intent ledger (not completed inline)")
-		reservation, err := paymentService.GetByID(ctx, prepared.reservation.ID)
-		if err != nil {
-			return nil, 0, fmt.Errorf("refund queued but reservation failed to load: %w", err)
-		}
-		return reservation, http.StatusAccepted, nil
+		return refund, http.StatusAccepted, nil
 	}
 }
 
@@ -526,6 +386,7 @@ func adminRefundMetadata(idempotencyKey string, req refundRequest, status string
 		"admin_refund_idempotency_key": strings.TrimSpace(idempotencyKey),
 		"admin_refund_status":          status,
 		"admin_refund_amount":          req.Amount,
+		"admin_refund_revoke_access":   req.RevokeAccess,
 	}
 	if reason := strings.TrimSpace(req.Reason); reason != "" {
 		metadata["admin_refund_reason"] = reason
