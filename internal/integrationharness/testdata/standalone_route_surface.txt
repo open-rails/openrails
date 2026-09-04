@@ -80,6 +80,7 @@ GET /v1/merchant/customers/{customer_id}/credit-transactions
 GET /v1/merchant/customers/{customer_id}/credits
 GET /v1/merchant/customers/{customer_id}/delinquency
 GET /v1/merchant/customers/{customer_id}/entitlements
+GET /v1/merchant/customers/{customer_id}/invoice-profile
 GET /v1/merchant/customers/{customer_id}/payment-methods
 GET /v1/merchant/customers/{customer_id}/payments
 GET /v1/merchant/customers/{customer_id}/rate-overrides
@@ -88,6 +89,9 @@ GET /v1/merchant/delinquency
 GET /v1/merchant/entitlements/{entitlement}/customers
 GET /v1/merchant/findings
 GET /v1/merchant/findings/{id}
+GET /v1/merchant/invoices
+GET /v1/merchant/invoices/{id}
+GET /v1/merchant/invoices/{id}/payments
 GET /v1/merchant/invokers/{invoker}/credits
 GET /v1/merchant/metrics/schema
 GET /v1/merchant/notifications
@@ -170,6 +174,10 @@ POST /v1/merchant/customers/{customer_id}/payments/off-channel
 POST /v1/merchant/customers/{customer_id}/product-access
 POST /v1/merchant/dashboard/widgets/generate
 POST /v1/merchant/findings/{id}/resolve
+POST /v1/merchant/invoices/{id}/payments
+POST /v1/merchant/invoices/{id}/retry-collection
+POST /v1/merchant/invoices/{id}/uncollectible
+POST /v1/merchant/invoices/{id}/void
 POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
 POST /v1/merchant/notifications/{id}/read
@@ -206,6 +214,7 @@ PUT /v1/merchant/catalog/meters/{key}
 PUT /v1/merchant/catalog/meters/{key}/rate-card
 PUT /v1/merchant/credit-limit
 PUT /v1/merchant/customers/{customer_id}/business-profile
+PUT /v1/merchant/customers/{customer_id}/invoice-profile
 PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}
 PUT /v1/merchant/customers/{customer_id}/spend-delegations
 PUT /v1/merchant/customers/{customer_id}/spend-delegations:upsert

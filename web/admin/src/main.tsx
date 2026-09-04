@@ -9,11 +9,33 @@ import { Toaster } from "@/components/ui/sonner"
 import { AppLayout } from "@/layouts/app-layout"
 import { AuthProvider } from "@/lib/auth"
 import { queryClient } from "@/lib/query-client"
+<<<<<<< HEAD
 const routeLoading = (
   <div role="status" className="p-6 text-sm text-muted-foreground">
     Loading…
   </div>
 )
+=======
+import {
+  CatalogDriftPage,
+  CatalogPricesPage,
+  CatalogProductsPage,
+} from "@/pages/catalog"
+import { PriceDetailPage } from "@/pages/catalog/price-detail"
+import { CatalogMeteringPage, MeterDetailPage } from "@/pages/catalog/metering"
+import { CustomersPage } from "@/pages/customers"
+import { CustomerDetailPage } from "@/pages/customers/detail"
+import { DashboardPage } from "@/pages/dashboard"
+import { LoginPage } from "@/pages/login"
+import { OpsPage } from "@/pages/ops"
+import { InvoicesPage } from "@/pages/invoices"
+import { InvoiceDetailPage } from "@/pages/invoices/detail"
+import { PaymentsPage } from "@/pages/payments"
+import { PaymentDetailPage } from "@/pages/payments/detail"
+import { SettingsPage } from "@/pages/settings"
+import { SubscriptionsPage } from "@/pages/subscriptions"
+import { SubscriptionDetailPage } from "@/pages/subscriptions/detail"
+>>>>>>> origin/master
 
 const router = createBrowserRouter(
   [
@@ -30,6 +52,7 @@ const router = createBrowserRouter(
       hydrateFallbackElement: routeLoading,
       element: <AppLayout />,
       children: [
+<<<<<<< HEAD
         {
           index: true,
           lazy: () =>
@@ -135,6 +158,25 @@ const router = createBrowserRouter(
               Component: module.SettingsPage,
             })),
         },
+=======
+        { index: true, element: <DashboardPage /> },
+        { path: "customers", element: <CustomersPage /> },
+        { path: "customers/:customerId", element: <CustomerDetailPage /> },
+        { path: "subscriptions", element: <SubscriptionsPage /> },
+        { path: "subscriptions/:id", element: <SubscriptionDetailPage /> },
+        { path: "payments", element: <PaymentsPage /> },
+        { path: "invoices", element: <InvoicesPage /> },
+        { path: "invoices/:id", element: <InvoiceDetailPage /> },
+        { path: "payments/:id", element: <PaymentDetailPage /> },
+        { path: "catalog", element: <CatalogProductsPage /> },
+        { path: "catalog/prices", element: <CatalogPricesPage /> },
+        { path: "catalog/prices/:id", element: <PriceDetailPage /> },
+        { path: "catalog/metering", element: <CatalogMeteringPage /> },
+        { path: "catalog/metering/:key", element: <MeterDetailPage /> },
+        { path: "catalog/drift", element: <CatalogDriftPage /> },
+        { path: "ops", element: <OpsPage /> },
+        { path: "settings", element: <SettingsPage /> },
+>>>>>>> origin/master
       ],
     },
   ],
