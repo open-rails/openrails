@@ -3,11 +3,11 @@ package riverjobs
 import (
 	"context"
 	"fmt"
-	"github.com/jonboulle/clockwork"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/catalog"
