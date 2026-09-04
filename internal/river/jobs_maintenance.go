@@ -3,6 +3,7 @@ package riverjobs
 import (
 	"context"
 	"fmt"
+	"github.com/jonboulle/clockwork"
 	"strings"
 	"time"
 
@@ -19,9 +20,17 @@ import (
 // CCBillReconciler is the CCBill DataLink guarded-repair scan. It is NOT a River
 // job: ProviderRefreshWorker's CCBill lane calls Run directly.
 type CCBillReconciler struct {
+	Clock               clockwork.Clock
 	DB                  *db.DB
 	DataLink            *ccbill.DataLinkClient
 	NotificationService *subscriptions.NotificationService
+}
+
+func (w CCBillReconciler) now() time.Time {
+	if w.Clock != nil {
+		return w.Clock.Now().UTC()
+	}
+	return time.Now().UTC()
 }
 
 func (w CCBillReconciler) Run(ctx context.Context) error {
@@ -45,8 +54,9 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 	}
 	priceService := catalog.NewPriceService(w.DB)
 	productService := catalog.NewProductService(w.DB)
-	subscriptionService := subscriptions.NewSubscriptionService(w.DB, priceService, productService, nil)
+	subscriptionService := subscriptions.NewSubscriptionService(w.DB, priceService, productService, nil, w.Clock)
 	lifecycleService := &subscriptions.SubscriptionLifecycleService{DB: w.DB}
+	lifecycleService.SetClock(w.Clock)
 	localActive, err := subscriptionService.GetActiveSubscriptionsByRail(ctx, "ccbill")
 	if err != nil {
 		return fmt.Errorf("load local ccbill subscriptions: %w", err)
@@ -102,7 +112,7 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 		if existing.Status == "active" {
 			continue
 		}
-		paidThrough, ok := ccbill.DataLinkPaidThrough(record, time.Now().UTC())
+		paidThrough, ok := ccbill.DataLinkPaidThrough(record, w.now())
 		if !ok {
 			if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_paid_through", &existing.ID, existing.CustomerID.String(), railSubID, &record, nil); alertErr != nil {
 				log.WithContext(ctx).WithError(alertErr).Warn("CCBillReconcile: failed to persist missing-paid-through repair alert")
@@ -162,7 +172,7 @@ func (w CCBillReconciler) recordDataLinkRepairAlert(ctx context.Context, operati
 		metadata["datalink_username"] = record.Username
 		metadata["datalink_email"] = record.Email
 	}
-	return webhooks.RecordLedgerRepairAlert(ctx, w.NotificationService, w.DB, time.Now().UTC(), webhooks.LedgerRepairAlert{
+	return webhooks.RecordLedgerRepairAlert(ctx, w.NotificationService, w.DB, w.now(), webhooks.LedgerRepairAlert{
 		Provider:       "ccbill",
 		Operation:      operation,
 		SubscriptionID: subscriptionID,

@@ -15,7 +15,7 @@
     "lint": "eslint .",
     "format": "prettier --write \"**/*.{ts,tsx}\"",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -34,9 +34,8 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "react-grid-layout": "^2.2.3",
-    "react-router-dom": "^7.18.1",
+    "react-router-dom": "7.18.2",
     "recharts": "^3.9.2",
-    "shadcn": "^4.13.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.6.0",
     "tailwindcss": "^4",
@@ -58,6 +57,7 @@
     "typescript": "~6",
     "typescript-eslint": "^8",
     "vite": "^8",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "shadcn": "^4.13.0"
   }
 }

@@ -281,7 +281,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 		result["cancel"] = "noop_already_cancelled"
 		return nil
 	}
-	now := time.Now().UTC()
+	now := r.Clock.Now().UTC()
 	feedback := reason
 
 	switch {

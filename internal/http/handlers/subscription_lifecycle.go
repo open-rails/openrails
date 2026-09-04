@@ -155,7 +155,7 @@ func ResumeSubscription(r *httprequest.Request) {
 	// Gate on the single shared resumability predicate so the handler, the
 	// worker, and the DTO cannot drift. Resumable == CancelMode reversible &&
 	// cancelled && period end in the future. Preserve distinguishable 400s.
-	now := time.Now().UTC()
+	now := r.Clock.Now().UTC()
 	if !subscriptions.Resumable(sub, now) {
 		if sub.Status != models.StatusCancelled {
 			r.ErrorJSON(http.StatusBadRequest, "subscription is not cancelled")

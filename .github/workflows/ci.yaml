@@ -106,6 +106,12 @@ jobs:
         if: needs.changes.outputs.go == 'true'
         with:
           variant: vet
+      - name: Source guardrails
+        if: needs.changes.outputs.go == 'true'
+        run: |
+          bash scripts/check_business_time_test.sh
+          bash scripts/check_business_time.sh
+          bash scripts/sql-lint.sh
       - name: Download modules
         if: needs.changes.outputs.go == 'true'
         run: go mod download

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"time"
+
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
@@ -161,6 +163,7 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 
 type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
+	Clock                        clockwork.Clock
 	DB                           *db.DB
 	Config                       *config.Config
 	Rails                        railresolve.Source
@@ -200,7 +203,7 @@ func (w ResumeSubscriptionWorker) resume(ctx context.Context, args ResumeSubscri
 	userID := args.UserID
 	var sub *models.Subscription
 	var err error
-	now := time.Now().UTC()
+	now := timeutil.FirstClock(w.Clock).Now().UTC()
 
 	// If subscription ID is provided, use it directly
 	if args.SubscriptionID != uuid.Nil {

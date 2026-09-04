@@ -91,7 +91,7 @@ func selfLimitOffset(r *httprequest.Request, def int) (int, int) {
 }
 
 func selfUsageWindow(r *httprequest.Request) (time.Time, time.Time, bool) {
-	to := time.Now().UTC()
+	to := r.Clock.Now().UTC()
 	from := to.AddDate(0, -1, 0)
 	if raw := r.Request.URL.Query().Get("from"); raw != "" {
 		parsed, err := parseSelfTime(raw)

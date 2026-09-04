@@ -186,7 +186,7 @@ func (r *CheckoutSessionRepo) GetByReference(ctx context.Context, reference stri
 	return models.CheckoutSessionFromGen(row)
 }
 
-func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error) {
+func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail, now time.Time) (*models.CheckoutSession, error) {
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
@@ -195,7 +195,7 @@ func (r *CheckoutSessionRepo) GetLatestOpenByUserPriceRail(ctx context.Context, 
 		CustomerID: tsid,
 		PriceID:    priceID,
 		Rail:       string(rail),
-		Now:        time.Now(),
+		Now:        now,
 	})
 	if err != nil {
 		return nil, err

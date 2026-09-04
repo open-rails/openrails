@@ -32,7 +32,11 @@ done
 export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5434}"
 export GARNET_HOST_PORT="${GARNET_HOST_PORT:-6380}"
 
-docker compose -f docker-compose.yaml up -d --wait postgres garnet
+# An explicitly supplied pair is owned by the caller. Do not start another
+# compose stack (or mutate its ports) when testing against existing services.
+if [[ -z "${OPENRAILS_TEST_DB_DSN:-${OPENRAILS_TEST_DB_URL:-}}" || -z "${OPENRAILS_TEST_REDIS_ADDR:-}" ]]; then
+  docker compose -f docker-compose.yaml up -d --wait postgres garnet
+fi
 
 export OPENRAILS_TEST_DB_DSN="${OPENRAILS_TEST_DB_DSN:-postgresql://admin:admin_password@127.0.0.1:${POSTGRES_HOST_PORT}/openrails_db?sslmode=disable}"
 export OPENRAILS_TEST_REDIS_ADDR="${OPENRAILS_TEST_REDIS_ADDR:-127.0.0.1:${GARNET_HOST_PORT}}"
