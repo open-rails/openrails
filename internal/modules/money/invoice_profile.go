@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 
@@ -16,6 +17,9 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
+
+// MaxInvoiceNetTermsDays prevents overflow when terms become a due-date duration.
+const MaxInvoiceNetTermsDays = int64((1<<63 - 1) / (24 * time.Hour))
 
 // Invoice collection methods (#798). charge_automatically charges the saved
 // payment method via ChargeOutstanding; send_invoice is a manual-remittance
@@ -72,8 +76,8 @@ func (s *MoneyService) writeCustomerInvoiceProfile(ctx context.Context, payer id
 		return false, fmt.Errorf("payer required")
 	}
 	netTerms, castErr := safecast.Convert[int32](p.NetTermsDays)
-	if castErr != nil || netTerms < 0 {
-		return false, fmt.Errorf("net_terms_days must be a non-negative int32")
+	if castErr != nil || netTerms < 0 || int64(netTerms) > MaxInvoiceNetTermsDays {
+		return false, fmt.Errorf("net_terms_days must be between 0 and %d", MaxInvoiceNetTermsDays)
 	}
 	method, err := normalizeCollectionMethod(p.CollectionMethod)
 	if err != nil {

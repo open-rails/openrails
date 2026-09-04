@@ -21,6 +21,8 @@ import { CustomerDetailPage } from "@/pages/customers/detail"
 import { DashboardPage } from "@/pages/dashboard"
 import { LoginPage } from "@/pages/login"
 import { OpsPage } from "@/pages/ops"
+import { InvoicesPage } from "@/pages/invoices"
+import { InvoiceDetailPage } from "@/pages/invoices/detail"
 import { PaymentsPage } from "@/pages/payments"
 import { PaymentDetailPage } from "@/pages/payments/detail"
 import { SettingsPage } from "@/pages/settings"
@@ -40,6 +42,8 @@ const router = createBrowserRouter(
         { path: "subscriptions", element: <SubscriptionsPage /> },
         { path: "subscriptions/:id", element: <SubscriptionDetailPage /> },
         { path: "payments", element: <PaymentsPage /> },
+        { path: "invoices", element: <InvoicesPage /> },
+        { path: "invoices/:id", element: <InvoiceDetailPage /> },
         { path: "payments/:id", element: <PaymentDetailPage /> },
         { path: "catalog", element: <CatalogProductsPage /> },
         { path: "catalog/prices", element: <CatalogPricesPage /> },

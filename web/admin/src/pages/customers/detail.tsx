@@ -53,6 +53,7 @@ import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
+import { CustomerInvoiceProfileSection } from "./invoice-profile"
 import { CollectionDefaultBadges } from "./collection-default-badges"
 import { CustomerUsageRatesSection } from "./usage-rates"
 import { AutoTopupSafetySummary } from "./auto-topup-safety"
@@ -134,6 +135,7 @@ export function CustomerDetailPage() {
         currencies={profile.credit_balance.map((balance) => balance.currency)}
       />
       <CustomerUsageRatesSection customerId={customerId} />
+      <CustomerInvoiceProfileSection customerId={customerId} />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
         <div className="grid gap-4 lg:col-span-2">
