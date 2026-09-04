@@ -186,7 +186,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 			`SELECT slug FROM openrails.merchants WHERE id = $1::uuid`, res.MerchantID.String()).Scan(&rowSlug))
 		require.Equal(t, newSlug, rowSlug, "directory row lazily re-synced to the group's current slug")
 
-		// OLD slug: forwards forever via the group tombstone; canonical slug wins.
+		// An active former-name alias resolves directly to the group; canonical name wins.
 		mid, canonical, err = cp.ResolveMerchantForGroup(ctx, oldSlug)
 		require.NoError(t, err, "renamed-away slug forwards (ak#264)")
 		require.Equal(t, res.MerchantID.String(), mid.String())
@@ -201,11 +201,15 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.Equal(t, res.MerchantID.String(), route.MerchantID.String())
 		require.Equal(t, newSlug, route.MerchantSlug)
 
-		// The tombstoned old name is not claimable by anyone else, ever.
-		_, err = embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
+		// Provisioning through an active alias is idempotent for its existing
+		// group. It must not create a fresh billing identity.
+		aliased, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
 			Slug: oldSlug, OwnerUserID: user.ID,
 		})
-		require.Error(t, err, "a tombstoned slug is never a fresh claim")
+		require.NoError(t, err)
+		require.False(t, aliased.Created)
+		require.Equal(t, res.MerchantID, aliased.MerchantID)
+		require.Equal(t, res.GroupID, aliased.GroupID)
 	})
 
 	t.Run("released names are claimable again; tombstoned directory rows do not pin them", func(t *testing.T) {
