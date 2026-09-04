@@ -24,7 +24,7 @@ require (
 	github.com/knadh/koanf/v2 v2.2.2
 	github.com/moby/moby/api v1.54.3-0.20260603163940-285b47192d4b
 	github.com/moby/moby/client v0.4.2-0.20260603163940-285b47192d4b
-	github.com/open-rails/authkit v0.93.0
+	github.com/open-rails/authkit v0.97.3-0.20260904233728-7d833afc0ee6
 	github.com/open-rails/migratekit v1.4.0
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.12.1
@@ -138,7 +138,7 @@ require (
 	github.com/riverqueue/river/riverdriver v0.26.0 // indirect
 	github.com/riverqueue/river/rivershared v0.26.0 // indirect
 	github.com/riverqueue/river/rivertype v0.26.0
-	github.com/sendgrid/rest v2.6.9+incompatible // indirect
+	github.com/sendgrid/rest v2.6.9+incompatible
 	github.com/shirou/gopsutil/v4 v4.26.3 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/streamingfast/logging v0.0.0-20250729153644-6ddeb9abb112 // indirect
