@@ -127,8 +127,16 @@ const CATALOG_PAGE_SIZE = 100
 
 function ProductsTab() {
   const [offset, setOffset] = React.useState(0)
-  const { data, isPending: loading, isFetching } = useQuery(
-    adminQueries.products({ limit: CATALOG_PAGE_SIZE, offset, errorAction: "Load products" })
+  const {
+    data,
+    isPending: loading,
+    isFetching,
+  } = useQuery(
+    adminQueries.products({
+      limit: CATALOG_PAGE_SIZE,
+      offset,
+      errorAction: "Load products",
+    })
   )
 
   return (
@@ -176,8 +184,13 @@ function ProductsTab() {
           </Table>
         </div>
       )}
-      <PaginationFooter total={data?.total ?? 0} limit={data?.limit ?? CATALOG_PAGE_SIZE}
-        offset={data?.offset ?? offset} loading={isFetching} onChange={setOffset} />
+      <PaginationFooter
+        total={data?.total ?? 0}
+        limit={data?.limit ?? CATALOG_PAGE_SIZE}
+        offset={data?.offset ?? offset}
+        loading={isFetching}
+        onChange={setOffset}
+      />
     </div>
   )
 }
@@ -503,9 +516,19 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
 
 function PricesTab() {
   const [offset, setOffset] = React.useState(0)
-  const { data: products } = useQuery(adminQueries.allProducts({ errorAction: "Load products" }))
-  const { data, isPending: loading, isFetching } = useQuery(
-    adminQueries.prices({ limit: CATALOG_PAGE_SIZE, offset, errorAction: "Load prices" })
+  const { data: products } = useQuery(
+    adminQueries.allProducts({ errorAction: "Load products" })
+  )
+  const {
+    data,
+    isPending: loading,
+    isFetching,
+  } = useQuery(
+    adminQueries.prices({
+      limit: CATALOG_PAGE_SIZE,
+      offset,
+      errorAction: "Load prices",
+    })
   )
   const productName = (id: string) =>
     products?.items.find((p) => p.id === id)?.display_name ?? shortId(id, 13)
@@ -559,8 +582,13 @@ function PricesTab() {
           </Table>
         </div>
       )}
-      <PaginationFooter total={data?.total ?? 0} limit={data?.limit ?? CATALOG_PAGE_SIZE}
-        offset={data?.offset ?? offset} loading={isFetching} onChange={setOffset} />
+      <PaginationFooter
+        total={data?.total ?? 0}
+        limit={data?.limit ?? CATALOG_PAGE_SIZE}
+        offset={data?.offset ?? offset}
+        loading={isFetching}
+        onChange={setOffset}
+      />
     </div>
   )
 }

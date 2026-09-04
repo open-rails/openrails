@@ -48,10 +48,18 @@ import {
 // Complete collections are explicit: selectors need every eligible record,
 // while catalog screens fetch only their visible page.
 export async function collectCatalogPages<Page extends ItemsEnvelope<unknown>>(
-  loadPage: (limit: number, offset: number, signal?: AbortSignal) => Promise<Page>,
+  loadPage: (
+    limit: number,
+    offset: number,
+    signal?: AbortSignal
+  ) => Promise<Page>,
   signal?: AbortSignal
 ): Promise<Page> {
+  signal?.throwIfAborted()
   const first = await loadPage(200, 0, signal)
+  if (first.limit <= 0 || (first.total > 0 && first.items.length === 0)) {
+    throw new Error("Catalog pagination stopped before all records were loaded")
+  }
   const items = [...first.items]
   let offset = first.offset + first.limit
   while (offset < first.total) {
@@ -59,7 +67,9 @@ export async function collectCatalogPages<Page extends ItemsEnvelope<unknown>>(
     const page = await loadPage(200, offset, signal)
     const next = page.offset + page.limit
     if (page.items.length === 0 || next <= offset) {
-      throw new Error("Catalog pagination stopped before all records were loaded")
+      throw new Error(
+        "Catalog pagination stopped before all records were loaded"
+      )
     }
     items.push(...page.items)
     offset = next
@@ -173,7 +183,9 @@ export const adminQueries = {
       enabled: Boolean(id),
       meta: { errorAction: "Load payment" },
     }),
-  products: (options: { limit?: number; offset?: number; errorAction?: string } = {}) => {
+  products: (
+    options: { limit?: number; offset?: number; errorAction?: string } = {}
+  ) => {
     const { limit = 100, offset = 0, errorAction } = options
     return queryOptions({
       queryKey: [...queryKeys.catalog(), "products", { limit, offset }],
@@ -182,29 +194,53 @@ export const adminQueries = {
       meta: queryErrorMeta(errorAction),
     })
   },
-  allProducts: (options: { errorAction?: string } = {}) => queryOptions({
-    queryKey: [...queryKeys.catalog(), "products", "all"],
-    queryFn: ({ signal }) => collectCatalogPages(
-      (limit, offset, signal) => listProducts(limit, offset, undefined, signal), signal
-    ),
-    meta: queryErrorMeta(options.errorAction),
-  }),
-  prices: (options: { productId?: string; limit?: number; offset?: number; errorAction?: string } = {}) => {
+  allProducts: (options: { errorAction?: string } = {}) =>
+    queryOptions({
+      queryKey: [...queryKeys.catalog(), "products", "all"],
+      queryFn: ({ signal }) =>
+        collectCatalogPages(
+          (limit, offset, signal) =>
+            listProducts(limit, offset, undefined, signal),
+          signal
+        ),
+      meta: queryErrorMeta(options.errorAction),
+    }),
+  prices: (
+    options: {
+      productId?: string
+      limit?: number
+      offset?: number
+      errorAction?: string
+    } = {}
+  ) => {
     const { productId, limit = 100, offset = 0, errorAction } = options
     return queryOptions({
-      queryKey: [...queryKeys.catalog(), "prices", { productId, limit, offset }],
+      queryKey: [
+        ...queryKeys.catalog(),
+        "prices",
+        { productId, limit, offset },
+      ],
       queryFn: ({ signal }) => listPrices(limit, offset, productId, signal),
       placeholderData: keepPreviousData,
       meta: queryErrorMeta(errorAction),
     })
   },
-  allPrices: (options: { productId?: string; errorAction?: string } = {}) => queryOptions({
-    queryKey: [...queryKeys.catalog(), "prices", "all", { productId: options.productId }],
-    queryFn: ({ signal }) => collectCatalogPages(
-      (limit, offset, signal) => listPrices(limit, offset, options.productId, signal), signal
-    ),
-    meta: queryErrorMeta(options.errorAction),
-  }),
+  allPrices: (options: { productId?: string; errorAction?: string } = {}) =>
+    queryOptions({
+      queryKey: [
+        ...queryKeys.catalog(),
+        "prices",
+        "all",
+        { productId: options.productId },
+      ],
+      queryFn: ({ signal }) =>
+        collectCatalogPages(
+          (limit, offset, signal) =>
+            listPrices(limit, offset, options.productId, signal),
+          signal
+        ),
+      meta: queryErrorMeta(options.errorAction),
+    }),
   price: (
     id: string,
     options: { verify?: boolean; errorAction?: string } = {}

@@ -379,7 +379,12 @@ export const deleteDefaultUsageRateCard = (key: string) =>
     method: "DELETE",
   })
 
-export const listPrices = (limit: number, offset: number, productId?: string, signal?: AbortSignal) =>
+export const listPrices = (
+  limit: number,
+  offset: number,
+  productId?: string,
+  signal?: AbortSignal
+) =>
   api<ItemsEnvelope<CatalogPrice>>("/merchant/catalog/prices", {
     query: { limit, offset, product_id: productId },
     signal,

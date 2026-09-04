@@ -708,4 +708,3 @@ function MeterDetailSkeleton() {
     </div>
   )
 }
-
