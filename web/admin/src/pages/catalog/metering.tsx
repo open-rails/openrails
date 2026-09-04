@@ -250,7 +250,7 @@ export function MeterDetailPage() {
   const navigate = useNavigate()
   const [overrideOffset, setOverrideOffset] = React.useState(0)
   const meterQuery = useQuery(adminQueries.usageMeter(meterKey))
-  const metersQuery = useQuery(adminQueries.usageMeters(PAGE_SIZE, 0))
+  const metersQuery = useQuery(adminQueries.allUsageMeters())
   const productsQuery = useQuery(
     adminQueries.allProducts({ errorAction: "Load products for metering" })
   )
