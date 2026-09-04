@@ -196,11 +196,14 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		// Webhook-route resolution (published URLs carry the old slug).
 		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
 		require.NoError(t, err)
-		dir.WithGroupSlugResolver(cp.MerchantGroupSlugResolver())
+		dir.WithGroupSlugResolver(cp.MerchantGroupSlugResolver()).WithGroupIDResolver(cp.MerchantGroupIDResolver())
 		route, err := dir.ResolveBySlug(ctx, oldSlug)
 		require.NoError(t, err, "webhook URLs keep resolving across a rename")
 		require.Equal(t, res.MerchantID.String(), route.MerchantID.String())
 		require.Equal(t, newSlug, route.MerchantSlug)
+		canonicalByID, err := dir.CanonicalSlug(ctx, res.MerchantID)
+		require.NoError(t, err)
+		require.Equal(t, newSlug, canonicalByID)
 
 		// Provisioning through an active alias is idempotent for its existing
 		// group. It must not create a fresh billing identity.

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -57,4 +58,30 @@ func (s *Service) merchantByGroupName(ctx context.Context, slug string) (*Mercha
 		m.Slug = current
 	}
 	return m, nil
+}
+
+// GroupIDResolver reads the current name of one captured immutable group.
+type GroupIDResolver func(context.Context, string) (string, error)
+
+func (s *Service) WithGroupIDResolver(r GroupIDResolver) *Service {
+	if s != nil {
+		s.groupIDResolver = r
+	}
+	return s
+}
+
+// CanonicalSlug projects a merchant identity's current public name. Bound
+// merchants require AuthKit; an unbound host-owned row uses its local name.
+func (s *Service) CanonicalSlug(ctx context.Context, id merchant.ID) (string, error) {
+	m, err := s.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if m.PermissionGroupID == "" {
+		return m.Slug, nil
+	}
+	if s.groupIDResolver == nil {
+		return "", errors.New("merchants: canonical group resolver unavailable")
+	}
+	return s.groupIDResolver(ctx, m.PermissionGroupID)
 }
