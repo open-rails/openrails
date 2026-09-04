@@ -46,7 +46,6 @@ DEBT internal/merchants/group_resolution.go
 DEBT internal/merchants/host_config.go
 DEBT internal/merchants/lifecycle.go
 DEBT internal/merchants/payment_provider_config.go
-DEBT internal/merchants/webhook_routing.go
 DEBT internal/modules/admission/policy.go
 DEBT internal/modules/money/credit_purchase.go
 DEBT internal/modules/money/enterprise.go
