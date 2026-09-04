@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/internal/merchants"
@@ -123,6 +124,9 @@ func (c *ControlPlane) MerchantGroupSlugResolver() merchants.GroupSlugResolver {
 			return "", "", ErrNoControlPlane
 		}
 		gi, err := core.GroupInstanceForSlug(ctx, MerchantType, strings.ToLower(strings.TrimSpace(slug)))
+		if errors.Is(err, authkit.ErrGroupNotFound) {
+			return "", "", merchants.ErrMerchantNotFound
+		}
 		if err != nil {
 			return "", "", err
 		}
