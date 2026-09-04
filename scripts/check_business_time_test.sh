@@ -5,7 +5,7 @@ fixture="$(mktemp -d)"
 trap 'rm -rf "${fixture}"' EXIT
 mkdir -p "${fixture}"/{scripts,internal/modules,internal/river,internal/http/handlers,pkg/service}
 printf '# test allowlist\n' >"${fixture}/scripts/business-time-allowlist.txt"
-bash "${checker}" "${fixture}" >"${fixture}/result.log" 2>&1
+bash "${checker}" "${fixture}" >"${fixture}/result.log" 2>&1 || { cat "${fixture}/result.log" >&2; exit 1; }
 
 expect_failure() {
   if bash "${checker}" "${fixture}" >"${fixture}/result.log" 2>&1; then
@@ -25,7 +25,7 @@ now := time.Now()
 }
 GO
 printf '%s\n' 'internal/modules/policy.go|now := time.Now()|infrastructure_time|test cache timing|1' >"${fixture}/scripts/business-time-allowlist.txt"
-bash "${checker}" "${fixture}" >"${fixture}/result.log" 2>&1
+bash "${checker}" "${fixture}" >"${fixture}/result.log" 2>&1 || { cat "${fixture}/result.log" >&2; exit 1; }
 cat >>"${fixture}/internal/modules/policy.go" <<'GO'
 func businessPolicy() {
 now := time.Now()

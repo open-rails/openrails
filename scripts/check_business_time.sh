@@ -15,9 +15,14 @@ done
 guard_hits="$(mktemp)"
 trap 'rm -f "${guard_hits}"' EXIT
 status=0
-rg -n --no-heading 'time\.Now\(|\bNOW\(\)|CURRENT_TIMESTAMP|clockwork\.NewRealClock\(\)' \
-  "${guard_paths[@]}" -g '*.go' -g '!**/*_test.go' >"${guard_hits}" || status=$?
-# rg returns 1 for no matches; actual scan failures must never become a pass.
+pattern='time\.Now\(|\bNOW\(\)|CURRENT_TIMESTAMP|clockwork\.NewRealClock\(\)'
+if command -v rg >/dev/null 2>&1; then
+  rg -n --no-heading "${pattern}" "${guard_paths[@]}" -g '*.go' -g '!**/*_test.go' >"${guard_hits}" || status=$?
+else
+  # Hosted CI images do not necessarily include ripgrep.
+  grep -rnE --include='*.go' --exclude='*_test.go' "${pattern}" "${guard_paths[@]}" >"${guard_hits}" || status=$?
+fi
+# Both scanners return 1 for no matches; actual errors must never become a pass.
 (( status <= 1 )) || exit "${status}"
 
 declare -A expected=() seen=()
