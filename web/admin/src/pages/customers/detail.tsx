@@ -52,6 +52,7 @@ import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
+import { CustomerInvoiceProfileSection } from "./invoice-profile"
 import { CustomerUsageRatesSection } from "./usage-rates"
 
 export function CustomerDetailPage() {
@@ -118,6 +119,7 @@ export function CustomerDetailPage() {
       )}
 
       <CustomerUsageRatesSection customerId={customerId} />
+      <CustomerInvoiceProfileSection customerId={customerId} />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
         <div className="grid gap-4 lg:col-span-2">
