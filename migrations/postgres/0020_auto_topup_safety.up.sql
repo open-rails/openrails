@@ -12,6 +12,7 @@ CREATE TABLE openrails.auto_topup_episodes (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     currency text NOT NULL,
+    CONSTRAINT auto_topup_episodes_currency_shape CHECK (currency ~ '^[A-Z0-9]{3,12}$'),
     reserved_at timestamptz NOT NULL,
     amount_native bigint NOT NULL CHECK (amount_native > 0),
     receipt jsonb,
