@@ -181,6 +181,7 @@ func (c *ControlPlane) LooksLikeAPIKey(token string) bool {
 //   - resolves the merchant the credential administers from the permission GROUP
 //     the key was minted under (#567/#569: a merchant IS its group). A key whose
 //     group backs no active merchant yields ErrServiceCredentialMerchantUnresolved.
+//   - rejects a resolved merchant that differs from the request Host merchant.
 func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
@@ -204,6 +205,10 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 		return nil, err
 	}
 
+	if hostMID, ok := merchant.HostMerchant(ctx); ok && hostMID != mid {
+		return nil, ErrServiceCredentialHostMismatch
+	}
+
 	return &ResolvedServiceCredential{
 		OwnerGroupID:  groupID,
 		OwnerGroupRef: mslug,
@@ -212,6 +217,10 @@ func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*Resolv
 		Permissions:   permissions,
 	}, nil
 }
+
+// ErrServiceCredentialHostMismatch rejects a valid API key presented against
+// another merchant's canonical host.
+var ErrServiceCredentialHostMismatch = errors.New("controlplane: API key merchant does not match request host")
 
 // ErrServiceCredentialMerchantUnresolved indicates the caller's permission group
 // backs no active OpenRails merchant (no openrails.merchants row with that
