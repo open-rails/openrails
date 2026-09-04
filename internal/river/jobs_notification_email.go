@@ -74,6 +74,7 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 					return fmt.Errorf("list undelivered notifications: %w", err)
 				}
 				for i := range rows {
+					progress.Mark(ctx, "notification email "+rows[i].ID.String())
 					n, err := models.NotificationFromGen(rows[i])
 					if err != nil {
 						sweepErr = preferSweepError(sweepErr, fmt.Errorf("notification %s decode: %w", rows[i].ID, err))

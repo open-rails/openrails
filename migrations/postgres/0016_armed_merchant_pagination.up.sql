@@ -1,3 +1,6 @@
+SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+
 -- Worker sweeps must advance beyond the first page of rail-armed merchants.
 DROP FUNCTION openrails.psp_rail_merchant_ids(text[], integer);
 
@@ -24,3 +27,8 @@ COMMENT ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit inte
 
 REVOKE ALL ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer, p_after uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer, p_after uuid) TO openrails_app;
+
+-- Match the delivery cursor, including equal-timestamp notification batches.
+DROP INDEX openrails.idx_notification_queue_undelivered;
+CREATE INDEX idx_notification_queue_undelivered ON openrails.notification_queue
+    (merchant_id, created_at, id) WHERE emailed_at IS NULL;

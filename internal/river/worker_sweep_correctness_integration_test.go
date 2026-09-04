@@ -121,11 +121,21 @@ func (s *sweepSecrets) Get(ctx context.Context, id merchant.ID, name string) (me
 func TestStripeWebhookSweepCoverageAndFailure(t *testing.T) {
 	database, ids := seedSweepMerchants(t, 1001)
 	secrets := &sweepSecrets{MerchantSecretStore: merchants.NewMemorySecretStore(), seen: map[merchant.ID]bool{}, fail: merchant.ID(ids[0])}
-	service, err := merchants.NewService(database.Pool(), secrets, "test")
+	service, err := merchants.NewService(db.WrapPool(database.Pool(), ""), secrets, "test")
 	require.NoError(t, err)
 	worker := StripeWebhookReconcileWorker{DB: database, Config: &config.Config{APIURL: "https://billing.example.test", ProviderWriteMode: config.ProviderWriteModeFull}, Merchants: service}
-	err = worker.Work(context.Background(), nil)
+	ctx := context.Background()
+	err = (&WorkerHealthMiddleware{DB: database}).Work(ctx, &rivertype.JobRow{Kind: KindStripeWebhookReconcile}, func(ctx context.Context) error { return worker.Work(ctx, nil) })
 	require.ErrorContains(t, err, "controlled secret provider outage")
+	admin := dbtest.SharedSuperuserPGXPool(t)
+	var lastSuccess *time.Time
+	var failures int
+	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_health WHERE worker_kind=$1`, KindStripeWebhookReconcile).Scan(&lastSuccess, &failures))
+	require.Nil(t, lastSuccess)
+	require.Equal(t, 1, failures)
+	t.Cleanup(func() {
+		_, _ = admin.Exec(ctx, `DELETE FROM openrails.worker_health WHERE worker_kind=$1`, KindStripeWebhookReconcile)
+	})
 	for _, id := range ids {
 		require.True(t, secrets.seen[merchant.ID(id)], "merchant %s must be reached beyond the first page", id)
 	}
@@ -137,9 +147,9 @@ func (f sweepTransport) RoundTrip(r *http.Request) (*http.Response, error) { ret
 
 func TestNotificationSweepPoisonPageDoesNotStarveReceipt(t *testing.T) {
 	ctx := context.Background()
-	database := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
-	mctx := dbtest.WithTestMerchant(ctx)
-	mid := dbtest.TestMerchantID.UUID()
+	database, merchants := seedSweepMerchants(t, 1)
+	mid := merchants[0]
+	mctx := merchant.WithID(ctx, merchant.ID(mid))
 	store := merchantconfig.NewStore(database)
 	require.NoError(t, store.Upsert(mctx, models.MerchantConfiguration{Profile: models.MerchantProfileConfiguration{FromEmail: "sender@example.test", DisplayName: "Test"}}))
 	email, err := subscriptions.NewEmailService(&config.SendGridConfig{APIKey: "test-only-key"}, store)
@@ -170,6 +180,14 @@ func TestNotificationSweepPoisonPageDoesNotStarveReceipt(t *testing.T) {
 	t.Cleanup(func() {
 		_ = database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			_, err := database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE id=ANY($1::uuid[])`, ids)
+			if err != nil {
+				return err
+			}
+			_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.customers WHERE id=$1`, customer)
+			if err != nil {
+				return err
+			}
+			_, err = database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.merchant_configurations WHERE merchant_id=$1`, mid)
 			return err
 		})
 	})

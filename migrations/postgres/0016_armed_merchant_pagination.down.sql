@@ -1,3 +1,6 @@
+SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+
 DROP FUNCTION openrails.psp_rail_merchant_ids(text[], integer, uuid);
 
 CREATE FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer) RETURNS TABLE(merchant_id uuid)
@@ -21,3 +24,7 @@ COMMENT ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit inte
 
 REVOKE ALL ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.psp_rail_merchant_ids(p_rails text[], p_limit integer) TO openrails_app;
+
+DROP INDEX openrails.idx_notification_queue_undelivered;
+CREATE INDEX idx_notification_queue_undelivered ON openrails.notification_queue
+    (merchant_id, created_at) WHERE emailed_at IS NULL;
