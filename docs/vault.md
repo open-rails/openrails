@@ -118,11 +118,10 @@ Vault's runtime 403 remains the real boundary):
 Code addresses secrets by `(merchant_id, name)`; the Vault store resolves that to
 
 ```
-secret/openrails/merchants/<merchant-slug>/<name>     # value under KV-v2 field "value"
+secret/openrails/merchants/<merchant-uuid>/<name>     # value under KV-v2 field "value"
 ```
 
-Slugs (not ids) make operator-written paths deterministic and readable. The names are identical
-across backends — switching to Vault changes only the physical path.
+Immutable merchant UUIDs own the subtree. Renames change no secret paths, and a new owner of an old slug cannot address the original merchant's secrets. Existing pre-launch slug-based keys must be replaced at the UUID paths; no fallback reads old slug paths.
 
 There is exactly ONE canonical name shape, for every rail (#884 retired the flat
 `<rail>/<purpose>` spellings — they were write-only and never read):
@@ -137,9 +136,9 @@ CCBill `accnum-subacc`, Solana signer address); `<key>` is a rail-registry crede
 (`security_key`, `salt`, `datalink_username`, `datalink_password`, `private_key`, …). Examples:
 
 ```sh
-vault kv put secret/openrails/merchants/acme/psps/nmi/live/<gateway-id>/security_key value="$NMI_SECURITY_KEY"
-vault kv put secret/openrails/merchants/acme/psps/ccbill/live/<accnum-subacc>/salt value="$CCBILL_SALT"
-vault kv put secret/openrails/merchants/acme/psps/stripe/live/<acct-id>/secret_key value="$STRIPE_SECRET_KEY"
+vault kv put secret/openrails/merchants/<merchant-uuid>/psps/nmi/live/<gateway-id>/security_key value="$NMI_SECURITY_KEY"
+vault kv put secret/openrails/merchants/<merchant-uuid>/psps/ccbill/live/<accnum-subacc>/salt value="$CCBILL_SALT"
+vault kv put secret/openrails/merchants/<merchant-uuid>/psps/stripe/live/<acct-id>/secret_key value="$STRIPE_SECRET_KEY"
 ```
 
 `psps/solana/<env>/<address>/private_key` (local-keypair signer) is operator-only — it is never

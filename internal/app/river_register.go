@@ -241,6 +241,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add stripe webhook reconcile worker: %w", err)
 	}
+	if err := addTrackedWorker(r, workers, &riverjobs.MerchantSecretCleanupWorker{DB: r.DB, Merchants: r.Merchants}); err != nil {
+		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
+	}
 	// Credit money-in + reconciliation workers (#239/#241/#243/#508). The
 	// auto-top-up and invoice workers share the configured off-session charger;
 	// when it is nil they log-and-skip until rail wiring is attached.
@@ -692,6 +695,10 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
+
+	jobs = append(jobs, r.healthPeriodic(5*time.Minute, func() (river.JobArgs, *river.InsertOpts) {
+		return riverjobs.MerchantSecretCleanupArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 5 * time.Minute}}
+	}, &river.PeriodicJobOpts{RunOnStart: true}))
 
 	// Every hour: invoice collection (#241). (Low-balance alert scheduling was
 	// removed with its worker registration — no Alerter implementation exists.)
