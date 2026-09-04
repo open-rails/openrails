@@ -45,6 +45,7 @@ import {
 import {
   formatDate,
   formatMicros,
+  formatUnits,
   microsFromInput,
   shortId,
 } from "@/lib/format"
@@ -53,6 +54,7 @@ import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { CustomerUsageRatesSection } from "./usage-rates"
+import { CustomerCreditSupportSection } from "./credits"
 
 export function CustomerDetailPage() {
   const { customerId = "" } = useParams()
@@ -105,11 +107,17 @@ export function CustomerDetailPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-lg font-semibold">
-                  {formatMicros(b.balance, b.currency)}
+                  {formatUnits(b.balance, b.currency, b.decimal_places)}
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  held {formatMicros(b.held_balance, b.currency)} · owed{" "}
-                  {formatMicros(b.outstanding_owed_amount, b.currency)}
+                  held{" "}
+                  {formatUnits(b.held_balance, b.currency, b.decimal_places)} ·
+                  owed{" "}
+                  {formatUnits(
+                    b.outstanding_owed_amount,
+                    b.currency,
+                    b.decimal_places
+                  )}
                 </p>
               </CardContent>
             </Card>
@@ -117,6 +125,10 @@ export function CustomerDetailPage() {
         </div>
       )}
 
+      <CustomerCreditSupportSection
+        customerId={customerId}
+        currencies={profile.credit_balance.map((balance) => balance.currency)}
+      />
       <CustomerUsageRatesSection customerId={customerId} />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">

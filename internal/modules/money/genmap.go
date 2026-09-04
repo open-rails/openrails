@@ -51,6 +51,8 @@ func moneyTransactionFromTransfer(r gen.OpenrailsLedgerTransfer) *models.MoneyTr
 	case "credit_expire", "expire":
 		amount = -amount
 		txType = "expiry"
+	case "credit_revoke":
+		amount = -amount
 	}
 	// Every ledger transfer is posted (single-phase) since migration 014 retired
 	// the in-ledger two-phase pending apparatus (holds are Redis-only, #513).

@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,10 +45,11 @@ type CreditGrant struct {
 }
 
 type CreditGrantPage struct {
-	Grants []CreditGrant `json:"grants"`
-	Total  int64         `json:"total"`
-	Limit  int           `json:"limit"`
-	Offset int           `json:"offset"`
+	UnitDecimals int           `json:"unit_decimals"`
+	Grants       []CreditGrant `json:"grants"`
+	Total        int64         `json:"total"`
+	Limit        int           `json:"limit"`
+	Offset       int           `json:"offset"`
 }
 
 type CreditGrantRevocation struct {
@@ -60,10 +62,12 @@ func creditGrantFromRow(row gen.GetCustomerCreditGrantRow, now time.Time) Credit
 	switch {
 	case row.Termination == "revoke":
 		state = "revoked"
-	case row.Termination == "expire" || (row.EndsAt != nil && !row.EndsAt.After(now)):
+	case row.Termination == "expire":
 		state = "expired"
 	case row.Termination != "":
 		state = "terminated"
+	case row.EndsAt != nil && !row.EndsAt.After(now):
+		state = "expired"
 	case row.RemainingAmount <= 0:
 		state = "spent"
 	case row.StartsAt.After(now):
@@ -76,6 +80,9 @@ func creditGrantFromRow(row gen.GetCustomerCreditGrantRow, now time.Time) Credit
 }
 
 func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.CustomerID, currency string, limit, offset int) (*CreditGrantPage, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
@@ -84,7 +91,8 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 		return nil, err
 	}
 	currency = normalizeUnit(currency)
-	if err := s.validateUnit(ctx, currency); err != nil {
+	decimals, _, err := s.ResolveUnit(ctx, currency)
+	if err != nil {
 		return nil, err
 	}
 	if limit <= 0 || limit > 100 {
@@ -102,7 +110,7 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 	if err != nil {
 		return nil, err
 	}
-	page := &CreditGrantPage{Grants: make([]CreditGrant, 0, len(rows)), Total: total, Limit: limit, Offset: offset}
+	page := &CreditGrantPage{UnitDecimals: decimals, Grants: make([]CreditGrant, 0, len(rows)), Total: total, Limit: limit, Offset: offset}
 	for _, row := range rows {
 		page.Grants = append(page.Grants, creditGrantFromRow(gen.GetCustomerCreditGrantRow(row), s.now()))
 	}
@@ -114,11 +122,14 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 // that lock is held, matching admission's PG -> Redis ordering. Failure to read
 // holds fails closed. Repeating a completed revoke returns its original result.
 func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID, reason string, readAdmissionHeld func(context.Context, string) (int64, error)) (*CreditGrantRevocation, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
 	if payer.IsZero() || grantID == uuid.Nil {
 		return nil, ErrCreditGrantNotFound
 	}
 	reason = strings.TrimSpace(reason)
-	if reason == "" || len(reason) > 500 {
+	if reason == "" || utf8.RuneCountInString(reason) > 500 {
 		return nil, fmt.Errorf("reason is required (maximum 500 characters)")
 	}
 	if readAdmissionHeld == nil {
@@ -157,6 +168,9 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 		bal, err := s.deriveBalance(ctx, q, mid.UUID(), payer.UUID(), row.Currency)
 		if err != nil {
 			return err
+		}
+		if current.RemainingAmount > bal.Balance {
+			return ErrCreditGrantUnavailable
 		}
 		held, err := readAdmissionHeld(ctx, row.Currency)
 		if err != nil {

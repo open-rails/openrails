@@ -46,3 +46,14 @@ func (s *Service) RevokeCreditGrant(ctx context.Context, payer identity.Customer
 		return spendgate.New(s.rt.RedisClient).HeldAmount(ctx, mid.String(), payer.UUID().String(), currency)
 	})
 }
+
+// CreditUnitDecimals returns the existing registry's scale for a selected unit.
+func (s *Service) CreditUnitDecimals(ctx context.Context, currency string) (int, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	decimals, _, err := s.moneyService().ResolveUnit(ctx, currency)
+	return decimals, err
+}

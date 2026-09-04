@@ -5,6 +5,7 @@ DELETE /v1/merchant/alerts/rules/{id}
 DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/catalog/meters/{key}/rate-card
 DELETE /v1/merchant/customers/{customer_id}/business-profile
+DELETE /v1/merchant/customers/{customer_id}/credits/{grant_id}
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
 DELETE /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}
@@ -75,6 +76,8 @@ GET /v1/merchant/credits/deposit
 GET /v1/merchant/customers
 GET /v1/merchant/customers/{customer_id}
 GET /v1/merchant/customers/{customer_id}/business-profile
+GET /v1/merchant/customers/{customer_id}/credit-transactions
+GET /v1/merchant/customers/{customer_id}/credits
 GET /v1/merchant/customers/{customer_id}/delinquency
 GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/payment-methods

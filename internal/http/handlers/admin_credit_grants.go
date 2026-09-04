@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -91,7 +92,7 @@ func RevokeAdminCreditGrant(r *httprequest.Request) {
 		return
 	}
 	body.Reason = strings.TrimSpace(body.Reason)
-	if body.Reason == "" || len(body.Reason) > 500 {
+	if body.Reason == "" || utf8.RuneCountInString(body.Reason) > 500 {
 		r.ErrorJSON(http.StatusBadRequest, "reason is required (maximum 500 characters)")
 		return
 	}
@@ -145,5 +146,10 @@ func ListAdminCreditTransactions(r *httprequest.Request) {
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Amount: t.Amount, Currency: t.Currency, TransactionType: t.TransactionType, Status: t.Status, Source: t.Source, CreatedAt: t.CreatedAt})
 	}
-	r.SuccessJSON(map[string]any{"transactions": out, "total": total, "limit": limit, "offset": offset})
+	decimals, err := svc.CreditUnitDecimals(r.Request.Context(), currency)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "credit currency unavailable")
+		return
+	}
+	r.SuccessJSON(map[string]any{"transactions": out, "total": total, "limit": limit, "offset": offset, "unit_decimals": decimals})
 }
