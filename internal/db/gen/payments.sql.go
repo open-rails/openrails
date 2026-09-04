@@ -1442,6 +1442,7 @@ SET metadata = COALESCE(metadata, '{}'::jsonb)
 WHERE merchant_id = $2::uuid
   AND id = $3::uuid
   AND status = 'pending'
+  AND deleted_at IS NULL
 `
 
 type RecordRefundProviderReceiptParams struct {

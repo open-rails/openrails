@@ -134,7 +134,8 @@ SET metadata = COALESCE(metadata, '{}'::jsonb)
     || jsonb_build_object('provider_refund_id', sqlc.arg(provider_refund_id)::text)
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(reservation_id)::uuid
-  AND status = 'pending';
+  AND status = 'pending'
+  AND deleted_at IS NULL;
 
 -- name: CompleteRefundReservation :execrows
 UPDATE openrails.payments
