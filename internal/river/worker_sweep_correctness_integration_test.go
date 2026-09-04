@@ -171,7 +171,7 @@ func TestNotificationSweepPoisonPageDoesNotStarveReceipt(t *testing.T) {
 		ids[i] = uuid.MustParse(fmt.Sprintf("%s-0000-4000-8000-%012x", prefix, i+1))
 	}
 	require.NoError(t, database.RunInMerchantConn(mctx, func(ctx context.Context) error {
-		customer = dbtest.EnsureCustomerIDPgx(ctx, t, database.Qx(ctx), uuid.NewString())
+		customer = dbtest.EnsureCustomerIDPgxFor(ctx, t, database.Qx(ctx), mid, uuid.NewString())
 		_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.notification_queue(id,merchant_id,customer_id,event_type,data,created_at)
  SELECT id,$2,$3,'one_off_purchase_completed',jsonb_build_object('user_email','buyer@example.test','amount_micros',CASE WHEN id=$4 THEN '1000000' ELSE 'invalid' END,'currency','USD'),$5
  FROM unnest($1::uuid[]) AS id`, ids, mid, customer, ids[200], time.Now().Add(-time.Hour))
