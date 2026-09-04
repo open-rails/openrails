@@ -396,8 +396,7 @@ func TestNMIRefundDeclineReleasesReservation(t *testing.T) {
 }
 
 // TestNMIRefundConflictReturnsDurableOutcome: re-enqueueing the same logical
-// refund (same payment + amount) returns the executed intent untouched — the
-// producer detects the foreign reservation and refuses to double-refund.
+// refund (same payment and client key) returns the executed intent untouched.
 func TestNMIRefundConflictReturnsDurableOutcome(t *testing.T) {
 	fx := seedRefundablePayment(t, 500)
 	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
@@ -406,8 +405,7 @@ func TestNMIRefundConflictReturnsDurableOutcome(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, StatusSucceeded, first.Status)
 
-	// A second reservation for the identical refund content conflicts on the
-	// content-addressed key and must NOT execute again.
+	// Reusing the same caller key cannot replace the operation payload or execute again.
 	params := fx.enqueueParams(500)
 	otherReservation := fx.payload(500)
 	otherReservation.ReservationID = uuid.New()
@@ -566,4 +564,51 @@ func TestStripeRefundRefusalReleasesReservation(t *testing.T) {
 	assert.Equal(t, StatusFailedTerminal, row.Status)
 	status, _, _ := fx.reservation(t)
 	assert.Equal(t, "failed", status)
+}
+
+// A clean refusal allows one retry, but does not authorize another retry after
+// that request's response is lost and its executor dies before recording status.
+func TestCCBillRefundConsumesRefusalBeforeRetry(t *testing.T) {
+	fx := seedRefundablePayment(t, 500)
+	var calls atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		require.Equal(t, "voidOrRefundTransaction", r.PostFormValue("action"))
+		if calls.Add(1) == 1 {
+			fmt.Fprint(w, `<results>-7</results>`)
+			return
+		}
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	h := NewCCBillRefundHandler(fx.db, nil, ccbillRefundTestRails(), nil)
+	h.DataLinkBaseURL = srv.URL
+	runner := &Runner{Store: fx.store, Registry: NewRegistry(h), Config: fullModeConfig()}
+	params := fx.enqueueParams(500)
+	params.Provider = "ccbill"
+	params.IntentType = TypeCCBillRefund
+	params.PspID = dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "ccbill")
+	p := fx.payload(500)
+	p.ProviderTarget = "sub_123"
+	p.ProviderTransactionID = fx.originalTxn
+	params.Payload = p
+	ctx := dbtest.WithTestMerchant(context.Background())
+	row, err := runner.EnqueueAndExecute(ctx, params)
+	require.NoError(t, err)
+	require.Equal(t, StatusFailedRetryable, row.Status)
+	now := time.Now().Add(time.Hour)
+	claimed, ok, err := fx.store.ClaimByID(ctx, row.ID, now, now.Add(time.Minute))
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, OutcomeAmbiguous, h.Execute(ctx, claimed).Class)
+	// Drop the outcome, just as a process crash before Runner.apply would do.
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET claimed_until=now()-interval '1 second' WHERE id=$1`, row.ID)
+	require.NoError(t, err)
+	_, err = runner.RunExecuteOnce(ctx)
+	require.NoError(t, err)
+	got := fx.intentByID(t, row.ID)
+	require.Equal(t, StatusUnknownNeedsVerify, got.Status)
+	require.EqualValues(t, 2, calls.Load(), "stale refusal cannot authorize a third money movement")
+	require.NotNil(t, got.LastFailureReason)
+	require.Contains(t, *got.LastFailureReason, "operator must verify")
 }

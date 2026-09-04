@@ -214,3 +214,15 @@ func TestStripeRefundVerifyReadFailureStaysAmbiguous(t *testing.T) {
 	out := h.Verify(context.Background(), refundIntent(t, TypeStripeRefund, testRefundPayload()))
 	assert.Equal(t, OutcomeAmbiguous, out.Class)
 }
+
+// A pending provider refund is not completion: retain both the reservation and
+// customer access until the provider reports succeeded.
+func TestStripePendingRefundDoesNotFinalize(t *testing.T) {
+	result := &subscriptions.RefundResult{ID: "re_pending", Status: "pending"}
+	fake := &fakeStripeRefundAPI{createResult: result, findResult: result, findFound: true}
+	h := NewStripeRefundHandler(nil, stripeTestConfig(), stripeTestRails(), nil)
+	h.Stripe = fake
+	intent := refundIntent(t, TypeStripeRefund, testRefundPayload())
+	require.Equal(t, OutcomeAmbiguous, h.Execute(context.Background(), intent).Class)
+	require.Equal(t, OutcomeAmbiguous, h.Verify(context.Background(), intent).Class)
+}

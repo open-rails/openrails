@@ -17,7 +17,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -147,8 +146,8 @@ func adminRefundErrorResponse(err error) (int, string) {
 }
 
 type adminRefundPrepared struct {
-	reservation *models.Payment
-	intent      gen.OpenrailsRailIntent
+	reservationID uuid.UUID
+	intentID      uuid.UUID
 }
 
 // refundAmountCents converts an admin refund request amount (internal units at
@@ -174,14 +173,10 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 			return nil, adminRefundHTTPError(http.StatusConflict, "idempotency key was already used for a different refund request")
 		}
 		var intentID uuid.UUID
-		if err := txDB.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.rail_intents WHERE payment_id=$1 AND payload->>'reservation_id'=$2`, paymentID, existing.ID.String()).Scan(&intentID); err != nil {
+		if err := txDB.Qx(ctx).QueryRow(ctx, `SELECT id FROM openrails.rail_intents WHERE payment_id=$1 AND idempotency_key=$2`, paymentID, intents.RefundIdempotencyKey(paymentID, idempotencyKey)).Scan(&intentID); err != nil {
 			return nil, fmt.Errorf("load refund intent: %w", err)
 		}
-		intent, err := intents.NewStore(txDB).Get(ctx, intentID)
-		if err != nil {
-			return nil, err
-		}
-		return &adminRefundPrepared{reservation: existing, intent: intent}, nil
+		return &adminRefundPrepared{reservationID: existing.ID, intentID: intentID}, nil
 	} else if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load existing refund request: %w", err)
 	}
@@ -271,7 +266,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	if err != nil {
 		return nil, fmt.Errorf("enqueue refund intent: %w", err)
 	}
-	return &adminRefundPrepared{reservation: reservation, intent: intent}, nil
+	return &adminRefundPrepared{reservationID: reservation.ID, intentID: intent.ID}, nil
 }
 
 // ccbillManualRefundError: this specific payment can't resolve its CCBill
@@ -335,14 +330,14 @@ func adminRefundMetadataString(metadata map[string]any, key string) string {
 // The reservation and intent are already committed. Request cancellation cannot
 // discard the work; the scheduled executor can finish the same operation.
 func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepared *adminRefundPrepared) (*models.Payment, int, error) {
-	intent, err := r.State.IntentRunner().ExecuteByID(ctx, prepared.intent.ID)
+	intent, err := r.State.IntentRunner().ExecuteByID(ctx, prepared.intentID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("execute refund intent: %w", err)
 	}
 	paymentService := r.State.PaymentService
 	// Finalization and access revocation commit together, before the intent's
 	// success transition. Recover that outcome even if its lease expired there.
-	refund, err := paymentService.GetByID(ctx, prepared.reservation.ID)
+	refund, err := paymentService.GetByID(ctx, prepared.reservationID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -351,11 +346,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepa
 	}
 	switch intent.Status {
 	case intents.StatusSucceeded:
-		refund, err := paymentService.GetByID(ctx, prepared.reservation.ID)
-		if err != nil {
-			return nil, 0, fmt.Errorf("refund issued but failed to load: %w", err)
-		}
-		return refund, http.StatusCreated, nil
+		return nil, 0, errors.New("successful refund intent has an incomplete reservation")
 	case intents.StatusFailedTerminal:
 		message := "refund failed"
 		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
@@ -377,11 +368,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepa
 				return ""
 			}(),
 		}).Warn("admin refund queued on the provider intent ledger (not completed inline)")
-		reservation, err := paymentService.GetByID(ctx, prepared.reservation.ID)
-		if err != nil {
-			return nil, 0, fmt.Errorf("refund queued but reservation failed to load: %w", err)
-		}
-		return reservation, http.StatusAccepted, nil
+		return refund, http.StatusAccepted, nil
 	}
 }
 

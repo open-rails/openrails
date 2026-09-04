@@ -49,8 +49,7 @@ type RefundPayload struct {
 	// completes (provider id recorded) or releases (terminal refusal).
 	ReservationID uuid.UUID `json:"reservation_id"`
 	// AmountCents is provider minor units (typed CENTS, #671) — converted
-	// exactly from the request's micros at the admin boundary. Both the NMI
-	// wire amount and the verifier's action.AmountCents comparison are cents.
+	// exactly from the request's micros at the admin boundary.
 	AmountCents  moneyutil.Cents `json:"amount_cents"`
 	Reason       string          `json:"reason,omitempty"`
 	RevokeAccess bool            `json:"revoke_access"`
@@ -91,8 +90,8 @@ func decodeRefundPayload(intent gen.OpenrailsRailIntent) (RefundPayload, error) 
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode refund payload: %w", err)
 	}
-	if p.ReservationID == uuid.Nil || strings.TrimSpace(p.ProviderTarget) == "" || p.AmountCents <= 0 {
-		return p, errors.New("refund payload is incomplete (reservation, provider target and amount are required)")
+	if p.OriginalPaymentID == uuid.Nil || p.ReservationID == uuid.Nil || strings.TrimSpace(p.ProviderTarget) == "" || p.AmountCents <= 0 {
+		return p, errors.New("refund payload is incomplete (original payment, reservation, provider target and amount are required)")
 	}
 	return p, nil
 }
@@ -217,8 +216,8 @@ func (r refundReservations) terminally(ctx context.Context, p RefundPayload, rea
 // NMIRefundHandler executes refunds against NMI-backed rails. NMI has no
 // request-level idempotency, so effectively-once rests on the ledger: one
 // intent per caller operation, never blind-retried — any outcome that
-// MIGHT have moved money parks as unknown_needs_verify and the verifier
-// resolves it by reading the transaction's refund actions off the Query API.
+// MIGHT have moved money parks as unknown_needs_verify. Recovery requires a
+// captured operation receipt or explicit operator verification.
 type NMIRefundHandler struct {
 	refundReservations
 	// Resolver arms the intent merchant's NMI client from the armed rail
@@ -238,7 +237,7 @@ func NewNMIRefundHandler(d *db.DB, resolver money.NMIClientResolver, clock clock
 func (h *NMIRefundHandler) Type() string                         { return TypeNMIRefund }
 func (h *NMIRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-// PrunePolicy keeps the payload on a succeeded refund tombstone (#607): replays use the linked reservation and immutable operation payload. The forensic evidence
+// PrunePolicy retains the operation payload for replay. The forensic evidence
 // (provider_refund_id) is slimmed — the completed reservation row, not the
 // intent, is the source of truth post-success.
 func (h *NMIRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
@@ -339,7 +338,7 @@ func NewStripeRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Sour
 func (h *StripeRefundHandler) Type() string                         { return TypeStripeRefund }
 func (h *StripeRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-// PrunePolicy keeps the payload on a succeeded refund tombstone (#607): replays use the linked reservation and immutable operation payload.
+// PrunePolicy retains the immutable operation payload for replay.
 func (h *StripeRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
 func (h *StripeRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
@@ -386,11 +385,14 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		return Ambiguous("stripe refund outcome unknown: " + err.Error())
 	}
 
-	if strings.EqualFold(result.Status, "failed") {
+	if strings.EqualFold(result.Status, "failed") || strings.EqualFold(result.Status, "canceled") {
 		return h.terminally(ctx, p, "stripe refund failed: "+result.FailureReason, map[string]any{
 			"provider_refund_id": result.ID,
 			"failure_reason":     result.FailureReason,
 		})
+	}
+	if !strings.EqualFold(result.Status, "succeeded") {
+		return Ambiguous("stripe refund has not succeeded: " + result.Status)
 	}
 	if err := h.finalize(ctx, p, result.ID); err != nil {
 		return Ambiguous("refunded at provider, but local finalize failed: " + err.Error())
@@ -410,11 +412,14 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 	if !found {
 		return Retryable("refund not found at provider; verified not executed")
 	}
-	if strings.EqualFold(result.Status, "failed") {
+	if strings.EqualFold(result.Status, "failed") || strings.EqualFold(result.Status, "canceled") {
 		return h.terminally(ctx, p, "stripe refund failed post-create: "+result.FailureReason, map[string]any{
 			"provider_refund_id": result.ID,
 			"failure_reason":     result.FailureReason,
 		})
+	}
+	if !strings.EqualFold(result.Status, "succeeded") {
+		return Ambiguous("stripe refund has not succeeded: " + result.Status)
 	}
 	if err := h.finalize(ctx, p, result.ID); err != nil {
 		return Ambiguous("refund verified at provider, but local finalize failed: " + err.Error())
@@ -451,7 +456,7 @@ func ccbillDenialExhausted(attempts int32) bool {
 // COUNTERS — so effectively-once rests on the ledger (one intent per
 // caller operation) and the money mover NEVER blind-resends: any
 // outcome that MIGHT have moved money parks as unknown_needs_verify and the
-// verifier resolves it against the counters (verify-not-decline, #674).
+// verifier resolves captured receipts or requests operator verification.
 //
 // WIRE PROVISIONAL — the refund request+response shape is unverified (cannot
 // probe live: real money). See ccbill.DataLinkClient.RefundTransaction.
@@ -478,9 +483,7 @@ func NewCCBillRefundHandler(d *db.DB, cfg *config.Config, rails railresolve.Sour
 func (h *CCBillRefundHandler) Type() string                         { return TypeCCBillRefund }
 func (h *CCBillRefundHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
 
-// PrunePolicy keeps the payload on a succeeded refund tombstone (#607): the admin
-// refund producer reads reservation_id off the durable succeeded row to detect a
-// double-refund conflict (admin_payments.go).
+// PrunePolicy retains the immutable operation payload for replay.
 func (h *CCBillRefundHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
 func (h *CCBillRefundHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
@@ -509,8 +512,19 @@ func (h *CCBillRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 
 	// Only a definitive -7 refusal permits another send. An expired lease or
 	// unknown response must recover an exact receipt, never infer from counters.
-	if intent.Attempts > 1 && (intent.LastFailureReason == nil || !strings.HasPrefix(*intent.LastFailureReason, "ccbill refund denied (-7):")) {
-		return h.recoverReceipt(ctx, p)
+	if intent.Attempts > 1 {
+		if intent.LastFailureReason == nil || !strings.HasPrefix(*intent.LastFailureReason, "ccbill refund denied (-7):") {
+			return h.recoverReceipt(ctx, p)
+		}
+		// Consume the prior refusal before sending. If this process crashes,
+		// the next lease must not mistake that old refusal for this send's result.
+		tag, err := h.DB.Qx(ctx).Exec(ctx, `UPDATE openrails.rail_intents SET last_failure_reason=NULL WHERE id=$1 AND attempts=$2 AND status='in_flight' AND last_failure_reason=$3`, intent.ID, intent.Attempts, *intent.LastFailureReason)
+		if err != nil {
+			return Ambiguous("could not consume prior refund refusal: " + err.Error())
+		}
+		if tag.RowsAffected() != 1 {
+			return Ambiguous("refund refusal already consumed; operator must verify")
+		}
 	}
 
 	res, err := client.RefundTransaction(ctx, subscriptionID, transactionID, p.AmountCents)
@@ -561,7 +575,7 @@ func (h *CCBillRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 
 // ccbillRefundProviderRef is the synthetic provider reference recorded on the
 // completed reservation. CCBill answers a refund with a bare results code, NOT a
-// refund id, so the stable reference is the (subscription, transaction) pair.
+// refund id, so the reference includes the subscription, charge, and operation.
 func ccbillRefundProviderRef(subscriptionID, transactionID string, reservationID uuid.UUID) string {
 	return "ccbill_refund:" + subscriptionID + ":" + transactionID + ":" + reservationID.String()
 }

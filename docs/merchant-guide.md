@@ -229,6 +229,19 @@ reference: `docs/api/endpoints.md`.
 
 Destructive semantics are deliberate: refunds and cancels require an explicit
 `revoke_access` decision — refunding money and revoking access are separate choices.
+For refunds, requested access revocation commits with successful local refund
+completion. A queued or uncertain refund (HTTP 202) retains access until that
+completion. The amount, reason, and revocation choice are immutable for an
+`Idempotency-Key`; reusing that key resumes the same operation. A different key
+creates a new operation, including an equal-sized partial refund within the
+remaining balance or a retry after a definitive refusal.
+
+For NMI and CCBill, a lost response without an exact captured operation receipt
+requires operator verification. The system retains the reservation and never
+infers success from an equal refund amount or subscription counters. Check the
+provider before resolving the operation; do not use a new key to retry an
+uncertain refund. A captured success retries local finalization automatically
+without sending a second provider refund.
 
 Granting credits is money-in and carries its own permission,
 `merchant:credits:grant` — owner-level by default (`merchant:*`), NOT part of the
