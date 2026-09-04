@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 
-import { getTokens } from "@/lib/api/client"
+import { getTokens, type ItemsEnvelope } from "@/lib/api/client"
 import {
   getCustomerPaymentMethods,
   getCustomerProfile,
@@ -44,26 +44,25 @@ import {
   metricsQuery,
   type MetricsQuery,
 } from "@/lib/api/metrics"
-import type { UsageMeterPage } from "@/lib/api/types"
 
-type UsageMeterPageLoader = (
-  limit: number,
-  offset: number,
+// Complete collections are explicit: selectors need every eligible record,
+// while catalog screens fetch only their visible page.
+export async function collectCatalogPages<Page extends ItemsEnvelope<unknown>>(
+  loadPage: (limit: number, offset: number, signal?: AbortSignal) => Promise<Page>,
   signal?: AbortSignal
-) => Promise<UsageMeterPage>
-
-export async function collectUsageMeterPages(
-  loadPage: UsageMeterPageLoader,
-  signal?: AbortSignal
-): Promise<UsageMeterPage> {
+): Promise<Page> {
   const first = await loadPage(200, 0, signal)
   const items = [...first.items]
   let offset = first.offset + first.limit
-  while (items.length < first.total) {
+  while (offset < first.total) {
+    signal?.throwIfAborted()
     const page = await loadPage(200, offset, signal)
+    const next = page.offset + page.limit
+    if (page.items.length === 0 || next <= offset) {
+      throw new Error("Catalog pagination stopped before all records were loaded")
+    }
     items.push(...page.items)
-    if (page.items.length === 0) break
-    offset = page.offset + page.limit
+    offset = next
   }
   return { ...first, items, limit: items.length, offset: 0 }
 }
@@ -174,28 +173,38 @@ export const adminQueries = {
       enabled: Boolean(id),
       meta: { errorAction: "Load payment" },
     }),
-  products: (
-    options: { limit?: number; offset?: number; errorAction?: string } = {}
-  ) => {
-    const { limit = 1000, offset = 0, errorAction } = options
+  products: (options: { limit?: number; offset?: number; errorAction?: string } = {}) => {
+    const { limit = 100, offset = 0, errorAction } = options
     return queryOptions({
-      queryKey: [
-        ...queryKeys.catalog(),
-        "products",
-        { limit, offset, activeOnly: undefined },
-      ],
+      queryKey: [...queryKeys.catalog(), "products", { limit, offset }],
       queryFn: ({ signal }) => listProducts(limit, offset, undefined, signal),
+      placeholderData: keepPreviousData,
       meta: queryErrorMeta(errorAction),
     })
   },
-  prices: (options: { productId?: string; errorAction?: string } = {}) => {
-    const { productId, errorAction } = options
+  allProducts: (options: { errorAction?: string } = {}) => queryOptions({
+    queryKey: [...queryKeys.catalog(), "products", "all"],
+    queryFn: ({ signal }) => collectCatalogPages(
+      (limit, offset, signal) => listProducts(limit, offset, undefined, signal), signal
+    ),
+    meta: queryErrorMeta(options.errorAction),
+  }),
+  prices: (options: { productId?: string; limit?: number; offset?: number; errorAction?: string } = {}) => {
+    const { productId, limit = 100, offset = 0, errorAction } = options
     return queryOptions({
-      queryKey: [...queryKeys.catalog(), "prices", { productId }],
-      queryFn: ({ signal }) => listPrices(productId, signal),
+      queryKey: [...queryKeys.catalog(), "prices", { productId, limit, offset }],
+      queryFn: ({ signal }) => listPrices(limit, offset, productId, signal),
+      placeholderData: keepPreviousData,
       meta: queryErrorMeta(errorAction),
     })
   },
+  allPrices: (options: { productId?: string; errorAction?: string } = {}) => queryOptions({
+    queryKey: [...queryKeys.catalog(), "prices", "all", { productId: options.productId }],
+    queryFn: ({ signal }) => collectCatalogPages(
+      (limit, offset, signal) => listPrices(limit, offset, options.productId, signal), signal
+    ),
+    meta: queryErrorMeta(options.errorAction),
+  }),
   price: (
     id: string,
     options: { verify?: boolean; errorAction?: string } = {}
@@ -267,7 +276,7 @@ export const adminQueries = {
   allUsageMeters: () =>
     queryOptions({
       queryKey: [...queryKeys.usageMeters(), "all"],
-      queryFn: ({ signal }) => collectUsageMeterPages(listUsageMeters, signal),
+      queryFn: ({ signal }) => collectCatalogPages(listUsageMeters, signal),
       meta: { errorAction: "Load usage meters" },
     }),
   usageMeter: (key: string) =>

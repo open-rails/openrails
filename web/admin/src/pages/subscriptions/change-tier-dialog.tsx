@@ -71,11 +71,11 @@ export function ChangeTierDialog({
     )
   )
   const productsQuery = useQuery({
-    ...adminQueries.products({ errorAction: "Load tier-change plans" }),
+    ...adminQueries.allProducts({ errorAction: "Load tier-change plans" }),
     enabled: open,
   })
   const pricesQuery = useQuery({
-    ...adminQueries.prices({ errorAction: "Load tier-change prices" }),
+    ...adminQueries.allPrices({ errorAction: "Load tier-change prices" }),
     enabled: open,
   })
 

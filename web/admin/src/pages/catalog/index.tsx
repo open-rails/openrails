@@ -11,6 +11,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { FormFieldErrors } from "@/components/form-field-errors"
+import { PaginationFooter } from "@/components/pagination-footer"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -122,9 +123,12 @@ export function CatalogDriftPage() {
   )
 }
 
+const CATALOG_PAGE_SIZE = 100
+
 function ProductsTab() {
-  const { data, isPending: loading } = useQuery(
-    adminQueries.products({ errorAction: "Load products" })
+  const [offset, setOffset] = React.useState(0)
+  const { data, isPending: loading, isFetching } = useQuery(
+    adminQueries.products({ limit: CATALOG_PAGE_SIZE, offset, errorAction: "Load products" })
   )
 
   return (
@@ -172,6 +176,8 @@ function ProductsTab() {
           </Table>
         </div>
       )}
+      <PaginationFooter total={data?.total ?? 0} limit={data?.limit ?? CATALOG_PAGE_SIZE}
+        offset={data?.offset ?? offset} loading={isFetching} onChange={setOffset} />
     </div>
   )
 }
@@ -496,9 +502,10 @@ function ProductDialog({ product }: { product?: CatalogProduct }) {
 }
 
 function PricesTab() {
-  const { data: products } = useQuery(adminQueries.products())
-  const { data, isPending: loading } = useQuery(
-    adminQueries.prices({ errorAction: "Load prices" })
+  const [offset, setOffset] = React.useState(0)
+  const { data: products } = useQuery(adminQueries.allProducts({ errorAction: "Load products" }))
+  const { data, isPending: loading, isFetching } = useQuery(
+    adminQueries.prices({ limit: CATALOG_PAGE_SIZE, offset, errorAction: "Load prices" })
   )
   const productName = (id: string) =>
     products?.items.find((p) => p.id === id)?.display_name ?? shortId(id, 13)
@@ -552,6 +559,8 @@ function PricesTab() {
           </Table>
         </div>
       )}
+      <PaginationFooter total={data?.total ?? 0} limit={data?.limit ?? CATALOG_PAGE_SIZE}
+        offset={data?.offset ?? offset} loading={isFetching} onChange={setOffset} />
     </div>
   )
 }

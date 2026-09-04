@@ -12,23 +12,19 @@ import (
 	"github.com/google/uuid"
 )
 
-const countActiveProducts = `-- name: CountActiveProducts :one
-SELECT count(*) FROM openrails.products WHERE NOT archived
+const countProductsFiltered = `-- name: CountProductsFiltered :one
+SELECT count(*) FROM openrails.products
+WHERE (NOT $1::boolean OR NOT archived)
+  AND ($2::text = '' OR lower(btrim(tier_group)) = lower(btrim($2::text)))
 `
 
-func (q *Queries) CountActiveProducts(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveProducts)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+type CountProductsFilteredParams struct {
+	ActiveOnly bool
+	TierGroup  string
 }
 
-const countAllProducts = `-- name: CountAllProducts :one
-SELECT count(*) FROM openrails.products
-`
-
-func (q *Queries) CountAllProducts(ctx context.Context) (int64, error) {
-	row := q.db.QueryRow(ctx, countAllProducts)
+func (q *Queries) CountProductsFiltered(ctx context.Context, arg CountProductsFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countProductsFiltered, arg.ActiveOnly, arg.TierGroup)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -173,51 +169,6 @@ func (q *Queries) ListActiveProducts(ctx context.Context) ([]OpenrailsProduct, e
 	return items, nil
 }
 
-const listActiveProductsPaged = `-- name: ListActiveProductsPaged :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
-WHERE NOT archived
-ORDER BY created_at DESC
-LIMIT NULLIF($2::int, 0) OFFSET $1::int
-`
-
-type ListActiveProductsPagedParams struct {
-	PageOffset int32
-	PageLimit  int32
-}
-
-func (q *Queries) ListActiveProductsPaged(ctx context.Context, arg ListActiveProductsPagedParams) ([]OpenrailsProduct, error) {
-	rows, err := q.db.Query(ctx, listActiveProductsPaged, arg.PageOffset, arg.PageLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsProduct
-	for rows.Next() {
-		var i OpenrailsProduct
-		if err := rows.Scan(
-			&i.ID,
-			&i.Key,
-			&i.DisplayName,
-			&i.Description,
-			&i.EntitlementsSpec,
-			&i.CreditsSpec,
-			&i.TierGroup,
-			&i.TierRank,
-			&i.Archived,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.MerchantID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAllProducts = `-- name: ListAllProducts :many
 SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
 `
@@ -255,19 +206,12 @@ func (q *Queries) ListAllProducts(ctx context.Context) ([]OpenrailsProduct, erro
 	return items, nil
 }
 
-const listAllProductsPaged = `-- name: ListAllProductsPaged :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
-ORDER BY created_at DESC
-LIMIT NULLIF($2::int, 0) OFFSET $1::int
+const listProductsByIDs = `-- name: ListProductsByIDs :many
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE id = ANY($1::uuid[])
 `
 
-type ListAllProductsPagedParams struct {
-	PageOffset int32
-	PageLimit  int32
-}
-
-func (q *Queries) ListAllProductsPaged(ctx context.Context, arg ListAllProductsPagedParams) ([]OpenrailsProduct, error) {
-	rows, err := q.db.Query(ctx, listAllProductsPaged, arg.PageOffset, arg.PageLimit)
+func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsProduct, error) {
+	rows, err := q.db.Query(ctx, listProductsByIDs, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -299,12 +243,28 @@ func (q *Queries) ListAllProductsPaged(ctx context.Context, arg ListAllProductsP
 	return items, nil
 }
 
-const listProductsByIDs = `-- name: ListProductsByIDs :many
-SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products WHERE id = ANY($1::uuid[])
+const listProductsFiltered = `-- name: ListProductsFiltered :many
+SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
+WHERE (NOT $1::boolean OR NOT archived)
+  AND ($2::text = '' OR lower(btrim(tier_group)) = lower(btrim($2::text)))
+ORDER BY created_at DESC, id DESC
+LIMIT NULLIF($4::int, 0) OFFSET $3::int
 `
 
-func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]OpenrailsProduct, error) {
-	rows, err := q.db.Query(ctx, listProductsByIDs, ids)
+type ListProductsFilteredParams struct {
+	ActiveOnly bool
+	TierGroup  string
+	PageOffset int32
+	PageLimit  int32
+}
+
+func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilteredParams) ([]OpenrailsProduct, error) {
+	rows, err := q.db.Query(ctx, listProductsFiltered,
+		arg.ActiveOnly,
+		arg.TierGroup,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
