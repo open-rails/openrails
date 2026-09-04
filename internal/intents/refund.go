@@ -28,6 +28,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Refund intent types (#358 phase B). The provider-side money movement of an
@@ -173,8 +174,13 @@ func (r refundReservations) recordReceipt(ctx context.Context, p RefundPayload, 
 	if strings.TrimSpace(providerRefundID) == "" {
 		return errors.New("successful refund response has no transaction reference")
 	}
-	_, err := r.DB.Qx(ctx).Exec(ctx, `UPDATE openrails.payments SET metadata = coalesce(metadata, '{}'::jsonb) || jsonb_build_object('provider_refund_id', $2::text) WHERE id=$1 AND status='pending'`, p.ReservationID, providerRefundID)
-	return err
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	return r.DB.Gen(ctx).RecordRefundProviderReceipt(ctx, gen.RecordRefundProviderReceiptParams{
+		MerchantID: mid.UUID(), ReservationID: p.ReservationID, ProviderRefundID: providerRefundID,
+	})
 }
 
 // recoverReceipt never guesses ownership from an amount or subscription counter.
@@ -518,11 +524,13 @@ func (h *CCBillRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		}
 		// Consume the prior refusal before sending. If this process crashes,
 		// the next lease must not mistake that old refusal for this send's result.
-		tag, err := h.DB.Qx(ctx).Exec(ctx, `UPDATE openrails.rail_intents SET last_failure_reason=NULL WHERE id=$1 AND attempts=$2 AND status='in_flight' AND last_failure_reason=$3`, intent.ID, intent.Attempts, *intent.LastFailureReason)
+		affected, err := h.DB.Gen(ctx).ConsumeCCBillRefundRefusal(ctx, gen.ConsumeCCBillRefundRefusalParams{
+			MerchantID: intent.MerchantID, ID: intent.ID, Attempts: intent.Attempts, Reason: *intent.LastFailureReason,
+		})
 		if err != nil {
 			return Ambiguous("could not consume prior refund refusal: " + err.Error())
 		}
-		if tag.RowsAffected() != 1 {
+		if affected != 1 {
 			return Ambiguous("refund refusal already consumed; operator must verify")
 		}
 	}
