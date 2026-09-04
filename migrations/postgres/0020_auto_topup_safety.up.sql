@@ -1,8 +1,11 @@
+SET LOCAL lock_timeout = '10s';
+SET LOCAL statement_timeout = '60s';
+
 -- Durable safety reservations outlive generic provider-intent pruning. The
 -- credit ledger remains the sole accounting authority; these rows count charge
 -- episodes and preserve exact provider receipts for local finalization.
 ALTER TABLE openrails.money_settings
-    ADD COLUMN auto_topup_failures integer NOT NULL DEFAULT 0 CHECK (auto_topup_failures >= 0);
+    ADD COLUMN auto_topup_failures bigint NOT NULL DEFAULT 0 CHECK (auto_topup_failures >= 0);
 
 CREATE TABLE openrails.auto_topup_episodes (
     intent_id uuid PRIMARY KEY,

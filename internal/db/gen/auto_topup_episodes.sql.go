@@ -60,7 +60,7 @@ func (q *Queries) AutoTopupSafetyCounts(ctx context.Context, arg AutoTopupSafety
 const completeAutoTopupAccount = `-- name: CompleteAutoTopupAccount :exec
 UPDATE openrails.money_settings
 SET last_topup_at = $4::timestamptz,
-    auto_topup_failures = $5::integer,
+    auto_topup_failures = $5::bigint,
     auto_topup_enabled = CASE WHEN $6::boolean THEN false ELSE auto_topup_enabled END,
     updated_at = $4::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
@@ -71,7 +71,7 @@ type CompleteAutoTopupAccountParams struct {
 	CustomerID uuid.UUID
 	Currency   string
 	Now        time.Time
-	Failures   int32
+	Failures   int64
 	Disable    bool
 }
 

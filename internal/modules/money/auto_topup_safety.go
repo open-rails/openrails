@@ -192,7 +192,7 @@ func (s *MoneyService) FinalizeAutoTopupReceipt(ctx context.Context, in AutoTopu
 			return nil
 		}
 		now := s.now()
-		failures := int32(0)
+		failures := int64(0)
 		disable := false
 		if receipt.Declined {
 			failures = st.AutoTopupFailures + 1
@@ -233,7 +233,7 @@ func (s *MoneyService) FinalizeAutoTopupReceipt(ctx context.Context, in AutoTopu
 // AutoTopupStatus exposes safety state without treating pending money as credit.
 type AutoTopupStatus struct {
 	Enabled             bool                         `json:"enabled"`
-	ConsecutiveDeclines int32                        `json:"consecutive_declines"`
+	ConsecutiveDeclines int64                        `json:"consecutive_declines"`
 	Daily               int64                        `json:"daily"`
 	Weekly              int64                        `json:"weekly"`
 	Monthly             int64                        `json:"monthly"`

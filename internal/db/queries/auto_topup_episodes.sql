@@ -26,7 +26,7 @@ WHERE merchant_id = $1 AND intent_id = $2 AND finalized_at IS NULL AND receipt I
 -- name: CompleteAutoTopupAccount :exec
 UPDATE openrails.money_settings
 SET last_topup_at = sqlc.arg(now)::timestamptz,
-    auto_topup_failures = sqlc.arg(failures)::integer,
+    auto_topup_failures = sqlc.arg(failures)::bigint,
     auto_topup_enabled = CASE WHEN sqlc.arg(disable)::boolean THEN false ELSE auto_topup_enabled END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3;

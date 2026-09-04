@@ -884,7 +884,7 @@ type OpenrailsMoneySetting struct {
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
 	CreditLimitAmount         int64
 	CollectionPaymentMethodID *uuid.UUID
-	AutoTopupFailures         int32
+	AutoTopupFailures         int64
 }
 
 // Queue for user notifications related to billing and subscriptions
