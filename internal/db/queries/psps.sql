@@ -113,7 +113,8 @@ FROM openrails.psp_owner_by_identity(
 -- name: ListRailArmedMerchants :many
 SELECT merchant_id FROM openrails.psp_rail_merchant_ids(
     sqlc.arg(rails)::text[],
-    sqlc.arg(merchant_limit)::int);
+    sqlc.arg(merchant_limit)::int,
+    sqlc.narg(after_merchant_id)::uuid);
 
 -- One merchant's live PSPs on a rail, read inside that merchant's scope (the
 -- second leg of the ListRailArmedMerchants fan-out).

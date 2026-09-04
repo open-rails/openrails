@@ -505,58 +505,6 @@ func (q *Queries) ListActiveEntitlementNamesMerchant(ctx context.Context, arg Li
 	return items, nil
 }
 
-const listActiveEntitlementRecords = `-- name: ListActiveEntitlementRecords :many
-SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id FROM openrails.entitlements ent
-WHERE ent.customer_id = $1
-  AND ent.revoked_at IS NULL
-  AND ent.deleted_at IS NULL
-  AND ent.start_at <= $2::timestamptz
-  AND (ent.end_at IS NULL OR ent.end_at > $2::timestamptz)
-ORDER BY ent.start_at ASC
-`
-
-type ListActiveEntitlementRecordsParams struct {
-	CustomerID uuid.UUID
-	At         time.Time
-}
-
-func (q *Queries) ListActiveEntitlementRecords(ctx context.Context, arg ListActiveEntitlementRecordsParams) ([]OpenrailsEntitlement, error) {
-	rows, err := q.db.Query(ctx, listActiveEntitlementRecords, arg.CustomerID, arg.At)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsEntitlement
-	for rows.Next() {
-		var i OpenrailsEntitlement
-		if err := rows.Scan(
-			&i.ID,
-			&i.Entitlement,
-			&i.StartAt,
-			&i.EndAt,
-			&i.SourceID,
-			&i.SourceType,
-			&i.RevokedAt,
-			&i.RevokeReason,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.Period,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.GrantID,
-			&i.DestructiveRunID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listActiveEntitlementRecordsByCustomerIDs = `-- name: ListActiveEntitlementRecordsByCustomerIDs :many
 SELECT ent.id, ent.entitlement, ent.start_at, ent.end_at, ent.source_id, ent.source_type, ent.revoked_at, ent.revoke_reason, ent.created_at, ent.updated_at, ent.deleted_at, ent.period, ent.merchant_id, ent.customer_id, ent.grant_id, ent.destructive_run_id FROM openrails.entitlements ent
 WHERE ent.merchant_id = $1

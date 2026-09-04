@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -34,7 +35,19 @@ func clampCatalogPage(limit, offset int) (int, int) {
 	if offset < 0 {
 		offset = 0
 	}
+	if offset > math.MaxInt32 {
+		offset = math.MaxInt32
+	}
 	return limit, offset
+}
+
+// CatalogPage carries the effective pagination used by the query. HTTP and
+// embedded callers advance by these values, never by the unnormalized request.
+type CatalogPage[T any] struct {
+	Items  []T   `json:"items"`
+	Total  int64 `json:"total"`
+	Limit  int   `json:"limit"`
+	Offset int   `json:"offset"`
 }
 
 // GetProduct returns a product by ID.
@@ -98,42 +111,28 @@ type ListProductsOptions struct {
 
 // ListProducts returns a paginated list of products with optional filters.
 // Total is the unfiltered-by-pagination count.
-func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (items []CatalogProduct, total int64, err error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, 0, pinErr
+func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (CatalogPage[CatalogProduct], error) {
+	var page CatalogPage[CatalogProduct]
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return page, err
 	}
 	defer release()
-
 	products, err := s.requireProductService()
 	if err != nil {
-		return nil, 0, err
+		return page, err
 	}
-	limit, offset := clampCatalogPage(opts.Limit, opts.Offset)
-
-	var raws []*models.Product
-	// Use the simplest paginated method that exists on ProductService today.
-	// TierGroup filtering is applied in-memory since there's no repo helper for it.
-	if opts.ActiveOnly {
-		raws, total, err = products.GetActivePaginated(ctx, limit, offset)
-	} else {
-		raws, total, err = products.GetAllPaginated(ctx, limit, offset)
-	}
+	page.Limit, page.Offset = clampCatalogPage(opts.Limit, opts.Offset)
+	raws, total, err := products.GetPaginated(ctx, catalog.ProductFilter{ActiveOnly: opts.ActiveOnly, TierGroup: opts.TierGroup}, page.Limit, page.Offset)
 	if err != nil {
-		return nil, 0, err
+		return page, err
 	}
-
-	tierGroup := strings.TrimSpace(opts.TierGroup)
-	out := make([]CatalogProduct, 0, len(raws))
+	page.Items = make([]CatalogProduct, 0, len(raws))
+	page.Total = total
 	for _, p := range raws {
-		if tierGroup != "" {
-			if p.TierGroup == nil || !strings.EqualFold(strings.TrimSpace(*p.TierGroup), tierGroup) {
-				continue
-			}
-		}
-		out = append(out, *productToCatalogProduct(p))
+		page.Items = append(page.Items, *productToCatalogProduct(p))
 	}
-	return out, total, nil
+	return page, nil
 }
 
 // ActivateProduct sets status=active on a product.
@@ -246,27 +245,28 @@ func (s *Service) ListPricesByProduct(ctx context.Context, productID uuid.UUID, 
 }
 
 // ListPrices returns a paginated list of prices across all products, with filters.
-func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, limit, offset int) (items []CatalogPrice, total int64, err error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, 0, pinErr
+func (s *Service) ListPrices(ctx context.Context, filter catalog.PriceFilter, limit, offset int) (CatalogPage[CatalogPrice], error) {
+	var page CatalogPage[CatalogPrice]
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return page, err
 	}
 	defer release()
-
 	prices, err := s.requirePriceService()
 	if err != nil {
-		return nil, 0, err
+		return page, err
 	}
-	limit, offset = clampCatalogPage(limit, offset)
-	raws, total, err := prices.ListPaginated(ctx, filter, limit, offset)
+	page.Limit, page.Offset = clampCatalogPage(limit, offset)
+	raws, total, err := prices.ListPaginated(ctx, filter, page.Limit, page.Offset)
 	if err != nil {
-		return nil, 0, err
+		return page, err
 	}
-	out := make([]CatalogPrice, 0, len(raws))
+	page.Items = make([]CatalogPrice, 0, len(raws))
+	page.Total = total
 	for _, p := range raws {
-		out = append(out, *priceToCatalogPrice(p))
+		page.Items = append(page.Items, *priceToCatalogPrice(p))
 	}
-	return out, total, nil
+	return page, nil
 }
 
 // propagatePriceActiveToStripe pushes a price's active flag to its linked Stripe

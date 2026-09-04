@@ -47,7 +47,11 @@ func (r *RepriceRepo) CreateBatch(ctx context.Context, priceKey *string, toPrice
 }
 
 func (r *RepriceRepo) GetBatchByID(ctx context.Context, id uuid.UUID) (*models.RepriceBatch, error) {
-	row, err := r.db.Gen(ctx).GetRepriceBatchByID(ctx, id)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetRepriceBatchByID(ctx, gen.GetRepriceBatchByIDParams{MerchantID: tid.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -247,7 +251,11 @@ func (r *RepriceRepo) CountBatchRows(ctx context.Context, batchID uuid.UUID) (sc
 }
 
 func (r *RepriceRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionRepriceByID(ctx, id)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetSubscriptionRepriceByID(ctx, gen.GetSubscriptionRepriceByIDParams{MerchantID: tid.UUID(), ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -272,6 +280,10 @@ type SubscriptionRepriceFilter struct {
 }
 
 func (r *RepriceRepo) List(ctx context.Context, filter SubscriptionRepriceFilter, limit, offset int) ([]*models.SubscriptionReprice, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var status *string
 	if filter.Status != nil {
 		s := string(*filter.Status)
@@ -280,6 +292,7 @@ func (r *RepriceRepo) List(ctx context.Context, filter SubscriptionRepriceFilter
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := r.db.Gen(ctx).ListSubscriptionReprices(ctx, gen.ListSubscriptionRepricesParams{
+		MerchantID:     tid.UUID(),
 		SubscriptionID: filter.SubscriptionID,
 		RepriceBatchID: filter.RepriceBatchID,
 		Status:         status,
@@ -296,7 +309,11 @@ func (r *RepriceRepo) List(ctx context.Context, filter SubscriptionRepriceFilter
 // row is not (or is no longer) in status=scheduled — the cancel-before-
 // effective contract.
 func (r *RepriceRepo) Cancel(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).CancelSubscriptionReprice(ctx, id)
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	rows, err := r.db.Gen(ctx).CancelSubscriptionReprice(ctx, gen.CancelSubscriptionRepriceParams{MerchantID: tid.UUID(), ID: id})
 	if err != nil {
 		return err
 	}
@@ -324,9 +341,14 @@ func (r *RepriceRepo) Apply(ctx context.Context, id uuid.UUID) error {
 // first (#777: the console's price page needs "is there a pending migration
 // for this price key" without already knowing a batch id).
 func (r *RepriceRepo) ListBatchesByPriceKey(ctx context.Context, priceKey string, limit, offset int) ([]*models.RepriceBatch, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	limit32, _ := safecast.Convert[int32](limit)
 	offset32, _ := safecast.Convert[int32](offset)
 	rows, err := r.db.Gen(ctx).ListRepriceBatchesByPriceKey(ctx, gen.ListRepriceBatchesByPriceKeyParams{
+		MerchantID: tid.UUID(),
 		PriceKey:   priceKey,
 		PageLimit:  limit32,
 		PageOffset: offset32,

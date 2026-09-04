@@ -79,7 +79,8 @@ ORDER BY created_at DESC;
 
 -- name: ListPaymentsByCustomer :many
 SELECT * FROM openrails.payments purch
-WHERE purch.customer_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.customer_id = sqlc.arg(customer_id)::uuid
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC;
@@ -127,6 +128,16 @@ LIMIT 1;
 
 -- The rail confirmed the reversal and named it, so the row now records real
 -- (negative) money movement (or#827).
+-- name: RecordRefundProviderReceipt :exec
+-- Capture the provider's exact success before retryable local finalization.
+UPDATE openrails.payments
+SET metadata = COALESCE(metadata, '{}'::jsonb)
+    || jsonb_build_object('provider_refund_id', sqlc.arg(provider_refund_id)::text)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id = sqlc.arg(reservation_id)::uuid
+  AND status = 'pending'
+  AND deleted_at IS NULL;
+
 -- name: CompleteRefundReservation :execrows
 UPDATE openrails.payments
 SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
@@ -170,13 +181,15 @@ WHERE id = $1
 
 -- name: CountPaymentsByCustomer :one
 SELECT count(*) FROM openrails.payments purch
-WHERE purch.customer_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.customer_id = sqlc.arg(customer_id)::uuid
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND purch.deleted_at IS NULL;
 
 -- name: ListPaymentsByCustomerPaged :many
 SELECT * FROM openrails.payments purch
-WHERE purch.customer_id = $1
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.customer_id = sqlc.arg(customer_id)::uuid
   AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC

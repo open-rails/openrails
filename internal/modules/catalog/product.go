@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
@@ -113,46 +114,33 @@ func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) 
 	return productsFromGen(rows)
 }
 
-// GetActivePaginated returns active products with pagination
-func (s *ProductService) GetActivePaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	q := s.db.Gen(ctx)
-	total, err := q.CountActiveProducts(ctx)
-	if err != nil {
-		return nil, 0, err
-	}
-	rows, err := q.ListActiveProductsPaged(ctx, gen.ListActiveProductsPagedParams{
-		PageLimit:  productPageInt32(limit),
-		PageOffset: productPageInt32(offset),
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	products, err := productsFromGen(rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	return products, total, nil
+type ProductFilter struct {
+	ActiveOnly bool
+	TierGroup  string
 }
 
-// GetAllPaginated returns all products with pagination
+func (s *ProductService) GetActivePaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
+	return s.GetPaginated(ctx, ProductFilter{ActiveOnly: true}, limit, offset)
+}
+
 func (s *ProductService) GetAllPaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
+	return s.GetPaginated(ctx, ProductFilter{}, limit, offset)
+}
+
+// GetPaginated applies identical filters to the count and page before slicing.
+func (s *ProductService) GetPaginated(ctx context.Context, filter ProductFilter, limit, offset int) ([]*models.Product, int64, error) {
 	q := s.db.Gen(ctx)
-	total, err := q.CountAllProducts(ctx)
+	tierGroup := strings.TrimSpace(filter.TierGroup)
+	total, err := q.CountProductsFiltered(ctx, gen.CountProductsFilteredParams{ActiveOnly: filter.ActiveOnly, TierGroup: tierGroup})
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := q.ListAllProductsPaged(ctx, gen.ListAllProductsPagedParams{
-		PageLimit:  productPageInt32(limit),
-		PageOffset: productPageInt32(offset),
-	})
+	rows, err := q.ListProductsFiltered(ctx, gen.ListProductsFilteredParams{ActiveOnly: filter.ActiveOnly, TierGroup: tierGroup, PageLimit: productPageInt32(limit), PageOffset: productPageInt32(offset)})
 	if err != nil {
 		return nil, 0, err
 	}
 	products, err := productsFromGen(rows)
-	if err != nil {
-		return nil, 0, err
-	}
-	return products, total, nil
+	return products, total, err
 }
 
 // Update is not supported for arbitrary changes - products should be treated as mostly immutable.

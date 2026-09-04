@@ -323,6 +323,16 @@ func (r *SubscriptionRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.S
 	return r.oneWithDetails(ctx, row, false)
 }
 
+// GetByIDForUpdate holds the subscription row until the caller's transaction
+// finishes. Lifecycle mutations must lock before reading a full-row snapshot.
+func (r *SubscriptionRepo) GetByIDForUpdate(ctx context.Context, id uuid.UUID) (*models.Subscription, error) {
+	row, err := r.db.Gen(ctx).GetSubscriptionByIDForUpdate(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return r.oneWithDetails(ctx, row, false)
+}
+
 func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string) (*models.Subscription, error) {
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
@@ -428,11 +438,15 @@ func (r *SubscriptionRepo) GetByRailMetadataValue(ctx context.Context, rail, key
 }
 
 func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, userID string) ([]models.Subscription, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByCustomer(ctx, tsid)
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByCustomer(ctx, gen.ListActiveSubscriptionsByCustomerParams{MerchantID: tid.UUID(), CustomerID: tsid})
 	if err != nil {
 		return nil, err
 	}

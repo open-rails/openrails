@@ -598,7 +598,7 @@ WHERE ($1::boolean IS NULL OR price.archived = $1::boolean)
   AND ($3::uuid IS NULL OR price.product_id = $3::uuid)
   AND (NOT $4::boolean OR price.auto_renew)
   AND (NOT $5::boolean OR NOT price.auto_renew)
-ORDER BY price.created_at DESC
+ORDER BY price.created_at DESC, price.id DESC
 LIMIT NULLIF($7::int, 0) OFFSET $6::int
 `
 

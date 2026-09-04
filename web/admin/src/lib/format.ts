@@ -1,4 +1,5 @@
-// All API money amounts are micros (millionths of a currency unit).
+// Catalog prices use micros (millionths of a currency unit).
+// Native ledger/invoice endpoints provide their own unit_decimals.
 const MICROS = 1_000_000
 
 const isoCurrency = /^[a-zA-Z]{3}$/
@@ -20,10 +21,53 @@ export function formatMicros(amount: number, currency: string): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${currency}`
 }
 
+export function unitsFromInput(major: string, decimals: number): number | null {
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) return null
+  const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(major.trim())
+  if (!match || (!match[2] && !match[3]) || (match[3]?.length ?? 0) > decimals)
+    return null
+  const value =
+    BigInt(match[2] || "0") * 10n ** BigInt(decimals) +
+    BigInt((match[3] || "").padEnd(decimals, "0") || "0")
+  const signed = match[1] === "-" ? -value : value
+  if (
+    signed > BigInt(Number.MAX_SAFE_INTEGER) ||
+    signed < BigInt(Number.MIN_SAFE_INTEGER)
+  )
+    return null
+  return Number(signed)
+}
+
 export function microsFromInput(major: string): number | null {
-  const n = Number(major)
-  if (!Number.isFinite(n)) return null
-  return Math.round(n * MICROS)
+  return unitsFromInput(major, 6)
+}
+
+// Format using the server's unit scale without rounding through floating point.
+export function formatUnits(
+  amount: number,
+  currency: string,
+  decimals: number
+): string {
+  if (
+    !Number.isSafeInteger(amount) ||
+    !Number.isInteger(decimals) ||
+    decimals < 0 ||
+    decimals > 18
+  )
+    return `${currency} amount exceeds the exact display range`
+  const value = BigInt(amount)
+  const absolute = value < 0n ? -value : value
+  const scale = 10n ** BigInt(decimals)
+  const whole = (absolute / scale).toLocaleString()
+  const fraction = (absolute % scale)
+    .toString()
+    .padStart(decimals, "0")
+    .replace(/0+$/, "")
+  const separator =
+    new Intl.NumberFormat()
+      .formatToParts(1.1)
+      .find((part) => part.type === "decimal")?.value ?? "."
+  return `${value < 0n ? "-" : ""}${whole}${fraction ? separator + fraction : ""} ${currency}`
 }
 
 export function formatDate(iso?: string | null): string {

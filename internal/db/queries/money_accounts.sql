@@ -17,6 +17,11 @@ SELECT * FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 LIMIT 1;
 
+-- name: ListMoneyAccountSettingsByCustomer :many
+SELECT * FROM openrails.money_settings
+WHERE merchant_id = $1 AND customer_id = $2
+ORDER BY currency;
+
 -- name: GetAdmissionCapacity :one
 -- Hot-path affordability snapshot for service admit. The customer_balance account
 -- carries Phase-H O(1) counters; money_settings is optional (missing = prepaid,

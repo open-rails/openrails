@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	pgq "github.com/pganalyze/pg_query_go/v6"
 )
 
 // Rule ids. Each catches a distinct failure class; keep them few and sharp.
@@ -140,7 +142,7 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 		// Only when nothing but the merchant narrows the scan. If the index
 		// cond pins a real key, a residual filter discards a handful of rows
 		// and is not worth an index.
-		if indexCondNarrows(n, cat) {
+		if indexCondNarrows(n, cat) || filterPinsPrimaryKey(n, cat) {
 			return
 		}
 		// Only lookup columns (`col = $n` in the source), not incidental
@@ -167,6 +169,63 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 		})
 	})
 	return out
+}
+
+// On the empty vet database PostgreSQL can choose a merchant index and leave
+// the addressed primary-key equality in Filter. The existing PK index already
+// serves this one-row lookup; CAS guards need no new indexes of their own.
+// Recognize only a direct equality guaranteed by AND, on this scan's single
+// primary-key column. OR, casts/functions of the column, and composite-key
+// fragments cannot establish that bound. Seq-scan findings remain independent.
+func filterPinsPrimaryKey(scan planNode, cat *Catalog) bool {
+	key := cat.PrimaryKeys[scan.RelationName]
+	if len(key) != 1 || !mentions(scan.Filter, key[0]) {
+		return false
+	}
+	tree, err := pgq.Parse("SELECT 1 WHERE " + scan.Filter)
+	if err != nil || len(tree.Stmts) != 1 {
+		return false
+	}
+	var pinned func(*pgq.Node) bool
+	column := func(node *pgq.Node) bool {
+		ref := node.GetColumnRef()
+		if ref == nil || colName(node) != key[0] {
+			return false
+		}
+		if len(ref.Fields) == 1 {
+			return true
+		}
+		if len(ref.Fields) != 2 {
+			return false
+		}
+		qualifier := ref.Fields[0].GetString_().GetSval()
+		if scan.Alias != "" {
+			return qualifier == scan.Alias
+		}
+		return qualifier == scan.RelationName
+	}
+	pinned = func(node *pgq.Node) bool {
+		if node == nil {
+			return false
+		}
+		if expr := node.GetBoolExpr(); expr != nil {
+			if expr.Boolop != pgq.BoolExprType_AND_EXPR {
+				return false
+			}
+			for _, arg := range expr.Args {
+				if pinned(arg) {
+					return true
+				}
+			}
+			return false
+		}
+		expr := node.GetAExpr()
+		if expr == nil || expr.Kind != pgq.A_Expr_Kind_AEXPR_OP || opName(expr) != "=" {
+			return false
+		}
+		return column(expr.Lexpr) && (isParam(expr.Rexpr) || isConst(expr.Rexpr)) || column(expr.Rexpr) && (isParam(expr.Lexpr) || isConst(expr.Lexpr))
+	}
+	return pinned(tree.Stmts[0].Stmt.GetSelectStmt().WhereClause)
 }
 
 // indexCondNarrows reports whether the scan's index condition pins something

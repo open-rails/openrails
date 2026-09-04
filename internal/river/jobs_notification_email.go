@@ -3,6 +3,8 @@ package riverjobs
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
+	"time"
 
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -17,8 +19,8 @@ import (
 
 const KindNotificationEmailSweep = "openrails.notification_email_sweep"
 
-// notificationEmailSweepBatch bounds one merchant's per-sweep delivery batch;
-// the remainder rides the next tick.
+// notificationEmailSweepBatch bounds each page; the cursor advances past failed
+// rows too, so one failing page cannot prevent later receipts being attempted.
 const notificationEmailSweepBatch = 200
 
 type NotificationEmailSweepArgs struct{}
@@ -57,35 +59,50 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 	}
 
 	var delivered, failed int
+	var sweepErr error
 	for _, mid := range merchantIDs {
 		progress.Mark(ctx, "notification email merchant "+mid.String())
 		mctx := merchant.WithID(ctx, merchant.ID(mid))
 		if err := w.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			rows, err := w.DB.Gen(ctx).ListUndeliveredNotifications(ctx, gen.ListUndeliveredNotificationsParams{
-				MerchantID: mid, PageLimit: notificationEmailSweepBatch,
-			})
-			if err != nil {
-				return fmt.Errorf("list undelivered notifications: %w", err)
-			}
-			for i := range rows {
-				n, err := models.NotificationFromGen(rows[i])
+			var afterCreated *time.Time
+			var afterID uuid.UUID
+			for {
+				rows, err := w.DB.Gen(ctx).ListUndeliveredNotifications(ctx, gen.ListUndeliveredNotificationsParams{
+					MerchantID: mid, PageLimit: notificationEmailSweepBatch, AfterCreatedAt: afterCreated, AfterID: afterID,
+				})
 				if err != nil {
-					failed++
-					logger.WithError(err).WithField("notification_id", rows[i].ID).
-						Error("notification email sweep: decode row; skipping")
-					continue
+					return fmt.Errorf("list undelivered notifications: %w", err)
 				}
-				if err := w.Notifications.DeliverEmail(ctx, n); err != nil {
-					failed++
-					logger.WithError(err).WithFields(log.Fields{
-						"notification_id": n.ID, "event_type": n.EventType,
-					}).Error("notification email sweep: delivery failed; will retry next sweep")
-					continue
+				for i := range rows {
+					progress.Mark(ctx, "notification email "+rows[i].ID.String())
+					n, err := models.NotificationFromGen(rows[i])
+					if err != nil {
+						sweepErr = preferSweepError(sweepErr, fmt.Errorf("notification %s decode: %w", rows[i].ID, err))
+						failed++
+						logger.WithError(err).WithField("notification_id", rows[i].ID).
+							Error("notification email sweep: decode row; skipping")
+						continue
+					}
+					if err := w.Notifications.DeliverEmail(ctx, n); err != nil {
+						sweepErr = preferSweepError(sweepErr, fmt.Errorf("notification %s delivery: %w", n.ID, err))
+						failed++
+						logger.WithError(err).WithFields(log.Fields{
+							"notification_id": n.ID, "event_type": n.EventType,
+						}).Error("notification email sweep: delivery failed; will retry next sweep")
+						continue
+					}
+					delivered++
 				}
-				delivered++
+				if len(rows) < notificationEmailSweepBatch {
+					break
+				}
+				last := rows[len(rows)-1]
+				afterCreated = &last.CreatedAt
+				afterID = last.ID
 			}
 			return nil
 		}); err != nil {
+			sweepErr = preferSweepError(sweepErr, fmt.Errorf("notification merchant %s: %w", mid, err))
 			// One merchant's failure must not abort the rest of the sweep.
 			logger.WithError(err).WithField("merchant_id", mid).
 				Error("notification email sweep: merchant failed; continuing")
@@ -93,7 +110,7 @@ func (w NotificationEmailSweepWorker) Work(ctx context.Context, job *river.Job[N
 	}
 	if delivered > 0 || failed > 0 {
 		logger.WithFields(log.Fields{"delivered": delivered, "failed": failed}).
-			Info("notification email sweep completed")
+			Info("notification email sweep finished")
 	}
-	return nil
+	return sweepErr
 }

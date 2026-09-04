@@ -15,10 +15,12 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -158,17 +160,18 @@ type subscriptionSummary struct {
 }
 
 type paymentMethodResponse struct {
-	ID             string                       `json:"id"`
-	Object         string                       `json:"object"`
-	Type           string                       `json:"type"`
-	Rail           string                       `json:"rail"`
-	Customer       *string                      `json:"customer,omitempty"`
-	BillingDetails *paymentMethodBillingDetails `json:"billing_details,omitempty"`
-	Card           *paymentMethodCardDetails    `json:"card,omitempty"`
-	Metadata       map[string]string            `json:"metadata,omitempty"`
-	Created        int64                        `json:"created"`
-	Health         *paymentMethodHealth         `json:"health,omitempty"`
-	Subscriptions  []subscriptionSummary        `json:"subscriptions,omitempty"`
+	ID                          string                       `json:"id"`
+	Object                      string                       `json:"object"`
+	Type                        string                       `json:"type"`
+	Rail                        string                       `json:"rail"`
+	Customer                    *string                      `json:"customer,omitempty"`
+	BillingDetails              *paymentMethodBillingDetails `json:"billing_details,omitempty"`
+	Card                        *paymentMethodCardDetails    `json:"card,omitempty"`
+	Metadata                    map[string]string            `json:"metadata,omitempty"`
+	Created                     int64                        `json:"created"`
+	Health                      *paymentMethodHealth         `json:"health,omitempty"`
+	Subscriptions               []subscriptionSummary        `json:"subscriptions,omitempty"`
+	CollectionDefaultCurrencies []string                     `json:"collection_default_currencies,omitempty"`
 }
 
 // paymentMethodHealth is the #589 DERIVED per-method health, computed at query
@@ -516,8 +519,11 @@ func ListPaymentMethods(r *httprequest.Request) {
 		return
 	}
 
-	charges := paymentMethodCharges(r, methods)
-	r.SuccessJSON(api.NewList(paymentMethodsToAPI(methods, charges), totalItems, req.Limit, req.Offset))
+	response, ok := paymentMethodsWithCollectionDefaults(r, identity.CustomerIDFromString(user.ID), methods)
+	if !ok {
+		return
+	}
+	r.SuccessJSON(api.NewList(response, totalItems, req.Limit, req.Offset))
 }
 
 // paymentMethodCharges loads the derived last-charge health for the listed
@@ -768,4 +774,25 @@ func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]
 		result[i] = paymentMethodToAPI(pm, charge)
 	}
 	return result
+}
+
+// List/profile responses read the same collection policy. No
+// subscription default or client-side "first card" inference participates.
+func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]paymentMethodResponse, bool) {
+	response := paymentMethodsToAPI(methods, paymentMethodCharges(r, methods))
+	if len(methods) == 0 {
+		return response, true
+	}
+	defaults, err := money.NewMoneyService(r.State.DB, r.Clock).CollectionPaymentMethodCurrencies(r.Request.Context(), payer)
+	if err != nil {
+		log.WithError(err).Error("failed to load collection payment method defaults")
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment method defaults")
+		return nil, false
+	}
+	for i, method := range methods {
+		if currencies := defaults[method.ID]; len(currencies) > 0 {
+			response[i].CollectionDefaultCurrencies = currencies
+		}
+	}
+	return response, true
 }
