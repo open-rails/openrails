@@ -261,7 +261,11 @@ export function WidgetEditor({
                         {previewError}
                       </p>
                     ) : preview ? (
-                      <WidgetVizView viz={viz} result={preview} />
+                      <WidgetVizView
+                        viz={viz}
+                        result={preview}
+                        query={query ?? undefined}
+                      />
                     ) : (
                       <p className="flex h-full items-center justify-center text-xs text-muted-foreground">
                         {previewing ? "Running…" : "No preview yet"}

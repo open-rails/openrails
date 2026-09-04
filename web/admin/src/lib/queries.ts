@@ -365,7 +365,6 @@ export const adminQueries = {
       queryKey: [...queryKeys.dashboard(), "metrics", query ?? "unselected"],
       queryFn: ({ signal }) => metricsQuery(query!, signal),
       enabled: Boolean(query),
-      placeholderData: keepPreviousData,
     }),
   notifications: (enabled: boolean) =>
     queryOptions({
