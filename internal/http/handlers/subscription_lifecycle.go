@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/open-rails/openrails/internal/db"
