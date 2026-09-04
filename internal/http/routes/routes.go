@@ -186,7 +186,7 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if providerRoutes.SolanaSigning {
 		// Solana recurring enrollment (#255): confirms after the wallet signs subscribe,
 		// then OpenRails charges the first cycle — so it needs a signer (#661).
-		group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment))
+		group.Handle(http.MethodPost, "/solana/recurring/enroll", h(httphandlers.ConfirmSolanaEnrollment), required)
 	}
 }
 
@@ -408,10 +408,9 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_merchant_unresolved"}
 			case errors.Is(err, controlplane.ErrServiceCredentialScopeDenied):
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "service_credential_resource_scope_denied"}
-			case errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):
-				// #734: the issuer resolves fine, but its merchant disagrees with the
-				// request's Host-pinned merchant (or, as for any other caller of
-				// merchantForIssuer, the issuer itself is unregistered/disabled).
+			case errors.Is(err, controlplane.ErrDelegatedIssuerUnknown), errors.Is(err, controlplane.ErrServiceCredentialHostMismatch):
+				// The API key or issuer resolves to a different Host merchant.
+				// Issuer resolution also uses its sentinel for unregistered/disabled issuers.
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "host_merchant_mismatch"}
 			default:
 				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "service_credential_invalid"}

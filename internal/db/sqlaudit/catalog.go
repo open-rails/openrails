@@ -14,6 +14,7 @@ type Catalog struct {
 	MerchantScoped map[string]bool       // table -> has a merchant_id column
 	Indexed        map[string]bool       // "table.column" -> column is part of some index
 	UniqueKeys     map[string][][]string // table -> key column sets of each UNIQUE index
+	PrimaryKeys    map[string][]string   // table -> primary key columns
 	Columns        map[string][]string   // table -> its column names
 	Tables         map[string]struct{}   // every table in the openrails schema
 }
@@ -29,20 +30,21 @@ SELECT c.relname,
  WHERE n.nspname = 'openrails' AND c.relkind = 'r'`
 
 const uniqueKeysSQL = `
-SELECT c.relname, array_agg(a.attname ORDER BY k.ord)
+SELECT c.relname, array_agg(a.attname ORDER BY k.ord), i.indisprimary
   FROM pg_index i
   JOIN pg_class c ON c.oid = i.indrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
   CROSS JOIN LATERAL unnest(i.indkey[0:i.indnkeyatts-1]) WITH ORDINALITY AS k(attnum, ord)
   JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
  WHERE n.nspname = 'openrails' AND i.indisunique AND i.indpred IS NULL
- GROUP BY c.relname, i.indexrelid`
+ GROUP BY c.relname, i.indexrelid, i.indisprimary`
 
 func LoadCatalog(ctx context.Context, conn *pgx.Conn) (*Catalog, error) {
 	cat := &Catalog{
 		MerchantScoped: map[string]bool{},
 		Indexed:        map[string]bool{},
 		UniqueKeys:     map[string][][]string{},
+		PrimaryKeys:    map[string][]string{},
 		Columns:        map[string][]string{},
 		Tables:         map[string]struct{}{},
 	}
@@ -78,10 +80,14 @@ func LoadCatalog(ctx context.Context, conn *pgx.Conn) (*Catalog, error) {
 	for urows.Next() {
 		var table string
 		var cols []string
-		if err := urows.Scan(&table, &cols); err != nil {
+		var primary bool
+		if err := urows.Scan(&table, &cols, &primary); err != nil {
 			return nil, err
 		}
 		cat.UniqueKeys[table] = append(cat.UniqueKeys[table], cols)
+		if primary {
+			cat.PrimaryKeys[table] = cols
+		}
 	}
 	return cat, urows.Err()
 }

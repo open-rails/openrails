@@ -21,15 +21,10 @@ permissions:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
-# Keep the final job names stable if the repository later requires them. As of
-# 2026-08-26, the active rulesets require only `Injected Code Scan`; these PR
-# checks are still enforcing at workflow level, but GitHub does not yet block a
-# merge when one fails. The `integration` job below provides one stable status
-# independent of its dynamic shard count.
-
+# Stable aggregate statuses are the repository's required merge gates.
+# Conditional SQL/console jobs may skip only when classification excludes them.
 jobs:
-  # Classifies the PR diff. Go jobs no-op when irrelevant; SQL and console jobs
-  # skip entirely because neither status is currently required by a ruleset.
+  # Classifies the PR diff. The aggregate also requires classification success.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -406,3 +401,25 @@ jobs:
           result="${{ needs.integration-shard.result }}"
           echo "integration-shard matrix result: $result"
           [ "$result" = "success" ] || exit 1
+
+  required-ci:
+    name: Required CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [changes, build, unit, lint, sqlc, console, integration]
+    if: always()
+    steps:
+      - name: Require every applicable validation job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -e '
+            . as $jobs |
+            (["changes", "build", "unit", "lint", "integration"] |
+              all(.[]; $jobs[.].result == "success")) and
+            (["sql", "console"] | all(.[];
+              . as $area |
+              (if $area == "sql" then "sqlc" else "console" end) as $job |
+              ($jobs.changes.outputs[$area] == "true" and $jobs[$job].result == "success") or
+              ($jobs.changes.outputs[$area] == "false" and $jobs[$job].result == "skipped")))
+          ' <<< "$RESULTS"

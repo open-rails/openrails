@@ -16,7 +16,6 @@ import (
 type GenerateFlexFormURLParams struct {
 	Username      string `json:"username"`
 	Email         string `json:"email"`
-	Password      string `json:"password"`
 	CustomerFName string `json:"customer_fname"`
 	CustomerLName string `json:"customer_lname"`
 	Address1      string `json:"address1"`
@@ -83,7 +82,6 @@ func (c *CCBillClient) GenerateFlexFormURL(params *GenerateFlexFormURLParams) (*
 	}
 
 	q := c.baseFlexFormQuery(params.Username, params.Email, params.FormName, currencyCode)
-	q.Set("password", params.Password)
 	q.Set("customer_fname", params.CustomerFName)
 	q.Set("customer_lname", params.CustomerLName)
 	setOptional(q, "address1", params.Address1)
