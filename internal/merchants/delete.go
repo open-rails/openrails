@@ -380,8 +380,8 @@ func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
 //     operator demonstrably looked at THIS state.
 //   - Confirm-by-construction: DeleteOptions cannot be satisfied by a boolean.
 //
-// It then purges every merchant-owned openrails.* row, the merchant's secrets,
-// and tombstones the directory row (status='deleted', deleted_at) inside ONE
+// It then purges the supported merchant-owned rows and DB-backed secrets,
+// and tombstones the directory row (status='deleted', deleted_at) inside one
 // transaction, stamped with a destructive_runs row (kind=merchant_purge). The
 // run captures database completion and any external cleanup target atomically.
 // A Vault purge completes the run only after external cleanup is verified; failed
