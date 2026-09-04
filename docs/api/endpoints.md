@@ -160,10 +160,24 @@ on-chain prepare/confirm routes above.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/payment-methods` | List stored methods. Query: `limit`, `offset` |
+| GET | `/v1/me/payment-methods` | List stored methods with currency-qualified collection defaults. Query: `limit`, `offset` |
 | POST | `/v1/me/payment-methods` | Store an NMI card. Body: `payment_token` (Collect.js) + billing details |
 | PUT | `/v1/me/payment-methods/{id}` | Durably replace an NMI card. Requires tokenization's `payment_token`, `last_four`, `card_type`, and `expiry_date`; billing fields are optional. Returns the updated method when confirmed, `202` with no body while converging, `409 payment_method_update_retry_required` when a fresh token is required, or `502 payment_method_update_failed` for a terminal provider conflict. |
 | DELETE | `/v1/me/payment-methods/{id}` | Delete an NMI method through the durable provider-aware workflow. Returns `204` when complete, `202` while provider convergence continues, and an error when refused/failed. Stripe cards are managed through Stripe Billing Portal. |
+
+Saved-method lists and merchant customer profiles include
+`collection_default_currencies` on each method that is the current invoice
+collection choice for those billing currencies (for example, `["EUR", "USD"]`).
+An absent or empty list indicates no collection-default badge for that method.
+This reads the existing policy: an explicit invoice collection method wins;
+otherwise the configured top-up method remains the existing fallback. It does
+not change provider-managed subscription defaults or select a checkout method.
+
+The admin payment-method card labels each currency separately. Refresh payment
+methods invalidates both the customer profile and saved-method query caches.
+Completed customer-initiated deletion removes the local method and clears its
+settings references through foreign keys; when an explicit choice is removed,
+an existing top-up fallback can become the displayed collection choice.
 
 ### Checkout (delegated)
 

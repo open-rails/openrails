@@ -123,7 +123,11 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	if r.State.PaymentMethodService != nil {
 		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, path.UserID); err == nil && len(pms) > 0 {
-			profile.PaymentMethods = paymentMethodsToAPI(pms, paymentMethodCharges(r, pms))
+			methods, ok := paymentMethodsWithCollectionDefaults(r, customerID, pms)
+			if !ok {
+				return
+			}
+			profile.PaymentMethods = methods
 		}
 	}
 	if r.State.MoneyService != nil {
@@ -196,8 +200,11 @@ func GetAdminUserPaymentMethods(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment methods")
 		return
 	}
-	charges := paymentMethodCharges(r, pms)
-	r.SuccessJSON(map[string]any{"object": "list", "data": paymentMethodsToAPI(pms, charges)})
+	methods, ok := paymentMethodsWithCollectionDefaults(r, identity.CustomerIDFromString(path.UserID), pms)
+	if !ok {
+		return
+	}
+	r.SuccessJSON(map[string]any{"object": "list", "data": methods})
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {
