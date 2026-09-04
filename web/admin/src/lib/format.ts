@@ -1,4 +1,5 @@
-// All API money amounts are micros (millionths of a currency unit).
+// Catalog prices use micros (millionths of a currency unit).
+// Native ledger/invoice endpoints provide their own unit_decimals.
 const MICROS = 1_000_000
 
 const isoCurrency = /^[a-zA-Z]{3}$/
