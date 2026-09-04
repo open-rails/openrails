@@ -172,5 +172,5 @@ function TileBody({
     )
   }
   if (!data) return null
-  return <WidgetVizView viz={widget.viz} result={data} />
+  return <WidgetVizView viz={widget.viz} result={data} query={widget.query} />
 }
