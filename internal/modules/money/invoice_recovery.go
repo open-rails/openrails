@@ -103,6 +103,42 @@ func (s *MoneyService) ListInvoicePaymentAttempts(ctx context.Context, payer ide
 	return attempts, int(total), nil
 }
 
+// collectionPaymentMethodID is the existing collection precedence: an explicit
+// invoice method wins; the configured top-up method is its fallback. This is
+// independent of any provider-managed subscription's saved method.
+func collectionPaymentMethodID(settings *models.MoneyAccount) *uuid.UUID {
+	if settings.CollectionPaymentMethod != nil {
+		return settings.CollectionPaymentMethod
+	}
+	return settings.AutoTopupPaymentMethod
+}
+
+// CollectionPaymentMethodCurrencies projects the current collection policy for
+// one customer, with explicit currencies instead of a misleading universal default.
+func (s *MoneyService) CollectionPaymentMethodCurrencies(ctx context.Context, payer identity.CustomerID) (map[uuid.UUID][]string, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer required")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).ListMoneyAccountSettingsByCustomer(ctx, gen.ListMoneyAccountSettingsByCustomerParams{MerchantID: mid.UUID(), CustomerID: payer.UUID()})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID][]string)
+	for _, row := range rows {
+		if id := collectionPaymentMethodID(settingsFromGen(row)); id != nil {
+			out[*id] = append(out[*id], row.Currency)
+		}
+	}
+	return out, nil
+}
+
 // SetInvoiceCollectionPaymentMethod selects the payer-owned saved method used
 // for automatic invoice collection in one billing currency.
 func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, payer identity.CustomerID, currency string, paymentMethodID uuid.UUID) error {
@@ -433,10 +469,7 @@ func (s *MoneyService) claimInvoiceCollectionWithOptions(ctx context.Context, pa
 				return fmt.Errorf("load invoice collection settings: %w", err)
 			}
 			settings := settingsFromGen(settingsRow)
-			paymentMethodID = settings.CollectionPaymentMethod
-			if paymentMethodID == nil {
-				paymentMethodID = settings.AutoTopupPaymentMethod
-			}
+			paymentMethodID = collectionPaymentMethodID(settings)
 			if paymentMethodID == nil {
 				if options.manual {
 					return ErrCollectionPaymentMethodRequired

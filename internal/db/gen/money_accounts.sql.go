@@ -286,6 +286,54 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 	return items, nil
 }
 
+const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+WHERE merchant_id = $1 AND customer_id = $2
+ORDER BY currency
+`
+
+type ListMoneyAccountSettingsByCustomerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg ListMoneyAccountSettingsByCustomerParams) ([]OpenrailsMoneySetting, error) {
+	rows, err := q.db.Query(ctx, listMoneyAccountSettingsByCustomer, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsMoneySetting
+	for rows.Next() {
+		var i OpenrailsMoneySetting
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.BillingMode,
+			&i.LowBalanceThreshold,
+			&i.AutoTopupEnabled,
+			&i.AutoTopupAmount,
+			&i.AutoTopupPaymentMethodID,
+			&i.DefaultCreditExpiryHours,
+			&i.LastTopupAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Tier,
+			&i.TierSource,
+			&i.Currency,
+			&i.CreditLimitAmount,
+			&i.CollectionPaymentMethodID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
 SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
