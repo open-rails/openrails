@@ -96,7 +96,9 @@ SELECT EXISTS (
 SELECT * FROM openrails.notification_queue nq
 WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid
   AND nq.emailed_at IS NULL
-ORDER BY nq.created_at
+  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
+       OR (nq.created_at, nq.id) > (sqlc.narg(after_created_at)::timestamptz, sqlc.arg(after_id)::uuid))
+ORDER BY nq.created_at, nq.id
 LIMIT sqlc.arg(page_limit)::int;
 
 -- name: MarkNotificationEmailed :execrows

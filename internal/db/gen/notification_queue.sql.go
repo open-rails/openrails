@@ -356,18 +356,27 @@ const listUndeliveredNotifications = `-- name: ListUndeliveredNotifications :man
 SELECT id, event_type, data, seen, created_at, merchant_id, customer_id, emailed_at FROM openrails.notification_queue nq
 WHERE nq.merchant_id = $1::uuid
   AND nq.emailed_at IS NULL
-ORDER BY nq.created_at
-LIMIT $2::int
+  AND ($2::timestamptz IS NULL
+       OR (nq.created_at, nq.id) > ($2::timestamptz, $3::uuid))
+ORDER BY nq.created_at, nq.id
+LIMIT $4::int
 `
 
 type ListUndeliveredNotificationsParams struct {
-	MerchantID uuid.UUID
-	PageLimit  int32
+	MerchantID     uuid.UUID
+	AfterCreatedAt *time.Time
+	AfterID        uuid.UUID
+	PageLimit      int32
 }
 
 // #789: undelivered rows for the notification email sweep (emailed_at NULL).
 func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUndeliveredNotificationsParams) ([]OpenrailsNotificationQueue, error) {
-	rows, err := q.db.Query(ctx, listUndeliveredNotifications, arg.MerchantID, arg.PageLimit)
+	rows, err := q.db.Query(ctx, listUndeliveredNotifications,
+		arg.MerchantID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

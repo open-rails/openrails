@@ -59,7 +59,7 @@ type CatalogReconciliationPullWorker struct {
 
 func (CatalogReconciliationPullWorker) Kind() string { return KindCatalogReconciliationPull }
 
-// catalogReconcileMerchantBatch caps one pass's fan-out; the work queue is the
+// catalogReconcileMerchantBatch bounds each page of the pass; the work queue is the
 // armed-PSP set, so a pass scales with merchants on a reconcilable rail.
 const catalogReconcileMerchantBatch = 1000
 
@@ -81,28 +81,33 @@ func (w CatalogReconciliationPullWorker) Work(ctx context.Context, job *river.Jo
 	}
 	_ = job
 
-	merchantIDs, err := w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
-		Rails:         []string{string(models.RailStripe), string(models.RailNMI)},
-		MerchantLimit: catalogReconcileMerchantBatch,
-	})
-	if err != nil {
-		return fmt.Errorf("catalog reconciliation: list armed merchants: %w", err)
-	}
-	for _, mid := range merchantIDs {
-		if mid == nil {
-			continue
+	var after *uuid.UUID
+	var sweepErr error
+	for {
+		merchantIDs, err := w.DB.GenDirectory().ListRailArmedMerchants(ctx, gen.ListRailArmedMerchantsParams{
+			Rails:         []string{string(models.RailStripe), string(models.RailNMI)},
+			MerchantLimit: catalogReconcileMerchantBatch, AfterMerchantID: after,
+		})
+		if err != nil {
+			return preferSweepError(sweepErr, fmt.Errorf("catalog reconciliation: list armed merchants: %w", err))
 		}
-		merchantID := merchant.ID(*mid)
-		progress.Mark(ctx, "catalog reconciliation merchant "+merchantID.String())
-		if err := w.DB.RunInMerchantScope(ctx, merchantID, "catalog reconciliation", func(mctx context.Context) error {
-			return w.reconcileMerchant(mctx)
-		}); err != nil {
-			// One merchant's provider outage must not abort the rest of the pass.
-			log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
-				Error("CatalogReconciliation: merchant pass failed; continuing")
+		for _, mid := range merchantIDs {
+			if mid == nil {
+				continue
+			}
+			after = mid
+			merchantID := merchant.ID(*mid)
+			progress.Mark(ctx, "catalog reconciliation merchant "+merchantID.String())
+			if err := w.DB.RunInMerchantScope(ctx, merchantID, "catalog reconciliation", func(mctx context.Context) error { return w.reconcileMerchant(mctx) }); err != nil {
+				sweepErr = preferSweepError(sweepErr, fmt.Errorf("catalog reconciliation merchant %s: %w", merchantID, err))
+				log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).Error("CatalogReconciliation: merchant pass failed; continuing")
+			}
+		}
+		if len(merchantIDs) < catalogReconcileMerchantBatch {
+			break
 		}
 	}
-	return nil
+	return sweepErr
 }
 
 // reconcileMerchant runs one merchant's pull-and-diff, already inside its scope.
