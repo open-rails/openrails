@@ -24,7 +24,7 @@ export function formatMeasure(
   if (!Number.isFinite(n)) return String(value)
   switch (unit) {
     case "micros":
-      return formatMicros(n, currency || "usd")
+      return formatMicros(n, currency ?? "").trim()
     case "ratio":
       return `${(n * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
     case "days":
@@ -81,7 +81,74 @@ export function indexColumns(columns: MetricsColumn[]): ColumnIndex {
 
 export interface PivotSeries {
   key: string
+  label: string
+  measure: string
+  dimensions: MetricsCell[]
   unit?: string
+  currency?: string
+}
+
+export function filteredCurrency(query?: MetricsQuery): string | undefined {
+  const currencies = query?.filters?.currency
+  return currencies?.length === 1 ? currencies[0].trim() : undefined
+}
+
+export function rowCurrency(
+  row: MetricsCell[],
+  idx: ColumnIndex,
+  fallback?: string
+): string | undefined {
+  return idx.currency >= 0
+    ? String(row[idx.currency] ?? "") || undefined
+    : fallback
+}
+
+// Absolute bucket dates differ between periods; stat deltas are defined only
+// for a single value per dimension tuple. Never sum ratios or unlike monies.
+export function statDelta(
+  result: MetricsResult,
+  row: MetricsCell[],
+  measureIndex: number
+): number | null {
+  if (!result.compare_rows || row[measureIndex] === null) return null
+  const idx = indexColumns(result.columns)
+  const key = (r: MetricsCell[]) =>
+    JSON.stringify(idx.dims.map((d) => r[d.index]))
+  const currentKey = key(row)
+  if (result.rows.filter((r) => key(r) === currentKey).length !== 1) return null
+  const previous = result.compare_rows.filter((r) => key(r) === currentKey)
+  if (previous.length !== 1 || previous[0][measureIndex] === null) return null
+  const prev = Number(previous[0][measureIndex])
+  const cur = Number(row[measureIndex])
+  return Number.isFinite(prev) && Number.isFinite(cur) && prev !== 0
+    ? (cur - prev) / Math.abs(prev)
+    : null
+}
+
+// One axis (or donut total) may only combine the same measurement unit and
+// currency. Counts do not become money just because a currency dimension exists.
+export function groupSeries<T extends PivotSeries>(
+  series: T[]
+): { key: string; label: string; series: T[] }[] {
+  const groups = new Map<string, { key: string; label: string; series: T[] }>()
+  for (const item of series) {
+    const currency = item.unit === "micros" ? item.currency : undefined
+    const key = JSON.stringify([item.unit ?? "number", currency ?? null])
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        key,
+        label:
+          item.unit === "micros"
+            ? currency || "Amount (currency not supplied)"
+            : item.unit || "Values",
+        series: [],
+      }
+      groups.set(key, group)
+    }
+    group.series.push(item)
+  }
+  return [...groups.values()]
 }
 
 export interface Pivoted {
@@ -92,7 +159,10 @@ export interface Pivoted {
 // pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
 // series per measure × dimension-value combination. Server-zero-filled
 // buckets render as-is; combos absent for a bucket fill 0 so stacks align.
-export function pivotTimeSeries(result: MetricsResult): Pivoted {
+export function pivotTimeSeries(
+  result: MetricsResult,
+  currency?: string
+): Pivoted {
   const idx = indexColumns(result.columns)
   if (idx.time < 0) return { data: [], series: [] }
   const buckets = new Map<string, Record<string, number | string>>()
@@ -104,17 +174,30 @@ export function pivotTimeSeries(result: MetricsResult): Pivoted {
       entry = { bucket: formatBucket(t, result.grain), bucketISO: t }
       buckets.set(t, entry)
     }
-    const dimLabel = idx.dims
-      .map((d) => String(row[d.index] ?? ""))
+    const dimensions = idx.dims.map((d) => row[d.index])
+    const dimLabel = dimensions
+      .map((value) => String(value ?? ""))
       .filter(Boolean)
       .join(" · ")
     for (const m of idx.measures) {
-      const key =
-        dimLabel && idx.measures.length > 1
-          ? `${m.name} · ${dimLabel}`
-          : dimLabel || m.name
-      if (!series.has(key)) series.set(key, { key, unit: m.unit })
-      entry[key] = Number(row[m.index] ?? 0)
+      const identity = JSON.stringify([m.name, ...dimensions])
+      let item = series.get(identity)
+      if (!item) {
+        item = {
+          key: `series-${series.size}`,
+          label:
+            dimLabel && idx.measures.length > 1
+              ? `${m.name} · ${dimLabel}`
+              : dimLabel || m.name,
+          measure: m.name,
+          dimensions,
+          unit: m.unit,
+          currency:
+            m.unit === "micros" ? rowCurrency(row, idx, currency) : undefined,
+        }
+        series.set(identity, item)
+      }
+      entry[item.key] = Number(row[m.index] ?? 0)
     }
   }
   const data = [...buckets.entries()]

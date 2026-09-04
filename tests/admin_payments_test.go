@@ -691,9 +691,8 @@ func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 // TestAdminRefundPaymentThroughIntentLedger drives the full HTTP admin refund
 // path over the provider intent ledger (#358 phase B): the provider-side
 // money movement is a durable nmi_refund intent executed synchronously, the
-// content-addressed identity (payment + amount) blocks duplicate money
-// movement across DIFFERENT admin idempotency keys, and the admin-key replay
-// returns the recorded refund.
+// caller operation identity makes replays return the recorded refund while
+// distinct keys allow intentional equal-sized partial refunds.
 func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	suite := getSharedTestSuite(t)
 	admin := adminPaymentsWriter(t, suite)
@@ -715,10 +714,10 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	var refundBody atomic.Value
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refund") {
-			refundCalls.Add(1)
+			call := refundCalls.Add(1)
 			b, _ := io.ReadAll(r.Body)
 			refundBody.Store(string(b))
-			_, _ = w.Write([]byte(`{"object":"transaction","id":"txn_refund_http","response":"1","response_text":"SUCCESS"}`))
+			fmt.Fprintf(w, `{"object":"transaction","id":"txn_refund_http_%d","response":"1","response_text":"SUCCESS"}`, call)
 			return
 		}
 		_, _ = w.Write([]byte(`{}`))
@@ -758,11 +757,10 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	assert.Equal(t, http.StatusCreated, w.Code, "admin-key replay returns the recorded refund: %s", w.Body.String())
 	assert.EqualValues(t, 1, refundCalls.Load(), "replay never re-refunds")
 
-	// The SAME refund content under a DIFFERENT admin key conflicts on the
-	// content-addressed intent identity — no second money movement.
+	// A fresh caller key authorizes another partial refund within the balance.
 	w = refundReq("ledger-key-2")
-	assert.Equal(t, http.StatusConflict, w.Code, "identical refund content must conflict: %s", w.Body.String())
-	assert.EqualValues(t, 1, refundCalls.Load(), "the gateway never sees a duplicate refund")
+	assert.Equal(t, http.StatusCreated, w.Code, "second partial refund must complete: %s", w.Body.String())
+	assert.EqualValues(t, 2, refundCalls.Load(), "two intentional partial refunds")
 }
 
 // seedCCBillRefundablePayment: an active CCBill subscription (carrying the
@@ -806,7 +804,7 @@ func ccbillAdminRefundReq(t *testing.T, admin http.Handler, paymentID uuid.UUID,
 // contract: a CCBill payment WITH a linked subscription refunds through the
 // durable ccbill_refund intent against the DataLink SMS choke point
 // (voidOrRefundTransaction keyed off the CCBill subscription id, narrowed to
-// the original transaction id), with the same content-addressed
+// the original transaction id), with the same caller operation
 // effectively-once semantics as the NMI ledger path.
 func TestAdminRefundCCBillThroughIntentLedger(t *testing.T) {
 	suite := getSharedTestSuite(t)
@@ -859,18 +857,17 @@ func TestAdminRefundCCBillThroughIntentLedger(t *testing.T) {
 		payment.ID).Scan(&refundAmount, &refundStatus, &refundTxn))
 	assert.EqualValues(t, -5_000_000, refundAmount)
 	assert.Equal(t, "completed", refundStatus)
-	assert.Equal(t, "ccbill_refund:"+psid+":"+txnID, refundTxn)
+	assert.True(t, strings.HasPrefix(refundTxn, "ccbill_refund:"+psid+":"+txnID+":"))
 
 	// Admin-key replay returns the recorded refund without a second send.
 	w = ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-ledger-key-1")
 	assert.Equal(t, http.StatusCreated, w.Code, "admin-key replay returns the recorded refund: %s", w.Body.String())
 	assert.EqualValues(t, 1, refundCalls.Load(), "replay never re-refunds")
 
-	// The SAME refund content under a DIFFERENT admin key conflicts on the
-	// content-addressed intent identity — no second money movement.
+	// A fresh caller key authorizes another partial refund within the balance.
 	w = ccbillAdminRefundReq(t, admin, payment.ID, "ccbill-ledger-key-2")
-	assert.Equal(t, http.StatusConflict, w.Code, "identical refund content must conflict: %s", w.Body.String())
-	assert.EqualValues(t, 1, refundCalls.Load(), "CCBill never sees a duplicate refund")
+	assert.Equal(t, http.StatusCreated, w.Code, "second partial refund must complete: %s", w.Body.String())
+	assert.EqualValues(t, 2, refundCalls.Load(), "two intentional partial refunds")
 }
 
 // TestAdminRefundCCBillQueuedWhenDataLinkUnconfigured pins the pending
