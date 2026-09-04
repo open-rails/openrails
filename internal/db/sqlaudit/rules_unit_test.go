@@ -18,6 +18,7 @@ func testCatalog() *Catalog {
 			"subscriptions.customer_id": true, "subscriptions.rail": true,
 			"products.id": true, "products.merchant_id": true,
 		},
+		PrimaryKeys: map[string][]string{"subscriptions": {"id"}, "products": {"id"}},
 		UniqueKeys: map[string][][]string{
 			"subscriptions": {{"id"}, {"rail", "rail_subscription_id"}},
 		},
@@ -147,4 +148,64 @@ func TestMentionsRespectsIdentifierBoundaries(t *testing.T) {
 	if !mentions(f, "price_id") {
 		t.Fatal("`price_id` should match")
 	}
+}
+
+func TestUnindexedFilterAllowsOnlyGuaranteedPrimaryKeyPoints(t *testing.T) {
+	cases := []struct {
+		name, filter string
+		want         bool
+	}{
+		{"CAS guards after primary key", "id = $2 AND cancel_feedback = $3", false},
+		{"qualified reversed equality", "$2::uuid = s.id AND cancel_feedback = $3", false},
+		{"literal primary key", "id = '00000000-0000-0000-0000-000000000001'::uuid AND cancel_feedback = $3", false},
+		{"nonunique indexed customer", "customer_id = $2 AND cancel_feedback = $3", true},
+		{"primary key only inside OR", "id = $2 OR cancel_feedback = $3", true},
+		{"column expression is not unique", "lower(id::text) = $2 AND cancel_feedback = $3", true},
+		{"other relation key", "other.id = $2 AND cancel_feedback = $3", true},
+		{"unaliased self-join key", "subscriptions.id = $2 AND cancel_feedback = $3", true},
+		{"set of keys is not one row", "id = ANY($2) AND cancel_feedback = $3", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			query := Query{Name: tc.name, Kind: "many", SQL: "SELECT * FROM subscriptions s WHERE " + tc.filter}
+			structure, err := query.Parse()
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan := planNode{NodeType: "Index Scan", RelationName: "subscriptions", Alias: "s", IndexCond: "merchant_id = $1", Filter: tc.filter}
+			findings := planFindings(query, structure, plan, testCatalog())
+			flagged := false
+			for _, finding := range findings {
+				if finding.Rule == RuleUnindexedFilter {
+					flagged = true
+				}
+			}
+			if flagged != tc.want {
+				t.Fatalf("unindexed-filter=%v want=%v: %+v", flagged, tc.want, findings)
+			}
+		})
+	}
+}
+
+func TestPrimaryKeyFilterDoesNotExcuseCompositeFragmentsOrSeqScans(t *testing.T) {
+	cat := testCatalog()
+	scan := planNode{NodeType: "Index Scan", RelationName: "subscriptions", IndexCond: "merchant_id = $1", Filter: "id = $2 AND cancel_feedback = $3"}
+	cat.PrimaryKeys["subscriptions"] = []string{"id", "rail"}
+	if filterPinsPrimaryKey(scan, cat) {
+		t.Fatal("part of a composite primary key must not count as a point lookup")
+	}
+	cat = testCatalog()
+	scan.NodeType = "Seq Scan"
+	query := Query{Name: "point-with-seq-scan", Kind: "many", SQL: "SELECT * FROM subscriptions WHERE " + scan.Filter}
+	structure, err := query.Parse()
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings := planFindings(query, structure, scan, cat)
+	for _, finding := range findings {
+		if finding.Rule == RuleSeqScan {
+			return
+		}
+	}
+	t.Fatalf("primary-key recognition must not suppress physical seq scans: %+v", findings)
 }

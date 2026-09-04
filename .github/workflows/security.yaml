@@ -166,3 +166,16 @@ jobs:
       # scripts/testdata/injection-scan/ must trip the rules they belong to.
       - name: Detector self-test
         run: ./scripts/scan-injected-code.sh --self-test
+
+  required-security:
+    name: Required Security
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [security-changes, gosec, govulncheck, trivy, injection-scan]
+    if: always()
+    steps:
+      - name: Require every security job
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"

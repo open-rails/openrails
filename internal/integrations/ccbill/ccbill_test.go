@@ -24,6 +24,7 @@ func TestGenerateFlexFormURLIncludesReservationID(t *testing.T) {
 	parsed, err := url.Parse(resp.RedirectURL)
 	require.NoError(t, err)
 	require.Equal(t, "cs_11111111-1111-1111-1111-111111111111", parsed.Query().Get("reservationId"))
+	require.False(t, parsed.Query().Has("password"), "hosted checkout must not carry a member password")
 }
 
 func TestGenerateFlexFormURLOmitsEmptyOptionalAddressFields(t *testing.T) {
