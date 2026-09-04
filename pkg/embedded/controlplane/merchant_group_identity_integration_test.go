@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -173,7 +174,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 			Slug: oldSlug, OwnerUserID: user.ID,
 		})
 		require.NoError(t, err)
-		require.NoError(t, cp.Core().RenamePermissionGroupSlug(ctx, "merchant", oldSlug, newSlug))
+		require.NoError(t, cp.Core().RenamePermissionGroupSlugAs(ctx, user.ID, "merchant", oldSlug, newSlug))
 
 		// NEW slug: the directory row is stale; group resolution finds it and
 		// lazily re-syncs the row.
@@ -210,6 +211,45 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.False(t, aliased.Created)
 		require.Equal(t, res.MerchantID, aliased.MerchantID)
 		require.Equal(t, res.GroupID, aliased.GroupID)
+	})
+
+	t.Run("reclaimed name cannot select a former owner's live billing row", func(t *testing.T) {
+		name := "reclaim-" + sfx
+		original, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: name, OwnerUserID: user.ID})
+		require.NoError(t, err)
+		stranger, err := cp.Core().CreateUser(ctx, "other-"+sfx+"@example.test", "other"+sfx)
+		require.NoError(t, err)
+		// Reproduce the former crash window: AuthKit released a name while the
+		// old billing directory row is still live. No alias/local projection may
+		// make the new group's authority select that old row.
+		require.NoError(t, cp.Core().DeleteGroupInstanceByID(ctx, original.GroupID, authkit.DeletePermissionGroupOptions{ReleaseSlug: true}))
+		replacement, err := cp.Core().CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: name, OwnerSubjectID: stranger.ID})
+		require.NoError(t, err)
+		_, _, err = cp.ResolveAuthorizedMerchant(ctx, name, stranger.ID, "merchant:catalog:read")
+		require.ErrorIs(t, err, policy.ErrMerchantUnresolved)
+		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
+		require.NoError(t, err)
+		_, _, err = dir.Provision(ctx, merchants.ProvisionRequest{Slug: name, PermissionGroupID: replacement})
+		require.ErrorIs(t, err, merchants.ErrMerchantBindingConflict)
+		unchanged, err := dir.Get(ctx, original.MerchantID)
+		require.NoError(t, err)
+		require.Equal(t, original.GroupID, unchanged.PermissionGroupID)
+		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET deleted_at=now(),status='deleted' WHERE id=$1`, original.MerchantID.UUID())
+		require.NoError(t, err)
+		fresh, made, err := dir.Provision(ctx, merchants.ProvisionRequest{Slug: name, PermissionGroupID: replacement})
+		require.NoError(t, err)
+		require.True(t, made)
+		require.NotEqual(t, original.MerchantID, fresh.ID)
+		got, _, err := cp.ResolveAuthorizedMerchant(ctx, name, stranger.ID, "merchant:catalog:read")
+		require.NoError(t, err)
+		require.Equal(t, fresh.ID, got)
+		_, _, err = cp.ResolveAuthorizedMerchant(ctx, name, user.ID, "merchant:catalog:read")
+		require.ErrorIs(t, err, policy.ErrPermissionRequired)
+		// A delayed release retry is anchored to the first group's UUID.
+		require.NoError(t, cp.Core().DeleteGroupInstanceByID(ctx, original.GroupID, authkit.DeletePermissionGroupOptions{ReleaseSlug: true}))
+		alive, err := cp.Core().GroupInstanceByID(ctx, replacement)
+		require.NoError(t, err)
+		require.Equal(t, name, alive.InstanceSlug)
 	})
 
 	t.Run("released names are claimable again; tombstoned directory rows do not pin them", func(t *testing.T) {

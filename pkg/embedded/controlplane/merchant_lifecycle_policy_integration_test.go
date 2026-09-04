@@ -124,7 +124,7 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		// admission predicate must compare that stable identity, not only the
 		// group's current display slug.
 		renamedSlug := "pol-renamed-" + sfx
-		require.NoError(t, core.RenamePermissionGroupSlug(ctx, embcp.MerchantType, "pol-one-"+sfx, renamedSlug))
+		require.NoError(t, core.RenamePermissionGroupSlugAs(ctx, user.ID, embcp.MerchantType, "pol-one-"+sfx, renamedSlug))
 		require.NoError(t, admission(ctx, "pol-one-"+sfx, user.ID), "an owned tombstone is still an idempotent repair")
 
 		// Beyond it: refused until a payment method is on file.

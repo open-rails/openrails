@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -30,8 +31,15 @@ type merchantSelectorChecker struct {
 	inferenceRuns int
 }
 
-func (c *merchantSelectorChecker) HasAdminPermission(_ context.Context, merchantRef, userID, _ string) (bool, error) {
-	return userID == selectorTestUserID && c.allowed[merchantRef], nil
+func (c *merchantSelectorChecker) ResolveAuthorizedMerchant(_ context.Context, merchantRef, userID, _ string) (merchant.ID, string, error) {
+	if userID != selectorTestUserID || !c.allowed[merchantRef] {
+		return merchant.ID{}, "", policy.ErrPermissionRequired
+	}
+	id, ok := c.merchantIDs[merchantRef]
+	if !ok {
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+	}
+	return id, merchantRef, nil
 }
 
 func (c *merchantSelectorChecker) MerchantForUser(_ context.Context, userID string) (string, error) {
@@ -40,14 +48,6 @@ func (c *merchantSelectorChecker) MerchantForUser(_ context.Context, userID stri
 		return "", nil
 	}
 	return c.inferred, c.inferErr
-}
-
-func (c *merchantSelectorChecker) ResolveMerchantForGroup(_ context.Context, merchantRef string) (merchant.ID, string, error) {
-	id, ok := c.merchantIDs[merchantRef]
-	if !ok {
-		return merchant.ID{}, "", errors.New("merchant not found")
-	}
-	return id, merchantRef, nil
 }
 
 func TestMerchantSelector(t *testing.T) {

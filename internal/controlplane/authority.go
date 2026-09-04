@@ -8,6 +8,7 @@ import (
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -17,28 +18,37 @@ import (
 // explicitly rather than silently allowing or denying.
 var ErrNoControlPlane = errors.New("controlplane: not configured")
 
-// HasAdminPermission reports whether the given user holds perm in the named
-// MERCHANT permission-group according to LIVE AuthKit group state (not stale JWT
-// claims). Under the permission-group model (#567) merchant-admin authority is a
-// role on the merchant group (`type=merchant`, `resourceRef=merchantRef`); the
-// merchant `owner` auto-holds `merchant:*`.
-//
-// merchantRef is the merchant slug (the group's resource ref). An empty ref
-// yields no authority (there is no operator fallback): the caller must present a
-// merchant context.
-func (c *ControlPlane) HasAdminPermission(ctx context.Context, merchantRef, userID, perm string) (bool, error) {
+// ResolveAuthorizedMerchant resolves a name exactly once, checks live authority
+// on that group UUID and selects the billing row bound to that same UUID.
+func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, merchantRef, userID, perm string) (merchant.ID, string, error) {
 	if c == nil || c.Core() == nil {
-		return false, ErrNoControlPlane
+		return merchant.ID{}, "", ErrNoControlPlane
 	}
-	ref := strings.ToLower(strings.TrimSpace(merchantRef))
-	if ref == "" {
-		return false, nil
+	if strings.TrimSpace(merchantRef) == "" || strings.TrimSpace(userID) == "" {
+		return merchant.ID{}, "", policy.ErrPermissionRequired
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return false, nil
+	group, err := c.Core().GroupInstanceForSlug(ctx, MerchantType, strings.ToLower(strings.TrimSpace(merchantRef)))
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
 	}
-	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, MerchantType, ref, strings.TrimSpace(perm))
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	allowed, err := c.Core().CanOnGroup(ctx, strings.TrimSpace(userID), authcore.SubjectKindUser, group.ID, strings.TrimSpace(perm))
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	if !allowed {
+		return merchant.ID{}, "", policy.ErrPermissionRequired
+	}
+	mid, _, err := c.merchantForGroupID(ctx, group.ID)
+	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+	}
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	return mid, group.InstanceSlug, nil
 }
 
 // HasRootPermission reports whether the user holds perm in the singleton ROOT

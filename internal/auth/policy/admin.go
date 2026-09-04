@@ -1,6 +1,10 @@
 package policy
 
-import "context"
+import (
+	"context"
+	"errors"
+	"github.com/open-rails/openrails/pkg/merchant"
+)
 
 // PermMerchantCatalogUpdate is the narrow merchant catalog mutation capability. It
 // mirrors controlplane.PermMerchantCatalogUpdate (== merchant:catalog:update, #554)
@@ -10,5 +14,8 @@ const PermMerchantCatalogUpdate = "merchant:catalog:update"
 // AdminPermissionChecker is the live AuthKit effective-permission check the
 // control plane provides for merchant-local `merchant:` permissions.
 type AdminPermissionChecker interface {
-	HasAdminPermission(ctx context.Context, merchantRef, userID, perm string) (bool, error)
+	ResolveAuthorizedMerchant(ctx context.Context, merchantRef, userID, perm string) (merchant.ID, string, error)
 }
+
+var ErrPermissionRequired = errors.New("merchant permission required")
+var ErrMerchantUnresolved = errors.New("merchant identity unresolved")

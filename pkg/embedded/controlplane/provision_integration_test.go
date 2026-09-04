@@ -302,3 +302,7 @@ func TestSelfHostedPosture_RegistrationStaysClosed(t *testing.T) {
 		`{"identifier":"nobody@example.test","username":"nobody","password":"str0ng-horse-battery!"}`)
 	require.Equal(t, http.StatusNotFound, status, "self-hosted posture must not mount /register")
 }
+
+func (*captureEmailSender) SendContactChanged(context.Context, string, string, authcore.ContactChange) error {
+	return nil
+}

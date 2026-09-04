@@ -533,6 +533,8 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	// async River jobs and needs the in-process worker loop.
 	if sc.workers {
 		workersCtx, cancel := context.WithCancel(context.Background())
+		require.NoError(h.t, app.Runtime.InitRiver(workersCtx), "initialize River before publishing the client to workers")
+		require.NotNil(h.t, app.Runtime.RiverClient)
 		workersErr := make(chan error, 1)
 		go func() { workersErr <- app.Runtime.RunWorkers(workersCtx) }()
 		h.cleanup(func() {
@@ -542,19 +544,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 			case <-time.After(2 * time.Second):
 			}
 		})
-		// RunWorkers initialises River asynchronously; tests assume workers are up.
-		deadline := time.Now().Add(30 * time.Second)
-		for app.Runtime.RiverClient == nil {
-			select {
-			case werr := <-workersErr:
-				workersErr <- werr
-				require.NoError(h.t, werr, "RunWorkers exited before River init")
-				require.Fail(h.t, "RunWorkers returned before River init")
-			default:
-			}
-			require.True(h.t, time.Now().Before(deadline), "timed out waiting for River client")
-			time.Sleep(50 * time.Millisecond)
-		}
+
 	}
 
 	srv := httptest.NewServer(assembled.Server.Handler())
