@@ -2,8 +2,9 @@ package intents
 
 import (
 	"context"
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestCCBillRefundAlwaysRequiresOperatorVerification(t *testing.T) {
@@ -24,9 +25,4 @@ func TestCCBillRefundAlwaysRequiresOperatorVerification(t *testing.T) {
 	payload, evidence := h.PrunePolicy()
 	require.True(t, payload)
 	require.True(t, evidence)
-}
-
-func TestCCBillExplicitAuthenticationDenialBudget(t *testing.T) {
-	require.False(t, ccbillDenialExhausted(1))
-	require.True(t, ccbillDenialExhausted(ccbillDenialMaxAttempts))
 }

@@ -283,6 +283,9 @@ func TestCCBillRefundReservationsAndReceiptsRemainUnresolved(t *testing.T) {
 		t.Run(receipt, func(t *testing.T) {
 			fx := seedRefundablePayment(t, 500)
 			ctx := dbtest.WithTestMerchant(context.Background())
+			fx.pspID = dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "ccbill")
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.payments SET rail='ccbill',psp_id=$3 WHERE id=$1 OR id=$2`, fx.paymentID, fx.reservationID, fx.pspID)
+			require.NoError(t, err)
 			h := NewCCBillRefundHandler(fx.db, nil)
 			p := fx.payload(500)
 			p.ProviderTarget = "sub_x"
@@ -294,7 +297,6 @@ func TestCCBillRefundReservationsAndReceiptsRemainUnresolved(t *testing.T) {
 			params.Provider = "ccbill"
 			params.IntentType = TypeCCBillRefund
 			params.Payload = p
-			params.PspID = dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "ccbill")
 			runner := &Runner{Store: fx.store, Registry: NewRegistry(h), Config: fullModeConfig()}
 			row, err := runner.EnqueueAndExecute(ctx, params)
 			require.NoError(t, err)
