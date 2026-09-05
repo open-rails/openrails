@@ -731,6 +731,10 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 // ownerless merchant row and applies the same profile/PSP
 // configuration path without touching AuthKit or startup bootstrap markers.
 type ProvisionMerchantRequest struct {
+	// MerchantID is an already resolved, explicit host binding. The outer name
+	// boundary must verify the supplied name before passing this immutable scope.
+	MerchantID    merchant.ID
+	Directory     *merchants.Service
 	Config        *config.Config
 	ControlPlane  *controlplane.ControlPlane
 	Database      *db.DB
@@ -854,7 +858,31 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		}
 	}
 
-	tn, found, err := lookupManifestMerchant(ctx, database, slug)
+	directory := req.Directory
+	if directory == nil {
+		var err error
+		directory, err = merchants.NewDirectoryService(database.DataPool())
+		if err != nil {
+			return nil, err
+		}
+		if req.ControlPlane != nil {
+			directory.WithNameAuthority(controlplane.MerchantNameAuthority(req.ControlPlane.Core()))
+		}
+	}
+	var tn *merchants.Merchant
+	var err error
+	if !req.MerchantID.IsZero() {
+		tn, err = directory.Get(ctx, req.MerchantID)
+		if err == nil {
+			tn.Slug = slug
+		}
+	} else {
+		tn, err = directory.GetBySlug(ctx, slug)
+	}
+	found := err == nil
+	if errors.Is(err, merchants.ErrMerchantNotFound) && req.MerchantID.IsZero() {
+		err = nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
 	}
@@ -867,16 +895,20 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 			return nil, err
 		}
 	} else if req.ControlPlane != nil && mt.RemoteApplication != nil && req.Options.Overwrite {
-		if _, err := provisionMerchantGroup(ctx, req.ControlPlane, slug, mt); err != nil {
+		if err := configureMerchantRemoteApplication(ctx, req.ControlPlane, tn.PermissionGroupID, mt.RemoteApplication); err != nil {
 			return nil, fmt.Errorf("merchant bootstrap: update merchant group/remote_application for %q: %w", slug, err)
 		}
 	}
 
 	// Keep an existing merchant's display name in sync with the manifest (the
-	// create path already set it via RegisterMerchant). Idempotent upsert; an
-	// empty manifest display name leaves the stored one untouched (COALESCE).
+	// create path already set it). A UUID-scoped update ensures an
+	// empty manifest display name leaves the stored one untouched.
 	if found && strings.TrimSpace(mt.DisplayName) != "" {
-		if _, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: slug, DisplayName: mt.DisplayName}); err != nil {
+		directory, err := merchants.NewDirectoryService(database.DataPool())
+		if err != nil {
+			return nil, err
+		}
+		if err := directory.SetDisplayName(ctx, tn.ID, mt.DisplayName); err != nil {
 			return nil, fmt.Errorf("merchant bootstrap: sync display name for %q: %w", slug, err)
 		}
 	}
@@ -893,11 +925,11 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 		// The merchant's permission-group is the host's AuthKit permission-group of the SAME slug
 		// (#541 — merchant slug == group slug); permission_group_id stays NULL here and
 		// is set only in standalone, where OpenRails owns the group.
-		id, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: slug, DisplayName: mt.DisplayName})
+		id, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug, DisplayName: mt.DisplayName})
 		if err != nil {
 			return nil, err
 		}
-		tn, found, err := lookupManifestMerchant(ctx, database, slug)
+		tn, found, err := lookupManifestMerchant(ctx, database, cp, slug)
 		if err != nil {
 			return nil, err
 		}
@@ -920,8 +952,12 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	if err != nil {
 		return nil, err
 	}
+	canonical, err := cp.Core().GroupInstanceByID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
 	tn, _, err := svc.Provision(ctx, merchants.ProvisionRequest{
-		Slug:              slug,
+		Slug:              canonical.InstanceSlug,
 		PermissionGroupID: groupID,
 	})
 	if err != nil {
@@ -930,41 +966,22 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	return tn, nil
 }
 
-func lookupManifestMerchant(ctx context.Context, database *db.DB, slug string) (*merchants.Merchant, bool, error) {
-	slug = strings.ToLower(strings.TrimSpace(slug))
-	if slug == "" {
-		return nil, false, fmt.Errorf("merchant slug is required")
+func lookupManifestMerchant(ctx context.Context, database *db.DB, cp *controlplane.ControlPlane, slug string) (*merchants.Merchant, bool, error) {
+	dir, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return nil, false, err
 	}
-	var (
-		id                string
-		status            string
-		permissionGroupID *string
-	)
-	err := database.Qx(ctx).QueryRow(ctx, `
-		SELECT id::text, status, permission_group_id
-		  FROM openrails.merchants
-		 WHERE slug = $1 AND deleted_at IS NULL
-	`, slug).Scan(&id, &status, &permissionGroupID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if cp != nil {
+		dir.WithNameAuthority(controlplane.MerchantNameAuthority(cp.Core()))
+	}
+	row, err := dir.GetBySlug(ctx, slug)
+	if errors.Is(err, merchants.ErrMerchantNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	merchantID, err := merchant.ParseID(id)
-	if err != nil {
-		return nil, false, err
-	}
-	owner := ""
-	if permissionGroupID != nil {
-		owner = *permissionGroupID
-	}
-	return &merchants.Merchant{
-		ID:                merchantID,
-		Slug:              slug,
-		Status:            merchants.MerchantStatus(status),
-		PermissionGroupID: owner,
-	}, true, nil
+	return row, true, nil
 }
 
 func sortedMerchantKeys(in map[string]MerchantConfig) []string {
@@ -2155,23 +2172,39 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 		return "", fmt.Errorf("merchant bootstrap: resolve merchant group %q: %w", slug, err)
 	}
 
-	// Register the merchant's federated issuer as a remote_application nested
-	// under the merchant group, then grant it the merchant `owner` role.
-	if mt.RemoteApplication != nil {
-		ra, err := manifestRemoteApplicationToAuthKit(slug, groupID, mt.RemoteApplication)
-		if err != nil {
-			return "", fmt.Errorf("merchant bootstrap: remote_application for %q: %w", slug, err)
-		}
-		stored, err := core.UpsertRemoteApplication(ctx, ra)
-		if err != nil {
-			return "", fmt.Errorf("merchant bootstrap: register remote_application for %q: %w", slug, err)
-		}
-		if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, slug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
-			return "", fmt.Errorf("merchant bootstrap: grant remote_application owner role for %q: %w", slug, err)
-		}
+	if err := configureMerchantRemoteApplication(ctx, cp, groupID, mt.RemoteApplication); err != nil {
+		return "", err
 	}
-
 	return groupID, nil
+}
+
+// Configure the remote application under the already captured group. The public
+// name may be renamed or reclaimed between provisioning and role assignment.
+func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.ControlPlane, groupID string, app *RemoteApplicationConfig) error {
+	if app == nil {
+		return nil
+	}
+	core := cp.Core()
+	group, err := core.GroupInstanceByID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if group.Persona != controlplane.MerchantType {
+		return merchants.ErrMerchantNotFound
+	}
+	ctx = authcore.WithResolvedGroup(ctx, group, group.InstanceSlug)
+	ra, err := manifestRemoteApplicationToAuthKit(group.InstanceSlug, group.ID, app)
+	if err != nil {
+		return fmt.Errorf("merchant bootstrap: remote_application for group %s: %w", groupID, err)
+	}
+	stored, err := core.UpsertRemoteApplication(ctx, ra)
+	if err != nil {
+		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
+	}
+	if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, group.InstanceSlug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
+		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
+	}
+	return nil
 }
 
 // manifestRemoteApplicationToAuthKit maps a merchant's manifest remote_application

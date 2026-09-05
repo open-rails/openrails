@@ -84,17 +84,17 @@ func TestEmbeddedSeam_ImportAdminGrantsThenConverge(t *testing.T) {
 	// (1) Admin comp handed over as a grant via the public seam (Config nil ->
 	// DefaultSchema, identical to the doujins embed wiring).
 	res, err := ImportAdminGrants(context.Background(), AdminGrantImportOptions{
-		PGXPool:      pool,
-		MerchantSlug: dbtest.TestMerchantSlug,
-		Grants:       []AdminGrant{{Customer: custAdmin, Product: prod, SourceID: adminSource, StartsAt: start, EndsAt: &end}},
+		PGXPool:    pool,
+		MerchantID: dbtest.TestMerchantID,
+		Grants:     []AdminGrant{{Customer: custAdmin, Product: prod, SourceID: adminSource, StartsAt: start, EndsAt: &end}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{adminSource}, res.Imported, "admin comp imported as a grant")
 
 	// (2) Merchant-wide convergence derives the subscription + wallet grants.
 	_, err = ConvergeMerchant(context.Background(), ConvergeMerchantOptions{
-		PGXPool:      pool,
-		MerchantSlug: dbtest.TestMerchantSlug,
+		PGXPool:    pool,
+		MerchantID: dbtest.TestMerchantID,
 	})
 	require.NoError(t, err)
 

@@ -133,7 +133,7 @@ func TestCatalogCreditPurchase_QuotesBonusCreditsAndDepositsLedgerBalance(t *tes
 	merchantID := dbtest.TestMerchantID.UUID()
 	productID := uuid.New()
 	productKey := "image-credit-topup-" + uuid.NewString()
-	unit := dbtest.TestMerchantSlug + "/image-credit"
+	unit := ""
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.ledger_transfers WHERE customer_id = $1 AND currency = $2", payer.UUID(), unit)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id = $1 AND currency = $2", payer.UUID(), unit)
@@ -149,13 +149,15 @@ INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, acti
 VALUES (uuidv7(), $1, 'image-credit', 0, true)
 ON CONFLICT (merchant_id, name) DO UPDATE SET active = true`, merchantID)
 	require.NoError(t, err)
+	unit, err = svc.CustomUnitCode(ctx, "image-credit")
+	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.products (id, key, display_name, merchant_id)
 VALUES ($1, $2, 'Image Credit Top-up', $3)`, productID, productKey, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_balances (merchant_id, key, unit, expires_hours)
-VALUES ($1, 'image-credit', 'image-credit', 720)
+SELECT $1,'image-credit','credit:'||id::text,720 FROM openrails.custom_credit_types WHERE merchant_id=$1 AND name='image-credit'
 ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit, expires_hours = EXCLUDED.expires_hours`, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
@@ -296,7 +298,7 @@ ON CONFLICT (merchant_id, name) DO UPDATE SET active = true`, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_balances (merchant_id, key, unit)
-VALUES ($1, 'image-credit', 'image-credit')
+SELECT $1,'image-credit','credit:'||id::text FROM openrails.custom_credit_types WHERE merchant_id=$1 AND name='image-credit'
 ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit`, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
@@ -335,7 +337,7 @@ ON CONFLICT (merchant_id, name) DO UPDATE SET active = true`, merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_balances (merchant_id, key, unit)
-VALUES ($1, 'image-credit', 'image-credit')
+SELECT $1,'image-credit','credit:'||id::text FROM openrails.custom_credit_types WHERE merchant_id=$1 AND name='image-credit'
 ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit`, merchantID)
 	require.NoError(t, err)
 	t.Cleanup(func() {

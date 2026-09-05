@@ -155,7 +155,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	}
 
 	res, err := ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: book,
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res.Blocked, "no blocks expected: %v", res.Reasons)
@@ -270,7 +270,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 	// 8) Re-import: pure no-op — everything already present, no dup payments,
 	// no lifecycle regression.
 	res2, err := ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: book,
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res2.Imported)
@@ -301,7 +301,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		}},
 	}
 	res3, err := ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: twin,
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: twin,
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"twin"}, res3.Blocked)
@@ -353,7 +353,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		}},
 	}
 	res4, err := ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: restalled,
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: restalled,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res4.Blocked, "no blocks expected: %v", res4.Reasons)
@@ -394,7 +394,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		}},
 	}
 	res5, err := ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: terminated,
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: terminated,
 	})
 	require.NoError(t, err)
 	require.Empty(t, res5.Blocked, "no blocks expected: %v", res5.Reasons)
@@ -470,7 +470,7 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 	}
 
 	_, err = ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: book,
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.Error(t, err)
 
@@ -489,7 +489,7 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 
 	book.Subscriptions[0].Evidence = json.RawMessage(`{"legacy_source":"atomic-test"}`)
 	result, err := ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: book,
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: book,
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{"atomic"}, result.Imported)
@@ -535,11 +535,11 @@ func TestImportBilling_RefusesPaymentMethodOwnerChange(t *testing.T) {
 	}
 
 	_, err = ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: method(owner),
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: method(owner),
 	})
 	require.NoError(t, err)
 	_, err = ImportBilling(context.Background(), BillingImportOptions{
-		PGXPool: pool, MerchantSlug: dbtest.TestMerchantSlug, Book: method(other),
+		PGXPool: pool, MerchantID: dbtest.TestMerchantID, Book: method(other),
 	})
 	require.ErrorContains(t, err, "already belongs to customer")
 

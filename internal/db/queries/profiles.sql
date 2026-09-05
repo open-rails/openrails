@@ -19,29 +19,53 @@ SELECT id
 FROM profiles.users
 WHERE username = $1 AND deleted_at IS NULL;
 
--- name: GetMerchantBySlug :one
+-- name: GetUnboundMerchantBySlug :one
 SELECT id, slug, status, display_name
 FROM openrails.merchants
-WHERE slug = $1 AND deleted_at IS NULL;
+WHERE slug = $1 AND deleted_at IS NULL AND permission_group_id IS NULL;
 
 -- name: ListMerchantDirectoryRefs :many
 -- The read counterpart of the display-name write path: a host that reaches a
 -- merchant through a MEMBERSHIP knows only slugs, and needs names to label its
 -- own surfaces. openrails.merchants is global/policy-free, so this is an
 -- ordinary query. Slugs that do not exist simply do not come back.
-SELECT slug, COALESCE(display_name, '')::text AS display_name
+SELECT id, slug, COALESCE(display_name, '')::text AS display_name
 FROM openrails.merchants
-WHERE slug = ANY(sqlc.arg(slugs)::text[]) AND deleted_at IS NULL
+WHERE slug = ANY(sqlc.arg(slugs)::text[]) AND deleted_at IS NULL AND permission_group_id IS NULL
 ORDER BY slug;
 
--- name: RegisterMerchant :one
+-- name: RegisterUnboundMerchant :one
 -- Register a merchant (billing bucket) from config, idempotently (#480). The
 -- merchant carries ONLY billing/rail state; NO auth. A re-register without a
 -- display_name keeps any existing one (COALESCE), so config that omits it never
 -- clears a name set elsewhere.
 INSERT INTO openrails.merchants (slug, status, display_name)
 VALUES ($1, 'active', sqlc.narg(display_name))
-ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET
+ON CONFLICT (slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL DO UPDATE SET
     display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
     updated_at = now()
 RETURNING id;
+
+-- name: ListMerchantDirectoryRefsByIDs :many
+SELECT id,slug,coalesce(display_name,'')::text AS display_name
+FROM openrails.merchants WHERE id=ANY(sqlc.arg(ids)::uuid[]) AND deleted_at IS NULL
+ORDER BY slug,id;
+
+-- name: GetMerchantDirectoryByID :one
+SELECT id,slug,status,permission_group_id,display_name,api_host
+FROM openrails.merchants WHERE id=sqlc.arg(id)::uuid AND deleted_at IS NULL;
+
+-- name: BindUnboundMerchantGroup :execrows
+UPDATE openrails.merchants SET permission_group_id=sqlc.arg(group_id)::text,updated_at=now()
+WHERE id=sqlc.arg(id)::uuid AND permission_group_id IS NULL AND deleted_at IS NULL;
+
+-- name: SearchUnboundMerchants :many
+SELECT id,slug,status FROM openrails.merchants
+WHERE deleted_at IS NULL AND permission_group_id IS NULL
+  AND strpos(lower(slug),lower(sqlc.arg(query)::text)) > 0
+ORDER BY slug,id LIMIT sqlc.arg(page_limit)::bigint;
+
+-- name: ListMerchantBindingsByGroups :many
+SELECT id,status,coalesce(permission_group_id,'')::text AS group_id
+FROM openrails.merchants
+WHERE permission_group_id=ANY(sqlc.arg(group_ids)::text[]) AND deleted_at IS NULL;

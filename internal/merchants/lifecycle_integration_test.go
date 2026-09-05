@@ -478,14 +478,14 @@ func TestListDirectoryRefs(t *testing.T) {
 	named, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "refs-named", PermissionGroupID: "group-refs-named"})
 	require.NoError(t, err)
 	require.NoError(t, svc.SetDisplayName(ctx, named.ID, "Refs Named"))
-	_, _, err = svc.Provision(ctx, ProvisionRequest{Slug: "refs-unnamed", PermissionGroupID: "group-refs-unnamed"})
+	unnamed, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "refs-unnamed", PermissionGroupID: "group-refs-unnamed"})
 	require.NoError(t, err)
 
 	refs, err := svc.ListDirectoryRefs(ctx, []string{"  REFS-NAMED  ", "refs-named", "refs-unnamed", "refs-missing", ""})
 	require.NoError(t, err)
 	require.Equal(t, []DirectoryRef{
-		{Slug: "refs-named", DisplayName: "Refs Named"},
-		{Slug: "refs-unnamed", DisplayName: ""},
+		{ID: named.ID, Slug: "refs-named", DisplayName: "Refs Named"},
+		{ID: unnamed.ID, Slug: "refs-unnamed", DisplayName: ""},
 	}, refs, "slugs normalize and dedupe; a merchant without a name still resolves; unknown slugs are omitted")
 
 	empty, err := svc.ListDirectoryRefs(ctx, nil)
@@ -504,7 +504,7 @@ func TestListDirectoryRefs(t *testing.T) {
 	require.NoError(t, err)
 	refs, err = svc.ListDirectoryRefs(ctx, []string{"refs-named", "refs-unnamed"})
 	require.NoError(t, err)
-	require.Equal(t, []DirectoryRef{{Slug: "refs-unnamed"}}, refs, "soft-deleted merchants must not surface")
+	require.Equal(t, []DirectoryRef{{ID: unnamed.ID, Slug: "refs-unnamed"}}, refs, "soft-deleted merchants must not surface")
 }
 
 func TestDelete_RequiresExport(t *testing.T) {

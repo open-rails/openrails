@@ -358,7 +358,7 @@ type OpenrailsCustodyMigration struct {
 	CreatedAt time.Time
 }
 
-// Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name. Written by the catalog sidecar push (#706): auto-defined from catalog_credit_balances.unit; never auto-deactivated (grants may still reference a removed balance's unit).
+// Merchant-owned custom credit identities and scales. Financial rows reference credit:<id>; external names resolve through the current merchant namespace.
 type OpenrailsCustomCreditType struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -756,7 +756,9 @@ type OpenrailsMerchant struct {
 	// human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
 	DisplayName *string
 	// Canonical Host-header value this merchant resolves from (#734), e.g. "api.acme.example". NULL = no Host resolution for this merchant. Lowercase, no scheme/port.
-	ApiHost *string
+	ApiHost                 *string
+	RetiredAt               *time.Time
+	GroupReleaseCompletedAt *time.Time
 }
 
 // One merchant-scoped JSON configuration row. Missing keys use service defaults.

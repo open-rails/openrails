@@ -120,7 +120,7 @@ RETURNING id;
 -- (openrails-saas #18). openrails.merchants is global/policy-free, so only the
 -- customers half needs the SECURITY DEFINER cross-merchant reader (0016).
 -- name: ListMerchantsForCustomerSubject :many
-SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
+SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
 FROM openrails.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'

@@ -40,7 +40,7 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug                TEXT NOT NULL UNIQUE,
+    slug                TEXT NOT NULL,
     display_name        TEXT,
     status              TEXT NOT NULL DEFAULT 'active',
     permission_group_id     TEXT,
@@ -49,6 +49,8 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at          TIMESTAMPTZ
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_unbound_slug ON openrails.merchants(slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_permission_group_id ON openrails.merchants(permission_group_id) WHERE permission_group_id IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_api_host ON openrails.merchants (api_host) WHERE api_host IS NOT NULL AND deleted_at IS NULL;
 
 CREATE TABLE IF NOT EXISTS openrails.merchant_secrets (

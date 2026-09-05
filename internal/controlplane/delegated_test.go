@@ -134,7 +134,7 @@ func testJWKS(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 func TestDelegatedVerify_SucceedsWithoutPermissionsAndAudience(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
 	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{})
-	cl, dp, err := v.VerifyDelegatedAccess(tok)
+	cl, dp, err := v.VerifyDelegatedAccess(context.Background(), tok)
 	require.NoError(t, err)
 	require.Equal(t, "", cl.UserID, "delegated token must not carry a normal sub")
 	require.Equal(t, testDelegatedSubject, dp.DelegatedSubject)
@@ -196,7 +196,7 @@ func TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS(t *testing.T) {
 	}}, []string{canonicalAudience}))
 
 	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{})
-	_, _, err = v.VerifyDelegatedAccess(tok)
+	_, _, err = v.VerifyDelegatedAccess(context.Background(), tok)
 	require.Error(t, err, "SSRF guard must block a loopback jwks_uri fetch, failing verification")
 	require.False(t, served.Load(), "the SSRF guard must refuse the connection before the JWKS endpoint is reached")
 }
@@ -206,7 +206,7 @@ func TestDelegatedVerify_RejectsWrongAudience(t *testing.T) {
 	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{
 		Audiences: []string{wrongAudience},
 	})
-	_, _, err := v.VerifyDelegatedAccess(tok)
+	_, _, err := v.VerifyDelegatedAccess(context.Background(), tok)
 	require.Error(t, err, "a token whose aud does not include openrails must be rejected")
 }
 
@@ -219,7 +219,7 @@ func TestDelegatedVerify_CarriesInAuthorityPermIncludingAdmit(t *testing.T) {
 	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{
 		Permissions: []string{PermMerchantAdmissionsCreate},
 	})
-	_, dp, err := v.VerifyDelegatedAccess(tok)
+	_, dp, err := v.VerifyDelegatedAccess(context.Background(), tok)
 	require.NoError(t, err, "admit is carriable on a delegated token when the signer holds it (#564)")
 	require.Contains(t, dp.Permissions, PermMerchantAdmissionsCreate)
 }
@@ -239,7 +239,7 @@ func TestDelegatedVerify_CarriesClaimForRouteGateBound(t *testing.T) {
 	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{
 		Permissions: []string{"root:*"},
 	})
-	_, dp, err := v.VerifyDelegatedAccess(tok)
+	_, dp, err := v.VerifyDelegatedAccess(context.Background(), tok)
 	require.NoError(t, err, "without a WithService enricher the verifier does not bound the claim (#567)")
 	require.Contains(t, dp.Permissions, "root:*")
 	// The OpenRails gate denies it: a foreign-persona glob covers no merchant perm.
@@ -264,13 +264,13 @@ func TestDelegatedVerify_RejectsExpired(t *testing.T) {
 		map[string]any{"typ": authhttp.DelegatedAccessTokenType},
 	)
 	require.NoError(t, err)
-	_, _, verr := v.VerifyDelegatedAccess(tok)
+	_, _, verr := v.VerifyDelegatedAccess(context.Background(), tok)
 	require.Error(t, verr, "expired delegated token must be rejected")
 }
 
 func TestDelegatedVerify_RejectsServiceCredential(t *testing.T) {
 	v, _ := newTestDelegatedVerifier(t)
-	_, _, err := v.VerifyDelegatedAccess("openrails_st_keyid_secret")
+	_, _, err := v.VerifyDelegatedAccess(context.Background(), "openrails_st_keyid_secret")
 	require.Error(t, err, "API keys must not verify as delegated browser tokens")
 }
 

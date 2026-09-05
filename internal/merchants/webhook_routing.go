@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -32,43 +30,21 @@ type WebhookResolver interface {
 	ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error)
 }
 
-// ResolveBySlug implements WebhookResolver against the openrails.merchants
-// directory. A miss retries through the authkit group namespace when the
-// or#914 rename-forwarding seam is wired, so a merchant's published webhook
-// URLs keep working across an ak#264 slug rename.
+// ResolveBySlug uses the same authoritative name resolution as other merchant
+// entrypoints. Provider signature verification still follows resolution.
 func (s *Service) ResolveBySlug(ctx context.Context, slug string) (WebhookRoute, error) {
-	slug = normalizeSlug(slug)
-	if slug == "" {
+	if normalizeSlug(slug) == "" {
 		return WebhookRoute{}, ErrMerchantRouteUnresolved
 	}
-	var idStr, status string
-	err := s.pool.QueryRow(ctx, `
-		SELECT id::text, status FROM openrails.merchants
-		 WHERE slug = $1 AND deleted_at IS NULL
-	`, slug).Scan(&idStr, &status)
-	if errors.Is(err, pgx.ErrNoRows) {
-		m, ferr := s.merchantByGroupFallback(ctx, slug)
-		if ferr != nil {
-			return WebhookRoute{}, ErrMerchantRouteUnresolved
-		}
-		return s.routeFromScan(m.ID.String(), m.Slug, string(m.Status), nil)
+	m, err := s.GetBySlug(ctx, slug)
+	if errors.Is(err, ErrMerchantNotFound) || errors.Is(err, ErrMerchantRetired) {
+		return WebhookRoute{}, ErrMerchantRouteUnresolved
 	}
-	return s.routeFromScan(idStr, slug, status, err)
-}
-
-func (s *Service) routeFromScan(idStr, slug, status string, err error) (WebhookRoute, error) {
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return WebhookRoute{}, ErrMerchantRouteUnresolved
-		}
 		return WebhookRoute{}, err
 	}
-	if MerchantStatus(status) == StatusDeleted {
+	if m.Status != StatusActive {
 		return WebhookRoute{}, ErrMerchantRouteUnresolved
 	}
-	id, perr := merchant.ParseID(idStr)
-	if perr != nil {
-		return WebhookRoute{}, perr
-	}
-	return WebhookRoute{MerchantID: id, MerchantSlug: slug}, nil
+	return WebhookRoute{MerchantID: m.ID, MerchantSlug: m.Slug}, nil
 }

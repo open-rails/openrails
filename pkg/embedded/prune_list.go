@@ -11,19 +11,18 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // PruneListOptions mirrors `openrails prune list`.
 type PruneListOptions struct {
-	Config       *config.Config
-	PGXPool      *pgxpool.Pool
-	MerchantSlug string
-	Limit        int
-	Format       string
-	Out          io.Writer
+	Config     *config.Config
+	PGXPool    *pgxpool.Pool
+	MerchantID merchant.ID
+	Limit      int
+	Format     string
+	Out        io.Writer
 }
 
 // PruneList shows this merchant's prune runs, newest first — the ids
@@ -51,9 +50,9 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 	}
 	defer database.Close()
 
-	merchantID, err := db.ResolveMerchantSlug(ctx, database.Pool(), strings.TrimSpace(opts.MerchantSlug))
-	if err != nil {
-		return fmt.Errorf("prune list: resolve merchant %q: %w", opts.MerchantSlug, err)
+	merchantID := opts.MerchantID
+	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
+		return err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 

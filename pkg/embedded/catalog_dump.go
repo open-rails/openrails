@@ -17,15 +17,18 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type CatalogDumpOptions struct {
-	Config   *config.Config
-	PGXPool  *pgxpool.Pool
-	Merchant string
-	Out      io.Writer
+	NameAuthority merchant.NameAuthority
+	Config        *config.Config
+	PGXPool       *pgxpool.Pool
+	Merchant      string
+	Out           io.Writer
 }
 
 func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
@@ -43,7 +46,12 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if opts.PGXPool == nil {
 		defer func() { _ = database.Close() }()
 	}
-	mctx, err := contextForCatalogPushTarget(ctx, database, opts.Merchant)
+	directory, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return err
+	}
+	directory.WithNameAuthority(opts.NameAuthority)
+	mctx, canonicalName, err := contextForCatalogPushTarget(ctx, directory, opts.Merchant)
 	if err != nil {
 		return err
 	}
@@ -58,7 +66,7 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	raw, err := yaml.Marshal(catalogPushFile{
 		Version: catalog.SupportedVersion,
 		Catalogs: []catalogPushFileEntry{{
-			Merchant:       strings.ToLower(strings.TrimSpace(opts.Merchant)),
+			Merchant:       canonicalName,
 			Products:       manifest.Products,
 			Meters:         manifest.Meters,
 			CreditBalances: manifest.CreditBalances,
@@ -105,6 +113,15 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Manifes
 	}
 	for _, id := range productIDs {
 		if p := byID[id]; p != nil {
+			for i := range p.Credits {
+				if money.IsQualifiedUnit(p.Credits[i].Unit) {
+					name, err := money.NewMoneyService(database).CustomUnitName(ctx, p.Credits[i].Unit)
+					if err != nil {
+						return nil, err
+					}
+					p.Credits[i].Unit = name
+				}
+			}
 			normalizeDumpProduct(p)
 			m.Products = append(m.Products, *p)
 		}
@@ -216,10 +233,11 @@ ORDER BY key`, merchantID)
 
 func dumpCatalogCreditBalances(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]catalog.CreditBalance, error) {
 	rows, err := database.Qx(ctx).Query(ctx, `
-SELECT key, unit, expires_hours
-FROM openrails.catalog_credit_balances
-WHERE merchant_id = $1
-ORDER BY key`, merchantID)
+SELECT b.key, b.unit, c.name, b.expires_hours
+FROM openrails.catalog_credit_balances b
+LEFT JOIN openrails.custom_credit_types c ON c.merchant_id=b.merchant_id AND 'credit:'||c.id::text=b.unit
+WHERE b.merchant_id = $1
+ORDER BY b.key`, merchantID)
 	if err != nil {
 		return nil, fmt.Errorf("list catalog credit balances: %w", err)
 	}
@@ -228,8 +246,15 @@ ORDER BY key`, merchantID)
 	for rows.Next() {
 		var b catalog.CreditBalance
 		var expires sql.NullInt64
-		if err := rows.Scan(&b.Key, &b.Unit, &expires); err != nil {
+		var name sql.NullString
+		if err := rows.Scan(&b.Key, &b.Unit, &name, &expires); err != nil {
 			return nil, err
+		}
+		if strings.HasPrefix(b.Unit, "credit:") {
+			if !name.Valid {
+				return nil, fmt.Errorf("catalog credit balance %q has no owned unit identity", b.Key)
+			}
+			b.Unit = name.String
 		}
 		if expires.Valid {
 			b.ExpiresDefault = hoursSpec(int(expires.Int64))

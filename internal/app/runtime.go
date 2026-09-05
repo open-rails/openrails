@@ -145,7 +145,9 @@ type Runtime struct {
 	// tombstone-following). ArmMerchantsService applies it to any merchants
 	// service armed AFTER the control plane attached; the attach path applies
 	// it directly when Merchants already exists. Nil without a control plane.
-	MerchantGroupResolver merchants.GroupSlugResolver
+	MerchantGroupResolver          merchants.GroupSlugResolver
+	MerchantGroupCanonicalResolver merchants.GroupIDResolver
+	MerchantGroupSearchResolver    merchants.GroupSearchResolver
 	// ManifestSecrets is the MODE-1 in-memory credential plane (#723), set iff
 	// merchant_source=manifest. Boot provisioning seeds it (Seeder()); runtime
 	// consumers read it through Merchants like any other store. The DB/Vault

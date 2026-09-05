@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -69,93 +68,34 @@ func (r *ResolvedServiceCredential) AllowsCustomer(subject uuid.UUID) bool {
 	return r != nil && !r.MerchantID.IsZero() && subject != uuid.Nil
 }
 
-// MerchantScope resolves a merchant reference (slug or UUID) to the canonical
-// OpenRails merchant id/slug.
+// MerchantScope resolves an external name through AuthKit before selecting its
+// immutable billing binding. A local display projection never owns the name.
 func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.ID, string, error) {
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		// No default merchant (#480): the merchant to scope to must be named explicitly.
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
-	}
 	if c == nil || c.pool == nil {
-		return merchant.ID{}, "", errors.New("controlplane: pgx pool unavailable for merchant resolution")
-	}
-	var (
-		idStr  string
-		slug   string
-		status string
-	)
-	err := c.pool.QueryRow(ctx, `
-		SELECT id::text, slug, status
-		  FROM openrails.merchants
-		 WHERE (id::text = $1 OR lower(slug) = lower($1))
-		   AND deleted_at IS NULL
-		 LIMIT 1
-	`, ref).Scan(&idStr, &slug, &status)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			// or#914: the directory row is slug-addressed but the slug LIVES
-			// with the merchant's authkit group (ak#264): a renamed group's
-			// old slug forwards via its tombstone, and a fresh rename leaves
-			// the directory row briefly stale under the NEW slug. Resolve
-			// through the group namespace before giving up.
-			return c.merchantScopeViaGroup(ctx, ref)
-		}
-		return merchant.ID{}, "", err
-	}
-	if status != "active" {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	mid, err := merchant.ParseID(idStr)
-	if err != nil {
-		return merchant.ID{}, "", err
+	if strings.TrimSpace(ref) == "" {
+		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	return mid, slug, nil
-}
-
-// merchantScopeViaGroup is MerchantScope's rename-forwarding fallback (or#914):
-// resolve ref as a merchant-group slug through authkit — which follows ak#264
-// slug tombstones, so a renamed-away slug still lands on the same group — then
-// find the directory row by its group binding. On a hit whose stored slug
-// drifted from the group's CURRENT slug, the row is lazily re-synced; the
-// group's current slug is returned either way (the group is the naming
-// authority).
-func (c *ControlPlane) merchantScopeViaGroup(ctx context.Context, ref string) (merchant.ID, string, error) {
 	core := c.Core()
 	if core == nil {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	gi, err := core.GroupInstanceForSlug(ctx, MerchantType, strings.ToLower(strings.TrimSpace(ref)))
-	if err != nil {
+	if errors.Is(err, authkit.ErrGroupNotFound) {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+	}
+	if err != nil {
+		return merchant.ID{}, "", err
 	}
 	mid, slug, err := c.merchantForGroupID(ctx, gi.ID)
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
 	if current := strings.TrimSpace(gi.InstanceSlug); current != "" && current != slug {
-		c.syncMerchantSlug(ctx, mid, current)
 		slug = current
 	}
 	return mid, slug, nil
-}
-
-// syncMerchantSlug lazily re-points a stale directory row at its group's
-// current slug (or#914). Best effort: a failure (e.g. a non-group-bound row
-// coincidentally holding the target slug) leaves the row stale and resolution
-// keeps working through the group fallback, so it is logged, never fatal.
-func (c *ControlPlane) syncMerchantSlug(ctx context.Context, mid merchant.ID, current string) {
-	if c.pool == nil {
-		return
-	}
-	if _, err := c.pool.Exec(ctx, `
-		UPDATE openrails.merchants
-		   SET slug = $2, updated_at = current_timestamp
-		 WHERE id = $1::uuid AND deleted_at IS NULL AND slug IS DISTINCT FROM $2
-	`, mid.String(), current); err != nil {
-		log.WithError(err).WithFields(log.Fields{"merchant_id": mid.String(), "slug": current}).
-			Warn("controlplane: lazy merchant slug re-sync after group rename failed; resolution continues via group forwarding (or#914)")
-	}
 }
 
 // TokenPrefix returns the fixed shared-secret API-key brand prefix used to

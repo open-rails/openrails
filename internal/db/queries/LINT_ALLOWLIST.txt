@@ -21,7 +21,6 @@ PERMANENT internal/http/handlers/admin_payments.go  # pg_advisory_xact_lock only
 PERMANENT internal/modules/metrics/service.go       # compiled metric SQL (compile.go builds it)
 PERMANENT internal/controlplane/fleet_analytics.go  # cross-merchant analytics, dynamic grouping
 PERMANENT internal/controlplane/fleet_timeseries.go # cross-merchant time series, dynamic buckets
-PERMANENT internal/bootstrap/merchant_dump.go       # dump/restore over a dynamic table list
 PERMANENT internal/bootstrap/merchant_manifest.go   # dump/restore over a dynamic table list
 PERMANENT pkg/embedded/catalog_dump.go              # dump/restore over a dynamic table list
 PERMANENT internal/river/progress.go                # reads River's OWN river_job table (not OpenRails' schema)
@@ -37,7 +36,6 @@ DEBT internal/intents/store.go
 DEBT internal/billingimport/billingimport.go
 DEBT internal/reconcile/declared_import.go
 DEBT internal/controlplane/api_key.go
-DEBT internal/controlplane/bootstrap.go
 DEBT internal/controlplane/customer.go
 DEBT internal/merchants/delete.go
 DEBT internal/merchants/dormancy.go
@@ -45,7 +43,6 @@ DEBT internal/merchants/group_resolution.go
 DEBT internal/merchants/host_config.go
 DEBT internal/merchants/lifecycle.go
 DEBT internal/merchants/payment_provider_config.go
-DEBT internal/merchants/webhook_routing.go
 DEBT internal/modules/admission/policy.go
 DEBT internal/modules/money/credit_purchase.go
 DEBT internal/modules/money/enterprise.go
@@ -58,4 +55,3 @@ DEBT internal/river/jobs_provider_refresh.go
 DEBT internal/river/jobs_stripe_webhooks.go
 DEBT pkg/service/catalog_sidecars.go
 DEBT pkg/embedded/controlplane/admission.go
-DEBT pkg/embedded/pull_provider.go

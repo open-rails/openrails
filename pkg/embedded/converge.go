@@ -2,23 +2,20 @@ package embedded
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // ConvergeMerchantOptions configures ConvergeMerchant.
 type ConvergeMerchantOptions struct {
-	Config       *config.Config
-	PGXPool      *pgxpool.Pool
-	MerchantSlug string
+	Config     *config.Config
+	PGXPool    *pgxpool.Pool
+	MerchantID merchant.ID
 }
 
 // ConvergeMerchantResult summarizes one merchant-wide convergence pass.
@@ -53,9 +50,9 @@ func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (Conver
 	}
 	defer database.Close()
 
-	merchantID, err := db.ResolveMerchantSlug(ctx, database.Pool(), strings.TrimSpace(opts.MerchantSlug))
-	if err != nil {
-		return res, fmt.Errorf("converge merchant: resolve %q: %w", opts.MerchantSlug, err)
+	merchantID := opts.MerchantID
+	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
+		return res, err
 	}
 	engine := converge.NewConvergeEngine(database)
 	engine.Now = func() time.Time { return time.Now().UTC() }

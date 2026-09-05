@@ -87,6 +87,10 @@ or `indefinite` for ownership:
             psps: [stripe]
 ```
 
+Custom units retain immutable ownership when a merchant renames; public APIs use
+its current or actively forwarded `merchant-slug/unit-name`. See
+[custom credit identity and cutover](custom-credit-identity.md).
+
 Credits reference a top-level balance declaration
 (`credit_balances: [{key: inference-api, unit: api-credit, expires_default: 365d}]`).
 `cadence` is `once` (initial activation) or `per_renewal` (granted on each confirmed

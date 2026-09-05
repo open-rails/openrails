@@ -23,7 +23,7 @@ import (
 // path the CLI push-merchant-config uses: UpsertRemoteApplication in a process
 // that never calls ReloadRemoteApplications) must converge in the live server's
 // delegated verifier without a restart:
-//   - a BRAND-NEW issuer verifies immediately (the verifier lazy-loads on miss),
+//   - a BRAND-NEW issuer verifies after the bounded registered-issuer snapshot refresh,
 //   - a rotated static key on an ALREADY-LOADED issuer (a miss never fires)
 //     verifies within the issuer-registry TTL via the activity-driven refresh.
 func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
@@ -35,6 +35,8 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 	require.NotNil(t, cp, "control plane attached")
 	core := cp.Core()
 	require.NotNil(t, core, "authkit core")
+	cp.SetIssuerRegistryTTL(50 * time.Millisecond)
+	defer cp.SetIssuerRegistryTTL(0)
 	groupID := h.ensureMerchantGroup(core, dbtest.TestMerchantSlug)
 
 	// --- Case A: brand-new issuer through the CLI's store path, NO reload.
@@ -60,16 +62,16 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 		TTL:              time.Hour,
 	})
 	require.NoError(t, err)
-	res, err := cp.ResolveDelegated(ctx, tokenA, "")
-	require.NoError(t, err, "brand-new out-of-band issuer must verify without restart (lazy-load-on-miss)")
-	require.Equal(t, dbtest.TestMerchantSlug, res.MerchantSlug)
+	// Unknown token issuers cannot cause a per-issuer DB lookup. Registration
+	// made in another process becomes visible through the bounded snapshot.
+	require.Eventually(t, func() bool {
+		res, err := cp.ResolveDelegated(ctx, tokenA, "")
+		return err == nil && res.MerchantSlug == dbtest.TestMerchantSlug
+	}, 15*time.Second, 100*time.Millisecond, "out-of-band registration must converge without restarting or reloading manually")
 
 	// --- Case B: static-key rotation on an already-loaded issuer, NO reload.
 	// A key rotation never produces an issuer miss, so lazy-load cannot heal it;
 	// convergence relies on the #852 TTL refresh kicked by verification traffic.
-	cp.SetIssuerRegistryTTL(50 * time.Millisecond)
-	defer cp.SetIssuerRegistryTTL(0)
-
 	oldKeys := authtesting.NewTestIssuerWithAudience("openrails")
 	h.cleanup(oldKeys.Close)
 	newKeys := authtesting.NewTestIssuerWithAudience("openrails")

@@ -1172,21 +1172,26 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	// custom_credit_types rows from the declared credit-balance units (#706) —
 	// the grants below fail unit resolution if it didn't.
 	moneySvc := money.NewMoneyService(dbi)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.custom_credit_types WHERE merchant_id = $1 AND name = ANY($2::text[])",
-			dbtest.TestMerchantID.UUID(), []string{aiUnitName, apiUnitName})
-	})
+	// Product specifications retain these registry identities until the isolated
+	// test database is dropped; deleting them would leave dangling product specs.
+	storedSpec := func(id uuid.UUID) models.CreditsSpec {
+		row, err := gen.New(pool).GetProductByID(ctx, id)
+		require.NoError(t, err)
+		var spec models.CreditsSpec
+		require.NoError(t, json.Unmarshal(row.CreditsSpec, &spec))
+		return spec
+	}
 
 	require.NoError(t, moneySvc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
 		Payer:     customer,
 		PaymentID: uuid.New(),
-		Spec:      serviceCreditsToModel(aiProduct.CreditsSpec),
+		Spec:      storedSpec(aiProduct.ID),
 		Source:    "catalog-ai-credit-purchase",
 	}))
 	require.NoError(t, moneySvc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
 		Payer:     customer,
 		PaymentID: uuid.New(),
-		Spec:      serviceCreditsToModel(apiProduct.CreditsSpec),
+		Spec:      storedSpec(apiProduct.ID),
 		Source:    "catalog-api-credit-purchase",
 	}))
 
@@ -1195,7 +1200,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(100), aiBalance.BalanceAmount)
 	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
-	_, csErr := grantLedger.CreditSpend(ctx, customerID, aiUnit, 40, customerID.String(), "ai-image-generation", ledger.Coord{Operation: ledger.OpSpend, Source: "catalog-ai-image-generation", SourceID: uuid.NewString()})
+	_, csErr := grantLedger.CreditSpend(ctx, customerID, storedSpec(aiProduct.ID)["ai-image-gen"].Unit, 40, customerID.String(), "ai-image-generation", ledger.Coord{Operation: ledger.OpSpend, Source: "catalog-ai-image-generation", SourceID: uuid.NewString()})
 	require.NoError(t, csErr)
 	aiBalance, err = client.GetCreditAccount(ctx, customerID.String(), aiUnit)
 	require.NoError(t, err)
@@ -1292,19 +1297,6 @@ func mustCatalogProduct(t *testing.T, ctx context.Context, applier httpCatalogAp
 	product, err := applier.GetProductByKey(ctx, key)
 	require.NoError(t, err)
 	return *product
-}
-
-func serviceCreditsToModel(in billingservice.CreditsSpec) models.CreditsSpec {
-	out := make(models.CreditsSpec, len(in))
-	for key, spec := range in {
-		out[key] = models.CreditGrantSpec{
-			Unit:        spec.Unit,
-			Amount:      spec.Amount,
-			ExpiryHours: spec.ExpiryHours,
-			Cadence:     models.CreditGrantCadence(spec.Cadence),
-		}
-	}
-	return out
 }
 
 func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, productID uuid.UUID) {

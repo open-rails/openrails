@@ -59,6 +59,10 @@ func (id ID) UUID() uuid.UUID { return uuid.UUID(id) }
 // String returns the canonical string form of the merchant id.
 func (id ID) String() string { return uuid.UUID(id).String() }
 
+// MarshalText keeps UUID-backed API identifiers in their canonical string form.
+func (id ID) MarshalText() ([]byte, error)     { return uuid.UUID(id).MarshalText() }
+func (id *ID) UnmarshalText(data []byte) error { return (*uuid.UUID)(id).UnmarshalText(data) }
+
 // IsZero reports whether the id is the zero value (unset).
 func (id ID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
 

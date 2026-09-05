@@ -71,7 +71,8 @@ func (s *captureEmailSender) resetLink(email string) string {
 	return s.resetLinks[email]
 }
 
-func hostedTestConfig(dsn, issuer string) *config.Config {
+func hostedTestConfig(t *testing.T, dsn, issuer string) *config.Config {
+	t.Helper()
 	return &config.Config{
 		Env:      "dev",
 		TestMode: config.CredentialPostureSandbox,
@@ -80,7 +81,7 @@ func hostedTestConfig(dsn, issuer string) *config.Config {
 		MerchantSource: config.MerchantSourceAPI,
 		SecretBackend:  config.SecretBackendDB,
 		DB:             &config.DBConfig{URL: dsn},
-		Auth:           &config.AuthConfig{Issuer: issuer},
+		Auth:           &config.AuthConfig{Issuer: issuer, KeysPath: t.TempDir()},
 	}
 }
 
@@ -125,7 +126,7 @@ func postJSON(t *testing.T, url, body string) (int, map[string]any) {
 func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://hosted.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://hosted.openrails.test")
 	e := newHostApp(t, cfg)
 
 	// Hosted posture with NO sender must fail loudly at construction (#536 gap:
@@ -226,7 +227,7 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	require.True(t, stillOwner)
 
 	// Provisioning without an attached control plane is a wiring error.
-	bare := newHostApp(t, hostedTestConfig(dsn, "https://bare.openrails.test"))
+	bare := newHostApp(t, hostedTestConfig(t, dsn, "https://bare.openrails.test"))
 	_, err = embcp.ProvisionMerchant(ctx, bare.App(), embcp.ProvisionMerchantRequest{Slug: "never-" + sfx})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no control plane attached")
@@ -243,7 +244,7 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 func TestProvisionMerchant_ConcurrentFirstCreateRace(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://race.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://race.openrails.test")
 	e := newHostApp(t, cfg)
 	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
 
@@ -291,7 +292,7 @@ func TestProvisionMerchant_ConcurrentFirstCreateRace(t *testing.T) {
 func TestSelfHostedPosture_RegistrationStaysClosed(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://selfhosted.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://selfhosted.openrails.test")
 	e := newHostApp(t, cfg)
 
 	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
@@ -301,4 +302,12 @@ func TestSelfHostedPosture_RegistrationStaysClosed(t *testing.T) {
 	status, _ := postJSON(t, srv.URL+"/register",
 		`{"identifier":"nobody@example.test","username":"nobody","password":"str0ng-horse-battery!"}`)
 	require.Equal(t, http.StatusNotFound, status, "self-hosted posture must not mount /register")
+}
+
+func (*captureEmailSender) SendContactChanged(context.Context, string, string, authcore.ContactChange) error {
+	return nil
+}
+
+func (*captureEmailSender) SendDeviceKeyEnrolled(context.Context, string, string, authcore.DeviceKeyNotice) error {
+	return nil
 }

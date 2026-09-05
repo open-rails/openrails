@@ -356,7 +356,7 @@ func bootstrapAndMigrate(ctx context.Context, dsn string) error {
 	// without first calling EnsureTestMerchant; seeding it here makes that robust and
 	// order-independent. Idempotent — EnsureTestMerchant remains a safe no-op.
 	if _, err := sqlDB.ExecContext(ctx,
-		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING`,
+		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active') ON CONFLICT (id) DO NOTHING`,
 		TestMerchantID.UUID(), TestMerchantSlug); err != nil {
 		return fmt.Errorf("seed test merchant: %w", err)
 	}

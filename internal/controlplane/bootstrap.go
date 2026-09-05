@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchants"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -256,32 +258,36 @@ func (c *ControlPlane) ensureMerchantAPIKeyActor(ctx context.Context, merchantSl
 	return createdBy, nil
 }
 
-// recordMerchantGroupBySlug writes the merchant permission-group's internal id onto
-// the bootstrap merchant's directory row (openrails.merchants.permission_group_id,
-// repurposed under #567 to hold the controlling group id), keyed by slug, and
-// returns the resolved OpenRails merchant id. openrails.* is OpenRails-owned
-// control-plane state, so this is a direct, idempotent UPDATE ... RETURNING.
-// There is no default merchant the row could fall back to (#480), so a missing
-// directory row is an error the caller must surface (register the merchant
-// before bootstrap).
+// recordMerchantGroupBySlug settles by the already resolved group UUID first.
+// Trusted operator bootstrap may adopt one explicitly unbound host row; a bound
+// display projection never authorizes acquiring that row or changing its group.
 func (c *ControlPlane) recordMerchantGroupBySlug(ctx context.Context, slug, groupID string) (merchant.ID, error) {
-	if c.pool == nil {
-		return merchant.ID{}, errors.New("controlplane: pgx pool unavailable for merchant directory update")
-	}
-	var idStr string
-	err := c.pool.QueryRow(ctx, `
-		UPDATE openrails.merchants
-		   SET permission_group_id = $2,
-		       updated_at      = current_timestamp
-		 WHERE lower(slug) = lower($1)
-		   AND deleted_at IS NULL
-		RETURNING id::text
-	`, slug, groupID).Scan(&idStr)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return merchant.ID{}, fmt.Errorf("controlplane: no openrails merchant directory row for bootstrap slug %q (register the merchant before bootstrap)", slug)
-	}
+	directory, err := merchants.NewDirectoryService(c.pool)
 	if err != nil {
-		return merchant.ID{}, fmt.Errorf("controlplane: record merchant group id on merchant %q: %w", slug, err)
+		return merchant.ID{}, err
 	}
-	return merchant.ParseID(idStr)
+	existing, err := directory.GetByGroupID(ctx, groupID)
+	if err == nil {
+		return existing.ID, nil
+	}
+	if !errors.Is(err, merchants.ErrMerchantNotFound) {
+		return merchant.ID{}, err
+	}
+	q := gen.New(c.pool)
+	host, err := q.GetUnboundMerchantBySlug(ctx, merchant.NormalizeSlug(slug))
+	if err != nil {
+		return merchant.ID{}, fmt.Errorf("controlplane: no unbound host merchant %q available for bootstrap: %w", slug, err)
+	}
+	_, err = q.BindUnboundMerchantGroup(ctx, gen.BindUnboundMerchantGroupParams{ID: host.ID, GroupID: groupID})
+	if err != nil {
+		return merchant.ID{}, fmt.Errorf("controlplane: bind explicit host merchant: %w", err)
+	}
+	selected, err := directory.GetByGroupID(ctx, groupID)
+	if err != nil {
+		return merchant.ID{}, err
+	}
+	if selected.ID.UUID() != host.ID {
+		return merchant.ID{}, merchants.ErrMerchantBindingConflict
+	}
+	return selected.ID, nil
 }

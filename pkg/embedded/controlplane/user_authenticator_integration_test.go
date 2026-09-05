@@ -26,7 +26,7 @@ func TestUserAuthenticator_InProcess(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 	// Nothing serves this issuer: a JWKS fetch would fail, an in-process verify
 	// must not care.
-	cfg := hostedTestConfig(dsn, "https://unreachable-issuer.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://unreachable-issuer.openrails.test")
 	e := newHostApp(t, cfg)
 
 	sender := &captureEmailSender{}

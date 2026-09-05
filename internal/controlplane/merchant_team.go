@@ -103,7 +103,7 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid merchant.ID) ([
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 	if email == "" {
 		return MerchantTeamInviteResult{}, fmt.Errorf("controlplane: invite email is required")
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return MerchantTeamInviteResult{}, err
 	}
@@ -200,7 +200,7 @@ func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid merchant
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +234,7 @@ func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid merchan
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return false, err
 	}
@@ -264,7 +264,7 @@ func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.
 	if targetUserID == "" {
 		return ErrNotATeamMember
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return err
 	}
@@ -314,7 +314,7 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchan
 	if targetUserID == "" {
 		return ErrNotATeamMember
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return err
 	}

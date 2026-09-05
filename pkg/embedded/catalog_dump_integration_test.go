@@ -92,6 +92,12 @@ catalogs:
 		Config: cfg, PGXPool: pool, Merchant: merchantSlug, Out: &firstDump,
 	}))
 	require.Contains(t, firstDump.String(), "expires: 30d")
+	require.NotContains(t, firstDump.String(), "credit:", "portable manifest uses local names")
+	var catalogUnit, productUnit string
+	require.NoError(t, dbtest.SharedSuperuserPGXPool(t).QueryRow(ctx, `SELECT 'credit:'||c.id::text,p.credits_spec->'image_credits'->>'unit'
+ FROM openrails.custom_credit_types c JOIN openrails.products p ON p.merchant_id=c.merchant_id
+ WHERE c.merchant_id=$1 AND c.name='credit' AND p.key='base'`, merchantID).Scan(&catalogUnit, &productUnit))
+	require.Equal(t, catalogUnit, productUnit)
 	require.NotContains(t, firstDump.String(), "expiry_hours")
 	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
 	require.NoError(t, err, "dump should parse as push-merchant-catalog YAML")
@@ -103,6 +109,13 @@ catalogs:
 		Config: cfg, PGXPool: pool, Manifest: firstDump.Bytes(), Out: &secondApply,
 		Insert: true, Overwrite: true, Prune: true,
 	}))
+
+	require.Contains(t, secondApply.String(), "no changes — catalog is up to date", "reapplying local names must not report a product edit")
+
+	qualified := bytes.ReplaceAll(manifest, []byte("unit: credit\n"), []byte("unit: "+merchantSlug+"/credit\n"))
+	var qualifiedPlan bytes.Buffer
+	require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{Config: cfg, PGXPool: pool, Manifest: qualified, Out: &qualifiedPlan, Insert: true, Overwrite: true, Prune: true}))
+	require.Contains(t, qualifiedPlan.String(), "no changes — catalog is up to date")
 
 	var secondDump bytes.Buffer
 	require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
