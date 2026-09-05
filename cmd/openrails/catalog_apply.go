@@ -75,18 +75,21 @@ func runPushCatalog(cmd *cobra.Command, opts catalogOptions) error {
 	}
 
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	_, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
-	if err != nil {
-		return err
+	push := embedded.CatalogPushOptions{
+		Config:    cfg,
+		File:      opts.file,
+		Out:       cmd.OutOrStdout(),
+		Insert:    opts.insert,
+		Overwrite: opts.overwrite,
+		Prune:     opts.prune,
 	}
-	defer close()
-	return embedded.PushMerchantCatalog(cmd.Context(), embedded.CatalogPushOptions{
-		Config:        cfg,
-		NameAuthority: authority,
-		File:          opts.file,
-		Out:           cmd.OutOrStdout(),
-		Insert:        opts.insert,
-		Overwrite:     opts.overwrite,
-		Prune:         opts.prune,
-	})
+	if cfg != nil && cfg.DB != nil {
+		_, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
+		if err != nil {
+			return err
+		}
+		defer close()
+		push.NameAuthority = authority
+	}
+	return embedded.PushMerchantCatalog(cmd.Context(), push)
 }

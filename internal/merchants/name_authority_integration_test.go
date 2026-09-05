@@ -3,6 +3,7 @@
 package merchants_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"testing"
@@ -72,6 +73,13 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 		require.Equal(t, first.ID, selected.ID)
 		require.Equal(t, newName, selected.Slug)
 	}
+	cfg := &config.Config{DB: &config.DBConfig{Schema: config.DefaultSchema}, MerchantSource: "manifest"}
+	catalogFor := func(name, display string) []byte {
+		return []byte("version: 1\ncatalogs:\n  - merchant: " + name + "\n    products:\n      - key: owner_product\n        display_name: " + display + "\n")
+	}
+	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
+		Config: cfg, PGXPool: pool, NameAuthority: authority, Manifest: catalogFor(old, "Original catalog"), Insert: true, Overwrite: true, Prune: true,
+	}))
 	_, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: old, OwnerSubjectID: ownerB.ID})
 	require.Error(t, err, "retained former name cannot be reclaimed")
 	var projection, status string
@@ -116,6 +124,27 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 			return nil
 		}))
 	}
+	// The alias initially selected A's catalog; after reclaim, the same external
+	// name selects B. UUID-scoped import still writes only to captured A.
+	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
+		Config: cfg, PGXPool: pool, NameAuthority: authority, Manifest: catalogFor(old, "New owner catalog"), Insert: true, Overwrite: true, Prune: true,
+	}))
+	var originalCatalog, reclaimedCatalog bytes.Buffer
+	require.NoError(t, embedded.DumpMerchantCatalog(ctx, embedded.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: newName, Out: &originalCatalog}))
+	require.NoError(t, embedded.DumpMerchantCatalog(ctx, embedded.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: old, Out: &reclaimedCatalog}))
+	require.Contains(t, originalCatalog.String(), "Original catalog")
+	require.NotContains(t, originalCatalog.String(), "New owner catalog")
+	require.Contains(t, originalCatalog.String(), "merchant: "+newName)
+	require.Contains(t, reclaimedCatalog.String(), "New owner catalog")
+	require.NotContains(t, reclaimedCatalog.String(), "Original catalog")
+	importedCustomer := uuid.New()
+	_, err = embedded.ImportBilling(ctx, embedded.BillingImportOptions{PGXPool: pool, MerchantID: first.ID,
+		Book: embedded.DeclaredBilling{AsOf: time.Now().UTC(), Customers: []embedded.DeclaredCustomer{{Customer: importedCustomer}}},
+	})
+	require.NoError(t, err)
+	var importedOwner uuid.UUID
+	require.NoError(t, admin.QueryRow(ctx, `SELECT merchant_id FROM openrails.customers WHERE id=$1`, importedCustomer).Scan(&importedOwner))
+	require.Equal(t, first.ID.UUID(), importedOwner)
 	resolved, canonical, err := embedded.ResolveMerchantName(ctx, embedded.MerchantNameOptions{PGXPool: pool, Name: old, NameAuthority: authority})
 	require.NoError(t, err)
 	require.Equal(t, second.ID, resolved)

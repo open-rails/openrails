@@ -42,7 +42,8 @@ What import does **not** do:
 ### The import surface
 
 **Embedded**: `pkg/embedded.ImportBilling(ctx, BillingImportOptions{Config,
-PGXPool, MerchantSlug (or MerchantID), Book})`. **HTTP**:
+PGXPool, MerchantID, Book})`. Resolve public names once with
+`embedded.ResolveMerchantName` and pass its captured UUID. **HTTP**:
 `POST /v1/import/billing` with the identical JSON body — merchant from the
 authenticated credential, gated on the owner-level `merchant:billing:import`
 permission. The HTTP body cap (1 MiB) forces large books to batch.

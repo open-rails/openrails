@@ -895,14 +895,14 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 			return nil, err
 		}
 	} else if req.ControlPlane != nil && mt.RemoteApplication != nil && req.Options.Overwrite {
-		if _, err := provisionMerchantGroup(ctx, req.ControlPlane, slug, mt); err != nil {
+		if err := configureMerchantRemoteApplication(ctx, req.ControlPlane, tn.PermissionGroupID, mt.RemoteApplication); err != nil {
 			return nil, fmt.Errorf("merchant bootstrap: update merchant group/remote_application for %q: %w", slug, err)
 		}
 	}
 
 	// Keep an existing merchant's display name in sync with the manifest (the
-	// create path already set it via RegisterMerchant). Idempotent upsert; an
-	// empty manifest display name leaves the stored one untouched (COALESCE).
+	// create path already set it). A UUID-scoped update ensures an
+	// empty manifest display name leaves the stored one untouched.
 	if found && strings.TrimSpace(mt.DisplayName) != "" {
 		directory, err := merchants.NewDirectoryService(database.DataPool())
 		if err != nil {
@@ -2172,23 +2172,39 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 		return "", fmt.Errorf("merchant bootstrap: resolve merchant group %q: %w", slug, err)
 	}
 
-	// Register the merchant's federated issuer as a remote_application nested
-	// under the merchant group, then grant it the merchant `owner` role.
-	if mt.RemoteApplication != nil {
-		ra, err := manifestRemoteApplicationToAuthKit(slug, groupID, mt.RemoteApplication)
-		if err != nil {
-			return "", fmt.Errorf("merchant bootstrap: remote_application for %q: %w", slug, err)
-		}
-		stored, err := core.UpsertRemoteApplication(ctx, ra)
-		if err != nil {
-			return "", fmt.Errorf("merchant bootstrap: register remote_application for %q: %w", slug, err)
-		}
-		if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, slug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
-			return "", fmt.Errorf("merchant bootstrap: grant remote_application owner role for %q: %w", slug, err)
-		}
+	if err := configureMerchantRemoteApplication(ctx, cp, groupID, mt.RemoteApplication); err != nil {
+		return "", err
 	}
-
 	return groupID, nil
+}
+
+// Configure the remote application under the already captured group. The public
+// name may be renamed or reclaimed between provisioning and role assignment.
+func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.ControlPlane, groupID string, app *RemoteApplicationConfig) error {
+	if app == nil {
+		return nil
+	}
+	core := cp.Core()
+	group, err := core.GroupInstanceByID(ctx, groupID)
+	if err != nil {
+		return err
+	}
+	if group.Persona != controlplane.MerchantType {
+		return merchants.ErrMerchantNotFound
+	}
+	ctx = authcore.WithResolvedGroup(ctx, group, group.InstanceSlug)
+	ra, err := manifestRemoteApplicationToAuthKit(group.InstanceSlug, group.ID, app)
+	if err != nil {
+		return fmt.Errorf("merchant bootstrap: remote_application for group %s: %w", groupID, err)
+	}
+	stored, err := core.UpsertRemoteApplication(ctx, ra)
+	if err != nil {
+		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
+	}
+	if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, group.InstanceSlug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
+		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
+	}
+	return nil
 }
 
 // manifestRemoteApplicationToAuthKit maps a merchant's manifest remote_application

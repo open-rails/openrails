@@ -93,9 +93,8 @@ type Service struct {
 	// destructive gates the merchant purge (or#858). Never nil: NewService seeds
 	// it with deniedPolicy so an unwired service cannot purge.
 	destructive DestructivePolicy
-	// groupSlugResolver is the or#914 rename-forwarding seam: slug lookups
-	// that miss the directory table retry through the authkit merchant-group
-	// namespace (which follows ak#264 tombstones). Nil = table-only.
+	// A configured group resolver owns the entire public namespace. With no
+	// resolver, name operations select only explicit unbound host rows.
 	groupSlugResolver   GroupSlugResolver
 	groupIDResolver     GroupIDResolver
 	groupSearchResolver GroupSearchResolver

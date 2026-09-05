@@ -43,7 +43,8 @@ type StaticJWKConfig = boot.StaticJWKConfig
 // every run. Billing-only: it touches no AuthKit/control-plane state (the merchant
 // is an ownerless billing bucket). Already-present secrets are left untouched. If
 // the engine is not yet bound to a merchant, it binds to this one; a later call
-// with a DIFFERENT slug errors (#770 — one embedded engine serves one merchant).
+// whose name resolves to a different UUID errors (#770 — one embedded engine
+// serves one merchant). Current names and valid forwards for its UUID work.
 // Returns the merchant id.
 func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m MerchantConfig) (merchant.ID, error) {
 	if rt == nil || rt.emb == nil {
