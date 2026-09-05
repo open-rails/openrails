@@ -43,8 +43,8 @@ func registerMerchant(t *testing.T, ctx context.Context, pool *db.Pool, slugPref
 }
 
 // vaultMerchantPath is the full KV logical path the store derives for (slug, name).
-func vaultMerchantPath(slug, name string) string {
-	return path.Join("secret", "openrails", "merchants", slug, name)
+func vaultMerchantPath(id, name string) string {
+	return path.Join("secret", "openrails", "merchants", id, name)
 }
 
 // kvCurrentVersion reads the REAL KV-v2 metadata version for a full logical path.
@@ -118,7 +118,7 @@ func TestVaultStoreCycle_VersioningAndTwoMerchantIsolation(t *testing.T) {
 
 	// KV-v2 overwrite versioning is real: rotate → current_version bumps to 2,
 	// and the store SURFACES it (Secret.Version mirrors KV-v2, not a constant).
-	require.Equal(t, 1, kvCurrentVersion(t, root, vaultMerchantPath(slugA, nameA)))
+	require.Equal(t, 1, kvCurrentVersion(t, root, vaultMerchantPath(midA.String(), nameA)))
 	require.Equal(t, 1, got.Version, "store must surface KV-v2 version on read")
 	put2, err := store.Secrets.Put(ctx, midA, nameA, "sk-A-2")
 	require.NoError(t, err)
@@ -127,7 +127,7 @@ func TestVaultStoreCycle_VersioningAndTwoMerchantIsolation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "sk-A-2", got.Value, "rotation must be live immediately")
 	require.Equal(t, 2, got.Version)
-	require.Equal(t, 2, kvCurrentVersion(t, root, vaultMerchantPath(slugA, nameA)))
+	require.Equal(t, 2, kvCurrentVersion(t, root, vaultMerchantPath(midA.String(), nameA)))
 
 	// Rotating A never touches B.
 	gotB, err := store.Secrets.Get(ctx, midB, nameB)
@@ -194,7 +194,7 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 
 	// The KV holds the value at the canonical PSPSecretName path.
 	keyName := scopedName(t, "nmi", "live", acctA, "security_key")
-	kvData, _, err := rootKV.ReadSecret(ctx, vaultMerchantPath(slugA, keyName))
+	kvData, _, err := rootKV.ReadSecret(ctx, vaultMerchantPath(midA.String(), keyName))
 	require.NoError(t, err)
 	require.Equal(t, "sk-full-A-1", kvData["value"],
 		"credential must live in Vault KV at the canonical path")
@@ -224,14 +224,14 @@ func TestVaultFullStack_PaymentProviderConfigRotationAndIsolation(t *testing.T) 
 	sec, err = store.Secrets.Get(ctx, midA, resolved)
 	require.NoError(t, err)
 	require.Equal(t, "sk-full-A-2", sec.Value, "rotation must be live immediately (write-through)")
-	require.Equal(t, 2, kvCurrentVersion(t, root, vaultMerchantPath(slugA, keyName)))
+	require.Equal(t, 2, kvCurrentVersion(t, root, vaultMerchantPath(midA.String(), keyName)))
 
 	// The second merchant is untouched by A's rotation.
 	keyNameB := scopedName(t, "nmi", "live", acctB, "security_key")
 	secB, err := store.Secrets.Get(ctx, midB, keyNameB)
 	require.NoError(t, err)
 	require.Equal(t, "sk-full-B-1", secB.Value)
-	require.Equal(t, 1, kvCurrentVersion(t, root, vaultMerchantPath(slugB, keyNameB)))
+	require.Equal(t, 1, kvCurrentVersion(t, root, vaultMerchantPath(midB.String(), keyNameB)))
 }
 
 // --- Capability gating (#661) with REAL Vault policies --------------------------
@@ -370,7 +370,7 @@ func TestVaultOutage_FailClosedAtBootAndRead_RecoverWithoutRestart(t *testing.T)
 	rootKV := vaultint.NewKVv2Adapter(d.Client(t, d.RootToken), "secret")
 	nameB := scopedName(t, "nmi", "live", "vout-b-"+slug, "security_key")
 	func() {
-		_, werr := rootKV.WriteSecret(ctx, vaultMerchantPath(slug, nameB), map[string]string{"value": "vB"})
+		_, werr := rootKV.WriteSecret(ctx, vaultMerchantPath(mid.String(), nameB), map[string]string{"value": "vB"})
 		require.NoError(t, werr)
 	}()
 

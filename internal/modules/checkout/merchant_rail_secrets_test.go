@@ -54,12 +54,6 @@ func (f *checkoutFakeVaultKV) ListSecrets(_ context.Context, prefix string) ([]s
 	return out, nil
 }
 
-type checkoutSlugResolver map[string]string
-
-func (r checkoutSlugResolver) MerchantSlug(_ context.Context, id merchant.ID) (string, error) {
-	return r[id.String()], nil
-}
-
 type unavailableSecretStore struct{}
 
 func (unavailableSecretStore) Get(context.Context, merchant.ID, string) (merchants.Secret, error) {
@@ -128,7 +122,7 @@ func (checkoutMissingProviderSecretResolver) ActivePSPScopesForRail(context.Cont
 func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	fakeKV := newCheckoutFakeVaultKV()
-	store := merchants.NewVaultSecretStore("secret", fakeKV, checkoutSlugResolver{dbtest.TestMerchantID.String(): "cozy-art"})
+	store := merchants.NewVaultSecretStore("secret", fakeKV)
 	secretName, err := merchants.PSPSecretName("nmi", "live", "mobius-account", "security_key")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-mobius-key")
@@ -141,7 +135,7 @@ func TestCheckoutResolvesMobiusClientFromVaultMerchantSecret(t *testing.T) {
 	client, err := svc.resolveNMIClient(ctx, "nmi")
 	require.NoError(t, err)
 	require.Equal(t, "merchant-mobius-key", client.SecurityKey)
-	require.Contains(t, fakeKV.data, "secret/openrails/merchants/cozy-art/psps/nmi/live/mobius-account/security_key")
+	require.Contains(t, fakeKV.data, "secret/openrails/merchants/"+dbtest.TestMerchantID.String()+"/psps/nmi/live/mobius-account/security_key")
 }
 
 // #788: the boot-config plane is gone — with no scoped merchant secret store

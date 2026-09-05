@@ -380,12 +380,12 @@ func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
 //     operator demonstrably looked at THIS state.
 //   - Confirm-by-construction: DeleteOptions cannot be satisfied by a boolean.
 //
-// It then purges every merchant-owned openrails.* row, the merchant's secrets,
-// and tombstones the directory row (status='deleted', deleted_at) inside ONE
+// It then purges the supported merchant-owned rows and DB-backed secrets,
+// and tombstones the directory row (status='deleted', deleted_at) inside one
 // transaction, stamped with a destructive_runs row (kind=merchant_purge). The
-// run is opened and closed inside that transaction deliberately: unlike a prune,
-// a purge is atomic, so either the damage and its record both exist or neither
-// does.
+// run captures database completion and any external cleanup target atomically.
+// A Vault purge completes the run only after external cleanup is verified; failed
+// cleanup stays retryable through RetrySecretCleanup and its scheduled worker.
 //
 // Re-running Delete on an already-deleted merchant returns ErrMerchantNotFound.
 func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions) error {
@@ -433,20 +433,34 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 	if actor == "" {
 		actor = "unknown"
 	}
+	cleanupPlan, err := captureSecretCleanup(ctx, s.secrets, id)
+	if err != nil {
+		return err
+	}
 	runID := uuid.New()
 	expected := int64(total)
 	note := fmt.Sprintf("merchant purge %s (%d rows) — one-way; restore path is PITR only", m.Slug, total)
-	inventoryProof, err := json.Marshal(map[string]any{
+	proof := map[string]any{
 		"kind":       "merchant_purge",
 		"is_backup":  false,
 		"row_counts": counts,
 		"total_rows": total,
-	})
+	}
+	if cleanupPlan != nil {
+		proof["secret_cleanup"] = cleanupPlan
+	}
+	inventoryProof, err := json.Marshal(proof)
 	if err != nil {
 		return fmt.Errorf("merchants: marshal purge proof: %w", err)
 	}
 
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := gen.New(tx).LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrMerchantNotFound
+			}
+			return err
+		}
 		// inventory-before-purge: an inventory for the merchant's CURRENT row
 		// count. A stale one proves nothing about what is about to be destroyed.
 		var matching int
@@ -491,7 +505,18 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 			return fmt.Errorf("merchants: tombstone merchant: %w", err)
 		}
 
-		affected, _ := json.Marshal(counts)
+		completionCounts := make(map[string]any, len(counts)+1)
+		for table, count := range counts {
+			completionCounts[table] = count
+		}
+		completionCounts["database_purged"] = true
+		affected, _ := json.Marshal(completionCounts)
+		if err := txq.MarkMerchantDatabasePurged(ctx, gen.MarkMerchantDatabasePurgedParams{MerchantID: id.UUID(), ID: runID, Affected: affected}); err != nil {
+			return err
+		}
+		if cleanupPlan != nil {
+			return nil
+		}
 		if _, err := txq.FinishDestructiveRun(ctx, gen.FinishDestructiveRunParams{
 			MerchantID: id.UUID(), ID: runID, Status: "completed",
 			Now: time.Now().UTC(), Affected: affected,
@@ -507,34 +532,10 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		return err
 	}
 
-	// Best-effort purge of any non-DB secret backend (e.g. Vault). Done outside
-	// the tx since it is not transactional; the count is folded back onto the run
-	// so the record of damage covers the secret store too.
-	secretsDeleted := 0
-	if s.secrets != nil {
-		if names, lerr := s.secrets.List(ctx, id); lerr == nil {
-			for _, n := range names {
-				if derr := s.secrets.Delete(ctx, id, n); derr == nil {
-					secretsDeleted++
-				}
-			}
-		}
+	if cleanupPlan != nil {
+		return s.RetrySecretCleanup(ctx, id, runID)
 	}
-	if secretsDeleted > 0 {
-		full := make(map[string]int, len(counts)+1)
-		for k, v := range counts {
-			full[k] = v
-		}
-		full["merchant_secrets"] = secretsDeleted
-		affected, _ := json.Marshal(full)
-		_ = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-			_, err := gen.New(tx).FinishDestructiveRun(ctx, gen.FinishDestructiveRunParams{
-				MerchantID: id.UUID(), ID: runID, Status: "completed",
-				Now: time.Now().UTC(), Affected: affected,
-			})
-			return err
-		})
-	}
+
 	return nil
 }
 

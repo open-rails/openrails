@@ -46,6 +46,7 @@ import (
 //
 // It is a plain unit test (no build tag) so it runs on every `go test ./...`.
 var workersWithoutMerchantScope = map[string]string{
+	"MerchantSecretCleanupWorker": "merchants.Service.RetrySecretCleanup opens Pool.MerchantTx for the captured tombstoned merchant",
 	// --- verified: the scope is opened one call out of this package ---
 	"AlertEvalWorker":   "alerting.Service.EvaluateMerchant opens RunInMerchantConn per merchant (evaluator.go)",
 	"SolanaCrankWorker": "solanasubs.SolanaSubscriptionRepo.ListDue fans out per merchant under RunInMerchantConn",

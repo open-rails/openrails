@@ -93,3 +93,7 @@ func (m *memSecretStore) List(_ context.Context, merchantID merchant.ID) ([]stri
 	sort.Strings(names)
 	return names, nil
 }
+
+func (m *memSecretStore) cleanupTarget(id merchant.ID) (string, string, error) {
+	return "memory", id.String(), nil
+}
