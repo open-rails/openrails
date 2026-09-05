@@ -155,7 +155,7 @@ func TestMerchantCancelCCBillDrivesTheLiveVerifiedCancel(t *testing.T) {
 	intent := fx.railIntent(t, intents.TypeCCBillCancelSubscription, subID)
 	assert.Equal(t, intents.StatusPending, intent.Status, "the remote cancel is durable, not refused")
 	assert.Equal(t, string(intents.OriginAdmin), intent.Origin,
-		"same intent, same origin as the findings-queue action (TestFindingsQueueApproveCCBillCancelAndRefund)")
+		"same intent, same origin as the findings-queue action (TestFindingsQueueApproveCCBillCancelOnly)")
 
 	// It drains through the same DataLink choke point the findings queue uses.
 	fake, client := newFakeCCBillSMS(t)

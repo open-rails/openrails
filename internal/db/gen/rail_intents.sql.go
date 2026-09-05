@@ -228,38 +228,6 @@ func (q *Queries) ClaimRailIntentByID(ctx context.Context, arg ClaimRailIntentBy
 	return i, err
 }
 
-const consumeCCBillRefundRefusal = `-- name: ConsumeCCBillRefundRefusal :execrows
-UPDATE openrails.rail_intents
-SET last_failure_reason = NULL
-WHERE merchant_id = $1::uuid
-  AND id = $2::uuid
-  AND attempts = $3::int
-  AND status = 'in_flight'
-  AND last_failure_reason = $4::text
-`
-
-type ConsumeCCBillRefundRefusalParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	Attempts   int32
-	Reason     string
-}
-
-// A proven refusal authorizes one new send. Consume it first so lease recovery
-// cannot mistake an earlier refusal for the outcome of an interrupted retry.
-func (q *Queries) ConsumeCCBillRefundRefusal(ctx context.Context, arg ConsumeCCBillRefundRefusalParams) (int64, error) {
-	result, err := q.db.Exec(ctx, consumeCCBillRefundRefusal,
-		arg.MerchantID,
-		arg.ID,
-		arg.Attempts,
-		arg.Reason,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const countActiveSubscriptionsByMerchant = `-- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid AND status = 'active'

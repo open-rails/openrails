@@ -111,7 +111,7 @@ intents (dunning charges, proactive deletes) while user/admin intents
 execute; `full` executes everything; an unrecognized origin parks.
 
 Every outbound provider mutation flows through the ledger: deferred NMI
-deletes, NMI/Stripe/CCBill refunds, dunning `manual_rebill` charges, CCBill
+deletes, NMI/Stripe refunds, dunning `manual_rebill` charges, CCBill
 cancels, catalog archive ops (`stripe_archive_product`/`stripe_archive_price`/
 `solana_sunset_plan`), payment-method swaps, vault deletes, checkout NMI
 sales, auto-top-up charges, and Solana recurring pulls. NMI deliberately has

@@ -2,7 +2,8 @@
 
 > Which flows are supported on this rail, and how well each one is verified:
 > [rail certification matrix](certification-matrix.md). Read it before relying on
-> CCBill refunds — that wire is modeled, not verified.
+> CCBill operations. Automatic refunds are unavailable; see the
+> [refund qualification boundary](ccbill-refund-qualification.md).
 
 CCBill is a hosted-checkout payment processor commonly used by high-risk and
 adult/subscription businesses. In OpenRails it is a **reserved gateway**: the
@@ -29,7 +30,7 @@ From CCBill (dashboard or merchant support) you need:
 - `clientAccnum` + `clientSubacc`
 - the **salt** used to sign FlexForm URLs
 - a **DataLink** username/password (optional — enables merchant-initiated
-  cancels/refunds and reconciliation; without it those paths cannot execute)
+  cancels and reconciliation; without it those paths cannot execute)
 - per price: a **FlexForm** (`flex_id` + `form_name`) created in CCBill's
   FlexForms admin with matching pricing
 
@@ -157,8 +158,12 @@ posture alone accepts nothing extra.
   success; ambiguous outcomes re-verify rather than decline). CCBill keeps
   the subscriber's access through the paid period on its own side. CCBill
   cancels are destructive: no resume.
-- DataLink (`datalink.ccbill.com`) also powers merchant-initiated refunds
-  (void-or-refund) and transaction-export reconciliation — all gated on the
-  `datalink_username`/`datalink_password` pair.
+- DataLink (`datalink.ccbill.com`) also powers transaction-export
+  reconciliation, gated on the `datalink_username`/`datalink_password` pair.
+- Automatic CCBill refunds are unavailable. The admin API refuses full and
+  partial requests; combined cancel-and-refund refuses before cancellation.
+  Existing unresolved refund intents retain their reserved balance and evidence
+  for operator verification. Confirmed inbound refunds and manual accounting
+  remain supported. See [qualification](ccbill-refund-qualification.md).
 - CCBill subscriptions cannot be reassigned to another payment method;
   payment-method changes go through a new checkout.

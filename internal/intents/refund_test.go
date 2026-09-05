@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -49,13 +50,15 @@ func TestRefundOperationIdentity(t *testing.T) {
 	assert.Equal(t, RefundIdempotencyKey(id, "key"), RefundIdempotencyKey(id, " key "))
 	assert.NotEqual(t, RefundIdempotencyKey(id, "key"), RefundIdempotencyKey(id, "other"))
 	assert.NotEqual(t, RefundIdempotencyKey(id, "key"), RefundIdempotencyKey(uuid.New(), "key"))
-	for rail, want := range map[models.Rail]string{models.RailStripe: TypeStripeRefund, models.RailNMI: TypeNMIRefund, models.RailCCBill: TypeCCBillRefund} {
+	for rail, want := range map[models.Rail]string{models.RailStripe: TypeStripeRefund, models.RailNMI: TypeNMIRefund} {
 		typ, provider, key, err := RefundIntentFor(&models.Payment{ID: id, Rail: rail}, "key")
 		require.NoError(t, err)
 		assert.Equal(t, want, typ)
 		assert.Equal(t, string(rail), provider)
 		assert.Equal(t, RefundIdempotencyKey(id, "key"), key)
 	}
+	_, _, _, unsupported := RefundIntentFor(&models.Payment{ID: id, Rail: models.RailCCBill}, "key")
+	require.ErrorIs(t, unsupported, ccbill.ErrRefundUnsupported)
 	_, _, _, err := RefundIntentFor(nil, "key")
 	require.Error(t, err)
 }

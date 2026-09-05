@@ -365,8 +365,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// Stripe via the #788 rail resolution seam.
 	ccbillCancel := intents.NewCCBillCancelHandler(r.DB, r.Config, r.RailConfigs, clock) // #696 (unarmed rail parks)
 	ccbillCancel.DataLinkBaseURL = r.CCBillDataLinkEndpoint
-	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, r.Config, r.RailConfigs, clock) // #696 refund (unarmed rail parks)
-	ccbillRefund.DataLinkBaseURL = r.CCBillDataLinkEndpoint
+	ccbillRefund := intents.NewCCBillRefundHandler(r.DB, clock) // retain unresolved pre-qualification refunds
 	registry := intents.NewRegistry(
 		intents.NewNMIDeleteHandler(r.DB, r.Config, r.CollectionResolver, clock),
 		intents.NewNMIPaymentSourceUpdateHandler(r.DB, r.CollectionResolver, clock), // #674: payment-method swap

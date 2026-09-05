@@ -269,7 +269,7 @@ export const refundPayment = (
   })
 
 // Rails whose refunds route through a provider API today (admin_payments.go).
-export const REFUNDABLE_RAILS = ["nmi", "ccbill", "stripe"]
+export const REFUNDABLE_RAILS = ["nmi", "stripe"]
 
 // --- Catalog ---
 

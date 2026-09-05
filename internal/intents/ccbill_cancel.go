@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"strings"
 	"time"
 
@@ -13,12 +11,20 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
 )
+
+// Only explicit HTTP/authentication refusals permit bounded clean retries.
+// Provider code -7 remains ambiguous and goes through cancellation verification.
+const ccbillDenialMaxAttempts = 3
+
+func ccbillDenialExhausted(attempts int32) bool { return attempts >= ccbillDenialMaxAttempts }
 
 // TypeCCBillCancelSubscription is the merchant-initiated CCBill cancel intent
 // (#696): stop future rebills via DataLink's SMS cancelSubscription; CCBill
@@ -125,16 +131,11 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		case errors.Is(err, ccbill.ErrProviderReadOnly):
 			return Parked("ccbill provider writes blocked (mode=readonly)")
 		case errors.Is(err, ccbill.ErrDataLinkAuth):
-			// -7 is CCBill's OVERLOADED denial (auth/IP OR operation-not-permitted).
-			// The cancel did NOT execute. Bounded clean-retry for a transient
-			// auth/IP flap, then terminal for the operator — never infinite retry
-			// behind a misleading "auth" reason (a permanently-refused cancel means
-			// the subscriber keeps rebilling: an operator must see it, not a silent
-			// forever-retry).
+			// An explicit HTTP/authentication rejection did not execute the action.
 			if ccbillDenialExhausted(intent.Attempts) {
-				return Terminal("cancelSubscription denied (-7): provider refused after bounded retries — not permitted / auth — needs operator attention")
+				return Terminal("cancelSubscription authentication/access rejected: provider refused after bounded retries — not permitted / auth — needs operator attention")
 			}
-			return Retryable("cancelSubscription denied (-7): provider refused (auth/IP, or not permitted); bounded retry")
+			return Retryable("cancelSubscription authentication/access rejected: provider refused (auth/IP, or not permitted); bounded retry")
 		default:
 			// Definite reject (may mean already-cancelled) or transport
 			// ambiguity — the verifier's read resolves either way.
