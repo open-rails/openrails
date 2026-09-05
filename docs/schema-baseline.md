@@ -19,7 +19,10 @@ embedded orphan-ledger refusal tests verify the new installation boundary.
 
 A baseline rewrite is a fresh-database operation. Never clear a migration ledger
 on an existing schema to make it appear current. The standalone and embedded
-orphan-migration fences continue to refuse incompatible retained databases.
+orphan-migration fences continue to refuse retained histories containing removed
+migration prefixes. They are not schema checksums: an old database recording only
+prefix1 cannot be distinguished by that fence, and must not be reused for this
+fresh-database cutover.
 
 Validation uses disposable `openrails_or927_*` databases in the audit PostgreSQL
 instance. A read-only census found no OpenRails/billing schema in the15 retained
