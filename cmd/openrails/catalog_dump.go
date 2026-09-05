@@ -8,10 +8,12 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/pkg/embedded"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type catalogDumpOptions struct {
-	merchant string
+	merchant         string
+	unboundMerchants bool
 }
 
 func newDumpCatalogCmd() *cobra.Command {
@@ -24,6 +26,7 @@ func newDumpCatalogCmd() *cobra.Command {
 			return runDumpCatalog(cmd, opts)
 		},
 	}
+	cmd.Flags().BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve names only in the AuthKit-free host merchant namespace")
 	cmd.Flags().StringVar(&opts.merchant, "slug", "", "merchant slug to dump")
 	return cmd
 }
@@ -34,11 +37,15 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 		return fmt.Errorf("--slug is required")
 	}
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	_, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
-	if err != nil {
-		return err
+	var authority merchant.NameAuthority
+	if !opts.unboundMerchants {
+		_, configuredAuthority, close, err := openCLINameDirectory(cmd.Context(), cfg)
+		if err != nil {
+			return err
+		}
+		defer close()
+		authority = configuredAuthority
 	}
-	defer close()
 	return embedded.DumpMerchantCatalog(cmd.Context(), embedded.CatalogDumpOptions{
 		Config:        cfg,
 		NameAuthority: authority,
