@@ -10,7 +10,7 @@ Custom units can be granted, reserved, spent, captured, expired and revoked thro
 
 ## Pre-launch cutover
 
-Migration `0021_custom_credit_identity` refuses databases with old name-based custom financial codes or catalog units. Its error names the affected table. It does not rewrite append-only history, interpret a former slug as ownership, or delete data.
+Migration `0021_custom_credit_identity` refuses databases with old name-based custom financial codes or catalog units. Its error names the affected table. It does not rewrite append-only history, interpret a former slug as ownership, or delete data. Migration `0022_custom_credit_identity_validate` validates the new constraints in a separate transaction so the short schema-change locks are released before scanning existing rows. Both run before application startup.
 
 Before applying the release, inventory any retained development database for custom `currency` values containing `/` name-based `catalog_credit_balances.unit` values, and noncanonical unit fields in product credit specs or subscription/payment snapshots. Export the affected merchant state and decide explicitly how to recreate that pre-launch state in a fresh database; preserve unrelated databases. The numbered tracker issue for retained environment inventory records any state awaiting that owner decision. New installations and the isolated integration fixtures use UUID identities directly.
 

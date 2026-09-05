@@ -39,84 +39,62 @@ END $$;
 
 ALTER TABLE openrails.metered_rating_watermarks DROP CONSTRAINT metered_rating_watermarks_currency_shape;
 ALTER TABLE openrails.metered_rating_watermarks ADD CONSTRAINT metered_rating_watermarks_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.metered_rating_watermarks VALIDATE CONSTRAINT metered_rating_watermarks_currency_shape;
 
 ALTER TABLE openrails.catalog_credit_purchase_prices DROP CONSTRAINT catalog_credit_purchase_prices_currency_shape;
 ALTER TABLE openrails.catalog_credit_purchase_prices ADD CONSTRAINT catalog_credit_purchase_prices_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.catalog_credit_purchase_prices VALIDATE CONSTRAINT catalog_credit_purchase_prices_currency_shape;
 
 ALTER TABLE openrails.host_lifecycle_events DROP CONSTRAINT host_lifecycle_events_currency_shape;
 ALTER TABLE openrails.host_lifecycle_events ADD CONSTRAINT host_lifecycle_events_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.host_lifecycle_events VALIDATE CONSTRAINT host_lifecycle_events_currency_shape;
 
 ALTER TABLE openrails.invoices DROP CONSTRAINT invoices_currency_shape;
 ALTER TABLE openrails.invoices ADD CONSTRAINT invoices_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.invoices VALIDATE CONSTRAINT invoices_currency_shape;
 
 ALTER TABLE openrails.ledger_accounts DROP CONSTRAINT ledger_accounts_currency_shape;
 ALTER TABLE openrails.ledger_accounts ADD CONSTRAINT ledger_accounts_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.ledger_accounts VALIDATE CONSTRAINT ledger_accounts_currency_shape;
 
 ALTER TABLE openrails.ledger_transfers DROP CONSTRAINT ledger_transfers_currency_shape;
 ALTER TABLE openrails.ledger_transfers ADD CONSTRAINT ledger_transfers_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.ledger_transfers VALIDATE CONSTRAINT ledger_transfers_currency_shape;
 
 ALTER TABLE openrails.prices DROP CONSTRAINT prices_currency_shape;
 ALTER TABLE openrails.prices ADD CONSTRAINT prices_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.prices VALIDATE CONSTRAINT prices_currency_shape;
 
 ALTER TABLE openrails.tier_schedules DROP CONSTRAINT tier_schedules_currency_shape;
 ALTER TABLE openrails.tier_schedules ADD CONSTRAINT tier_schedules_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.tier_schedules VALIDATE CONSTRAINT tier_schedules_currency_shape;
 
 ALTER TABLE openrails.usage_events DROP CONSTRAINT usage_events_currency_shape;
 ALTER TABLE openrails.usage_events ADD CONSTRAINT usage_events_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.usage_events VALIDATE CONSTRAINT usage_events_currency_shape;
 
 ALTER TABLE openrails.customer_delinquency DROP CONSTRAINT customer_delinquency_currency_shape;
 ALTER TABLE openrails.customer_delinquency ADD CONSTRAINT customer_delinquency_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.customer_delinquency VALIDATE CONSTRAINT customer_delinquency_currency_shape;
 
 ALTER TABLE openrails.customer_minimum_spend DROP CONSTRAINT customer_minimum_spend_currency_shape;
 ALTER TABLE openrails.customer_minimum_spend ADD CONSTRAINT customer_minimum_spend_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.customer_minimum_spend VALIDATE CONSTRAINT customer_minimum_spend_currency_shape;
 
 ALTER TABLE openrails.invoice_items DROP CONSTRAINT invoice_items_currency_shape;
 ALTER TABLE openrails.invoice_items ADD CONSTRAINT invoice_items_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.invoice_items VALIDATE CONSTRAINT invoice_items_currency_shape;
 
 ALTER TABLE openrails.invoice_payments DROP CONSTRAINT invoice_payments_currency_shape;
 ALTER TABLE openrails.invoice_payments ADD CONSTRAINT invoice_payments_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.invoice_payments VALIDATE CONSTRAINT invoice_payments_currency_shape;
 
 ALTER TABLE openrails.money_settings DROP CONSTRAINT money_settings_currency_shape;
 ALTER TABLE openrails.money_settings ADD CONSTRAINT money_settings_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.money_settings VALIDATE CONSTRAINT money_settings_currency_shape;
 
 ALTER TABLE openrails.payments DROP CONSTRAINT payments_currency_shape;
 ALTER TABLE openrails.payments ADD CONSTRAINT payments_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.payments VALIDATE CONSTRAINT payments_currency_shape;
 
 ALTER TABLE openrails.payment_settlement_events DROP CONSTRAINT payment_settlement_events_currency_shape;
 ALTER TABLE openrails.payment_settlement_events ADD CONSTRAINT payment_settlement_events_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.payment_settlement_events VALIDATE CONSTRAINT payment_settlement_events_currency_shape;
 
 ALTER TABLE openrails.checkout_sessions DROP CONSTRAINT checkout_sessions_currency_shape;
 ALTER TABLE openrails.checkout_sessions ADD CONSTRAINT checkout_sessions_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.checkout_sessions VALIDATE CONSTRAINT checkout_sessions_currency_shape;
 
 ALTER TABLE openrails.grants DROP CONSTRAINT grants_currency_shape;
 ALTER TABLE openrails.grants ADD CONSTRAINT grants_currency_shape CHECK(currency IS NULL OR currency ~ '^[A-Z0-9]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.grants VALIDATE CONSTRAINT grants_currency_shape;
 
 COMMENT ON TABLE openrails.custom_credit_types IS 'Merchant-owned custom credit identities and scales. Financial rows reference credit:<id>; external names resolve through the current merchant namespace.';
 
 ALTER TABLE openrails.catalog_credit_balances ADD CONSTRAINT catalog_credit_balances_unit_identity CHECK(unit ~ '^[A-Z0-9]{3,12}$' OR unit ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
-ALTER TABLE openrails.catalog_credit_balances VALIDATE CONSTRAINT catalog_credit_balances_unit_identity;
 
 ALTER TABLE openrails.products ADD CONSTRAINT products_credit_units_canonical CHECK(openrails.credit_spec_has_canonical_units(credits_spec)) NOT VALID;
-ALTER TABLE openrails.products VALIDATE CONSTRAINT products_credit_units_canonical;
 ALTER TABLE openrails.subscriptions ADD CONSTRAINT subscriptions_credit_units_canonical CHECK(openrails.credit_spec_has_canonical_units(credits_spec_snapshot)) NOT VALID;
-ALTER TABLE openrails.subscriptions VALIDATE CONSTRAINT subscriptions_credit_units_canonical;
 ALTER TABLE openrails.payments ADD CONSTRAINT payments_credit_units_canonical CHECK(openrails.credit_spec_has_canonical_units(credits_spec_snapshot)) NOT VALID;
-ALTER TABLE openrails.payments VALIDATE CONSTRAINT payments_credit_units_canonical;
