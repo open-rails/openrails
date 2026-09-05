@@ -70,18 +70,18 @@ func TestProvisionRepairKeepsCapturedIdentity(t *testing.T) {
 	missingName := "missing-" + suffix
 	missingID, err := core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: missingName, OwnerSubjectID: owner.ID})
 	require.NoError(t, err)
-	attached, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: missingName, OwnerUserID: owner.ID, ExistingGroupID: missingID})
+	attached, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{OwnerUserID: owner.ID, ExistingGroupID: missingID})
 	require.NoError(t, err)
 	require.True(t, attached.Created)
 	require.Equal(t, missingID, attached.GroupID)
-	again, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: missingName, OwnerUserID: owner.ID, ExistingGroupID: missingID})
+	again, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{OwnerUserID: owner.ID, ExistingGroupID: missingID})
 	require.NoError(t, err)
 	require.False(t, again.Created)
 	require.Equal(t, attached.MerchantID, again.MerchantID)
 
 	_, err = cp.Pool().Exec(ctx, `UPDATE openrails.merchants SET deleted_at=now() WHERE id=$1`, attached.MerchantID.UUID())
 	require.NoError(t, err)
-	_, err = embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: missingName, OwnerUserID: owner.ID, ExistingGroupID: missingID})
+	_, err = embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{OwnerUserID: owner.ID, ExistingGroupID: missingID})
 	require.ErrorIs(t, err, merchants.ErrMerchantNotFound)
 
 	customerID, err := core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "customer", InstanceSlug: owner.ID, OwnerSubjectID: owner.ID})

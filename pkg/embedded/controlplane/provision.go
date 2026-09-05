@@ -17,7 +17,7 @@ import (
 
 // ProvisionMerchantRequest parameterizes runtime merchant provisioning (#738).
 type ProvisionMerchantRequest struct {
-	// Slug is the merchant slug (merchant.ValidateSlug rules). Required.
+	// Slug selects a merchant name. Required unless ExistingGroupID is supplied.
 	Slug string
 	// OwnerUserID is an optional AuthKit user uuid seeded as the merchant
 	// permission-group's owner (auto-holds `merchant:*`, #567) — ONLY when this
@@ -58,9 +58,9 @@ type ProvisionMerchantResult struct {
 	// arbitrated solely by the openrails.merchants directory row insert — the
 	// one step whose winner the database decides (#898). The permission group
 	// is resolve-or-create and its winner can be a DIFFERENT concurrent caller,
-	// so counting it here would let two racers both report true. A call that
-	// only (re)created the group for an already-listed merchant is a repair of
-	// an existing merchant and reports false.
+	// so counting it here would let two racers both report true. Attaching a
+	// missing billing row to an existing group reports true; repeating an
+	// already-attached group reports false.
 	Created bool
 }
 
@@ -85,8 +85,10 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		return nil, fmt.Errorf("control plane provision: core service unavailable")
 	}
 	slug := merchant.NormalizeSlug(req.Slug)
-	if err := merchant.ValidateSlug(slug); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrInvalidSlug, err)
+	if strings.TrimSpace(req.ExistingGroupID) == "" {
+		if err := merchant.ValidateSlug(slug); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidSlug, err)
+		}
 	}
 	owner := strings.TrimSpace(req.OwnerUserID)
 
