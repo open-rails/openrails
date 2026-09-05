@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -158,63 +156,4 @@ func (s *MoneyService) ListDueAutoTopups(ctx context.Context, cooldown time.Dura
 		})
 	}
 	return out, nil
-}
-
-// HasAutoTopupDeposit reports whether the episode's deposit (source_id) is
-// already on the ledger. The deposit's idempotency key is the credit GRANT's
-// (merchant, customer, source_id) — the same lookup depositTx dedupes on.
-func (s *MoneyService) HasAutoTopupDeposit(ctx context.Context, customerID uuid.UUID, currency, sourceID string) (bool, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	_, err = s.db.Gen(ctx).GetCreditGrantBySourceID(ctx, gen.GetCreditGrantBySourceIDParams{
-		MerchantID: tid.UUID(), CustomerID: customerID, SourceID: sourceID,
-	})
-	if err != nil {
-		if db.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
-}
-
-// FinalizeAutoTopup deposits a CONFIRMED top-up charge (idempotent on the
-// unique (merchant,customer,currency,source,source_id)) and stamps
-// last_topup_at, advancing the episode anchor.
-func (s *MoneyService) FinalizeAutoTopup(ctx context.Context, customerID uuid.UUID, currency string, amountNative int64, sourceID string) error {
-	payer := identity.CustomerID(customerID)
-	deposited, err := s.HasAutoTopupDeposit(ctx, customerID, currency, sourceID)
-	if err != nil {
-		return err
-	}
-	if !deposited {
-		if _, err := s.Deposit(ctx, DepositParams{
-			CustomerID:                &payer,
-			Invoker:                   payer.UUID().String(),
-			Currency:                  currency,
-			Amount:                    amountNative,
-			Source:                    "auto_topup",
-			SourceID:                  &sourceID,
-			ApplyAccountExpiryDefault: true,
-		}); err != nil {
-			return err
-		}
-	}
-	return s.StampAutoTopupAttempt(ctx, customerID, currency)
-}
-
-// StampAutoTopupAttempt stamps last_topup_at now — the cooldown after a
-// finalized episode OR a declined charge (so a failing card is not hammered
-// every tick; the alerter still surfaces the low balance).
-func (s *MoneyService) StampAutoTopupAttempt(ctx context.Context, customerID uuid.UUID, currency string) error {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	now := s.now()
-	return s.db.Gen(ctx).StampMoneyAccountTopupAt(ctx, gen.StampMoneyAccountTopupAtParams{
-		MerchantID: tid.UUID(), CustomerID: customerID, Currency: normalizeCurrency(currency), Now: &now,
-	})
 }

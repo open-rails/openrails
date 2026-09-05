@@ -150,6 +150,9 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	}
 
 	switch notification.EventType {
+	case models.NotificationAutoTopupDisabled:
+		currency, _ := notification.Data["currency"].(string)
+		return s.emailService.SendAutoTopupDisabled(ctx, notification.CustomerID.String(), currency)
 	case models.NotificationPremiumStarted:
 		return s.emailService.SendSubscriptionConfirmed(ctx, notification.CustomerID.String())
 	case models.NotificationPremiumRenewed:
