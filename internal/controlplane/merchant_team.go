@@ -34,7 +34,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -157,7 +156,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 	user, err := c.Core().GetUserByEmail(ctx, email)
 	switch {
 	case err == nil && user != nil:
-		if aerr := c.Core().AssignGroupRoleAs(ctx, actor, MerchantType, slug, user.ID, authcore.SubjectKindUser, role); aerr != nil {
+		if aerr := c.Core().AssignGroupRoleAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(user.ID), authkit.Role(role)); aerr != nil {
 			return MerchantTeamInviteResult{}, aerr
 		}
 		return MerchantTeamInviteResult{Added: true, Member: &MerchantTeamMember{
@@ -179,7 +178,7 @@ func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid merchan
 	link, err := c.Core().CreateGroupInviteLink(ctx, authkit.CreateGroupInviteLinkRequest{
 		Persona:      MerchantType,
 		InstanceSlug: slug,
-		Role:         role,
+		Role:         authkit.Role(role),
 		InvitedBy:    actor,
 	})
 	if err != nil {
@@ -204,7 +203,7 @@ func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid merchant
 	if err != nil {
 		return nil, err
 	}
-	links, err := c.Core().ListGroupInviteLinks(ctx, MerchantType, slug)
+	links, err := c.Core().ListGroupInviteLinks(ctx, MerchantGroup(slug))
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +211,7 @@ func (c *ControlPlane) ListMerchantTeamInvites(ctx context.Context, mid merchant
 	for _, l := range links {
 		out = append(out, MerchantTeamInvite{
 			ID:         l.ID,
-			Role:       l.Role,
+			Role:       string(l.Role),
 			CreatedAt:  l.CreatedAt,
 			ExpiresAt:  l.ExpiresAt,
 			RedeemedAt: l.RedeemedAt,
@@ -238,7 +237,7 @@ func (c *ControlPlane) RevokeMerchantTeamInvite(ctx context.Context, mid merchan
 	if err != nil {
 		return false, err
 	}
-	err = c.Core().RevokeGroupInviteLink(ctx, MerchantType, slug, strings.TrimSpace(linkID))
+	err = c.Core().RevokeGroupInviteLink(ctx, MerchantGroup(slug), strings.TrimSpace(linkID))
 	if err != nil {
 		if errors.Is(err, authkit.ErrInviteLinkNotFound) {
 			return false, nil
@@ -291,10 +290,10 @@ func (c *ControlPlane) ChangeMerchantTeamRole(ctx context.Context, mid merchant.
 	// Assign the new role first, then strip the old — order keeps a promotion
 	// from ever transiently dropping a role. The pre-check above already guards
 	// the last-owner case; AuthKit's own refuseIfLastOwner is a backstop.
-	if err := c.Core().AssignGroupRoleAs(ctx, actor, MerchantType, slug, targetUserID, authcore.SubjectKindUser, newRole); err != nil {
+	if err := c.Core().AssignGroupRoleAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(targetUserID), authkit.Role(newRole)); err != nil {
 		return err
 	}
-	if err := c.Core().UnassignGroupRoleAs(ctx, actor, MerchantType, slug, targetUserID, authcore.SubjectKindUser, current.Role); err != nil {
+	if err := c.Core().UnassignGroupRoleAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(targetUserID), authkit.Role(current.Role)); err != nil {
 		if errors.Is(err, authkit.ErrCannotRemoveLastAdminRole) {
 			return ErrCannotRemoveLastOwner
 		}
@@ -333,7 +332,7 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchan
 	if current.Role == MerchantRoleOwner && ownerCount(members) <= 1 {
 		return ErrCannotRemoveLastOwner
 	}
-	if err := c.Core().RemoveGroupSubjectAs(ctx, actor, MerchantType, slug, targetUserID, authcore.SubjectKindUser); err != nil {
+	if err := c.Core().RemoveGroupSubjectAs(ctx, actor, MerchantGroup(slug), authkit.UserSubject(targetUserID)); err != nil {
 		if errors.Is(err, authkit.ErrCannotRemoveLastAdminRole) {
 			return ErrCannotRemoveLastOwner
 		}
@@ -347,21 +346,21 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid merchan
 // Each member's Role is their highest-privilege catalog role (a subject may hold
 // several role rows; the console models one role per member).
 func (c *ControlPlane) humanTeam(ctx context.Context, slug string) (map[string]MerchantTeamMember, error) {
-	raw, err := c.Core().ListGroupMembers(ctx, MerchantType, slug)
+	raw, err := c.Core().ListGroupMembers(ctx, MerchantGroup(slug))
 	if err != nil {
 		return nil, err
 	}
 	roles := make(map[string]string, len(raw))
 	ids := make([]string, 0, len(raw))
 	for _, m := range raw {
-		if m.SubjectKind != authcore.SubjectKindUser {
+		if m.SubjectKind != authkit.SubjectKindUser {
 			continue
 		}
-		if existing, seen := roles[m.SubjectID]; !seen || teamRoleRank(m.Role) < teamRoleRank(existing) {
+		if existing, seen := roles[m.SubjectID]; !seen || teamRoleRank(string(m.Role)) < teamRoleRank(existing) {
 			if !seen {
 				ids = append(ids, m.SubjectID)
 			}
-			roles[m.SubjectID] = m.Role
+			roles[m.SubjectID] = string(m.Role)
 		}
 	}
 	refs, err := c.Core().UsersByIDs(ctx, ids)

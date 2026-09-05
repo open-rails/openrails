@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	authtesting "github.com/open-rails/authkit/authtest"
-	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -52,7 +51,7 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 		Enabled:           true,
 	})
 	require.NoError(t, err, "register issuer out of band")
-	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, raA.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner))
+	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(raA.ID), controlplane.MerchantRoleOwner))
 	// Deliberately NO cp.ReloadRemoteApplications: the CLI runs in another process.
 
 	tokenA, err := mintDelegatedAccessToken(ctx, issuerA.Signer(), authkit.DelegatedAccessParams{
@@ -87,7 +86,7 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 		Enabled:           true,
 	})
 	require.NoError(t, err)
-	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, raB.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner))
+	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.RemoteAppSubject(raB.ID), controlplane.MerchantRoleOwner))
 	// Deterministically load the OLD key into the live verifier (the long-running
 	// server already trusts it).
 	require.NoError(t, cp.ReloadRemoteApplications(ctx))

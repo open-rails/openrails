@@ -99,8 +99,8 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		status, body := postJSON(t, srv.URL+"/register",
 			`{"identifier":"`+email+`","username":"pol`+sfx+`","password":"str0ng-horse-battery!"}`)
 		require.Equal(t, 202, status, "register: %v", body)
-		status, body = postJSON(t, srv.URL+"/email/verify/confirm",
-			`{"email":"`+email+`","code":"`+sender.code(email)+`"}`)
+		status, body = postJSON(t, srv.URL+"/verify/confirm",
+			`{"identifier":"`+email+`","code":"`+sender.code(email)+`"}`)
 		require.Equal(t, 200, status, "verify: %v", body)
 		user, err := core.GetUserByEmail(ctx, email)
 		require.NoError(t, err)
@@ -262,7 +262,7 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		require.Equal(t, 1, res.Deleted)
 		require.GreaterOrEqual(t, res.Withdrawn, 1)
 
-		_, err = core.GroupInstanceForSlug(ctx, "merchant", "dorm-a-"+sfx)
+		_, err = core.GroupInstanceForSlug(ctx, embcp.MerchantGroup("dorm-a-"+sfx))
 		require.ErrorIs(t, err, authkit.ErrGroupNotFound, "released, not tombstoned")
 		var status string
 		var deleted bool

@@ -299,7 +299,7 @@ func (r trustingResolver) ResolveAPIKey(context.Context, string) (*controlplane.
 		MerchantID:    r.merchantID,
 		MerchantSlug:  r.merchantSlug,
 		// Full merchant authority: the trusting embedded host owns its merchant.
-		Permissions: []string{authcore.OwnerGrant(controlplane.MerchantType)},
+		Permissions: []string{string(controlplane.MerchantType.OwnerGrant())},
 	}, nil
 }
 
@@ -608,12 +608,12 @@ func (h *Harness) ensureMerchantGroup(core authkit.Client, slug string) string {
 	_, err := core.EnsureRootGroup(h.ctx)
 	require.NoError(h.t, err, "ensure root group")
 	require.NoError(h.t, core.SeedPermissionGroupContainment(h.ctx), "seed containment")
-	gid, err := core.ResolveGroupIDForSlug(h.ctx, controlplane.MerchantType, slug)
+	gid, err := core.ResolveGroupIDForSlug(h.ctx, controlplane.MerchantGroup(slug))
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		gid, err = core.CreatePermissionGroup(h.ctx, authkit.CreatePermissionGroupRequest{
 			Persona:       controlplane.MerchantType,
 			InstanceSlug:  slug,
-			ParentPersona: authcore.RootPersona,
+			ParentPersona: authkit.RootPersona,
 		})
 	}
 	require.NoError(h.t, err, "ensure merchant permission-group")
@@ -708,7 +708,7 @@ func (s *Surface) MintUserAccessToken(username string) string {
 // role (when non-empty) on ownerMerchantSlug and signs a token with the
 // principal's own key. A principal with a merchant role can administer that
 // merchant; pass role="" to provision a principal with NO authority.
-func (s *Surface) RegisterRemoteApplication(slug, ownerMerchantSlug, role string) RemoteAppCaller {
+func (s *Surface) RegisterRemoteApplication(slug, ownerMerchantSlug string, role authkit.Role) RemoteAppCaller {
 	return s.registerRemoteApplication(slug, ownerMerchantSlug, role, nil)
 }
 
@@ -717,12 +717,12 @@ func (s *Surface) RegisterRemoteApplication(slug, ownerMerchantSlug, role string
 // in the remote application access token. AuthKit treats this as a down-scope request against STORED
 // authority, never as a widening grant; tests use this to prove self-claimed
 // permissions alone do not authorize a principal.
-func (s *Surface) RegisterRemoteApplicationWithPermissionsClaim(slug, ownerMerchantSlug, role string, permissions []string) RemoteAppCaller {
+func (s *Surface) RegisterRemoteApplicationWithPermissionsClaim(slug, ownerMerchantSlug string, role authkit.Role, permissions []string) RemoteAppCaller {
 	perms := append([]string(nil), permissions...)
 	return s.registerRemoteApplication(slug, ownerMerchantSlug, role, perms)
 }
 
-func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug, role string, permissionsClaim []string) RemoteAppCaller {
+func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug string, role authkit.Role, permissionsClaim []string) RemoteAppCaller {
 	h := s.h
 	require.NotNil(h.t, s.app, "RegisterRemoteApplication requires the standalone surface")
 	cp := embcp.Get(s.app)
@@ -752,7 +752,7 @@ func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug, role string
 	require.NoError(h.t, err, "register remote_application")
 
 	if role != "" {
-		require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantType, ownerMerchantSlug, ra.ID, authcore.SubjectKindRemoteApp, role),
+		require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), role),
 			"assign merchant role to remote_application")
 	}
 
@@ -811,7 +811,7 @@ func (s *Surface) RegisterDelegatedIssuer(slug, ownerMerchantSlug string) *Deleg
 		Enabled:           true,
 	})
 	require.NoError(h.t, err, "register delegated issuer")
-	require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantType, ownerMerchantSlug, ra.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner),
+	require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
 		"assign merchant owner role to delegated issuer")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
@@ -908,7 +908,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerMerchantSlug, subject strin
 		// #567: merchant groups have fixed catalog roles (no custom roles). Grant
 		// the merchant `owner` role (= merchant:*); the delegated token's claim is
 		// then bounded down to its requested subset at verify/gate time.
-		require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantType, ownerMerchantSlug, ra.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner),
+		require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
 			"assign merchant owner role to delegated remote_application")
 	}
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
@@ -958,7 +958,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerMerchantSlug string, permi
 	require.NoError(h.t, err, "register service-JWT issuer")
 	// #567: assign the merchant `owner` role (= merchant:*); the service JWT's
 	// claimed permissions are bounded down to its requested subset at verify time.
-	require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantType, ownerMerchantSlug, ra.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner),
+	require.NoError(h.t, core.Genesis().AssignGroupRole(h.ctx, controlplane.MerchantGroup(ownerMerchantSlug), authkit.RemoteAppSubject(ra.ID), controlplane.MerchantRoleOwner),
 		"assign merchant owner role to service-JWT remote_application")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
@@ -988,9 +988,9 @@ func (s *Surface) MintAPIKey(merchantSlug, name string, permissions []string) st
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), merchantSlug)
 	createdBy := h.ensureAPIKeyActor(cp, merchantSlug)
-	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, merchantSlug, authkit.APIKeyMintOptions{
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantGroup(merchantSlug), authkit.APIKeyMintOptions{
 		Name:      name,
-		Role:      roleForPerms(permissions),
+		Role:      authkit.Role(roleForPerms(permissions)),
 		CreatedBy: createdBy,
 	})
 	require.NoError(h.t, err, "mint API key")
@@ -1029,7 +1029,7 @@ func merchantRoleCatalog() map[string][]string {
 	for _, gt := range controlplane.Groups() {
 		if gt.Name == controlplane.MerchantType {
 			for _, r := range gt.Roles {
-				out[r.Name] = r.Permissions
+				out[string(r.Name)] = r.Permissions
 			}
 		}
 	}
@@ -1059,7 +1059,7 @@ func (h *Harness) mintFreshAPIKey(a *app.App) string {
 	require.NotNil(h.t, cp, "control plane attached")
 	h.ensureMerchantGroup(cp.Core(), dbtest.TestMerchantSlug)
 	createdBy := h.ensureAPIKeyActor(cp, dbtest.TestMerchantSlug)
-	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, authkit.APIKeyMintOptions{
+	_, secret, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.APIKeyMintOptions{
 		Name:      "integrationharness-extra",
 		Role:      controlplane.MerchantRoleOwner,
 		CreatedBy: createdBy,
@@ -1085,7 +1085,7 @@ func (h *Harness) ensureAPIKeyActor(cp *controlplane.ControlPlane, merchantSlug 
 		user, err = cp.Core().CreateUser(h.ctx, email, username)
 	}
 	require.NoError(h.t, err, "ensure API-key actor")
-	require.NoError(h.t, cp.Core().Genesis().AssignGroupRole(h.ctx, controlplane.MerchantType, merchantSlug, user.ID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner),
+	require.NoError(h.t, cp.Core().Genesis().AssignGroupRole(h.ctx, controlplane.MerchantGroup(merchantSlug), authkit.UserSubject(user.ID), controlplane.MerchantRoleOwner),
 		"assign API-key actor merchant owner")
 	return user.ID
 }

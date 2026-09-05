@@ -704,17 +704,17 @@ export interface TwoFactorFactor {
   phone_number?: string
 }
 
+// AuthKit TokenSet: the 200 body of /password/login, /2fa/verify and /token.
 export interface AuthTokens {
   access_token: string
   token_type: string
   expires_in: number
   refresh_token?: string
-  requires_2fa?: false
-  requires_verification?: false
 }
 
-export interface TwoFactorRequiredResponse {
-  requires_2fa: true
+// Pending challenges are 403 error envelopes with the challenge in
+// `error.metadata` (authkit #313): `2fa_required` from /password/login ...
+export interface TwoFactorRequiredMetadata {
   user_id: string
   challenge: string
   method: string
@@ -723,19 +723,18 @@ export interface TwoFactorRequiredResponse {
   available_factors: TwoFactorFactor[]
 }
 
-export interface TwoFactorChallengeResponse {
-  requires_2fa: true
+// ... `2fa_required` from /2fa/challenge (factor switch) ...
+export interface TwoFactorChallengeMetadata {
   method: string
   verification_id?: string
   factor: TwoFactorFactor
 }
 
-export interface VerificationRequiredResponse {
-  requires_verification: true
+// ... and `verification_required` from /password/login.
+export interface VerificationRequiredMetadata {
+  identifier: string
+  channel: string
 }
-
-export type PasswordLoginResponse =
-  AuthTokens | TwoFactorRequiredResponse | VerificationRequiredResponse
 
 export interface Me {
   id: string

@@ -52,7 +52,7 @@ func TestRunBootstrap_ExternalShapeAndExplicitMintOnly(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.False(t, res1.APIKeyMinted, "MintInitialAPIKey:false must be honored verbatim")
-	keys, err := cp.Core().ListAPIKeys(ctx, "merchant", slug)
+	keys, err := cp.Core().ListAPIKeys(ctx, embcp.MerchantGroup(slug))
 	require.NoError(t, err)
 	require.Empty(t, keys)
 
@@ -66,10 +66,10 @@ func TestRunBootstrap_ExternalShapeAndExplicitMintOnly(t *testing.T) {
 	require.NotEmpty(t, res2.APIKeySecret)
 
 	// Operator revokes it (e.g. suspected compromise).
-	keys, err = cp.Core().ListAPIKeys(ctx, "merchant", slug)
+	keys, err = cp.Core().ListAPIKeys(ctx, embcp.MerchantGroup(slug))
 	require.NoError(t, err)
 	require.Len(t, keys, 1)
-	revoked, err := cp.Core().RevokeAPIKey(ctx, "merchant", slug, keys[0].ID)
+	revoked, err := cp.Core().RevokeAPIKey(ctx, embcp.MerchantGroup(slug), keys[0].ID)
 	require.NoError(t, err)
 	require.True(t, revoked)
 
@@ -81,7 +81,7 @@ func TestRunBootstrap_ExternalShapeAndExplicitMintOnly(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, res3.APIKeyMinted, "RunBootstrap must never re-mint after an operator revokes all keys")
 
-	finalKeys, err := cp.Core().ListAPIKeys(ctx, "merchant", slug)
+	finalKeys, err := cp.Core().ListAPIKeys(ctx, embcp.MerchantGroup(slug))
 	require.NoError(t, err)
 	require.Len(t, finalKeys, 1, "no replacement key should exist after revocation")
 }

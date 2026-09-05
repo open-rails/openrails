@@ -45,8 +45,8 @@ func TestUserAuthenticator_InProcess(t *testing.T) {
 	require.Equal(t, http.StatusAccepted, status, "register: %v", body)
 	code := sender.code(email)
 	require.NotEmpty(t, code)
-	status, body = postJSON(t, srv.URL+"/email/verify/confirm",
-		`{"email":"`+email+`","code":"`+code+`"}`)
+	status, body = postJSON(t, srv.URL+"/verify/confirm",
+		`{"identifier":"`+email+`","code":"`+code+`"}`)
 	require.Equal(t, http.StatusOK, status, "verify confirm: %v", body)
 	token, _ := body["access_token"].(string)
 	require.NotEmpty(t, token, "verify confirm returns an access token")

@@ -89,10 +89,10 @@ func (c *ControlPlane) WrapAuthRoute(spec authhttp.RouteSpec, h http.Handler) ht
 	if c == nil || spec.Group != authhttp.RoutePermissionGroups {
 		return h
 	}
-	if c.merchantCreation != nil && spec.Method == http.MethodPost && spec.Path == "/"+MerchantType {
+	if c.merchantCreation != nil && spec.Method == http.MethodPost && spec.Path == "/"+string(MerchantType) {
 		return c.merchantCreationAttachHandler(h)
 	}
-	if !strings.HasPrefix(spec.Path, "/"+CustomerType+"/{instance_slug}/") {
+	if !strings.HasPrefix(spec.Path, "/"+string(CustomerType)+"/{instance_slug}/") {
 		return h
 	}
 	return c.lazyCustomerGroupHandler(h)

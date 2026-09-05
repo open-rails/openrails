@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -93,7 +92,7 @@ func TestProvisionRepairKeepsCapturedIdentity(t *testing.T) {
 	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
 	group, err := core.GroupInstanceByID(ctx, replacement)
 	require.NoError(t, err)
-	allowed, err := core.CanOnGroup(ctx, other.ID, authcore.SubjectKindUser, group.ID, "merchant:*")
+	allowed, err := core.CanOnGroup(ctx, authkit.UserSubject(other.ID), group.ID, "merchant:*")
 	require.NoError(t, err)
 	require.True(t, allowed)
 }

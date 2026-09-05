@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -57,14 +56,14 @@ func MerchantAPIKeyRoles() []string {
 func MerchantRolePermissions(role string) ([]string, bool) {
 	role = strings.ToLower(strings.TrimSpace(role))
 	if role == MerchantRoleOwner {
-		return []string{authcore.OwnerGrant(MerchantType)}, true
+		return []string{string(MerchantType.OwnerGrant())}, true
 	}
 	for _, gt := range Groups() {
 		if gt.Name != MerchantType {
 			continue
 		}
 		for _, r := range gt.Roles {
-			if r.Name == role {
+			if r.Name == authkit.Role(role) {
 				return append([]string(nil), r.Permissions...), true
 			}
 		}
@@ -84,7 +83,7 @@ func MerchantRoleCoveredBy(role string, grants []string) bool {
 	for _, perm := range perms {
 		covered := false
 		for _, grant := range grants {
-			if authkit.PermMatches(grant, perm) {
+			if authkit.Perm(perm).Matches(authkit.Perm(grant)) {
 				covered = true
 				break
 			}
@@ -123,9 +122,9 @@ func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, 
 			return MerchantAPIKey{}, "", err
 		}
 	}
-	key, secret, err := c.Core().MintAPIKeyWithOptions(ctx, MerchantType, slug, authkit.APIKeyMintOptions{
+	key, secret, err := c.Core().MintAPIKeyWithOptions(ctx, MerchantGroup(slug), authkit.APIKeyMintOptions{
 		Name:      strings.TrimSpace(name),
-		Role:      role,
+		Role:      authkit.Role(role),
 		CreatedBy: actorUserID,
 	})
 	if err != nil {
@@ -145,7 +144,7 @@ func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid merchant.ID)
 	if err != nil {
 		return nil, err
 	}
-	keys, err := c.Core().ListAPIKeys(ctx, MerchantType, slug)
+	keys, err := c.Core().ListAPIKeys(ctx, MerchantGroup(slug))
 	if err != nil {
 		return nil, err
 	}
@@ -167,14 +166,14 @@ func (c *ControlPlane) RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID
 	if err != nil {
 		return false, err
 	}
-	return c.Core().RevokeAPIKey(ctx, MerchantType, slug, strings.TrimSpace(id))
+	return c.Core().RevokeAPIKey(ctx, MerchantGroup(slug), strings.TrimSpace(id))
 }
 
 func (c *ControlPlane) merchantAPIKeyView(k authkit.APIKey) MerchantAPIKey {
 	return MerchantAPIKey{
 		ID:         k.ID,
 		Name:       k.Name,
-		Role:       k.Role,
+		Role:       string(k.Role),
 		Prefix:     authkit.APIKeyMarker(c.TokenPrefix()) + k.KeyID,
 		CreatedAt:  k.CreatedAt,
 		LastUsedAt: k.LastUsedAt,

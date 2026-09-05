@@ -37,9 +37,10 @@ func TestHostLifecycleEventsCrossMerchantIsolation(t *testing.T) {
 	cfg := &config.Config{
 		Env:  "test",
 		DB:   &config.DBConfig{},
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true},
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 	}
-	cp, err := New(ctx, cfg, super)
+	rdb, _ := dbtest.SharedRedisClient(t)
+	cp, err := New(ctx, cfg, super, WithRedis(rdb))
 	require.NoError(t, err)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]

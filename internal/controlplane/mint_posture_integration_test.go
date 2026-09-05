@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/dbtest"
 )
 
 // TestNew_VerifyOnlyMustBeDeclared proves the #748 posture: verify-only is a
@@ -21,11 +22,11 @@ import (
 // Env "test" is used for the non-dev cases (matching the sibling
 // bootstrap-package control-plane tests): it is NOT dev-like per OpenRails'
 // own config.IsDev (so the #748 gate under test treats it as non-development),
-// but IS dev-like per authkit's separate embedded.IsDevEnvironment classifier
-// (so construction doesn't also need a Redis-backed ephemeral store to get
-// past an unrelated authkit environment gate).
+// so the non-dev cases wire Redis (the engine refuses the in-memory ephemeral
+// store outside development, ak#314) to keep that unrelated gate out of the way.
 func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 	pool := newBootstrapTestPool(t)
+	rdb, _ := dbtest.SharedRedisClient(t)
 	ctx := context.Background()
 
 	t.Run("non-dev + no key + mint_disabled unset refuses to boot", func(t *testing.T) {
@@ -41,9 +42,9 @@ func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 	t.Run("non-dev + no key + mint_disabled=true boots verify-only", func(t *testing.T) {
 		cfg := &config.Config{
 			Env:  "test",
-			Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true},
+			Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 		}
-		cp, err := New(ctx, cfg, pool)
+		cp, err := New(ctx, cfg, pool, WithRedis(rdb))
 		require.NoError(t, err, "a DECLARED verify-only posture must boot even outside development")
 		require.NotNil(t, cp)
 	})

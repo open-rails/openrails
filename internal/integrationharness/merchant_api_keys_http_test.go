@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -192,8 +191,7 @@ func TestMerchantSelfServeAPIKeys(t *testing.T) {
 			name := "apikeyuser" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 			user, err := core.CreateUser(ctx, name+"@example.com", name)
 			require.NoError(t, err)
-			require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType,
-				dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, role))
+			require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), authkit.Role(role)))
 			token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 			require.NoError(t, err)
 			return token

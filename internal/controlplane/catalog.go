@@ -21,6 +21,7 @@ package controlplane
 import (
 	"context"
 
+	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/permissions"
@@ -39,8 +40,8 @@ import (
 // Both are addressed by (type, resourceRef): the merchant slug for MerchantType,
 // the customer uuid string for CustomerType.
 const (
-	MerchantType = "merchant"
-	CustomerType = "customer"
+	MerchantType authkit.Persona = "merchant"
+	CustomerType authkit.Persona = "customer"
 
 	// Merchant staff roles (#567). owner is auto-seeded by authkit (= `merchant:*`).
 	MerchantRoleOwner   = "owner"
@@ -59,6 +60,17 @@ const (
 	RootRoleMerchantDirectoryAdmin  = "merchant-directory-admin"
 )
 
+// MerchantGroup addresses the merchant permission-group for slug.
+func MerchantGroup(slug string) authkit.GroupRef {
+	return authkit.GroupRef{Persona: MerchantType, Instance: slug}
+}
+
+// CustomerGroup addresses the customer permission-group for customerID (the
+// payer's own user id, #567).
+func CustomerGroup(customerID string) authkit.GroupRef {
+	return authkit.GroupRef{Persona: CustomerType, Instance: customerID}
+}
+
 // Groups returns the OpenRails permission-group type catalog (#567): the two
 // flat top-level personas (`merchant`, `customer`) declared under `root`. Fixed
 // catalogs, CustomRoles=false (custom roles + deep hierarchy are tensorhub's
@@ -71,7 +83,7 @@ func Groups() []authcore.PersonaDef {
 		// declarations; owner = root:* stays auto-seeded). These gate the
 		// cross-merchant /v1/platform/merchants directory.
 		{
-			Name: authcore.RootPersona,
+			Name: authkit.RootPersona,
 			Roles: []authcore.RoleDef{
 				{
 					Name:        RootRoleMerchantDirectoryViewer,
@@ -87,7 +99,7 @@ func Groups() []authcore.PersonaDef {
 		},
 		{
 			Name:   MerchantType,
-			Parent: authcore.RootPersona,
+			Parent: authkit.RootPersona,
 			// authkit auto-generates the staff/credential MANAGEMENT routes from
 			// these capabilities (members, api-keys, remote-applications). OpenRails
 			// mounts these and builds none of them (#567).
@@ -122,7 +134,7 @@ func Groups() []authcore.PersonaDef {
 		},
 		{
 			Name:   CustomerType,
-			Parent: authcore.RootPersona,
+			Parent: authkit.RootPersona,
 			Capabilities: authcore.PersonaCapabilities{
 				APIKeys:            true,
 				RemoteApplications: true,
@@ -185,7 +197,7 @@ func withMerchantCreation(defs []authcore.PersonaDef, cfg MerchantCreationConfig
 			Enabled:                true,
 			SlugPattern:            cfg.SlugPattern,
 			ReservedSlugs:          reserved,
-			ReservedEscalationRole: cfg.ReservedEscalationRole,
+			ReservedEscalationRole: authkit.Role(cfg.ReservedEscalationRole),
 		}
 	}
 	return defs
@@ -259,5 +271,5 @@ const (
 	// (= `<type>:*`). The merchant `owner` holds `merchant:*`; the customer
 	// `owner` holds `customer:*`. OpenRails does NOT define this role; it only
 	// ASSIGNS it (the bootstrap admin) or MINTS against it.
-	OwnerRole = authcore.OwnerRoleName
+	OwnerRole = authkit.OwnerRole
 )

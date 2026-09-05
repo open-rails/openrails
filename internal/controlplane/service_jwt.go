@@ -65,7 +65,7 @@ func (c *ControlPlane) ResolveServiceJWT(ctx context.Context, token string) (*Re
 
 // intersectPermissions returns the elements of claimed that are COVERED by the
 // stored authority, under AuthKit's namespace-anchored glob semantics
-// (authkit.PermMatches). A stored grant may be a wildcard pattern — the merchant
+// (authkit.Perm.Matches). A stored grant may be a wildcard pattern — the merchant
 // `owner` role resolves to the single token `merchant:*` (#567) — so a claimed
 // concrete permission like `merchant:customer-settings:update` must be matched by
 // COVERAGE, not exact string equality, or every owner-backed service JWT is
@@ -82,7 +82,7 @@ func intersectPermissions(claimed, stored []string) []string {
 	out := make([]string, 0, len(claimed))
 	for _, c := range claimed {
 		for _, g := range stored {
-			if authkit.PermMatches(g, c) {
+			if authkit.Perm(c).Matches(authkit.Perm(g)) {
 				out = append(out, c)
 				break
 			}

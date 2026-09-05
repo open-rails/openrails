@@ -37,7 +37,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	defer pool.Close()
 	database, err := db.NewWithPGXPool(pool, config.DefaultSchema)
 	require.NoError(t, err)
-	core, err := authcore.New(authcore.Config{Keys: authcore.KeysConfig{VerifyOnly: true}, Token: authcore.TokenConfig{Issuer: "https://names.test", IssuedAudiences: []string{"test"}}, RBAC: []authcore.PersonaDef{{Name: "merchant", Parent: authcore.RootPersona}}}, admin)
+	core, err := authcore.New(authcore.Config{Keys: authcore.KeysConfig{VerifyOnly: true}, Token: authcore.TokenConfig{Issuer: "https://names.test", IssuedAudiences: []string{"test"}}, RBAC: []authcore.PersonaDef{{Name: "merchant", Parent: authkit.RootPersona}}, Ephemeral: authcore.EphemeralConfig{AllowMemory: true}}, authcore.Deps{Postgres: admin})
 	require.NoError(t, err)
 	require.NoError(t, core.SeedPermissionGroupContainment(ctx))
 	_, err = core.EnsureRootGroup(ctx)
@@ -92,7 +92,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	// decision and forwarding reads still run through AuthKit's actual APIs.
 	_, err = admin.Exec(ctx, `UPDATE profiles.name_claims SET expires_at=now()-interval '1 second' WHERE owner_id=$1::uuid AND name=$2`, groupA, old)
 	require.NoError(t, err)
-	_, err = names.GroupInstanceForSlug(ctx, "merchant", old)
+	_, err = names.GroupInstanceForSlug(ctx, authkit.GroupRef{Persona: "merchant", Instance: old})
 	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
 	groupB, err := core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: old, OwnerSubjectID: ownerB.ID})
 	require.NoError(t, err)

@@ -14,7 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	authcore "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/verify"
 
 	"github.com/open-rails/openrails/config"
@@ -90,8 +90,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 
 	// The merchant-admin authority is live permission-group state, not a claim:
 	// the token was minted BEFORE this grant and never learns about it.
-	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, dbtest.TestMerchantSlug,
-		adminID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner), "grant merchant owner")
+	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(adminID), controlplane.MerchantRoleOwner), "grant merchant owner")
 
 	// --- the seam, wired the way doujins would wire it -------------------
 	var lookups []string

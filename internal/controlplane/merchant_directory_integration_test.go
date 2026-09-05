@@ -18,11 +18,12 @@ import (
 func TestListActiveMerchantIDs(t *testing.T) {
 	ctx := context.Background()
 	super := dbtest.SharedSuperuserPGXPool(t)
+	rdb, _ := dbtest.SharedRedisClient(t)
 	cp, err := New(ctx, &config.Config{
 		Env:  "test",
 		DB:   &config.DBConfig{},
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true},
-	}, super)
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
+	}, super, WithRedis(rdb))
 	require.NoError(t, err)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]

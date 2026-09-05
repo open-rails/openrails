@@ -230,6 +230,14 @@ type Config struct {
 	// JSON array string, e.g. TRUSTED_PROXIES='["10.0.0.0/8"]').
 	TrustedProxies []string `koanf:"trusted_proxies,omitempty"`
 
+	// CloudflareProxies lists Cloudflare's egress CIDRs, ONLY where Cloudflare
+	// fronts this origin (ak#298). These peers are trusted for X-Forwarded-For
+	// like TrustedProxies, and they alone may assert CF-Connecting-IP to
+	// AuthKit — a merely trusted proxy never does. Lock the origin down to
+	// Cloudflare ingress when set. Env: CLOUDFLARE_PROXIES (same list forms as
+	// TRUSTED_PROXIES).
+	CloudflareProxies []string `koanf:"cloudflare_proxies,omitempty"`
+
 	// CCBillWebhookIPAllowlist lists EXTRA source CIDRs accepted as CCBill
 	// webhook origins on top of CCBill's own documented ranges (SEC-19).
 	// CCBill signs nothing, so the source IP IS the authentication: this list
@@ -1318,6 +1326,10 @@ func Validate(cfg *Config) error {
 
 	if err := validateSourceCIDRs(cfg.TrustedProxies); err != nil {
 		return fmt.Errorf("trusted_proxies config validation failed: %w", err)
+	}
+
+	if err := validateSourceCIDRs(cfg.CloudflareProxies); err != nil {
+		return fmt.Errorf("cloudflare_proxies config validation failed: %w", err)
 	}
 
 	if err := validateSourceCIDRs(cfg.CCBillWebhookIPAllowlist); err != nil {

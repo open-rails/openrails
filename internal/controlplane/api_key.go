@@ -50,7 +50,7 @@ type ResolvedServiceCredential struct {
 // `merchant:catalog:update`; an exact grant still matches exactly).
 func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
 	for _, grant := range r.Permissions {
-		if authkit.PermMatches(grant, perm) {
+		if authkit.Perm(perm).Matches(authkit.Perm(grant)) {
 			return true
 		}
 	}
@@ -81,7 +81,7 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 	if core == nil {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
-	gi, err := core.GroupInstanceForSlug(ctx, MerchantType, strings.ToLower(strings.TrimSpace(ref)))
+	gi, err := core.GroupInstanceForSlug(ctx, MerchantGroup(strings.ToLower(strings.TrimSpace(ref))))
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}

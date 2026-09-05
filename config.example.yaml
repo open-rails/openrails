@@ -86,6 +86,12 @@ rate_limits:
 # trusted_proxies:
 #   - 10.0.0.0/8
 
+# Cloudflare egress ranges, ONLY where Cloudflare fronts this origin: trusted for
+# X-Forwarded-For like trusted_proxies, and the only peers AuthKit accepts
+# CF-Connecting-IP from. Lock the origin down to Cloudflare ingress when set.
+# cloudflare_proxies:
+#   - 173.245.48.0/20
+
 # EXTRA CCBill webhook source CIDRs, on top of CCBill's own documented ranges.
 # CCBill signs nothing, so this list is authentication: entries are honored only
 # under test_mode: sandbox and only while no live CCBill PSP exists anywhere in

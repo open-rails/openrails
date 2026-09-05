@@ -35,9 +35,10 @@ func TestFleetAggregatesUnderTheEnforcingRole(t *testing.T) {
 	cfg := &config.Config{
 		Env:  "test",
 		DB:   &config.DBConfig{},
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true},
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 	}
-	cp, err := New(ctx, cfg, appPool)
+	rdb, _ := dbtest.SharedRedisClient(t)
+	cp, err := New(ctx, cfg, appPool, WithRedis(rdb))
 	require.NoError(t, err)
 
 	sfx := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]

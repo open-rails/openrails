@@ -62,7 +62,7 @@ func TestFrontendOverride_PasswordResetLinkUsesProductFrontend(t *testing.T) {
 	_, err := cp.Core().CreateUser(ctx, email, "resettarget")
 	require.NoError(t, err)
 
-	status, body := postJSON(t, srv.URL+"/email/password/reset/request", `{"email":"`+email+`"}`)
+	status, body := postJSON(t, srv.URL+"/password/reset/request", `{"identifier":"`+email+`"}`)
 	require.Equal(t, http.StatusAccepted, status, "%v", body)
 
 	link := sender.resetLink(email)
@@ -94,7 +94,7 @@ func TestFrontendAbsent_KeepsPreviousIssuerBasedDefault(t *testing.T) {
 	_, err := cp.Core().CreateUser(ctx, email, "resetdefault")
 	require.NoError(t, err)
 
-	status, body := postJSON(t, srv.URL+"/email/password/reset/request", `{"email":"`+email+`"}`)
+	status, body := postJSON(t, srv.URL+"/password/reset/request", `{"identifier":"`+email+`"}`)
 	require.Equal(t, http.StatusAccepted, status, "%v", body)
 
 	link := sender.resetLink(email)
@@ -128,8 +128,8 @@ func TestTrustedProxies_ClientIPBucketsByForwardedHeader(t *testing.T) {
 		codes := make([]int, 0, requests)
 		for i := 0; i < requests; i++ {
 			email := fmt.Sprintf("reset-%d-%s@example.test", i, strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")))
-			status := postJSONWithHeaders(t, srv.URL+"/email/password/reset/request",
-				`{"email":"`+email+`"}`,
+			status := postJSONWithHeaders(t, srv.URL+"/password/reset/request",
+				`{"identifier":"`+email+`"}`,
 				map[string]string{"X-Forwarded-For": fmt.Sprintf("203.0.113.%d", i+1)})
 			codes = append(codes, status)
 		}
@@ -158,7 +158,7 @@ func TestTrustedProxies_ClientIPBucketsByForwardedHeader(t *testing.T) {
 }
 
 // TestTrustedProxies_InvalidCIDRFailsAttach proves the option actually reaches
-// authhttp.WithTrustedProxies (an invalid CIDR is authhttp's own construction
+// authhttp.Config.TrustedProxies (an invalid CIDR is authhttp's own construction
 // error, not something OpenRails could produce by accident) rather than being
 // silently dropped.
 func TestTrustedProxies_InvalidCIDRFailsAttach(t *testing.T) {
@@ -214,7 +214,8 @@ func TestPasswordlessPolicyForwarding(t *testing.T) {
 		status, body = postJSON(t, srv.URL+"/passwordless/confirm",
 			`{"identifier":"`+email+`","code":"`+code+`"}`)
 		require.Equal(t, http.StatusOK, status, "%v", body)
-		require.NotEmpty(t, body["access_token"])
+		tokenSet, _ := body["token_set"].(map[string]any)
+		require.NotEmpty(t, tokenSet["access_token"], "passwordless confirm answers {token_set, return_to}: %v", body)
 		require.Equal(t, "/portal/example", body["return_to"])
 
 		cp := embcp.Get(e.App())
@@ -248,7 +249,8 @@ func TestPasswordlessPolicyForwarding(t *testing.T) {
 		status, body := postJSON(t, srv.URL+"/passwordless/confirm",
 			`{"identifier":"`+email+`","code":"`+code+`"}`)
 		require.Equal(t, http.StatusOK, status, "%v", body)
-		require.NotEmpty(t, body["access_token"])
+		tokenSet, _ := body["token_set"].(map[string]any)
+		require.NotEmpty(t, tokenSet["access_token"], "passwordless confirm answers {token_set}: %v", body)
 
 		unknownEmail := "passwordless-unknown-" + strings.ToLower(uuid.NewString()[:8]) + "@example.test"
 		status = postJSONWithHeaders(t, srv.URL+"/passwordless/start",

@@ -9,14 +9,19 @@ export const authMutations = {
   // Resolves to a challenge when the account needs a second factor, else null.
   login: (
     loginWithPassword: (
-      login: string,
+      identifier: string,
       password: string
     ) => Promise<TwoFactorChallenge | null>
   ) =>
     mutationOptions({
       mutationKey: ["auth", "login"],
-      mutationFn: ({ login, password }: { login: string; password: string }) =>
-        loginWithPassword(login, password),
+      mutationFn: ({
+        identifier,
+        password,
+      }: {
+        identifier: string
+        password: string
+      }) => loginWithPassword(identifier, password),
     }),
   verifyTwoFactor: (
     completeTwoFactor: (

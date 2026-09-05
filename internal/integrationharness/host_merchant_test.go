@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -210,7 +210,7 @@ func TestHostMerchantVsUserSessionMembershipMismatchHTTP(t *testing.T) {
 	require.NoError(t, err, "create user")
 	// Owner of merchant A ONLY — no membership in B whatsoever.
 	require.NoError(t, core.Genesis().AssignGroupRole(
-		ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, user.ID, authcore.SubjectKindUser, controlplane.MerchantRoleOwner,
+		ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(user.ID), controlplane.MerchantRoleOwner,
 	), "assign merchant A owner role")
 	token, _, err := core.MintAccessToken(ctx, user.ID, nil)
 	require.NoError(t, err, "issue user access token")
