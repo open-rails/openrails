@@ -29,9 +29,11 @@ func TestProvisionKeepsImmutableGroupOwnership(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, created)
 
-	t.Run("different group cannot steal a live name", func(t *testing.T) {
-		_, _, err := svc.Provision(ctx, ProvisionRequest{Slug: slug, PermissionGroupID: uuid.NewString()})
-		require.ErrorIs(t, err, ErrMerchantBindingConflict)
+	t.Run("same display projection keeps independent group ownership", func(t *testing.T) {
+		other, created, err := svc.Provision(ctx, ProvisionRequest{Slug: slug, PermissionGroupID: uuid.NewString()})
+		require.NoError(t, err)
+		require.True(t, created)
+		require.NotEqual(t, first.ID, other.ID)
 		got, err := svc.Get(ctx, first.ID)
 		require.NoError(t, err)
 		require.Equal(t, group, got.PermissionGroupID)

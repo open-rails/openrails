@@ -893,8 +893,8 @@ func (s *Service) ProbeLiveRailPSPs(ctx context.Context, rail string) (LiveRailP
 	live := "live"
 	for _, id := range ids {
 		found := false
-		if err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
-			n, err := s.database.Gen(ctx).CountPSPsForRailEnvironment(ctx, gen.CountPSPsForRailEnvironmentParams{
+		if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+			n, err := gen.New(tx).CountPSPsForRailEnvironment(ctx, gen.CountPSPsForRailEnvironmentParams{
 				MerchantID:  uuid.UUID(id),
 				Rail:        rail,
 				Environment: &live,

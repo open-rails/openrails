@@ -16,7 +16,7 @@ import (
 // Vault. A managed deployment swaps in the Vault-backed store (secrets_vault.go)
 // with the same (merchant, name) addressing and no schema change.
 type dbSecretStore struct {
-	pool *db.Pool
+	database *db.DB
 }
 
 // NewDBSecretStore returns a database-backed MerchantSecretStore over the given
@@ -25,7 +25,11 @@ func NewDBSecretStore(pool *db.Pool) (MerchantSecretStore, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required for the DB-backed secret store")
 	}
-	return &dbSecretStore{pool: pool}, nil
+	database, err := db.NewWithPGXPool(pool.Raw(), pool.Schema())
+	if err != nil {
+		return nil, err
+	}
+	return &dbSecretStore{database: database}, nil
 }
 
 func (d *dbSecretStore) Get(ctx context.Context, merchantID merchant.ID, name string) (Secret, error) {
@@ -33,8 +37,8 @@ func (d *dbSecretStore) Get(ctx context.Context, merchantID merchant.ID, name st
 		return Secret{}, err
 	}
 	var s Secret
-	err := d.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
+	err := d.database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
+		return d.database.Qx(ctx).QueryRow(ctx, `
 			SELECT name, value, version
 			  FROM openrails.merchant_secrets
 			 WHERE merchant_id = $1::uuid AND name = $2
@@ -58,7 +62,7 @@ func (d *dbSecretStore) Put(ctx context.Context, merchantID merchant.ID, name, v
 	// Idempotent rotation: insert version 1, or bump version ONLY when the value
 	// actually changes (re-putting the same value is a no-op rotation).
 	var s Secret
-	err := d.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := d.database.DataPool().MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			INSERT INTO openrails.merchant_secrets (merchant_id, name, value, version)
 			VALUES ($1::uuid, $2, $3, 1)
@@ -81,7 +85,7 @@ func (d *dbSecretStore) Delete(ctx context.Context, merchantID merchant.ID, name
 	if err := validateSecretRef(merchantID, name); err != nil {
 		return err
 	}
-	err := d.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
+	err := d.database.DataPool().MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid AND name = $2
 		`, merchantID.String(), name)
@@ -98,8 +102,8 @@ func (d *dbSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]str
 		return nil, validateSecretRef(merchantID, "x")
 	}
 	var names []string
-	err := d.pool.MerchantTx(ctx, merchantID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
+	err := d.database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
+		rows, err := d.database.Qx(ctx).Query(ctx, `
 			SELECT name FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid ORDER BY name
 		`, merchantID.String())
 		if err != nil {

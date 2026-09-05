@@ -72,7 +72,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 	if !bound.IsZero() {
 		selected, err := directory.GetBySlug(ctx, merchant.NormalizeSlug(slug))
 		if err != nil {
-			return merchant.ID{}, fmt.Errorf("openrails embed: engine is bound to merchant %s; cannot resolve supplied name %q: %w", bound, slug, err)
+			return merchant.ID{}, fmt.Errorf("openrails embed: engine is already bound to merchant %s; cannot resolve supplied name %q: %w", bound, slug, err)
 		}
 		if selected.ID != bound {
 			return merchant.ID{}, fmt.Errorf("openrails embed: one embedded engine serves one merchant; refusing second merchant %q (%s), bound to %s", slug, selected.ID, bound)
