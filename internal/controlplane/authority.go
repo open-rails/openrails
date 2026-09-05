@@ -116,6 +116,9 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef 
 		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
 	}
 	mid, mslug, err := c.MerchantScope(ctx, ref)
+	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+	}
 	if err != nil {
 		return merchant.ID{}, "", err
 	}

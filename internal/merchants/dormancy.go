@@ -28,7 +28,7 @@ import (
 // for an already-deleted group so a crash between the group half and the row
 // half converges on the next pass. The control plane provides one
 // (pkg/embedded/controlplane.SweepDormantMerchants wires it).
-type GroupReleaser func(ctx context.Context, slug string) error
+type GroupReleaser func(ctx context.Context, groupID string) error
 
 // DormancySweepConfig bounds one sweep pass. TTL and WarningLead must be
 // positive; a zero Batch defaults to 200 (dormant merchants accrue by human
@@ -82,13 +82,17 @@ func (s *Service) SweepDormant(ctx context.Context, cfg DormancySweepConfig, rel
 		batch = 200
 	}
 	now := time.Now().UTC()
+	var firstErr error
+	if cfg.Armed && release != nil {
+		res.Deleted, firstErr = s.resumeGroupRetirements(ctx, batch, release)
+	}
 
 	// Aged, live, GROUP-BOUND directory rows (openrails.merchants is the
 	// RLS-exempt directory, so this cross-merchant read answers truthfully).
 	// Merchants without a group binding are operator/embedded state, never
 	// swept.
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, slug, created_at
+		SELECT id::text, slug, created_at, permission_group_id
 		  FROM openrails.merchants
 		 WHERE deleted_at IS NULL AND status = 'active'
 		   AND permission_group_id IS NOT NULL
@@ -103,11 +107,12 @@ func (s *Service) SweepDormant(ctx context.Context, cfg DormancySweepConfig, rel
 		id        string
 		slug      string
 		createdAt time.Time
+		groupID   string
 	}
 	var aged []cand
 	for rows.Next() {
 		var c cand
-		if err := rows.Scan(&c.id, &c.slug, &c.createdAt); err != nil {
+		if err := rows.Scan(&c.id, &c.slug, &c.createdAt, &c.groupID); err != nil {
 			rows.Close()
 			return res, err
 		}
@@ -207,33 +212,27 @@ func (s *Service) SweepDormant(ctx context.Context, cfg DormancySweepConfig, rel
 			continue
 		}
 
-		// ReleaseSlug is the entire point — reclaiming camped names — and it
-		// is safe here and ONLY here because this same pass just re-proved
-		// nothing ever referenced this merchant. Group first, row second: a
-		// crash in between leaves the row live and the next pass converges
-		// (the releaser treats an already-deleted group as done).
-		if err := release(ctx, c.slug); err != nil {
-			log.WithFields(fields).WithError(err).Error("dormant merchant group delete failed (or#914)")
+		// Commit the tombstone and pending UUID operation BEFORE external
+		// release. A restart cannot reinterpret the released name.
+		retired, err := s.retireUnusedMerchant(ctx, mid, c.groupID, now, cfg.WarningLead)
+		if err != nil {
+			return res, err
+		}
+		if !retired {
+			res.SkippedActive++
 			continue
 		}
-		if _, err := s.pool.Exec(ctx, `
-			UPDATE openrails.merchants
-			   SET status = 'deleted', deleted_at = now(), updated_at = now()
-			 WHERE id = $1::uuid AND deleted_at IS NULL
-		`, c.id); err != nil {
-			return res, fmt.Errorf("merchants: soft-delete dormant merchant %s: %w", c.slug, err)
-		}
-		if err := s.pool.MerchantTx(ctx, mid, func(ctx context.Context, tx pgx.Tx) error {
-			_, derr := tx.Exec(ctx,
-				`DELETE FROM openrails.merchant_dormancy_notices WHERE merchant_id = $1::uuid`, c.id)
-			return derr
-		}); err != nil {
-			log.WithFields(fields).WithError(err).Warn("merchants: dormancy notice cleanup after delete")
+		if err := s.releaseRetiredGroup(ctx, mid, c.groupID, release); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			log.WithFields(fields).WithError(err).Error("merchant retirement group release pending")
+			continue
 		}
 		res.Deleted++
-		log.WithFields(fields).Warn("dormant merchant DELETED, slug released for re-claim (or#914)")
+
 	}
-	return res, nil
+	return res, firstErr
 }
 
 // dormancyUsedProbeSQL is the never-used predicate for ONE merchant, run

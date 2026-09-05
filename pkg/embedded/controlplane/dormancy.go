@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/authkit"
 
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
@@ -43,15 +42,9 @@ func SweepDormantMerchants(ctx context.Context, a *app.App, cfg DormancySweepCon
 		return DormancySweepResult{}, err
 	}
 	core := cp.Core()
-	release := func(ctx context.Context, slug string) error {
-		err := core.DeletePermissionGroup(ctx, controlplane.MerchantType, slug,
-			authkit.DeletePermissionGroupOptions{ReleaseSlug: true})
-		if errors.Is(err, authkit.ErrGroupNotFound) {
-			// Already gone (a previous pass crashed between halves, or the
-			// group died some other way): the row half still needs finishing.
-			return nil
-		}
-		return err
+	release := func(ctx context.Context, groupID string) error {
+		return core.DeleteGroupInstanceByID(ctx, groupID, authkit.DeletePermissionGroupOptions{ReleaseSlug: true})
 	}
+
 	return dir.SweepDormant(ctx, cfg, release)
 }

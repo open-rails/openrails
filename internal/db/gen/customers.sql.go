@@ -130,7 +130,7 @@ func (q *Queries) GetLatestCustomerEmail(ctx context.Context, arg GetLatestCusto
 }
 
 const listMerchantsForCustomerSubject = `-- name: ListMerchantsForCustomerSubject :many
-SELECT m.slug, COALESCE(m.display_name, '')::text AS display_name
+SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
 FROM openrails.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
@@ -141,6 +141,7 @@ ORDER BY m.slug
 `
 
 type ListMerchantsForCustomerSubjectRow struct {
+	ID          uuid.UUID
 	Slug        string
 	DisplayName string
 }
@@ -157,7 +158,7 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject s
 	var items []ListMerchantsForCustomerSubjectRow
 	for rows.Next() {
 		var i ListMerchantsForCustomerSubjectRow
-		if err := rows.Scan(&i.Slug, &i.DisplayName); err != nil {
+		if err := rows.Scan(&i.ID, &i.Slug, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

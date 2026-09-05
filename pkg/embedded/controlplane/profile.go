@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -12,6 +13,8 @@ import (
 // ErrMerchantNotFound indicates that no active merchant matched the requested
 // directory update.
 var ErrMerchantNotFound = merchants.ErrMerchantNotFound
+var ErrPermissionRequired = policy.ErrPermissionRequired
+var ErrMerchantUnresolved = policy.ErrMerchantUnresolved
 
 // ListMerchantRefs returns the directory identity — slug plus display name — of
 // each requested slug, for the slugs that exist. It is the read counterpart of
@@ -30,13 +33,14 @@ func ListMerchantRefs(ctx context.Context, a *app.App, slugs []string) ([]Mercha
 	if err != nil {
 		return nil, fmt.Errorf("control plane list merchant refs: build merchant directory service: %w", err)
 	}
+	dir.WithGroupSlugResolver(cp.MerchantGroupSlugResolver()).WithGroupIDResolver(cp.MerchantGroupIDResolver())
 	rows, err := dir.ListDirectoryRefs(ctx, slugs)
 	if err != nil {
 		return nil, fmt.Errorf("control plane list merchant refs: %w", err)
 	}
 	out := make([]MerchantRef, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, MerchantRef{Slug: r.Slug, DisplayName: r.DisplayName})
+		out = append(out, MerchantRef{ID: r.ID, Slug: r.Slug, DisplayName: r.DisplayName})
 	}
 	return out, nil
 }

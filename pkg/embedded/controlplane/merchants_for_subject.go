@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // MerchantRef is a merchant's directory identity as a host sees it: the slug it
@@ -12,8 +13,9 @@ import (
 // "which merchants does this customer transact with" (ListMerchantsForSubject,
 // openrails-saas #18) and "what are these merchants called" (ListMerchantRefs).
 type MerchantRef struct {
-	Slug        string `json:"slug"`
-	DisplayName string `json:"display_name,omitempty"`
+	ID          merchant.ID `json:"id"`
+	Slug        string      `json:"slug"`
+	DisplayName string      `json:"display_name,omitempty"`
 }
 
 // ListMerchantsForSubject returns the active merchants where the AuthKit subject
@@ -36,7 +38,7 @@ func ListMerchantsForSubject(ctx context.Context, a *app.App, subject string) ([
 	}
 	out := make([]MerchantRef, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, MerchantRef{Slug: r.Slug, DisplayName: r.DisplayName})
+		out = append(out, MerchantRef{ID: r.ID, Slug: r.Slug, DisplayName: r.DisplayName})
 	}
 	return out, nil
 }
