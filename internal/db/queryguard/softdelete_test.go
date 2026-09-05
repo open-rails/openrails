@@ -43,6 +43,7 @@ var policedTables = map[string]string{
 // allow lists queries that legitimately see soft-deleted rows. Every entry is a
 // deliberate decision with a reason; adding one is the review point.
 var allow = map[string]string{
+	"MerchantHasBillingActivity": "retirement is only for never-used merchants; historical and soft-deleted payments/subscriptions must disqualify them",
 	// The prune's own reversal path: it exists to find stamped rows.
 	"RestoreSubscriptionsByDestructiveRun":    "the rollback — its whole job is to find soft-deleted rows",
 	"RestorePaymentsByDestructiveRun":         "the rollback",

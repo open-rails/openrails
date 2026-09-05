@@ -18,6 +18,7 @@ import (
 	"reflect"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/authkit/ratelimit"
 
@@ -103,6 +104,10 @@ import (
 //   - WithLanguageConfig: NOT forwarded — i18n is not wired into
 //     AttachOptions; no host has asked for it yet.
 type AttachOptions struct {
+	// Naming overrides config.Auth.Naming as one site policy input. Nil uses config.
+	Naming *authkit.NamingConfig
+	// NameAdmission is a side-effect-free host claim check; creation charges use MerchantCreation.Admission.
+	NameAdmission func(context.Context, authkit.NameAdmissionRequest) error
 	// HostedPosture opens AuthKit registration and mounts the full AuthKit API.
 	// Leave false for private standalone-compatible embedded hosts.
 	HostedPosture bool
@@ -140,16 +145,12 @@ type AttachOptions struct {
 	// OpenRails-owned wrapper needed, matching EmailSender/SMSSender above.
 	Frontend authcore.FrontendConfig
 
-	// TrustedProxies lists the CIDRs of reverse proxies/load balancers in
-	// front of this deployment. When set, AuthKit's HTTP server derives the
-	// client IP for its per-client registration/login rate limiter from
-	// forwarded headers ONLY when the immediate peer is one of these CIDRs
-	// (#743); otherwise (the default, empty) it uses the direct TCP peer,
-	// which behind any LB collapses every client into one shared bucket.
-	// Coordinate with #746's engine-wide trusted-proxy resolver: this is
-	// deliberately a standalone AttachOptions field, not a shared config key,
-	// until that unification lands.
+	// TrustedProxies overrides cfg.TrustedProxies for AuthKit's HTTP client-IP
+	// resolver. Production requires proxies or an explicit direct-peer posture.
 	TrustedProxies []string
+	// DirectPeerIP declares there is no reverse proxy in front of AuthKit.
+	// It cannot be combined with configured or host-supplied trusted proxies.
+	DirectPeerIP bool
 
 	// AuthRateLimitOverrides overlays bucket-specific limits onto AuthKit's
 	// built-in rate-limit defaults (#743 task 3, unblocked by authkit
@@ -230,6 +231,12 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	}
 
 	var cpOpts []controlplane.Option
+	if opts.Naming != nil {
+		cpOpts = append(cpOpts, controlplane.WithNaming(*opts.Naming))
+	}
+	if opts.NameAdmission != nil {
+		cpOpts = append(cpOpts, controlplane.WithNameAdmission(opts.NameAdmission))
+	}
 	if opts.HostedPosture {
 		cpOpts = append(cpOpts, controlplane.WithHostedPosture())
 	}
@@ -244,6 +251,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	}
 	if opts.Frontend != (authcore.FrontendConfig{}) {
 		cpOpts = append(cpOpts, controlplane.WithFrontend(opts.Frontend))
+	}
+	if opts.DirectPeerIP {
+		cpOpts = append(cpOpts, controlplane.WithDirectPeerIP())
 	}
 	if len(opts.TrustedProxies) > 0 {
 		cpOpts = append(cpOpts, controlplane.WithTrustedProxies(opts.TrustedProxies))

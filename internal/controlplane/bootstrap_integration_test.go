@@ -124,7 +124,7 @@ func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 		// "dev": authkit v0.78.0 resolves signing keys fail-closed outside dev
 		// (no keys.json -> no ephemeral keys -> IssueAccessToken missing_signer).
 		Env:  "dev",
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test"},
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test", KeysPath: t.TempDir()},
 	}
 	cp, err := New(context.Background(), cfg, pool)
 	require.NoError(t, err)

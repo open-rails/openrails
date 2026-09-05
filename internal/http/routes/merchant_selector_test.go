@@ -32,6 +32,13 @@ type merchantSelectorChecker struct {
 }
 
 func (c *merchantSelectorChecker) ResolveAuthorizedMerchant(_ context.Context, merchantRef, userID, _ string) (merchant.ID, string, error) {
+	if merchantRef == "" {
+		c.inferenceRuns++
+		if c.inferErr != nil || c.inferred == "" {
+			return merchant.ID{}, "", policy.ErrMerchantUnresolved
+		}
+		merchantRef = c.inferred
+	}
 	if userID != selectorTestUserID || !c.allowed[merchantRef] {
 		return merchant.ID{}, "", policy.ErrPermissionRequired
 	}
@@ -40,14 +47,6 @@ func (c *merchantSelectorChecker) ResolveAuthorizedMerchant(_ context.Context, m
 		return merchant.ID{}, "", policy.ErrMerchantUnresolved
 	}
 	return id, merchantRef, nil
-}
-
-func (c *merchantSelectorChecker) MerchantForUser(_ context.Context, userID string) (string, error) {
-	c.inferenceRuns++
-	if userID != selectorTestUserID {
-		return "", nil
-	}
-	return c.inferred, c.inferErr
 }
 
 func TestMerchantSelector(t *testing.T) {
@@ -183,7 +182,7 @@ func TestMerchantSelector(t *testing.T) {
 				}
 			}
 			if checker.inferenceRuns != tt.wantInferenceRun {
-				t.Fatalf("MerchantForUser() calls = %d, want %d", checker.inferenceRuns, tt.wantInferenceRun)
+				t.Fatalf("merchant inference calls = %d, want %d", checker.inferenceRuns, tt.wantInferenceRun)
 			}
 		})
 	}

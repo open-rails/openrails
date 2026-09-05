@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/authkit"
 	"regexp"
 	"strings"
 	"time"
@@ -78,6 +79,8 @@ type ControlPlane struct {
 }
 
 type options struct {
+	naming                       *authkit.NamingConfig
+	nameAdmission                func(context.Context, authkit.NameAdmissionRequest) error
 	hosted                       bool
 	passwordlessLogin            bool
 	passwordlessAutoRegistration bool
@@ -85,6 +88,7 @@ type options struct {
 	sms                          authcore.SMSSender
 	frontend                     authcore.FrontendConfig
 	trustedProxies               []string
+	directPeerIP                 bool
 	rateLimitOverrides           map[string]ratelimit.Limit
 	redis                        *redis.Client
 	merchantCreation             *MerchantCreationConfig
@@ -161,17 +165,16 @@ func WithFrontend(fc authcore.FrontendConfig) Option {
 	}
 }
 
-// WithTrustedProxies configures the reverse-proxy/LB CIDRs AuthKit's HTTP
-// server trusts when deriving the client IP (CF-Connecting-IP / X-Forwarded-For)
-// for its per-client registration/login rate limiter (#743). Without this,
-// authhttp keys the limiter off the immediate TCP peer — behind any load
-// balancer that is the LB's own address, so the whole product shares ONE
-// registration bucket. Empty (the default) keeps authhttp's safe
-// direct-RemoteAddr behavior.
+// WithTrustedProxies overrides the configured reverse-proxy CIDRs used by
+// AuthKit's client-IP resolver. Production requires an explicit proxy or direct
+// peer posture so clients do not accidentally share a proxy's rate-limit bucket.
 func WithTrustedProxies(cidrs []string) Option {
-	return func(o *options) {
-		o.trustedProxies = cidrs
-	}
+	return func(o *options) { o.trustedProxies = append([]string(nil), cidrs...) }
+}
+
+// WithDirectPeerIP declares that AuthKit receives the client's direct connection.
+func WithDirectPeerIP() Option {
+	return func(o *options) { o.directPeerIP = true }
 }
 
 // WithRateLimitOverrides overlays bucket-specific limits onto AuthKit's
@@ -377,7 +380,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		}
 	}
 
+	naming := authkit.NamingConfig{}
+	if cfg.Auth != nil {
+		naming = cfg.Auth.Naming
+	}
+	if options.naming != nil {
+		naming = *options.naming
+	}
 	coreCfg := authcore.Config{
+		Naming: naming,
 		Keys: authcore.KeysConfig{
 			Source:     keySource,
 			Path:       authKeysPath(cfg),
@@ -418,7 +429,15 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	// Host-owned verification senders (#738) are engine dependencies, wired as
 	// authkit functional options. authkit enforces the required-policy/sender
 	// pairing itself at HTTP-server construction below — no downgrade here.
-	var coreOpts []authcore.Option
+	coreOpts := []authcore.Option{authcore.WithNameAdmission(func(ctx context.Context, request authkit.NameAdmissionRequest) error {
+		if request.OwnerKind == "group" && request.Persona == CustomerType && request.Operation == authkit.NameRename {
+			return authkit.ErrGroupSlugApplicationManaged
+		}
+		if options.nameAdmission != nil {
+			return options.nameAdmission(ctx, request)
+		}
+		return nil
+	})}
 	if options.email != nil {
 		coreOpts = append(coreOpts, authcore.WithEmailSender(options.email))
 	}
@@ -449,6 +468,27 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 
 	// Client-first construction (#142): build the AuthKit engine, then adapt it
 	// with the HTTP server. Core() / the delegated verifier hold this client.
+	// HTTP-layer options (#743): trusted-proxy CIDRs so the per-client
+	// registration/login rate limiter keys on the real client behind a load
+	// balancer instead of the LB's own peer address; per-bucket rate-limit
+	// overrides layered onto AuthKit's defaults.
+	var authHTTPOpts []authhttp.Option
+	proxies := cfg.TrustedProxies
+	if len(options.trustedProxies) > 0 {
+		proxies = options.trustedProxies
+	}
+	directPeer := cfg.Auth.DirectPeerIP || options.directPeerIP
+	if directPeer && len(proxies) > 0 {
+		return nil, errors.New("controlplane: direct_peer_ip conflicts with trusted_proxies")
+	}
+	if len(proxies) > 0 {
+		authHTTPOpts = append(authHTTPOpts, authhttp.WithTrustedProxies(proxies...))
+	} else if directPeer {
+		authHTTPOpts = append(authHTTPOpts, authhttp.WithDirectPeerIP())
+	}
+	if len(options.rateLimitOverrides) > 0 {
+		authHTTPOpts = append(authHTTPOpts, authhttp.WithRateLimitOverrides(options.rateLimitOverrides))
+	}
 	authClient, err := authcore.New(coreCfg, pool, coreOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
@@ -462,17 +502,6 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		if err := EnsureRootContainment(ctx, authClient); err != nil {
 			return nil, fmt.Errorf("controlplane: merchant creation enabled: %w", err)
 		}
-	}
-	// HTTP-layer options (#743): trusted-proxy CIDRs so the per-client
-	// registration/login rate limiter keys on the real client behind a load
-	// balancer instead of the LB's own peer address; per-bucket rate-limit
-	// overrides layered onto AuthKit's defaults.
-	var authHTTPOpts []authhttp.Option
-	if len(options.trustedProxies) > 0 {
-		authHTTPOpts = append(authHTTPOpts, authhttp.WithTrustedProxies(options.trustedProxies...))
-	}
-	if len(options.rateLimitOverrides) > 0 {
-		authHTTPOpts = append(authHTTPOpts, authhttp.WithRateLimitOverrides(options.rateLimitOverrides))
 	}
 	authSvc, err := authhttp.NewServer(authClient, authHTTPOpts...)
 	if err != nil {
@@ -619,4 +648,11 @@ func (c *ControlPlane) SelfHostedPosture() bool {
 		return true
 	}
 	return !c.hosted
+}
+
+func WithNaming(input authkit.NamingConfig) Option {
+	return func(options *options) { options.naming = &input }
+}
+func WithNameAdmission(admit func(context.Context, authkit.NameAdmissionRequest) error) Option {
+	return func(options *options) { options.nameAdmission = admit }
 }

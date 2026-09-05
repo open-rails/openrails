@@ -287,7 +287,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 		productIDs[k], priceIDs[k] = pid, prid
 		_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 			ID: pid, MerchantID: merchantID, Key: fmt.Sprintf("perf-product-%d", k),
-			DisplayName: "Perf", EntitlementsSpec: []byte(`[]`), CreditsSpec: []byte(`[]`),
+			DisplayName: "Perf", EntitlementsSpec: []byte(`[]`), CreditsSpec: []byte(`{}`),
 			TierGroup: nil, TierRank: 0, CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
