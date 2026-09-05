@@ -734,6 +734,9 @@ func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug, role string
 	// now, so integration tests register the same key through static public_keys.
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.cleanup(issuer.Close)
+	// Socket ports can be reused between tests sharing the authority database.
+	// Static issuer identity must remain unique even after that server closes.
+	issuerURL := issuer.URL() + "/" + uuid.NewString()
 
 	// #567: a remote_application is nested under its controlling merchant
 	// permission-group (PermissionGroupID carries the permission_group_id).
@@ -741,7 +744,7 @@ func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug, role string
 	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
 		Slug:              slug,
 		PermissionGroupID: groupID,
-		Issuer:            issuer.URL(),
+		Issuer:            issuerURL,
 		Mode:              authkit.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Enabled:           true,
@@ -758,14 +761,14 @@ func (s *Surface) registerRemoteApplication(slug, ownerMerchantSlug, role string
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
 	token, err := authcore.MintRemoteApplicationAccessToken(h.ctx, issuer.Signer(), authkit.RemoteApplicationAccessParams{
-		Issuer:      issuer.URL(),
+		Issuer:      issuerURL,
 		Audiences:   []string{"openrails"},
 		TTL:         time.Hour,
 		Permissions: permissionsClaim,
 	})
 	require.NoError(h.t, err, "mint remote application access token")
 
-	return RemoteAppCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
+	return RemoteAppCaller{Slug: slug, Issuer: issuerURL, Token: token}
 }
 
 // DelegatedIssuer is a registered remote_application issuer for a merchant that
@@ -794,12 +797,15 @@ func (s *Surface) RegisterDelegatedIssuer(slug, ownerMerchantSlug string) *Deleg
 
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.cleanup(issuer.Close)
+	// Socket ports can be reused between tests sharing the authority database.
+	// Static issuer identity must remain unique even after that server closes.
+	issuerURL := issuer.URL() + "/" + uuid.NewString()
 
 	groupID := h.ensureMerchantGroup(core, ownerMerchantSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
 		Slug:              slug,
 		PermissionGroupID: groupID,
-		Issuer:            issuer.URL(),
+		Issuer:            issuerURL,
 		Mode:              authkit.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Enabled:           true,
@@ -809,7 +815,7 @@ func (s *Surface) RegisterDelegatedIssuer(slug, ownerMerchantSlug string) *Deleg
 		"assign merchant owner role to delegated issuer")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
-	return &DelegatedIssuer{h: h, Slug: slug, Issuer: issuer.URL(), issuer: issuer}
+	return &DelegatedIssuer{h: h, Slug: slug, Issuer: issuerURL, issuer: issuer}
 }
 
 // Mint mints a delegated access token for subject. email/username ride the
@@ -884,12 +890,15 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerMerchantSlug, subject strin
 
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.cleanup(issuer.Close)
+	// Socket ports can be reused between tests sharing the authority database.
+	// Static issuer identity must remain unique even after that server closes.
+	issuerURL := issuer.URL() + "/" + uuid.NewString()
 
 	groupID := h.ensureMerchantGroup(core, ownerMerchantSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
 		Slug:              slug,
 		PermissionGroupID: groupID,
-		Issuer:            issuer.URL(),
+		Issuer:            issuerURL,
 		Mode:              authkit.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Enabled:           true,
@@ -905,7 +914,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerMerchantSlug, subject strin
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
 	token, err := mintDelegatedAccessToken(h.ctx, issuer.Signer(), authkit.DelegatedAccessParams{
-		Issuer:           issuer.URL(),
+		Issuer:           issuerURL,
 		Audiences:        []string{"openrails"},
 		DelegatedSubject: subject,
 		Permissions:      append([]string(nil), permissions...),
@@ -913,7 +922,7 @@ func (s *Surface) RegisterDelegatedCaller(slug, ownerMerchantSlug, subject strin
 	})
 	require.NoError(h.t, err, "mint delegated access token")
 
-	return DelegatedCaller{Slug: slug, Issuer: issuer.URL(), Subject: subject, Token: token}
+	return DelegatedCaller{Slug: slug, Issuer: issuerURL, Subject: subject, Token: token}
 }
 
 // RegisterServiceJWTIssuer registers a remote_application issuer for a merchant
@@ -930,12 +939,15 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerMerchantSlug string, permi
 
 	issuer := authtesting.NewTestIssuerWithAudience("openrails")
 	h.cleanup(issuer.Close)
+	// Socket ports can be reused between tests sharing the authority database.
+	// Static issuer identity must remain unique even after that server closes.
+	issuerURL := issuer.URL() + "/" + uuid.NewString()
 
 	groupID := h.ensureMerchantGroup(core, ownerMerchantSlug)
 	ra, err := core.UpsertRemoteApplication(h.ctx, authkit.RemoteApplication{
 		Slug:              slug,
 		PermissionGroupID: groupID,
-		Issuer:            issuer.URL(),
+		Issuer:            issuerURL,
 		Mode:              authkit.RemoteAppModeStatic,
 		PublicKeys:        testIssuerRemoteAppKeys(h.t, issuer),
 		Enabled:           true,
@@ -950,7 +962,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerMerchantSlug string, permi
 		"assign merchant owner role to service-JWT remote_application")
 	require.NoError(h.t, cp.ReloadRemoteApplications(h.ctx), "reload remote_applications")
 
-	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuer.URL(), authkit.ServiceJWTMintOptions{
+	token, _, err := authcore.MintServiceJWT(h.ctx, issuer.Signer(), issuerURL, authkit.ServiceJWTMintOptions{
 		Subject:     "service:" + slug,
 		Audiences:   []string{"openrails"},
 		Permissions: permissions,
@@ -958,7 +970,7 @@ func (s *Surface) RegisterServiceJWTIssuer(slug, ownerMerchantSlug string, permi
 	})
 	require.NoError(h.t, err, "mint service JWT")
 
-	return ServiceJWTCaller{Slug: slug, Issuer: issuer.URL(), Token: token}
+	return ServiceJWTCaller{Slug: slug, Issuer: issuerURL, Token: token}
 }
 
 // MintAPIKey mints a real AuthKit API key under the merchant permission-group
