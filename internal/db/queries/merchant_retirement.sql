@@ -25,9 +25,9 @@ ORDER BY retired_at,id LIMIT sqlc.arg(batch_limit)::bigint;
 DELETE FROM openrails.merchant_dormancy_notices WHERE merchant_id=sqlc.arg(merchant_id)::uuid;
 
 -- name: MerchantHasBillingActivity :one
-SELECT EXISTS (SELECT 1 FROM openrails.psps             WHERE merchant_id = sqlc.arg(merchant_id)::uuid)
+SELECT coalesce((EXISTS (SELECT 1 FROM openrails.psps             WHERE merchant_id = sqlc.arg(merchant_id)::uuid)
 	    OR EXISTS (SELECT 1 FROM openrails.payments         WHERE merchant_id = sqlc.arg(merchant_id)::uuid)
 	    OR EXISTS (SELECT 1 FROM openrails.subscriptions    WHERE merchant_id = sqlc.arg(merchant_id)::uuid)
 	    OR EXISTS (SELECT 1 FROM openrails.customers        WHERE merchant_id = sqlc.arg(merchant_id)::uuid)
 	    OR EXISTS (SELECT 1 FROM openrails.products         WHERE merchant_id = sqlc.arg(merchant_id)::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.ledger_transfers WHERE merchant_id = sqlc.arg(merchant_id)::uuid);
+	    OR EXISTS (SELECT 1 FROM openrails.ledger_transfers WHERE merchant_id = sqlc.arg(merchant_id)::uuid)), false)::boolean AS used;
