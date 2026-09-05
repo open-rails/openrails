@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -25,7 +26,15 @@ import (
 
 func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	ctx := context.Background()
-	database := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	_, dsn := dbtest.SharedRLSPostgres(t)
+	poolConfig, err := pgxpool.ParseConfig(dsn)
+	require.NoError(t, err)
+	poolConfig.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	database, err := db.NewWithPGXPool(pool, "openrails")
+	require.NoError(t, err)
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	redis := dbtest.NewSharedRedisClient(t)
 	t.Cleanup(func() { _ = redis.Close() })
@@ -34,7 +43,7 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	groupA, groupB := uuid.NewString(), uuid.NewString()
 	prefix := "unit-" + uuid.NewString()[:8]
 	old, newName := prefix+"-old", prefix+"-new"
-	_, err := admin.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status,permission_group_id) VALUES($1,$2,'active',$3),($4,$5,'active',$6)`, merchantA.UUID(), old, groupA, merchantB.UUID(), prefix+"-shadow", groupB)
+	_, err = admin.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status,permission_group_id) VALUES($1,$2,'active',$3),($4,$5,'active',$6)`, merchantA.UUID(), old, groupA, merchantB.UUID(), prefix+"-shadow", groupB)
 	require.NoError(t, err)
 	names := map[string]string{groupA: old, groupB: prefix + "-shadow"}
 	claims := map[string]string{old: groupA, prefix + "-shadow": groupB}
