@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
+	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -179,12 +180,22 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 						balanceTrust = tl
 					}
 				}
+				service, err := billingservice.New(r.State)
+				if err != nil {
+					r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+					return
+				}
+				display, err := service.DisplayCurrency(ctx, bal.Currency)
+				if err != nil {
+					r.ErrorJSON(http.StatusInternalServerError, "credit display name unavailable")
+					return
+				}
 				profile.CreditBalance = append(profile.CreditBalance, adminCreditBalanceResponse{
-					Currency:              bal.Currency,
+					Currency:              display,
 					AutoTopup:             topup,
 					TrustLevel:            balanceTrust,
-					DisplayName:           bal.Currency,
-					Unit:                  bal.Currency,
+					DisplayName:           display,
+					Unit:                  display,
 					DecimalPlaces:         decimals,
 					Balance:               bal.Balance,
 					HeldBalance:           bal.HeldBalance,

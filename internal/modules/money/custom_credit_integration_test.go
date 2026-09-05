@@ -26,7 +26,8 @@ INSERT INTO openrails.custom_credit_types (id, merchant_id, name, decimals, acti
 VALUES (uuidv7(), $1, 'gold', 2, true)
 ON CONFLICT (merchant_id, name) DO UPDATE SET decimals = 2, active = true`, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
-	unit := dbtest.TestMerchantSlug + "/gold" // "test/gold"
+	unit, err := svc.CustomUnitCode(ctx, "gold")
+	require.NoError(t, err)
 
 	// ResolveUnit returns the custom decimals, not a built-in.
 	dec, builtin, err := svc.ResolveUnit(ctx, unit)
@@ -50,6 +51,24 @@ ON CONFLICT (merchant_id, name) DO UPDATE SET decimals = 2, active = true`, dbte
 	bal, err := svc.GetBalanceForCustomer(ctx, payer, unit)
 	require.NoError(t, err)
 	require.Equal(t, int64(350), bal.Balance)
+
+	spendKey, err := money.NewIdempotencyKey(money.OpSpend, "custom-test", uuid.NewString())
+	require.NoError(t, err)
+	spend := money.SpendParams{Payer: &payer, Invoker: payer.UUID().String(), Currency: unit, Amount: 50, Key: spendKey}
+	spent, err := svc.SpendCredits(ctx, spend)
+	require.NoError(t, err)
+	require.Equal(t, unit, spent.Currency)
+	replay, err := svc.SpendCredits(ctx, spend)
+	require.NoError(t, err)
+	require.True(t, replay.Replayed)
+	spend.Key, err = money.NewIdempotencyKey(money.OpSpend, "custom-test", uuid.NewString())
+	require.NoError(t, err)
+	spend.Amount = 301
+	_, err = svc.SpendCredits(ctx, spend)
+	require.ErrorIs(t, err, money.ErrInsufficientCredits)
+	bal, err = svc.GetBalanceForCustomer(ctx, payer, unit)
+	require.NoError(t, err)
+	require.EqualValues(t, 300, bal.Balance)
 
 	// (3) invariant: a billing op (owed accrual) on the qualified unit is rejected.
 	_, err = svc.AccrueOwed(ctx, payer, unit, "billing", uuid.NewString(), 100)

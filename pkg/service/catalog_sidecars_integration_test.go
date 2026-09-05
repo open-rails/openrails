@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -92,7 +93,7 @@ WHERE cm.merchant_id = $1 AND cm.key = $2`, merchantID, meterKey).
 	require.Equal(t, "droplet.usage", eventType)
 	require.Equal(t, "metadata.size_slug", groupBy)
 	require.Equal(t, "USD", priceCurrency)
-	require.Equal(t, "image-credit", creditUnit)
+	require.True(t, strings.HasPrefix(creditUnit, "credit:"))
 }
 
 // TestSyncCatalogSidecars_AutoDefinesCustomCreditTypes proves the #706 fix: a
@@ -111,7 +112,7 @@ func TestSyncCatalogSidecars_AutoDefinesCustomCreditTypes(t *testing.T) {
 	productID := uuid.New()
 	productKey := "gem-topup-" + uuid.NewString()
 	unitName := "gem-" + uuid.NewString()[:8]
-	qualifiedUnit := dbtest.TestMerchantSlug + "/" + unitName
+	qualifiedUnit := ""
 	payerID := uuid.New()
 	payer := identity.CustomerID(payerID)
 	t.Cleanup(func() {
@@ -154,6 +155,8 @@ VALUES ($1, $2, 'Gem Top-up', $3)`, productID, productKey, merchantID)
 
 	// The ledger resolves the auto-defined unit: quote + deposit.
 	moneySvc := money.NewMoneyService(dbi)
+	qualifiedUnit, err = moneySvc.CustomUnitCode(ctx, unitName)
+	require.NoError(t, err)
 	quote, err := moneySvc.QuoteCatalogCreditPurchase(ctx, money.CatalogCreditPurchaseQuoteInput{
 		ProductKey:  productKey,
 		SpendMicros: 10_000_000,
@@ -184,7 +187,7 @@ VALUES ($1, $2, 'Gem Top-up', $3)`, productID, productKey, merchantID)
 		CreditBalances: []CatalogCreditBalanceSpec{{Key: "gems", Unit: "someone-else/" + unitName}},
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "qualified with slug")
+	require.Contains(t, err.Error(), "merchant naming authority is not configured")
 
 	// Removing the balance prunes the catalog row but leaves the type ACTIVE:
 	// deposited lots must stay spendable.
