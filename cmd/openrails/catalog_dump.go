@@ -34,9 +34,15 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 		return fmt.Errorf("--slug is required")
 	}
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	_, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
+	if err != nil {
+		return err
+	}
+	defer close()
 	return embedded.DumpMerchantCatalog(cmd.Context(), embedded.CatalogDumpOptions{
-		Config:   cfg,
-		Merchant: slug,
-		Out:      cmd.OutOrStdout(),
+		Config:        cfg,
+		NameAuthority: authority,
+		Merchant:      slug,
+		Out:           cmd.OutOrStdout(),
 	})
 }

@@ -63,7 +63,7 @@ func newPullProviderCmd() *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "", "Transaction window start (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&until, "until", "", "Transaction window end (RFC3339 or YYYY-MM-DD)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().StringVar(&logDir, "log-dir", "openrails-pull-provider-logs", "Directory for pull-provider .log files")
 	cmd.Flags().BoolVar(&insert, "insert", false, "Insert provider-observed records that are missing locally")
 	cmd.Flags().BoolVar(&overwrite, "overwrite", false, "Overwrite existing local mirror rows from provider-observed truth")
@@ -79,7 +79,7 @@ func newPullProviderCmd() *cobra.Command {
 	}
 	reportCmd.Flags().StringVar(&runIDStr, "run", "", "Run ID (default: the latest run)")
 	reportCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-	reportCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	reportCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 
 	cmd.AddCommand(reportCmd)
 	return cmd
@@ -87,9 +87,26 @@ func newPullProviderCmd() *cobra.Command {
 
 func runPullProvider(cmd *cobra.Command, providerNames []string, pspStr, sinceStr, untilStr, format, merchantSlug, logDir, manifestPath string, insert, overwrite, prune bool, expectRows *int) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	mid, err := resolveConfiguredCLIMerchant(cmd.Context(), cfg, merchantSlug)
+	if err != nil {
+		return err
+	}
+	directory, authority, close, err := openCLINameDirectory(cmd.Context(), cfg)
+	if err != nil {
+		return err
+	}
+	defer close()
+	selected, err := directory.Get(cmd.Context(), mid)
+	if err != nil {
+		return err
+	}
+	if selected.PermissionGroupID == "" {
+		authority = nil
+	}
 	return embedded.PullProvider(cmd.Context(), embedded.PullProviderOptions{
+		NameAuthority:        authority,
 		Config:               cfg,
-		MerchantSlug:         merchantSlug,
+		MerchantID:           mid,
 		Providers:            providerNames,
 		PSP:                  pspStr,
 		Since:                sinceStr,
@@ -108,12 +125,16 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, pspStr, sinceSt
 
 func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug string) error {
 	cfg := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	mid, err := resolveConfiguredCLIMerchant(cmd.Context(), cfg, merchantSlug)
+	if err != nil {
+		return err
+	}
 	return embedded.PullProviderReport(cmd.Context(), embedded.PullProviderReportOptions{
-		Config:       cfg,
-		MerchantSlug: merchantSlug,
-		RunID:        runIDStr,
-		Format:       format,
-		Out:          os.Stdout,
+		Config:     cfg,
+		MerchantID: mid,
+		RunID:      runIDStr,
+		Format:     format,
+		Out:        os.Stdout,
 	})
 }
 
@@ -140,12 +161,16 @@ func newPruneCmd() *cobra.Command {
 		Short: "List this merchant's destructive runs, newest first",
 		RunE: func(c *cobra.Command, _ []string) error {
 			cfg := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			mid, err := resolveConfiguredCLIMerchant(c.Context(), cfg, merchantSlug)
+			if err != nil {
+				return err
+			}
 			return embedded.PruneList(c.Context(), embedded.PruneListOptions{
-				Config: cfg, MerchantSlug: merchantSlug, Limit: limit, Format: format, Out: os.Stdout,
+				Config: cfg, MerchantID: mid, Limit: limit, Format: format, Out: os.Stdout,
 			})
 		},
 	}
-	listCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	listCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	listCmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to show")
 	listCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 

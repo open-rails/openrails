@@ -17,16 +17,18 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type CatalogDumpOptions struct {
-	Config   *config.Config
-	PGXPool  *pgxpool.Pool
-	Merchant string
-	Out      io.Writer
+	NameAuthority merchant.NameAuthority
+	Config        *config.Config
+	PGXPool       *pgxpool.Pool
+	Merchant      string
+	Out           io.Writer
 }
 
 func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
@@ -44,7 +46,12 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	if opts.PGXPool == nil {
 		defer func() { _ = database.Close() }()
 	}
-	mctx, err := contextForCatalogPushTarget(ctx, database, opts.Merchant)
+	directory, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return err
+	}
+	directory.WithNameAuthority(opts.NameAuthority)
+	mctx, canonicalName, err := contextForCatalogPushTarget(ctx, directory, opts.Merchant)
 	if err != nil {
 		return err
 	}
@@ -59,7 +66,7 @@ func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
 	raw, err := yaml.Marshal(catalogPushFile{
 		Version: catalog.SupportedVersion,
 		Catalogs: []catalogPushFileEntry{{
-			Merchant:       strings.ToLower(strings.TrimSpace(opts.Merchant)),
+			Merchant:       canonicalName,
 			Products:       manifest.Products,
 			Meters:         manifest.Meters,
 			CreditBalances: manifest.CreditBalances,

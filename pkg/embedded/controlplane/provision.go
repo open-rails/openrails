@@ -170,7 +170,11 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 	if err != nil {
 		return nil, fmt.Errorf("control plane provision: build merchant directory service: %w", err)
 	}
-	m, rowCreated, err := dir.Provision(ctx, merchants.ProvisionRequest{Slug: slug, PermissionGroupID: groupID})
+	canonical, err := core.GroupInstanceByID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
+	m, rowCreated, err := dir.Provision(ctx, merchants.ProvisionRequest{Slug: canonical.InstanceSlug, PermissionGroupID: groupID})
 	if err != nil {
 		return nil, fmt.Errorf("control plane provision: provision merchant directory row %q: %w", slug, err)
 	}

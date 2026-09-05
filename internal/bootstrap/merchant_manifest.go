@@ -731,6 +731,10 @@ func (o MerchantManifestReconcileOptions) HasMutations() bool {
 // ownerless merchant row and applies the same profile/PSP
 // configuration path without touching AuthKit or startup bootstrap markers.
 type ProvisionMerchantRequest struct {
+	// MerchantID is an already resolved, explicit host binding. The outer name
+	// boundary must verify the supplied name before passing this immutable scope.
+	MerchantID    merchant.ID
+	Directory     *merchants.Service
 	Config        *config.Config
 	ControlPlane  *controlplane.ControlPlane
 	Database      *db.DB
@@ -854,7 +858,31 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		}
 	}
 
-	tn, found, err := lookupManifestMerchant(ctx, database, slug)
+	directory := req.Directory
+	if directory == nil {
+		var err error
+		directory, err = merchants.NewDirectoryService(database.DataPool())
+		if err != nil {
+			return nil, err
+		}
+		if req.ControlPlane != nil {
+			directory.WithNameAuthority(controlplane.MerchantNameAuthority(req.ControlPlane.Core()))
+		}
+	}
+	var tn *merchants.Merchant
+	var err error
+	if !req.MerchantID.IsZero() {
+		tn, err = directory.Get(ctx, req.MerchantID)
+		if err == nil {
+			tn.Slug = slug
+		}
+	} else {
+		tn, err = directory.GetBySlug(ctx, slug)
+	}
+	found := err == nil
+	if errors.Is(err, merchants.ErrMerchantNotFound) && req.MerchantID.IsZero() {
+		err = nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
 	}
@@ -876,7 +904,11 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 	// create path already set it via RegisterMerchant). Idempotent upsert; an
 	// empty manifest display name leaves the stored one untouched (COALESCE).
 	if found && strings.TrimSpace(mt.DisplayName) != "" {
-		if _, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: slug, DisplayName: mt.DisplayName}); err != nil {
+		directory, err := merchants.NewDirectoryService(database.DataPool())
+		if err != nil {
+			return nil, err
+		}
+		if err := directory.SetDisplayName(ctx, tn.ID, mt.DisplayName); err != nil {
 			return nil, fmt.Errorf("merchant bootstrap: sync display name for %q: %w", slug, err)
 		}
 	}
@@ -893,11 +925,11 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 		// The merchant's permission-group is the host's AuthKit permission-group of the SAME slug
 		// (#541 — merchant slug == group slug); permission_group_id stays NULL here and
 		// is set only in standalone, where OpenRails owns the group.
-		id, err := db.RegisterMerchant(ctx, database.Qx(ctx), db.RegisterMerchantOptions{Slug: slug, DisplayName: mt.DisplayName})
+		id, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug, DisplayName: mt.DisplayName})
 		if err != nil {
 			return nil, err
 		}
-		tn, found, err := lookupManifestMerchant(ctx, database, slug)
+		tn, found, err := lookupManifestMerchant(ctx, database, cp, slug)
 		if err != nil {
 			return nil, err
 		}
@@ -920,8 +952,12 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	if err != nil {
 		return nil, err
 	}
+	canonical, err := cp.Core().GroupInstanceByID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
 	tn, _, err := svc.Provision(ctx, merchants.ProvisionRequest{
-		Slug:              slug,
+		Slug:              canonical.InstanceSlug,
 		PermissionGroupID: groupID,
 	})
 	if err != nil {
@@ -930,41 +966,22 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 	return tn, nil
 }
 
-func lookupManifestMerchant(ctx context.Context, database *db.DB, slug string) (*merchants.Merchant, bool, error) {
-	slug = strings.ToLower(strings.TrimSpace(slug))
-	if slug == "" {
-		return nil, false, fmt.Errorf("merchant slug is required")
+func lookupManifestMerchant(ctx context.Context, database *db.DB, cp *controlplane.ControlPlane, slug string) (*merchants.Merchant, bool, error) {
+	dir, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return nil, false, err
 	}
-	var (
-		id                string
-		status            string
-		permissionGroupID *string
-	)
-	err := database.Qx(ctx).QueryRow(ctx, `
-		SELECT id::text, status, permission_group_id
-		  FROM openrails.merchants
-		 WHERE slug = $1 AND deleted_at IS NULL
-	`, slug).Scan(&id, &status, &permissionGroupID)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if cp != nil {
+		dir.WithNameAuthority(controlplane.MerchantNameAuthority(cp.Core()))
+	}
+	row, err := dir.GetBySlug(ctx, slug)
+	if errors.Is(err, merchants.ErrMerchantNotFound) {
 		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, err
 	}
-	merchantID, err := merchant.ParseID(id)
-	if err != nil {
-		return nil, false, err
-	}
-	owner := ""
-	if permissionGroupID != nil {
-		owner = *permissionGroupID
-	}
-	return &merchants.Merchant{
-		ID:                merchantID,
-		Slug:              slug,
-		Status:            merchants.MerchantStatus(status),
-		PermissionGroupID: owner,
-	}, true, nil
+	return row, true, nil
 }
 
 func sortedMerchantKeys(in map[string]MerchantConfig) []string {

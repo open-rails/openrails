@@ -30,20 +30,23 @@ import (
 // minimalMerchantsDDL creates just the openrails.merchants directory table the
 // control plane updates (#480/#481). OpenRails 001_schema.up.sql owns the full
 // table in production; the control-plane bootstrap only needs the table (plus a
-// row, seeded via dbtest.EnsureTestMerchant) to exist. slug is UNIQUE to match
-// EnsureTestMerchant's ON CONFLICT (slug). permission_group_id is the AuthKit
+// row, seeded via dbtest.EnsureTestMerchant) to exist. unbound host names are unique;
+// EnsureTestMerchant settles by its immutable test UUID. permission_group_id is the AuthKit
 // merchant permission-group id that administers the merchant.
 const minimalMerchantsDDL = `
 CREATE SCHEMA IF NOT EXISTS openrails;
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY,
-    slug             TEXT NOT NULL UNIQUE,
+    slug             TEXT NOT NULL,
+    display_name     TEXT,
     status           TEXT NOT NULL DEFAULT 'active',
     permission_group_id  TEXT,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_unbound_slug ON openrails.merchants(slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_permission_group_id ON openrails.merchants(permission_group_id) WHERE permission_group_id IS NOT NULL;
 `
 
 func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {

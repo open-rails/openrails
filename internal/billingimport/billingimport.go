@@ -172,14 +172,13 @@ type DeclaredBilling struct {
 	Transactions   []DeclaredTransaction   `json:"transactions,omitempty"`
 }
 
-// Options configures Import. Merchant scoping: MerchantID when the caller
-// already resolved it (the HTTP door — credential-derived), else MerchantSlug.
+// Options configures Import. MerchantID is the already resolved or authorized
+// immutable merchant UUID; imports never interpret a public name.
 type Options struct {
-	Config       *config.Config
-	PGXPool      *pgxpool.Pool
-	MerchantSlug string
-	MerchantID   merchant.ID
-	Book         DeclaredBilling
+	Config     *config.Config
+	PGXPool    *pgxpool.Pool
+	MerchantID merchant.ID
+	Book       DeclaredBilling
 }
 
 // Result reports per-SourceID outcomes (subscriptions only; customers/payment
@@ -216,11 +215,8 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	defer database.Close()
 
 	merchantID := opts.MerchantID
-	if merchantID.IsZero() {
-		merchantID, err = db.ResolveMerchantSlug(ctx, database.Pool(), strings.TrimSpace(opts.MerchantSlug))
-		if err != nil {
-			return res, fmt.Errorf("import billing: resolve merchant %q: %w", opts.MerchantSlug, err)
-		}
+	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
+		return res, err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 

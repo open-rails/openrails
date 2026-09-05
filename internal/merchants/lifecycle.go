@@ -96,8 +96,9 @@ type Service struct {
 	// groupSlugResolver is the or#914 rename-forwarding seam: slug lookups
 	// that miss the directory table retry through the authkit merchant-group
 	// namespace (which follows ak#264 tombstones). Nil = table-only.
-	groupSlugResolver GroupSlugResolver
-	groupIDResolver   GroupIDResolver
+	groupSlugResolver   GroupSlugResolver
+	groupIDResolver     GroupIDResolver
+	groupSearchResolver GroupSearchResolver
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
@@ -173,6 +174,9 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 	// Repeated provisioning (including after rename) settles by group, not name.
 	m, err := s.merchantByGroupID(ctx, groupID)
 	if err == nil {
+		// The caller already resolved this group; the supplied current name is
+		// a projection and cannot change the billing identity.
+		m.Slug = slug
 		return m, false, nil
 	}
 	if !errors.Is(err, ErrMerchantNotFound) {
@@ -330,39 +334,6 @@ func (s *Service) SetDisplayName(ctx context.Context, id merchant.ID, displayNam
 	return nil
 }
 
-// SearchMerchants returns active merchant directory rows whose slug matches the
-// (case-insensitive) query substring. It is the cross-merchant search backing
-// the platform-superadmin API (issue #226); the CALLER is responsible for
-// auditing the search (it is a sensitive cross-merchant read). limit is clamped.
-func (s *Service) SearchMerchants(ctx context.Context, q string, limit int) ([]Merchant, error) {
-	q = strings.TrimSpace(q)
-	if q == "" {
-		return nil, errors.New("merchants: search requires a non-empty query")
-	}
-	if limit <= 0 || limit > 200 {
-		limit = 50
-	}
-	pattern := "%" + strings.ToLower(q) + "%"
-	rows, err := s.pool.Query(ctx, `SELECT `+merchantSelectCols+`
-		FROM openrails.merchants
-		WHERE deleted_at IS NULL
-		  AND lower(slug) LIKE $1
-		ORDER BY slug LIMIT $2`, pattern, limit)
-	if err != nil {
-		return nil, fmt.Errorf("merchants: search merchants: %w", err)
-	}
-	defer rows.Close()
-	var out []Merchant
-	for rows.Next() {
-		t, serr := scanMerchant(rows)
-		if serr != nil {
-			return nil, serr
-		}
-		out = append(out, *t)
-	}
-	return out, rows.Err()
-}
-
 func normalizeSlug(s string) string {
 	return strings.ToLower(strings.TrimSpace(s))
 }
@@ -392,7 +363,7 @@ func scanMerchant(row pgx.Row) (*Merchant, error) {
 
 func (s *Service) merchantBySlug(ctx context.Context, slug string) (*Merchant, error) {
 	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
-		FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`, slug)
+		FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL AND permission_group_id IS NULL`, slug)
 	return scanMerchant(row)
 }
 

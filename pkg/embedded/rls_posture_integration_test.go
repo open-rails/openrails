@@ -15,6 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // #763: embedded construction never enforced the RLS posture gate
@@ -129,24 +130,24 @@ catalogs:
 			return DumpMerchantCatalog(ctx, CatalogDumpOptions{Config: cfg, PGXPool: pool, Merchant: "rls-posture-guard"})
 		}},
 		{"ConvergeMerchant", func() error {
-			_, err := ConvergeMerchant(ctx, ConvergeMerchantOptions{Config: cfg, PGXPool: pool, MerchantSlug: "rls-posture-guard"})
+			_, err := ConvergeMerchant(ctx, ConvergeMerchantOptions{Config: cfg, PGXPool: pool, MerchantID: merchant.ID(uuid.New())})
 			return err
 		}},
 		{"ImportAdminGrants", func() error {
-			_, err := ImportAdminGrants(ctx, AdminGrantImportOptions{Config: cfg, PGXPool: pool, MerchantSlug: "rls-posture-guard",
+			_, err := ImportAdminGrants(ctx, AdminGrantImportOptions{Config: cfg, PGXPool: pool, MerchantID: merchant.ID(uuid.New()),
 				Grants: []AdminGrant{{Customer: uuid.New(), Product: uuid.New(), SourceID: "src"}}})
 			return err
 		}},
 		{"PruneList", func() error {
-			return PruneList(ctx, PruneListOptions{Config: cfg, PGXPool: pool, MerchantSlug: "rls-posture-guard"})
+			return PruneList(ctx, PruneListOptions{Config: cfg, PGXPool: pool, MerchantID: merchant.ID(uuid.New())})
 		}},
 		{"ImportBilling", func() error {
-			_, err := ImportBilling(ctx, BillingImportOptions{Config: cfg, PGXPool: pool, MerchantSlug: "rls-posture-guard",
+			_, err := ImportBilling(ctx, BillingImportOptions{Config: cfg, PGXPool: pool, MerchantID: merchant.ID(uuid.New()),
 				Book: DeclaredBilling{AsOf: time.Now().UTC()}})
 			return err
 		}},
 		{"PullProviderReport", func() error {
-			return PullProviderReport(ctx, PullProviderReportOptions{Config: cfg, MerchantSlug: "rls-posture-guard"})
+			return PullProviderReport(ctx, PullProviderReportOptions{Config: cfg, MerchantID: merchant.ID(uuid.New())})
 		}},
 	}
 	for _, tc := range cases {
@@ -183,9 +184,9 @@ func TestManifestPlaneEntryPointsRunAsAppRole(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	require.NoError(t, PruneList(ctx, PruneListOptions{Config: cfg, PGXPool: pool, MerchantSlug: slug, Out: &out}))
+	require.NoError(t, PruneList(ctx, PruneListOptions{Config: cfg, PGXPool: pool, MerchantID: merchant.ID(merchantID), Out: &out}))
 
-	res, err := ConvergeMerchant(ctx, ConvergeMerchantOptions{Config: cfg, PGXPool: pool, MerchantSlug: slug})
+	res, err := ConvergeMerchant(ctx, ConvergeMerchantOptions{Config: cfg, PGXPool: pool, MerchantID: merchant.ID(merchantID)})
 	require.NoError(t, err, "converge must run on an RLS-enforcing pool")
 	require.Empty(t, res.Findings)
 

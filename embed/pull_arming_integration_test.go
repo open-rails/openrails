@@ -221,13 +221,13 @@ func TestPullProviderCLI_ManifestModeArmsFromManifestPlane(t *testing.T) {
 			},
 		},
 	}
-	pullCLIManifestMerchant(t, ctx, dsn, slug, m)
+	id := pullCLIManifestMerchant(t, ctx, dsn, slug, m)
 
 	fake := newPullFakeNMI(t)
 	var out bytes.Buffer
 	require.NoError(t, embedded.PullProvider(ctx, embedded.PullProviderOptions{
 		Config:           &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
-		MerchantSlug:     slug,
+		MerchantID:       id,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),
 		Out:              &out,
@@ -264,13 +264,13 @@ func TestPullProviderCLI_ManifestModeMissingSecretRailNotArmed(t *testing.T) {
 			},
 		},
 	}
-	pullCLIManifestMerchant(t, ctx, dsn, slug, m)
+	id := pullCLIManifestMerchant(t, ctx, dsn, slug, m)
 
 	hook := logrustest.NewGlobal()
 	defer hook.Reset()
 	err := embedded.PullProvider(ctx, embedded.PullProviderOptions{
 		Config:           &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
-		MerchantSlug:     slug,
+		MerchantID:       id,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),
 		MerchantManifest: &embedded.BillingConfig{Version: 1, Merchants: map[string]embedded.MerchantConfig{slug: m}},

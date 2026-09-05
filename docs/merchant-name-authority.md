@@ -13,3 +13,11 @@ Provisioning a newly reclaimed name creates a distinct billing identity for the 
 The change must prove rename, active forwarding, expiry and reclaim while the original merchant is still alive; both owners retain distinct billing identities and data. The same assertions apply to public resolution, provisioning, manifest/bootstrap, catalog and import/maintenance boundaries. Unbound host names must remain unique, ambiguous projections must never be picked arbitrarily, and all verification must use isolated databases.
 
 The pre-launch cutover needs no old-name compatibility reader or second alias registry. AuthKit's own read-only directory API supplies the same canonical/alias semantics to tools that do not run its issuer, sessions or HTTP server.
+
+## Pre-launch helper API changes
+
+Imports and maintenance helpers accept `MerchantID merchant.ID`, replacing `MerchantSlug`: `AdminGrantImportOptions`, `ConvergeMerchantOptions`, `PruneListOptions`, `UndoRunOptions`, `PullProviderOptions` and `PullProviderReportOptions`. `BillingImportOptions` and `CustodyMigrationOptions` keep their existing UUID field and remove name fallback. Pull and report accept a caller-owned `PGXPool`, preserving the application's unprivileged billing connection.
+
+At a host CLI boundary, build AuthKit's lightweight `embedded.NewGroupDirectory` on an authority pool, adapt it with OpenRails `embedded/controlplane.NewNameAuthority`, and call OpenRails `embedded.ResolveMerchantName` to obtain the billing UUID and canonical name. The authority pool must remain separate from a billing pool that can hold its only connection. Catalog push/dump and named pull-manifest input accept this explicit authority; an already constructed runtime uses its configured directory.
+
+Standalone maintenance commands interpret bare `--merchant` values as public names, including UUID-shaped names. Deliberate direct operator addressing uses `--merchant id:<uuid>`; it never shares an ambiguous string format with public names. The selected UUID must identify an existing non-deleted billing merchant.

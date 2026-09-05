@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -94,28 +93,9 @@ func (c *ControlPlane) MerchantScope(ctx context.Context, ref string) (merchant.
 		return merchant.ID{}, "", err
 	}
 	if current := strings.TrimSpace(gi.InstanceSlug); current != "" && current != slug {
-		c.syncMerchantSlug(ctx, mid, current)
 		slug = current
 	}
 	return mid, slug, nil
-}
-
-// syncMerchantSlug lazily re-points a stale directory row at its group's
-// current slug (or#914). Best effort: a failure (e.g. a non-group-bound row
-// coincidentally holding the target slug) leaves the row stale and resolution
-// keeps working through the group fallback, so it is logged, never fatal.
-func (c *ControlPlane) syncMerchantSlug(ctx context.Context, mid merchant.ID, current string) {
-	if c.pool == nil {
-		return
-	}
-	if _, err := c.pool.Exec(ctx, `
-		UPDATE openrails.merchants
-		   SET slug = $2, updated_at = current_timestamp
-		 WHERE id = $1::uuid AND deleted_at IS NULL AND slug IS DISTINCT FROM $2
-	`, mid.String(), current); err != nil {
-		log.WithError(err).WithFields(log.Fields{"merchant_id": mid.String(), "slug": current}).
-			Warn("controlplane: lazy merchant slug re-sync after group rename failed; resolution continues via group forwarding (or#914)")
-	}
 }
 
 // TokenPrefix returns the fixed shared-secret API-key brand prefix used to

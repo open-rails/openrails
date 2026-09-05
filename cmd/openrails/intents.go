@@ -48,7 +48,7 @@ func newIntentsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&provider, "rail", "", "Rail filter (e.g. nmi, stripe)")
 	cmd.Flags().StringVar(&intentType, "type", "", "Intent type filter (e.g. nmi_delete_subscription, manual_rebill, stripe_refund)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (default: the default merchant)")
+	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (default: the default merchant)")
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 
 	return cmd
@@ -77,7 +77,7 @@ func newIntentsLogCmd() *cobra.Command {
 	cmd.Flags().StringVar(&psp, "provider-account", "", "PSP id filter")
 	cmd.Flags().StringVar(&phase, "phase", "", "Phase filter: attempting, succeeded, failed, unknown, parked")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
-	cmd.Flags().StringVar(&merchant, "merchant", "", "Merchant slug or id (default: the default merchant)")
+	cmd.Flags().StringVar(&merchant, "merchant", "", "Merchant public name or id:<uuid> (default: the default merchant)")
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 	return cmd
 }

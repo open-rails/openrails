@@ -7,7 +7,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/pkg/merchant"
-	log "github.com/sirupsen/logrus"
 )
 
 // GroupSlugResolver resolves a current or active former name to immutable group
@@ -43,20 +42,11 @@ func (s *Service) merchantByGroupName(ctx context.Context, slug string) (*Mercha
 		}
 		return nil, err
 	}
-	if current = strings.TrimSpace(current); current != "" && current != m.Slug {
-		// Best effort: a failure (e.g. a non-group-bound row coincidentally
-		// holding the target slug) leaves the row stale; resolution keeps
-		// working through this fallback either way.
-		if _, uerr := s.database.Qx(ctx).Exec(ctx, `
-			UPDATE openrails.merchants
-			   SET slug = $2, updated_at = current_timestamp
-			 WHERE id = $1::uuid AND deleted_at IS NULL AND slug IS DISTINCT FROM $2
-		`, m.ID.String(), current); uerr != nil {
-			log.WithError(uerr).WithFields(log.Fields{"merchant_id": m.ID.String(), "slug": current}).
-				Warn("merchants: lazy slug re-sync after group rename failed; resolution continues via group forwarding (or#914)")
-		}
-		m.Slug = current
+	if current = strings.TrimSpace(current); current == "" {
+		return nil, ErrMerchantNotFound
 	}
+	// Project the authoritative name without mutating billing on a read.
+	m.Slug = current
 	return m, nil
 }
 
@@ -84,4 +74,17 @@ func (s *Service) CanonicalSlug(ctx context.Context, id merchant.ID) (string, er
 		return "", errors.New("merchants: canonical group resolver unavailable")
 	}
 	return s.groupIDResolver(ctx, m.PermissionGroupID)
+}
+
+// WithNameAuthority configures both name and immutable-group projections together.
+func (s *Service) WithNameAuthority(authority merchant.NameAuthority) *Service {
+	if s != nil && authority != nil {
+		s.WithGroupSlugResolver(authority.ResolveGroup)
+		s.WithGroupIDResolver(authority.GroupName)
+		s.groupSearchResolver = nil
+		if search, ok := authority.(merchant.GroupNameSearch); ok {
+			s.WithGroupSearchResolver(search.SearchGroups)
+		}
+	}
+	return s
 }

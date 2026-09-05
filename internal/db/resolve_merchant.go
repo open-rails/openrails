@@ -11,7 +11,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ResolveMerchantSlug resolves a public merchant SLUG to the internal merchant.ID
+// ResolveUnboundMerchantSlug resolves only the explicit AuthKit-free host namespace.
+// Bound merchant names must be resolved through their name authority.
+// It maps a local merchant slug to the internal merchant.ID
 // (#480). The slug is the public-surface identifier (library options, config,
 // HTTP); the UUID is an internal detail resolved exactly once at bootstrap.
 //
@@ -20,7 +22,7 @@ import (
 // ErrNoMerchant), by design (there is no default merchant). A non-empty slug that
 // does not match a live merchant is a configuration error the caller should fail
 // boot on.
-func ResolveMerchantSlug(ctx context.Context, qx gen.DBTX, slug string) (merchant.ID, error) {
+func ResolveUnboundMerchantSlug(ctx context.Context, qx gen.DBTX, slug string) (merchant.ID, error) {
 	// or#914: slugs are STORED normalized (lowercase); normalize here so every
 	// caller-supplied ref (config, CLI flags, import payloads) resolves
 	// case-insensitively instead of each call site remembering to.
@@ -28,26 +30,26 @@ func ResolveMerchantSlug(ctx context.Context, qx gen.DBTX, slug string) (merchan
 	if slug == "" {
 		return merchant.ID{}, nil
 	}
-	row, err := gen.New(qx).GetMerchantBySlug(ctx, slug)
+	row, err := gen.New(qx).GetUnboundMerchantBySlug(ctx, slug)
 	if err != nil {
 		// A no-rows error is the unprovisioned-merchant case: the slug is
 		// configured but no merchant row exists. Standalone/remote must not
 		// auto-create — surface a CLEAR, actionable error (not a panic, #478).
-		// Embedded boot calls RegisterMerchant before resolving, so it never
+		// Embedded boot calls RegisterUnboundMerchant before resolving, so it never
 		// reaches this branch for its own bound merchant.
 		if errors.Is(err, pgx.ErrNoRows) {
-			return merchant.ID{}, fmt.Errorf("configured merchant slug %q is not provisioned — register the merchant (embedded: db.RegisterMerchant at boot; standalone: provision via the control plane)", slug)
+			return merchant.ID{}, fmt.Errorf("configured merchant slug %q is not provisioned — register the merchant (embedded: db.RegisterUnboundMerchant at boot; standalone: provision via the control plane)", slug)
 		}
 		return merchant.ID{}, fmt.Errorf("resolve configured merchant slug %q: %w", slug, err)
 	}
 	return merchant.ID(row.ID), nil
 }
 
-// RegisterMerchant registers a merchant (a billing bucket) from config,
+// RegisterUnboundMerchant registers a merchant (a billing bucket) from config,
 // idempotently (#480). It carries ONLY billing/rail state and NO auth. Embedded
 // boot calls it after migrations. Returns the canonical merchant id. An empty
 // slug is a no-op.
-func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOptions) (merchant.ID, error) {
+func RegisterUnboundMerchant(ctx context.Context, qx gen.DBTX, opts RegisterUnboundMerchantOptions) (merchant.ID, error) {
 	slug := merchant.NormalizeSlug(opts.Slug)
 	if slug == "" {
 		return merchant.ID{}, nil
@@ -61,20 +63,32 @@ func RegisterMerchant(ctx context.Context, qx gen.DBTX, opts RegisterMerchantOpt
 	if dn := strings.TrimSpace(opts.DisplayName); dn != "" {
 		displayName = &dn
 	}
-	id, err := gen.New(qx).RegisterMerchant(ctx, gen.RegisterMerchantParams{Slug: slug, DisplayName: displayName})
+	id, err := gen.New(qx).RegisterUnboundMerchant(ctx, gen.RegisterUnboundMerchantParams{Slug: slug, DisplayName: displayName})
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("register merchant slug %q: %w", slug, err)
 	}
 	return merchant.ID(id), nil
 }
 
-// RegisterMerchantOptions is the billing-only descriptor for RegisterMerchant.
+// RegisterUnboundMerchantOptions is the billing-only descriptor for RegisterUnboundMerchant.
 // It carries NO auth/issuer/JWKS — auth is the host's (embedded) or AuthKit's
 // (standalone). PSP identity is owned by psps, not
 // merchants.
-type RegisterMerchantOptions struct {
+type RegisterUnboundMerchantOptions struct {
 	Slug string
 	// DisplayName is the human-readable merchant name (end-user display / invoices).
 	// Optional; empty leaves any existing name untouched on re-register.
 	DisplayName string
+}
+
+// RequireMerchantID verifies an explicit internal UUID without interpreting any
+// public name. Missing or deleted identities cannot report empty successful work.
+func (d *DB) RequireMerchantID(ctx context.Context, id merchant.ID) error {
+	if id.IsZero() {
+		return fmt.Errorf("merchant_id is required")
+	}
+	if _, err := d.Gen(ctx).GetMerchantDirectoryByID(ctx, id.UUID()); err != nil {
+		return fmt.Errorf("merchant %s is not available: %w", id, err)
+	}
+	return nil
 }
