@@ -275,6 +275,15 @@ func (c *ControlPlane) recordMerchantGroupBySlug(ctx context.Context, slug, grou
 	}
 	q := gen.New(c.pool)
 	host, err := q.GetUnboundMerchantBySlug(ctx, merchant.NormalizeSlug(slug))
+	if errors.Is(err, pgx.ErrNoRows) {
+		// A concurrent boot can bind the host row after our first UUID read.
+		// Adopt only that same captured group; never re-resolve the name.
+		if bound, bindingErr := directory.GetByGroupID(ctx, groupID); bindingErr == nil {
+			return bound.ID, nil
+		} else if !errors.Is(bindingErr, merchants.ErrMerchantNotFound) {
+			return merchant.ID{}, bindingErr
+		}
+	}
 	if err != nil {
 		return merchant.ID{}, fmt.Errorf("controlplane: no unbound host merchant %q available for bootstrap: %w", slug, err)
 	}
