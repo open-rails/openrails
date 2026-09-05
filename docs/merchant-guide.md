@@ -170,7 +170,7 @@ openrails push-merchant-catalog -f catalog.yaml --insert --overwrite --prune  # 
 provider objects are never touched. Declared prices are a SET: an active price whose
 financial identity is not declared gets archived under `--prune`.
 
-For an AuthKit-free embedded host, add `--unbound-merchants` to both catalog commands. This explicitly selects the host-local unbound merchant namespace. The default resolves AuthKit merchant groups and their active aliases; neither mode falls back to the other namespace. The database role and provider-write checks still apply.
+For an embedded host whose billing merchants are not bound to AuthKit merchant groups, add `--unbound-merchants` to both catalog commands. This explicitly selects the host-local unbound merchant namespace. The default resolves AuthKit merchant groups and their active aliases; neither mode falls back to the other namespace. The database role and provider-write checks still apply.
 
 Round-trip check: `openrails dump-merchant-catalog --slug <merchant>` emits the live
 catalog as push-compatible YAML.

@@ -45,7 +45,7 @@ func newPushCatalogCmd() *cobra.Command {
 		},
 	}
 	flags := cmd.Flags()
-	flags.BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve names only in the AuthKit-free host merchant namespace")
+	flags.BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve only host-local merchants without an AuthKit group binding")
 	flags.StringVarP(&opts.file, "file", "f", defaultCatalogManifestPath, "catalog manifest YAML file")
 	flags.BoolVar(&opts.insert, "insert", false, "Create missing OpenRails/provider catalog objects from the manifest")
 	flags.BoolVar(&opts.overwrite, "overwrite", false, "Update existing OpenRails-owned catalog objects from the manifest")

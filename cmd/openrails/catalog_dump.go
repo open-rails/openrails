@@ -26,7 +26,7 @@ func newDumpCatalogCmd() *cobra.Command {
 			return runDumpCatalog(cmd, opts)
 		},
 	}
-	cmd.Flags().BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve names only in the AuthKit-free host merchant namespace")
+	cmd.Flags().BoolVar(&opts.unboundMerchants, "unbound-merchants", false, "Resolve only host-local merchants without an AuthKit group binding")
 	cmd.Flags().StringVar(&opts.merchant, "slug", "", "merchant slug to dump")
 	return cmd
 }
