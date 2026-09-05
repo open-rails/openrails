@@ -401,7 +401,7 @@ func TestAutoTopupIntent_AmbiguousThenVerifyResolves(t *testing.T) {
 
 	// Simulate "the charge actually landed and the deposit was recorded just
 	// before the crash": land the deposit under the intent-derived source id.
-	require.NoError(t, svc.FinalizeAutoTopup(ctx, payer.UUID(), currency, 50_000_000, "topup:"+done[0].ID.String()))
+	require.NoError(t, svc.RecordAutoTopupReceipt(ctx, done[0].ID, money.AutoTopupReceipt{TransactionID: "confirmed-exact-receipt"}))
 
 	// The verifier resolves from the local deposit — exactly one deposit, one
 	// external charge, intent succeeded.
@@ -463,36 +463,27 @@ func TestAutoTopupIntent_ChargeThenCrashBeforeDeposit_NoDoubleCharge(t *testing.
 	require.Equal(t, int64(50_000_500), bal.Balance)
 }
 
-// Provider offline (#674): the charge attempt fails cleanly, the intent stays
-// live (failed_retryable), and once the provider returns the SAME intent (and
-// so the same wire ref) lands the charge — nothing lost, no fresh key.
-func TestAutoTopupIntent_ProviderOfflineParksThenLands(t *testing.T) {
+// A charger error does not prove no payment was submitted, even on a rail
+// with idempotency keys. Keep the safety slot until an exact receipt is known.
+func TestAutoTopupIntent_UnknownErrorNeverResends(t *testing.T) {
 	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
-	// Stripe-family rail: clean transient failures re-send under the SAME
-	// Stripe idempotency key (replay-safe) without a provider read.
 	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailStripe))
 	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{transientFailures: 1})
-
 	done := h.runOnce(t, ctx, time.Hour)
 	require.Len(t, done, 1)
-	require.Equal(t, intents.StatusFailedRetryable, done[0].Status)
-	require.Len(t, h.ch.charges, 1)
-	firstWireRef := h.ch.charges[0].IdempotencyKey
-
-	// Provider is back; the scheduled executor drains the SAME intent and
-	// re-sends under the ORIGINAL derived key (the pre-send verify answers
-	// "not executed" for a clean transient failure).
-	h.advance(5 * time.Minute)
-	_, err := h.runner.RunExecuteOnce(ctx)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, done[0].Status)
+	h.advance(35 * 24 * time.Hour)
+	_, err := h.runner.RunVerifyOnce(ctx)
 	require.NoError(t, err)
+	_, err = h.runner.RunExecuteOnce(ctx)
+	require.NoError(t, err)
+	require.Len(t, h.ch.charges, 1)
 	final, err := intents.NewStore(dbi).Get(ctx, done[0].ID)
 	require.NoError(t, err)
-	require.Equal(t, intents.StatusSucceeded, final.Status)
-	require.Len(t, h.ch.charges, 2)
-	require.Equal(t, firstWireRef, h.ch.charges[1].IdempotencyKey, "retry reuses the ORIGINAL derived key")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, final.Status)
 	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
 	require.NoError(t, err)
-	require.Equal(t, int64(50_000_500), bal.Balance)
+	require.Equal(t, int64(500), bal.Balance)
 }
 
 func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {

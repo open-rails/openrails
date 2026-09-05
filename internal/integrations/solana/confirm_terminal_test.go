@@ -90,6 +90,8 @@ func TestWatchTransaction_ChainTerminalEndsTheWatch(t *testing.T) {
 
 	_, err := client.WatchTransaction(context.Background(), sig, rpc.CommitmentConfirmed, ChainTerminal{LastValidBlockHeight: 1005})
 	require.ErrorIs(t, err, ErrTransactionExpired)
+	chain.mu.Lock()
+	defer chain.mu.Unlock()
 	require.GreaterOrEqual(t, chain.statusPolls, 5, "the signature was looked for on every tick before the verdict")
 }
 
@@ -107,6 +109,8 @@ func TestWatchTransaction_UnknownTerminalWatchesUntilTheCaller(t *testing.T) {
 	}()
 	_, err := client.WatchTransaction(ctx, sig, rpc.CommitmentConfirmed, ChainTerminal{})
 	require.ErrorIs(t, err, context.Canceled)
+	chain.mu.Lock()
+	defer chain.mu.Unlock()
 	require.GreaterOrEqual(t, chain.statusPolls, 5)
 	require.EqualValues(t, 1000, chain.height, "no terminal known: the block height was never consulted")
 }

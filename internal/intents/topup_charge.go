@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -88,22 +87,17 @@ func decodeTopupChargePayload(intent gen.OpenrailsRailIntent) (TopupChargePayloa
 	return p, nil
 }
 
-// CheckRelevance: a top-up whose account no longer has the auto-top-up
-// configuration (settings removed, payment method gone) is superseded; the
-// balance level is deliberately NOT re-checked — once the episode was cut, its
-// charge either happened (must be deposited) or is cheap to complete.
+// Submitted episodes stay relevant even when settings or payment methods change:
+// a known charge still has to be credited. Reservation checks all first sends.
 func (h *TopupChargeHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
-	p, err := decodeTopupChargePayload(intent)
-	if err != nil {
-		return SupersededBy("unusable topup charge intent: " + err.Error()), nil
-	}
-	if _, err := h.DB.Gen(ctx).GetPaymentMethodByID(ctx, p.PaymentMethodID); err != nil {
-		if db.IsNotFound(err) {
-			return SupersededBy("auto-topup payment method no longer exists"), nil
-		}
-		return Relevance{}, err
+	if _, err := decodeTopupChargePayload(intent); err != nil {
+		return SupersededBy(err.Error()), nil
 	}
 	return StillRelevant(), nil
+}
+
+func topupEpisode(intent gen.OpenrailsRailIntent, p TopupChargePayload) money.AutoTopupEpisode {
+	return money.AutoTopupEpisode{IntentID: intent.ID, CustomerID: p.CustomerID, PaymentMethodID: p.PaymentMethodID, Currency: p.Currency, Anchor: p.EpisodeAnchor, Amount: p.AmountNative}
 }
 
 func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
@@ -114,143 +108,85 @@ func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsRa
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	wireRef := topupWireRef(intent.ID)
-	svc := h.money()
-
-	// Episode already deposited (crash after finalize, replayed executor)?
-	if deposited, derr := svc.HasAutoTopupDeposit(ctx, p.CustomerID, p.Currency, wireRef); derr != nil {
-		return Retryable("deposit lookup failed: " + derr.Error())
-	} else if deposited {
-		if serr := svc.StampAutoTopupAttempt(ctx, p.CustomerID, p.Currency); serr != nil {
-			return Ambiguous("deposit exists but cooldown stamp failed: " + serr.Error())
-		}
-		return Succeeded(map[string]any{"deposited": true, "verified_existing": true})
-	}
-
-	rail, outcome := h.methodRail(ctx, p)
-	if outcome != nil {
-		return *outcome
-	}
-
-	// Money mover on a gateway without request idempotency (NMI): any
-	// re-execution verifies by reading before sending another charge.
-	if intent.Attempts > 1 && isNMIRail(rail) {
-		txnID, found, verr := h.findNMISale(ctx, intent, rail, wireRef)
-		if verr != nil {
-			return Ambiguous("pre-send verification read failed: " + verr.Error())
-		}
-		if found {
-			return h.finalize(ctx, svc, p, wireRef, txnID, true)
-		}
-	}
-
 	chargeMinor, err := moneyutil.NativeToRailMinor(p.Currency, p.AmountNative)
 	if err != nil {
 		return Terminal("top-up amount not representable in rail minor units: " + err.Error())
 	}
+	svc := h.money()
+	existing, err := svc.ReserveAutoTopup(ctx, topupEpisode(intent, p))
+	if errors.Is(err, money.ErrAutoTopupSafety) {
+		return Parked(err.Error())
+	}
+	if err != nil {
+		return Retryable("reserve top-up: " + err.Error())
+	}
+	if existing != nil {
+		return h.Verify(ctx, intent)
+	}
 	res, err := h.Charger.ChargeSavedMethod(ctx, money.ChargeRequest{
-		MerchantID:      intent.MerchantID,
-		Payer:           identity.CustomerID(p.CustomerID),
-		Invoker:         p.CustomerID.String(),
-		PaymentMethodID: p.PaymentMethodID,
-		AmountCents:     chargeMinor,
-		Currency:        p.Currency,
-		IdempotencyKey:  wireRef,
-		Description:     "auto top-up",
+		MerchantID: intent.MerchantID, Payer: identity.CustomerID(p.CustomerID), Invoker: p.CustomerID.String(), PaymentMethodID: p.PaymentMethodID,
+		AmountCents: chargeMinor, Currency: p.Currency, IdempotencyKey: topupWireRef(intent.ID), Description: "auto top-up",
 	})
 	if err != nil {
-		if errors.Is(err, nmi.ErrProviderReadOnly) {
-			return Parked("provider writes blocked (mode=readonly)")
-		}
-		if nmi.IsTransportAmbiguous(err) {
-			return Ambiguous("top-up charge outcome unknown: " + err.Error())
-		}
-		// Clean transient failure. For Stripe the wire ref is the Stripe
-		// Idempotency-Key, so a re-send replays rather than double-charges;
-		// for NMI attempts>1 verifies by order id before re-sending.
-		return Retryable("top-up charge failed: " + err.Error())
+		// Once submission starts, absence of a response is not proof of failure.
+		// Neither retries nor expiry may create another charge for this episode.
+		return Ambiguous("top-up submission requires exact provider verification: " + err.Error())
 	}
-	if res.Declined {
-		// Terminal for the episode; stamp the cooldown so a failing card is
-		// not hammered every tick (a later episode gets a fresh anchor).
-		if serr := svc.StampAutoTopupAttempt(ctx, p.CustomerID, p.Currency); serr != nil {
-			return Retryable("declined, but cooldown stamp failed: " + serr.Error())
-		}
-		reason := "top-up charge declined"
-		if res.FailureMessage != nil && *res.FailureMessage != "" {
-			reason = *res.FailureMessage
-		}
-		evidence := map[string]any{"declined": true}
-		if res.FailureCode != nil {
-			evidence["failure_code"] = *res.FailureCode
-		}
-		return TerminalWithEvidence(reason, evidence)
+	receipt := money.AutoTopupReceipt{TransactionID: res.TransactionID, Declined: res.Declined}
+	if res.FailureMessage != nil {
+		receipt.Reason = *res.FailureMessage
 	}
-	return h.finalize(ctx, svc, p, wireRef, res.TransactionID, false)
+	return h.recordAndFinalize(ctx, intent, p, receipt)
 }
 
-// Verify resolves an ambiguous top-up charge via reads: the local deposit row
-// first, then the provider (NMI order-id sale search). Stripe needs no read —
-// the wire ref is the Stripe Idempotency-Key, so re-execution replays safely.
+// Verify uses only exact local receipts or the provider's unique request ID.
+// A missing provider search result does not prove a submitted payment failed.
 func (h *TopupChargeHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeTopupChargePayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	wireRef := topupWireRef(intent.ID)
 	svc := h.money()
-
-	if deposited, derr := svc.HasAutoTopupDeposit(ctx, p.CustomerID, p.Currency, wireRef); derr != nil {
-		return Ambiguous("deposit lookup failed: " + derr.Error())
-	} else if deposited {
-		if serr := svc.StampAutoTopupAttempt(ctx, p.CustomerID, p.Currency); serr != nil {
-			return Ambiguous("deposit exists but cooldown stamp failed: " + serr.Error())
-		}
-		return Succeeded(map[string]any{"deposited": true, "verified_existing": true})
-	}
-
-	rail, outcome := h.methodRail(ctx, p)
-	if outcome != nil {
-		return *outcome
-	}
-	if isNMIRail(rail) {
-		txnID, found, verr := h.findNMISale(ctx, intent, rail, wireRef)
-		if verr != nil {
-			return Ambiguous("provider read failed: " + verr.Error())
-		}
-		if !found {
-			return Retryable("no successful sale found for wire ref; charge verified not executed")
-		}
-		return h.finalize(ctx, svc, p, wireRef, txnID, true)
-	}
-	// Stripe (and any idempotency-keyed rail): re-execution with the same key
-	// replays the original charge — safe to hand back to the executor.
-	return Retryable("rail replays by idempotency key; safe to re-execute")
-}
-
-// finalize deposits the confirmed charge (idempotent on source_id) and stamps
-// the cooldown.
-func (h *TopupChargeHandler) finalize(ctx context.Context, svc *money.MoneyService, p TopupChargePayload, wireRef, transactionID string, verified bool) Outcome {
-	if err := svc.FinalizeAutoTopup(ctx, p.CustomerID, p.Currency, p.AmountNative, wireRef); err != nil {
-		// The charge DID happen; the verifier re-runs finalize off the wire ref.
-		return Ambiguous("top-up charged, but deposit/stamp failed: " + err.Error())
-	}
-	evidence := map[string]any{"transaction_id": transactionID, "deposited": true}
-	if verified {
-		evidence["verified_existing"] = true
-	}
-	return Succeeded(evidence)
-}
-
-// methodRail loads the payment method's rail; a missing method is superseded
-// by relevance, so a load failure here is retryable.
-func (h *TopupChargeHandler) methodRail(ctx context.Context, p TopupChargePayload) (string, *Outcome) {
-	method, err := h.DB.Gen(ctx).GetPaymentMethodByID(ctx, p.PaymentMethodID)
+	ep, err := svc.GetAutoTopupEpisode(ctx, intent.ID)
 	if err != nil {
-		out := Retryable("load payment method: " + err.Error())
-		return "", &out
+		return Ambiguous("read top-up reservation: " + err.Error())
 	}
-	return strings.ToLower(strings.TrimSpace(method.Rail)), nil
+	if ep == nil {
+		return Ambiguous("top-up submission has no safety reservation; operator verification required")
+	}
+	if len(ep.Receipt) > 0 {
+		return h.finalizeReceipt(ctx, intent, p)
+	}
+	if isNMIRail(intent.Rail) {
+		transactionID, found, err := h.findNMISale(ctx, intent, intent.Rail, topupWireRef(intent.ID))
+		if err != nil {
+			return Ambiguous("provider verification failed: " + err.Error())
+		}
+		if found {
+			return h.recordAndFinalize(ctx, intent, p, money.AutoTopupReceipt{TransactionID: transactionID})
+		}
+	}
+	return Ambiguous("submitted top-up lacks an exact provider receipt; operator verification required, no automatic resend")
+}
+
+func (h *TopupChargeHandler) recordAndFinalize(ctx context.Context, intent gen.OpenrailsRailIntent, p TopupChargePayload, receipt money.AutoTopupReceipt) Outcome {
+	if err := h.money().RecordAutoTopupReceipt(ctx, intent.ID, receipt); err != nil {
+		out := Ambiguous("persist top-up provider receipt: " + err.Error())
+		out.Evidence = map[string]any{"transaction_id": receipt.TransactionID, "declined": receipt.Declined, "reason": receipt.Reason}
+		return out
+	}
+	return h.finalizeReceipt(ctx, intent, p)
+}
+
+func (h *TopupChargeHandler) finalizeReceipt(ctx context.Context, intent gen.OpenrailsRailIntent, p TopupChargePayload) Outcome {
+	receipt, err := h.money().FinalizeAutoTopupReceipt(ctx, topupEpisode(intent, p))
+	if err != nil {
+		return Ambiguous("finalize durable top-up receipt: " + err.Error())
+	}
+	if receipt.Declined {
+		return TerminalWithEvidence("top-up declined: "+receipt.Reason, map[string]any{"declined": true})
+	}
+	return Succeeded(map[string]any{"transaction_id": receipt.TransactionID, "deposited": true})
 }
 
 // findNMISale answers "did the charge land?" for an NMI-family rail via the

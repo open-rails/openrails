@@ -59,7 +59,7 @@ func (b *planMigrationRequestBody) toServiceRequest(r *httprequest.Request) (sub
 	}
 	effective := b.EffectiveAt
 	if b.NoticeDays > 0 {
-		effective = time.Now().UTC().Add(time.Duration(b.NoticeDays) * 24 * time.Hour)
+		effective = r.Clock.Now().UTC().Add(time.Duration(b.NoticeDays) * 24 * time.Hour)
 	}
 	out = subscriptions.PlanMigrationRequest{
 		SourcePriceID:          source.ID,

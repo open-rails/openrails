@@ -237,12 +237,6 @@ type fakeVaultKV struct {
 
 func newFakeVaultKV() *fakeVaultKV { return &fakeVaultKV{data: map[string]map[string]string{}} }
 
-type staticMerchantSlugResolver map[string]string
-
-func (s staticMerchantSlugResolver) MerchantSlug(_ context.Context, id merchant.ID) (string, error) {
-	return s[id.String()], nil
-}
-
 func (f *fakeVaultKV) ReadSecret(_ context.Context, path string) (map[string]string, int, error) {
 	d, ok := f.data[path]
 	if !ok {
@@ -264,7 +258,7 @@ func (f *fakeVaultKV) ListSecrets(_ context.Context, _ string) ([]string, error)
 
 func TestVaultSecretStore_StubFailsClosed(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", nil, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug}) // no live client
+	store := NewVaultSecretStore("secret", nil) // no live client
 	id := dbtest.TestMerchantID
 	if _, err := store.Get(ctx, id, "psps/stripe/live/acct_884_test/secret_key"); !errors.Is(err, ErrVaultNotConfigured) {
 		t.Fatalf("stub Get = %v, want ErrVaultNotConfigured", err)
@@ -277,7 +271,7 @@ func TestVaultSecretStore_StubFailsClosed(t *testing.T) {
 func TestVaultSecretStore_RoundTripWithFakeClient(t *testing.T) {
 	ctx := context.Background()
 	fake := newFakeVaultKV()
-	store := NewVaultSecretStore("secret", fake, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): "cozy-art"})
+	store := NewVaultSecretStore("secret", fake)
 	id := dbtest.TestMerchantID
 
 	if _, err := store.Put(ctx, id, "psps/stripe/live/acct_884_test/secret_key", "sk_live"); err != nil {
@@ -295,7 +289,7 @@ func TestVaultSecretStore_RoundTripWithFakeClient(t *testing.T) {
 		t.Fatalf("expected one vault path, got %d", len(fake.data))
 	}
 	for p := range fake.data {
-		if want := "secret/openrails/merchants/cozy-art/" + "psps/stripe/live/acct_884_test/secret_key"; p != want {
+		if want := "secret/openrails/merchants/" + dbtest.TestMerchantID.String() + "/" + "psps/stripe/live/acct_884_test/secret_key"; p != want {
 			t.Fatalf("vault path = %q, want %q", p, want)
 		}
 	}

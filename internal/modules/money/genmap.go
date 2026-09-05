@@ -92,6 +92,7 @@ func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 		BillingMode:              r.BillingMode,
 		LowBalanceThreshold:      r.LowBalanceThreshold,
 		AutoTopupEnabled:         r.AutoTopupEnabled,
+		AutoTopupFailures:        r.AutoTopupFailures,
 		AutoTopupAmount:          r.AutoTopupAmount,
 		AutoTopupPaymentMethod:   r.AutoTopupPaymentMethodID,
 		CollectionPaymentMethod:  r.CollectionPaymentMethodID,

@@ -605,7 +605,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			return fmt.Errorf("invoice collection is in progress")
 		}
 		if amount > invoiceRow.AmountDue {
-			return fmt.Errorf("payment amount exceeds invoice amount_due")
+			return ErrInvoicePaymentExceedsDue
 		}
 		now := s.now()
 		sourceID := railPaymentID
@@ -618,7 +618,7 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 			TransferType: "owed_payment", Operation: string(manualPayCoord.Operation),
 			Source: manualPayCoord.Source, SourceID: manualPayCoord.SourceID,
 		}); derr == nil {
-			return fmt.Errorf("manual payment reference %q already applied", sourceID)
+			return fmt.Errorf("%w: %s", ErrInvoicePaymentReferenceUsed, sourceID)
 		} else if !errors.Is(derr, pgx.ErrNoRows) {
 			return derr
 		}

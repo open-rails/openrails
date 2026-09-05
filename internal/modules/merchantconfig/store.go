@@ -23,6 +23,9 @@ func NewStore(database *db.DB) *Store {
 }
 
 func (s *Store) Upsert(ctx context.Context, cfg models.MerchantConfiguration) error {
+	if _, err := AutoTopupSafety(cfg.AutoTopupSafety); err != nil {
+		return err
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return err

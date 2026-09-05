@@ -583,37 +583,6 @@ func (s *StripeCatalogService) RetrievePrice(ctx context.Context, stripePriceID 
 	return &out, nil
 }
 
-func (s *StripeCatalogService) VerifyPriceExists(ctx context.Context, priceID string) error {
-	stripeProc := s.stripeRail(ctx)
-	if stripeProc == nil || stripeProc.SecretKey == "" {
-		return fmt.Errorf("stripe is not configured")
-	}
-	priceID = strings.TrimSpace(priceID)
-	if priceID == "" {
-		return fmt.Errorf("stripe price_id required")
-	}
-
-	endpoint := s.baseURL() + "/v1/prices/" + url.PathEscape(priceID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+stripeProc.SecretKey)
-	resp, err := s.httpClient().Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("stripe price verification failed: %s", parseStripeError(body))
-	}
-	return nil
-}
-
 // StripeIntervalForDays exposes the OpenRails-billing-cycle -> Stripe recurrence
 // mapping so callers outside this package can validate linked Stripe Prices.
 func StripeIntervalForDays(days int) (interval string, intervalCount int) {

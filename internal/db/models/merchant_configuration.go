@@ -5,6 +5,8 @@ package models
 type MerchantConfiguration struct {
 	Profile MerchantProfileConfiguration `json:"profile,omitempty"`
 
+	AutoTopupSafety *AutoTopupSafetyPolicy `json:"auto_topup_safety,omitempty"`
+
 	// Invoice settings are merchant-owned billing cadence and collection knobs.
 	// Missing values use money service defaults.
 	InvoiceCollectionThreshold *int64 `json:"collection_threshold,omitempty"`
@@ -82,4 +84,13 @@ type MerchantProfileConfiguration struct {
 	// SignupURL (#789) is the winback/signup page access-ended and expiry
 	// emails link to. "" ⇒ no CTA rendered.
 	SignupURL string `json:"signup_url,omitempty"`
+}
+
+// AutoTopupSafetyPolicy bounds submitted episodes per customer and currency.
+// Windows are rolling24h,7d,30d; omitted policy uses3,10,30 and3 declines.
+type AutoTopupSafetyPolicy struct {
+	MaxDaily              int `json:"max_daily" yaml:"max_daily" koanf:"max_daily"`
+	MaxWeekly             int `json:"max_weekly" yaml:"max_weekly" koanf:"max_weekly"`
+	MaxMonthly            int `json:"max_monthly" yaml:"max_monthly" koanf:"max_monthly"`
+	DeclinesBeforeDisable int `json:"declines_before_disable" yaml:"declines_before_disable" koanf:"declines_before_disable"`
 }

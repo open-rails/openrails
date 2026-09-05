@@ -14,11 +14,13 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/integrations/vault/vaulttest"
 )
 
 func TestMain(m *testing.M) {
 	code := m.Run()
 	dbtest.TerminateShared()
+	vaulttest.TerminateShared()
 	os.Exit(code)
 }
 

@@ -679,6 +679,7 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 }
 
 func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {
+	registerMerchantInvoiceRoutes(rr, opts, dbMW...)
 	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
 	offChannelWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationOffChannel, dbMW...)
 	grantWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
@@ -922,4 +923,24 @@ func RegisterHostWebhookRoutes(rr router.Router, rt *app.Runtime, resolve mercha
 	handler := h(httphandlers.HostWebhook(resolve))
 	rr.Handle(http.MethodPost, "/webhooks/:provider", handler)
 	rr.Handle(http.MethodPost, "/webhooks/:provider/:account_id", handler)
+}
+
+// registerMerchantInvoiceRoutes reuses the existing support-operation limits.
+func registerMerchantInvoiceRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {
+	read := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantInvoicesRead)}, dbMW...)
+	update := opts.merchantAdminOperationMW(controlplane.PermMerchantInvoicesUpdate, middleware.AdminOperationDestructive, dbMW...)
+	collect := opts.merchantAdminOperationMW(controlplane.PermMerchantInvoicesCollect, middleware.AdminOperationOffChannel, dbMW...)
+	remittance := opts.merchantAdminOperationMW(controlplane.PermMerchantInvoicesUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	invoices := rr.Group("/invoices")
+	invoices.Handle(http.MethodGet, "", h(httphandlers.ListAdminInvoices(opts.Gate)), read...)
+	invoices.Handle(http.MethodGet, "/:id", h(httphandlers.GetAdminInvoice(opts.Gate)), read...)
+	invoices.Handle(http.MethodGet, "/:id/payments", h(httphandlers.ListAdminInvoicePayments), read...)
+	invoices.Handle(http.MethodPost, "/:id/void", h(httphandlers.MutateAdminInvoice("void")), update...)
+	invoices.Handle(http.MethodPost, "/:id/uncollectible", h(httphandlers.MutateAdminInvoice("mark_uncollectible")), update...)
+	invoices.Handle(http.MethodPost, "/:id/payments", h(httphandlers.MutateAdminInvoice("record_payment")), remittance...)
+	invoices.Handle(http.MethodPost, "/:id/retry-collection", h(httphandlers.RetryAdminInvoiceCollection), collect...)
+	profileRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
+	profileWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
+	rr.Handle(http.MethodGet, "/customers/:customer_id/invoice-profile", h(httphandlers.GetAdminInvoiceProfile(opts.Gate)), profileRead...)
+	rr.Handle(http.MethodPut, "/customers/:customer_id/invoice-profile", h(httphandlers.PutAdminInvoiceProfile), profileWrite...)
 }

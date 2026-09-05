@@ -48,7 +48,7 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 		return
 	}
 	if at.IsZero() {
-		at = time.Now().UTC()
+		at = r.Clock.Now().UTC()
 	}
 	windows, err := r.State.EntitlementService.ListActiveRecords(r.Request.Context(), user.ID, at)
 	if err != nil {
@@ -121,7 +121,7 @@ func GetMyTier(r *httprequest.Request) {
 		return
 	}
 	if at.IsZero() {
-		at = time.Now().UTC()
+		at = r.Clock.Now().UTC()
 	}
 	tier, err := r.State.EntitlementService.ResolveEffectiveTier(r.Request.Context(), user.ID, group, at)
 	if err != nil {

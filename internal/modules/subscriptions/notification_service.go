@@ -150,6 +150,9 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	}
 
 	switch notification.EventType {
+	case models.NotificationAutoTopupDisabled:
+		currency, _ := notification.Data["currency"].(string)
+		return s.emailService.SendAutoTopupDisabled(ctx, notification.CustomerID.String(), currency)
 	case models.NotificationPremiumStarted:
 		return s.emailService.SendSubscriptionConfirmed(ctx, notification.CustomerID.String())
 	case models.NotificationPremiumRenewed:
@@ -163,7 +166,7 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		}
 		if reason == PremiumEndReasonAccessEnded {
 			// #789: subscription-row-free path; ended_at rides in the row data.
-			endedAt := time.Now().UTC()
+			endedAt := s.emailService.now().UTC()
 			if raw, ok := notification.Data["ended_at"].(string); ok {
 				if t, err := time.Parse(time.RFC3339, raw); err == nil {
 					endedAt = t

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -1406,7 +1405,7 @@ func subscriptionFromModel(resp *subscriptions.UserSubscriptionResponse) Subscri
 	// Resumability surface — derived from the single shared predicate so the
 	// library DTO, the HTTP serialization, the resume handler, and the worker all
 	// agree (they call the same subscriptions.* helpers).
-	now := time.Now().UTC()
+	now := resp.EvaluationTime()
 	result.Resumable = subscriptions.Resumable(sub, now)
 	result.CancelScheduled = subscriptions.CancelScheduled(sub, now)
 	result.CancelMode = string(subscriptions.CancelModeFor(sub, now))
