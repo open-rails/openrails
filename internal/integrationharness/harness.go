@@ -834,7 +834,7 @@ func (di *DelegatedIssuer) Mint(subject, email, username string, permissions []s
 		attrs["username"] = username
 	}
 	token, err := mintDelegatedAccessToken(h.ctx, di.issuer.Signer(), authkit.DelegatedAccessParams{
-		Issuer:           di.issuer.URL(),
+		Issuer:           di.Issuer,
 		Audiences:        []string{"openrails"},
 		DelegatedSubject: subject,
 		Permissions:      append([]string(nil), permissions...),
