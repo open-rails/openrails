@@ -38,7 +38,9 @@ func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), err
 	if d.pgtx != nil {
 		return ctx, func() {}, nil
 	}
-	if _, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); ok {
+	if lc, err := d.merchantConn(ctx); err != nil {
+		return ctx, func() {}, err
+	} else if lc != nil {
 		return ctx, func() {}, nil
 	}
 
@@ -50,7 +52,7 @@ func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), err
 		return ctx, func() {}, fmt.Errorf("db: WithMerchantConn requires a merchant in context")
 	}
 
-	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String()}
+	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema()}
 	newCtx := context.WithValue(ctx, merchantPgxConnKey{}, lazy)
 	return newCtx, lazy.release, nil
 }
@@ -67,4 +69,18 @@ func (d *DB) RunInMerchantConn(ctx context.Context, fn func(ctx context.Context)
 	}
 	defer release()
 	return fn(ctx)
+}
+
+// A request can visit independent databases. Reuse only this pool's pin;
+// silently querying another database with the caller's pin changes authority.
+func (d *DB) merchantConn(ctx context.Context) (*lazyMerchantPgxConn, error) {
+	lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn)
+	if !ok || lc.pool != d.pool {
+		return nil, nil
+	}
+	mid, ok := merchant.FromContext(ctx)
+	if !ok || mid.String() != lc.tenantID || d.rw.schema() != lc.schema {
+		return nil, fmt.Errorf("db: merchant connection does not match requested schema or merchant")
+	}
+	return lc, nil
 }

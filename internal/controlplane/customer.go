@@ -75,6 +75,7 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 // (openrails-saas #18): the directory identity a hosted portal needs to scope
 // the subject's self-service billing to.
 type MerchantForSubject struct {
+	ID          merchant.ID
 	Slug        string
 	DisplayName string
 }
@@ -107,7 +108,7 @@ func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject stri
 	}
 	out := make([]MerchantForSubject, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, MerchantForSubject{Slug: row.Slug, DisplayName: row.DisplayName})
+		out = append(out, MerchantForSubject{ID: merchant.ID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName})
 	}
 	return out, nil
 }

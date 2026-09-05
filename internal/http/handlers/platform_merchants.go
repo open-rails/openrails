@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -197,6 +198,11 @@ func PlatformRestoreMerchant(r *httprequest.Request) {
 		return
 	}
 	if err != nil {
+		var constraint *pgconn.PgError
+		if errors.As(err, &constraint) && constraint.Code == "23514" {
+			r.ErrorJSON(http.StatusConflict, "retired or purged merchant cannot be restored")
+			return
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "failed to restore merchant")
 		return
 	}

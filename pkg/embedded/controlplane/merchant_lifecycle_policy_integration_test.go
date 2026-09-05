@@ -33,7 +33,7 @@ import (
 func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://or914b.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://or914b.openrails.test")
 	e := newHostApp(t, cfg)
 
 	vaulted := map[string]bool{} // subject -> has card (the host seam, stubbed)
@@ -124,7 +124,8 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		// admission predicate must compare that stable identity, not only the
 		// group's current display slug.
 		renamedSlug := "pol-renamed-" + sfx
-		require.NoError(t, core.RenamePermissionGroupSlug(ctx, embcp.MerchantType, "pol-one-"+sfx, renamedSlug))
+		_, err = core.UpdateGroupInstanceAs(ctx, user.ID, first.GroupID, authkit.GroupInstanceUpdate{Slug: &renamedSlug})
+		require.NoError(t, err)
 		require.NoError(t, admission(ctx, "pol-one-"+sfx, user.ID), "an owned tombstone is still an idempotent repair")
 
 		// Beyond it: refused until a payment method is on file.

@@ -52,7 +52,7 @@ var ErrRemoteApplicationSourceUnavailable = errors.New("controlplane: no remote_
 // remote_application registry (#74), NOT an OpenRails-owned table (the
 // old delegated-issuer registry was dropped in #480). The verifier's
 // in-house JWKS fetch/refresh handles keys; this is also re-callable to pick up
-// store changes, and the verifier lazy-loads any single issuer on first use.
+// store changes; the verifier also lazily loads registered snapshot members.
 func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 	if c == nil || c.delegatedVerifier == nil {
 		return ErrDelegatedNotConfigured
@@ -73,8 +73,8 @@ func (c *ControlPlane) loadRemoteApplications(ctx context.Context) error {
 
 // ReloadRemoteApplications re-syncs the verifier's in-memory issuer registry with
 // AuthKit's remote_application store, picking up newly registered/disabled
-// principals (the verifier also lazy-loads any single issuer on first use, so
-// this is for deterministic reloads — e.g. after an inbound registration).
+// principals immediately after an in-process registration. Out-of-band changes
+// converge through the bounded snapshot/registry refresh.
 func (c *ControlPlane) ReloadRemoteApplications(ctx context.Context) error {
 	return c.loadRemoteApplications(ctx)
 }
@@ -92,9 +92,8 @@ func (c *ControlPlane) SetIssuerRegistryTTL(d time.Duration) {
 // successful load is older than the TTL (#852). Called from the delegated-
 // verifier consumption points, so refresh work scales with verification
 // traffic, never with wall clock. The current request still verifies against
-// the existing registry (brand-new issuers are covered immediately by the
-// verifier's own lazy-load-on-miss); convergence for updates/revocations is
-// bounded by TTL + one reload.
+// the existing registry. New out-of-band registrations, updates and revocations
+// converge within TTL plus one reload, without a per-unknown-issuer DB lookup.
 func (c *ControlPlane) refreshIssuerRegistryIfStale() {
 	// Core() nil => no remote_application store to re-sync from; don't spawn a
 	// goroutine that can only fail (a partially-configured plane keeps verifying

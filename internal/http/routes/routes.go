@@ -84,17 +84,6 @@ type remoteApplicationResolver interface {
 	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
 }
 
-type merchantGroupResolver interface {
-	ResolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, string, error)
-}
-
-// merchantUserResolver resolves the merchant a user session is acting on from
-// the user's merchant-group membership. User access tokens carry no merchant
-// claim under #567, so /v1/merchant routes infer it from membership.
-type merchantUserResolver interface {
-	MerchantForUser(ctx context.Context, userID string) (string, error)
-}
-
 // requiredMW builds the neutral "authentication required" middleware for the
 // embedded surface. It authenticates via opts.Authenticator, aborts 401 on
 // failure, and pins the resulting UserContext on the request context (the single
@@ -490,29 +479,23 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if req != nil {
 			uc.Merchant = strings.TrimSpace(req.Header.Get(billingauth.MerchantSelectorHeader))
 		}
-		if uc.Merchant == "" {
-			resolver, ok := g.AdminPermissionChecker.(merchantUserResolver)
-			if !ok {
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
-			}
-			ref, rerr := resolver.MerchantForUser(ctx, uc.UserID)
-			if rerr != nil || strings.TrimSpace(ref) == "" {
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
-			}
-			uc.Merchant = ref
+
+	}
+	membershipMID, canonical, err := g.AdminPermissionChecker.ResolveAuthorizedMerchant(ctx, uc.Merchant, uc.UserID, perm)
+	if err != nil {
+		switch {
+		case errors.Is(err, authpolicy.ErrPermissionRequired):
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
+		case errors.Is(err, authpolicy.ErrMerchantUnresolved), errors.Is(err, controlplane.ErrMerchantAmbiguous):
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
+		default:
+			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}
 		}
 	}
-	allowed, err := g.AdminPermissionChecker.HasAdminPermission(ctx, uc.Merchant, uc.UserID, perm)
-	if err != nil {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}
+	if membershipMID.IsZero() {
+		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 	}
-	if !allowed {
-		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
-	}
-	membershipMID, rerr := g.resolveMerchantForGroup(ctx, uc.Merchant)
-	if rerr != nil {
-		return billingauth.Principal{}, resolveMerchantForGroupGateError(rerr)
-	}
+	uc.Merchant = canonical
 	mid, ok := merchant.FromContext(ctx)
 	if !ok {
 		mid = membershipMID
@@ -536,34 +519,6 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_context_mismatch"}
 	}
 	return billingauth.Principal{MerchantID: mid, UserContext: uc}, nil
-}
-
-// errMerchantGroupResolverUnavailable distinguishes "AdminPermissionChecker
-// doesn't implement merchantGroupResolver" (a server misconfiguration, 500)
-// from "the merchant ref itself didn't resolve" (403, fail closed) in
-// resolveMerchantForGroup's callers.
-var errMerchantGroupResolverUnavailable = errors.New("merchant resolver unavailable")
-
-// resolveMerchantForGroup resolves the merchant.ID that owns merchantRef (a
-// merchant-group ref, e.g. from user-membership resolution) via the
-// AdminPermissionChecker's merchantGroupResolver facet.
-func (g legacyGate) resolveMerchantForGroup(ctx context.Context, merchantRef string) (merchant.ID, error) {
-	resolver, ok := g.AdminPermissionChecker.(merchantGroupResolver)
-	if !ok {
-		return merchant.ID{}, errMerchantGroupResolverUnavailable
-	}
-	mid, _, err := resolver.ResolveMerchantForGroup(ctx, merchantRef)
-	if err != nil {
-		return merchant.ID{}, err
-	}
-	return mid, nil
-}
-
-func resolveMerchantForGroupGateError(err error) billingauth.GateError {
-	if errors.Is(err, errMerchantGroupResolverUnavailable) {
-		return billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
-	}
-	return billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 }
 
 func (g legacyGate) resolveServiceCredential(ctx context.Context, r *http.Request, allowJWTFallthrough bool) (*controlplane.ResolvedServiceCredential, error, bool) {

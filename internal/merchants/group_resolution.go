@@ -6,20 +6,15 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
-// GroupSlugResolver resolves a merchant slug through the authkit merchant-group
-// namespace to the bound permission-group id and the group's CURRENT slug
-// (or#914). Implementations follow ak#264 slug tombstones, so a renamed-away
-// slug resolves to the same group forever. The control plane provides one
-// (ControlPlane.MerchantGroupSlugResolver); a runtime with no control plane
-// leaves it nil and slug resolution stays table-only.
+// GroupSlugResolver resolves a current or active former name to immutable group
+// identity and its canonical name. Alias lifetime is owned by AuthKit.
 type GroupSlugResolver func(ctx context.Context, slug string) (groupID, currentSlug string, err error)
 
-// WithGroupSlugResolver wires the authkit group namespace into directory slug
-// resolution (or#914): slugs that miss the openrails.merchants table are
-// retried through the group namespace, which follows renames. Nil is a no-op.
+// WithGroupSlugResolver selects AuthKit as the directory's naming authority.
 func (s *Service) WithGroupSlugResolver(r GroupSlugResolver) *Service {
 	if s != nil && r != nil {
 		s.groupSlugResolver = r
@@ -27,21 +22,19 @@ func (s *Service) WithGroupSlugResolver(r GroupSlugResolver) *Service {
 	return s
 }
 
-// merchantByGroupFallback is the shared rename-forwarding miss path (or#914):
-// resolve slug -> group (tombstone-following) -> directory row by its group
-// binding. On a hit whose stored slug drifted from the group's current slug
-// the row is lazily re-synced; the returned Merchant carries the group's
-// CURRENT slug (the group is the naming authority). Returns
-// ErrMerchantNotFound when the seam is unwired or nothing matches.
-func (s *Service) merchantByGroupFallback(ctx context.Context, slug string) (*Merchant, error) {
+// merchantByGroupName resolves identity before reading the billing directory.
+func (s *Service) merchantByGroupName(ctx context.Context, slug string) (*Merchant, error) {
 	if s == nil || s.groupSlugResolver == nil || s.pool == nil {
 		return nil, ErrMerchantNotFound
 	}
 	groupID, current, err := s.groupSlugResolver(ctx, slug)
-	if err != nil || strings.TrimSpace(groupID) == "" {
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(groupID) == "" {
 		return nil, ErrMerchantNotFound
 	}
-	row := s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
+	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
 		FROM openrails.merchants WHERE permission_group_id = $1 AND deleted_at IS NULL`, groupID)
 	m, err := scanMerchant(row)
 	if err != nil {
@@ -54,7 +47,7 @@ func (s *Service) merchantByGroupFallback(ctx context.Context, slug string) (*Me
 		// Best effort: a failure (e.g. a non-group-bound row coincidentally
 		// holding the target slug) leaves the row stale; resolution keeps
 		// working through this fallback either way.
-		if _, uerr := s.pool.Exec(ctx, `
+		if _, uerr := s.database.Qx(ctx).Exec(ctx, `
 			UPDATE openrails.merchants
 			   SET slug = $2, updated_at = current_timestamp
 			 WHERE id = $1::uuid AND deleted_at IS NULL AND slug IS DISTINCT FROM $2
@@ -65,4 +58,30 @@ func (s *Service) merchantByGroupFallback(ctx context.Context, slug string) (*Me
 		m.Slug = current
 	}
 	return m, nil
+}
+
+// GroupIDResolver reads the current name of one captured immutable group.
+type GroupIDResolver func(context.Context, string) (string, error)
+
+func (s *Service) WithGroupIDResolver(r GroupIDResolver) *Service {
+	if s != nil {
+		s.groupIDResolver = r
+	}
+	return s
+}
+
+// CanonicalSlug projects a merchant identity's current public name. Bound
+// merchants require AuthKit; an unbound host-owned row uses its local name.
+func (s *Service) CanonicalSlug(ctx context.Context, id merchant.ID) (string, error) {
+	m, err := s.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if m.PermissionGroupID == "" {
+		return m.Slug, nil
+	}
+	if s.groupIDResolver == nil {
+		return "", errors.New("merchants: canonical group resolver unavailable")
+	}
+	return s.groupIDResolver(ctx, m.PermissionGroupID)
 }

@@ -275,6 +275,7 @@ func (c *ControlPlane) recordMerchantGroupBySlug(ctx context.Context, slug, grou
 		       updated_at      = current_timestamp
 		 WHERE lower(slug) = lower($1)
 		   AND deleted_at IS NULL
+           AND (permission_group_id IS NULL OR permission_group_id = $2)
 		RETURNING id::text
 	`, slug, groupID).Scan(&idStr)
 	if errors.Is(err, pgx.ErrNoRows) {

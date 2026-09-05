@@ -19,7 +19,7 @@ type stubVerifier struct {
 	err    error
 }
 
-func (s stubVerifier) Verify(string) (verify.Claims, error) { return s.claims, s.err }
+func (s stubVerifier) Verify(context.Context, string) (verify.Claims, error) { return s.claims, s.err }
 
 func delegatedReq(bearer string) *http.Request {
 	return delegatedReqPath("/billing/v1/me/balance", bearer)
@@ -198,4 +198,18 @@ func TestDelegatedAuthenticator_PermissionResolverSeesTheRequest(t *testing.T) {
 	})
 	_, err = boom.AuthenticateDelegated(t.Context(), delegatedReq("x.y.z"))
 	require.ErrorIs(t, err, billingauth.ErrUnauthenticated)
+}
+
+// contextVerifier makes a cancelled request observable at the token boundary.
+type contextVerifier struct{}
+
+func (contextVerifier) Verify(ctx context.Context, _ string) (verify.Claims, error) {
+	return verify.Claims{}, ctx.Err()
+}
+func TestRequestVerifierPropagatesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := delegatedReq("token").WithContext(ctx)
+	_, err := RequestVerifierFor(contextVerifier{}).VerifyRequest(req)
+	require.ErrorIs(t, err, context.Canceled)
 }

@@ -42,7 +42,7 @@ func TestFrontendOverride_PasswordResetLinkUsesProductFrontend(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	issuer := "https://controlplane.openrails.test"
-	cfg := hostedTestConfig(dsn, issuer)
+	cfg := hostedTestConfig(t, dsn, issuer)
 	e := newHostApp(t, cfg)
 
 	sender := &captureEmailSender{}
@@ -80,7 +80,7 @@ func TestFrontendAbsent_KeepsPreviousIssuerBasedDefault(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	issuer := "https://controlplane2.openrails.test"
-	cfg := hostedTestConfig(dsn, issuer)
+	cfg := hostedTestConfig(t, dsn, issuer)
 	e := newHostApp(t, cfg)
 
 	sender := &captureEmailSender{}
@@ -117,7 +117,7 @@ func TestTrustedProxies_ClientIPBucketsByForwardedHeader(t *testing.T) {
 
 	run := func(t *testing.T, trustedProxies []string) []int {
 		dsn := dbtest.SharedPostgresDSN(t)
-		cfg := hostedTestConfig(dsn, "https://controlplane.openrails.test")
+		cfg := hostedTestConfig(t, dsn, "https://controlplane.openrails.test")
 		e := newHostApp(t, cfg)
 		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
 			EmailSender:    &captureEmailSender{},
@@ -164,7 +164,7 @@ func TestTrustedProxies_ClientIPBucketsByForwardedHeader(t *testing.T) {
 func TestTrustedProxies_InvalidCIDRFailsAttach(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://controlplane.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://controlplane.openrails.test")
 	e := newHostApp(t, cfg)
 
 	err := embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
@@ -180,7 +180,7 @@ func TestPasswordlessPolicyForwarding(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	t.Run("disabled by default", func(t *testing.T) {
-		cfg := hostedTestConfig(dsn, "https://passwordless-disabled.openrails.test")
+		cfg := hostedTestConfig(t, dsn, "https://passwordless-disabled.openrails.test")
 		e := newHostApp(t, cfg)
 		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
 			HostedPosture: true,
@@ -193,7 +193,7 @@ func TestPasswordlessPolicyForwarding(t *testing.T) {
 	})
 
 	t.Run("login and auto-registration enabled", func(t *testing.T) {
-		cfg := hostedTestConfig(dsn, "https://passwordless-enabled.openrails.test")
+		cfg := hostedTestConfig(t, dsn, "https://passwordless-enabled.openrails.test")
 		e := newHostApp(t, cfg)
 		sender := &captureEmailSender{}
 		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{
@@ -224,7 +224,7 @@ func TestPasswordlessPolicyForwarding(t *testing.T) {
 	})
 
 	t.Run("login without auto-registration", func(t *testing.T) {
-		cfg := hostedTestConfig(dsn, "https://passwordless-login-only.openrails.test")
+		cfg := hostedTestConfig(t, dsn, "https://passwordless-login-only.openrails.test")
 		e := newHostApp(t, cfg)
 		sender := &captureEmailSender{}
 		require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{

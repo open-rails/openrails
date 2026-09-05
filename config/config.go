@@ -23,6 +23,7 @@ import (
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	log "github.com/sirupsen/logrus"
@@ -989,6 +990,12 @@ type RedisConfig struct {
 // permissions are seeded as AuthKit state rather than trusted from runtime
 // config.yaml/.env issuer allow-lists.
 type AuthConfig struct {
+	// DirectPeerIP declares that AuthKit receives the client connection directly.
+	// Configure trusted_proxies instead when a reverse proxy is in front.
+	DirectPeerIP bool `koanf:"direct_peer_ip,omitempty"`
+
+	// Naming is normalized and validated by AuthKit once at construction.
+	Naming authkit.NamingConfig `koanf:"naming,omitempty"`
 	// HARDCUT (#312/#537): there is no `auth.operator_tenant_slug` /
 	// `auth.operator_tenant_admin_roles`. Admin authority is live merchant-local
 	// AuthKit merchant permission-group state (or a deployment-minted admin API
@@ -2021,6 +2028,16 @@ func envKeyToConfigKey(s string) string {
 	// top-level prefix, so these are dead without the special case. The
 	// unprefixed names are poison — Load refuses boot on them.
 	switch s {
+	case "auth_direct_peer_ip":
+		return "auth.direct_peer_ip"
+	case "auth_naming_enabled":
+		return "auth.naming.enabled"
+	case "auth_naming_rename_interval":
+		return "auth.naming.rename_interval"
+	case "auth_naming_former_names_mode":
+		return "auth.naming.former_names.mode"
+	case "auth_naming_former_names_duration":
+		return "auth.naming.former_names.duration"
 	case "authkit_active_key_id":
 		return "auth.active_key_id"
 	case "authkit_active_private_key_pem":

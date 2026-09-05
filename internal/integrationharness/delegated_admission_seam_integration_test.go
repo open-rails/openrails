@@ -57,7 +57,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 		MerchantSource: config.MerchantSourceAPI,
 		SecretBackend:  config.SecretBackendDB,
 		DB:             &config.DBConfig{URL: h.DSN},
-		Auth:           &config.AuthConfig{Issuer: "https://or918.openrails.test"},
+		Auth:           &config.AuthConfig{Issuer: "https://or918.openrails.test", KeysPath: t.TempDir()},
 	}
 	rt, err := embed.New(ctx, embed.Options{
 		Options: embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()},
@@ -98,11 +98,11 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	admissions := 0
 	liveUserGate := func(ctx context.Context, _ *http.Request, cl verify.Claims) error {
 		admissions++
-		allowed, err := core.IsUserAllowed(ctx, cl.UserID)
+		live, err := core.UserLivenessByIDs(ctx, []string{cl.UserID})
 		if err != nil {
 			return fmt.Errorf("liveness lookup: %w", err) // fail closed
 		}
-		if !allowed {
+		if !live[cl.UserID].Allowed {
 			return errors.New("user is not allowed")
 		}
 		return nil
@@ -181,7 +181,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	// still verifies. Without the veto this request would still be a 200.
 	reason := "or918 liveness proof"
 	require.NoError(t, core.BanUser(ctx, adminID, &reason, nil, adminID), "ban the user")
-	verified, verr := cp.AuthService().Verifier().Verify(adminToken)
+	verified, verr := cp.AuthService().Verifier().Verify(ctx, adminToken)
 	require.NoError(t, verr, "the banned user's token still VERIFIES — this is the gap")
 	require.Equal(t, adminID, verified.UserID)
 

@@ -61,26 +61,64 @@ Embedded hosts provision merchants programmatically
 (`embed.Runtime.UpsertMerchantConfig`, same manifest shape) and pass auth at
 HTTP mount time; the issuer-as-owner path below is the standalone mechanism.
 
-## Merchant identity = permission group (or#914)
+## Merchant identity and names
 
-The merchant's NAME is its authkit permission group's instance slug — one
-namespace, one team system. `openrails.merchants.slug` is a synced mirror
-(unique among live rows only), never an independently claimable name:
+The merchant's name is its AuthKit group's instance slug. The group UUID owns
+authorization; the billing merchant UUID owns payments, credits, customers and
+secrets. A non-null billing-to-group binding is immutable, including after
+retirement. Repeated provisioning of the same group returns the same billing
+UUID. A different group claiming an old name cannot take over that billing row.
 
-- **Claims** are arbitrated by the group namespace. Hosted user-driven
-  creation goes through authkit's generated `POST /merchant` (ak#263); see the
-  recipe below.
-- **Renames** (ak#264, `RenamePermissionGroupSlug`): the old slug tombstones
-  and forwards to the same group forever. Every slug-addressed engine surface
-  (merchant-scoped routes, webhook URLs, service-credential refs) resolves the
-  directory table first and falls back through the group namespace, then
-  lazily re-syncs the stale row — published URLs keep working with no
-  operator step.
-- **Deletes**: a plain group delete tombstones the slug (default). A host that
-  proves a merchant was never used may free the name with
-  `DeletePermissionGroup(..., DeletePermissionGroupOptions{ReleaseSlug: true})`
-  and soft-delete the directory row; live-rows-only uniqueness makes the name
-  provisionable again as a NEW merchant.
+For AuthKit-bound merchants, resolve the requested name through AuthKit first,
+then authorize and select billing data by the captured group UUID. The local
+`openrails.merchants.slug` is a display projection. API writes keep their method,
+body, authorization and idempotency key; forwarding is internal resolution, not
+an HTTP redirect to another owner. Webhooks retain provider signature/account
+checks after name resolution.
+
+AuthKit owns one site policy for usernames and group names. Defaults allow a
+rename every **72 hours** and reserve/forward each former name for **90 days**.
+Aliases point directly to the immutable owner. Expiry is checked when resolving
+or claiming a name; cleanup is not required before an expired name is available.
+Later policy changes do not alter promises already recorded for former names.
+
+Standalone configuration (these are the defaults):
+
+```yaml
+auth:
+  naming:
+    enabled: true
+    rename_interval: 72h
+    former_names:
+      mode: finite
+      duration: 2160h
+```
+
+Set `enabled: false` to disallow renames, or `rename_interval: 0s` for immediate
+eligibility. Former-name modes are `finite`, `forever`, and `immediate`; omit
+`duration` for the latter two. Environment equivalents are
+`AUTH_NAMING_ENABLED`, `AUTH_NAMING_RENAME_INTERVAL`,
+`AUTH_NAMING_FORMER_NAMES_MODE`, and `AUTH_NAMING_FORMER_NAMES_DURATION`.
+
+Embedded hosts pass the same `authkit.NamingConfig` through `cfg.Auth.Naming`.
+A non-nil `AttachOptions.Naming` replaces that whole input; AuthKit alone validates
+and supplies defaults. `AttachOptions.NameAdmission` adds a host namespace rule
+for both creation and rename. Creation allowance/payment-method checks remain
+creation-only. The merchant persona's reserved names and slug pattern apply to
+renames too. Customer group handles encode immutable payer IDs and cannot be
+renamed; their display names can change.
+
+Use `ResolveAuthorizedMerchant` at a host authorization boundary. With an empty
+selector it infers the user's sole merchant group by UUID. If an authorized
+operation subsequently calls a name-addressed AuthKit API, carry
+`BindMerchantGroupContext(ctx, merchantID, originalReference)` into that call.
+This pins its target without granting permissions; a deleted target fails closed
+rather than resolving the same spelling to a new owner. Team/API-key wrappers
+already accept the billing UUID and carry this scope themselves.
+
+AuthKit-free embedded hosts explicitly own their local merchant names and
+provide their own authorization. They do not gain AuthKit alias policy by
+attaching a name to an unbound billing row.
 
 ### Hosted creation recipe (registration is provisioning)
 
@@ -140,9 +178,12 @@ Typed refusals: `embcp.ErrEmailUnverified`, `embcp.ErrVaultedPaymentMethodRequir
 dormancy policy: merchants past `cfg.TTL` with NO provider, money, catalog or
 customers (probed per merchant under `MerchantTx`) are warned in
 `openrails.merchant_dormancy_notices`; once a notice is older than
-`cfg.WarningLead`, an ARMED pass (`cfg.Armed`, default off = dry run) deletes
-the merchant group with `ReleaseSlug: true` — the camped name becomes
-claimable again — and soft-deletes the directory row. Notices withdraw on any
+`cfg.WarningLead`, an ARMED pass (`cfg.Armed`, default off = dry run) locks
+and rechecks the merchant, then commits its billing tombstone and retirement
+marker before deleting the captured group UUID with `ReleaseSlug: true`.
+Incomplete group deletion is retried by UUID on the next pass, so it cannot delete
+a new claimant of the released name. Committed retirement and committed merchant
+purge cannot be restored. Notices withdraw on any
 activity. Host wiring: run it on a cadence (openrails-saas: a River worker),
 arm it behind the host's own destructive setting, and deliver the warning to
 the owner if a sender exists — the persisted notice row is the watermark
@@ -269,7 +310,7 @@ Where the values live depends on the mode:
   edit the file/env and reboot.
 - **MODE 2** (`merchant_source: api`): a persistent backend, selected by
   `secret_backend`:
-  - `vault` — Vault KV-v2 at `<mount>/openrails/merchants/<merchant-slug>/<name>`
+  - `vault` — Vault KV-v2 at `<mount>/openrails/merchants/<merchant-uuid>/<name>`
     (e.g. `secret/openrails/merchants/myapp/psps/nmi/live/100001/security_key`);
     a Vault policy can scope a merchant to its own subtree.
   - `db` — `openrails.merchant_secrets`, envelope-encrypted via
@@ -355,7 +396,7 @@ shape mounts ONE surface, all sharing one handler:
 POST /v1/webhooks/:rail                                      # standalone: merchant derived from the
 POST /v1/webhooks/:rail/:account_id                          #   payload's account identity (NMI/CCBill; Stripe with account)
 POST /billing/v1/merchants/:merchant/webhooks/:rail          # embedded: the host pins one merchant,
-POST /billing/v1/merchants/:merchant/webhooks/:rail/:account_id  #   so the slug is the identity
+POST /billing/v1/merchants/:merchant/webhooks/:rail/:account_id  #   slug resolves once to immutable identity
 ```
 
 `:rail` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,

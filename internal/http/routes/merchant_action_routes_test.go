@@ -11,11 +11,13 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/pkg/billingauth"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type fakeMerchantDelegatedResolver struct {
@@ -38,9 +40,12 @@ type merchantActionChecker struct {
 	allowed bool
 }
 
-func (c *merchantActionChecker) HasAdminPermission(_ context.Context, _, _, perm string) (bool, error) {
+func (c *merchantActionChecker) ResolveAuthorizedMerchant(_ context.Context, _, _, perm string) (merchant.ID, string, error) {
 	c.perm = perm
-	return c.allowed, nil
+	if !c.allowed {
+		return merchant.ID{}, "", policy.ErrPermissionRequired
+	}
+	return merchant.ID{}, "", policy.ErrMerchantUnresolved
 }
 
 func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {

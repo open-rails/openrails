@@ -32,7 +32,7 @@ type Merchant struct {
 
 // ProvisionRequest parameterizes merchant provisioning.
 type ProvisionRequest struct {
-	// Slug is the stable merchant slug (used in routes and merchant resolution).
+	// Slug is the current public name; PermissionGroupID owns billing identity.
 	Slug string `json:"slug"`
 	// PermissionGroupID is the merchant's own AuthKit permission-group id (#567).
 	// Required for control-plane provisioning; embedded/no-AuthKit registration
@@ -46,6 +46,8 @@ var ErrMerchantNotFound = errors.New("merchants: merchant not found")
 // ErrPermissionGroupRequired indicates control-plane merchant provisioning
 // tried to create a merchant namespace without its authkit permission-group id.
 var ErrPermissionGroupRequired = errors.New("merchants: permission group required")
+var ErrMerchantBindingConflict = errors.New("merchants: name belongs to a different billing identity")
+var ErrMerchantRetired = errors.New("merchants: billing identity retired")
 
 // DestructivePolicy is the destructive-action gate a merchant purge must clear
 // (#836 kill switch + #835 per-merchant policy). internal/destructive.Gate
@@ -72,8 +74,9 @@ func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) 
 // secrets. Control-plane callers create/resolve the AuthKit permission-group and
 // pass its id explicitly; this service never creates AuthKit authority itself.
 type Service struct {
-	pool    *db.Pool
-	secrets MerchantSecretStore
+	pool     *db.Pool
+	database *db.DB
+	secrets  MerchantSecretStore
 	// providerEnvironment is the deployment posture (#681): test under
 	// test_mode, live otherwise. Scoped credential lookups resolve
 	// psps rows in THIS environment only.
@@ -94,6 +97,7 @@ type Service struct {
 	// that miss the directory table retry through the authkit merchant-group
 	// namespace (which follows ak#264 tombstones). Nil = table-only.
 	groupSlugResolver GroupSlugResolver
+	groupIDResolver   GroupIDResolver
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
@@ -117,7 +121,13 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 	if env == "" {
 		return nil, fmt.Errorf("merchants: provider environment must be live or test, got %q", providerEnvironment)
 	}
-	return &Service{pool: pool, secrets: secrets, providerEnvironment: env, destructive: deniedPolicy{}}, nil
+	service, err := NewDirectoryService(pool)
+	if err != nil {
+		return nil, err
+	}
+	service.secrets = secrets
+	service.providerEnvironment = env
+	return service, nil
 }
 
 // NewDirectoryService builds a directory-only Service: merchant provisioning +
@@ -128,7 +138,11 @@ func NewDirectoryService(pool *db.Pool) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
-	return &Service{pool: pool, destructive: deniedPolicy{}}, nil
+	database, err := db.NewWithPGXPool(pool.Raw(), pool.Schema())
+	if err != nil {
+		return nil, err
+	}
+	return &Service{pool: pool, database: database, destructive: deniedPolicy{}}, nil
 }
 
 // NewSecretManagementService builds a secret-management-only Service. It is for
@@ -144,27 +158,10 @@ func NewSecretManagementService(secrets MerchantSecretStore) (*Service, error) {
 // Secrets exposes the per-merchant secret store (may be nil).
 func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
 
-// Provision idempotently provisions a merchant:
-//
-//  1. create/ensure the openrails.merchants namespace row (resolve by slug),
-//  2. record the merchant permission-group id supplied by the caller.
-//
-// Re-running with the same slug returns the existing merchant (no duplicate row),
-// so provisioning is safe to retry. Default-merchant seeding of catalog/credit
-// definitions is left to the existing bootstrap/seed paths and is not duplicated
-// here.
-//
-// The returned bool reports whether THIS call inserted the directory row
-// (true) or the row already existed (false) — derived from the INSERT's own
-// RETURNING, not a separate existence check, so it stays correct under
-// concurrent first-provisions of the same slug: exactly one racing caller
-// observes true (#750).
+// Provision binds billing identity to the immutable AuthKit group. A conflicting
+// name can never authorize replacing an existing group's binding.
 func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchant, bool, error) {
 	slug := normalizeSlug(req.Slug)
-	if slug == "" {
-		return nil, false, errors.New("merchants: provision requires a slug")
-	}
-	// #567: the merchant slug must be a legal AuthKit permission-group instance slug.
 	if err := merchant.ValidateSlug(slug); err != nil {
 		return nil, false, err
 	}
@@ -173,68 +170,41 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 		return nil, false, ErrPermissionGroupRequired
 	}
 
-	// 1. Insert the merchant directory row. ON CONFLICT(slug) DO NOTHING keeps
-	//    the existing row; RETURNING only yields a row when THIS statement
-	//    performed the insert, which is how `created` is derived race-safely.
-	//    The arbiter is the or#914 LIVE-rows-only unique index (slug WHERE
-	//    deleted_at IS NULL): a soft-deleted row no longer pins its name, so a
-	//    slug authkit released can be provisioned again.
-	var insertedID string
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO openrails.merchants (slug, status, permission_group_id)
-		VALUES ($1, 'active', NULLIF($2,''))
-		ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING
-		RETURNING id::text
-	`, slug, groupID).Scan(&insertedID)
-	created := true
-	settledOnGroupConflict := false
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		created = false
-	case isUniqueViolationOn(err, permissionGroupUniqueIndex):
-		// #898: ON CONFLICT (slug) arbitrates the slug index ONLY. Two
-		// concurrent first-provisions of one slug converge on the same
-		// permission group (authkit's group create is unique on
-		// (persona, instance_slug)), so the loser's speculative insert can
-		// reach uq_merchants_permission_group_id before the slug arbiter and
-		// raise 23505 instead of settling. The unique check already waited out
-		// the winner's transaction, so the winner's row is committed: settle
-		// under the conflict by converging on it below, exactly as
-		// db.EnsureCustomerRow does for its own first-touch race (#889).
-		// A group bound to a DIFFERENT slug is a genuine 1:1 violation and
-		// still fails — that is the no-row-for-this-slug branch.
-		created, settledOnGroupConflict = false, true
-	case err != nil:
-		return nil, false, fmt.Errorf("merchants: insert merchant %q: %w", slug, err)
+	// Repeated provisioning (including after rename) settles by group, not name.
+	m, err := s.merchantByGroupID(ctx, groupID)
+	if err == nil {
+		return m, false, nil
 	}
-
-	t, rerr := s.merchantBySlug(ctx, slug)
-	if rerr != nil {
-		if settledOnGroupConflict {
-			return nil, false, fmt.Errorf("merchants: permission group %q is already bound to another merchant: %w", groupID, err)
-		}
-		return nil, false, rerr
-	}
-
-	// 2. Record the merchant's own permission-group id (#567). Idempotent — and
-	//    a no-op on the settle path, where the winner already wrote it.
-	if _, uerr := s.pool.Exec(ctx, `
-			UPDATE openrails.merchants
-			   SET permission_group_id = $2, updated_at = current_timestamp
-			 WHERE id = $1::uuid AND permission_group_id IS DISTINCT FROM $2
-		`, t.ID.String(), groupID); uerr != nil {
-		if isUniqueViolationOn(uerr, permissionGroupUniqueIndex) {
-			return nil, false, fmt.Errorf("merchants: permission group %q is already bound to another merchant: %w", groupID, uerr)
-		}
-		return nil, false, fmt.Errorf("merchants: record permission group on merchant: %w", uerr)
-	}
-	t.PermissionGroupID = groupID
-
-	t, err = s.merchantBySlug(ctx, slug)
-	if err != nil {
+	if !errors.Is(err, ErrMerchantNotFound) {
 		return nil, false, err
 	}
-	return t, created, nil
+	var insertedID string
+	err = s.pool.QueryRow(ctx, `
+  INSERT INTO openrails.merchants (slug, status, permission_group_id)
+  VALUES ($1, 'active', $2)
+  ON CONFLICT DO NOTHING
+  RETURNING id::text
+ `, slug, groupID).Scan(&insertedID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, fmt.Errorf("merchants: provision %q: %w", slug, err)
+	}
+	created := err == nil
+	m, err = s.merchantByGroupID(ctx, groupID)
+	if errors.Is(err, ErrMerchantNotFound) {
+		return nil, false, fmt.Errorf("%w: %q", ErrMerchantBindingConflict, slug)
+	}
+	return m, created, err
+}
+
+// merchantByGroupID includes retired rows so the same group cannot silently
+// acquire a new billing identity after deletion.
+func (s *Service) merchantByGroupID(ctx context.Context, groupID string) (*Merchant, error) {
+	m, err := scanMerchant(s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
+  FROM openrails.merchants WHERE permission_group_id = $1`, groupID))
+	if err == nil && m.Status != StatusActive {
+		return nil, ErrMerchantRetired
+	}
+	return m, err
 }
 
 // Get returns the merchant directory row by id.
@@ -242,21 +212,29 @@ func (s *Service) Get(ctx context.Context, id merchant.ID) (*Merchant, error) {
 	return s.merchantByID(ctx, id)
 }
 
-// GetBySlug returns the merchant directory row by slug. A miss retries
-// through the authkit group namespace when the or#914 rename-forwarding seam
-// is wired (renamed-away slugs forward via their ak#264 tombstones).
+// GetBySlug uses AuthKit as the naming authority when configured. A stale local
+// display projection must never override alias expiry or a new name owner.
+// AuthKit-free hosts resolve their explicitly configured local directory.
 func (s *Service) GetBySlug(ctx context.Context, slug string) (*Merchant, error) {
 	norm := normalizeSlug(slug)
-	m, err := s.merchantBySlug(ctx, norm)
-	if errors.Is(err, ErrMerchantNotFound) {
-		return s.merchantByGroupFallback(ctx, norm)
+	if s.groupSlugResolver != nil {
+		return s.merchantByGroupName(ctx, norm)
 	}
-	return m, err
+	return s.merchantBySlug(ctx, norm)
+}
+
+// GetByGroupID selects the billing identity already authorized by the caller.
+func (s *Service) GetByGroupID(ctx context.Context, groupID string) (*Merchant, error) {
+	if strings.TrimSpace(groupID) == "" {
+		return nil, ErrPermissionGroupRequired
+	}
+	return s.merchantByGroupID(ctx, groupID)
 }
 
 // DirectoryRef is a merchant's public-facing directory identity: the slug it is
 // addressed by and the human-readable name an operator gave it.
 type DirectoryRef struct {
+	ID          merchant.ID
 	Slug        string
 	DisplayName string
 }
@@ -295,13 +273,38 @@ func (s *Service) ListDirectoryRefs(ctx context.Context, slugs []string) ([]Dire
 	if len(normalized) == 0 {
 		return nil, nil
 	}
-	rows, err := gen.New(s.pool).ListMerchantDirectoryRefs(ctx, normalized)
+	var rows []gen.ListMerchantDirectoryRefsRow
+	var err error
+	if s.groupSlugResolver != nil {
+		canonical := map[uuid.UUID]string{}
+		ids := make([]uuid.UUID, 0, len(normalized))
+		for _, name := range normalized {
+			found, e := s.GetBySlug(ctx, name)
+			if errors.Is(e, ErrMerchantNotFound) {
+				continue
+			}
+			if e != nil {
+				return nil, e
+			}
+			if _, exists := canonical[found.ID.UUID()]; !exists {
+				ids = append(ids, found.ID.UUID())
+			}
+			canonical[found.ID.UUID()] = found.Slug
+		}
+		resolved, e := gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefsByIDs(ctx, ids)
+		err = e
+		for _, row := range resolved {
+			rows = append(rows, gen.ListMerchantDirectoryRefsRow{ID: row.ID, Slug: canonical[row.ID], DisplayName: row.DisplayName})
+		}
+	} else {
+		rows, err = gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefs(ctx, normalized)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("merchants: list directory refs: %w", err)
 	}
 	refs := make([]DirectoryRef, 0, len(rows))
 	for _, row := range rows {
-		refs = append(refs, DirectoryRef{Slug: row.Slug, DisplayName: row.DisplayName})
+		refs = append(refs, DirectoryRef{ID: merchant.ID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName})
 	}
 	return refs, nil
 }
@@ -388,13 +391,13 @@ func scanMerchant(row pgx.Row) (*Merchant, error) {
 }
 
 func (s *Service) merchantBySlug(ctx context.Context, slug string) (*Merchant, error) {
-	row := s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
+	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
 		FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`, slug)
 	return scanMerchant(row)
 }
 
 func (s *Service) merchantByID(ctx context.Context, id merchant.ID) (*Merchant, error) {
-	row := s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
+	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
 		FROM openrails.merchants WHERE id = $1::uuid AND deleted_at IS NULL`, id.String())
 	return scanMerchant(row)
 }

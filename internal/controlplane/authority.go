@@ -5,8 +5,10 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 
+	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -16,28 +18,45 @@ import (
 // explicitly rather than silently allowing or denying.
 var ErrNoControlPlane = errors.New("controlplane: not configured")
 
-// HasAdminPermission reports whether the given user holds perm in the named
-// MERCHANT permission-group according to LIVE AuthKit group state (not stale JWT
-// claims). Under the permission-group model (#567) merchant-admin authority is a
-// role on the merchant group (`type=merchant`, `resourceRef=merchantRef`); the
-// merchant `owner` auto-holds `merchant:*`.
-//
-// merchantRef is the merchant slug (the group's resource ref). An empty ref
-// yields no authority (there is no operator fallback): the caller must present a
-// merchant context.
-func (c *ControlPlane) HasAdminPermission(ctx context.Context, merchantRef, userID, perm string) (bool, error) {
+// ResolveAuthorizedMerchant captures one group UUID from the explicit name or,
+// when empty, the user's sole merchant membership. Live authorization and billing
+// selection use that same UUID; inference never resolves a mutable name again.
+func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, merchantRef, userID, perm string) (merchant.ID, string, error) {
 	if c == nil || c.Core() == nil {
-		return false, ErrNoControlPlane
+		return merchant.ID{}, "", ErrNoControlPlane
+	}
+	if strings.TrimSpace(userID) == "" {
+		return merchant.ID{}, "", policy.ErrPermissionRequired
 	}
 	ref := strings.ToLower(strings.TrimSpace(merchantRef))
+	var group authkit.GroupInstance
+	var err error
 	if ref == "" {
-		return false, nil
+		group, err = c.merchantGroupForUser(ctx, strings.TrimSpace(userID))
+	} else {
+		group, err = c.Core().GroupInstanceForSlug(ctx, MerchantType, ref)
 	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return false, nil
+	if errors.Is(err, authkit.ErrGroupNotFound) {
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
 	}
-	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, MerchantType, ref, strings.TrimSpace(perm))
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	allowed, err := c.Core().CanOnGroup(ctx, strings.TrimSpace(userID), authcore.SubjectKindUser, group.ID, strings.TrimSpace(perm))
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	if !allowed {
+		return merchant.ID{}, "", policy.ErrPermissionRequired
+	}
+	mid, _, err := c.merchantForGroupID(ctx, group.ID)
+	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+	}
+	if err != nil {
+		return merchant.ID{}, "", err
+	}
+	return mid, group.InstanceSlug, nil
 }
 
 // HasRootPermission reports whether the user holds perm in the singleton ROOT
@@ -56,40 +75,29 @@ func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm strin
 	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, authcore.RootPersona, "", strings.TrimSpace(perm))
 }
 
-// ErrMerchantAmbiguous is returned by MerchantForUser when a user is a member of
-// more than one merchant group: the active merchant cannot be inferred from
-// membership alone and the caller must present an explicit merchant selector.
+// ErrMerchantAmbiguous requires an explicit selector when several distinct
+// merchant groups are present in the user's live memberships.
 var ErrMerchantAmbiguous = errors.New("controlplane: user belongs to multiple merchants")
 
-// MerchantForUser resolves the merchant a user session is acting on from the
-// user's LIVE merchant-group membership (#567: a user access token carries no
-// merchant claim, so /v1/merchant routes resolve the merchant from the
-// permission-group the user belongs to). Returns the merchant slug (the group's
-// resource ref) when the user is a member of exactly one merchant group, "" when
-// the user belongs to none, or ErrMerchantAmbiguous when more than one.
-func (c *ControlPlane) MerchantForUser(ctx context.Context, userID string) (string, error) {
-	if c == nil || c.Core() == nil {
-		return "", ErrNoControlPlane
-	}
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return "", nil
-	}
+func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) (authkit.GroupInstance, error) {
 	memberships, err := c.Core().ListSubjectGroups(ctx, userID, authcore.SubjectKindUser)
 	if err != nil {
-		return "", err
+		return authkit.GroupInstance{}, err
 	}
-	var ref string
-	for _, m := range memberships {
-		if m.Persona != MerchantType || strings.TrimSpace(m.InstanceSlug) == "" {
+	var groupID string
+	for _, membership := range memberships {
+		if membership.Persona != MerchantType {
 			continue
 		}
-		if ref != "" && !strings.EqualFold(ref, m.InstanceSlug) {
-			return "", ErrMerchantAmbiguous
+		if groupID != "" && groupID != membership.GroupID {
+			return authkit.GroupInstance{}, ErrMerchantAmbiguous
 		}
-		ref = m.InstanceSlug
+		groupID = membership.GroupID
 	}
-	return ref, nil
+	if groupID == "" {
+		return authkit.GroupInstance{}, policy.ErrMerchantUnresolved
+	}
+	return c.Core().GroupInstanceByID(ctx, groupID)
 }
 
 // ResolveMerchantForGroup resolves a merchant by its reference (the merchant slug,
@@ -102,9 +110,12 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef 
 	}
 	ref := strings.ToLower(strings.TrimSpace(merchantRef))
 	if ref == "" {
-		return merchant.ID{}, "", ErrServiceCredentialMerchantUnresolved
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
 	}
 	mid, mslug, err := c.MerchantScope(ctx, ref)
+	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
+		return merchant.ID{}, "", policy.ErrMerchantUnresolved
+	}
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
@@ -113,8 +124,7 @@ func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, merchantRef 
 
 // MerchantGroupSlugResolver returns the or#914 rename-forwarding seam for the
 // merchants directory service: slug -> the bound merchant group's id and
-// CURRENT slug, following ak#264 tombstones so renamed-away slugs resolve to
-// the same group forever. Wire it with merchants.Service.WithGroupSlugResolver
+// CURRENT slug, following only aliases still reserved by AuthKit's naming policy. Wire it with merchants.Service.WithGroupSlugResolver
 // wherever both the control plane and a directory service exist.
 func (c *ControlPlane) MerchantGroupSlugResolver() merchants.GroupSlugResolver {
 	return func(ctx context.Context, slug string) (string, string, error) {
@@ -123,6 +133,9 @@ func (c *ControlPlane) MerchantGroupSlugResolver() merchants.GroupSlugResolver {
 			return "", "", ErrNoControlPlane
 		}
 		gi, err := core.GroupInstanceForSlug(ctx, MerchantType, strings.ToLower(strings.TrimSpace(slug)))
+		if errors.Is(err, authkit.ErrGroupNotFound) {
+			return "", "", merchants.ErrMerchantNotFound
+		}
 		if err != nil {
 			return "", "", err
 		}
@@ -142,4 +155,23 @@ func (c *ControlPlane) IsAdmin(ctx context.Context, merchantRef, userID string) 
 		return false, nil
 	}
 	return c.Core().Can(ctx, strings.TrimSpace(userID), authcore.SubjectKindUser, MerchantType, ref, PermMerchantSettingsRead)
+}
+
+func (c *ControlPlane) MerchantGroupIDResolver() merchants.GroupIDResolver {
+	return func(ctx context.Context, groupID string) (string, error) {
+		if c == nil || c.Core() == nil {
+			return "", ErrNoControlPlane
+		}
+		group, err := c.Core().GroupInstanceByID(ctx, groupID)
+		if errors.Is(err, authkit.ErrGroupNotFound) {
+			return "", merchants.ErrMerchantNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		if group.Persona != MerchantType {
+			return "", merchants.ErrMerchantNotFound
+		}
+		return group.InstanceSlug, nil
+	}
 }

@@ -48,7 +48,9 @@ func (d *DB) Qx(ctx context.Context) gen.DBTX {
 	if d.pgtx != nil {
 		return d.pgtx
 	}
-	if lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); ok {
+	if lc, err := d.merchantConn(ctx); err != nil {
+		return errDBTX{err}
+	} else if lc != nil {
 		return d.rw.wrapDBTX(lc)
 	}
 	if d.pool != nil {
@@ -113,7 +115,11 @@ func (d *DB) pgxBegin(ctx context.Context) (pgx.Tx, error) {
 		// Nested: pgx models nesting as savepoints via tx.Begin.
 		return d.pgtx.Begin(ctx)
 	}
-	if lc, ok := ctx.Value(merchantPgxConnKey{}).(*lazyMerchantPgxConn); ok {
+	lc, err := d.merchantConn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if lc != nil {
 		// Begin on the pinned merchant connection (acquiring it now if this is
 		// the request's first sqlc touch) so the tx inherits the session GUC.
 		conn, err := lc.get(ctx)
@@ -241,6 +247,7 @@ func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id merchant.ID) (con
 type lazyMerchantPgxConn struct {
 	pool     *pgxpool.Pool
 	tenantID string
+	schema   string
 
 	mu   sync.Mutex
 	conn *pgxpool.Conn
