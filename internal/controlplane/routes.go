@@ -49,7 +49,7 @@ func (c *ControlPlane) MountedRouteGroups() []authhttp.RouteGroup {
 	}
 	var out []authhttp.RouteGroup
 	seen := map[authhttp.RouteGroup]bool{}
-	for _, spec := range c.authSvc.Routes().DefaultAPI() {
+	for _, spec := range c.authSvc.APIRoutes() {
 		if !seen[spec.Group] {
 			seen[spec.Group] = true
 			out = append(out, spec.Group)
@@ -71,7 +71,7 @@ func (c *ControlPlane) RouteSpecs() []authhttp.RouteSpec {
 	if len(groups) == 0 {
 		return nil
 	}
-	specs := c.authSvc.Routes().Groups(groups...)
+	specs := c.authSvc.APIRoutes(groups...)
 	out := make([]authhttp.RouteSpec, len(specs))
 	copy(out, specs)
 	for i := range out {
