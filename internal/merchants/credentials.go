@@ -289,8 +289,8 @@ func (s *Service) activePSPSecretScope(ctx context.Context, id merchant.ID, rail
 	}
 	rail = normalizeProviderSecretType(rail)
 	var row gen.OpenrailsPsp
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		q := s.database.Gen(ctx)
 		count, err := q.CountActivePSPsForNewWork(ctx, gen.CountActivePSPsForNewWorkParams{
 			MerchantID:  id.UUID(),
 			Rail:        rail,
@@ -362,8 +362,8 @@ func (s *Service) PSPKeyArchived(ctx context.Context, id merchant.ID, key, envir
 		return false, fmt.Errorf("PSP environment must be live or test")
 	}
 	archived := false
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		return s.database.Qx(ctx).QueryRow(ctx, `
 				SELECT EXISTS (
 					SELECT 1 FROM openrails.psps
 					 WHERE merchant_id = $1::uuid
@@ -393,8 +393,8 @@ func (s *Service) PSPScopeByKey(ctx context.Context, id merchant.ID, key, enviro
 	}
 	var scope pspSecretScope
 	var evidence []byte
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		return s.database.Qx(ctx).QueryRow(ctx, `
 				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
@@ -429,8 +429,8 @@ func (s *Service) ActivePSPScopesForRail(ctx context.Context, id merchant.ID, ra
 		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
 	var out []PSPScope
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		rows, err := s.database.Qx(ctx).Query(ctx, `
 				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
@@ -473,8 +473,8 @@ func (s *Service) activePSPScopes(ctx context.Context, id merchant.ID, environme
 		return nil, fmt.Errorf("PSP environment must be live or test")
 	}
 	var out []PSPScope
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, `
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		rows, err := s.database.Qx(ctx).Query(ctx, `
 				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
@@ -517,8 +517,8 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	rail = normalizeProviderSecretType(rail)
 	var scope pspSecretScope
 	var evidence []byte
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		return s.database.Qx(ctx).QueryRow(ctx, `
 				SELECT rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
@@ -577,8 +577,8 @@ func (s *Service) newestPSPScope(ctx context.Context, id merchant.ID, rail, envi
 	}
 	var scope pspSecretScope
 	var evidence []byte
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		return s.database.Qx(ctx).QueryRow(ctx, `
 				SELECT id, rail, environment, account_id, evidence
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
@@ -666,8 +666,8 @@ func (s *Service) ResolvePSPID(ctx context.Context, id merchant.ID, rail, accoun
 	}
 	rail = normalizeProviderSecretType(rail)
 	var pid uuid.UUID
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		return s.database.Qx(ctx).QueryRow(ctx, `
 			SELECT id FROM openrails.psps
 			 WHERE merchant_id = $1::uuid
 			   AND rail = lower($2)
@@ -893,8 +893,8 @@ func (s *Service) ProbeLiveRailPSPs(ctx context.Context, rail string) (LiveRailP
 	live := "live"
 	for _, id := range ids {
 		found := false
-		if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-			n, err := gen.New(tx).CountPSPsForRailEnvironment(ctx, gen.CountPSPsForRailEnvironmentParams{
+		if err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+			n, err := s.database.Gen(ctx).CountPSPsForRailEnvironment(ctx, gen.CountPSPsForRailEnvironmentParams{
 				MerchantID:  uuid.UUID(id),
 				Rail:        rail,
 				Environment: &live,
@@ -972,9 +972,9 @@ func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, ra
 	}
 	rail = normalizeProviderSecretType(rail)
 	var count int64
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		var e error
-		count, e = gen.New(tx).CountActivePSPsForNewWork(ctx, gen.CountActivePSPsForNewWorkParams{
+		count, e = s.database.Gen(ctx).CountActivePSPsForNewWork(ctx, gen.CountActivePSPsForNewWorkParams{
 			MerchantID:  id.UUID(),
 			Rail:        rail,
 			Environment: &environment,
