@@ -276,12 +276,15 @@ func defineCustomCreditUnit(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID
 	}
 	if strings.HasPrefix(unit, "credit:") {
 		id, err := uuid.Parse(strings.TrimPrefix(unit, "credit:"))
-		if err != nil {
+		if err != nil || id == uuid.Nil || money.CreditUnitCode(id) != unit {
 			return "", fmt.Errorf("invalid custom unit identity")
 		}
 		row, err := gen.New(tx).GetCustomCreditTypeByID(ctx, gen.GetCustomCreditTypeByIDParams{MerchantID: merchantID, ID: id})
 		if err != nil {
 			return "", err
+		}
+		if !row.Active {
+			return "", fmt.Errorf("custom credit unit is inactive")
 		}
 		return money.CreditUnitCode(row.ID), nil
 	}

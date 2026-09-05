@@ -679,3 +679,45 @@ func ServiceExtendHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "extend failed")
 	}
 }
+func ServiceGetInvokerCredits(r *httprequest.Request) {
+	invokerID := strings.TrimSpace(r.Param("invoker"))
+	if invokerID == "" {
+		r.ErrorJSON(http.StatusBadRequest, "invoker required")
+		return
+	}
+	payer, err := parseServiceCustomerID(r.Request.URL.Query().Get("customer_id"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
+	if payer == nil {
+		personal := billingidentity.CustomerIDFromString(invokerID)
+		if personal.IsZero() {
+			r.ErrorJSON(http.StatusNotFound, "balance not found")
+			return
+		}
+		payer = &personal
+	}
+	if !requireServiceCustomerScope(r, *payer) {
+		return
+	}
+	currency, ok := serviceRequiredCurrency(r, r.Request.URL.Query().Get("currency"))
+	if !ok {
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	balance, err := svc.GetCreditsByType(r.Request.Context(), payer.UUID().String(), currency)
+	if err != nil {
+		r.ErrorJSON(http.StatusNotFound, "balance not found")
+		return
+	}
+	r.SuccessJSON(map[string]any{
+		"currency":     balance.Currency,
+		"balance":      balance.Balance,
+		"held_balance": balance.HeldBalance,
+	})
+}

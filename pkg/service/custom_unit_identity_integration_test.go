@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -68,13 +69,22 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	canonical := money.CreditUnitCode(unitA)
 	_, err = admin.Exec(ctx, `UPDATE openrails.custom_credit_types SET decimals=3 WHERE merchant_id=$1 AND id=$2`, merchantA.UUID(), unitA)
 	require.NoError(t, err)
-	require.NoError(t, svc.SyncCatalogSidecars(a, SyncCatalogSidecarsRequest{CreditBalances: []CatalogCreditBalanceSpec{{Key: "tokens", Unit: old + "/tokens"}}}))
+	productKey := prefix + "-topup"
+	_, err = admin.Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Tokens')`, uuid.New(), merchantA.UUID(), productKey)
+	require.NoError(t, err)
+	require.NoError(t, svc.SyncCatalogSidecars(a, SyncCatalogSidecarsRequest{
+		CreditBalances:  []CatalogCreditBalanceSpec{{Key: "tokens", Unit: old + "/tokens"}},
+		CreditPurchases: []CatalogCreditPurchasePriceSpec{{ProductKey: productKey, Ordinal: 1, CreditKey: "tokens", Currency: "USD", Price: json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":10000}}`)}},
+	}))
 	scale, err := svc.CreditUnitDecimals(a, old+"/tokens")
 	require.NoError(t, err)
 	require.Equal(t, 3, scale, "catalog updates preserve an existing unit's scale and UUID")
 	var catalogUnit string
 	require.NoError(t, admin.QueryRow(ctx, `SELECT unit FROM openrails.catalog_credit_balances WHERE merchant_id=$1 AND key='tokens'`, merchantA.UUID()).Scan(&catalogUnit))
 	require.Equal(t, canonical, catalogUnit)
+	quote, err := rt.MoneyService.QuoteCatalogCreditPurchase(a, money.CatalogCreditPurchaseQuoteInput{ProductKey: productKey, Credits: 100})
+	require.NoError(t, err, "cold quote must retain the merchant connection during registry resolution")
+	require.Equal(t, canonical, quote.Unit)
 	payer := identity.CustomerID(uuid.New())
 	key, err := NewDepositIdempotencyKey("admin", uuid.NewString())
 	require.NoError(t, err)
@@ -114,6 +124,9 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	empty, err := svc.GetCreditAccount(b, payer, old+"/tokens")
 	require.NoError(t, err)
 	require.Zero(t, empty.BalanceAmount)
+	quote, err = rt.MoneyService.QuoteCatalogCreditPurchase(a, money.CatalogCreditPurchaseQuoteInput{ProductKey: productKey, Credits: 100})
+	require.NoError(t, err)
+	require.Equal(t, canonical, quote.Unit, "reclaimed spelling cannot change a stored catalog unit")
 	_, err = svc.GetCreditAccount(b, payer, canonical)
 	require.Error(t, err, "foreign registry UUID must not bypass ownership")
 	// A custom unit cannot turn an excess capture into fiat debt. A refused

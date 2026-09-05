@@ -63,6 +63,7 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	rt := &app.Runtime{Merchants: directory, DB: database, MoneyService: ms, EntitlementService: entitlements.NewEntitlementService(database), RedisClient: redis}
 	mux := http.NewServeMux()
 	RegisterMerchantActionRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, Options{Gate: creditSupportGate{actor: uuid.NewString()}})
+	RegisterServiceRoutes(router.NewMux(mux, "/v1/merchant", rt), rt, Options{Gate: creditSupportGate{actor: uuid.NewString()}})
 	customer := identity.CustomerID(uuid.New())
 	mid := dbtest.TestMerchantID.UUID()
 	path := fmt.Sprintf("/v1/merchant/customers/%s/credits", customer.UUID())
@@ -150,6 +151,10 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 		require.Equal(t, 200, code, page)
 		require.EqualValues(t, unit.decimals, page["unit_decimals"])
 		require.EqualValues(t, 125, page["grants"].([]any)[0].(map[string]any)["amount"])
+		code, invokerBalance := request(http.MethodGet, fmt.Sprintf("/v1/merchant/invokers/%s/credits?currency=%s", customer.UUID(), url.QueryEscape(unit.code)), "owner", mid, nil)
+		require.Equal(t, 200, code, invokerBalance)
+		require.Equal(t, unit.code, invokerBalance["currency"])
+		require.EqualValues(t, 125, invokerBalance["balance"])
 	}
 	code, profile := request(http.MethodGet, fmt.Sprintf("/v1/merchant/customers/%s", customer.UUID()), "viewer", mid, nil)
 	require.Equal(t, 200, code, profile)

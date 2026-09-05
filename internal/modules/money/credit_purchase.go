@@ -175,25 +175,15 @@ ORDER BY cpp.ordinal`, tid.UUID(), productKey, currency, provider)
 		if count > 1 {
 			return fmt.Errorf("credit purchase %q has multiple matching offers; specify currency/provider", productKey)
 		}
-		return nil
+		row.Unit = normalizeUnit(row.Unit)
+		_, _, err = s.ResolveUnit(ctx, row.Unit)
+		return err
 	})
-	if err != nil {
-		return catalogCreditPurchaseRow{}, err
-	}
-	row.Unit, err = s.qualifyCatalogCreditUnit(ctx, row.Unit)
 	if err != nil {
 		return catalogCreditPurchaseRow{}, err
 	}
 	row.Currency = normalizeCurrency(row.Currency)
 	return row, nil
-}
-
-func (s *MoneyService) qualifyCatalogCreditUnit(ctx context.Context, unit string) (string, error) {
-	code := normalizeUnit(unit)
-	if _, _, err := s.ResolveUnit(ctx, code); err != nil {
-		return "", err
-	}
-	return code, nil
 }
 
 func checkCreditPurchaseSpend(row catalogCreditPurchaseRow, spend int64) error {
