@@ -54,14 +54,17 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	secrets := merchants.NewMemorySecretStore()
 	// Deployment posture is test_mode (#681): the merchants service resolves
 	// environment=test rows; live rows are seeded alongside to prove isolation.
-	svc, err := merchants.NewService(db.WrapPool(pool, ""), secrets, "test")
+	directory := db.WrapPool(pool, "")
+	svc, err := merchants.NewService(directory, secrets, "test")
 	require.NoError(t, err)
 
 	suffix := strings.ReplaceAll(uuid.NewString()[:8], "-", "")
 	acmeSlug, evilSlug := "acme-"+suffix, "evil-"+suffix
-	acme, _, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: acmeSlug, PermissionGroupID: "group-acme-" + suffix})
+	// This host has no AuthKit name authority. Its webhook paths resolve the
+	// explicit unbound namespace; bound group projections are not selectors.
+	acme, err := db.RegisterUnboundMerchant(ctx, directory, db.RegisterUnboundMerchantOptions{Slug: acmeSlug})
 	require.NoError(t, err)
-	evil, _, err := svc.Provision(ctx, merchants.ProvisionRequest{Slug: evilSlug, PermissionGroupID: "group-evil-" + suffix})
+	evil, err := db.RegisterUnboundMerchant(ctx, directory, db.RegisterUnboundMerchantOptions{Slug: evilSlug})
 	require.NoError(t, err)
 
 	// PSP identities are GLOBALLY unique (uq_psps_identity),
@@ -72,23 +75,23 @@ func TestMerchantWebhookRouteHTTPResolvesMerchantBeforeVerifyingStripe(t *testin
 	nmiAcme, nmiEvil := "nmi_acme_account_"+suffix, "nmi_evil_account_"+suffix
 	nmiAcmeTest, nmiArchived := "nmi_acme_test_"+suffix, "nmi_acme_archived_"+suffix
 	ccbillAcct := "945282-0000"
-	seedPSP(t, seed, acme.ID.String(), "stripe", acctAcme)
-	seedPSP(t, seed, evil.ID.String(), "stripe", acctEvil)
-	seedPSP(t, seed, acme.ID.String(), "nmi", nmiAcme)
-	seedPSP(t, seed, evil.ID.String(), "nmi", nmiEvil)
-	seedArchivedPSPEnv(t, seed, acme.ID.String(), "nmi", "test", nmiArchived)
+	seedPSP(t, seed, acme.String(), "stripe", acctAcme)
+	seedPSP(t, seed, evil.String(), "stripe", acctEvil)
+	seedPSP(t, seed, acme.String(), "nmi", nmiAcme)
+	seedPSP(t, seed, evil.String(), "nmi", nmiEvil)
+	seedArchivedPSPEnv(t, seed, acme.String(), "nmi", "test", nmiArchived)
 	// NO live ccbill rows anywhere: the #668 test_mode IP-allowlist bypass is
 	// refused while any environment=live ccbill account exists in the catalog.
-	seedPSPEnv(t, seed, acme.ID.String(), "stripe", "test", acctAcmeTest)
-	seedPSPEnv(t, seed, acme.ID.String(), "nmi", "test", nmiAcmeTest)
-	seedPSPEnv(t, seed, acme.ID.String(), "ccbill", "test", ccbillAcct)
-	putProviderSecret(t, ctx, secrets, acme.ID, "stripe", acctAcme, "webhook_signing_secret", "whsec_acme")
-	putProviderSecret(t, ctx, secrets, evil.ID, "stripe", acctEvil, "webhook_signing_secret", "whsec_evil")
-	putProviderSecret(t, ctx, secrets, acme.ID, "nmi", nmiAcme, "webhook_signing_secret", "nmi_acme")
-	putProviderSecret(t, ctx, secrets, evil.ID, "nmi", nmiEvil, "webhook_signing_secret", "nmi_evil")
-	putProviderSecretEnv(t, ctx, secrets, acme.ID, "nmi", "test", nmiArchived, "webhook_signing_secret", "nmi_archived")
-	putProviderSecretEnv(t, ctx, secrets, acme.ID, "stripe", "test", acctAcmeTest, "webhook_signing_secret", "whsec_acme_test")
-	putProviderSecretEnv(t, ctx, secrets, acme.ID, "nmi", "test", nmiAcmeTest, "webhook_signing_secret", "nmi_acme_test")
+	seedPSPEnv(t, seed, acme.String(), "stripe", "test", acctAcmeTest)
+	seedPSPEnv(t, seed, acme.String(), "nmi", "test", nmiAcmeTest)
+	seedPSPEnv(t, seed, acme.String(), "ccbill", "test", ccbillAcct)
+	putProviderSecret(t, ctx, secrets, acme, "stripe", acctAcme, "webhook_signing_secret", "whsec_acme")
+	putProviderSecret(t, ctx, secrets, evil, "stripe", acctEvil, "webhook_signing_secret", "whsec_evil")
+	putProviderSecret(t, ctx, secrets, acme, "nmi", nmiAcme, "webhook_signing_secret", "nmi_acme")
+	putProviderSecret(t, ctx, secrets, evil, "nmi", nmiEvil, "webhook_signing_secret", "nmi_evil")
+	putProviderSecretEnv(t, ctx, secrets, acme, "nmi", "test", nmiArchived, "webhook_signing_secret", "nmi_archived")
+	putProviderSecretEnv(t, ctx, secrets, acme, "stripe", "test", acctAcmeTest, "webhook_signing_secret", "whsec_acme_test")
+	putProviderSecretEnv(t, ctx, secrets, acme, "nmi", "test", nmiAcmeTest, "webhook_signing_secret", "nmi_acme_test")
 
 	// SEC-19: the CCBill source-IP gate has no blanket test_mode bypass — the
 	// httptest client's loopback address must be DECLARED, and is still only
