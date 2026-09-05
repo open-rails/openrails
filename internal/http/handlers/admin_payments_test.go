@@ -6,37 +6,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// #696: the CCBill admin refund branch resolves the DataLink refund target from
-// a payment + its subscription. The DB load lives in prepareAdminRefund; this
-// pins the pure resolution + guards.
-func TestCCBillRefundTarget(t *testing.T) {
-	payment := &models.Payment{Rail: models.RailCCBill, TransactionID: "TX_999"}
-	sub := &models.Subscription{RailSubscriptionID: "sub_123"}
-
-	subID, txnID, err := ccbillRefundTarget(payment, sub)
-	require.NoError(t, err)
-	assert.Equal(t, "sub_123", subID, "subscriptionId comes off the subscription row")
-	assert.Equal(t, "TX_999", txnID, "transaction id comes off the payment")
-
-	// A payment with no linked subscription cannot resolve the CCBill sub id.
-	_, _, err = ccbillRefundTarget(payment, nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no linked subscription")
-
-	// A subscription without a rail id cannot be refunded.
-	_, _, err = ccbillRefundTarget(payment, &models.Subscription{RailSubscriptionID: "  "})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "rail subscription id")
-
-	// A payment with no transaction id cannot be narrowed to a charge.
-	_, _, err = ccbillRefundTarget(&models.Payment{Rail: models.RailCCBill}, sub)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "transaction id")
-}
 
 func TestAdminRefundReservationTransactionIDIsStableAndScoped(t *testing.T) {
 	paymentID := uuid.New()

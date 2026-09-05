@@ -19,7 +19,8 @@ const (
 	// ActionCancelAndRefund cancels a local subscription (the remote side
 	// rides the durable rail-intents ledger — queue-always #679,
 	// breaker-guarded) and refunds one payment through the rail's refund API
-	// via the intents log.
+	// via the intents log. CCBill refund requests are refused before either leg;
+	// cancellation-only remains supported.
 	// Params: subscription_id (uuid, optional — no cancel when absent, e.g. a
 	// pure one-off ownership duplicate); refund_payment_id (uuid, optional —
 	// no refund when absent); at least one of the two is required; amount

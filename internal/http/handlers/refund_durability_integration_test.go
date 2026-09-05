@@ -25,6 +25,34 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestAdminCCBillRefundRejectedBeforeReservationAndAccessChanges(t *testing.T) {
+	for _, amount := range []int64{5_000_000, 10_000_000} {
+		t.Run(fmt.Sprint(amount), func(t *testing.T) {
+			fx := newFindingsFixture(t)
+			payID := fx.seedCompletedPayment("ccbill-"+uuid.NewString(), nil)
+			fx.exec(`UPDATE openrails.payments SET rail='ccbill',psp_id=$2 WHERE id=$1`, payID, fx.pspFor("ccbill"))
+			grant, _, err := fx.rt.ProductAccessService.GrantProductAccess(fx.ctx, productaccess.GrantParams{UserID: fx.customer.String(), ProductID: fx.product, SourceType: models.ProductAccessSourcePurchase, SourceID: payID.String(), PaymentID: &payID})
+			require.NoError(t, err)
+			req := httptest.NewRequest(http.MethodPost, "/refund", strings.NewReader(fmt.Sprintf(`{"amount":%d,"revoke_access":true}`, amount))).WithContext(fx.ctx)
+			req.SetPathValue("id", payID.String())
+			req.Header.Set("Idempotency-Key", "ccbill-refusal")
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			AdminRefundPayment(httprequest.NewHTTP(rec, req, fx.rt))
+			require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
+			require.Contains(t, rec.Body.String(), "automatic CCBill refunds are unavailable")
+			var count int
+			require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1`, fx.merchant).Scan(&count))
+			require.Zero(t, count)
+			require.NoError(t, fx.dbi.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM openrails.payments WHERE refunded_payment_id=$1`, payID).Scan(&count))
+			require.Zero(t, count)
+			got, err := fx.rt.ProductAccessService.GetGrant(fx.ctx, grant.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.ProductAccessStatusActive, got.Status)
+		})
+	}
+}
+
 func TestRefundInterruptedBeforeEnqueueMustRemainRetryable(t *testing.T) {
 	fx := newFindingsFixture(t)
 	payID := fx.seedCompletedPayment("audit-"+uuid.NewString(), nil)

@@ -314,6 +314,64 @@ func TestCCBillCancelAmbiguousThenVerifyResolves(t *testing.T) {
 	assert.EqualValues(t, 1, fake.cancelCalls.Load(), "verification is read-only")
 }
 
+// -7 may be an internal/database failure after execution. Even at the old
+// denial retry limit, only the provider-state read can resolve cancellation.
+func TestCCBillCancelMinusSevenRequiresVerification(t *testing.T) {
+	for _, providerStatus := range []string{"1", "2"} {
+		t.Run(providerStatus, func(t *testing.T) {
+			ctx := dbtest.WithTestMerchant(context.Background())
+			fx := seedCCBillSubscription(t)
+			fake, client := newFakeSMS(t, "2")
+			fake.cancelBody.Store(`<results>-7</results>`)
+			require.NoError(t, fx.userService().CancelUserSubscription(ctx, fx.userID.String(), "test feedback"))
+			intentID, _, _, _ := fx.intentRow(t)
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET attempts=3 WHERE id=$1`, intentID)
+			require.NoError(t, err)
+			_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(ctx)
+			require.NoError(t, err)
+			_, status, _, failure := fx.intentRow(t)
+			require.Equal(t, StatusUnknownNeedsVerify, status)
+			require.NotNil(t, failure)
+			require.Contains(t, *failure, "indeterminate provider error")
+			fake.status.Store(providerStatus)
+			fx.forceDue(t, intentID)
+			_, err = fx.runner(client, fullModeConfig()).RunVerifyOnce(ctx)
+			require.NoError(t, err)
+			_, status, _, _ = fx.intentRow(t)
+			if providerStatus == "1" {
+				require.Equal(t, StatusSucceeded, status)
+			} else {
+				require.Equal(t, StatusFailedRetryable, status)
+			}
+			require.EqualValues(t, 1, fake.cancelCalls.Load(), "verification cannot resend the mutation")
+		})
+	}
+}
+
+func TestCCBillCancelExplicitAccessRefusalHasBoundedRetries(t *testing.T) {
+	for _, attempts := range []int{0, 2} {
+		t.Run(fmt.Sprint(attempts), func(t *testing.T) {
+			ctx := dbtest.WithTestMerchant(context.Background())
+			fx := seedCCBillSubscription(t)
+			fake, client := newFakeSMS(t, "2")
+			fake.cancelHTTP.Store(http.StatusForbidden)
+			require.NoError(t, fx.userService().CancelUserSubscription(ctx, fx.userID.String(), "test feedback"))
+			intentID, _, _, _ := fx.intentRow(t)
+			_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.rail_intents SET attempts=$2 WHERE id=$1`, intentID, attempts)
+			require.NoError(t, err)
+			_, err = fx.runner(client, fullModeConfig()).RunExecuteOnce(ctx)
+			require.NoError(t, err)
+			_, status, _, _ := fx.intentRow(t)
+			if attempts == 0 {
+				require.Equal(t, StatusFailedRetryable, status)
+			} else {
+				require.Equal(t, StatusFailedTerminal, status)
+			}
+			require.EqualValues(t, 1, fake.cancelCalls.Load())
+		})
+	}
+}
+
 // A definite provider reject (results=0) is ALSO verify-not-decline: the
 // verifier finds the sub still rebilling and hands it back for retry.
 func TestCCBillCancelRejectVerifiesNotExecuted(t *testing.T) {

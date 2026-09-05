@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -189,27 +190,9 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	}
 
 	var stripeRefundTargetID string
-	var ccbillSubscriptionID, ccbillTransactionID string
 	switch {
 	case payment.Rail == models.RailCCBill:
-		// #696: refund through OUR admin via the DataLink SMS choke point. The
-		// refund action keys off the CCBill subscriptionId (carried on the
-		// subscription row) + the payment's transaction id; the provider mutation
-		// rides the intent ledger. (API refunds also require CCBill's
-		// account-level refund feature; a -7 denial surfaces from the executor.)
-		if payment.SubscriptionID == nil {
-			return nil, ccbillManualRefundError("CCBill refunds are keyed off the linked subscription's CCBill subscription id, and this payment has no linked subscription")
-		}
-		sub, err := subscriptions.NewSubscriptionRepo(txDB).GetByID(ctx, *payment.SubscriptionID)
-		if err != nil {
-			return nil, adminRefundHTTPError(http.StatusBadRequest, "payment cannot be refunded: could not load subscription for the ccbill refund")
-		}
-		subID, txnID, err := ccbillRefundTarget(payment, sub)
-		if err != nil {
-			return nil, ccbillManualRefundError(err.Error())
-		}
-		ccbillSubscriptionID = subID
-		ccbillTransactionID = txnID
+		return nil, adminRefundHTTPError(http.StatusBadRequest, ccbill.ErrRefundUnsupported.Error())
 	case payment.Rail == models.RailStripe:
 		refundTargetID, err := subscriptions.ResolveStripeRefundTarget(payment)
 		if err != nil {
@@ -243,9 +226,6 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 	if payment.Rail == models.RailStripe {
 		providerTarget = stripeRefundTargetID
 	}
-	if payment.Rail == models.RailCCBill {
-		providerTarget = ccbillSubscriptionID
-	}
 	intentType, provider, intentKey, err := intents.RefundIntentFor(payment, idempotencyKey)
 	if err != nil {
 		return nil, err
@@ -259,7 +239,7 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		SubscriptionID: payment.SubscriptionID, PaymentID: &payment.ID, PspID: *payment.PspID,
 		Payload: intents.RefundPayload{OriginalPaymentID: payment.ID, ReservationID: reservation.ID,
 			AmountCents: amountCents, Reason: strings.TrimSpace(req.Reason), RevokeAccess: req.RevokeAccess,
-			ProviderTarget: providerTarget, ProviderTransactionID: ccbillTransactionID},
+			ProviderTarget: providerTarget},
 		IdempotencyKey: intentKey, NextAttemptAt: r.Clock.Now().UTC(),
 		Origin: intents.OriginAdmin, OriginReason: "admin refund request",
 	})
@@ -267,34 +247,6 @@ func prepareAdminRefund(ctx context.Context, r *httprequest.Request, txDB *db.DB
 		return nil, fmt.Errorf("enqueue refund intent: %w", err)
 	}
 	return &adminRefundPrepared{reservationID: reservation.ID, intentID: intent.ID}, nil
-}
-
-// ccbillManualRefundError: this specific payment can't resolve its CCBill
-// refund coordinates, so the API path is out — direct the operator to the
-// manual fallback instead of a dead end.
-func ccbillManualRefundError(why string) error {
-	return adminRefundHTTPError(http.StatusBadRequest,
-		"payment cannot be refunded via the API: "+why+" — refund it manually in the CCBill admin portal")
-}
-
-// ccbillRefundTarget derives the CCBill refund coordinates from a CCBill payment
-// and its (already loaded) subscription: the CCBill subscriptionId (the DataLink
-// voidOrRefundTransaction key, = subscription.rail_subscription_id) + the
-// original transactionId. Both are required — refunding without the exact
-// transaction id lets CCBill pick the latest charge on the subscription.
-func ccbillRefundTarget(payment *models.Payment, sub *models.Subscription) (subscriptionID, transactionID string, err error) {
-	transactionID = strings.TrimSpace(payment.TransactionID)
-	if transactionID == "" {
-		return "", "", errors.New("ccbill payment has no transaction id")
-	}
-	if sub == nil {
-		return "", "", errors.New("ccbill payment has no linked subscription; cannot resolve the CCBill subscription id")
-	}
-	subscriptionID = strings.TrimSpace(sub.RailSubscriptionID)
-	if subscriptionID == "" {
-		return "", "", errors.New("subscription has no CCBill rail subscription id")
-	}
-	return subscriptionID, transactionID, nil
 }
 
 func adminRefundMatchesRequest(existing *models.Payment, req refundRequest) bool {

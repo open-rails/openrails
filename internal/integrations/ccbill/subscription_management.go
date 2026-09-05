@@ -8,11 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
@@ -24,8 +22,8 @@ import (
 // (#696 Phase 0). Confirmed by real viewSubscriptionStatus/cancelSubscription
 // round-trips: endpoint + form params below; response is
 // <?xml version='1.0'?><results>…</results>. cancelSubscription success is a
-// bare <results>1</results>; auth/authz rejection is HTTP 200 + a NEGATIVE
-// bare results code (-7 observed = collapsed auth class). A status read returns
+// bare <results>1</results>. A captured -7 response does not establish a general
+// no-execution guarantee: documented causes include internal errors. A status read returns
 // a document of leaf fields — the real ones seen: subscriptionStatus,
 // recurringSubscription, nextBillingDate, expirationDate, cancelDate,
 // signupDate, timesRebilled, refundsIssued/returnsIssued/voidsIssued/
@@ -38,10 +36,6 @@ const subscriptionManagementPath = "/utils/subscriptionManagement.cgi"
 const (
 	actionViewSubscriptionStatus = "viewSubscriptionStatus"
 	actionCancelSubscription     = "cancelSubscription"
-	// actionVoidOrRefundTransaction voids an unsettled transaction, else refunds
-	// a settled one — one action covers both states (#696 refund leg). WIRE
-	// PROVISIONAL (see RefundTransaction).
-	actionVoidOrRefundTransaction = "voidOrRefundTransaction"
 )
 
 // ErrProviderReadOnly is returned by every CCBill mutation when the provider
@@ -49,29 +43,19 @@ const (
 // mirroring nmi.ErrProviderReadOnly.
 var ErrProviderReadOnly = errors.New("ccbill: provider writes are blocked (mode=readonly)")
 
-// ErrDataLinkAuth marks a DataLink DENIAL — the request was received but NOT
-// executed. It is CCBill's OVERLOADED refusal signal: HTTP 401/403, an
-// auth-shaped error body, OR a bare results=-7. -7 is returned BOTH for a wrong
-// password (Phase 0) AND (VERIFIED 2026-07-03, safe fail-probe, no money moved)
-// for an operation not permitted on the target — a refund/void of a too-old,
-// non-refundable transaction with VALID creds — the two are indistinguishable
-// from outside. So a -7 may be a transient auth/IP flap OR a permanent
-// "not permitted": callers must bounded-retry then go terminal, NOT clean-retry
-// forever as if it were pure auth. (Symbol name kept for continuity; read it as
-// "request denied", not "authentication rejected".)
-var ErrDataLinkAuth = errors.New("ccbill datalink: request denied (auth or operation not permitted)")
+// ErrDataLinkAuth identifies explicit HTTP/authentication rejections. A numeric
+// -7 response is deliberately excluded: it also covers internal/database errors.
+var ErrDataLinkAuth = errors.New("ccbill datalink: authentication or access rejected")
 
-// ErrCancelRejected marks a received, parsed, DEFINITE non-success answer to
-// cancelSubscription (results != 1). The verbatim provider answer is wrapped.
-// Callers on the intents path verify-not-decline: a reject may mean
-// already-cancelled — the viewSubscriptionStatus re-read decides.
+// ErrDataLinkIndeterminate does not establish whether a mutation executed.
+var ErrDataLinkIndeterminate = errors.New("ccbill datalink: indeterminate provider error")
+
+// ErrCancelRejected requires a provider-state read before any retry or completion.
 var ErrCancelRejected = errors.New("ccbill datalink: cancelSubscription rejected")
 
-// ErrRefundRejected marks a received, parsed, DEFINITE non-success answer to the
-// refund action (results != 1, not the -7 auth class). The verbatim answer is
-// wrapped. Callers verify-not-decline: a reject may mean already-refunded — the
-// viewSubscriptionStatus counter re-read decides.
-var ErrRefundRejected = errors.New("ccbill datalink: refund rejected")
+// ErrRefundUnsupported prevents an unqualified subscription-level operation from
+// being presented as an exact payment refund. See docs/rails/ccbill-refund-qualification.md.
+var ErrRefundUnsupported = errors.New("automatic CCBill refunds are unavailable; use the CCBill admin portal and verify the transaction, amount, and subscription state")
 
 // maxSubscriptionManagementResponseBytes bounds one SMS response (tiny XML).
 const maxSubscriptionManagementResponseBytes = 1 << 20
@@ -156,41 +140,9 @@ func (r SubscriptionStatusResult) ExpiresAt() (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// RefundsAndVoidsIssued sums the per-subscription refundsIssued + voidsIssued
-// counters and reports whether they were present. VERIFIED present on active-sub
-// reads (#696 Phase 0: refundsIssued=0, voidsIssued=0). returnsIssued
-// (chargebacks/reversals) is deliberately EXCLUDED — it is not a merchant refund.
-// known=false when the response omits the primary refundsIssued counter (some
-// dead-sub variants do); the caller then cannot conclude "no refund occurred".
-// This is the ONLY refund signal CCBill's read surface exposes — there is no
-// per-transaction refund action to attribute a refund to one charge (unlike NMI).
-func (r SubscriptionStatusResult) RefundsAndVoidsIssued() (total int64, known bool) {
-	refunds, rOK := subscriptionIntField(r.Fields, "refundsIssued")
-	voids, _ := subscriptionIntField(r.Fields, "voidsIssued")
-	return refunds + voids, rOK
-}
-
-func subscriptionIntField(fields map[string]string, name string) (int64, bool) {
-	raw := strings.TrimSpace(fields[name])
-	if raw == "" {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
-}
-
 // CancelResult carries the verbatim provider answer to cancelSubscription.
 type CancelResult struct {
 	Results string // verbatim results token ("1" on success)
-}
-
-// RefundResult carries the verbatim provider answer to a refund action.
-type RefundResult struct {
-	Results string // verbatim results token ("1" on success)
-	Action  string // the SMS action sent (voidOrRefundTransaction)
 }
 
 // ViewSubscriptionStatus reads ONE subscription's provider state — a READ,
@@ -236,7 +188,7 @@ func (c *DataLinkClient) ViewSubscriptionStatus(ctx context.Context, subscriptio
 // ErrProviderReadOnly before any HTTP under mode=readonly. Error classes:
 //
 //	ErrProviderReadOnly — not attempted (transport gate)
-//	ErrDataLinkAuth     — provider DENIAL (-7: auth OR not permitted), not executed; caller bounded-retry→terminal
+//	ErrDataLinkAuth     — explicit authentication/access rejection
 //	ErrCancelRejected   — provider answered a definite non-success (verify)
 //	anything else       — the request MAY have executed (verify, never assume)
 func (c *DataLinkClient) CancelSubscription(ctx context.Context, subscriptionID string) (CancelResult, error) {
@@ -263,121 +215,25 @@ func (c *DataLinkClient) CancelSubscription(ctx context.Context, subscriptionID 
 	if results == "1" {
 		return CancelResult{Results: results}, nil
 	}
-	// A NEGATIVE results code is an auth/authz rejection (verified: -7), NOT a
-	// subscription-specific "cancel refused" — the request did not execute, so
-	// it is a clean retry (ErrDataLinkAuth), never a verify-not-decline ambiguity.
+	// Internal/provider errors retain uncertainty; they never authorize a resend.
 	if err := classifyResultsCode(results); err != nil {
 		return CancelResult{Results: results}, err
 	}
 	return CancelResult{Results: results}, fmt.Errorf("%w: results=%q", ErrCancelRejected, results)
 }
 
-// RefundTransaction refunds (or voids-then-refunds) ONE transaction of a
-// subscription through the DataLink SMS choke point. A MUTATION: blocked with
-// ErrProviderReadOnly before any HTTP under mode=readonly. amountCents > 0 sends
-// a PARTIAL refund amount; 0 refunds the whole transaction (amount omitted).
-//
-// WIRE PROVISIONAL — the refund request+response shape is UNVERIFIED. It cannot
-// be probed live (real money), so it is modeled on the same SMS pattern as
-// cancel: action=voidOrRefundTransaction (handles settled + unsettled), keyed by
-// subscriptionId, carrying the original transactionId for per-transaction
-// precision and an optional DECIMAL amount for partials; the answer is parsed
-// with the SAME success(=1)/auth(-7)/reject envelope as cancel. On the FIRST
-// real refund, CONFIRM: (1) the success / partial / already-refunded result
-// codes, (2) the amount format (decimal dollars — assumed here — vs cents),
-// (3) whether transactionId narrows to that charge. Then pin a golden test.
-//
-// Error classes mirror CancelSubscription:
-//
-//	ErrProviderReadOnly — not attempted (transport gate)
-//	ErrDataLinkAuth     — provider DENIAL (-7: auth OR not permitted), not executed; caller bounded-retry→terminal
-//	ErrRefundRejected   — provider answered a definite non-success (verify)
-//	anything else       — the request MAY have executed (verify, never assume)
-func (c *DataLinkClient) RefundTransaction(ctx context.Context, subscriptionID, transactionID string, amountCents moneyutil.Cents) (RefundResult, error) {
-	subscriptionID = strings.TrimSpace(subscriptionID)
-	transactionID = strings.TrimSpace(transactionID)
-	if subscriptionID == "" {
-		return RefundResult{}, fmt.Errorf("ccbill datalink: subscription id is required")
-	}
-	if amountCents < 0 {
-		return RefundResult{}, fmt.Errorf("ccbill datalink: refund amount must not be negative")
-	}
-	if c.ReadOnly {
-		return RefundResult{}, ErrProviderReadOnly
-	}
-	action := actionVoidOrRefundTransaction
-	body, err := c.postSubscriptionManagementForm(ctx, action, c.refundForm(action, subscriptionID, transactionID, amountCents))
-	if err != nil {
-		return RefundResult{}, err
-	}
-	fields, bare, err := parseSubscriptionManagementBody(body)
-	if err != nil {
-		// Received bytes we cannot interpret — the refund may have executed.
-		return RefundResult{}, fmt.Errorf("ccbill %s: unparseable response: %w", action, err)
-	}
-	results := bare
-	if results == "" {
-		results = strings.TrimSpace(fields["results"])
-	}
-	if results == "1" {
-		return RefundResult{Results: results, Action: action}, nil
-	}
-	// A NEGATIVE results code is the auth/authz rejection class (verified: -7),
-	// NOT a refund-specific "refused" — the request did not execute, so a clean
-	// retry (ErrDataLinkAuth), never a verify-not-decline ambiguity.
-	if err := classifyResultsCode(results); err != nil {
-		return RefundResult{Results: results, Action: action}, err
-	}
-	return RefundResult{Results: results, Action: action}, fmt.Errorf("%w: results=%q", ErrRefundRejected, results)
-}
-
-// refundForm builds the refund SMS request form: the base subscription-management
-// params + the original transactionId (precision — never let CCBill pick the
-// latest charge) + an optional amount for a PARTIAL refund.
-//
-// WIRE PROVISIONAL — the amount is encoded as a DECIMAL major-unit string (e.g.
-// "9.99"), matching every other CCBill money field (billedInitialPrice) and the
-// classic FormatCentsDecimal wire; it is NOT integer cents. The dollars-vs-cents
-// guess lives on ONE line so a first-real-refund correction is trivial; decimal
-// is also the SAFER guess (if CCBill wanted cents, "9.99" under-refunds/errors,
-// whereas "999" would over-refund 100x).
-func (c *DataLinkClient) refundForm(action, subscriptionID, transactionID string, amountCents moneyutil.Cents) url.Values {
-	form := c.subscriptionManagementForm(action, subscriptionID)
-	if transactionID != "" {
-		form.Set("transactionId", transactionID)
-	}
-	if amountCents > 0 {
-		form.Set("amount", moneyutil.FormatCentsDecimal(amountCents))
-	}
-	return form
-}
-
-// dataLinkAuthResultsCode is the VERIFIED collapsed DENIAL code. -7 is
-// OVERLOADED: bad creds / IP not whitelisted / subsystem not enabled ALL return
-// -7 (Phase 0), AND (2026-07-03 refund fail-probe) a refund/void of a too-old,
-// non-refundable transaction with VALID creds ALSO returns -7 — indistinguishable
-// from outside. It signals "request denied" (auth OR operation-not-permitted),
-// NOT auth specifically; the operation did NOT execute. Only this exact code is
-// classified as a denial — other negative/error codes carry unverified meanings
-// and must not be mapped (no silent fabrication).
-const dataLinkAuthResultsCode = "-7"
-
-// classifyResultsCode maps a DataLink bare <results> code to ErrDataLinkAuth iff
-// it is the confirmed DENIAL code (-7); else nil (caller-specific handling). The
-// request did NOT execute on -7, but -7 is OVERLOADED (auth OR
-// operation-not-permitted) so callers bounded-retry then go terminal rather than
-// clean-retrying forever.
+// CCBill documents -7 for both input/authentication failures and internal
+// database errors. An observed denial cannot make every -7 safe to resend.
 func classifyResultsCode(code string) error {
-	if strings.TrimSpace(strings.Trim(code, `"`)) == dataLinkAuthResultsCode {
-		return fmt.Errorf("%w: results=%q", ErrDataLinkAuth, dataLinkAuthResultsCode)
+	if strings.TrimSpace(strings.Trim(code, `"`)) == "-7" {
+		return fmt.Errorf("%w: results=%q", ErrDataLinkIndeterminate, "-7")
 	}
 	return nil
 }
 
-// subscriptionManagementForm builds the SMS request form. ONE function owns
-// the wire params so a Phase-0 correction is a one-line change. Provisional
-// open question for Phase 0: whether the subaccount param is `clientSubacc`
-// (tracker's best-known shape, used here) or `usingSubacc` (s2member).
+// subscriptionManagementForm authenticates the configured subaccount explicitly.
+// Account-level DataLink credentials instead require a separately qualified
+// clientAccnum/usingSubacc setup; those scopes are not interchangeable.
 func (c *DataLinkClient) subscriptionManagementForm(action, subscriptionID string) url.Values {
 	form := url.Values{}
 	form.Set("clientAccnum", c.ClientAccNum)
@@ -392,19 +248,10 @@ func (c *DataLinkClient) subscriptionManagementForm(action, subscriptionID strin
 	return form
 }
 
-// postSubscriptionManagement performs ONE SMS round-trip for the simple
-// (action, subscriptionId) requests (view + cancel), delegating the transport to
-// postSubscriptionManagementForm.
+// postSubscriptionManagement performs one view/cancel round-trip. The intent
+// runner owns retries: blind HTTP retries on this mutation endpoint are unsafe.
 func (c *DataLinkClient) postSubscriptionManagement(ctx context.Context, action, subscriptionID string) (string, error) {
-	return c.postSubscriptionManagementForm(ctx, action, c.subscriptionManagementForm(action, subscriptionID))
-}
-
-// postSubscriptionManagementForm performs ONE SMS round-trip (no retry loop — the
-// intents executor/verifier own retries; blind HTTP retries on a mutation
-// endpoint are unsafe) and returns the raw trimmed body. Auth-shaped
-// rejections (401/403, auth-error body) surface as ErrDataLinkAuth. ONE transport
-// serves view/cancel/refund so a change is a single edit.
-func (c *DataLinkClient) postSubscriptionManagementForm(ctx context.Context, action string, form url.Values) (string, error) {
+	form := c.subscriptionManagementForm(action, subscriptionID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+subscriptionManagementPath, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("ccbill %s: build request: %w", action, err)

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -248,6 +249,21 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 		reason += ": " + notes
 	}
 
+	// Reject unsupported refund semantics before the independent cancel leg can
+	// change local access or enqueue a provider mutation.
+	if hasRefund {
+		if r.State.PaymentService == nil {
+			return errors.New("payment service unavailable")
+		}
+		payment, err := r.State.PaymentService.GetByID(r.Request.Context(), paymentID)
+		if err != nil {
+			return paramErrorf("refund payment %s not found", paymentID)
+		}
+		if payment.Rail == models.RailCCBill {
+			return paramErrorf("%s", ccbill.ErrRefundUnsupported)
+		}
+	}
+
 	if hasCancel {
 		if err := cancelSubscriptionForFinding(r, subID, reason, result); err != nil {
 			return err
@@ -376,9 +392,6 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	if err != nil {
 		return paramErrorf("refund payment %s not found", paymentID)
 	}
-	// #696: CCBill refunds now ride the same intent-ledger path as NMI/Stripe
-	// (executeAdminRefund resolves the DataLink refund target). WIRE PROVISIONAL —
-	// the CCBill refund wire is unverified until the first real refund confirms it.
 	amount := payment.Amount // full refund by default (micros)
 	if raw, ok := params["amount"]; ok && raw != nil {
 		parsed, perr := paramAmountMicros(raw)
