@@ -84,7 +84,17 @@ func (s *MoneyService) CustomUnitName(ctx context.Context, code string) (string,
 // Unqualified codes resolve against the built-in currency registry (#474).
 // Custom UUIDs resolve against the ctx merchant's existing registry.
 // Human-readable names never reach this stored-unit path.
-func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals int, builtin bool, err error) {
+func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (int, bool, error) {
+	if !IsQualifiedUnit(code) {
+		return resolveUnit(ctx, nil, code)
+	}
+	if s == nil || s.db == nil {
+		return 0, false, fmt.Errorf("money service not initialized")
+	}
+	return resolveUnit(ctx, s.db.Gen(ctx), code)
+}
+
+func resolveUnit(ctx context.Context, q *gen.Queries, code string) (decimals int, builtin bool, err error) {
 	if !IsQualifiedUnit(code) {
 		d, ok := moneyutil.CurrencyScale(code)
 		if !ok {
@@ -92,7 +102,7 @@ func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals i
 		}
 		return d, true, nil
 	}
-	if s == nil || s.db == nil {
+	if q == nil {
 		return 0, false, fmt.Errorf("money service not initialized")
 	}
 	id, err := creditUnitID(code)
@@ -103,7 +113,7 @@ func (s *MoneyService) ResolveUnit(ctx context.Context, code string) (decimals i
 	if err != nil {
 		return 0, false, err
 	}
-	ct, err := s.db.Gen(ctx).GetCustomCreditTypeByID(ctx, gen.GetCustomCreditTypeByIDParams{MerchantID: tid.UUID(), ID: id})
+	ct, err := q.GetCustomCreditTypeByID(ctx, gen.GetCustomCreditTypeByIDParams{MerchantID: tid.UUID(), ID: id})
 	if err != nil {
 		return 0, false, fmt.Errorf("unknown custom credit identity for merchant: %w", err)
 	}

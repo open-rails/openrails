@@ -11,9 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -55,7 +57,7 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 		})
 		return dir
 	}
-	rt := &app.Runtime{DB: database, MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), RedisClient: redis, Merchants: directory()}
+	rt := &app.Runtime{DB: database, ProductService: catalog.NewProductService(database), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database), RedisClient: redis, Merchants: directory()}
 	svc, err := New(rt)
 	require.NoError(t, err)
 	a := merchant.WithID(ctx, merchantA)
@@ -70,8 +72,12 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	_, err = admin.Exec(ctx, `UPDATE openrails.custom_credit_types SET decimals=3 WHERE merchant_id=$1 AND id=$2`, merchantA.UUID(), unitA)
 	require.NoError(t, err)
 	productKey := prefix + "-topup"
-	_, err = admin.Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Tokens')`, uuid.New(), merchantA.UUID(), productKey)
+	product, err := svc.CreateProduct(a, CreateProductRequest{Key: productKey, DisplayName: "Tokens", CreditsSpec: CreditsSpec{"tokens": {Unit: "tokens", Amount: 10, Cadence: CreditGrantCadencePerRenewal}}})
 	require.NoError(t, err)
+	require.Equal(t, old+"/tokens", product.CreditsSpec["tokens"].Unit)
+	var productUnit string
+	require.NoError(t, admin.QueryRow(ctx, `SELECT credits_spec->'tokens'->>'unit' FROM openrails.products WHERE merchant_id=$1 AND id=$2`, merchantA.UUID(), product.ID).Scan(&productUnit))
+	require.Equal(t, canonical, productUnit)
 	require.NoError(t, svc.SyncCatalogSidecars(a, SyncCatalogSidecarsRequest{
 		CreditBalances:  []CatalogCreditBalanceSpec{{Key: "tokens", Unit: old + "/tokens"}},
 		CreditPurchases: []CatalogCreditPurchasePriceSpec{{ProductKey: productKey, Ordinal: 1, CreditKey: "tokens", Currency: "USD", Price: json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":10000}}`)}},
@@ -127,6 +133,11 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	quote, err = rt.MoneyService.QuoteCatalogCreditPurchase(a, money.CatalogCreditPurchaseQuoteInput{ProductKey: productKey, Credits: 100})
 	require.NoError(t, err)
 	require.Equal(t, canonical, quote.Unit, "reclaimed spelling cannot change a stored catalog unit")
+	productRead, err := svc.GetProductByKey(a, productKey)
+	require.NoError(t, err)
+	require.Equal(t, newName+"/tokens", productRead.CreditsSpec["tokens"].Unit)
+	_, err = svc.UpdateProduct(a, product.ID, UpdateProductRequest{SetCredits: true, CreditsSpec: CreditsSpec{"tokens": {Unit: old + "/tokens", Amount: 10}}})
+	require.ErrorContains(t, err, "another merchant")
 	_, err = svc.GetCreditAccount(b, payer, canonical)
 	require.Error(t, err, "foreign registry UUID must not bypass ownership")
 	// A custom unit cannot turn an excess capture into fiat debt. A refused
@@ -170,6 +181,21 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 75, revoked.Grant.RevokedAmount)
 	require.Equal(t, newName+"/tokens", revoked.Grant.Currency)
+	// Future renewal still consumes the captured product unit UUID after rename.
+	priceID, subscriptionID := uuid.New(), uuid.New()
+	pspID := dbtest.EnsureTestPSP(a, t, admin, merchantA.UUID(), string(models.RailStripe))
+	_, err = admin.Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,1000000,'USD',720,true)`, priceID, merchantA.UUID(), product.ID)
+	require.NoError(t, err)
+	periodEnd := time.Now().Add(30 * 24 * time.Hour)
+	_, err = admin.Exec(ctx, `INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,status,rail,psp_id,rail_subscription_id,current_period_starts_at,current_period_ends_at,credits_spec_snapshot)
+ SELECT $1,$2,$3,id,$4,'active','stripe',$5,$6,now(),$7,credits_spec FROM openrails.products WHERE merchant_id=$2 AND id=$8`, subscriptionID, merchantA.UUID(), payer.UUID(), priceID, pspID, "sub_"+subscriptionID.String(), periodEnd, product.ID)
+	require.NoError(t, err)
+	for range 2 {
+		require.NoError(t, rt.MoneyService.GrantSubscriptionCredits(a, money.GrantSubscriptionCreditsParams{SubscriptionID: subscriptionID, PeriodEnd: periodEnd, Cadence: models.CreditGrantCadencePerRenewal, Source: "subscription_renewal"}))
+	}
+	account, err = svc.GetCreditAccount(a, payer, newName+"/tokens")
+	require.NoError(t, err)
+	require.EqualValues(t, 10, account.BalanceAmount)
 	// No mutable merchant spelling survived into financial or reservation keys.
 	var bad int
 	require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE merchant_id=$1 AND currency<>$2`, merchantA.UUID(), canonical).Scan(&bad))

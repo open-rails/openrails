@@ -34,7 +34,7 @@ func TestValidateCreditGrantSpec(t *testing.T) {
 	s := &MoneyService{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := s.validateCreditGrantSpec(context.Background(), tt.ctype, tt.spec)
+			err := s.validateCreditGrantSpec(context.Background(), nil, tt.ctype, tt.spec)
 			if tt.wantErr && err == nil {
 				t.Fatalf("expected error")
 			}

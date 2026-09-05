@@ -4,6 +4,7 @@ package postgresmigrations_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -20,6 +21,13 @@ func TestCustomCreditIdentityCutoverRefusesMutableState(t *testing.T) {
 	for _, tc := range []struct {
 		name, restoreOldConstraint, insert, read, message string
 	}{
+		{
+			name:                 "product credit specification",
+			restoreOldConstraint: `ALTER TABLE openrails.products DROP CONSTRAINT products_credit_units_canonical`,
+			insert:               `INSERT INTO openrails.products(id,merchant_id,key,display_name,credits_spec) VALUES(uuidv7(),$1,'tokens','Tokens','{"tokens":{"unit":"former-owner/tokens","amount":5}}'::jsonb)`,
+			read:                 `SELECT credits_spec->'tokens'->>'unit' FROM openrails.products WHERE merchant_id=$1 AND key='tokens'`,
+			message:              "products.credits_spec contains noncanonical units",
+		},
 		{
 			name:                 "financial history",
 			restoreOldConstraint: `ALTER TABLE openrails.ledger_accounts DROP CONSTRAINT ledger_accounts_currency_shape`,
@@ -48,7 +56,7 @@ func TestCustomCreditIdentityCutoverRefusesMutableState(t *testing.T) {
 			require.NoError(t, err)
 			_, err = tx.Exec(ctx, `SAVEPOINT before_cutover`)
 			require.NoError(t, err)
-			_, err = tx.Exec(ctx, string(migration))
+			_, err = tx.Exec(ctx, strings.Replace(string(migration), "CREATE FUNCTION openrails.credit_spec_has_canonical_units", "CREATE OR REPLACE FUNCTION openrails.credit_spec_has_canonical_units", 1))
 			require.ErrorContains(t, err, tc.message)
 			_, err = tx.Exec(ctx, `ROLLBACK TO SAVEPOINT before_cutover`)
 			require.NoError(t, err)

@@ -96,7 +96,15 @@ func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*Pa
 
 	products := make([]Product, 0, len(result.Products))
 	for _, p := range result.Products {
-		products = append(products, productFromModel(p))
+		projected := productFromModel(p)
+		for key, spec := range projected.CreditsSpec {
+			spec.Unit, err = s.DisplayCurrency(ctx, spec.Unit)
+			if err != nil {
+				return nil, err
+			}
+			projected.CreditsSpec[key] = spec
+		}
+		products = append(products, projected)
 	}
 
 	return &PaginatedResult[Product]{

@@ -3,8 +3,6 @@ package embedded
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"os"
 	"strings"
@@ -16,9 +14,11 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/merchants"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -257,6 +257,15 @@ func newCatalogPushRuntime(ctx context.Context, cfg *config.Config, pool *pgxpoo
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
 	if err := rt.EnsureMerchantsService(context.Background()); err != nil {
 		log.WithError(err).Warn("catalog push: merchants service arming failed; provider links degrade to manual")
+	}
+	if rt.Merchants == nil {
+		// Catalog identity does not depend on provider credentials. Unbound
+		// host merchants can still resolve local names; bound groups continue
+		// to refuse canonical-name projection without their AuthKit authority.
+		rt.Merchants, err = merchants.NewDirectoryService(database.DataPool())
+		if err != nil {
+			return nil, nil, nil, err
+		}
 	}
 	cleanup := func() {
 		if closeErr := rt.Close(context.Background()); closeErr != nil {

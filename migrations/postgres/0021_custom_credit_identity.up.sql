@@ -1,8 +1,21 @@
 SET LOCAL lock_timeout = '10s';
 SET LOCAL statement_timeout = '60s';
 
+-- Product and financial snapshots must retain the same immutable unit identity.
+CREATE FUNCTION openrails.credit_spec_has_canonical_units(spec jsonb) RETURNS boolean
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+ SELECT CASE WHEN spec IS NULL THEN true WHEN jsonb_typeof(spec) <> 'object' THEN false ELSE NOT EXISTS (
+  SELECT 1 FROM jsonb_each(spec) entry
+  WHERE COALESCE(entry.value->>'unit','') !~ '^[A-Z0-9]{3,12}$'
+    AND COALESCE(entry.value->>'unit','') !~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+ ) END
+$$;
+
 -- Never reinterpret a former merchant slug or rewrite append-only financial history.
 DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM openrails.products WHERE NOT openrails.credit_spec_has_canonical_units(credits_spec)) THEN RAISE EXCEPTION 'custom credit identity cutover: products.credits_spec contains noncanonical units. Export and explicitly recreate the affected pre-launch catalog; migration does not rewrite stored specs.'; END IF;
+ IF EXISTS(SELECT 1 FROM openrails.subscriptions WHERE NOT openrails.credit_spec_has_canonical_units(credits_spec_snapshot)) THEN RAISE EXCEPTION 'custom credit identity cutover: subscriptions.credits_spec_snapshot contains noncanonical units. Inventory affected subscriptions and decide how to recreate pre-launch state; migration does not rewrite snapshots.'; END IF;
+ IF EXISTS(SELECT 1 FROM openrails.payments WHERE NOT openrails.credit_spec_has_canonical_units(credits_spec_snapshot)) THEN RAISE EXCEPTION 'custom credit identity cutover: payments.credits_spec_snapshot contains noncanonical units. Inventory affected payments and decide how to recreate pre-launch state; migration does not rewrite history.'; END IF;
  IF EXISTS(SELECT 1 FROM openrails.metered_rating_watermarks WHERE currency LIKE '%/%') THEN RAISE EXCEPTION 'custom credit identity cutover: openrails.metered_rating_watermarks contains mutable unit codes. Inventory the affected merchant/customer rows and decide how to recreate this pre-launch data; migration performs no history rewrite.'; END IF;
  IF EXISTS(SELECT 1 FROM openrails.catalog_credit_purchase_prices WHERE currency LIKE '%/%') THEN RAISE EXCEPTION 'custom credit identity cutover: openrails.catalog_credit_purchase_prices contains mutable unit codes. Inventory the affected merchant/customer rows and decide how to recreate this pre-launch data; migration performs no history rewrite.'; END IF;
  IF EXISTS(SELECT 1 FROM openrails.host_lifecycle_events WHERE currency LIKE '%/%') THEN RAISE EXCEPTION 'custom credit identity cutover: openrails.host_lifecycle_events contains mutable unit codes. Inventory the affected merchant/customer rows and decide how to recreate this pre-launch data; migration performs no history rewrite.'; END IF;
@@ -100,3 +113,10 @@ COMMENT ON TABLE openrails.custom_credit_types IS 'Merchant-owned custom credit 
 
 ALTER TABLE openrails.catalog_credit_balances ADD CONSTRAINT catalog_credit_balances_unit_identity CHECK(unit ~ '^[A-Z0-9]{3,12}$' OR unit ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') NOT VALID;
 ALTER TABLE openrails.catalog_credit_balances VALIDATE CONSTRAINT catalog_credit_balances_unit_identity;
+
+ALTER TABLE openrails.products ADD CONSTRAINT products_credit_units_canonical CHECK(openrails.credit_spec_has_canonical_units(credits_spec)) NOT VALID;
+ALTER TABLE openrails.products VALIDATE CONSTRAINT products_credit_units_canonical;
+ALTER TABLE openrails.subscriptions ADD CONSTRAINT subscriptions_credit_units_canonical CHECK(openrails.credit_spec_has_canonical_units(credits_spec_snapshot)) NOT VALID;
+ALTER TABLE openrails.subscriptions VALIDATE CONSTRAINT subscriptions_credit_units_canonical;
+ALTER TABLE openrails.payments ADD CONSTRAINT payments_credit_units_canonical CHECK(openrails.credit_spec_has_canonical_units(credits_spec_snapshot)) NOT VALID;
+ALTER TABLE openrails.payments VALIDATE CONSTRAINT payments_credit_units_canonical;

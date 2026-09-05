@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -105,6 +106,15 @@ func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Manifes
 	}
 	for _, id := range productIDs {
 		if p := byID[id]; p != nil {
+			for i := range p.Credits {
+				if money.IsQualifiedUnit(p.Credits[i].Unit) {
+					name, err := money.NewMoneyService(database).CustomUnitName(ctx, p.Credits[i].Unit)
+					if err != nil {
+						return nil, err
+					}
+					p.Credits[i].Unit = name
+				}
+			}
 			normalizeDumpProduct(p)
 			m.Products = append(m.Products, *p)
 		}
