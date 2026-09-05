@@ -30,7 +30,7 @@ func TestCLIMerchantNameAndExplicitIdentityAreDistinct(t *testing.T) {
 	defer pool.Close()
 	database, err := db.NewWithPGXPool(pool, config.DefaultSchema)
 	require.NoError(t, err)
-	core, err := authcore.New(authcore.Config{Keys: authcore.KeysConfig{VerifyOnly: true}, Token: authcore.TokenConfig{Issuer: "https://cli-names.test", IssuedAudiences: []string{"test"}}, RBAC: []authcore.PersonaDef{{Name: "merchant", Parent: authcore.RootPersona}}}, admin)
+	core, err := authcore.New(authcore.Config{Keys: authcore.KeysConfig{VerifyOnly: true}, Token: authcore.TokenConfig{Issuer: "https://cli-names.test", IssuedAudiences: []string{"test"}}, RBAC: []authcore.PersonaDef{{Name: "merchant", Parent: authkit.RootPersona}}, Ephemeral: authcore.EphemeralConfig{AllowMemory: true}}, authcore.Deps{Postgres: admin})
 	require.NoError(t, err)
 	require.NoError(t, core.SeedPermissionGroupContainment(ctx))
 	_, err = core.EnsureRootGroup(ctx)

@@ -16,7 +16,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
@@ -171,7 +170,7 @@ func TestBootstrap_Idempotent(t *testing.T) {
 	require.Equal(t, res1.BootstrapMerchantGroupID, res2.BootstrapMerchantGroupID)
 
 	// Exactly one API key exists after two runs (under the merchant group).
-	apiKeys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	apiKeys, err := cp.Core().ListAPIKeys(ctx, MerchantGroup(dbtest.TestMerchantSlug))
 	require.NoError(t, err)
 	require.Len(t, apiKeys, 1, "exactly one admin API key after two bootstrap runs")
 
@@ -200,15 +199,15 @@ func TestBootstrap_RevokedKeysNeverAutoRemint(t *testing.T) {
 	require.NotEmpty(t, res1.APIKeySecret)
 
 	// Operator revokes the key.
-	keys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	keys, err := cp.Core().ListAPIKeys(ctx, MerchantGroup(dbtest.TestMerchantSlug))
 	require.NoError(t, err)
 	require.Len(t, keys, 1)
-	revoked, err := cp.Core().RevokeAPIKey(ctx, MerchantType, dbtest.TestMerchantSlug, keys[0].ID)
+	revoked, err := cp.Core().RevokeAPIKey(ctx, MerchantGroup(dbtest.TestMerchantSlug), keys[0].ID)
 	require.NoError(t, err)
 	require.True(t, revoked)
 
 	// Sanity: zero LIVE keys now, but the key HISTORY is non-empty.
-	afterRevoke, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	afterRevoke, err := cp.Core().ListAPIKeys(ctx, MerchantGroup(dbtest.TestMerchantSlug))
 	require.NoError(t, err)
 	require.Len(t, afterRevoke, 1)
 	require.NotNil(t, afterRevoke[0].RevokedAt)
@@ -227,7 +226,7 @@ func TestBootstrap_RevokedKeysNeverAutoRemint(t *testing.T) {
 	require.Empty(t, res3.APIKeySecret)
 
 	// Exactly one API key exists ever (the original, revoked) — no replacement minted.
-	finalKeys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	finalKeys, err := cp.Core().ListAPIKeys(ctx, MerchantGroup(dbtest.TestMerchantSlug))
 	require.NoError(t, err)
 	require.Len(t, finalKeys, 1, "no replacement key should have been minted after revocation")
 }
@@ -243,7 +242,7 @@ func TestBootstrap_FreshMerchantMintsOnlyOnExplicitRequest(t *testing.T) {
 	res1, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, MintInitialAPIKey: false})
 	require.NoError(t, err)
 	require.False(t, res1.APIKeyMinted, "the zero value must never mint")
-	keys, err := cp.Core().ListAPIKeys(ctx, MerchantType, dbtest.TestMerchantSlug)
+	keys, err := cp.Core().ListAPIKeys(ctx, MerchantGroup(dbtest.TestMerchantSlug))
 	require.NoError(t, err)
 	require.Empty(t, keys)
 
@@ -280,18 +279,18 @@ func TestBootstrap_SeedsPermissionCatalog(t *testing.T) {
 		PermMerchantSubscriptionsRead, PermMerchantSubscriptionsUpdate,
 		PermMerchantAdmissionsCreate, PermMerchantUsageRead, PermMerchantRepairAlertsRead,
 	} {
-		ok, cerr := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, want)
+		ok, cerr := cp.Core().Can(ctx, authkit.UserSubject(adminUser), MerchantGroup(dbtest.TestMerchantSlug), authkit.Perm(want))
 		require.NoError(t, cerr)
 		require.Truef(t, ok, "merchant owner should effectively hold %q", want)
 	}
-	platformDenied, err := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, "platform:merchants:delete")
+	platformDenied, err := cp.Core().Can(ctx, authkit.UserSubject(adminUser), MerchantGroup(dbtest.TestMerchantSlug), "platform:merchants:delete")
 	require.NoError(t, err)
 	require.False(t, platformDenied, "merchant owner must not reach platform permissions")
 
 	// Re-running keeps the grant stable (owner still holds merchant:*).
 	_, err = cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, InitialAdminUserID: adminUser, MintInitialAPIKey: false})
 	require.NoError(t, err)
-	stillOwner, err := cp.Core().Can(ctx, adminUser, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantAdmissionsCreate)
+	stillOwner, err := cp.Core().Can(ctx, authkit.UserSubject(adminUser), MerchantGroup(dbtest.TestMerchantSlug), PermMerchantAdmissionsCreate)
 	require.NoError(t, err)
 	require.True(t, stillOwner, "merchant owner grant stable across reruns")
 }
@@ -309,10 +308,10 @@ func TestEnsureCustomerPermissionGroup_Idempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, groupID)
 
-	canSpend, err := cp.Core().Can(ctx, owner.ID, authcore.SubjectKindUser, CustomerType, customerID, PermCustomerSpendDelegationsUpdate)
+	canSpend, err := cp.Core().Can(ctx, authkit.UserSubject(owner.ID), CustomerGroup(customerID), PermCustomerSpendDelegationsUpdate)
 	require.NoError(t, err)
 	require.True(t, canSpend, "customer owner should hold customer:*")
-	canMerchant, err := cp.Core().Can(ctx, owner.ID, authcore.SubjectKindUser, CustomerType, customerID, PermMerchantAdmissionsCreate)
+	canMerchant, err := cp.Core().Can(ctx, authkit.UserSubject(owner.ID), CustomerGroup(customerID), PermMerchantAdmissionsCreate)
 	require.NoError(t, err)
 	require.False(t, canMerchant, "customer owner must not hold merchant perms")
 
@@ -330,7 +329,7 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	require.NoError(t, err)
 	customerID := owner.ID
 
-	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerType, customerID)
+	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerGroup(customerID))
 	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
 
 	token, _, err := cp.Core().MintAccessToken(ctx, owner.ID, nil)
@@ -356,7 +355,7 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	mux.ServeHTTP(w, req)
 	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
 
-	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, CustomerType, customerID)
+	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, CustomerGroup(customerID))
 	require.NoError(t, err)
 	require.NotEmpty(t, groupID)
 	app, err := cp.Core().GetRemoteApplication(ctx, "https://cozy.art")
@@ -385,19 +384,19 @@ func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
 	// authkit v0.84.0 #49: assigning an MFA-required root role fails closed
 	// unless the subject already has 2FA enrolled.
 	enrollTestMFA(ctx, t, pool, rootOperator.ID)
-	require.NoError(t, cp.Core().Genesis().AssignGroupRole(ctx, authcore.RootPersona, "", rootOperator.ID, authcore.SubjectKindUser, authcore.OwnerRoleName))
+	require.NoError(t, cp.Core().Genesis().AssignGroupRole(ctx, authkit.RootGroup(), authkit.UserSubject(rootOperator.ID), authkit.OwnerRole))
 
-	canModerateMerchant, err := cp.Core().Can(ctx, rootOperator.ID, authcore.SubjectKindUser, authcore.RootPersona, "", "root:merchants:delete")
+	canModerateMerchant, err := cp.Core().Can(ctx, authkit.UserSubject(rootOperator.ID), authkit.RootGroup(), "root:merchants:delete")
 	require.NoError(t, err)
 	require.True(t, canModerateMerchant, "root owner should hold root moderation authority")
-	canRunMerchant, err := cp.Core().Can(ctx, rootOperator.ID, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantSettingsUpdate)
+	canRunMerchant, err := cp.Core().Can(ctx, authkit.UserSubject(rootOperator.ID), MerchantGroup(dbtest.TestMerchantSlug), PermMerchantSettingsUpdate)
 	require.NoError(t, err)
 	require.False(t, canRunMerchant, "root authority must not imply merchant internals")
 
-	merchantCanRunMerchant, err := cp.Core().Can(ctx, merchantOwner.ID, authcore.SubjectKindUser, MerchantType, dbtest.TestMerchantSlug, PermMerchantSettingsUpdate)
+	merchantCanRunMerchant, err := cp.Core().Can(ctx, authkit.UserSubject(merchantOwner.ID), MerchantGroup(dbtest.TestMerchantSlug), PermMerchantSettingsUpdate)
 	require.NoError(t, err)
 	require.True(t, merchantCanRunMerchant, "merchant owner should hold merchant:*")
-	merchantCanModerateRoot, err := cp.Core().Can(ctx, merchantOwner.ID, authcore.SubjectKindUser, authcore.RootPersona, "", "root:merchants:delete")
+	merchantCanModerateRoot, err := cp.Core().Can(ctx, authkit.UserSubject(merchantOwner.ID), authkit.RootGroup(), "root:merchants:delete")
 	require.NoError(t, err)
 	require.False(t, merchantCanModerateRoot, "merchant owner must not hold root moderation perms")
 }

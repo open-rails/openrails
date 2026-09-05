@@ -24,7 +24,7 @@ describe("auth mutations", () => {
     await queryClient
       .getMutationCache()
       .build(queryClient, authMutations.login(loginWithPassword))
-      .execute({ login: "alice@example.com", password: "secret" })
+      .execute({ identifier: "alice@example.com", password: "secret" })
 
     expect(loginWithPassword).toHaveBeenCalledWith(
       "alice@example.com",

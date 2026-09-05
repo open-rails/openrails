@@ -8,6 +8,7 @@ import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 
 import {
+  ApiError,
   authApi,
   getBootstrap,
   getTokens,
@@ -22,9 +23,9 @@ import type {
   AuthTokens,
   Me,
   MerchantMembership,
-  PasswordLoginResponse,
-  TwoFactorChallengeResponse,
+  TwoFactorChallengeMetadata,
   TwoFactorFactor,
+  TwoFactorRequiredMetadata,
 } from "@/lib/api/types"
 import {
   authStateQueryKey,
@@ -146,31 +147,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loginWithPassword = React.useCallback(
     async (
-      login: string,
+      identifier: string,
       password: string
     ): Promise<TwoFactorChallenge | null> => {
       const expectedSession = getTokens()
-      const res = await authApi<PasswordLoginResponse>("/password/login", {
-        method: "POST",
-        body: { login, password },
-      })
-      // A 2FA account gets no tokens here. Hand the challenge back so the caller
-      // can ask for a code, rather than treating a normal policy as a failure.
-      if ("requires_2fa" in res && res.requires_2fa) {
-        return {
-          challenge: res.challenge,
-          userID: res.user_id,
-          factor: res.default_factor,
-          factors: res.available_factors,
-          method: res.method,
-          verificationID: res.verification_id,
-          expectedSession,
+      let res: AuthTokens
+      try {
+        res = await authApi<AuthTokens>("/password/login", {
+          method: "POST",
+          body: { identifier, password },
+        })
+      } catch (err) {
+        // Pending challenges are 403 envelopes carrying the challenge in
+        // error.metadata. A 2FA account gets no tokens here: hand the
+        // challenge back so the caller can ask for a code, rather than
+        // treating a normal policy as a failure.
+        if (err instanceof ApiError && err.code === "2fa_required") {
+          const meta = err.metadata as unknown as TwoFactorRequiredMetadata
+          return {
+            challenge: meta.challenge,
+            userID: meta.user_id,
+            factor: meta.default_factor,
+            factors: meta.available_factors,
+            method: meta.method,
+            verificationID: meta.verification_id,
+            expectedSession,
+          }
         }
-      }
-      if ("requires_verification" in res && res.requires_verification) {
-        throw new Error(
-          "This account requires verification before it can sign in."
-        )
+        if (err instanceof ApiError && err.code === "verification_required") {
+          throw new Error(
+            "This account requires verification before it can sign in.",
+            { cause: err }
+          )
+        }
+        throw err
       }
       await completeSession(res, expectedSession)
       return null
@@ -195,20 +205,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const selectTwoFactor = React.useCallback(
     async (challenge: TwoFactorChallenge, factorId: string) => {
-      const res = await authApi<TwoFactorChallengeResponse>("/2fa/challenge", {
-        method: "POST",
-        body: {
-          user_id: challenge.userID,
-          challenge: challenge.challenge,
-          factor_id: factorId,
-        },
-      })
-      return {
-        ...challenge,
-        factor: res.factor,
-        method: res.method,
-        verificationID: res.verification_id,
+      // Switching factors re-issues the challenge as a 403 2fa_required
+      // envelope; a 200 here would mean the route contract changed.
+      try {
+        await authApi<never>("/2fa/challenge", {
+          method: "POST",
+          body: {
+            user_id: challenge.userID,
+            challenge: challenge.challenge,
+            factor_id: factorId,
+          },
+        })
+      } catch (err) {
+        if (err instanceof ApiError && err.code === "2fa_required") {
+          const meta = err.metadata as unknown as TwoFactorChallengeMetadata
+          return {
+            ...challenge,
+            factor: meta.factor,
+            method: meta.method,
+            verificationID: meta.verification_id,
+          }
+        }
+        throw err
       }
+      throw new Error("Unexpected response while selecting a verification factor")
     },
     []
   )

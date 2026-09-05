@@ -72,17 +72,17 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 			return ErrEmailUnverified
 		}
 
-		memberships, err := core.ListSubjectGroups(ctx, ownerUserID, "user")
+		memberships, err := core.ListSubjectGroups(ctx, authkit.UserSubject(ownerUserID))
 		if err != nil {
 			return fmt.Errorf("list user's merchant memberships: %w", err)
 		}
 
-		claimedGroupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, merchant.NormalizeSlug(instanceSlug))
+		claimedGroupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(merchant.NormalizeSlug(instanceSlug)))
 		switch {
 		case err == nil:
 			for _, membership := range memberships {
 				if membership.Persona == controlplane.MerchantType &&
-					strings.EqualFold(membership.Role, controlplane.MerchantRoleOwner) &&
+					strings.EqualFold(string(membership.Role), controlplane.MerchantRoleOwner) &&
 					membership.GroupID == claimedGroupID {
 					return nil
 				}
@@ -95,7 +95,7 @@ func MerchantCreationAdmission(a *app.App, policy MerchantCreationPolicy) (func(
 
 		owned := 0
 		for _, m := range memberships {
-			if m.Persona == controlplane.MerchantType && strings.EqualFold(m.Role, controlplane.MerchantRoleOwner) {
+			if m.Persona == controlplane.MerchantType && strings.EqualFold(string(m.Role), controlplane.MerchantRoleOwner) {
 				owned++
 			}
 		}

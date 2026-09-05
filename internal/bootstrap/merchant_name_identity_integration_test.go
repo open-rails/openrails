@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/stretchr/testify/require"
@@ -29,7 +28,7 @@ func TestManifestKeepsCapturedOwnerThroughNameReclaim(t *testing.T) {
 	require.NoError(t, err)
 	var b *merchants.Merchant
 	directory.WithGroupSlugResolver(func(ctx context.Context, name string) (string, string, error) {
-		captured, err := core.GroupInstanceForSlug(ctx, controlplane.MerchantType, name)
+		captured, err := core.GroupInstanceForSlug(ctx, controlplane.MerchantGroup(name))
 		require.NoError(t, err)
 		current := "manifest-current"
 		_, err = core.UpdateGroupInstanceAs(ctx, owner.ID, groupA, authkit.GroupInstanceUpdate{Slug: &current})
@@ -55,10 +54,10 @@ func TestManifestKeepsCapturedOwnerThroughNameReclaim(t *testing.T) {
 	var appID, appGroup string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text,permission_group_id::text FROM profiles.remote_applications WHERE slug=$1`, "manifest-owner-app").Scan(&appID, &appGroup))
 	require.Equal(t, groupA, appGroup, "remote application remains nested under the captured owner")
-	allowed, err := core.CanOnGroup(ctx, appID, authcore.SubjectKindRemoteApp, groupA, "merchant:*")
+	allowed, err := core.CanOnGroup(ctx, authkit.RemoteAppSubject(appID), groupA, "merchant:*")
 	require.NoError(t, err)
 	require.True(t, allowed)
-	allowed, err = core.CanOnGroup(ctx, appID, authcore.SubjectKindRemoteApp, b.PermissionGroupID, "merchant:*")
+	allowed, err = core.CanOnGroup(ctx, authkit.RemoteAppSubject(appID), b.PermissionGroupID, "merchant:*")
 	require.NoError(t, err)
 	require.False(t, allowed, "a reclaimed name cannot receive the old owner's application role")
 	var displayA, displayB string

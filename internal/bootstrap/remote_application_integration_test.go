@@ -32,9 +32,10 @@ func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
 		// MintDisabled: this test only exercises cp.Core() directly (never
 		// mints), and "test" is not a dev-like env (#748: verify-only must be
 		// declared outside development, not stumbled into from a missing key).
-		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true},
+		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 	}
-	cp, err := controlplane.New(ctx, cfg, pool)
+	rdb, _ := dbtest.SharedRedisClient(t)
+	cp, err := controlplane.New(ctx, cfg, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]

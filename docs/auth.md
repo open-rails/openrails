@@ -84,9 +84,12 @@ registered JWKS). Same seam, two serializations.
 AuthKit requires an explicit client-IP posture outside development. Configure
 OpenRails' top-level `trusted_proxies` with the actual proxy CIDRs, or set
 `auth.direct_peer_ip: true` (`AUTH_DIRECT_PEER_IP=true`) when client connections
-arrive directly. Embedded `AttachOptions.TrustedProxies` and `DirectPeerIP`
-forward the same choices; combining direct-peer and proxy declarations is an
-error. Generic proxy trust does not trust client-supplied `CF-Connecting-IP`.
+arrive directly. Where Cloudflare fronts the origin, list its egress ranges in
+`cloudflare_proxies` (`CLOUDFLARE_PROXIES`): only those peers may assert
+`CF-Connecting-IP`; generic proxy trust never honours it. Embedded
+`AttachOptions.TrustedProxies`, `CloudflareProxies` and `DirectPeerIP` forward
+the same choices; combining direct-peer and proxy declarations is an error.
+Development defaults to direct-peer when nothing is declared.
 
 Development signing keys must persist to a writable `auth.keys_path`
 (`AUTHKIT_KEYS_PATH`) directory. Tests use their own temporary directories;

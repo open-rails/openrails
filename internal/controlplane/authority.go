@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -34,7 +33,7 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, merchantRe
 	if ref == "" {
 		group, err = c.merchantGroupForUser(ctx, strings.TrimSpace(userID))
 	} else {
-		group, err = c.Core().GroupInstanceForSlug(ctx, MerchantType, ref)
+		group, err = c.Core().GroupInstanceForSlug(ctx, MerchantGroup(ref))
 	}
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		return merchant.ID{}, "", policy.ErrMerchantUnresolved
@@ -42,7 +41,7 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, merchantRe
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
-	allowed, err := c.Core().CanOnGroup(ctx, strings.TrimSpace(userID), authcore.SubjectKindUser, group.ID, strings.TrimSpace(perm))
+	allowed, err := c.Core().CanOnGroup(ctx, authkit.UserSubject(strings.TrimSpace(userID)), group.ID, authkit.Perm(strings.TrimSpace(perm)))
 	if err != nil {
 		return merchant.ID{}, "", err
 	}
@@ -72,7 +71,7 @@ func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm strin
 		return false, nil
 	}
 	// The root group is the singleton parentless group: persona=root, no slug.
-	return c.Core().Can(ctx, userID, authcore.SubjectKindUser, authcore.RootPersona, "", strings.TrimSpace(perm))
+	return c.Core().Can(ctx, authkit.UserSubject(userID), authkit.RootGroup(), authkit.Perm(strings.TrimSpace(perm)))
 }
 
 // ErrMerchantAmbiguous requires an explicit selector when several distinct
@@ -80,7 +79,7 @@ func (c *ControlPlane) HasRootPermission(ctx context.Context, userID, perm strin
 var ErrMerchantAmbiguous = errors.New("controlplane: user belongs to multiple merchants")
 
 func (c *ControlPlane) merchantGroupForUser(ctx context.Context, userID string) (authkit.GroupInstance, error) {
-	memberships, err := c.Core().ListSubjectGroups(ctx, userID, authcore.SubjectKindUser)
+	memberships, err := c.Core().ListSubjectGroups(ctx, authkit.UserSubject(userID))
 	if err != nil {
 		return authkit.GroupInstance{}, err
 	}
@@ -132,7 +131,7 @@ func (c *ControlPlane) MerchantGroupSlugResolver() merchants.GroupSlugResolver {
 		if core == nil {
 			return "", "", ErrNoControlPlane
 		}
-		gi, err := core.GroupInstanceForSlug(ctx, MerchantType, strings.ToLower(strings.TrimSpace(slug)))
+		gi, err := core.GroupInstanceForSlug(ctx, MerchantGroup(strings.ToLower(strings.TrimSpace(slug))))
 		if errors.Is(err, authkit.ErrGroupNotFound) {
 			return "", "", merchants.ErrMerchantNotFound
 		}
@@ -154,7 +153,7 @@ func (c *ControlPlane) IsAdmin(ctx context.Context, merchantRef, userID string) 
 	if ref == "" {
 		return false, nil
 	}
-	return c.Core().Can(ctx, strings.TrimSpace(userID), authcore.SubjectKindUser, MerchantType, ref, PermMerchantSettingsRead)
+	return c.Core().Can(ctx, authkit.UserSubject(strings.TrimSpace(userID)), MerchantGroup(ref), PermMerchantSettingsRead)
 }
 
 func (c *ControlPlane) MerchantGroupIDResolver() merchants.GroupIDResolver {

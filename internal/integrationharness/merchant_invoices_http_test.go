@@ -75,7 +75,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	actor := h.ensureAPIKeyActor(cp, dbtest.TestMerchantSlug)
 	mintRole := func(role string) string {
 		t.Helper()
-		_, token, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantType, dbtest.TestMerchantSlug, authkit.APIKeyMintOptions{Name: "invoice-" + role + "-" + uuid.NewString(), Role: role, CreatedBy: actor})
+		_, token, err := cp.Core().MintAPIKeyWithOptions(h.ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.APIKeyMintOptions{Name: "invoice-" + role + "-" + uuid.NewString(), Role: authkit.Role(role), CreatedBy: actor})
 		require.NoError(t, err)
 		return token
 	}

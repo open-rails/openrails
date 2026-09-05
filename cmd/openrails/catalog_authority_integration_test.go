@@ -24,10 +24,11 @@ func TestCLICatalogNamespacesStaySeparate(t *testing.T) {
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	ctx := cliCmdContext(appDSN, "staging")
 	core, err := authcore.New(authcore.Config{
-		Keys:  authcore.KeysConfig{VerifyOnly: true},
-		Token: authcore.TokenConfig{Issuer: "https://catalog-cli.test/" + uuid.NewString(), IssuedAudiences: []string{"test"}},
-		RBAC:  []authcore.PersonaDef{{Name: "merchant", Parent: authcore.RootPersona}},
-	}, admin)
+		Keys:      authcore.KeysConfig{VerifyOnly: true},
+		Token:     authcore.TokenConfig{Issuer: "https://catalog-cli.test/" + uuid.NewString(), IssuedAudiences: []string{"test"}},
+		RBAC:      []authcore.PersonaDef{{Name: "merchant", Parent: authkit.RootPersona}},
+		Ephemeral: authcore.EphemeralConfig{AllowMemory: true},
+	}, authcore.Deps{Postgres: admin})
 	require.NoError(t, err)
 	require.NoError(t, core.SeedPermissionGroupContainment(ctx))
 	_, err = core.EnsureRootGroup(ctx)

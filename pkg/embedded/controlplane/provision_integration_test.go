@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/stretchr/testify/require"
 
@@ -161,8 +162,8 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	require.NotEmpty(t, code, "verification code delivered to host sender")
 
 	// Confirm -> the pending registration becomes a real, verified user.
-	status, body = postJSON(t, srv.URL+"/email/verify/confirm",
-		`{"email":"`+email+`","code":"`+code+`"}`)
+	status, body = postJSON(t, srv.URL+"/verify/confirm",
+		`{"identifier":"`+email+`","code":"`+code+`"}`)
 	require.Equal(t, http.StatusOK, status, "verify confirm: %v", body)
 
 	cp := embcp.Get(e.App())
@@ -209,7 +210,7 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 		embcp.ErrMerchantNotFound)
 
 	// The owner holds the merchant owner role (= merchant:*), never platform authority.
-	canRead, err := cp.Core().Can(ctx, user.ID, authcore.SubjectKindUser, "merchant", slug, permissions.MerchantSettingsRead)
+	canRead, err := cp.Core().Can(ctx, authkit.UserSubject(user.ID), embcp.MerchantGroup(slug), permissions.MerchantSettingsRead)
 	require.NoError(t, err)
 	require.True(t, canRead, "provisioned owner should hold merchant permissions")
 
@@ -222,7 +223,7 @@ func TestHostedPosture_RegisterVerifyProvision(t *testing.T) {
 	require.False(t, res2.Created, "re-run must not recreate the merchant")
 	require.Equal(t, res1.MerchantID, res2.MerchantID)
 	require.Equal(t, res1.GroupID, res2.GroupID)
-	stillOwner, err := cp.Core().Can(ctx, user.ID, authcore.SubjectKindUser, "merchant", slug, permissions.MerchantSettingsRead)
+	stillOwner, err := cp.Core().Can(ctx, authkit.UserSubject(user.ID), embcp.MerchantGroup(slug), permissions.MerchantSettingsRead)
 	require.NoError(t, err)
 	require.True(t, stillOwner)
 

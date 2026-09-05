@@ -32,8 +32,8 @@ import (
 // # Field-by-field forwarding audit (#743)
 //
 // AttachOptions is the ONLY seam an embedding host has onto the AuthKit dials
-// OpenRails' control plane wires (authcore.Config + authhttp.NewServer's
-// functional options). Below is every dial on both surfaces and whether
+// OpenRails' control plane wires (authcore.Config, authcore.Deps and
+// authhttp.Config). Below is every dial on both surfaces and whether
 // AttachOptions forwards it, so the next missing forward is a deliberate
 // decision recorded here, not a silent gap rediscovered by a 404 in
 // production (#743's Frontend-links finding was exactly that).
@@ -64,45 +64,41 @@ import (
 //   - RBAC: NOT forwarded — OpenRails' own Groups() permission-group catalog
 //     IS the product's authorization schema (#567); a host cannot override
 //     its own persona/permission model.
-//   - Environment: forwarded, but via cfg.Env at the config layer (already a
-//     top-level host-set value), not a separate AttachOptions field.
 //   - Schema / SolanaNetwork: NOT AttachOptions concerns — Schema follows
-//     cfg.DB.SchemaName() at the DB-wiring layer; SolanaNetwork derives from
-//     Environment (authcore's own default), never overridden today.
+//     cfg.DB.SchemaName() at the DB-wiring layer; SolanaNetwork is never
+//     overridden today.
+//   - The dev-rig flags (Ephemeral.AllowMemory, Applications.AllowPrivateNetworkJWKS,
+//     Registration.AllowMissingSenders; ak#314): NOT forwarded — the control
+//     plane maps cfg.Env==development onto them and nothing else may.
 //
-// authcore.Option (engine-construction functional options):
-//   - WithEmailSender / WithSMSSender: FORWARDED via AttachOptions.EmailSender
-//     / SMSSender (#738).
-//   - WithEphemeralStore / embedded.WithRedis: FORWARDED (#753) — AttachWithOptions
-//     wires the app graph's OWN Redis client (app.App.RedisClient, the same
-//     client pkg/embedded.Options.Redis produced) into
-//     controlplane.WithRedis whenever the app has one, rather than adding a
-//     redundant AttachOptions field for state the app graph already holds.
-//     authhttp's own construction-time validate() hard-fails when
-//     Environment is not dev-like and no Redis was supplied, so a hosted
-//     attach in a non-development environment now requires the app to have
-//     Redis configured (pkg/embedded.Options.Redis / app.BootstrapOptions.Redis);
-//     the resulting error names the requirement.
-//   - WithEntitlements / WithClickHouse: NOT forwarded — unrelated feature
-//     areas OpenRails' control plane does not use.
+// authcore.Deps (engine dependencies):
+//   - Email / SMS: FORWARDED via AttachOptions.EmailSender / SMSSender (#738).
+//   - Redis: FORWARDED (#753) — AttachWithOptions wires the app graph's OWN
+//     Redis client (app.App.RedisClient, the same client
+//     pkg/embedded.Options.Redis produced) rather than adding a redundant
+//     AttachOptions field for state the app graph already holds. Outside
+//     development the engine refuses the in-memory ephemeral store, so a
+//     hosted attach there requires the app to have Redis configured
+//     (pkg/embedded.Options.Redis / app.BootstrapOptions.Redis); the
+//     resulting error names the requirement.
+//   - NameAdmission / InstanceAdmission: FORWARDED via AttachOptions.NameAdmission
+//     and MerchantCreation.Admission.
+//   - Entitlements / DelegatedAuthorization / ApplicationAdmission /
+//     SolanaSNSResolver / OutboundHTTP / Clock: NOT forwarded — unrelated
+//     feature areas OpenRails' control plane does not use.
 //
-// authhttp.Option (HTTP-layer construction options, authhttp.NewServer):
-//   - WithTrustedProxies: FORWARDED (this issue) via AttachOptions.TrustedProxies.
-//   - WithClientIPFunc: NOT forwarded — superseded by WithTrustedProxies (the
-//     "normal knob", per its own doc); exposing a raw ClientIPFunc would let a
-//     host inject arbitrary, unaudited client-IP logic. Advanced/test-only by
-//     authhttp's own doc.
-//   - WithRateLimiter / WithoutRateLimiter: NOT forwarded — full-policy-replacement
-//     footguns ("ADVANCED/TEST ONLY" per authhttp's own doc); forwarding them
-//     would let a host disable rate limiting entirely instead of tuning one
-//     bucket. Use AuthRateLimitOverrides for per-bucket tuning instead.
-//   - WithRateLimitOverrides: FORWARDED (#743 task 3, unblocked by authkit
-//     v0.79.0's merge-style override API) via AttachOptions.AuthRateLimitOverrides.
-//   - WithRedis: NOT separately forwarded — the HTTP layer automatically
-//     reuses whatever Redis client the engine was wired with above (authkit
-//     v0.79.0, #210); a host never needs to pass Redis twice.
-//   - WithLanguageConfig: NOT forwarded — i18n is not wired into
-//     AttachOptions; no host has asked for it yet.
+// authhttp.Config (HTTP-layer construction, authhttp.New):
+//   - TrustedProxies / CloudflareProxies / DirectPeerIP: FORWARDED via the
+//     AttachOptions fields of the same names (client-IP posture, ak#299/#298).
+//   - ClientIP: NOT forwarded — superseded by the posture fields; exposing a raw
+//     ClientIPFunc would let a host inject arbitrary, unaudited client-IP logic.
+//   - Limiter / DisableRateLimiting: NOT forwarded — full-policy-replacement
+//     footguns; forwarding them would let a host disable rate limiting entirely
+//     instead of tuning one bucket. Use AuthRateLimitOverrides instead.
+//   - RateLimits: FORWARDED (#743 task 3) via AttachOptions.AuthRateLimitOverrides.
+//   - Redis: NOT separately forwarded — the HTTP layer reuses whatever Redis
+//     client the engine was wired with above (#210).
+//   - Languages / Documents: NOT forwarded — no host has asked for them yet.
 type AttachOptions struct {
 	// Naming overrides config.Auth.Naming as one site policy input. Nil uses config.
 	Naming *authkit.NamingConfig
@@ -148,13 +144,17 @@ type AttachOptions struct {
 	// TrustedProxies overrides cfg.TrustedProxies for AuthKit's HTTP client-IP
 	// resolver. Production requires proxies or an explicit direct-peer posture.
 	TrustedProxies []string
+	// CloudflareProxies overrides cfg.CloudflareProxies: Cloudflare's egress
+	// CIDRs, declared ONLY where Cloudflare fronts the origin (ak#298). These
+	// peers alone may assert CF-Connecting-IP.
+	CloudflareProxies []string
 	// DirectPeerIP declares there is no reverse proxy in front of AuthKit.
 	// It cannot be combined with configured or host-supplied trusted proxies.
 	DirectPeerIP bool
 
 	// AuthRateLimitOverrides overlays bucket-specific limits onto AuthKit's
-	// built-in rate-limit defaults (#743 task 3, unblocked by authkit
-	// v0.79.0's authhttp.WithRateLimitOverrides). Keys are AuthKit's exported
+	// built-in rate-limit defaults (#743 task 3, authhttp.Config.RateLimits).
+	// Keys are AuthKit's exported
 	// bucket names (authhttp.RLPasswordLogin, authhttp.RLAuthRegister, ...);
 	// a host tunes only the buckets it names, every other bucket keeps
 	// AuthKit's default. The type is authkit/ratelimit's own exported Limit —
@@ -258,6 +258,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	if len(opts.TrustedProxies) > 0 {
 		cpOpts = append(cpOpts, controlplane.WithTrustedProxies(opts.TrustedProxies))
 	}
+	if len(opts.CloudflareProxies) > 0 {
+		cpOpts = append(cpOpts, controlplane.WithCloudflareProxies(opts.CloudflareProxies))
+	}
 	if len(opts.AuthRateLimitOverrides) > 0 {
 		cpOpts = append(cpOpts, controlplane.WithRateLimitOverrides(opts.AuthRateLimitOverrides))
 	}
@@ -265,9 +268,8 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	// pkg/embedded.Options.Redis / app.BootstrapOptions.Redis produced) as
 	// AuthKit's ephemeral store, rather than adding a redundant AttachOptions
 	// field for state the app already holds. Nil (no Redis configured) is
-	// passed through unchanged — authhttp.NewServer below fails construction
-	// with a clear error naming the Redis requirement whenever Environment
-	// is non-development and no Redis was wired.
+	// passed through unchanged — outside development the engine refuses the
+	// in-memory ephemeral store with an error naming the Redis requirement.
 	if a.RedisClient != nil {
 		cpOpts = append(cpOpts, controlplane.WithRedis(a.RedisClient))
 	}

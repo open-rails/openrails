@@ -124,6 +124,9 @@ export interface ApiErrorBody {
     code?: string
     message?: string
     param?: string
+    // Machine-readable context; AuthKit's pending-challenge 403s
+    // (2fa_required, verification_required) carry the challenge here.
+    metadata?: Record<string, unknown>
   }
 }
 
@@ -132,6 +135,7 @@ export class ApiError extends Error {
   type?: string
   code?: string
   param?: string
+  metadata?: Record<string, unknown>
 
   constructor(status: number, body: ApiErrorBody | null, fallback: string) {
     super(body?.error?.message || fallback)
@@ -139,6 +143,7 @@ export class ApiError extends Error {
     this.type = body?.error?.type
     this.code = body?.error?.code
     this.param = body?.error?.param
+    this.metadata = body?.error?.metadata
   }
 
   get isPermissionDenied() {

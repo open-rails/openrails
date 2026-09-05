@@ -109,7 +109,7 @@ export function LoginPage() {
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
     passwordLogin.mutate(
-      { login, password },
+      { identifier: login, password },
       {
         onSuccess: (pending) => {
           // A challenge means the password was right and a code is still owed;

@@ -137,7 +137,7 @@ func TestCapturedMerchantGroupSurvivesNameReuse(t *testing.T) {
 	replacement, err := cp.Core().CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: oldName, OwnerSubjectID: other.ID})
 	require.NoError(t, err)
 	require.NotEqual(t, gid, replacement)
-	require.NoError(t, cp.Core().AssignGroupRoleAs(bound, owner.ID, "merchant", oldName, teammate.ID, "user", "viewer"))
+	require.NoError(t, cp.Core().AssignGroupRoleAs(bound, owner.ID, embcp.MerchantGroup(oldName), authkit.UserSubject(teammate.ID), "viewer"))
 	team, err := cp.ListMerchantTeam(ctx, res.MerchantID)
 	require.NoError(t, err)
 	found := false
@@ -145,7 +145,7 @@ func TestCapturedMerchantGroupSurvivesNameReuse(t *testing.T) {
 		found = found || member.UserID == teammate.ID
 	}
 	require.True(t, found, "the captured group receives the teammate after the spelling is reclaimed")
-	allowed, err := cp.Core().CanOnGroup(ctx, teammate.ID, "user", replacement, "merchant:settings:read")
+	allowed, err := cp.Core().CanOnGroup(ctx, authkit.UserSubject(teammate.ID), replacement, "merchant:settings:read")
 	require.NoError(t, err)
 	require.False(t, allowed)
 	key, secret, err := cp.MintMerchantAPIKey(ctx, res.MerchantID, "after rename", "viewer", owner.ID)
@@ -174,6 +174,6 @@ func TestCapturedMerchantGroupSurvivesNameReuse(t *testing.T) {
 	require.ErrorIs(t, err, authkit.ErrGroupSlugApplicationManaged)
 	// A previously captured request cannot fall through to the new owner after deletion.
 	require.NoError(t, cp.Core().DeleteGroupInstanceByID(ctx, gid, authkit.DeletePermissionGroupOptions{ReleaseSlug: true}))
-	err = cp.Core().AssignGroupRoleAs(bound, other.ID, "merchant", oldName, teammate.ID, "user", "viewer")
+	err = cp.Core().AssignGroupRoleAs(bound, other.ID, embcp.MerchantGroup(oldName), authkit.UserSubject(teammate.ID), "viewer")
 	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
 }

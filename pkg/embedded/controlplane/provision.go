@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -107,7 +106,7 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		if group.Persona != controlplane.MerchantType || owner == "" {
 			return nil, authkit.ErrInsufficientRoleAuthority
 		}
-		allowed, err := core.CanOnGroup(ctx, owner, authcore.SubjectKindUser, groupID, authcore.OwnerGrant(controlplane.MerchantType))
+		allowed, err := core.CanOnGroup(ctx, authkit.UserSubject(owner), groupID, controlplane.MerchantType.OwnerGrant())
 		if err != nil {
 			return nil, err
 		}
@@ -118,7 +117,7 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		// Capture an existing group before any host admission callback. A rename
 		// while that callback runs must not turn an existing group into creation.
 		var err error
-		groupID, err = core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+		groupID, err = core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(slug))
 		if err != nil && !errors.Is(err, authkit.ErrGroupNotFound) {
 			return nil, fmt.Errorf("control plane provision: resolve merchant group %q: %w", slug, err)
 		}
@@ -128,12 +127,12 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		if groupID == "" {
 			groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
 				Persona: controlplane.MerchantType, InstanceSlug: slug,
-				ParentPersona: authcore.RootPersona, OwnerSubjectID: owner,
+				ParentPersona: authkit.RootPersona, OwnerSubjectID: owner,
 			})
 			if err != nil {
 				// A concurrent first creation may have won. Adopt its identity;
 				// existing roles remain untouched and callers verify ownership.
-				createdID, resolveErr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+				createdID, resolveErr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(slug))
 				if resolveErr != nil {
 					return nil, fmt.Errorf("control plane provision: create merchant group %q: %w", slug, err)
 				}

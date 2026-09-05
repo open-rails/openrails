@@ -69,8 +69,8 @@ func TestMerchantGroupIdentity(t *testing.T) {
 	status, body := postJSON(t, srv.URL+"/register",
 		`{"identifier":"`+email+`","username":"or914user`+sfx+`","password":"str0ng-horse-battery!"}`)
 	require.Equal(t, http.StatusAccepted, status, "register: %v", body)
-	status, body = postJSON(t, srv.URL+"/email/verify/confirm",
-		`{"email":"`+email+`","code":"`+sender.code(email)+`"}`)
+	status, body = postJSON(t, srv.URL+"/verify/confirm",
+		`{"identifier":"`+email+`","code":"`+sender.code(email)+`"}`)
 	require.Equal(t, http.StatusOK, status, "verify confirm: %v", body)
 	token, _ := body["access_token"].(string)
 	require.NotEmpty(t, token)
@@ -142,7 +142,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		status, body = postMerchant("blocked-" + sfx)
 		require.GreaterOrEqual(t, status, 400, "admission refusal must surface: %v", body)
 		require.Less(t, status, 500)
-		_, gerr := cp.Core().ResolveGroupIDForSlug(ctx, "merchant", "blocked-"+sfx)
+		_, gerr := cp.Core().ResolveGroupIDForSlug(ctx, embcp.MerchantGroup("blocked-"+sfx))
 		require.Error(t, gerr, "no group is created behind a refused admission")
 	})
 
@@ -313,7 +313,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 			SET status='deleted', deleted_at=now(), updated_at=now() WHERE id=$1::uuid`,
 			res.MerchantID.String())
 		require.NoError(t, err)
-		require.NoError(t, cp.Core().DeletePermissionGroup(ctx, "merchant", gone,
+		require.NoError(t, cp.Core().DeletePermissionGroup(ctx, embcp.MerchantGroup(gone),
 			authkit.DeletePermissionGroupOptions{ReleaseSlug: true}))
 
 		res2, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{

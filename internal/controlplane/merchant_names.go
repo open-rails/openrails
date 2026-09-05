@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
 	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/open-rails/authkit"
@@ -14,7 +15,7 @@ import (
 // GroupDirectory is the read-only subset shared by an attached AuthKit client
 // and AuthKit's lightweight directory. It owns all alias and expiry semantics.
 type GroupDirectory interface {
-	GroupInstanceForSlug(context.Context, string, string) (authkit.GroupInstance, error)
+	GroupInstanceForSlug(context.Context, authkit.GroupRef) (authkit.GroupInstance, error)
 	GroupInstanceByID(context.Context, string) (authkit.GroupInstance, error)
 }
 
@@ -29,7 +30,7 @@ func MerchantNameAuthority(groups GroupDirectory) merchant.NameAuthority {
 }
 
 func (a merchantNameAuthority) ResolveGroup(ctx context.Context, name string) (string, string, error) {
-	group, err := a.groups.GroupInstanceForSlug(ctx, MerchantType, name)
+	group, err := a.groups.GroupInstanceForSlug(ctx, MerchantGroup(name))
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		return "", "", merchants.ErrMerchantNotFound
 	}
@@ -57,7 +58,7 @@ func (a merchantNameAuthority) GroupName(ctx context.Context, id string) (string
 
 func (a merchantNameAuthority) SearchGroups(ctx context.Context, query, afterName, afterID string, limit int) ([]merchant.GroupName, error) {
 	search, ok := a.groups.(interface {
-		SearchGroupInstances(context.Context, string, string, string, string, int) ([]authkit.GroupInstance, error)
+		SearchGroupInstances(context.Context, authkit.Persona, string, string, string, int) ([]authkit.GroupInstance, error)
 	})
 	if !ok {
 		return nil, fmt.Errorf("authoritative merchant group search is not configured")

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit"
-	authcore "github.com/open-rails/authkit/embedded"
 )
 
 // EnsureCustomerPermissionGroup lazily materializes the AuthKit customer group
@@ -27,7 +26,7 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 		return "", fmt.Errorf("controlplane: %w", err)
 	}
 
-	groupID, err := core.ResolveGroupIDForSlug(ctx, CustomerType, customerID)
+	groupID, err := core.ResolveGroupIDForSlug(ctx, CustomerGroup(customerID))
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		if ownerSubject == "" {
 			return "", errors.New("controlplane: customer owner subject required")
@@ -35,12 +34,12 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
 			Persona:        CustomerType,
 			InstanceSlug:   customerID,
-			ParentPersona:  authcore.RootPersona,
+			ParentPersona:  authkit.RootPersona,
 			OwnerSubjectID: ownerSubject,
 		})
 		if err != nil {
 			// ponytail: handles the only expected race, concurrent first writers.
-			if id, rerr := core.ResolveGroupIDForSlug(ctx, CustomerType, customerID); rerr == nil {
+			if id, rerr := core.ResolveGroupIDForSlug(ctx, CustomerGroup(customerID)); rerr == nil {
 				groupID = id
 			} else {
 				return "", fmt.Errorf("controlplane: create customer group %q: %w", customerID, err)
@@ -49,33 +48,9 @@ func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, custom
 	} else if err != nil {
 		return "", fmt.Errorf("controlplane: resolve customer group %q: %w", customerID, err)
 	} else if ownerSubject != "" {
-		if err := core.Genesis().AssignGroupRole(ctx, CustomerType, customerID, ownerSubject, authcore.SubjectKindUser, CustomerRoleOwner); err != nil {
+		if err := core.Genesis().AssignGroupRole(ctx, CustomerGroup(customerID), authkit.UserSubject(ownerSubject), CustomerRoleOwner); err != nil {
 			return "", fmt.Errorf("controlplane: assign customer owner: %w", err)
 		}
 	}
 	return groupID, nil
-}
-
-// AuthorizePermissionGroupRoute backs AuthKit's generated group-management
-// surface. Customer groups are self-owned and lazy: the first authenticated user
-// request against /customer/{their-user-id}/... materializes the group, then the
-// normal AuthKit Can check decides the route.
-func (c *ControlPlane) AuthorizePermissionGroupRoute(ctx context.Context, subjectID, persona, instanceSlug, perm string) (bool, error) {
-	core := c.Core()
-	if core == nil {
-		return false, errors.New("controlplane: core service unavailable")
-	}
-	subjectID = strings.TrimSpace(subjectID)
-	persona = strings.TrimSpace(persona)
-	instanceSlug = strings.TrimSpace(instanceSlug)
-	perm = strings.TrimSpace(perm)
-	if subjectID == "" || persona == "" || instanceSlug == "" || perm == "" {
-		return false, nil
-	}
-	if persona == CustomerType && subjectID == instanceSlug {
-		if _, err := c.EnsureCustomerPermissionGroup(ctx, instanceSlug, subjectID); err != nil {
-			return false, err
-		}
-	}
-	return core.Can(ctx, subjectID, authcore.SubjectKindUser, persona, instanceSlug, perm)
 }

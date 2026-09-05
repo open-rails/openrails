@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 
-	authcore "github.com/open-rails/authkit/embedded"
-
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -43,7 +41,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 // full merchant owner grant, identical to what a merchant-owner API key
 // resolves to on the standalone wire path.
 func hostPermissions() []string {
-	return []string{authcore.OwnerGrant(controlplane.MerchantType)}
+	return []string{string(controlplane.MerchantType.OwnerGrant())}
 }
 
 // inprocessTransport dispatches SDK requests directly into the in-process

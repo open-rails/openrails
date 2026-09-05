@@ -107,7 +107,7 @@ func mintDelegated(t *testing.T, signer jwtkit.Signer, p authkit.DelegatedAccess
 
 type delegatedRemoteAppSource []authkit.RemoteApplication
 
-func (s delegatedRemoteAppSource) ListRemoteApplications(context.Context, bool) ([]authkit.RemoteApplication, error) {
+func (s delegatedRemoteAppSource) ListEnabledRemoteApplications(context.Context) ([]authkit.RemoteApplication, error) {
 	return append([]authkit.RemoteApplication(nil), s...), nil
 }
 

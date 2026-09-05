@@ -33,10 +33,10 @@ func (noopEmailSender) SendLoginCode(context.Context, string, string, string) er
 func (noopEmailSender) SendWelcome(context.Context, string, string) error           { return nil }
 
 // stagingControlPlaneConfig is newTestControlPlane's cfg with a non-development
-// Environment (#753): authhttp.NewServer's own construction-time validate()
-// requires a Redis-backed ephemeral store whenever Environment is not dev-like
-// (embedded.IsDevEnvironment) — "staging" here is what actually exercises that
-// gate ("dev", used everywhere else in this file, never does).
+// Env (#753): New grants Ephemeral.AllowMemory only to development (ak#314),
+// so the engine requires a Redis-backed ephemeral store everywhere else —
+// "staging" here is what actually exercises that gate ("dev", used everywhere
+// else in this file, never does).
 // Auth.MintDisabled=true sidesteps signing-key discovery (no keys.json exists
 // in this test environment, which outside development would otherwise be a
 // separate, unrelated construction failure — irrelevant to the Redis gate
@@ -52,10 +52,10 @@ func stagingControlPlaneConfig() *config.Config {
 	}
 }
 
-// TestNew_HostedStagingWithRedis_Succeeds proves #753's fix: New now accepts
+// TestNew_HostedStagingWithRedis_Succeeds proves #753's fix: New accepts
 // WithRedis, wiring the caller's Redis client into AuthKit's engine as its
-// ephemeral store (authcore.WithRedis) — which authhttp.NewServer (authkit
-// v0.79.0, #210) also reuses for its own HTTP-layer rate limiter/state caches.
+// ephemeral store (embedded.Deps.Redis) — which authhttp.New (#210) also
+// reuses for its own HTTP-layer rate limiter/state caches.
 // A hosted control plane in a non-development environment must boot when
 // Redis is supplied.
 func TestNew_HostedStagingWithRedis_Succeeds(t *testing.T) {
@@ -74,10 +74,10 @@ func TestNew_HostedStagingWithRedis_Succeeds(t *testing.T) {
 
 // TestNew_HostedStagingWithoutRedis_FailsNamingRedis is the mirror: before
 // #753, internal/controlplane.New never wired Redis/an ephemeral store into
-// authhttp.NewServer at all, so ANY hosted construction with a
-// production-like Environment string hard-failed unconditionally. With no
-// WithRedis option supplied, New must still fail — but the error must clearly
-// name the Redis/ephemeral-store requirement so an operator can act on it.
+// the engine at all, so ANY hosted construction with a production-like Env
+// hard-failed unconditionally. With no WithRedis option supplied, New must
+// still fail — but the error must clearly name the Redis/ephemeral-store
+// requirement so an operator can act on it.
 func TestNew_HostedStagingWithoutRedis_FailsNamingRedis(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)

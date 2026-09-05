@@ -293,8 +293,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Config:      cfg,
 		Clock:       clock,
 		// #746: one proxy-aware client-IP resolver, built once from config;
-		// empty cfg.TrustedProxies yields a resolver that trusts nothing.
-		TrustedProxies:       iputil.ParseTrustedProxies(cfg.TrustedProxies),
+		// empty yields a resolver that trusts nothing. Cloudflare peers (ak#298)
+		// are trusted for X-Forwarded-For here exactly as AuthKit trusts them.
+		TrustedProxies:       iputil.ParseTrustedProxies(append(append([]string(nil), cfg.TrustedProxies...), cfg.CloudflareProxies...)),
 		AdmissionPolicyCache: admission.NewPolicyCache(0), // #513: default long TTL (config)
 		RailConfigs:          railConfigs,
 

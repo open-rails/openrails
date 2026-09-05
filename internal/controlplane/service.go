@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/authkit"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/open-rails/authkit"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	authhttp "github.com/open-rails/authkit/authhttp"
@@ -88,6 +89,7 @@ type options struct {
 	sms                          authcore.SMSSender
 	frontend                     authcore.FrontendConfig
 	trustedProxies               []string
+	cloudflareProxies            []string
 	directPeerIP                 bool
 	rateLimitOverrides           map[string]ratelimit.Limit
 	redis                        *redis.Client
@@ -172,17 +174,23 @@ func WithTrustedProxies(cidrs []string) Option {
 	return func(o *options) { o.trustedProxies = append([]string(nil), cidrs...) }
 }
 
+// WithCloudflareProxies overrides the configured Cloudflare egress CIDRs
+// (ak#298). Only these peers may assert CF-Connecting-IP; declare them solely
+// where Cloudflare fronts the origin.
+func WithCloudflareProxies(cidrs []string) Option {
+	return func(o *options) { o.cloudflareProxies = append([]string(nil), cidrs...) }
+}
+
 // WithDirectPeerIP declares that AuthKit receives the client's direct connection.
 func WithDirectPeerIP() Option {
 	return func(o *options) { o.directPeerIP = true }
 }
 
 // WithRateLimitOverrides overlays bucket-specific limits onto AuthKit's
-// built-in rate-limit defaults (authhttp.WithRateLimitOverrides; #743 task 3,
-// unblocked by authkit v0.79.0's authkit#242 merge-style override API). Keys
-// are AuthKit's exported bucket names (authhttp.RLPasswordLogin, etc.);
-// unset buckets keep AuthKit's default. Never replaces the whole policy —
-// authhttp.WithRateLimiter/WithoutRateLimiter remain the (unforwarded,
+// built-in rate-limit defaults (authhttp.Config.RateLimits; #743 task 3). Keys
+// are AuthKit's exported bucket names (authhttp.RLPasswordLogin, etc.); unset
+// buckets keep AuthKit's default. Never replaces the whole policy —
+// authhttp.Config.Limiter/DisableRateLimiting remain the (unforwarded,
 // advanced-only) full-replacement seam.
 func WithRateLimitOverrides(overrides map[string]ratelimit.Limit) Option {
 	return func(o *options) {
@@ -191,16 +199,46 @@ func WithRateLimitOverrides(overrides map[string]ratelimit.Limit) Option {
 }
 
 // WithRedis wires a Redis client into the AuthKit engine's ephemeral store
-// (authcore.WithRedis) — #753. authhttp.NewServer (authkit v0.79.0, #210)
-// automatically reuses this SAME client for its own OIDC/SIWS state caches
-// and rate limiter, so this one call satisfies both layers' Redis needs.
-// Required outside development: authhttp.NewServer hard-fails construction
-// when Environment is non-development and no Redis-backed ephemeral store
-// was wired.
+// (embedded.Deps.Redis) — #753. authhttp.New reuses this SAME client for its
+// own OIDC/SIWS state caches and rate limiter, so this one call satisfies both
+// layers' Redis needs. Required outside development: the engine refuses the
+// in-memory store unless Ephemeral.AllowMemory is set, which New grants only
+// to development (ak#305/#314).
 func WithRedis(rd *redis.Client) Option {
 	return func(o *options) {
 		o.redis = rd
 	}
+}
+
+// clientIPPosture resolves the authhttp client-IP declaration (ak#299): host
+// options override config, direct-peer excludes proxy lists, and outside
+// development an undeclared posture refuses to boot rather than sharing one
+// rate-limit bucket behind an unknown proxy. A development rig is its own
+// edge and defaults to direct-peer.
+func clientIPPosture(cfg *config.Config, options options) (authhttp.Config, error) {
+	proxies := cfg.TrustedProxies
+	if len(options.trustedProxies) > 0 {
+		proxies = options.trustedProxies
+	}
+	cloudflare := cfg.CloudflareProxies
+	if len(options.cloudflareProxies) > 0 {
+		cloudflare = options.cloudflareProxies
+	}
+	directPeer := cfg.Auth.DirectPeerIP || options.directPeerIP
+	switch {
+	case directPeer && (len(proxies) > 0 || len(cloudflare) > 0):
+		return authhttp.Config{}, errors.New("controlplane: direct_peer_ip conflicts with trusted_proxies/cloudflare_proxies")
+	case !directPeer && len(proxies) == 0 && len(cloudflare) == 0:
+		if !cfg.IsDev() {
+			return authhttp.Config{}, errors.New("controlplane: an explicit client-IP posture is required outside development: set auth.direct_peer_ip=true when clients connect directly, or trusted_proxies / cloudflare_proxies for the proxies in front")
+		}
+		directPeer = true
+	}
+	return authhttp.Config{
+		TrustedProxies:    proxies,
+		CloudflareProxies: cloudflare,
+		DirectPeerIP:      directPeer,
+	}, nil
 }
 
 func newOptions(opts []Option) options {
@@ -399,9 +437,17 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 			IssuedAudiences:   []string{billingauth.TokenAudience},
 			ExpectedAudiences: []string{billingauth.TokenAudience},
 		},
-		Frontend:    resolveFrontendConfig(issuer, options.frontend),
-		APIKeys:     authcore.APIKeysConfig{Prefix: APIKeyPrefix},
-		Environment: strings.TrimSpace(cfg.Env),
+		Frontend: resolveFrontendConfig(issuer, options.frontend),
+		APIKeys:  authcore.APIKeysConfig{Prefix: APIKeyPrefix},
+		// ak#314: authkit has no environment classifier; the dev-rig
+		// relaxations are explicit flags, all off by default. OpenRails keeps
+		// its own env vocabulary (config.Env, SEC-18) and maps development onto
+		// them here: the in-memory ephemeral store (no Redis), private-network
+		// JWKS for the local sandbox issuer, and missing senders (the engine
+		// hands codes back instead of delivering). Every other environment
+		// runs fail-closed: Redis required, public JWKS only, senders required.
+		Ephemeral:    authcore.EphemeralConfig{AllowMemory: cfg.IsDev()},
+		Applications: authcore.ApplicationsConfig{AllowPrivateNetworkJWKS: cfg.IsDev()},
 		// HARD CUT (#567): OpenRails declares two FLAT top-level permission-group
 		// personas under `root` — `merchant` (owner/support/viewer, `merchant:*`)
 		// and `customer` (owner/member, `customer:*`). There is no merchant coupling
@@ -423,73 +469,50 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 			Verification:                 registrationVerification(lockedRegistration),
 			PasswordlessLogin:            options.passwordlessLogin,
 			PasswordlessAutoRegistration: options.passwordlessAutoRegistration,
+			AllowMissingSenders:          cfg.IsDev(),
 		},
 	}
 
-	// Host-owned verification senders (#738) are engine dependencies, wired as
-	// authkit functional options. authkit enforces the required-policy/sender
-	// pairing itself at HTTP-server construction below — no downgrade here.
-	coreOpts := []authcore.Option{authcore.WithNameAdmission(func(ctx context.Context, request authkit.NameAdmissionRequest) error {
-		if request.OwnerKind == "group" && request.Persona == CustomerType && request.Operation == authkit.NameRename {
-			return authkit.ErrGroupSlugApplicationManaged
-		}
-		if options.nameAdmission != nil {
-			return options.nameAdmission(ctx, request)
-		}
-		return nil
-	})}
-	if options.email != nil {
-		coreOpts = append(coreOpts, authcore.WithEmailSender(options.email))
-	}
-	if options.sms != nil {
-		coreOpts = append(coreOpts, authcore.WithSMSSender(options.sms))
-	}
-	// #753: wire the engine's Redis client as AuthKit's ephemeral store.
-	// authhttp.NewServer below (authkit v0.79.0, #210) automatically reuses
-	// THIS SAME client for its own OIDC/SIWS caches and rate limiter — one
-	// wire satisfies both layers, and is REQUIRED outside development (see
-	// authhttp.NewServer's validate()).
-	if options.redis != nil {
-		coreOpts = append(coreOpts, authcore.WithRedis(options.redis))
+	// Engine dependencies (ak#314 embedded.Deps). Host-owned senders (#738)
+	// and the app's Redis client (#753) are wired here once; authhttp.New
+	// below reuses the same Redis for its OIDC/SIWS caches and rate limiter.
+	deps := authcore.Deps{
+		Postgres: pool,
+		Redis:    options.redis,
+		Email:    options.email,
+		SMS:      options.sms,
+		NameAdmission: func(ctx context.Context, request authkit.NameAdmissionRequest) error {
+			if request.OwnerKind == "group" && request.Persona == CustomerType && request.Operation == authkit.NameRename {
+				return authkit.ErrGroupSlugApplicationManaged
+			}
+			if options.nameAdmission != nil {
+				return options.nameAdmission(ctx, request)
+			}
+			return nil
+		},
 	}
 	if options.merchantCreation != nil && options.merchantCreation.Admission != nil {
-		// ak#263 host admission seam (signature per authkit v0.93.0: the
-		// predicate receives the normalized slug). Personas other than
-		// merchant never reach the host gate — openrails enables creation on
-		// the merchant persona only.
+		// ak#263 host admission seam: the predicate receives the normalized
+		// slug. Personas other than merchant never reach the host gate —
+		// openrails enables creation on the merchant persona only.
 		admit := options.merchantCreation.Admission
-		coreOpts = append(coreOpts, authcore.WithInstanceAdmission(func(ctx context.Context, persona, instanceSlug, subject string) error {
-			if persona != MerchantType {
+		deps.InstanceAdmission = func(ctx context.Context, group authkit.GroupRef, subject string) error {
+			if group.Persona != MerchantType {
 				return nil
 			}
-			return admit(ctx, instanceSlug, subject)
-		}))
+			return admit(ctx, group.Instance, subject)
+		}
 	}
+
+	httpCfg, err := clientIPPosture(cfg, options)
+	if err != nil {
+		return nil, err
+	}
+	httpCfg.RateLimits = options.rateLimitOverrides
 
 	// Client-first construction (#142): build the AuthKit engine, then adapt it
 	// with the HTTP server. Core() / the delegated verifier hold this client.
-	// HTTP-layer options (#743): trusted-proxy CIDRs so the per-client
-	// registration/login rate limiter keys on the real client behind a load
-	// balancer instead of the LB's own peer address; per-bucket rate-limit
-	// overrides layered onto AuthKit's defaults.
-	var authHTTPOpts []authhttp.Option
-	proxies := cfg.TrustedProxies
-	if len(options.trustedProxies) > 0 {
-		proxies = options.trustedProxies
-	}
-	directPeer := cfg.Auth.DirectPeerIP || options.directPeerIP
-	if directPeer && len(proxies) > 0 {
-		return nil, errors.New("controlplane: direct_peer_ip conflicts with trusted_proxies")
-	}
-	if len(proxies) > 0 {
-		authHTTPOpts = append(authHTTPOpts, authhttp.WithTrustedProxies(proxies...))
-	} else if directPeer {
-		authHTTPOpts = append(authHTTPOpts, authhttp.WithDirectPeerIP())
-	}
-	if len(options.rateLimitOverrides) > 0 {
-		authHTTPOpts = append(authHTTPOpts, authhttp.WithRateLimitOverrides(options.rateLimitOverrides))
-	}
-	authClient, err := authcore.New(coreCfg, pool, coreOpts...)
+	authClient, err := authcore.New(coreCfg, deps)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
 	}
@@ -498,12 +521,12 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		// groups parented at ROOT, and unlike Bootstrap/ProvisionMerchant the
 		// route has no ensure step of its own — a fresh deployment would 404
 		// (parent group not found) until something else seeded root. Ensure it
-		// here, once, at construction (idempotent, #844-tolerant).
+		// here, once, at construction (idempotent).
 		if err := EnsureRootContainment(ctx, authClient); err != nil {
 			return nil, fmt.Errorf("controlplane: merchant creation enabled: %w", err)
 		}
 	}
-	authSvc, err := authhttp.NewServer(authClient, authHTTPOpts...)
+	authSvc, err := authhttp.New(authClient, httpCfg)
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}

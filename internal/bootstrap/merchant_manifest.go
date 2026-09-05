@@ -2151,18 +2151,18 @@ func provisionMerchantGroup(ctx context.Context, cp *controlplane.ControlPlane, 
 	}
 
 	// Idempotently create the merchant permission-group (resolve, else create).
-	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(slug))
 	if errors.Is(err, authkit.ErrGroupNotFound) {
 		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
 			Persona:       controlplane.MerchantType,
 			InstanceSlug:  slug,
-			ParentPersona: authcore.RootPersona,
+			ParentPersona: authkit.RootPersona,
 		})
 		if err != nil {
 			// #844: concurrent first-create loser — re-read and adopt the
 			// winner's group (the Reconcile path holds an advisory lock, but
 			// ProvisionMerchant callers do not).
-			id, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+			id, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup(slug))
 			if rerr != nil {
 				return "", fmt.Errorf("merchant bootstrap: create merchant group %q: %w", slug, err)
 			}
@@ -2201,7 +2201,7 @@ func configureMerchantRemoteApplication(ctx context.Context, cp *controlplane.Co
 	if err != nil {
 		return fmt.Errorf("merchant bootstrap: register remote_application for group %s: %w", groupID, err)
 	}
-	if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantType, group.InstanceSlug, stored.ID, authcore.SubjectKindRemoteApp, controlplane.MerchantRoleOwner); err != nil {
+	if err := core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(group.InstanceSlug), authkit.RemoteAppSubject(stored.ID), controlplane.MerchantRoleOwner); err != nil {
 		return fmt.Errorf("merchant bootstrap: grant remote_application owner role for group %s: %w", groupID, err)
 	}
 	return nil
