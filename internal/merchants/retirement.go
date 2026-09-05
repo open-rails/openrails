@@ -22,8 +22,8 @@ func (s *Service) retireUnusedMerchant(ctx context.Context, mid merchant.ID, gro
 		if !live {
 			return nil
 		}
-		var used bool
-		if err := tx.QueryRow(ctx, dormancyUsedProbeSQL, mid.String()).Scan(&used); err != nil {
+		used, err := q.MerchantHasBillingActivity(ctx, mid.UUID())
+		if err != nil {
 			return err
 		}
 		if used {

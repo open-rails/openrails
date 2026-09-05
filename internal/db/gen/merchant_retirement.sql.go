@@ -112,3 +112,19 @@ func (q *Queries) MarkMerchantRetired(ctx context.Context, arg MarkMerchantRetir
 	_, err := q.db.Exec(ctx, markMerchantRetired, arg.RetiredAt, arg.ID)
 	return err
 }
+
+const merchantHasBillingActivity = `-- name: MerchantHasBillingActivity :one
+SELECT EXISTS (SELECT 1 FROM openrails.psps             WHERE merchant_id = $1::uuid)
+	    OR EXISTS (SELECT 1 FROM openrails.payments         WHERE merchant_id = $1::uuid)
+	    OR EXISTS (SELECT 1 FROM openrails.subscriptions    WHERE merchant_id = $1::uuid)
+	    OR EXISTS (SELECT 1 FROM openrails.customers        WHERE merchant_id = $1::uuid)
+	    OR EXISTS (SELECT 1 FROM openrails.products         WHERE merchant_id = $1::uuid)
+	    OR EXISTS (SELECT 1 FROM openrails.ledger_transfers WHERE merchant_id = $1::uuid)
+`
+
+func (q *Queries) MerchantHasBillingActivity(ctx context.Context, merchantID uuid.UUID) (*bool, error) {
+	row := q.db.QueryRow(ctx, merchantHasBillingActivity, merchantID)
+	var column_1 *bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}

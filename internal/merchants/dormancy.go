@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -152,7 +153,9 @@ func (s *Service) SweepDormant(ctx context.Context, cfg DormancySweepConfig, rel
 			warnCount     int64
 		)
 		err = s.pool.MerchantTx(ctx, mid, func(ctx context.Context, tx pgx.Tx) error {
-			if err := tx.QueryRow(ctx, dormancyUsedProbeSQL, c.id).Scan(&used); err != nil {
+			var err error
+			used, err = gen.New(tx).MerchantHasBillingActivity(ctx, mid.UUID())
+			if err != nil {
 				return err
 			}
 			if used {
@@ -234,16 +237,3 @@ func (s *Service) SweepDormant(ctx context.Context, cfg DormancySweepConfig, rel
 	}
 	return res, firstErr
 }
-
-// dormancyUsedProbeSQL is the never-used predicate for ONE merchant, run
-// inside MerchantTx. "Used" is any provider connection, money movement,
-// catalog, or customer — a merchant someone invested ANY setup in is never
-// dormant.
-const dormancyUsedProbeSQL = `
-	SELECT EXISTS (SELECT 1 FROM openrails.psps             WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.payments         WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.subscriptions    WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.customers        WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.products         WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.ledger_transfers WHERE merchant_id = $1::uuid)
-`
