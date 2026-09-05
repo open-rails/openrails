@@ -90,3 +90,7 @@ func TestNew_HostedStagingWithoutRedis_FailsNamingRedis(t *testing.T) {
 	require.Contains(t, strings.ToLower(err.Error()), "redis",
 		"the failure must name the Redis/ephemeral-store requirement: %v", err)
 }
+
+func (noopEmailSender) SendContactChanged(context.Context, string, string, authcore.ContactChange) error {
+	return nil
+}
