@@ -26,14 +26,14 @@ type GrantSubscriptionCreditsParams struct {
 // must be a built-in currency OR an active qualified custom-credit unit (#475).
 // expiry_hours is optional; omitted and explicit 0 both mean never-expire
 // (#857). Only an explicit negative is invalid — it names no reachable instant.
-func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, grantKey string, spec models.CreditGrantSpec) error {
+func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, q *gen.Queries, grantKey string, spec models.CreditGrantSpec) error {
 	if strings.TrimSpace(grantKey) == "" {
 		return fmt.Errorf("grant key is empty")
 	}
 	if spec.Amount <= 0 {
 		return fmt.Errorf("invalid credits_spec: %s amount must be > 0", grantKey)
 	}
-	if err := s.validateUnit(ctx, spec.UnitCode()); err != nil {
+	if _, _, err := resolveUnit(ctx, q, spec.UnitCode()); err != nil {
 		return fmt.Errorf("invalid credits_spec: %s %w", grantKey, err)
 	}
 	if spec.ExpiryHours != nil && *spec.ExpiryHours < 0 {
@@ -121,7 +121,7 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 
 		for label, spec := range creditsSpec {
 			label = strings.TrimSpace(label)
-			if err := s.validateCreditGrantSpec(ctx, label, spec); err != nil {
+			if err := s.validateCreditGrantSpec(ctx, q, label, spec); err != nil {
 				return err
 			}
 
@@ -205,7 +205,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 		now := s.now()
 		for label, spec := range params.Spec {
 			label = strings.TrimSpace(label)
-			if err := s.validateCreditGrantSpec(ctx, label, spec); err != nil {
+			if err := s.validateCreditGrantSpec(ctx, q, label, spec); err != nil {
 				return err
 			}
 			cadence := spec.Cadence

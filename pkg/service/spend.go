@@ -35,7 +35,7 @@ type CreditAccountSnapshot struct {
 
 // GetCreditAccount returns the balance + policy snapshot for an merchant subject.
 func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerID, currency string) (*CreditAccountSnapshot, error) {
-	currency, err := requireCurrency(currency)
+	currency, err := s.resolveCurrency(ctx, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -83,6 +83,9 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 		}
 		return nil
 	})
+	if err == nil && snap != nil {
+		snap.Currency, err = s.DisplayCurrency(ctx, snap.Currency)
+	}
 	return snap, err
 }
 
@@ -104,11 +107,19 @@ type UsageRow struct {
 // openrails_app role (#227); RunInMerchantConn reuses the request's already-pinned
 // connection when one is set.
 func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRow, error) {
+	currency, err := s.resolveCurrency(ctx, currency)
+	if err != nil {
+		return nil, err
+	}
+	displayCurrency, err := s.DisplayCurrency(ctx, currency)
+	if err != nil {
+		return nil, err
+	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
 	var out []UsageRow
-	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		rows, err := s.moneyService().AggregateUsage(ctx, payer, currency, from, to)
 		if err != nil {
 			return err
@@ -117,7 +128,7 @@ func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, curre
 		for _, r := range rows {
 			out = append(out, UsageRow{
 				EventType:   r.EventType,
-				Currency:    r.Currency,
+				Currency:    displayCurrency,
 				TotalAmount: r.TotalAmount,
 				EventCount:  r.EventCount,
 				Dimensions:  r.Dimensions,
@@ -453,7 +464,7 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.resolveCurrency(ctx, currency)
 	if err != nil {
 		return err
 	}
@@ -477,7 +488,7 @@ func (s *Service) SetCreditLimit(ctx context.Context, payer identity.CustomerID,
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.resolveCurrency(ctx, currency)
 	if err != nil {
 		return err
 	}
@@ -500,7 +511,7 @@ func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID,
 	if payer.IsZero() {
 		return 0, fmt.Errorf("payer required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.resolveCurrency(ctx, currency)
 	if err != nil {
 		return 0, err
 	}
@@ -520,7 +531,7 @@ func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.C
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.resolveCurrency(ctx, currency)
 	if err != nil {
 		return nil, err
 	}
@@ -533,7 +544,7 @@ func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer ident
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
-	currency, err := requireCurrency(currency)
+	currency, err := s.resolveCurrency(ctx, currency)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -544,5 +555,13 @@ func (s *Service) GetCustomerCreditTransactions(ctx context.Context, payer ident
 		items, total, e = s.moneyService().GetTransactionsByCustomer(ctx, payer, currency, limit, offset)
 		return e
 	})
+	if err == nil {
+		for i := range items {
+			items[i].Currency, err = s.DisplayCurrency(ctx, items[i].Currency)
+			if err != nil {
+				return nil, 0, err
+			}
+		}
+	}
 	return items, total, err
 }

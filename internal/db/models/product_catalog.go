@@ -58,7 +58,7 @@ const (
 
 type CreditGrantSpec struct {
 	// Unit is the currency code of the granted balance (#472). Required.
-	// Unqualified = built-in currency; a future merchant/name = custom credit (#473).
+	// Built-ins use ISO codes; custom units use credit:<registry UUID>.
 	Unit   string `json:"unit,omitempty"`
 	Amount int64  `json:"amount"`
 	// ExpiryHours: balance expires now+N hours. null/omitted => NEVER expires

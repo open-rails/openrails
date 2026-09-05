@@ -358,7 +358,7 @@ type OpenrailsCustodyMigration struct {
 	CreatedAt time.Time
 }
 
-// Per-tenant custom credit units (#475): consume-only, no FX, never billed in. Referenced from money rows via the qualified code tenant-slug/name. Written by the catalog sidecar push (#706): auto-defined from catalog_credit_balances.unit; never auto-deactivated (grants may still reference a removed balance's unit).
+// Merchant-owned custom credit identities and scales. Financial rows reference credit:<id>; external names resolve through the current merchant namespace.
 type OpenrailsCustomCreditType struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID

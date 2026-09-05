@@ -159,6 +159,10 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if err != nil {
 		return nil, err
 	}
+	storedCredits, err := s.storedCatalogCredits(ctx, req.CreditsSpec)
+	if err != nil {
+		return nil, err
+	}
 	p := &models.Product{
 		// #662: the product id is a pure function of its immutable natural key
 		// (merchant_id, key) — same logical product → same id in every DB.
@@ -168,7 +172,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
-		CreditsSpec:      toModelCreditsSpec(req.CreditsSpec),
+		CreditsSpec:      storedCredits,
 		TierGroup:        req.TierGroup,
 		TierRank:         req.TierRank,
 		Archived:         req.Archived,
@@ -178,7 +182,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if err := products.Create(ctx, p); err != nil {
 		return nil, err
 	}
-	return productToCatalogProduct(p), nil
+	return s.catalogProduct(ctx, p)
 }
 
 type UpdateProductRequest struct {
@@ -215,12 +219,19 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	if productID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
+	var storedCredits models.CreditsSpec
+	if req.SetCredits {
+		storedCredits, err = s.storedCatalogCredits(ctx, req.CreditsSpec)
+		if err != nil {
+			return nil, err
+		}
+	}
 	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
 		SetEntitlements:  req.SetEntitlements,
-		CreditsSpec:      toModelCreditsSpec(req.CreditsSpec),
+		CreditsSpec:      storedCredits,
 		SetCredits:       req.SetCredits,
 		TierGroup:        req.TierGroup,
 		SetTierGroup:     req.SetTierGroup,
@@ -275,7 +286,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 		}
 	}
 
-	return productToCatalogProduct(p), nil
+	return s.catalogProduct(ctx, p)
 }
 
 // propagateProductActiveToStripe pushes the product's active flag to its Stripe

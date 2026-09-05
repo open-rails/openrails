@@ -147,6 +147,15 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
 	entitlements := entitlementsSpec(product.Entitlements)
 	credits := creditsSpec(product.Credits)
+	if normalizer, ok := applier.(interface {
+		NormalizeCatalogCredits(context.Context, billingservice.CreditsSpec) (billingservice.CreditsSpec, error)
+	}); ok {
+		var err error
+		credits, err = normalizer.NormalizeCatalogCredits(ctx, credits)
+		if err != nil {
+			return nil, err
+		}
+	}
 	// Usage-metered products carry no tier_group — they aren't tier-exclusive
 	// subscriptions (#642). The loader put them in a synthetic singleton group;
 	// persist NULL so they never share tier exclusivity.

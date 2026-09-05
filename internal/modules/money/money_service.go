@@ -565,7 +565,7 @@ func stringPtr(s string) *string { return &s }
 func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params DepositParams) (*models.MoneyTransaction, error) {
 	now := s.now()
 	cur := normalizeUnit(params.Currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	if _, _, err := resolveUnit(ctx, q, cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
