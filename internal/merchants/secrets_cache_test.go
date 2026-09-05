@@ -202,7 +202,7 @@ func (e errVaultKV) ListSecrets(context.Context, string) ([]string, error) { ret
 
 func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", errVaultKV{err: errors.New("dial tcp: connection refused")}, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug})
+	store := NewVaultSecretStore("secret", errVaultKV{err: errors.New("dial tcp: connection refused")})
 	_, err := store.Get(ctx, dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("unreachable Get = %v, want wraps ErrSecretBackendUnavailable", err)
@@ -214,7 +214,7 @@ func TestVaultSecretStore_UnreachableIsBackendUnavailableNotAbsent(t *testing.T)
 
 func TestVaultSecretStore_AbsentIsNotFound(t *testing.T) {
 	ctx := context.Background()
-	store := NewVaultSecretStore("secret", newFakeVaultKV(), staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug}) // empty store -> no value
+	store := NewVaultSecretStore("secret", newFakeVaultKV()) // empty store -> no value
 	_, err := store.Get(ctx, dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
 	if !errors.Is(err, ErrSecretNotFound) {
 		t.Fatalf("absent Get = %v, want ErrSecretNotFound", err)
@@ -230,7 +230,7 @@ func TestVaultSecretStore_StubWrapsBackendUnavailable(t *testing.T) {
 	if !errors.Is(ErrVaultNotConfigured, ErrSecretBackendUnavailable) {
 		t.Fatal("ErrVaultNotConfigured must wrap ErrSecretBackendUnavailable")
 	}
-	_, err := NewVaultSecretStore("secret", nil, staticMerchantSlugResolver{dbtest.TestMerchantID.String(): dbtest.TestMerchantSlug}).Get(context.Background(), dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
+	_, err := NewVaultSecretStore("secret", nil).Get(context.Background(), dbtest.TestMerchantID, "psps/stripe/live/acct_884_test/secret_key")
 	if !errors.Is(err, ErrSecretBackendUnavailable) {
 		t.Fatalf("stub Get = %v, want wraps ErrSecretBackendUnavailable", err)
 	}

@@ -303,7 +303,7 @@ func (s *Service) AdminCreateOffChannelPayment(ctx context.Context, req AdminCre
 		priceID = &id
 	}
 
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	payment := &models.Payment{
 		ID:            uuidutil.NewV7(),
 		CustomerID:    identity.CustomerIDFromString(req.UserID).UUID(),
@@ -353,7 +353,7 @@ func (s *Service) AdminGetUserBillingProfile(ctx context.Context, userID string)
 		Entitlements:  []EntitlementRecord{},
 	}
 
-	now := time.Now().UTC()
+	now := s.now().UTC()
 
 	// Get active subscription
 	if s.rt.SubscriptionService != nil {
@@ -405,7 +405,7 @@ func (s *Service) AdminGetUserEntitlements(ctx context.Context, userID string, a
 		return nil, fmt.Errorf("user_id required")
 	}
 
-	queryTime := time.Now().UTC()
+	queryTime := s.now().UTC()
 	if at != nil {
 		queryTime = *at
 	}
@@ -452,7 +452,7 @@ func (s *Service) EntitlementGrantEntitlement(ctx context.Context, adminUserID s
 		return nil, fmt.Errorf("admin_user_id required")
 	}
 
-	now := time.Now().UTC()
+	now := s.now().UTC()
 
 	// #511: a manual entitlement grant is now just an `admin`-sourced grant in the
 	// ledger (the source of truth) — no separate entitlement_grants provenance row.

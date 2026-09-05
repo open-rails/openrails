@@ -200,3 +200,12 @@ func (a *KVv2Adapter) listSecrets(ctx context.Context, root, rel string, depth i
 	}
 	return names, nil
 }
+
+// BackendIdentity identifies the configured Vault address and namespace without
+// credentials. Cleanup refuses a later configuration pointed at another backend.
+func (a *KVv2Adapter) BackendIdentity() string {
+	if a.client == nil {
+		return ""
+	}
+	return strings.TrimRight(a.client.Address(), "/") + "|" + a.client.Namespace()
+}

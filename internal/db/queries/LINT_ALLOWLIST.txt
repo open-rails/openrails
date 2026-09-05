@@ -30,7 +30,6 @@ PERMANENT internal/river/job_liveness.go            # beats River's OWN river_jo
 # --- PERMANENT: privileged, runs before merchant context/RLS exists ---------
 PERMANENT internal/crypto/dek_store_db.go      # DEK bootstrap on the privileged pool
 PERMANENT internal/merchants/secrets_db.go     # merchant secret store (pre-context)
-PERMANENT internal/merchants/secrets_vault.go  # vault pointer store (pre-context)
 PERMANENT internal/merchants/credentials.go    # credential read (pre-context)
 
 # --- DEBT: ordinary queries that belong in sqlc -----------------------------

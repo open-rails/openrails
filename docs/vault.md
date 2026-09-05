@@ -118,11 +118,10 @@ Vault's runtime 403 remains the real boundary):
 Code addresses secrets by `(merchant_id, name)`; the Vault store resolves that to
 
 ```
-secret/openrails/merchants/<merchant-slug>/<name>     # value under KV-v2 field "value"
+secret/openrails/merchants/<merchant-uuid>/<name>     # value under KV-v2 field "value"
 ```
 
-Slugs (not ids) make operator-written paths deterministic and readable. The names are identical
-across backends — switching to Vault changes only the physical path.
+Immutable merchant UUIDs own the subtree. Renames change no secret paths, and a new owner of an old slug cannot address the original merchant's secrets. Existing pre-launch slug-based keys must be replaced at the UUID paths; no fallback reads old slug paths.
 
 There is exactly ONE canonical name shape, for every rail (#884 retired the flat
 `<rail>/<purpose>` spellings — they were write-only and never read):
@@ -137,9 +136,9 @@ CCBill `accnum-subacc`, Solana signer address); `<key>` is a rail-registry crede
 (`security_key`, `salt`, `datalink_username`, `datalink_password`, `private_key`, …). Examples:
 
 ```sh
-vault kv put secret/openrails/merchants/acme/psps/nmi/live/<gateway-id>/security_key value="$NMI_SECURITY_KEY"
-vault kv put secret/openrails/merchants/acme/psps/ccbill/live/<accnum-subacc>/salt value="$CCBILL_SALT"
-vault kv put secret/openrails/merchants/acme/psps/stripe/live/<acct-id>/secret_key value="$STRIPE_SECRET_KEY"
+vault kv put secret/openrails/merchants/<merchant-uuid>/psps/nmi/live/<gateway-id>/security_key value="$NMI_SECURITY_KEY"
+vault kv put secret/openrails/merchants/<merchant-uuid>/psps/ccbill/live/<accnum-subacc>/salt value="$CCBILL_SALT"
+vault kv put secret/openrails/merchants/<merchant-uuid>/psps/stripe/live/<acct-id>/secret_key value="$STRIPE_SECRET_KEY"
 ```
 
 `psps/solana/<env>/<address>/private_key` (local-keypair signer) is operator-only — it is never
@@ -188,3 +187,31 @@ OpenRails sends the serialized transaction message to `transit/sign/<key>` (raw 
 merchant's on-chain address — from `transit/keys/<key>`. Transit works with either secret backend
 and in both merchant-source modes. A Transit key rotation mints a new keypair, so it carries the
 same on-chain identity caveat as any signer change.
+
+## Merchant purge cleanup
+
+A committed merchant purge records its immutable Vault address/namespace and UUID
+root in `destructive_runs.coverage.secret_cleanup`. Database completion is stored
+in `affected.database_purged`; the original authorization/inventory proof remains
+immutable. The run stays `running` or `failed` until every secret version has been
+deleted and a fresh root listing is empty. An external failure returns
+`merchant secret cleanup pending` instead of reporting a complete purge.
+
+The `openrails.merchant_secret_cleanup` worker retries committed, tombstoned
+purges every five minutes and on startup. It re-lists the captured UUID root, so
+credentials written after inventory but before tombstoning are included. A
+changed Vault address, namespace, or mount is refused: restore the original
+backend configuration to finish its outstanding cleanup. No secret values are
+stored in the journal.
+
+Runtime Vault writes and purge tombstoning take the same merchant row lock.
+Writes that finish first are swept; writes after tombstoning are rejected.
+Request-pinned database connections are reused. Direct operator writes to Vault
+bypass OpenRails lifecycle locks: stop writing a purged UUID's subtree and remove
+any per-merchant Vault credentials/policies before erasure. The process-level
+Vault credential cannot prevent an independently authorized operator from
+recreating a secret after cleanup.
+
+This does not enable merchant purge on an HTTP or CLI surface. Its existing
+inventory/confirmation/destructive-policy requirements and unwired-purge guard
+remain in place.

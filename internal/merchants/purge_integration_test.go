@@ -214,9 +214,10 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		require.Equal(t, "or858-operator", actor)
 		require.Equal(t, int64(total), expectedRows)
 
-		var counts map[string]int
+		var counts map[string]any
 		require.NoError(t, json.Unmarshal(affected, &counts))
-		require.Equal(t, 1, counts["payment_methods"])
+		require.EqualValues(t, 1, counts["payment_methods"])
+		require.Equal(t, true, counts["database_purged"])
 	})
 }
 

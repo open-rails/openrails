@@ -574,7 +574,7 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantIDText))
 	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_vault_123", "secret_key")
 	require.NoError(t, err)
-	vaultPath := "secret/openrails/merchants/cozy-art/" + secretName
+	vaultPath := "secret/openrails/merchants/" + merchantIDText + "/" + secretName
 	require.Equal(t, "sk_test_vault_bootstrap", readVaultKV2Value(t, vault, vaultPath))
 
 	var dbSecretCount int

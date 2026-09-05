@@ -184,10 +184,13 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 		store := merchants.NewVaultSecretStore(
 			kvMount,
 			vault.NewKVv2Adapter(vclient, kvMount).WithReauthTrigger(vaultAuth),
-			merchants.NewDBMerchantSlugResolver(pool),
 		)
+		database, err := db.NewWithPGXPool(pool.Raw(), pool.Schema())
+		if err != nil {
+			return nil, err
+		}
 		return &Store{
-			Secrets:       merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL),
+			Secrets:       merchants.NewLifecycleSecretStore(database, merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL)),
 			SolanaTransit: transit,
 			Capabilities:  caps,
 			SolanaCanSign: solanaCanSign,

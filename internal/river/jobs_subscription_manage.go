@@ -3,10 +3,9 @@ package riverjobs
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails/internal/railresolve"
-	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -14,6 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
@@ -161,6 +162,7 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 
 type ResumeSubscriptionWorker struct {
 	river.WorkerDefaults[ResumeSubscriptionArgs]
+	Clock                        clockwork.Clock
 	DB                           *db.DB
 	Config                       *config.Config
 	Rails                        railresolve.Source
@@ -200,7 +202,7 @@ func (w ResumeSubscriptionWorker) resume(ctx context.Context, args ResumeSubscri
 	userID := args.UserID
 	var sub *models.Subscription
 	var err error
-	now := time.Now().UTC()
+	now := timeutil.FirstClock(w.Clock).Now().UTC()
 
 	// If subscription ID is provided, use it directly
 	if args.SubscriptionID != uuid.Nil {
