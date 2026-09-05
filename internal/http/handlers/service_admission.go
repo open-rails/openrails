@@ -370,11 +370,12 @@ type serviceMerchantConfigWindow struct {
 }
 
 type serviceMerchantSettingsRequest struct {
-	Profile                    *serviceMerchantProfileConfiguration `json:"profile,omitempty"`
-	InvoiceCollectionThreshold *int64                               `json:"collection_threshold,omitempty"`
-	InvoiceMonthlyFloor        *int64                               `json:"monthly_floor,omitempty"`
-	InvoiceBillingBoundary     string                               `json:"billing_period_boundary,omitempty"`
-	AlertEmail                 *string                              `json:"alert_email,omitempty"`
+	AutoTopupSafety            *billingservice.AutoTopupSafetyPolicy `json:"auto_topup_safety,omitempty"`
+	Profile                    *serviceMerchantProfileConfiguration  `json:"profile,omitempty"`
+	InvoiceCollectionThreshold *int64                                `json:"collection_threshold,omitempty"`
+	InvoiceMonthlyFloor        *int64                                `json:"monthly_floor,omitempty"`
+	InvoiceBillingBoundary     string                                `json:"billing_period_boundary,omitempty"`
+	AlertEmail                 *string                               `json:"alert_email,omitempty"`
 	// RepriceNoticeWindowDays (#781): the minimum advance-notice window (in
 	// days) a subscription price INCREASE's effective_at must give existing
 	// subscribers. Unset ⇒ subscriptions.DefaultRepriceNoticeWindowDays (30).
@@ -439,6 +440,7 @@ func ServiceGetMerchantSettings(r *httprequest.Request) {
 	}
 	r.SuccessJSON(serviceMerchantSettingsRequest{
 		Profile:                           merchantProfileResponsePtr(cfg.Profile),
+		AutoTopupSafety:                   cfg.AutoTopupSafety,
 		InvoiceCollectionThreshold:        cfg.InvoiceCollectionThreshold,
 		InvoiceMonthlyFloor:               cfg.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:            cfg.InvoiceBillingBoundary,
@@ -474,6 +476,10 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 	// or#288: a malformed routing policy is a client error, not a server one.
 	// Run the SAME normalizer the service will run, so the caller gets the
 	// exact reason instead of a bare 500.
+	if _, err := merchantconfig.AutoTopupSafety(req.AutoTopupSafety); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	if req.CheckoutRouting != nil {
 		if _, err := merchantconfig.NormalizeCheckoutRouting(*req.CheckoutRouting); err != nil {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
@@ -506,6 +512,7 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
 		AlertEmail:                         req.AlertEmail,
 		RepriceNoticeWindowDays:            req.RepriceNoticeWindowDays,
+		AutoTopupSafety:                    req.AutoTopupSafety,
 		ArrearsGraceDays:                   req.ArrearsGraceDays,
 		ArrearsDelinquencyFloor:            req.ArrearsDelinquencyFloor,
 		CheckoutRouting:                    req.CheckoutRouting,

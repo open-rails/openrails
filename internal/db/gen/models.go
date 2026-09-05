@@ -161,6 +161,17 @@ type OpenrailsAlertRule struct {
 	UpdatedAt       time.Time
 }
 
+type OpenrailsAutoTopupEpisode struct {
+	IntentID     uuid.UUID
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+	Currency     string
+	ReservedAt   time.Time
+	AmountNative int64
+	Receipt      []byte
+	FinalizedAt  *time.Time
+}
+
 // or#897: the merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
 type OpenrailsBillingPolicy struct {
 	ID         uuid.UUID
@@ -873,6 +884,7 @@ type OpenrailsMoneySetting struct {
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
 	CreditLimitAmount         int64
 	CollectionPaymentMethodID *uuid.UUID
+	AutoTopupFailures         int64
 }
 
 // Queue for user notifications related to billing and subscriptions

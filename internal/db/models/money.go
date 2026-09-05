@@ -57,6 +57,7 @@ type MoneyAccount struct {
 
 	BillingMode              string     `json:"billing_mode"`
 	LowBalanceThreshold      *int64     `json:"low_balance_threshold,omitempty"`
+	AutoTopupFailures        int64      `json:"auto_topup_failures"`
 	AutoTopupEnabled         bool       `json:"auto_topup_enabled"`
 	AutoTopupAmount          *int64     `json:"auto_topup_amount,omitempty"`
 	AutoTopupPaymentMethod   *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`

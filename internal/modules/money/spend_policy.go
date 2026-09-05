@@ -103,6 +103,30 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	if err != nil {
 		return nil, err
 	}
+	var out *models.MoneyAccount
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		if err := ensureCustomer(ctx, q, tid.UUID(), payer.UUID()); err != nil {
+			return err
+		}
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{ID: payer.UUID(), MerchantID: tid.UUID()}); err != nil {
+			return err
+		}
+		var err error
+		out, err = NewMoneyService(s.db.NewWithPgxTx(tx), s.clock).upsertAccountSettingsTx(ctx, payer, currency, in)
+		return err
+	})
+	return out, err
+}
+
+func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identity.CustomerID, currency string, in AccountSettingsInput) (*models.MoneyAccount, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("money service not initialized")
+	}
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
 	// Materialize the payable customers row before the subject's first settings
 	// write.
 	if err := ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID()); err != nil {
@@ -122,6 +146,7 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 	if err != nil {
 		return nil, err
 	}
+	wasEnabled := cur.AutoTopupEnabled
 	// Apply overrides onto the current/default view.
 	if in.BillingMode != nil {
 		cur.BillingMode = *in.BillingMode
@@ -173,6 +198,11 @@ func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity
 		UpdatedAt:                cur.UpdatedAt,
 	}); err != nil {
 		return nil, err
+	}
+	if in.AutoTopupEnabled != nil && *in.AutoTopupEnabled && !wasEnabled {
+		if err := s.db.Gen(ctx).ResetAutoTopupFailures(ctx, gen.ResetAutoTopupFailuresParams{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur.Currency}); err != nil {
+			return nil, err
+		}
 	}
 	return s.GetAccountSettings(ctx, payer, currency)
 }

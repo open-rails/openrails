@@ -10,6 +10,7 @@ import (
 type NotificationEventType string
 
 const (
+	NotificationAutoTopupDisabled NotificationEventType = "auto_topup_disabled"
 	// Premium lifecycle notifications (3 types)
 	NotificationPremiumStarted NotificationEventType = "premium_started" // (1) Premium started
 	NotificationPremiumRenewed NotificationEventType = "premium_renewed" // (2) Premium renewed

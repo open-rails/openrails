@@ -587,7 +587,10 @@ func DefaultInvokerWastedWindows() []abuse.WastedWindow {
 
 // MerchantConfiguration is the service-level representation of a merchant's
 // one-row configuration payload.
+type AutoTopupSafetyPolicy = models.AutoTopupSafetyPolicy
+
 type MerchantConfiguration struct {
+	AutoTopupSafety                    *AutoTopupSafetyPolicy
 	Profile                            *models.MerchantProfileConfiguration
 	InvoiceCollectionThreshold         *int64
 	InvoiceMonthlyFloor                *int64
@@ -641,6 +644,7 @@ func (s *Service) GetMerchantConfiguration(ctx context.Context) (MerchantConfigu
 	}
 	out := MerchantConfiguration{
 		Profile:                            &cfg.Profile,
+		AutoTopupSafety:                    cfg.AutoTopupSafety,
 		InvoiceCollectionThreshold:         cfg.InvoiceCollectionThreshold,
 		InvoiceMonthlyFloor:                cfg.InvoiceMonthlyFloor,
 		InvoiceBillingBoundary:             cfg.InvoiceBillingBoundary,
@@ -706,6 +710,12 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 	}
 	if in.AlertEmail != nil {
 		cfg.AlertEmail = strings.TrimSpace(*in.AlertEmail)
+	}
+	if in.AutoTopupSafety != nil {
+		if _, err := merchantconfig.AutoTopupSafety(in.AutoTopupSafety); err != nil {
+			return err
+		}
+		cfg.AutoTopupSafety = in.AutoTopupSafety
 	}
 	if in.RepriceNoticeWindowDays != nil {
 		if *in.RepriceNoticeWindowDays < 0 {

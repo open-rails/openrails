@@ -135,7 +135,24 @@ export interface PaymentMethodResponse {
   }[]
 }
 
+export interface AutoTopupStatus {
+  enabled: boolean
+  consecutive_declines: number
+  daily: number
+  weekly: number
+  monthly: number
+  pending: boolean
+  policy: {
+    max_daily: number
+    max_weekly: number
+    max_monthly: number
+    declines_before_disable: number
+  }
+}
+
 export interface CreditBalance {
+  auto_topup?: AutoTopupStatus
+
   currency: string
   display_name: string
   unit: string
@@ -240,12 +257,7 @@ export interface CatalogProduct {
 }
 
 export type UsageAggregation =
-  | "sum"
-  | "count"
-  | "max"
-  | "min"
-  | "unique_count"
-  | "latest"
+  "sum" | "count" | "max" | "min" | "unique_count" | "latest"
 export type UsagePriceModel = "per_unit" | "tiered" | "package"
 
 export interface UsageRateTier {
@@ -606,7 +618,11 @@ export interface PaymentProviderConfig {
   // Absent/0 = never rotated here (manifest-armed, or pre-or#812).
   credentials: Record<
     string,
-    { configured: boolean; last_validated_at?: string; rotation_version?: number }
+    {
+      configured: boolean
+      last_validated_at?: string
+      rotation_version?: number
+    }
   >
   first_seen_at: string
   last_validated_at?: string
@@ -719,9 +735,7 @@ export interface VerificationRequiredResponse {
 }
 
 export type PasswordLoginResponse =
-  | AuthTokens
-  | TwoFactorRequiredResponse
-  | VerificationRequiredResponse
+  AuthTokens | TwoFactorRequiredResponse | VerificationRequiredResponse
 
 export interface Me {
   id: string
