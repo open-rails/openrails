@@ -28,6 +28,10 @@ type ProvisionMerchantRequest struct {
 	// creating call already seeded the owner. Later owner changes go through
 	// Core().Genesis().AssignGroupRole explicitly (authkit v0.79.0, #241).
 	OwnerUserID string
+	// ExistingGroupID carries a group already selected for owner repair. This
+	// path checks live ownership and never resolves or creates another group.
+	// It can complete a missing billing attachment for that same group UUID.
+	ExistingGroupID string
 }
 
 // ErrInvalidSlug wraps pkg/merchant's slug-validation error (errors.Is-able)
@@ -92,70 +96,48 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		return nil, fmt.Errorf("control plane provision: %w", err)
 	}
 
-	// Resolve-or-create the merchant permission-group — the merchant IS the
-	// group (#567): type=merchant, resourceRef=slug, parent=root.
-	//
-	// Race handling (#750): two concurrent first-creates of the same fresh
-	// slug both observe ErrGroupNotFound and race CreatePermissionGroup; the
-	// loser hits the DB's uniqueness constraint on (persona, instance_slug),
-	// which authkit's PermissionGroupStore.CreateGroup wraps in a bare
-	// fmt.Errorf (no stable "already exists" sentinel to errors.Is against —
-	// confirmed against authkit v0.80.0). Rather than string-matching that
-	// error, the loser re-resolves once: if the winner's row is now visible,
-	// the loser proceeds exactly like any other already-provisioned merchant —
-	// the SAME retry-resolve pattern EnsureCustomerPermissionGroup already uses
-	// for the identical race on customer groups (customer_group.go). Only when
-	// the re-resolve ALSO fails do we conclude CreatePermissionGroup's error was
-	// a genuine failure (DB outage, etc.), not a slug race, and return it
-	// wrapped as before (hosts 500 it).
-	//
-	// No orphaned group can survive this race: CreateGroup runs inside authkit's
-	// own transaction and the loser's INSERT is rejected by
-	// permission_groups_persona_instance_uidx, so nothing is committed to clean
-	// up — both callers end up holding the winner's single group id (#898).
-	//
-	// Deliberately no ErrSlugTaken sentinel: the retry-resolve converts every
-	// race loser into the ordinary Created=false idempotent path callers
-	// already handle — a genuine slug conflict (a pre-existing merchant owned
-	// by someone else) is ALSO Created=false, and hosts distinguish "mine"
-	// vs. "taken" by checking ownership afterward (see
-	// openrails-saas/internal/api/accounts.go's handleCreateMerchant). If a
-	// future authkit release exposes a stable duplicate-group sentinel,
-	// mapping it to a typed ErrSlugTaken here — skipping the extra
-	// round-trip — is a non-breaking follow-up.
-	// or#914: a USER-claimed slug (owner set) on a creation-enabled deployment
-	// answers to the SAME declared policy authkit enforces on its generated
-	// POST /merchant route — the reserved-slug list, the extra slug pattern
-	// and the host admission (cost) gate. Refusals are typed
-	// (controlplane re-exports below: ErrSlugReserved / ErrCreationRefused)
-	// for hosts to map onto 4xx. The generated route is the canonical hosted
-	// creation path (it additionally rate-limits per IP/user and attaches the
-	// directory row itself); this keeps the in-process API from being a side
-	// door around the deployment's own policy. Operator paths (owner == "",
-	// Bootstrap, manifests) are not user claims and stay ungated.
-	if err := cp.EnforceMerchantCreationPolicy(ctx, slug, owner); err != nil {
-		return nil, fmt.Errorf("control plane provision: %w", err)
-	}
-
-	groupID, err := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
-	switch {
-	case errors.Is(err, authkit.ErrGroupNotFound):
-		groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
-			Persona:        controlplane.MerchantType,
-			InstanceSlug:   slug,
-			ParentPersona:  authcore.RootPersona,
-			OwnerSubjectID: owner,
-		})
+	groupID := strings.TrimSpace(req.ExistingGroupID)
+	if groupID != "" {
+		group, err := core.GroupInstanceByID(ctx, groupID)
 		if err != nil {
-			createErr := err
-			resolvedID, rerr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
-			if rerr != nil {
-				return nil, fmt.Errorf("control plane provision: create merchant group %q: %w", slug, createErr)
-			}
-			groupID = resolvedID
+			return nil, err
 		}
-	case err != nil:
-		return nil, fmt.Errorf("control plane provision: resolve merchant group %q: %w", slug, err)
+		if group.Persona != controlplane.MerchantType || owner == "" {
+			return nil, authkit.ErrInsufficientRoleAuthority
+		}
+		allowed, err := core.CanOnGroup(ctx, owner, authcore.SubjectKindUser, groupID, authcore.OwnerGrant(controlplane.MerchantType))
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, authkit.ErrInsufficientRoleAuthority
+		}
+	} else {
+		// Capture an existing group before any host admission callback. A rename
+		// while that callback runs must not turn an existing group into creation.
+		var err error
+		groupID, err = core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+		if err != nil && !errors.Is(err, authkit.ErrGroupNotFound) {
+			return nil, fmt.Errorf("control plane provision: resolve merchant group %q: %w", slug, err)
+		}
+		if err := cp.EnforceMerchantCreationPolicy(ctx, slug, owner); err != nil {
+			return nil, fmt.Errorf("control plane provision: %w", err)
+		}
+		if groupID == "" {
+			groupID, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{
+				Persona: controlplane.MerchantType, InstanceSlug: slug,
+				ParentPersona: authcore.RootPersona, OwnerSubjectID: owner,
+			})
+			if err != nil {
+				// A concurrent first creation may have won. Adopt its identity;
+				// existing roles remain untouched and callers verify ownership.
+				createdID, resolveErr := core.ResolveGroupIDForSlug(ctx, controlplane.MerchantType, slug)
+				if resolveErr != nil {
+					return nil, fmt.Errorf("control plane provision: create merchant group %q: %w", slug, err)
+				}
+				groupID = createdID
+			}
+		}
 	}
 
 	// Create/link the directory row (permission_group_id) via the merchants
@@ -179,6 +161,11 @@ func ProvisionMerchant(ctx context.Context, a *app.App, req ProvisionMerchantReq
 		return nil, fmt.Errorf("control plane provision: provision merchant directory row %q: %w", slug, err)
 	}
 
+	// Provision also sees historical bindings so it cannot allocate a second
+	// billing identity. A deleted row is never a successful active repair.
+	if _, err := dir.Get(ctx, m.ID); err != nil {
+		return nil, err
+	}
 	return &ProvisionMerchantResult{
 		MerchantID: m.ID,
 		GroupID:    groupID,
