@@ -59,7 +59,7 @@ func (c *ControlPlane) ResolveRemoteApplication(ctx context.Context, token strin
 	// Verify signature/issuer/audience/expiry. Verify() handles the
 	// remote-application-access+jwt profile and resolves STORED authority from the
 	// validated `iss`; self-claimed authority is never honored.
-	cl, err := c.delegatedVerifier.Verify(token)
+	cl, err := c.delegatedVerifier.Verify(ctx, token)
 	if err != nil {
 		if isRemoteApplicationWrongType(err) {
 			return nil, ErrNotRemoteApplicationToken

@@ -278,7 +278,7 @@ func resolveControlPlaneKeySource(cfg *config.Config) (jwtkit.KeySource, error) 
 		}
 		return ks, nil
 	}
-	return jwtkit.ResolveKeySource(authKeysPath(cfg), cfg.IsDev())
+	return jwtkit.ResolveKeySource(authKeysPath(cfg), cfg.IsDev(), nil)
 }
 
 // authKeysPath is the directory AuthKit scans for key material. It holds BOTH

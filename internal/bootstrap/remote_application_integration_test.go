@@ -105,6 +105,8 @@ func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	// Provisioning through a separate operator path requires a live-registry refresh.
+	require.NoError(t, cp.ReloadRemoteApplications(ctx))
 	resolved, err := cp.ResolveRemoteApplication(ctx, token)
 	require.NoError(t, err)
 	require.Equal(t, staticSlug, resolved.MerchantSlug)

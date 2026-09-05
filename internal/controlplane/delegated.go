@@ -224,7 +224,7 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 	}
 	c.refreshIssuerRegistryIfStale()
 
-	cl, principal, err := c.delegatedVerifier.VerifyDelegatedAccess(token)
+	cl, principal, err := c.delegatedVerifier.VerifyDelegatedAccess(ctx, token)
 	if err != nil {
 		// Preserve expiry so the middleware can return a precise reason; map
 		// everything else to a sanitized invalid error (never leak verifier

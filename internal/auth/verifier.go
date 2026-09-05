@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -13,7 +14,7 @@ import (
 
 // Verifier validates bearer tokens against configured issuers/JWKS.
 type Verifier interface {
-	Verify(token string) (verify.Claims, error)
+	Verify(ctx context.Context, token string) (verify.Claims, error)
 }
 
 // RequestVerifier validates the credential presented on a whole request.
@@ -21,7 +22,7 @@ type Verifier interface {
 // embedded host injects the verifier it already uses everywhere else: the
 // request shape carries the host's full credential chain (API-key branch, 2FA
 // enrollment gate, delegated-issuer enrichment), none of which a bare
-// Verify(token) sees.
+// Verify(ctx, token) sees.
 type RequestVerifier interface {
 	VerifyRequest(r *http.Request) (verify.Claims, error)
 }
@@ -49,7 +50,7 @@ func (t tokenRequestVerifier) VerifyRequest(r *http.Request) (verify.Claims, err
 	if token == "" {
 		return verify.Claims{}, billingauth.ErrUnauthenticated
 	}
-	cl, err := t.v.Verify(token)
+	cl, err := t.v.Verify(r.Context(), token)
 	if err != nil {
 		// Non-JWT bearers (API keys, etc.) reach this verifier as an expected
 		// fallback in the credential chain — debug, not warn (#845).
