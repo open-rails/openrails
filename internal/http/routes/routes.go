@@ -84,13 +84,6 @@ type remoteApplicationResolver interface {
 	ResolveRemoteApplication(ctx context.Context, token string) (*controlplane.ResolvedServiceCredential, error)
 }
 
-// merchantUserResolver resolves the merchant a user session is acting on from
-// the user's merchant-group membership. User access tokens carry no merchant
-// claim under #567, so /v1/merchant routes infer it from membership.
-type merchantUserResolver interface {
-	MerchantForUser(ctx context.Context, userID string) (string, error)
-}
-
 // requiredMW builds the neutral "authentication required" middleware for the
 // embedded surface. It authenticates via opts.Authenticator, aborts 401 on
 // failure, and pins the resulting UserContext on the request context (the single
@@ -486,24 +479,14 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		if req != nil {
 			uc.Merchant = strings.TrimSpace(req.Header.Get(billingauth.MerchantSelectorHeader))
 		}
-		if uc.Merchant == "" {
-			resolver, ok := g.AdminPermissionChecker.(merchantUserResolver)
-			if !ok {
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "merchant resolver unavailable"}
-			}
-			ref, rerr := resolver.MerchantForUser(ctx, uc.UserID)
-			if rerr != nil || strings.TrimSpace(ref) == "" {
-				return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
-			}
-			uc.Merchant = ref
-		}
+
 	}
 	membershipMID, canonical, err := g.AdminPermissionChecker.ResolveAuthorizedMerchant(ctx, uc.Merchant, uc.UserID, perm)
 	if err != nil {
 		switch {
 		case errors.Is(err, authpolicy.ErrPermissionRequired):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "permission_required"}
-		case errors.Is(err, authpolicy.ErrMerchantUnresolved):
+		case errors.Is(err, authpolicy.ErrMerchantUnresolved), errors.Is(err, controlplane.ErrMerchantAmbiguous):
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusForbidden, Message: "merchant_unresolved"}
 		default:
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusInternalServerError, Message: "failed to check permission"}

@@ -47,6 +47,7 @@ func stagingControlPlaneConfig() *config.Config {
 		Auth: &config.AuthConfig{
 			Issuer:       "https://openrails-staging.test",
 			MintDisabled: true,
+			DirectPeerIP: true,
 		},
 	}
 }
@@ -93,4 +94,43 @@ func TestNew_HostedStagingWithoutRedis_FailsNamingRedis(t *testing.T) {
 
 func (noopEmailSender) SendContactChanged(context.Context, string, string, authcore.ContactChange) error {
 	return nil
+}
+
+func (noopEmailSender) SendDeviceKeyEnrolled(context.Context, string, string, authcore.DeviceKeyNotice) error {
+	return nil
+}
+
+func TestProductionClientIPPosture(t *testing.T) {
+	ctx := context.Background()
+	pool := newBootstrapTestPool(t)
+	rdb, _ := dbtest.SharedRedisClient(t)
+	for _, tc := range []struct {
+		name    string
+		direct  bool
+		proxies []string
+		opts    []Option
+		wantErr string
+	}{
+		{name: "undeclared", wantErr: "explicit client-IP posture"},
+		{name: "configured direct peer", direct: true},
+		{name: "host direct peer", opts: []Option{WithDirectPeerIP()}},
+		{name: "configured proxies", proxies: []string{"192.0.2.0/24"}},
+		{name: "host proxies", opts: []Option{WithTrustedProxies([]string{"192.0.2.0/24"})}},
+		{name: "conflicting posture", direct: true, proxies: []string{"192.0.2.0/24"}, wantErr: "conflicts with trusted_proxies"},
+		{name: "invalid proxy", proxies: []string{"not-a-cidr"}, wantErr: "invalid trusted proxy CIDR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := stagingControlPlaneConfig()
+			cfg.Auth.DirectPeerIP = tc.direct
+			cfg.TrustedProxies = tc.proxies
+			opts := append([]Option{WithHostedPosture(), WithEmailSender(noopEmailSender{}), WithRedis(rdb)}, tc.opts...)
+			cp, err := New(ctx, cfg, pool, opts...)
+			if tc.wantErr != "" {
+				require.ErrorContains(t, err, tc.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, cp)
+		})
+	}
 }

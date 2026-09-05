@@ -39,6 +39,16 @@ redis:
 
 auth:
   issuer: http://localhost:3053 # issuer URL; JWKS is served under this authority
+  # Declare only when AuthKit receives direct client connections.
+  # Behind proxies, configure top-level trusted_proxies instead.
+  direct_peer_ip: true
+  # Shared AuthKit policy for usernames and group names (shown defaults).
+  naming:
+    enabled: true
+    rename_interval: 72h
+    former_names:
+      mode: finite # finite | forever | immediate; omit duration for the latter two
+      duration: 2160h # 90 days
   # signing keys are loaded by AuthKit from env, /vault/auth/keys.json,
   # or development-only generated keys under .runtime/authkit
 

@@ -17,7 +17,7 @@ import (
 
 func TestUpsertPaymentProviderConfig(t *testing.T) {
 	ctx := context.Background()
-	cfg := hostedTestConfig(dbtest.SharedPostgresDSN(t), "https://providers.openrails.test")
+	cfg := hostedTestConfig(t, dbtest.SharedPostgresDSN(t), "https://providers.openrails.test")
 	e := newHostApp(t, cfg)
 	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
 	require.NoError(t, e.App().Runtime.EnsureMerchantsService(ctx))

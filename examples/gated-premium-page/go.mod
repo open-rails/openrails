@@ -8,7 +8,7 @@ replace github.com/open-rails/openrails => ../..
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/open-rails/authkit v0.93.0
+	github.com/open-rails/authkit v0.97.3-0.20260905005613-1449cfb903e0
 	github.com/open-rails/openrails v0.0.0
 )
 

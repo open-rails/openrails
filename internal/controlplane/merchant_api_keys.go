@@ -10,11 +10,9 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 
@@ -114,7 +112,7 @@ func (c *ControlPlane) MintMerchantAPIKey(ctx context.Context, mid merchant.ID, 
 	if _, ok := MerchantRolePermissions(role); !ok {
 		return MerchantAPIKey{}, "", ErrUnknownMerchantRole
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return MerchantAPIKey{}, "", err
 	}
@@ -143,7 +141,7 @@ func (c *ControlPlane) ListMerchantAPIKeys(ctx context.Context, mid merchant.ID)
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +163,7 @@ func (c *ControlPlane) RevokeMerchantAPIKey(ctx context.Context, mid merchant.ID
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane
 	}
-	slug, err := c.merchantSlugForID(ctx, mid)
+	ctx, slug, err := c.merchantGroupScopeForID(ctx, mid)
 	if err != nil {
 		return false, err
 	}
@@ -183,21 +181,4 @@ func (c *ControlPlane) merchantAPIKeyView(k authkit.APIKey) MerchantAPIKey {
 		ExpiresAt:  k.ExpiresAt,
 		RevokedAt:  k.RevokedAt,
 	}
-}
-
-// merchantSlugForID resolves an active merchant's slug (== its permission-group
-// resource ref, #548) from its id. Missing/deleted/suspended merchants fail
-// closed as ErrServiceCredentialMerchantUnresolved.
-func (c *ControlPlane) merchantSlugForID(ctx context.Context, mid merchant.ID) (string, error) {
-	if mid.IsZero() {
-		return "", ErrServiceCredentialMerchantUnresolved
-	}
-	_, slug, err := c.merchantDirectoryRow(ctx, `id::text = $1`, mid.UUID().String())
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrServiceCredentialMerchantUnresolved
-	}
-	if err != nil {
-		return "", fmt.Errorf("controlplane: resolve merchant slug: %w", err)
-	}
-	return slug, nil
 }

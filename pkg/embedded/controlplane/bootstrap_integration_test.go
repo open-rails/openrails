@@ -30,7 +30,7 @@ import (
 func TestRunBootstrap_ExternalShapeAndExplicitMintOnly(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://controlplane.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://controlplane.openrails.test")
 	e := newHostApp(t, cfg)
 	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
 
