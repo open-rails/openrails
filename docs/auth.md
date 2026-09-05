@@ -78,3 +78,21 @@ registered JWKS). Same seam, two serializations.
   names, and there is no role-string fallback.
 - Browser origin policy for delegated calls is configured on the AuthKit
   `remote_application` issuer record, not in OpenRails runtime config.
+
+## Client IP and development keys
+
+AuthKit requires an explicit client-IP posture outside development. Configure
+OpenRails' top-level `trusted_proxies` with the actual proxy CIDRs, or set
+`auth.direct_peer_ip: true` (`AUTH_DIRECT_PEER_IP=true`) when client connections
+arrive directly. Embedded `AttachOptions.TrustedProxies` and `DirectPeerIP`
+forward the same choices; combining direct-peer and proxy declarations is an
+error. Generic proxy trust does not trust client-supplied `CF-Connecting-IP`.
+
+Development signing keys must persist to a writable `auth.keys_path`
+(`AUTHKIT_KEYS_PATH`) directory. Tests use their own temporary directories;
+production mounts its managed signing-key directory.
+
+After in-process remote-application registration, call
+`ControlPlane.ReloadRemoteApplications` for immediate verification. Registrations
+made by another process converge through the bounded issuer-registry refresh.
+An arbitrary unverified token issuer does not trigger its own database lookup.

@@ -41,7 +41,7 @@ import (
 func TestMerchantGroupIdentity(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://or914.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://or914.openrails.test")
 	e := newHostApp(t, cfg)
 
 	var refuse atomic.Bool
@@ -177,7 +177,8 @@ func TestMerchantGroupIdentity(t *testing.T) {
 			Slug: oldSlug, OwnerUserID: user.ID,
 		})
 		require.NoError(t, err)
-		require.NoError(t, cp.Core().RenamePermissionGroupSlugAs(ctx, user.ID, "merchant", oldSlug, newSlug))
+		_, err = cp.Core().UpdateGroupInstanceAs(ctx, user.ID, res.GroupID, authkit.GroupInstanceUpdate{Slug: &newSlug})
+		require.NoError(t, err)
 
 		// NEW slug: the directory row is stale; group resolution finds it and
 		// lazily re-syncs the row.

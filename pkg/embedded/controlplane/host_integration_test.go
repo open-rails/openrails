@@ -25,7 +25,7 @@ import (
 func TestSetGetMerchantAPIHost(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
-	cfg := hostedTestConfig(dsn, "https://hosts.openrails.test")
+	cfg := hostedTestConfig(t, dsn, "https://hosts.openrails.test")
 	e := newHostApp(t, cfg)
 	require.NoError(t, embcp.Attach(ctx, e.App(), cfg, nil))
 
@@ -78,7 +78,7 @@ func TestSetGetMerchantAPIHost(t *testing.T) {
 	require.ErrorIs(t, err, merchants.ErrAPIHostTaken)
 
 	// Without an attached control plane, both calls are a wiring error.
-	bare := newHostApp(t, hostedTestConfig(dsn, "https://hostset-bare.openrails.test"))
+	bare := newHostApp(t, hostedTestConfig(t, dsn, "https://hostset-bare.openrails.test"))
 	err = embcp.SetMerchantAPIHost(ctx, bare.App(), merchant.ID{}, apiHost)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no control plane attached")

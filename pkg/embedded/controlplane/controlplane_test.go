@@ -117,3 +117,7 @@ func (passwordlessTestSender) SendContactChanged(context.Context, string, string
 func (passwordlessTestSMSSender) SendContactChanged(context.Context, string, authcore.ContactChange) error {
 	return nil
 }
+
+func (passwordlessTestSender) SendDeviceKeyEnrolled(context.Context, string, string, authcore.DeviceKeyNotice) error {
+	return nil
+}

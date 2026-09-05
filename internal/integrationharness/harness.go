@@ -477,7 +477,8 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 		DB:                &config.DBConfig{URL: appDSN},
 		Auth: &config.AuthConfig{
 			// The control plane's own AuthKit issuer.
-			Issuer: "https://controlplane.openrails.test",
+			Issuer:   "https://controlplane.openrails.test",
+			KeysPath: h.t.TempDir(),
 		},
 	}
 	if h.Redis != nil {
