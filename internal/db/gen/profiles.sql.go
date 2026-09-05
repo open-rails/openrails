@@ -86,13 +86,14 @@ func (q *Queries) GetUserIDByUsername(ctx context.Context, username *string) (uu
 }
 
 const listMerchantDirectoryRefs = `-- name: ListMerchantDirectoryRefs :many
-SELECT slug, COALESCE(display_name, '')::text AS display_name
+SELECT id, slug, COALESCE(display_name, '')::text AS display_name
 FROM openrails.merchants
 WHERE slug = ANY($1::text[]) AND deleted_at IS NULL
 ORDER BY slug
 `
 
 type ListMerchantDirectoryRefsRow struct {
+	ID          uuid.UUID
 	Slug        string
 	DisplayName string
 }
@@ -110,7 +111,39 @@ func (q *Queries) ListMerchantDirectoryRefs(ctx context.Context, slugs []string)
 	var items []ListMerchantDirectoryRefsRow
 	for rows.Next() {
 		var i ListMerchantDirectoryRefsRow
-		if err := rows.Scan(&i.Slug, &i.DisplayName); err != nil {
+		if err := rows.Scan(&i.ID, &i.Slug, &i.DisplayName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMerchantDirectoryRefsByIDs = `-- name: ListMerchantDirectoryRefsByIDs :many
+SELECT id,slug,coalesce(display_name,'')::text AS display_name
+FROM openrails.merchants WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL
+ORDER BY slug,id
+`
+
+type ListMerchantDirectoryRefsByIDsRow struct {
+	ID          uuid.UUID
+	Slug        string
+	DisplayName string
+}
+
+func (q *Queries) ListMerchantDirectoryRefsByIDs(ctx context.Context, ids []uuid.UUID) ([]ListMerchantDirectoryRefsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, listMerchantDirectoryRefsByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMerchantDirectoryRefsByIDsRow
+	for rows.Next() {
+		var i ListMerchantDirectoryRefsByIDsRow
+		if err := rows.Scan(&i.ID, &i.Slug, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

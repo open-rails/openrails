@@ -34,7 +34,7 @@ func (s *Service) merchantByGroupName(ctx context.Context, slug string) (*Mercha
 	if strings.TrimSpace(groupID) == "" {
 		return nil, ErrMerchantNotFound
 	}
-	row := s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
+	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
 		FROM openrails.merchants WHERE permission_group_id = $1 AND deleted_at IS NULL`, groupID)
 	m, err := scanMerchant(row)
 	if err != nil {
@@ -47,7 +47,7 @@ func (s *Service) merchantByGroupName(ctx context.Context, slug string) (*Mercha
 		// Best effort: a failure (e.g. a non-group-bound row coincidentally
 		// holding the target slug) leaves the row stale; resolution keeps
 		// working through this fallback either way.
-		if _, uerr := s.pool.Exec(ctx, `
+		if _, uerr := s.database.Qx(ctx).Exec(ctx, `
 			UPDATE openrails.merchants
 			   SET slug = $2, updated_at = current_timestamp
 			 WHERE id = $1::uuid AND deleted_at IS NULL AND slug IS DISTINCT FROM $2

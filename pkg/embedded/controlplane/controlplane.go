@@ -218,6 +218,15 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		}
 		pool = p
 		ownedPool = true
+	} else if a.Runtime != nil && a.Runtime.DB != nil && pool == a.Runtime.DB.Pool() {
+		// Authority lookups can follow a pinned billing read. Keep their pool
+		// independent so a one-connection host cannot deadlock itself.
+		separate, err := pgxpool.NewWithConfig(ctx, pool.Config())
+		if err != nil {
+			return fmt.Errorf("control plane: build independent authority pool: %w", err)
+		}
+		pool = separate
+		ownedPool = true
 	}
 
 	var cpOpts []controlplane.Option

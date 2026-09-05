@@ -29,7 +29,7 @@ WHERE slug = $1 AND deleted_at IS NULL;
 -- merchant through a MEMBERSHIP knows only slugs, and needs names to label its
 -- own surfaces. openrails.merchants is global/policy-free, so this is an
 -- ordinary query. Slugs that do not exist simply do not come back.
-SELECT slug, COALESCE(display_name, '')::text AS display_name
+SELECT id, slug, COALESCE(display_name, '')::text AS display_name
 FROM openrails.merchants
 WHERE slug = ANY(sqlc.arg(slugs)::text[]) AND deleted_at IS NULL
 ORDER BY slug;
@@ -45,3 +45,8 @@ ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET
     display_name = COALESCE(EXCLUDED.display_name, openrails.merchants.display_name),
     updated_at = now()
 RETURNING id;
+
+-- name: ListMerchantDirectoryRefsByIDs :many
+SELECT id,slug,coalesce(display_name,'')::text AS display_name
+FROM openrails.merchants WHERE id=ANY(sqlc.arg(ids)::uuid[]) AND deleted_at IS NULL
+ORDER BY slug,id;

@@ -74,8 +74,9 @@ func (deniedPolicy) AllowDestructive(context.Context, uuid.UUID) (bool, string) 
 // secrets. Control-plane callers create/resolve the AuthKit permission-group and
 // pass its id explicitly; this service never creates AuthKit authority itself.
 type Service struct {
-	pool    *db.Pool
-	secrets MerchantSecretStore
+	pool     *db.Pool
+	database *db.DB
+	secrets  MerchantSecretStore
 	// providerEnvironment is the deployment posture (#681): test under
 	// test_mode, live otherwise. Scoped credential lookups resolve
 	// psps rows in THIS environment only.
@@ -120,7 +121,13 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 	if env == "" {
 		return nil, fmt.Errorf("merchants: provider environment must be live or test, got %q", providerEnvironment)
 	}
-	return &Service{pool: pool, secrets: secrets, providerEnvironment: env, destructive: deniedPolicy{}}, nil
+	service, err := NewDirectoryService(pool)
+	if err != nil {
+		return nil, err
+	}
+	service.secrets = secrets
+	service.providerEnvironment = env
+	return service, nil
 }
 
 // NewDirectoryService builds a directory-only Service: merchant provisioning +
@@ -131,7 +138,11 @@ func NewDirectoryService(pool *db.Pool) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
 	}
-	return &Service{pool: pool, destructive: deniedPolicy{}}, nil
+	database, err := db.NewWithPGXPool(pool.Raw(), pool.Schema())
+	if err != nil {
+		return nil, err
+	}
+	return &Service{pool: pool, database: database, destructive: deniedPolicy{}}, nil
 }
 
 // NewSecretManagementService builds a secret-management-only Service. It is for
@@ -188,7 +199,7 @@ func (s *Service) Provision(ctx context.Context, req ProvisionRequest) (*Merchan
 // merchantByGroupID includes retired rows so the same group cannot silently
 // acquire a new billing identity after deletion.
 func (s *Service) merchantByGroupID(ctx context.Context, groupID string) (*Merchant, error) {
-	m, err := scanMerchant(s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
+	m, err := scanMerchant(s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
   FROM openrails.merchants WHERE permission_group_id = $1`, groupID))
 	if err == nil && m.Status != StatusActive {
 		return nil, ErrMerchantRetired
@@ -223,6 +234,7 @@ func (s *Service) GetByGroupID(ctx context.Context, groupID string) (*Merchant, 
 // DirectoryRef is a merchant's public-facing directory identity: the slug it is
 // addressed by and the human-readable name an operator gave it.
 type DirectoryRef struct {
+	ID          merchant.ID
 	Slug        string
 	DisplayName string
 }
@@ -261,13 +273,38 @@ func (s *Service) ListDirectoryRefs(ctx context.Context, slugs []string) ([]Dire
 	if len(normalized) == 0 {
 		return nil, nil
 	}
-	rows, err := gen.New(s.pool).ListMerchantDirectoryRefs(ctx, normalized)
+	var rows []gen.ListMerchantDirectoryRefsRow
+	var err error
+	if s.groupSlugResolver != nil {
+		canonical := map[uuid.UUID]string{}
+		ids := make([]uuid.UUID, 0, len(normalized))
+		for _, name := range normalized {
+			found, e := s.GetBySlug(ctx, name)
+			if errors.Is(e, ErrMerchantNotFound) {
+				continue
+			}
+			if e != nil {
+				return nil, e
+			}
+			if _, exists := canonical[found.ID.UUID()]; !exists {
+				ids = append(ids, found.ID.UUID())
+			}
+			canonical[found.ID.UUID()] = found.Slug
+		}
+		resolved, e := gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefsByIDs(ctx, ids)
+		err = e
+		for _, row := range resolved {
+			rows = append(rows, gen.ListMerchantDirectoryRefsRow{ID: row.ID, Slug: canonical[row.ID], DisplayName: row.DisplayName})
+		}
+	} else {
+		rows, err = gen.New(s.database.Qx(ctx)).ListMerchantDirectoryRefs(ctx, normalized)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("merchants: list directory refs: %w", err)
 	}
 	refs := make([]DirectoryRef, 0, len(rows))
 	for _, row := range rows {
-		refs = append(refs, DirectoryRef{Slug: row.Slug, DisplayName: row.DisplayName})
+		refs = append(refs, DirectoryRef{ID: merchant.ID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName})
 	}
 	return refs, nil
 }
@@ -354,13 +391,13 @@ func scanMerchant(row pgx.Row) (*Merchant, error) {
 }
 
 func (s *Service) merchantBySlug(ctx context.Context, slug string) (*Merchant, error) {
-	row := s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
+	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
 		FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL`, slug)
 	return scanMerchant(row)
 }
 
 func (s *Service) merchantByID(ctx context.Context, id merchant.ID) (*Merchant, error) {
-	row := s.pool.QueryRow(ctx, `SELECT `+merchantSelectCols+`
+	row := s.database.Qx(ctx).QueryRow(ctx, `SELECT `+merchantSelectCols+`
 		FROM openrails.merchants WHERE id = $1::uuid AND deleted_at IS NULL`, id.String())
 	return scanMerchant(row)
 }
