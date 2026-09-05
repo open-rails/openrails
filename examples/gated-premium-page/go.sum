@@ -2,5 +2,5 @@ github.com/golang-jwt/jwt/v5 v5.3.1 h1:kYf81DTWFe7t+1VvL7eS+jKFVWaUnK9cB1qbwn63Y
 github.com/golang-jwt/jwt/v5 v5.3.1/go.mod h1:fxCRLWMO43lRc8nhHWY6LGqRcf+1gQWArsqaEUEa5bE=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/open-rails/authkit v0.98.0 h1:hjZ1wy9iH/KV0YWQobYPSZX87Q/iQamabA6MaLblzzk=
-github.com/open-rails/authkit v0.98.0/go.mod h1:pHVDGwvbAz8a495N0seEY4YkYvG8TTEaMlmlEVljG+s=
+github.com/open-rails/authkit v0.98.1 h1:TrQqQJscyw35qOeNWau/GsLbEohdq4DqR7YOy8KkaXs=
+github.com/open-rails/authkit v0.98.1/go.mod h1:8IvRMfMdOKhy4BAukwqFD4JRNfwovIFtdwoDw1F/NqU=
