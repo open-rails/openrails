@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -19,11 +18,11 @@ import (
 
 // UndoRunOptions mirrors `openrails undo-run` (or#859 §5.2).
 type UndoRunOptions struct {
-	Config       *config.Config
-	PGXPool      *pgxpool.Pool
-	MerchantSlug string
-	RunID        string
-	Actor        string
+	Config     *config.Config
+	PGXPool    *pgxpool.Pool
+	MerchantID merchant.ID
+	RunID      string
+	Actor      string
 	// Apply is false by default: an undo prints its plan and changes nothing
 	// until an operator asks for it AND types the row count back.
 	Apply bool
@@ -63,9 +62,9 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	}
 	defer database.Close()
 
-	merchantID, err := db.ResolveMerchantSlug(ctx, database.Pool(), strings.TrimSpace(opts.MerchantSlug))
-	if err != nil {
-		return fmt.Errorf("undo-run: resolve merchant %q: %w", opts.MerchantSlug, err)
+	merchantID := opts.MerchantID
+	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
+		return err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 	jsonOut := strings.EqualFold(strings.TrimSpace(opts.Format), "json")
@@ -82,7 +81,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 		if jsonOut {
 			return encodeJSON(opts.Out, plan)
 		}
-		printUndoPlan(opts.Out, plan, opts.MerchantSlug)
+		printUndoPlan(opts.Out, plan, opts.MerchantID.String())
 		return nil
 	}
 
@@ -104,7 +103,7 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if jsonOut {
 		return encodeJSON(opts.Out, res)
 	}
-	printUndoResult(opts.Out, res, opts.MerchantSlug)
+	printUndoResult(opts.Out, res, opts.MerchantID.String())
 	return nil
 }
 

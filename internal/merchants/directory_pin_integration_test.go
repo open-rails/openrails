@@ -53,6 +53,60 @@ func TestDirectoryReadsReuseOneConnection(t *testing.T) {
 	require.Equal(t, slug+"-new", current)
 }
 
+func TestDBSecretReadsReuseOneConnectionAndKeepMerchantScope(t *testing.T) {
+	ctx := context.Background()
+	_, dsn := dbtest.SharedRLSPostgres(t)
+	cfg, err := pgxpool.ParseConfig(dsn)
+	require.NoError(t, err)
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	require.NoError(t, err)
+	defer pool.Close()
+	database, err := db.NewWithPGXPool(pool, "openrails")
+	require.NoError(t, err)
+	store, err := NewDBSecretStore(database.DataPool())
+	require.NoError(t, err)
+	svc, err := NewService(database.DataPool(), store, "live")
+	require.NoError(t, err)
+	a, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "secret-pin-a-" + uuid.NewString()[:8], PermissionGroupID: uuid.NewString()})
+	require.NoError(t, err)
+	b, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "secret-pin-b-" + uuid.NewString()[:8], PermissionGroupID: uuid.NewString()})
+	require.NoError(t, err)
+	account := "pin-" + uuid.NewString()
+	require.NoError(t, database.DataPool().MerchantTx(ctx, a.ID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,rail,environment,account_id) VALUES($1,'stripe','live',$2)`, a.ID.UUID(), account)
+		return err
+	}))
+	name, err := PSPSecretName("stripe", "live", account, "secret_key")
+	require.NoError(t, err)
+	_, err = store.Put(ctx, a.ID, name, "original-test-credential")
+	require.NoError(t, err)
+	_, err = store.Put(ctx, b.ID, name, "other-test-credential")
+	require.NoError(t, err)
+	// Bound the regression itself: the old read attempted a second connection
+	// while this request held the only one, despite both reads targeting A.
+	ctx, cancel := context.WithTimeout(merchant.WithID(ctx, a.ID), 3*time.Second)
+	defer cancel()
+	ctx, release, err := database.WithMerchantConn(ctx)
+	require.NoError(t, err)
+	defer release()
+	_, err = database.Qx(ctx).Exec(ctx, "SELECT 1")
+	require.NoError(t, err)
+	secret, err := store.Get(ctx, a.ID, name)
+	require.NoError(t, err)
+	require.Equal(t, "original-test-credential", secret.Value)
+	names, err := store.List(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{name}, names)
+	creds, err := svc.LoadStripeCredentials(ctx, a.ID)
+	require.NoError(t, err)
+	require.Equal(t, "original-test-credential", creds.SecretKey)
+	_, err = store.Get(ctx, b.ID, name)
+	require.Error(t, err, "the pinned merchant cannot read another merchant's secret")
+	_, err = store.List(ctx, b.ID)
+	require.Error(t, err, "the pinned merchant cannot enumerate another merchant's secrets")
+}
+
 func TestRestoreRefusesCommittedPurgeButAllowsFailedPreflight(t *testing.T) {
 	_, dsn := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(context.Background(), dsn)

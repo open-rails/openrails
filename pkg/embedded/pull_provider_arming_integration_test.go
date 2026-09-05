@@ -42,9 +42,9 @@ func TestPullProviderRefusesWhenNoCredentialPlaneCanBeBuilt(t *testing.T) {
 	}
 
 	err := embedded.PullProvider(context.Background(), embedded.PullProviderOptions{
-		Config:       cfg,
-		MerchantSlug: "does-not-matter",
-		Out:          io.Discard,
+		Config:     cfg,
+		MerchantID: dbtest.TestMerchantID,
+		Out:        io.Discard,
 	})
 	require.Error(t, err, "a pull with no credential plane must fail, not report an empty-but-clean run")
 	require.Contains(t, err.Error(), "no rail can be armed")

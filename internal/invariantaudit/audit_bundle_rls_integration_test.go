@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
@@ -540,12 +541,26 @@ func TestGAP9_PermissionGroupIsUniquePerMerchant(t *testing.T) {
 		   GROUP BY 1 HAVING count(*) > 1) d`).Scan(&dupes))
 	require.EqualValues(t, 0, dupes, "GAP-9: two merchants share one permission group")
 
-	var idx int64
-	require.NoError(t, app.QueryRow(ctx, `
-		SELECT count(*) FROM pg_indexes
-		 WHERE schemaname='openrails' AND tablename='merchants'
-		   AND indexdef LIKE '%UNIQUE%' AND indexdef LIKE '%permission_group_id%'`).Scan(&idx))
-	require.EqualValues(t, 1, idx, "GAP-9: the unique index on merchants.permission_group_id is missing")
+	// Probe the invariant itself. The unbound-name index also mentions
+	// permission_group_id in its predicate, so index-definition substring
+	// counting cannot identify the group-ownership key.
+	tx, err := app.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	owner, group := uuid.New(), uuid.NewString()
+	_, err = tx.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,permission_group_id) VALUES($1,$2,$3)`, owner, "group-owner-"+owner.String(), group)
+	require.NoError(t, err)
+	for _, deleted := range []bool{false, true} {
+		if deleted {
+			_, err = tx.Exec(ctx, `UPDATE openrails.merchants SET status='deleted',deleted_at=now() WHERE id=$1`, owner)
+			require.NoError(t, err)
+		}
+		next := uuid.New()
+		err = attemptInTx(ctx, tx, `INSERT INTO openrails.merchants(id,slug,permission_group_id) VALUES($1,$2,$3)`, next, "group-duplicate-"+next.String(), group)
+		var violation *pgconn.PgError
+		require.ErrorAs(t, err, &violation, "GAP-9: a group cannot acquire another billing identity (old owner deleted=%v)", deleted)
+		require.Equal(t, "23505", violation.Code, "group ownership must remain unique after deletion")
+	}
 }
 
 func keys(m map[string]string) []string {

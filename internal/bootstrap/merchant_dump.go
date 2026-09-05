@@ -3,14 +3,12 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -57,20 +55,22 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 		return nil, fmt.Errorf("wrap control-plane db: %w", err)
 	}
 
-	var merchantID string
-	var displayName, apiHost *string
-	if err := database.Qx(ctx).QueryRow(ctx, `
-		SELECT id::text, display_name, api_host FROM openrails.merchants WHERE slug = $1 AND deleted_at IS NULL
-	`, slug).Scan(&merchantID, &displayName, &apiHost); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, fmt.Errorf("merchant %q not found", slug)
-		}
+	directory, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return nil, err
+	}
+	directory.WithNameAuthority(controlplane.MerchantNameAuthority(cp.Core()))
+	selected, err := directory.GetBySlug(ctx, slug)
+	if err != nil {
 		return nil, fmt.Errorf("lookup merchant %q: %w", slug, err)
 	}
-	mid, err := merchant.ParseID(merchantID)
+	slug = selected.Slug
+	mid := selected.ID
+	row, err := database.Gen(ctx).GetMerchantDirectoryByID(ctx, mid.UUID())
 	if err != nil {
-		return nil, fmt.Errorf("parse merchant id: %w", err)
+		return nil, err
 	}
+	displayName, apiHost := row.DisplayName, row.ApiHost
 	mctx := merchant.WithID(ctx, mid)
 
 	// merchants.display_name is the canonical merchant name (#041), NULL -> slug.

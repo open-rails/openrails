@@ -13,7 +13,6 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchants"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -26,8 +25,11 @@ import (
 
 // CatalogPushOptions configures PushMerchantCatalog.
 type CatalogPushOptions struct {
-	Config  *config.Config
-	PGXPool *pgxpool.Pool
+	// NameAuthority is required for bound names when constructing an isolated
+	// catalog runtime. A supplied Runtime uses its already configured authority.
+	NameAuthority merchant.NameAuthority
+	Config        *config.Config
+	PGXPool       *pgxpool.Pool
 	// Runtime applies the catalog through an already-bootstrapped embedded
 	// engine. This preserves its armed per-merchant PSPs and
 	// signers; without it the helper builds an isolated runtime from Config.
@@ -107,10 +109,11 @@ func PushMerchantCatalog(ctx context.Context, opts CatalogPushOptions) error {
 	applier := catalog.NewServiceApplier(svc)
 
 	for _, target := range targets {
-		catalogCtx, err := contextForCatalogPushTarget(ctx, rt.DB, target.Merchant)
+		catalogCtx, canonicalName, err := contextForCatalogPushTarget(ctx, rt.Merchants, target.Merchant)
 		if err != nil {
 			return err
 		}
+		target.Merchant = canonicalName
 		if err := rt.DB.RunInMerchantConn(catalogCtx, func(ctx context.Context) error {
 			plan, err := catalog.Plan(ctx, applier, target.Manifest)
 			if err != nil {
@@ -185,6 +188,9 @@ func catalogPushRuntime(
 	)
 	if err != nil {
 		return nil, nil, nil, err
+	}
+	if opts.NameAuthority != nil {
+		rt.Merchants.WithNameAuthority(opts.NameAuthority)
 	}
 	return rt, svc, cleanup, nil
 }
@@ -351,24 +357,15 @@ func reportCatalogExtras(ctx context.Context, svc *billingservice.Service, out i
 	return nil
 }
 
-func contextForCatalogPushTarget(ctx context.Context, database *db.DB, merchantSlug string) (context.Context, error) {
-	tid, err := resolveMerchantBySlug(ctx, database, merchantSlug)
+func contextForCatalogPushTarget(ctx context.Context, directory *merchants.Service, name string) (context.Context, string, error) {
+	if directory == nil {
+		return nil, "", fmt.Errorf("merchant directory is required")
+	}
+	selected, err := directory.GetBySlug(ctx, name)
 	if err != nil {
-		return nil, err
+		return nil, "", fmt.Errorf("resolve catalog merchant %q: %w", name, err)
 	}
-	return merchant.WithID(ctx, tid), nil
-}
-
-func resolveMerchantBySlug(ctx context.Context, database *db.DB, merchantSlug string) (merchant.ID, error) {
-	merchantSlug = strings.TrimSpace(merchantSlug)
-	if merchantSlug == "" {
-		return merchant.ID{}, fmt.Errorf("catalog merchant is required")
-	}
-	id, err := db.ResolveMerchantSlug(ctx, database.Pool(), merchantSlug)
-	if err != nil {
-		return merchant.ID{}, err
-	}
-	return id, nil
+	return merchant.WithID(ctx, selected.ID), selected.Slug, nil
 }
 
 func catalogPushUsesProvider(manifests []*catalog.Manifest, provider string) bool {

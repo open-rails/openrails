@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -38,18 +38,22 @@ type InvoiceConfig = boot.InvoiceConfig
 
 // PullProviderOptions mirrors `openrails pull-provider` for embedded hosts.
 type PullProviderOptions struct {
-	Config       *config.Config
-	MerchantSlug string
-	Providers    []string
-	PSP          string
-	Since        string
-	Until        string
-	Format       string
-	LogDir       string
-	Insert       bool
-	Overwrite    bool
-	Prune        bool
-	Out          io.Writer
+	PGXPool *pgxpool.Pool
+	// NameAuthority resolves names in an external merchant manifest. The pull
+	// itself is always scoped by MerchantID; nil selects unbound host names only.
+	NameAuthority merchant.NameAuthority
+	Config        *config.Config
+	MerchantID    merchant.ID
+	Providers     []string
+	PSP           string
+	Since         string
+	Until         string
+	Format        string
+	LogDir        string
+	Insert        bool
+	Overwrite     bool
+	Prune         bool
+	Out           io.Writer
 
 	// PruneExpectRows is the operator's typed confirmation and the ONLY way a
 	// prune writes (or#858). Nil = dry-run: discover, report the number to
@@ -77,11 +81,12 @@ type PullProviderOptions struct {
 
 // PullProviderReportOptions mirrors `openrails pull-provider report`.
 type PullProviderReportOptions struct {
-	Config       *config.Config
-	MerchantSlug string
-	RunID        string
-	Format       string
-	Out          io.Writer
+	PGXPool    *pgxpool.Pool
+	Config     *config.Config
+	MerchantID merchant.ID
+	RunID      string
+	Format     string
+	Out        io.Writer
 }
 
 // PullProvider pulls provider-observed state into OpenRails' local mirror.
@@ -119,8 +124,8 @@ func PullProvider(ctx context.Context, opts PullProviderOptions) error {
 	}
 	defer cleanup()
 
-	merchantID, err := resolvePullProviderMerchant(ctx, rt.DB, opts.MerchantSlug)
-	if err != nil {
+	merchantID := opts.MerchantID
+	if err := rt.DB.RequireMerchantID(ctx, merchantID); err != nil {
 		return err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
@@ -293,7 +298,7 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 	if opts.Config == nil || opts.Config.DB == nil {
 		return fmt.Errorf("config not loaded")
 	}
-	database, err := openEmbeddedDB(ctx, opts.Config, nil)
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {
 		return err
 	}
@@ -301,8 +306,8 @@ func PullProviderReport(ctx context.Context, opts PullProviderReportOptions) err
 		_ = database.Close()
 	}()
 
-	merchantID, err := resolvePullProviderMerchant(ctx, database, opts.MerchantSlug)
-	if err != nil {
+	merchantID := opts.MerchantID
+	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
 		return err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
@@ -356,11 +361,15 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 	if cfg == nil || cfg.DB == nil {
 		return nil, nil, fmt.Errorf("config not loaded")
 	}
-	database, err := openEmbeddedDB(ctx, cfg, nil)
+	database, err := openEmbeddedDB(ctx, cfg, opts.PGXPool)
 	if err != nil {
 		return nil, nil, err
 	}
 	cleanup := func() { _ = database.Close() }
+	if err := database.RequireMerchantID(ctx, opts.MerchantID); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
 	// #699/#788: pulls arm from the per-merchant secrets store, with the same
 	// semantics as the server's River pulls (store wins; a declared account with
 	// a missing secret is a rail NOT armed, loudly). MODE 1 (#723): the manifest
@@ -437,45 +446,39 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 	transit := transitStore.SolanaTransit
 	plane := merchants.NewManifestSecretStore()
 	seeder := plane.Seeder()
-	for slug, mt := range manifest.Merchants {
-		var idStr string
-		err := database.DataPool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1) AND deleted_at IS NULL`, slug).Scan(&idStr)
-		if errors.Is(err, pgx.ErrNoRows) {
-			// Never provisioned → no local mirror rows to pull for it.
-			log.WithField("merchant", slug).Warn("pull-provider: manifest merchant has no merchant row; skipping its secret plane")
+	directory, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return nil, err
+	}
+	directory.WithNameAuthority(opts.NameAuthority)
+	var selected *boot.MerchantConfig
+	for name, mt := range manifest.Merchants {
+		owner, err := directory.GetBySlug(ctx, name)
+		if errors.Is(err, merchants.ErrMerchantNotFound) {
 			continue
 		}
 		if err != nil {
-			return nil, fmt.Errorf("pull-provider: resolve manifest merchant %q: %w", slug, err)
+			return nil, fmt.Errorf("pull-provider: resolve manifest merchant %q: %w", name, err)
 		}
-		mid, err := merchant.ParseID(idStr)
-		if err != nil {
-			return nil, fmt.Errorf("pull-provider: manifest merchant %q id: %w", slug, err)
+		if owner.ID != opts.MerchantID {
+			continue
 		}
-		if err := boot.SeedMerchantManifestSecretPlane(ctx, cfg, mid, mt, seeder, transit); err != nil {
-			return nil, fmt.Errorf("pull-provider: seed manifest secrets for %q: %w", slug, err)
+		if selected != nil {
+			return nil, fmt.Errorf("pull-provider: multiple manifest names resolve to merchant %s", opts.MerchantID)
 		}
+		selected = &mt
+	}
+	if selected == nil {
+		return nil, fmt.Errorf("pull-provider: manifest has no entry for merchant %s", opts.MerchantID)
+	}
+	if err := boot.SeedMerchantManifestSecretPlane(ctx, cfg, opts.MerchantID, *selected, seeder, transit); err != nil {
+		return nil, fmt.Errorf("pull-provider: seed merchant %s: %w", opts.MerchantID, err)
 	}
 	svc, err := merchants.NewService(database.DataPool(), plane, config.ExpectedProviderEnvironment(cfg.IsTestMode()))
 	if err != nil {
 		return nil, fmt.Errorf("pull-provider: build merchants service over the manifest plane: %w", err)
 	}
-	return svc, nil
-}
-
-func resolvePullProviderMerchant(ctx context.Context, database *db.DB, slug string) (merchant.ID, error) {
-	slug = strings.TrimSpace(slug)
-	if slug == "" {
-		return merchant.ID{}, fmt.Errorf("--merchant is required (slug or id)")
-	}
-	if id, err := merchant.ParseID(slug); err == nil {
-		return id, nil
-	}
-	var id string
-	if err := database.DataPool().QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE lower(slug) = lower($1) AND deleted_at IS NULL`, slug).Scan(&id); err != nil {
-		return merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", slug, err)
-	}
-	return merchant.ParseID(id)
+	return svc.WithNameAuthority(opts.NameAuthority), nil
 }
 
 func resolvePullPSPTarget(ctx context.Context, rt *pullProviderRuntime, pspStr string) (reconcile.Provider, reconcile.PSPBinding, error) {

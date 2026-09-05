@@ -170,7 +170,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.True(t, res.Created)
 	})
 
-	t.Run("ak#264 rename forwards on every directory resolver and re-syncs the row", func(t *testing.T) {
+	t.Run("rename forwards through the authority without writing billing projections", func(t *testing.T) {
 		oldSlug := "alpha-" + sfx
 		newSlug := "beta-" + sfx
 		res, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
@@ -180,8 +180,8 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		_, err = cp.Core().UpdateGroupInstanceAs(ctx, user.ID, res.GroupID, authkit.GroupInstanceUpdate{Slug: &newSlug})
 		require.NoError(t, err)
 
-		// NEW slug: the directory row is stale; group resolution finds it and
-		// lazily re-syncs the row.
+		// The current name resolves by group UUID while billing retains its
+		// non-authoritative projection.
 		mid, canonical, err := cp.ResolveMerchantForGroup(ctx, newSlug)
 		require.NoError(t, err, "new slug resolves while the directory row is stale")
 		require.Equal(t, res.MerchantID.String(), mid.String())
@@ -189,7 +189,7 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		var rowSlug string
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT slug FROM openrails.merchants WHERE id = $1::uuid`, res.MerchantID.String()).Scan(&rowSlug))
-		require.Equal(t, newSlug, rowSlug, "directory row lazily re-synced to the group's current slug")
+		require.Equal(t, oldSlug, rowSlug, "name resolution does not mutate the billing projection")
 
 		// An active former-name alias resolves directly to the group; canonical name wins.
 		mid, canonical, err = cp.ResolveMerchantForGroup(ctx, oldSlug)
@@ -236,17 +236,14 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		require.ErrorIs(t, err, policy.ErrMerchantUnresolved)
 		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
 		require.NoError(t, err)
-		_, _, err = dir.Provision(ctx, merchants.ProvisionRequest{Slug: name, PermissionGroupID: replacement})
-		require.ErrorIs(t, err, merchants.ErrMerchantBindingConflict)
-		unchanged, err := dir.Get(ctx, original.MerchantID)
-		require.NoError(t, err)
-		require.Equal(t, original.GroupID, unchanged.PermissionGroupID)
-		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET deleted_at=now(),status='deleted' WHERE id=$1`, original.MerchantID.UUID())
-		require.NoError(t, err)
 		fresh, made, err := dir.Provision(ctx, merchants.ProvisionRequest{Slug: name, PermissionGroupID: replacement})
 		require.NoError(t, err)
 		require.True(t, made)
 		require.NotEqual(t, original.MerchantID, fresh.ID)
+		unchanged, err := dir.Get(ctx, original.MerchantID)
+		require.NoError(t, err)
+		require.Equal(t, original.GroupID, unchanged.PermissionGroupID)
+		require.Equal(t, merchants.StatusActive, unchanged.Status, "old billing state need not be deleted before reclaim")
 		got, _, err := cp.ResolveAuthorizedMerchant(ctx, name, stranger.ID, "merchant:catalog:read")
 		require.NoError(t, err)
 		require.Equal(t, fresh.ID, got)

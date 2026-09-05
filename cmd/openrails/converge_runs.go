@@ -47,7 +47,7 @@ func newConvergeCmd() *cobra.Command {
 			return runConvergeList(c, merchantSlug, limit, format)
 		},
 	}
-	listCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	listCmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	listCmd.Flags().IntVar(&limit, "limit", 20, "Maximum runs to show")
 	listCmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 
@@ -64,7 +64,7 @@ func convergeOpenDB(cmd *cobra.Command, merchantSlug string) (*db.DB, merchant.I
 	if err != nil {
 		return nil, merchant.ID{}, fmt.Errorf("open postgres: %w", err)
 	}
-	mid, err := db.ResolveMerchantSlug(cmd.Context(), database.Pool(), strings.TrimSpace(merchantSlug))
+	mid, err := resolveCLIMerchant(cmd.Context(), database, strings.TrimSpace(merchantSlug))
 	if err != nil {
 		_ = database.Close()
 		return nil, merchant.ID{}, fmt.Errorf("resolve merchant %q: %w", merchantSlug, err)

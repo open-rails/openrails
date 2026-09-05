@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -33,10 +32,10 @@ type AdminGrant struct {
 
 // AdminGrantImportOptions configures ImportAdminGrants.
 type AdminGrantImportOptions struct {
-	Config       *config.Config
-	PGXPool      *pgxpool.Pool
-	MerchantSlug string
-	Grants       []AdminGrant
+	Config     *config.Config
+	PGXPool    *pgxpool.Pool
+	MerchantID merchant.ID
+	Grants     []AdminGrant
 }
 
 // AdminGrantImportResult reports per-source outcomes of an import batch so the
@@ -68,9 +67,9 @@ func ImportAdminGrants(ctx context.Context, opts AdminGrantImportOptions) (Admin
 	}
 	defer database.Close()
 
-	merchantID, err := db.ResolveMerchantSlug(ctx, database.Pool(), strings.TrimSpace(opts.MerchantSlug))
-	if err != nil {
-		return res, fmt.Errorf("import admin grants: resolve merchant %q: %w", opts.MerchantSlug, err)
+	merchantID := opts.MerchantID
+	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
+		return res, err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 

@@ -37,7 +37,7 @@ func newLedgerAuditCmd() *cobra.Command {
 			return runLedgerAudit(c, merchantSlug, format)
 		},
 	}
-	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (default: every merchant)")
+	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (default: every merchant)")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")
 	return cmd
 }

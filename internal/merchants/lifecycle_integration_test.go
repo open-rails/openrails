@@ -70,7 +70,7 @@ CREATE SCHEMA IF NOT EXISTS openrails;
 
 CREATE TABLE IF NOT EXISTS openrails.merchants (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    slug             TEXT NOT NULL UNIQUE,
+    slug             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active',
     permission_group_id  TEXT,
     display_name     TEXT,
@@ -78,6 +78,9 @@ CREATE TABLE IF NOT EXISTS openrails.merchants (
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
     deleted_at       TIMESTAMPTZ
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_unbound_slug ON openrails.merchants(slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_merchants_permission_group_id ON openrails.merchants(permission_group_id) WHERE permission_group_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS openrails.entitlements (
     id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -481,6 +484,16 @@ func TestListDirectoryRefs(t *testing.T) {
 	unnamed, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "refs-unnamed", PermissionGroupID: "group-refs-unnamed"})
 	require.NoError(t, err)
 
+	svc.WithGroupSlugResolver(func(_ context.Context, name string) (string, string, error) {
+		switch name {
+		case "refs-named":
+			return named.PermissionGroupID, name, nil
+		case "refs-unnamed":
+			return unnamed.PermissionGroupID, name, nil
+		default:
+			return "", "", ErrMerchantNotFound
+		}
+	})
 	refs, err := svc.ListDirectoryRefs(ctx, []string{"  REFS-NAMED  ", "refs-named", "refs-unnamed", "refs-missing", ""})
 	require.NoError(t, err)
 	require.Equal(t, []DirectoryRef{
@@ -591,6 +604,13 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	svc := newSvc(t)
 	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "acme", PermissionGroupID: "group-acme"})
 	require.NoError(t, err)
+
+	svc.WithGroupSlugResolver(func(_ context.Context, name string) (string, string, error) {
+		if name == "acme" {
+			return tn.PermissionGroupID, name, nil
+		}
+		return "", "", ErrMerchantNotFound
+	})
 
 	// Resolve by slug.
 	route, err := svc.ResolveBySlug(ctx, "acme")

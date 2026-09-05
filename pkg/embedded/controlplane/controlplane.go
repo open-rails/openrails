@@ -296,8 +296,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 		resolver := cp.MerchantGroupSlugResolver()
 		a.Runtime.MerchantGroupResolver = resolver
 		a.Runtime.MerchantGroupCanonicalResolver = cp.MerchantGroupIDResolver()
+		a.Runtime.MerchantGroupSearchResolver = cp.MerchantGroupSearchResolver()
 		if a.Runtime.Merchants != nil {
-			a.Runtime.Merchants.WithGroupSlugResolver(resolver).WithGroupIDResolver(cp.MerchantGroupIDResolver())
+			a.Runtime.Merchants.WithGroupSlugResolver(resolver).WithGroupIDResolver(cp.MerchantGroupIDResolver()).WithGroupSearchResolver(cp.MerchantGroupSearchResolver())
 		}
 	}
 	return nil

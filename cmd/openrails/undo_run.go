@@ -54,13 +54,17 @@ func newUndoRunCmd() *cobra.Command {
 				return fmt.Errorf("undo-run --apply requires --expect-rows: run without --apply first and confirm the row count it prints")
 			}
 			cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			mid, err := resolveConfiguredCLIMerchant(c.Context(), cfg, merchantSlug)
+			if err != nil {
+				return err
+			}
 			return embedded.UndoRun(c.Context(), embedded.UndoRunOptions{
-				Config: cfg, MerchantSlug: merchantSlug, RunID: runID, Actor: cliActor(),
+				Config: cfg, MerchantID: mid, RunID: runID, Actor: cliActor(),
 				Apply: apply, ExpectRows: expectRows, Format: format, Out: os.Stdout,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant slug or id (required)")
+	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().StringVar(&runID, "run", "", "Destructive run id to reverse (required; see `openrails prune list` / `openrails converge list`)")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Actually perform the reversal (default: plan only)")
 	cmd.Flags().Int64Var(&expectRows, "expect-rows", 0, "Typed confirmation: the number of rows the plan says would be restored. Required with --apply")
