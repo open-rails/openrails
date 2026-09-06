@@ -1178,6 +1178,73 @@ func (q *Queries) ListLapsedSubscriptionsWithEvidence(ctx context.Context, arg L
 	return items, nil
 }
 
+const listPaidPendingSubscriptions = `-- name: ListPaidPendingSubscriptions :many
+SELECT s.id, s.rail, s.created_at, p.id AS payment_id, p.transaction_id, p.purchased_at
+FROM openrails.subscriptions s
+JOIN LATERAL (
+    SELECT p.id, p.transaction_id, p.purchased_at FROM openrails.payments p
+    WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+      AND p.status = 'completed' AND p.deleted_at IS NULL
+    ORDER BY p.purchased_at DESC, p.id DESC
+    LIMIT 1
+) p ON true
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'pending'
+  AND s.created_at < $3::timestamptz
+ORDER BY s.created_at, s.id
+LIMIT $4::int
+`
+
+type ListPaidPendingSubscriptionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Cutoff     time.Time
+	RowLimit   int32
+}
+
+type ListPaidPendingSubscriptionsRow struct {
+	ID            uuid.UUID
+	Rail          string
+	CreatedAt     time.Time
+	PaymentID     uuid.UUID
+	TransactionID string
+	PurchasedAt   time.Time
+}
+
+func (q *Queries) ListPaidPendingSubscriptions(ctx context.Context, arg ListPaidPendingSubscriptionsParams) ([]ListPaidPendingSubscriptionsRow, error) {
+	rows, err := q.db.Query(ctx, listPaidPendingSubscriptions,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Cutoff,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPaidPendingSubscriptionsRow
+	for rows.Next() {
+		var i ListPaidPendingSubscriptionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Rail,
+			&i.CreatedAt,
+			&i.PaymentID,
+			&i.TransactionID,
+			&i.PurchasedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentlyClosedLastEntitlementWindows = `-- name: ListRecentlyClosedLastEntitlementWindows :many
 SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.entitlement,
@@ -1368,13 +1435,18 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 }
 
 const listStalePendingSubscriptions = `-- name: ListStalePendingSubscriptions :many
-SELECT id FROM openrails.subscriptions
-WHERE merchant_id = $1::uuid
-  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
-  AND deleted_at IS NULL
-  AND status = 'pending'
-  AND created_at < $3::timestamptz
-ORDER BY created_at, id
+SELECT s.id FROM openrails.subscriptions s
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'pending'
+  AND s.created_at < $3::timestamptz
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.payments p
+      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+        AND p.status = 'completed' AND p.deleted_at IS NULL
+  )
+ORDER BY s.created_at, s.id
 LIMIT $4::int
 `
 
