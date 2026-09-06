@@ -262,20 +262,23 @@ func TestAdminCustomersSearch(t *testing.T) {
 	res = search(bToken, "q="+aliceSubject[:10])
 	require.Empty(t, res.Data, "merchant B must not see merchant A's customers")
 
-	// The detail profile returns the latest historical email even though its
-	// active-subscription section is empty.
+	// The detail profile returns the latest historical email and lists the
+	// cancelled subscription with its status.
 	status, body := requestJSON(t, http.MethodGet,
 		surface.BaseURL+"/v1/merchant/customers/"+alice.String(), aToken, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var profile struct {
 		CustomerID    string `json:"customer_id"`
 		Email         string `json:"email"`
-		Subscriptions []any  `json:"subscriptions"`
+		Subscriptions []struct {
+			Status string `json:"status"`
+		} `json:"subscriptions"`
 	}
 	require.NoError(t, json.Unmarshal(body, &profile))
 	require.Equal(t, alice.String(), profile.CustomerID)
 	require.Equal(t, aliceEmail, profile.Email)
-	require.Empty(t, profile.Subscriptions)
+	require.Len(t, profile.Subscriptions, 1)
+	require.Equal(t, "cancelled", profile.Subscriptions[0].Status)
 
 	// Auth gate: no bearer is a 401. (Every merchant catalog role — owner/
 	// support/viewer — carries customer-settings:read, so there is no valid
