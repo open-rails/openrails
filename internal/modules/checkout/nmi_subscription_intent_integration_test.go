@@ -167,6 +167,8 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock)
 	svc := NewCheckoutService(subSvc, productSvc, priceSvc, paymentSvc, entSvc,
 		nil, nil, &stubIdemStore{}, nil, nil, nil, clock)
+	svc.SetSubscriptionLifecycleService(subscriptions.NewSubscriptionLifecycleService(
+		dbi, productSvc, priceSvc, entSvc, subscriptions.NewNotificationService(dbi, nil), paymentSvc, clock))
 	// #788: the scoped resolver is the ONLY NMI client source; the fixture
 	// overrides it with the fake-gateway client.
 	svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
@@ -270,4 +272,51 @@ func TestNMISubscriptionIntent_OrphanedRemoteCreateIsRepaired(t *testing.T) {
 	sub, ok := fx.localSub(t)
 	require.True(t, ok, "orphaned remote subscription registered locally")
 	require.Equal(t, models.StatusActive, sub.Status)
+}
+
+func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) {
+	fx := newSubIntentFixture(t)
+	pool := fx.db.Pool()
+	_, err := pool.Exec(fx.ctx, `UPDATE openrails.products SET entitlements_spec = '{"premium": null}'
+		WHERE id = (SELECT product_id FROM openrails.prices WHERE id = $1)`, fx.priceID)
+	require.NoError(t, err)
+
+	intent := fx.enqueueAndExecute(t)
+	require.Equal(t, intents.StatusSucceeded, intent.Status)
+	sub, ok := fx.localSub(t)
+	require.True(t, ok)
+	require.Equal(t, fx.payload.LocalSubscriptionID, sub.ID)
+	require.Equal(t, models.StatusActive, sub.Status)
+	require.NotNil(t, sub.CurrentPeriodStartsAt)
+	require.NotNil(t, sub.CurrentPeriodEndsAt)
+	require.Equal(t, 720*time.Hour, sub.CurrentPeriodEndsAt.Sub(*sub.CurrentPeriodStartsAt))
+
+	assertOneMembership := func() {
+		t.Helper()
+		var windows int
+		require.NoError(t, pool.QueryRow(fx.ctx, `SELECT count(*) FROM openrails.entitlements
+			WHERE source_type = 'subscription' AND source_id = $1 AND entitlement = 'premium'`, sub.ID).Scan(&windows))
+		require.Equal(t, 1, windows)
+		var txnID, orderID string
+		require.NoError(t, pool.QueryRow(fx.ctx, `SELECT transaction_id, metadata->>'order_id' FROM openrails.payments
+			WHERE subscription_id = $1 AND status = 'completed'`, sub.ID).Scan(&txnID, &orderID))
+		require.Equal(t, fx.gateway.txnID, txnID)
+		require.NotEmpty(t, orderID)
+		rows, err := pool.Query(fx.ctx, `SELECT to_status::text FROM openrails.subscription_status_transitions
+			WHERE subscription_id = $1 ORDER BY occurred_at, id`, sub.ID)
+		require.NoError(t, err)
+		defer rows.Close()
+		var transitions []string
+		for rows.Next() {
+			var s string
+			require.NoError(t, rows.Scan(&s))
+			transitions = append(transitions, s)
+		}
+		require.Equal(t, []string{"pending", "active"}, transitions)
+	}
+	assertOneMembership()
+
+	replay := fx.enqueueAndExecute(t)
+	require.Equal(t, intents.StatusSucceeded, replay.Status)
+	assertOneMembership()
 }

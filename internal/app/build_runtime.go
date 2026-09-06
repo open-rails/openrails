@@ -854,6 +854,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		railConfigs,
 		clock,
 	)
+	checkoutService.SetSubscriptionLifecycleService(subscriptionLifecycleService)
 	webhookDispatcher.PurchaseRegistrar = checkoutService
 	// Wire durable product-access grants (issue #250) into the one-time purchase
 	// flow. Additive to feature entitlements; nil-safe.
