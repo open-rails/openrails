@@ -53,6 +53,10 @@ type adminCreditBalanceResponse struct {
 	OutstandingOwedAmount int64                  `json:"outstanding_owed_amount"`
 }
 
+// adminProfileSubscriptionWindow bounds the profile's subscriptions section to
+// the customer's most recent non-deleted subscriptions of any status.
+const adminProfileSubscriptionWindow = 100
+
 type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
 }
@@ -106,7 +110,10 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		profile.Email = &email
 	}
 	if r.State.SubscriptionService != nil {
-		subs, err := r.State.SubscriptionService.GetActiveSubscriptionsByUserID(ctx, path.UserID)
+		// Every non-deleted subscription, newest first, with its status: an
+		// admin 360 that hid pending/past_due/cancelled/unknown rows forced
+		// hosts to fan out to GET /subscriptions?user_id= to see them.
+		subs, _, err := r.State.SubscriptionService.GetPaginatedByUserID(ctx, path.UserID, 1, adminProfileSubscriptionWindow)
 		if err == nil && len(subs) > 0 {
 			profile.Subscriptions = subs
 		}
@@ -125,9 +132,15 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	if r.State.PaymentMethodService != nil {
 		if pms, err := r.State.PaymentMethodService.GetByUserID(ctx, path.UserID); err == nil && len(pms) > 0 {
-			methods, ok := paymentMethodsWithCollectionDefaults(r, customerID, pms)
-			if !ok {
-				return
+			// Collection defaults are an enrichment of this section, not the
+			// point of the profile: a loader failure used to 500 the whole
+			// composite and blank the host's admin view. Degrade to the
+			// methods without defaults; GetAdminUserPaymentMethods keeps the
+			// hard failure.
+			methods := paymentMethodsToAPI(pms, paymentMethodCharges(r, pms))
+			if err := applyCollectionDefaults(r, customerID, pms, methods); err != nil {
+				log.WithError(err).WithField("user_id", path.UserID).
+					Warn("failed to load collection payment method defaults; profile payment methods returned without them")
 			}
 			profile.PaymentMethods = methods
 		}

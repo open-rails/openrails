@@ -594,14 +594,37 @@ LIMIT sqlc.arg(row_limit)::int;
 -- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
 -- never confirmed within the threshold (cutoff = now - pendingStaleAfter).
 -- name: ListStalePendingSubscriptions :many
-SELECT id FROM openrails.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (sqlc.narg(customer_id)::uuid IS NULL OR customer_id = sqlc.narg(customer_id)::uuid)
-  AND deleted_at IS NULL
-  AND status = 'pending'
-  AND created_at < sqlc.arg(cutoff)::timestamptz
+SELECT s.id FROM openrails.subscriptions s
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'pending'
+  AND s.created_at < sqlc.arg(cutoff)::timestamptz
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.payments p
+      WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+        AND p.status = 'completed' AND p.deleted_at IS NULL
+  )
 -- or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
-ORDER BY created_at, id
+ORDER BY s.created_at, s.id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListPaidPendingSubscriptions :many
+SELECT s.id, s.rail, s.created_at, p.id AS payment_id, p.transaction_id, p.purchased_at
+FROM openrails.subscriptions s
+JOIN LATERAL (
+    SELECT p.id, p.transaction_id, p.purchased_at FROM openrails.payments p
+    WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
+      AND p.status = 'completed' AND p.deleted_at IS NULL
+    ORDER BY p.purchased_at DESC, p.id DESC
+    LIMIT 1
+) p ON true
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'pending'
+  AND s.created_at < sqlc.arg(cutoff)::timestamptz
+ORDER BY s.created_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that

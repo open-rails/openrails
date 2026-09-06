@@ -220,6 +220,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	var paymentService *payments.PaymentService
+	paymentRecorded := false
 	if params.TransactionID != "" && s.PaymentService != nil {
 		paymentService = payments.NewPaymentService(dbb, s.Clock())
 		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Rail, params.TransactionID)
@@ -247,20 +248,36 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if err := validateCompletedPayment(existingPayment, expectedAmount, expectedCurrency); err != nil {
 				return nil, nil, err
 			}
-			existingSubscription, err := subService.GetByID(ctx, *existingPayment.SubscriptionID)
+			existingSubscription, err := subService.subscriptionRepo.GetByIDForUpdate(ctx, *existingPayment.SubscriptionID)
 			if err != nil {
 				return nil, nil, fmt.Errorf("failed to load subscription for duplicate payment transaction: %w", err)
 			}
 			if existingSubscription.CustomerID.String() != params.UserID {
 				return nil, nil, fmt.Errorf("payment transaction subscription belongs to a different user")
 			}
+			if existingSubscription.Status != models.StatusPending {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": existingSubscription.ID,
+					"user_id":         params.UserID,
+					"payment_id":      existingPayment.ID,
+					"transaction_id":  params.TransactionID,
+				}).Info("Membership payment already exists; skipping duplicate membership creation")
+				return existingSubscription, nil, nil
+			}
+			if existingPendingSub != nil && existingPendingSub.ID != existingSubscription.ID {
+				return nil, nil, fmt.Errorf("payment transaction is linked to a different pending subscription")
+			}
+			if existingSubscription.ProductID != price.ProductID {
+				return nil, nil, fmt.Errorf("payment transaction subscription belongs to a different product")
+			}
 			log.WithContext(ctx).WithFields(log.Fields{
 				"subscription_id": existingSubscription.ID,
 				"user_id":         params.UserID,
 				"payment_id":      existingPayment.ID,
 				"transaction_id":  params.TransactionID,
-			}).Info("Membership payment already exists; skipping duplicate membership creation")
-			return existingSubscription, nil, nil
+			}).Info("Membership payment already exists for pending subscription; activating it")
+			existingPendingSub = existingSubscription
+			paymentRecorded = true
 		}
 	}
 
@@ -498,7 +515,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	}
 
 	// Create Payment record if payment info is provided
-	if params.TransactionID != "" && paymentService != nil {
+	if params.TransactionID != "" && paymentService != nil && !paymentRecorded {
 		// Use provided amount/currency or fall back to price defaults
 		amount := params.Amount
 		if !params.AmountProvided && amount == 0 {

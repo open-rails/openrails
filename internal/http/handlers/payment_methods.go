@@ -778,21 +778,41 @@ func paymentMethodsToAPI(methods []*models.PaymentMethod, charges map[uuid.UUID]
 
 // List/profile responses read the same collection policy. No
 // subscription default or client-side "first card" inference participates.
+// Here the defaults are load-bearing (the response IS the payment methods), so
+// a loader failure is the caller's 500; the admin profile degrades instead.
 func paymentMethodsWithCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod) ([]paymentMethodResponse, bool) {
 	response := paymentMethodsToAPI(methods, paymentMethodCharges(r, methods))
-	if len(methods) == 0 {
-		return response, true
-	}
-	defaults, err := money.NewMoneyService(r.State.DB, r.Clock).CollectionPaymentMethodCurrencies(r.Request.Context(), payer)
-	if err != nil {
+	if err := applyCollectionDefaults(r, payer, methods, response); err != nil {
 		log.WithError(err).Error("failed to load collection payment method defaults")
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment method defaults")
 		return nil, false
+	}
+	return response, true
+}
+
+// applyCollectionDefaults stamps each method's collection-default currencies
+// onto its already-built API response. response must be index-aligned with
+// methods (paymentMethodsToAPI). The loader error is returned untouched so the
+// caller decides whether it is fatal.
+func applyCollectionDefaults(r *httprequest.Request, payer identity.CustomerID, methods []*models.PaymentMethod, response []paymentMethodResponse) error {
+	if len(methods) == 0 {
+		return nil
+	}
+	defaults, err := loadCollectionPaymentMethodDefaults(r, payer)
+	if err != nil {
+		return err
 	}
 	for i, method := range methods {
 		if currencies := defaults[method.ID]; len(currencies) > 0 {
 			response[i].CollectionDefaultCurrencies = currencies
 		}
 	}
-	return response, true
+	return nil
+}
+
+// loadCollectionPaymentMethodDefaults is the one loader behind every list and
+// profile response. A package var so the admin profile's degrade path can be
+// exercised by failing the loader without corrupting the database.
+var loadCollectionPaymentMethodDefaults = func(r *httprequest.Request, payer identity.CustomerID) (map[uuid.UUID][]string, error) {
+	return money.NewMoneyService(r.State.DB, r.Clock).CollectionPaymentMethodCurrencies(r.Request.Context(), payer)
 }

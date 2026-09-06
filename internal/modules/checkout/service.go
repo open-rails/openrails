@@ -112,16 +112,21 @@ type CheckoutService struct {
 	StripeService *subscriptions.StripeService
 	// Intents executes durable write-ahead provider intents (#674). Every NMI
 	// recurring create in this flow goes through it.
-	Intents intentExecutor
-	clock   clockwork.Clock
-	Config  *config.Config
-	Rails   railresolve.Source
+	Intents   intentExecutor
+	Lifecycle *subscriptions.SubscriptionLifecycleService
+	clock     clockwork.Clock
+	Config    *config.Config
+	Rails     railresolve.Source
 	// NMIEndpointOverride points store-armed NMI clients at a fake gateway
 	// (test seam; empty = real endpoints).
 	NMIEndpointOverride string
 	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
 	// entirely (test seam; nil = the scoped resolution).
 	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)
+}
+
+func (s *CheckoutService) SetSubscriptionLifecycleService(l *subscriptions.SubscriptionLifecycleService) {
+	s.Lifecycle = l
 }
 
 // now returns the current time from the service's clock, or time.Now() if no clock is set.
@@ -950,14 +955,8 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 }
 
 func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, subscriptionID uuid.UUID, provider string, providerSubscriptionID string, transactionID string, orderID string, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
-	if s.SubscriptionService == nil {
-		return nil, errors.New("subscription service unavailable")
-	}
-	if s.EntitlementService == nil {
-		return nil, errors.New("entitlement service unavailable")
-	}
-	if s.PaymentService == nil {
-		return nil, errors.New("payment service unavailable")
+	if s.Lifecycle == nil {
+		return nil, errors.New("subscription lifecycle service unavailable")
 	}
 
 	metadata := map[string]any{
@@ -970,100 +969,31 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 		}
 	}
 
-	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
-	if err != nil {
+	now := s.now().UTC()
+	periodEnd := nmiSubscriptionPeriodEnd(now, price)
+	railSubscriptionID := providerSubscriptionID
+	var email *string
+	if req.Email != "" {
+		email = &req.Email
+	}
+	if _, err := s.Lifecycle.CreateMembership(ctx, &subscriptions.CreateMembershipParams{
+		UserID:                user.ID,
+		PriceID:               price.ID,
+		Rail:                  models.Rail(provider),
+		RailSubscriptionID:    &railSubscriptionID,
+		UserEmail:             email,
+		CurrentPeriodStartsAt: &now,
+		CurrentPeriodEndsAt:   &periodEnd,
+		TransactionID:         transactionID,
+		Amount:                price.Amount,
+		AmountProvided:        true,
+		Currency:              price.Currency,
+		PaymentMetadata:       metadata,
+	}); err != nil {
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, fmt.Errorf("failed to load NMI subscription for activation: %w", err)
-	}
-	if subscription.Status != models.StatusActive || subscription.CurrentPeriodStartsAt == nil || subscription.CurrentPeriodEndsAt == nil {
-		now := s.now().UTC()
-		periodStart := now
-		periodEnd := nmiSubscriptionPeriodEnd(now, price)
-		subscription.Status = models.StatusActive
-		subscription.CurrentPeriodStartsAt = &periodStart
-		subscription.CurrentPeriodEndsAt = &periodEnd
-		subscription.StartedAt = periodStart
-		if subscription.RailSubscriptionID == "" {
-			subscription.RailSubscriptionID = providerSubscriptionID
-		}
-		subscription.Rail = models.Rail(provider)
-		if err := s.SubscriptionService.Update(ctx, subscription); err != nil {
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-			return nil, fmt.Errorf("failed to activate NMI subscription: %w", err)
-		}
-	}
-	if err := s.grantImmediateNMISubscriptionEntitlements(ctx, user.ID, subscription); err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
-
-	if _, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(provider), transactionID); err != nil {
-		if !db.IsNotFound(err) {
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-			return nil, fmt.Errorf("failed to check NMI subscription payment: %w", err)
-		}
-		now := s.now().UTC()
-		payment := &models.Payment{
-			ID:                       uuidutil.NewV7(),
-			CustomerID:               subscription.CustomerID,
-			PriceID:                  price.ID,
-			SubscriptionID:           &subscription.ID,
-			Rail:                     models.Rail(provider),
-			TransactionID:            transactionID,
-			Amount:                   price.Amount,
-			ListAmount:               price.Amount,
-			Currency:                 price.Currency,
-			Status:                   payments.PaymentStatusCompletedValue,
-			Metadata:                 metadata,
-			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
-			CreditsSpecSnapshot:      models.CloneCreditsSpec(subscription.CreditsSpecSnapshot),
-			AttemptKind:              func() *string { k := payments.AttemptInitial; return &k }(),
-			MoneyMovement:            models.MoneyMovementRail, // or#827: the NMI subscription's first charge settled.
-			PurchasedAt:              now,
-			CreatedAt:                now,
-		}
-		if err := s.PaymentService.Create(ctx, payment); err != nil {
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-			return nil, fmt.Errorf("failed to record NMI subscription payment: %w", err)
-		}
+		return nil, fmt.Errorf("failed to activate NMI subscription: %w", err)
 	}
 	return s.nmiSubscriptionSuccessResponse(ctx, subscriptionID, transactionID, idempOp, idempotencyKey)
-}
-
-func (s *CheckoutService) grantImmediateNMISubscriptionEntitlements(ctx context.Context, userID string, subscription *models.Subscription) error {
-	if subscription == nil {
-		return errors.New("subscription is required")
-	}
-	if subscription.CurrentPeriodStartsAt == nil || subscription.CurrentPeriodEndsAt == nil {
-		return errors.New("active subscription period is required")
-	}
-	entitlementsSpec := subscription.EntitlementsSpecSnapshot
-	if len(entitlementsSpec) == 0 {
-		entitlementsSpec = map[string]*int{"premium": nil}
-	}
-	for entitlementName := range entitlementsSpec {
-		exists, err := s.EntitlementService.ExistsBySource(ctx, models.EntitlementSourceSubscription, subscription.ID, entitlementName)
-		if err != nil {
-			return fmt.Errorf("failed entitlement check: %w", err)
-		}
-		if exists {
-			continue
-		}
-		notBefore := subscription.CurrentPeriodStartsAt.UTC()
-		endAt := subscription.CurrentPeriodEndsAt.UTC()
-		if _, err := s.EntitlementService.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{
-			UserID:      userID,
-			CustomerID:  subscription.CustomerID,
-			Entitlement: entitlementName,
-			NotBefore:   &notBefore,
-			EndAt:       &endAt,
-			SourceType:  models.EntitlementSourceSubscription,
-			SourceID:    subscription.ID,
-		}); err != nil {
-			return fmt.Errorf("failed to grant entitlement %s: %w", entitlementName, err)
-		}
-	}
-	return nil
 }
 
 func nmiSubscriptionPeriodEnd(start time.Time, price *models.Price) time.Time {

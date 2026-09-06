@@ -26,6 +26,10 @@ import (
 // any real activation latency, so auto-cancelling can't race a confirming sub.
 const pendingStaleAfter = 72 * time.Hour
 
+// paidPendingAfter is how long a pending subscription may hold a completed
+// payment before the missing activation is surfaced.
+const paidPendingAfter = time.Hour
+
 // deriveBackfillWindow bounds derive-1 (#631): only subscriptions/payments whose
 // access window ends within this lookback are derived. Banking-aligned 3y
 // (replaces the migrate's old 1-year hack). A past-ended window is harmless
@@ -541,6 +545,36 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 				_, err = reconcile.ApplyDecision(ctx, p.e.DB, p.e.lifecycle, sub, decision, now)
 				return err
 			},
+		})
+	}
+
+	paidPending, err := q.ListPaidPendingSubscriptions(ctx, gen.ListPaidPendingSubscriptionsParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-paidPendingAfter),
+		RowLimit: convergeScanCap,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("life: scan paid pending subscriptions: %w", err)
+	}
+	for i := range paidPending {
+		row := paidPending[i]
+		out = append(out, ConvergeFinding{
+			Type:       "life.subscription.paid_pending",
+			Shape:      ShapeMissing,
+			Class:      ClassAdmin,
+			Severity:   "high",
+			SubjectKey: "subscription:" + row.ID.String(),
+			Provider:   "self",
+			Evidence: map[string]any{
+				"subscription_id": row.ID.String(),
+				"rail":            row.Rail,
+				"payment_id":      row.PaymentID.String(),
+				"transaction_id":  row.TransactionID,
+				"purchased_at":    row.PurchasedAt.UTC(),
+				"pending_since":   row.CreatedAt.UTC(),
+				"cause":           "completed_payment_without_activation",
+			},
+			RecommendedAction: fmt.Sprintf("Subscription %s is still pending although payment %s (transaction %s) completed. Re-run the rail's converge for this subscription, or activate it manually; never cancel it as stale.",
+				row.ID, row.PaymentID, row.TransactionID),
 		})
 	}
 
