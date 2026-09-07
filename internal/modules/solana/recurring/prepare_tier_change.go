@@ -158,16 +158,12 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		return nil, fmt.Errorf("recurring: subscription authority %s not found — expected an existing same-mint subscription for a tier change", saPDA)
 	}
 
-	cancelOldIx := subscriptions.BuildCancelSubscription(subscriptions.CancelOrResumeParams{
+	cancelOld := subscriptions.BuildCancelSubscription(subscriptions.CancelOrResumeParams{
 		Subscriber:      subscriber,
 		PlanPDA:         oldPlanPDA,
 		SubscriptionPDA: oldSubPDA,
 		EventAuthority:  eventAuth,
 	})
-	cancelOld, err := withReferenceMeta(cancelOldIx, in.Reference)
-	if err != nil {
-		return nil, err
-	}
 	subscribeNew := subscriptions.BuildSubscribe(subscriptions.SubscribeParams{
 		Subscriber:                     subscriber,
 		Merchant:                       merchant,
@@ -189,7 +185,11 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	if !in.IsUpgrade {
 		// Downgrade: cancel old + subscribe new, no immediate charge. Wallet signs
 		// alone. The cranker defers the first pull to the old period end.
-		tx, err := buildTierChangeUnsignedTxBase64(ctx, s.rpc, subscriber, []solanago.Instruction{cancelOld, subscribeNew})
+		ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew}, subscriber, in.Reference)
+		if err != nil {
+			return nil, err
+		}
+		tx, err := buildTierChangeUnsignedTxBase64(ctx, s.rpc, subscriber, ixs)
 		if err != nil {
 			return nil, err
 		}
@@ -232,8 +232,11 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		Delegator:             subscriber,
 	})
 
-	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber,
-		[]solanago.Instruction{cancelOld, subscribeNew, transferNew})
+	ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew, transferNew}, subscriber, in.Reference)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber, ixs)
 	if err != nil {
 		return nil, err
 	}

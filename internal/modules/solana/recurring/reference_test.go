@@ -7,6 +7,7 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
 
 // referenceInAccountKeys reports whether the given base58 pubkey appears in the
@@ -117,45 +118,86 @@ func TestPrepareTierChange_AttachesReference(t *testing.T) {
 	}
 }
 
-func TestWithReferenceMeta(t *testing.T) {
-	prog := solanago.MustPublicKeyFromBase58(randKeyStr(t))
-	acct := solanago.MustPublicKeyFromBase58(randKeyStr(t))
-	var base solanago.Instruction = solanago.NewInstruction(prog, solanago.AccountMetaSlice{
-		solanago.NewAccountMeta(acct, true, true),
-	}, []byte{1})
-
-	// Empty reference -> unchanged instruction.
-	same, err := withReferenceMeta(base, "")
-	if err != nil {
-		t.Fatalf("empty reference: %v", err)
+// programInstructionAccountCounts returns, per subscriptions-program instruction
+// in tx, how many accounts it carries. The program treats a trailing account as
+// an optional payer that must sign (or destructures an exact count), so a
+// reference must never ride on one of these.
+func programInstructionAccountCounts(t *testing.T, tx *solanago.Transaction) []int {
+	t.Helper()
+	var out []int
+	for _, ix := range tx.Message.Instructions {
+		prog, err := tx.Message.Program(ix.ProgramIDIndex)
+		if err != nil {
+			t.Fatalf("program index: %v", err)
+		}
+		if prog.Equals(subscriptions.ProgramID) {
+			out = append(out, len(ix.Accounts))
+		}
 	}
-	if len(same.(*solanago.GenericInstruction).AccountValues) != 1 {
-		t.Error("empty reference must not add accounts")
+	return out
+}
+
+func TestReferenceTagInstruction(t *testing.T) {
+	payer := solanago.MustPublicKeyFromBase58(randKeyStr(t))
+
+	// Empty reference -> nothing to tag.
+	none, err := referenceTagInstruction(payer, "")
+	if err != nil || none != nil {
+		t.Fatalf("empty reference: ix=%v err=%v, want nil, nil", none, err)
+	}
+	ixs, err := withReference([]solanago.Instruction{}, payer, "")
+	if err != nil || len(ixs) != 0 {
+		t.Fatalf("withReference(empty) = %v, %v; want unchanged", ixs, err)
 	}
 
 	reference := randKeyStr(t)
-	tagged, err := withReferenceMeta(base, reference)
+	tag, err := referenceTagInstruction(payer, reference)
 	if err != nil {
-		t.Fatalf("withReferenceMeta: %v", err)
+		t.Fatalf("referenceTagInstruction: %v", err)
 	}
-	metas := tagged.(*solanago.GenericInstruction).AccountValues
-	if len(metas) != 2 {
-		t.Fatalf("expected 2 accounts after tagging, got %d", len(metas))
+	if !tag.ProgramID().Equals(solanago.SystemProgramID) {
+		t.Fatalf("tag program = %s, want System Program", tag.ProgramID())
 	}
-	last := metas[1]
+	data, _ := tag.Data()
+	if len(data) != 12 || data[0] != 2 || data[4] != 0 {
+		t.Fatalf("tag data = %x, want Transfer (index 2) of 0 lamports", data)
+	}
+	metas := tag.Accounts()
+	if len(metas) != 3 {
+		t.Fatalf("expected 3 accounts (payer, payer, reference), got %d", len(metas))
+	}
+	if !metas[0].PublicKey.Equals(payer) || !metas[0].IsSigner || !metas[0].IsWritable {
+		t.Error("payer must be the signing, writable sender")
+	}
+	last := metas[2]
 	if last.PublicKey.String() != reference {
 		t.Errorf("trailing account = %s, want reference %s", last.PublicKey, reference)
 	}
 	if last.IsSigner || last.IsWritable {
 		t.Error("reference meta must be read-only + non-signer")
 	}
-	// The original instruction must be untouched (we copy).
-	if len(base.(*solanago.GenericInstruction).AccountValues) != 1 {
-		t.Error("withReferenceMeta must not mutate the input instruction")
-	}
 
-	if _, err := withReferenceMeta(base, "not-base58!"); err == nil {
+	if _, err := referenceTagInstruction(payer, "not-base58!"); err == nil {
 		t.Error("invalid reference must error")
+	}
+}
+
+// The reference never lands on a subscriptions-program instruction: cancel keeps
+// its exact 5 accounts with the reference in a separate tag instruction.
+func TestPrepareCancel_ReferenceDoesNotTouchProgramInstruction(t *testing.T) {
+	row := newCancelRow(t)
+	svc := NewPrepareCancelService(fakeCancelReader{row: row}, fakeCancelRPC{})
+
+	res, err := svc.PrepareWithReference(context.Background(), uuid.New(), randKeyStr(t))
+	if err != nil {
+		t.Fatalf("PrepareWithReference: %v", err)
+	}
+	tx := decodeTx(t, res.Transaction)
+	if got := programInstructionAccountCounts(t, tx); len(got) != 1 || got[0] != 5 {
+		t.Fatalf("cancel_subscription accounts = %v, want [5]", got)
+	}
+	if len(tx.Message.Instructions) != 2 {
+		t.Fatalf("referenced cancel tx should be [cancel, reference tag], got %d instructions", len(tx.Message.Instructions))
 	}
 }
 
