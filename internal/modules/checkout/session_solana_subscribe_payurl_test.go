@@ -1,8 +1,10 @@
 package checkout
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db"
 	"testing"
 
 	"github.com/google/uuid"
@@ -121,4 +123,47 @@ func TestIsSolanaSubscribeNotLandedErr(t *testing.T) {
 
 	require.False(t, isSolanaSubscribeNotLandedErr(nil))
 	require.False(t, isSolanaSubscribeNotLandedErr(errors.New("create membership: db down")))
+}
+
+// The poller-driven Solana confirms (subscribe / lifecycle) run without a
+// request-scoped PSP; they must pin the session's PSP so the provider-bound rows
+// they write are attributable (or#893) instead of refused with ErrNoPSPInContext.
+func TestPollerConfirmContextPinsSessionPSP(t *testing.T) {
+	svc := &CheckoutSessionService{}
+	pspID := uuid.New()
+
+	ctx := svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{PspID: pspID})
+	require.Equal(t, pspID, db.PSPIDFromContext(ctx))
+
+	// No session / no PSP on the row: nothing is invented.
+	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), nil)))
+	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{})))
+}
+
+// A poller-driven confirm has verified the payment on-chain (settled): the
+// session window is quote validity, so an elapsed or already-expired session
+// still becomes succeeded. Without that proof the existing refusals stand, and
+// failed/canceled are never clock outcomes.
+func TestSucceedTransitionHonoursSettledPayments(t *testing.T) {
+	cases := []struct {
+		status  models.CheckoutSessionStatus
+		settled bool
+		proceed bool
+		err     error
+	}{
+		{models.CheckoutSessionStatusRequiresAction, false, true, nil},
+		{models.CheckoutSessionStatusRequiresAction, true, true, nil},
+		{models.CheckoutSessionStatusCreated, true, true, nil},
+		{models.CheckoutSessionStatusSucceeded, false, false, nil},
+		{models.CheckoutSessionStatusSucceeded, true, false, nil},
+		{models.CheckoutSessionStatusExpired, false, false, ErrCheckoutSessionConflict},
+		{models.CheckoutSessionStatusExpired, true, true, nil},
+		{models.CheckoutSessionStatusFailed, true, false, ErrCheckoutSessionConflict},
+		{models.CheckoutSessionStatusCanceled, true, false, ErrCheckoutSessionConflict},
+	}
+	for _, tc := range cases {
+		proceed, err := succeedTransition(tc.status, tc.settled)
+		require.Equal(t, tc.proceed, proceed, "%s settled=%v", tc.status, tc.settled)
+		require.ErrorIs(t, err, tc.err, "%s settled=%v", tc.status, tc.settled)
+	}
 }

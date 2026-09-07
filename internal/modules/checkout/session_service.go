@@ -2270,17 +2270,28 @@ func (s *CheckoutSessionService) MarkExpired(ctx context.Context, sessionID uuid
 }
 
 func (s *CheckoutSessionService) MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error {
+	return s.markSucceededWithSubscription(ctx, sessionID, paymentID, transactionID, subscriptionID, false)
+}
+
+// markSucceededWithSubscription is MarkSucceededWithSubscription with the
+// settled flag. settled=true says the caller has already verified the payment
+// on-chain (a funded subscription PDA, a mirrored cancel/tier-change): the
+// session window is quote validity, never a refusal of money that actually
+// moved (xs-007 row 35), so a session whose window elapsed while the poller was
+// not looking — or that a client poll already flipped to expired — still
+// becomes succeeded. Refusing it would leave a paid subscriber whose checkout
+// says otherwise and a reference the poller can never finalize. failed and
+// canceled are not clock outcomes and stay refused.
+func (s *CheckoutSessionService) markSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID, settled bool) error {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
 		return ErrCheckoutSessionNotFound
 	}
-	if s.isTerminal(session.Status) {
-		if session.Status == models.CheckoutSessionStatusSucceeded {
-			return nil
-		}
-		return ErrCheckoutSessionConflict
+	proceed, err := succeedTransition(session.Status, settled)
+	if err != nil || !proceed {
+		return err
 	}
-	if s.isExpired(session) {
+	if !settled && s.isExpired(session) {
 		_ = s.MarkExpired(ctx, session.ID, "checkout session expired")
 		return ErrCheckoutSessionExpired
 	}
@@ -2298,6 +2309,24 @@ func (s *CheckoutSessionService) MarkSucceededWithSubscription(ctx context.Conte
 	}
 
 	return s.repo.Update(ctx, session)
+}
+
+// succeedTransition decides whether a session in status may move to succeeded.
+// (false, nil) is the idempotent no-op for an already-succeeded session.
+func succeedTransition(status models.CheckoutSessionStatus, settled bool) (bool, error) {
+	switch status {
+	case models.CheckoutSessionStatusSucceeded:
+		return false, nil
+	case models.CheckoutSessionStatusExpired:
+		if settled {
+			return true, nil
+		}
+		return false, ErrCheckoutSessionConflict
+	case models.CheckoutSessionStatusFailed, models.CheckoutSessionStatusCanceled:
+		return false, ErrCheckoutSessionConflict
+	default:
+		return true, nil
+	}
 }
 
 func (s *CheckoutSessionService) FindOpenByUserPriceRail(ctx context.Context, userID string, priceID uuid.UUID, rail models.Rail) (*models.CheckoutSession, error) {
@@ -2927,6 +2956,20 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 // the reference poller when it detects the reference-tagged tx has landed.
 // Idempotent: a re-confirm of an already-succeeded session is a no-op, and the
 // underlying ConfirmCancel / ConfirmTierChange mirrors are themselves idempotent.
+// pollerConfirmContext prepares the context for a confirm driven by the Solana
+// Pay poller rather than an HTTP request. or#893/#704: such a context carries no
+// request-scoped PSP, yet every provider-bound row the confirm writes
+// (membership, payment, mirror) must be attributable to the account the session
+// was minted against — exactly what the HTTP confirm path pins — or the repos
+// refuse the write (db.ErrNoPSPInContext) and the landed payment is never
+// enrolled.
+func (s *CheckoutSessionService) pollerConfirmContext(ctx context.Context, session *models.CheckoutSession) context.Context {
+	if session == nil {
+		return ctx
+	}
+	return db.WithPSPID(ctx, session.PspID)
+}
+
 func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Context, sessionID uuid.UUID, signature string) error {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
@@ -2935,6 +2978,7 @@ func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Conte
 	if session.Status == models.CheckoutSessionStatusSucceeded {
 		return nil
 	}
+	ctx = s.pollerConfirmContext(ctx, session)
 	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.RailState, "subscription_id")))
 	if err != nil {
 		return fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
@@ -2952,7 +2996,7 @@ func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Conte
 		if err := s.solanaConfirmCancel.Confirm(ctx, subscriptionID, signature); err != nil {
 			return err
 		}
-		return s.MarkSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, subscriptionID)
+		return s.markSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, subscriptionID, true)
 	case models.CheckoutSessionModeSolanaTierChange:
 		if s.solanaConfirmTierChange == nil {
 			return fmt.Errorf("%w: solana tier change is not configured", ErrCheckoutSessionValidation)
@@ -2969,7 +3013,7 @@ func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Conte
 		if res != nil && res.NewSubscription != nil {
 			newSubID = res.NewSubscription.ID
 		}
-		return s.MarkSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, newSubID)
+		return s.markSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, newSubID, true)
 	default:
 		return fmt.Errorf("%w: not a solana lifecycle session", ErrCheckoutSessionValidation)
 	}
@@ -2999,6 +3043,7 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 	if session.Status == models.CheckoutSessionStatusSucceeded {
 		return nil
 	}
+	ctx = s.pollerConfirmContext(ctx, session)
 	signature = strings.TrimSpace(signature)
 	if signature == "" {
 		return fmt.Errorf("%w: signature is required", ErrCheckoutSessionValidation)
@@ -3075,7 +3120,7 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 		return err
 	}
 
-	return s.MarkSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, sub.ID)
+	return s.markSucceededWithSubscription(ctx, session.ID, uuid.Nil, signature, sub.ID, true)
 }
 
 // isSolanaSubscribeNotLandedErr reports whether a ConfirmEnrollment error means
