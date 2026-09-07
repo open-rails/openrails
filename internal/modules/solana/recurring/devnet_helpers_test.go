@@ -178,10 +178,9 @@ func publishUSDCPlan(ctx context.Context, t *testing.T, planSvc *PlanService, am
 
 // devnetSubscribe runs the FULL production subscribe for `sub` to plan `h`:
 //
-//	prepare -> if Step=="init": signAndSendBase64 (user-only) -> re-prepare
-//	        -> Step=="subscribe": the ATOMIC co-signed [subscribe+transfer]
-//	        -> completePartialAndSend (wallet completes ONLY its fee-payer slot,
-//	           preserving the cranker's pre-signature).
+//	prepare -> the ATOMIC co-signed bundle [init (first-timer only), subscribe,
+//	           transfer] -> completePartialAndSend (wallet completes ONLY its
+//	           fee-payer slot, preserving the cranker's pre-signature).
 //
 // On return the subscription exists on-chain AND the FIRST period has already
 // been pulled (atomically, inside the subscribe tx). It returns the crank row so
@@ -199,12 +198,6 @@ func devnetSubscribe(ctx context.Context, t *testing.T, rc *solanaint.RPCClient,
 	}
 
 	res := prepare()
-	if res.Step == "init" {
-		// init_subscription_authority is user-only signed.
-		signAndSendBase64(ctx, t, rc, raw, sub, res.Transactions)
-		res = prepare() // re-prepare: the authority now exists -> subscribe step.
-	}
-	require.Equal(t, "subscribe", res.Step, "after init the step must be subscribe")
 	require.Len(t, res.Transactions, 1, "atomic subscribe is a single co-signed tx")
 	// The atomic subscribe is partially signed (cranker slot done); the wallet
 	// completes its fee-payer slot WITHOUT dropping the cranker signature.

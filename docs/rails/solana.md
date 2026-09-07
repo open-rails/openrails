@@ -185,7 +185,9 @@ To exercise the flows on devnet:
   allowlist resolves the configured USDC mint, so a self-minted token won't work.
 - Browser testing: point a wallet extension (Phantom/Backpack) at Devnet; the
   checkout returns `next_action: solana_sign_transactions` and the wallet
-  approves each transaction (first-timer: init then subscribe).
+  approves one transaction (a first-timer's bundle folds
+  `initialize_subscription_authority` in front of subscribe + first pull, using
+  the program's `UNKNOWN_INIT_ID` same-slot check).
 
 Devnet money is fake: under test_mode the token-price provider falls back to
 $1.00 parity when live pricing is unavailable, so devnet never requires a price

@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -75,9 +76,6 @@ func TestPrepareSubscribe_AtomicCosignedBundle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if res.Step != "subscribe" {
-		t.Fatalf("Step = %q, want subscribe", res.Step)
-	}
 	if !res.AuthorityExists {
 		t.Fatalf("AuthorityExists must be true (returning subscriber)")
 	}
@@ -102,7 +100,11 @@ func TestPrepareSubscribe_AtomicCosignedBundle(t *testing.T) {
 	}
 }
 
-func TestPrepareSubscribe_InitTransactionHasUnsignedSignatureSlots(t *testing.T) {
+// A first-time subscriber gets ONE transaction: init_subscription_authority
+// folded in front of the co-signed [subscribe+transfer] bundle, with subscribe
+// carrying the program's UNKNOWN_INIT_ID sentinel (same-slot init check). Still
+// two required signers with exactly the cranker slot pre-signed.
+func TestPrepareSubscribe_FirstTimerGetsOneStepBundle(t *testing.T) {
 	orig := authorityReadBackoff
 	authorityReadBackoff = 0
 	defer func() { authorityReadBackoff = orig }()
@@ -112,11 +114,71 @@ func TestPrepareSubscribe_InitTransactionHasUnsignedSignatureSlots(t *testing.T)
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if res.Step != "init" {
-		t.Fatalf("Step = %q, want init", res.Step)
+	if res.AuthorityExists {
+		t.Fatalf("AuthorityExists = true, want false (one-step first-timer)")
+	}
+	if len(res.Transactions) != 1 {
+		t.Fatalf("want a single tx, got %d", len(res.Transactions))
 	}
 	tx := decodeTx(t, res.Transactions[0])
-	assertUnsignedSignatureSlots(t, tx)
+	if len(tx.Message.Instructions) != 3 {
+		t.Fatalf("first-timer bundle should be [init, subscribe, transfer], got %d instructions", len(tx.Message.Instructions))
+	}
+	if int(tx.Message.Header.NumRequiredSignatures) != 2 {
+		t.Fatalf("want 2 required signers, got %d", tx.Message.Header.NumRequiredSignatures)
+	}
+	signed := 0
+	for _, s := range tx.Signatures {
+		if !s.IsZero() {
+			signed++
+		}
+	}
+	if signed != 1 {
+		t.Errorf("exactly one slot (the cranker) should be pre-signed, got %d", signed)
+	}
+	init, subscribe := tx.Message.Instructions[0], tx.Message.Instructions[1]
+	if init.Data[0] != 0 || len(init.Accounts) != 6 {
+		t.Fatalf("instruction 0 must be initialize_subscription_authority with 6 accounts, got disc=%d accounts=%d", init.Data[0], len(init.Accounts))
+	}
+	if subscribe.Data[0] != 11 {
+		t.Fatalf("instruction 1 must be subscribe, got disc=%d", subscribe.Data[0])
+	}
+	// The init id is the trailing i64 of the subscribe data.
+	got := int64(binary.LittleEndian.Uint64(subscribe.Data[len(subscribe.Data)-8:]))
+	if got != subscriptions.UnknownInitID {
+		t.Fatalf("subscribe init id = %d, want UNKNOWN_INIT_ID sentinel %d", got, subscriptions.UnknownInitID)
+	}
+}
+
+// A returning subscriber echoes the authority's REAL init id, never the sentinel.
+func TestPrepareSubscribe_ReturningSubscriberEchoesRealInitID(t *testing.T) {
+	svc, _ := newSubscribeSvc(t, subFakeRPC{initID: 42, balance: 50_000_000})
+	res, err := svc.Prepare(context.Background(), newSubscribeInput(t))
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	tx := decodeTx(t, res.Transactions[0])
+	subscribe := tx.Message.Instructions[0]
+	if subscribe.Data[0] != 11 {
+		t.Fatalf("instruction 0 must be subscribe for a returning subscriber, got disc=%d", subscribe.Data[0])
+	}
+	if got := int64(binary.LittleEndian.Uint64(subscribe.Data[len(subscribe.Data)-8:])); got != 42 {
+		t.Fatalf("subscribe init id = %d, want the stored 42", got)
+	}
+}
+
+// Pre-flight applies to first-timers too: the bundle pulls the first period, so
+// an underfunded wallet is refused before anything is built.
+func TestPrepareSubscribe_FirstTimerPreflightInsufficient(t *testing.T) {
+	orig := authorityReadBackoff
+	authorityReadBackoff = 0
+	defer func() { authorityReadBackoff = orig }()
+
+	svc, _ := newSubscribeSvc(t, subFakeRPCAbsent{balance: 1_000_000})
+	_, err := svc.Prepare(context.Background(), newSubscribeInput(t))
+	if !errors.Is(err, ErrInsufficientUSDC) {
+		t.Fatalf("error must wrap ErrInsufficientUSDC, got %v", err)
+	}
 }
 
 // Pre-flight: balance below the first-period amount returns the typed

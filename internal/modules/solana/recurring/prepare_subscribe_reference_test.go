@@ -40,9 +40,6 @@ func TestPrepareSubscribe_AttachesReferenceToSubscribeStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if res.Step != "subscribe" {
-		t.Fatalf("Step = %q, want subscribe", res.Step)
-	}
 	tx := decodeTx(t, res.Transactions[0])
 	found, ro := referenceInAccountKeys(t, tx, reference)
 	if !found {
@@ -70,9 +67,10 @@ func TestPrepareSubscribe_AttachesReferenceToSubscribeStep(t *testing.T) {
 	}
 }
 
-// A first-time subscriber over Solana Pay gets the INIT step tagged with the
-// reference, so the poller can detect the landed init and advance to subscribe.
-func TestPrepareSubscribe_AttachesReferenceToInitStep(t *testing.T) {
+// A first-time subscriber over Solana Pay gets the one-step bundle [init,
+// subscribe, transfer] tagged with the reference, so the poller detects the single
+// landed tx and enrolls.
+func TestPrepareSubscribe_AttachesReferenceToFirstTimerBundle(t *testing.T) {
 	// Shrink the read-after-write retry so the absent-authority path (which retries
 	// the empty read up to the bound before treating it as first-time) is fast.
 	orig := authorityReadBackoff
@@ -88,21 +86,25 @@ func TestPrepareSubscribe_AttachesReferenceToInitStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
 	}
-	if res.Step != "init" {
-		t.Fatalf("Step = %q, want init (first-time subscriber)", res.Step)
+	if res.AuthorityExists {
+		t.Fatalf("AuthorityExists = true, want false (one-step first-timer)")
 	}
 	tx := decodeTx(t, res.Transactions[0])
 	found, ro := referenceInAccountKeys(t, tx, reference)
 	if !found {
-		t.Fatal("init tx must contain the Solana Pay reference in its account keys")
+		t.Fatal("first-timer bundle must contain the Solana Pay reference in its account keys")
 	}
 	if !ro {
 		t.Error("reference must be a read-only, non-signer account")
 	}
+	if len(tx.Message.Instructions) != 4 {
+		t.Fatalf("bundle should be [init, subscribe, transfer, reference tag], got %d instructions", len(tx.Message.Instructions))
+	}
 	// initialize_subscription_authority takes exactly 6 accounts; a 7th would be
-	// read as an optional payer that must sign (NotSigner, code 100).
-	if got := programInstructionAccountCounts(t, tx); len(got) != 1 || got[0] != 6 {
-		t.Fatalf("init instruction accounts = %v, want [6]", got)
+	// read as an optional payer that must sign (NotSigner, code 100). subscribe
+	// (8) and transfer_subscription (10) likewise carry only their own accounts.
+	if got := programInstructionAccountCounts(t, tx); !reflect.DeepEqual(got, []int{6, 8, 10}) {
+		t.Fatalf("program instruction accounts = %v, want [6 8 10]", got)
 	}
 }
 
