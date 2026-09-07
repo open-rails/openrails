@@ -139,3 +139,31 @@ func TestPollerConfirmContextPinsSessionPSP(t *testing.T) {
 	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), nil)))
 	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{})))
 }
+
+// A poller-driven confirm has verified the payment on-chain (settled): the
+// session window is quote validity, so an elapsed or already-expired session
+// still becomes succeeded. Without that proof the existing refusals stand, and
+// failed/canceled are never clock outcomes.
+func TestSucceedTransitionHonoursSettledPayments(t *testing.T) {
+	cases := []struct {
+		status  models.CheckoutSessionStatus
+		settled bool
+		proceed bool
+		err     error
+	}{
+		{models.CheckoutSessionStatusRequiresAction, false, true, nil},
+		{models.CheckoutSessionStatusRequiresAction, true, true, nil},
+		{models.CheckoutSessionStatusCreated, true, true, nil},
+		{models.CheckoutSessionStatusSucceeded, false, false, nil},
+		{models.CheckoutSessionStatusSucceeded, true, false, nil},
+		{models.CheckoutSessionStatusExpired, false, false, ErrCheckoutSessionConflict},
+		{models.CheckoutSessionStatusExpired, true, true, nil},
+		{models.CheckoutSessionStatusFailed, true, false, ErrCheckoutSessionConflict},
+		{models.CheckoutSessionStatusCanceled, true, false, ErrCheckoutSessionConflict},
+	}
+	for _, tc := range cases {
+		proceed, err := succeedTransition(tc.status, tc.settled)
+		require.Equal(t, tc.proceed, proceed, "%s settled=%v", tc.status, tc.settled)
+		require.ErrorIs(t, err, tc.err, "%s settled=%v", tc.status, tc.settled)
+	}
+}
