@@ -20,6 +20,7 @@ type ApplyResult struct {
 	PricesCreated    int                `json:"prices_created"`
 	PricesActivated  int                `json:"prices_activated"`
 	PricesArchived   int                `json:"prices_archived"`
+	PricesRelinked   int                `json:"prices_relinked"`
 	PendingActions   []PendingActionFor `json:"pending_actions,omitempty"`
 }
 
@@ -167,6 +168,24 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 				return fmt.Errorf("relabel price %s to key %q: %w", plp.Label, plp.Key, err)
 			}
 		}
+		// A matched price whose manifest declares a link its row does not carry
+		// gets exactly those entries merged (never a replace): the rail adapter
+		// validates or publishes the new link. Gated on Overwrite like every
+		// other mutation of an existing price.
+		if plp.Action != PriceCreate && len(plp.PSPLinks) > 0 && opts.Overwrite {
+			out, err := applier.UpdatePrice(ctx, plp.ExistingID, billingservice.UpdatePriceRequest{PSPLinks: plp.PSPLinks})
+			if err != nil {
+				return fmt.Errorf("rotate psp_links on price %s: %w", plp.Label, err)
+			}
+			res.PricesRelinked++
+			for _, pa := range out.PendingManualActions {
+				res.PendingActions = append(res.PendingActions, PendingActionFor{
+					ProductKey: pp.Key,
+					PriceLabel: plp.Label,
+					Action:     pa,
+				})
+			}
+		}
 	}
 	return nil
 }
@@ -174,9 +193,9 @@ func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productI
 // Print writes a human summary of the apply result, including any pending
 // manual actions, to out.
 func (r *ApplyResult) Print(out io.Writer) {
-	fmt.Fprintf(out, "applied: products +%d ~%d -%d | prices +%d activated %d archived %d\n",
+	fmt.Fprintf(out, "applied: products +%d ~%d -%d | prices +%d activated %d archived %d relinked %d\n",
 		r.ProductsCreated, r.ProductsUpdated, r.ProductsArchived,
-		r.PricesCreated, r.PricesActivated, r.PricesArchived)
+		r.PricesCreated, r.PricesActivated, r.PricesArchived, r.PricesRelinked)
 	if len(r.PendingActions) == 0 {
 		return
 	}

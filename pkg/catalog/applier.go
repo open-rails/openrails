@@ -25,5 +25,8 @@ type Applier interface {
 	DeactivatePrice(ctx context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error)
 	// SetPriceKey relabels a price's #774 key in place (a plain rename — never
 	// used to create/activate/archive a row).
+	// UpdatePrice rotates a matched price's PSP links (psp_links merge) —
+	// the only mutation a substance-unchanged price can need from a manifest.
+	UpdatePrice(ctx context.Context, id uuid.UUID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error)
 	SetPriceKey(ctx context.Context, id uuid.UUID, key string) (*billingservice.CatalogPrice, error)
 }
