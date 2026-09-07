@@ -45,3 +45,21 @@ the CCBill boundary.
 Version 0.2.4 requires a checkout host whose pay endpoint accepts
 `name_on_card`. Legacy `first_name` and `last_name` are no longer emitted by
 this package.
+
+## Solana Pay
+
+The package never assumes which token a Solana option settles in. The host
+binds the token on the option's `public_config`:
+
+- `token_symbol` — required; the SPL mint symbol the price is bound to
+  (`USDC`, `USD1`, …). It is sent back verbatim (uppercased) as the pay
+  request's `token_symbol`. An option without it is not offered at all.
+- `token_name` — optional buyer-facing name (`USD Coin`), shown next to the
+  symbol in the method list.
+- `network` — optional Solana cluster (`mainnet-beta`, `devnet`, `testnet`).
+  Any network other than `mainnet-beta` is named in the method hint
+  (“USD Coin (USDC) on Solana devnet”) so a test-network payment is never
+  mistaken for a real one.
+
+Version 0.2.5 removes the former `USDC` default: a host that bound no token
+saw “USDC” before and sees no Solana option now.

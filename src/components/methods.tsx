@@ -5,7 +5,7 @@
 import { cn } from "#orck/lib/utils"
 import { Label } from "#orck/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "#orck/components/ui/radio-group"
-import { RAIL_META } from "#orck/lib/rail-meta"
+import { RAIL_META, solanaHint, solanaToken } from "#orck/lib/rail-meta"
 import type { PaymentRailOption } from "#orck/types"
 
 export function MethodList({
@@ -35,10 +35,8 @@ export function MethodList({
     >
       {rails.map((option) => {
         const meta = RAIL_META[option.rail]
-        const hint =
-          option.rail === "solana"
-            ? `${option.public_config?.token_symbol?.trim().toUpperCase() || "USDC"} on Solana`
-            : meta.hint
+        const token = option.rail === "solana" ? solanaToken(option) : undefined
+        const hint = token ? solanaHint(token) : meta.hint
         const active = option.id === selected
         const controlId = `${idPrefix}-option-${option.id}`
         return (

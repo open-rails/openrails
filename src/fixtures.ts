@@ -42,7 +42,13 @@ export function fixtureSession(
         mode: "subscription",
         driver: "redirect",
       },
-      { id: "option_4", rail: "solana", mode: "one_off", driver: "solana_pay" },
+      {
+        id: "option_4",
+        rail: "solana",
+        mode: "one_off",
+        driver: "solana_pay",
+        public_config: { token_symbol: "USDC", token_name: "USD Coin" },
+      },
     ],
     saved_methods: [
       {
