@@ -437,6 +437,50 @@ describe("Checkout", () => {
     })
   })
 
+  it("names the Solana method after the host-bound token and network", async () => {
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [
+            checkoutOption("ccbill"),
+            checkoutOption("solana", {
+              token_symbol: "usdc",
+              token_name: "USD Coin",
+              network: "devnet",
+            }),
+          ],
+        })
+      },
+      pay: vi.fn(),
+    }
+
+    render(<Checkout source={source} />)
+
+    expect(
+      await screen.findByText("USD Coin (USDC) on Solana devnet")
+    ).toBeInTheDocument()
+  })
+
+  it("does not offer a Solana option the host bound no token to", async () => {
+    const source: CheckoutSource = {
+      async getSession() {
+        return fixtureSession({
+          rails: [checkoutOption("ccbill"), checkoutOption("solana")],
+        })
+      },
+      pay: vi.fn(),
+    }
+
+    render(<Checkout source={source} />)
+
+    expect(
+      await screen.findByRole("radio", { name: /CCBill/ })
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("radio", { name: /Crypto/ })
+    ).not.toBeInTheDocument()
+  })
+
   it("creates a Solana transfer request and renders the official QR", async () => {
     const transactionURL =
       "solana:recipient?amount=19.99&spl-token=mint&reference=reference"
@@ -489,7 +533,7 @@ describe("Checkout", () => {
         return fixtureSession({
           status: "requires_action",
           transaction_url: transactionURL,
-          rails: [checkoutOption("solana")],
+          rails: [checkoutOption("solana", { token_symbol: "USDC" })],
         })
       },
       pay,
@@ -511,7 +555,7 @@ describe("Checkout", () => {
     const transactionURL =
       "solana:recipient?amount=5.00&spl-token=mint&reference=reference"
     const created = fixtureSession({
-      rails: [checkoutOption("solana")],
+      rails: [checkoutOption("solana", { token_symbol: "USDC" })],
     })
     const succeeded = fixtureSession({
       status: "succeeded",

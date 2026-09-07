@@ -20,7 +20,7 @@ import {
   type CCBillBilling,
 } from "#orck/lib/ccbill"
 import { MethodBody, MethodList } from "#orck/components/methods"
-import { supportedOptions } from "#orck/lib/rail-meta"
+import { solanaToken, supportedOptions } from "#orck/lib/rail-meta"
 import { PayButton, TrustLine } from "#orck/components/pay-button"
 import { SolanaBody } from "#orck/components/qr"
 import { NEW_CARD_VALUE, SavedMethods } from "#orck/components/saved-methods"
@@ -90,12 +90,12 @@ function solanaAmountLabel(
     try {
       const amount = new URL(transactionURL).searchParams.get("amount")
       if (amount && /^\d+(?:\.\d+)?$/.test(amount))
-        return `${amount} ${tokenSymbol}`
+        return `${amount} ${tokenSymbol}`.trim()
     } catch {
       // The wire schema already requires solana:, so retain the plan fallback.
     }
   }
-  return `${(session.plan.unit_amount_micros / 1_000_000).toFixed(2)} ${tokenSymbol}`
+  return `${(session.plan.unit_amount_micros / 1_000_000).toFixed(2)} ${tokenSymbol}`.trim()
 }
 
 export function Checkout({
@@ -296,11 +296,11 @@ export function Checkout({
         }
       }
       if (active.driver === "solana_pay") {
-        const tokenSymbol =
-          active.public_config?.token_symbol?.trim().toUpperCase() || "USDC"
+        // supportedOptions only offers Solana options with a bound token, so
+        // the symbol the host bound is the one we pay with — never a default.
         request = {
           option_id: active.id,
-          token_symbol: tokenSymbol,
+          token_symbol: solanaToken(active)?.symbol,
         }
       }
       const result = await source.pay(request)
@@ -451,9 +451,7 @@ export function Checkout({
 
   const merchantName = session?.merchant.display_name ?? ""
   const solanaTokenSymbol =
-    active?.rail === "solana"
-      ? active.public_config?.token_symbol?.trim().toUpperCase() || "USDC"
-      : "USDC"
+    active?.rail === "solana" ? (solanaToken(active)?.symbol ?? "") : ""
   const processing = phase === "processing"
   const payLabel =
     active && session
