@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,6 +24,7 @@ type fakeApplier struct {
 	activatedPrices  []uuid.UUID
 	archivedPrices   []uuid.UUID
 	relabeledPrices  map[uuid.UUID]string
+	relinkedPrices   map[uuid.UUID]billingservice.UpdatePriceRequest
 }
 
 func newFakeApplier() *fakeApplier {
@@ -124,6 +126,14 @@ func (f *fakeApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*billingse
 
 func (f *fakeApplier) DeactivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
 	f.archivedPrices = append(f.archivedPrices, id)
+	return &billingservice.CatalogPrice{ID: id}, nil
+}
+
+func (f *fakeApplier) UpdatePrice(_ context.Context, id uuid.UUID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
+	if f.relinkedPrices == nil {
+		f.relinkedPrices = map[uuid.UUID]billingservice.UpdatePriceRequest{}
+	}
+	f.relinkedPrices[id] = req
 	return &billingservice.CatalogPrice{ID: id}, nil
 }
 
@@ -460,4 +470,95 @@ func TestApply_DrivesFacade(t *testing.T) {
 	if len(f.deactivatedProds) != 1 {
 		t.Fatalf("expert should be deactivated via facade, got %v", f.deactivatedProds)
 	}
+}
+
+// A financially matched price whose manifest declares a psp_links entry its
+// stored link does not satisfy is rotated: the plan carries exactly that entry,
+// counts as a change, and apply merges it through UpdatePrice under Overwrite.
+// Entries the row already satisfies (mobius plan_id) and provider-generated
+// stored ids (plan_pda, mint_symbol) are not drift, so a converged row is quiet.
+func TestPlan_RotatesDeclaredPSPLinksOnMatchedPrice(t *testing.T) {
+	const manifest = `
+version: 1
+products:
+  - key: premium
+    display_name: Premium
+    prices:
+      - key: premium-monthly
+        currency: usd
+        unit_amount: 23000000
+        duration: 30d
+        auto_renew: true
+        psps: [mobius, solana]
+        psp_links:
+          mobius: {plan_id: premium_new}
+          solana: {token: DUSD}
+`
+	seed := func(solana map[string]string) (*fakeApplier, uuid.UUID) {
+		f := newFakeApplier()
+		premium := f.seedProduct("premium", "default", 0, false)
+		premium.DisplayName = "Premium"
+		f.seedPrice(premium.ID, 23_000_000, "USD", 30*24, false)
+		price := &f.prices[premium.ID][0]
+		price.Key = "premium-monthly"
+		price.Providers = map[string]billingservice.ProviderState{
+			"mobius": {Status: billingservice.ProviderStatusLinked, IDs: map[string]string{"plan_id": "premium_new", "provider": "mobius"}},
+			"solana": {Status: billingservice.ProviderStatusLinked, IDs: solana},
+		}
+		return f, price.ID
+	}
+
+	t.Run("stale link is rotated", func(t *testing.T) {
+		f, priceID := seed(map[string]string{"mint_symbol": "USDC", "plan_pda": "DHYK...", "mint": "4zMM..."})
+		plan, err := Plan(context.Background(), f, loadFrom(t, manifest))
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		pp := findProduct(plan, "premium")
+		if len(pp.Prices) != 1 || pp.Prices[0].Action != PriceUnchanged {
+			t.Fatalf("want one matched (unchanged) price, got %+v", pp.Prices)
+		}
+		want := map[string]map[string]string{"solana": {"token": "DUSD"}}
+		if got := pp.Prices[0].PSPLinks; !reflect.DeepEqual(got, want) {
+			t.Fatalf("PSPLinks = %v, want %v", got, want)
+		}
+		if !plan.HasChanges() {
+			t.Fatal("a link rotation must count as a change")
+		}
+		if !strings.Contains(plan.String(), "(rotate psp_links: solana)") {
+			t.Fatalf("plan output should name the rotated PSP:\n%s", plan)
+		}
+
+		if _, err := ApplyWithOptions(context.Background(), f, plan, ApplyOptions{Insert: true, Prune: true}); err != nil {
+			t.Fatalf("apply without overwrite: %v", err)
+		}
+		if len(f.relinkedPrices) != 0 {
+			t.Fatalf("rotation must be gated on Overwrite, got %v", f.relinkedPrices)
+		}
+		res, err := Apply(context.Background(), f, plan)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if res.PricesRelinked != 1 {
+			t.Fatalf("PricesRelinked = %d, want 1", res.PricesRelinked)
+		}
+		req, ok := f.relinkedPrices[priceID]
+		if !ok || req.ReplacePSPLinks || !reflect.DeepEqual(req.PSPLinks, want) {
+			t.Fatalf("UpdatePrice request = %+v (found %v), want merge of %v", req, ok, want)
+		}
+	})
+
+	t.Run("converged link is quiet", func(t *testing.T) {
+		f, _ := seed(map[string]string{"token": "DUSD", "mint_symbol": "DUSD", "plan_pda": "9abc..."})
+		plan, err := Plan(context.Background(), f, loadFrom(t, manifest))
+		if err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+		if pp := findProduct(plan, "premium"); pp.Prices[0].PSPLinks != nil {
+			t.Fatalf("PSPLinks = %v, want none", pp.Prices[0].PSPLinks)
+		}
+		if plan.HasChanges() {
+			t.Fatalf("converged plan must have no changes:\n%s", plan)
+		}
+	})
 }

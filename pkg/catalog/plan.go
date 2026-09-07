@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -89,6 +91,16 @@ type PricePlan struct {
 	// differs from the matched row's current key — signaling apply must
 	// relabel (a plain key rename, no substance change) via SetPriceKey.
 	Key string `json:"key,omitempty"`
+
+	// PSPLinks is set ONLY for a MATCHED price whose manifest declares a
+	// psp_links entry the stored link does not already satisfy (a key missing
+	// or holding a different value) — e.g. `solana: {token: DUSD}` against a
+	// row still bound to a USDC plan. Apply merges exactly these entries via
+	// UpdatePrice, whose rail adapters validate/publish the new link, so a
+	// link rotation is a manifest edit like any other change instead of a
+	// blocked admin PATCH. Once stored, the same declaration reads as
+	// satisfied and the plan is quiet again.
+	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 }
 
 // Plan computes the convergence diff for a manifest against the catalog exposed
@@ -363,6 +375,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 			if match.Key != key {
 				plp.Key = key
 			}
+			plp.PSPLinks = pspLinksToRotate(price.PSPLinks, match.Providers)
 			pp.Prices = append(pp.Prices, plp)
 			continue
 		}
@@ -408,6 +421,37 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		}
 	}
 	return nil
+}
+
+// pspLinksToRotate returns the declared psp_links entries a matched price's
+// stored links do not satisfy. An entry is satisfied when every declared
+// key/value is present verbatim (trimmed) on the stored link for that PSP;
+// extra stored keys (provider-generated ids such as plan_pda or mint_symbol)
+// never count as drift. Nil when nothing needs rotating.
+func pspLinksToRotate(declared map[string]map[string]string, current map[string]billingservice.ProviderState) map[string]map[string]string {
+	var out map[string]map[string]string
+	for psp, link := range declared {
+		psp = strings.ToLower(strings.TrimSpace(psp))
+		if psp == "" || len(link) == 0 {
+			continue
+		}
+		stored := current[psp].IDs
+		satisfied := true
+		for k, v := range link {
+			if strings.TrimSpace(stored[strings.TrimSpace(k)]) != strings.TrimSpace(v) {
+				satisfied = false
+				break
+			}
+		}
+		if satisfied {
+			continue
+		}
+		if out == nil {
+			out = map[string]map[string]string{}
+		}
+		out[psp] = maps.Clone(link)
+	}
+	return out
 }
 
 // matchPrice finds an existing OpenRails price with the same financial identity
@@ -519,7 +563,7 @@ func (plan *ApplyPlan) HasChanges() bool {
 				return true
 			}
 			for _, price := range pp.Prices {
-				if price.Action != PriceUnchanged {
+				if price.Action != PriceUnchanged || len(price.PSPLinks) > 0 {
 					return true
 				}
 			}
@@ -540,7 +584,12 @@ func (plan *ApplyPlan) String() string {
 			var changes []string
 			for i := range pp.Prices {
 				plp := &pp.Prices[i]
-				changes = append(changes, fmt.Sprintf("%s %s", plp.Action, plp.Label))
+				line := fmt.Sprintf("%s %s", plp.Action, plp.Label)
+				if len(plp.PSPLinks) > 0 {
+					psps := slices.Sorted(maps.Keys(plp.PSPLinks))
+					line += fmt.Sprintf(" (rotate psp_links: %s)", strings.Join(psps, ", "))
+				}
+				changes = append(changes, line)
 			}
 			sort.Strings(changes)
 			for _, c := range changes {
