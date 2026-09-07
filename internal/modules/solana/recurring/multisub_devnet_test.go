@@ -78,7 +78,7 @@ func TestDevnetMultiSub(t *testing.T) {
 		if dupErr != nil {
 			t.Logf("✅ duplicate same-plan subscribe refused at prepare: %v", dupErr)
 		} else {
-			require.Equal(t, "subscribe", dupRes.Step, "authority exists -> the duplicate goes straight to the subscribe step")
+			require.True(t, dupRes.AuthorityExists, "authority exists -> the duplicate subscribe is a returning-subscriber bundle")
 			e, ok := trySignSend(ctx, t, raw, rc, sub, dupRes.Transactions)
 			require.False(t, ok, "re-subscribing the SAME plan A must be rejected on-chain (Subscription PDA already exists)")
 			t.Logf("✅ duplicate same-plan subscribe rejected on-chain: %s", e)

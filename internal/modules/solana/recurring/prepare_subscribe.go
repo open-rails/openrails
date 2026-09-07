@@ -134,15 +134,15 @@ type PrepareSubscribeInput struct {
 type PrepareSubscribeResult struct {
 	// Transactions are base64-encoded unsigned transactions to sign+send in order.
 	Transactions []string
-	// Step is "init" when the returned tx is init_subscription_authority and the
-	// caller must re-prepare afterwards for the subscribe tx; "subscribe" when the
-	// returned tx is the ATOMIC co-signed bundle [subscribe + transfer(first
-	// period)] (the cranker pre-signed the transfer slot; the wallet completes the
-	// fee-payer slot). The subscribe step is the final on-chain step before confirm
-	// and pulls the first period IN THE SAME TX (#286).
-	Step string
+	// The single transaction is the ATOMIC co-signed bundle [subscribe +
+	// transfer(first period)] (the cranker pre-signed the transfer slot; the
+	// wallet completes the fee-payer slot), prefixed with
+	// initialize_subscription_authority for a first-time subscriber (one-step
+	// signup via the program's UNKNOWN_INIT_ID sentinel). It is the only on-chain
+	// step before confirm and pulls the first period IN THE SAME TX (#286).
+	//
 	// AuthorityExists reports whether the SubscriptionAuthority already existed
-	// (returning subscriber → single subscribe tx, no init step).
+	// (returning subscriber → no init instruction in the bundle).
 	AuthorityExists bool
 	MerchantAddress string
 	PlanPDA         string
@@ -152,8 +152,9 @@ type PrepareSubscribeResult struct {
 }
 
 // Prepare derives the PDAs, checks whether the subscriber's SubscriptionAuthority
-// for this mint exists, and returns the next unsigned transaction(s) to sign:
-// [init] (first-time, then re-prepare) or [subscribe] (authority present).
+// for this mint exists, and returns the single transaction to sign: the atomic
+// [subscribe + transfer] bundle, with init_subscription_authority prepended for a
+// first-time subscriber (one signature either way).
 func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscribeInput) (*PrepareSubscribeResult, error) {
 	if in.SubscriberWallet == "" {
 		return nil, fmt.Errorf("recurring: subscriber wallet is required")
@@ -205,58 +206,20 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	}
 
 	// Read the authority with a bounded, read-after-write-tolerant retry (#274):
-	// on the re-prepare right after init confirms, the RPC node may not yet serve
-	// the just-written account, so we retry until it is present and readable rather
-	// than racing a single read.
+	// right after a bundle lands, the RPC node may not yet serve the just-written
+	// account, so we retry until it is present and readable rather than racing a
+	// single read. Absent after the retries means first-time subscriber.
 	initID, exists, err := readAuthorityInitID(ctx, s.rpc, saPDA)
 	if err != nil {
 		return nil, err
 	}
 
-	// First-time subscriber for this mint: the authority must be initialized
-	// before subscribe can be built (subscribe needs its initId). Return the init
-	// tx; the caller signs+sends it, then re-prepares for the subscribe tx.
-	if !exists {
-		initIx := subscriptions.BuildInitSubscriptionAuthority(subscriptions.InitSubscriptionAuthorityParams{
-			Owner:                 subscriber,
-			SubscriptionAuthority: saPDA,
-			TokenMint:             mint,
-			UserATA:               subscriberATA,
-			TokenProgram:          solanago.TokenProgramID,
-		})
-		// Solana Pay subscribe: tag the init tx with the reference (its own
-		// instruction — see referenceTagInstruction) so the poller can detect THIS
-		// landed init and advance the session to the subscribe step.
-		ixs, err := withReference([]solanago.Instruction{initIx}, subscriber, in.Reference)
-		if err != nil {
-			return nil, err
-		}
-		tx, err := s.buildUnsignedTxBase64(ctx, subscriber, ixs)
-		if err != nil {
-			return nil, err
-		}
-		result.Transactions = []string{tx}
-		result.Step = "init"
-		result.AuthorityExists = false
-		return result, nil
-	}
-
-	// Authority exists and its initId was read above; build the subscribe tx.
-	//
-	// TODO(#274): the repeated-subscribe-by-same-wallet path can still fail
-	// on-chain with Custom:519. The leading hypothesis is that the program expects
-	// the authority's CURRENT counter rather than the original init_id passed as
-	// ExpectedSubscriptionAuthInitID — i.e. the value at offset 98 may need to track
-	// accumulated authority state across subscribes. This is NOT yet confirmed on
-	// devnet; do NOT change the offset/semantics until a devnet root-cause check
-	// (current authority counter vs original init_id) proves what value subscribe
-	// must echo back. This change only makes the read robust against RPC lag.
-	// Pre-flight USDC balance check (#286 part A). The atomic subscribe bundle
-	// pulls the FULL first period in the same tx, so an underfunded wallet would
-	// produce a tx that reverts. Catch it server-side BEFORE signing anything and
-	// return a typed insufficient-USDC error the caller maps to a "buy USDC" code.
-	// Best-effort: an RPC blip must not hard-fail the flow (the atomic tx is the
-	// real guarantee — it reverts on chain if the balance is short).
+	// Pre-flight USDC balance check (#286 part A). The atomic bundle pulls the
+	// FULL first period in the same tx, so an underfunded wallet would produce a tx
+	// that reverts. Catch it server-side BEFORE signing anything and return a typed
+	// insufficient-USDC error the caller maps to a "buy USDC" code. Best-effort: an
+	// RPC blip must not hard-fail the flow (the atomic tx is the real guarantee — it
+	// reverts on chain if the balance is short).
 	if err := s.preflightBalance(ctx, subscriber, mint, in.AmountBaseUnits); err != nil {
 		return nil, err
 	}
@@ -264,6 +227,29 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	eventAuth, _, err := subscriptions.DeriveEventAuthority()
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive event authority: %w", err)
+	}
+
+	// ONE-STEP SIGNUP. A first-time subscriber for this mint has no
+	// SubscriptionAuthority yet, and subscribe must echo the authority's init_id
+	// (its creation slot). Rather than landing init first and reading the id back
+	// (two wallet signatures), bundle initialize_subscription_authority into the
+	// same transaction and pass the program's UNKNOWN_INIT_ID sentinel: the
+	// program then checks the stored init_id against the CURRENT slot, which the
+	// same-tx init satisfies by construction. Everything (init, subscribe, first
+	// pull) lands or reverts together, so there is no half-initialized state.
+	// A returning subscriber's authority already exists: echo its real init_id
+	// and skip the init instruction.
+	expectedInitID := initID
+	var ixs []solanago.Instruction
+	if !exists {
+		expectedInitID = subscriptions.UnknownInitID
+		ixs = append(ixs, subscriptions.BuildInitSubscriptionAuthority(subscriptions.InitSubscriptionAuthorityParams{
+			Owner:                 subscriber,
+			SubscriptionAuthority: saPDA,
+			TokenMint:             mint,
+			UserATA:               subscriberATA,
+			TokenProgram:          solanago.TokenProgramID,
+		}))
 	}
 	subscribeIx := subscriptions.BuildSubscribe(subscriptions.SubscribeParams{
 		Subscriber:                     subscriber,
@@ -278,7 +264,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		ExpectedAmount:                 in.AmountBaseUnits,
 		ExpectedPeriodHours:            in.PeriodHours,
 		ExpectedCreatedAt:              in.PlanCreatedAt,
-		ExpectedSubscriptionAuthInitID: initID,
+		ExpectedSubscriptionAuthInitID: expectedInitID,
 	})
 
 	// ATOMIC co-signed subscribe (#286 part B). Bundle the first pull
@@ -288,10 +274,6 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	// pre-signs that slot via BuildPartiallySignedTx and the wallet completes the
 	// subscribe/fee-payer slot. Both land or both revert -> no
 	// "subscribed-but-not-charged" window; confirm just verifies the bundle landed.
-	delegatorATA, _, err := subscriptions.DeriveATA(subscriber, mint, solanago.TokenProgramID)
-	if err != nil {
-		return nil, fmt.Errorf("recurring: derive delegator ata: %w", err)
-	}
 	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive receiver ata: %w", err)
@@ -300,7 +282,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		SubscriptionPDA:       subPDA,
 		PlanPDA:               planPDA,
 		SubscriptionAuthority: saPDA,
-		DelegatorATA:          delegatorATA,
+		DelegatorATA:          subscriberATA,
 		ReceiverATA:           receiverATA,
 		Caller:                merchant,
 		Mint:                  mint,
@@ -309,15 +291,15 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		Amount:                in.AmountBaseUnits, // first period = full plan amount
 		Delegator:             subscriber,
 	})
+	ixs = append(ixs, subscribeIx, transferIx)
 
 	if s.signer == nil {
 		return nil, fmt.Errorf("recurring: atomic subscribe requires a cranker signer")
 	}
-	// Solana Pay subscribe: tag the subscribe instruction with the reference so the
-	// poller can detect the landed atomic [subscribe+transfer] bundle and route it
-	// to ConfirmEnrollment. Extra trailing read-only accounts are ignored by the
-	// program, so the on-chain action is unchanged.
-	ixs, err := withReference([]solanago.Instruction{subscribeIx, transferIx}, subscriber, in.Reference)
+	// Solana Pay subscribe: carry the reference (its own instruction — see
+	// referenceTagInstruction) so the poller can detect the landed bundle and
+	// route it to ConfirmEnrollment.
+	ixs, err = withReference(ixs, subscriber, in.Reference)
 	if err != nil {
 		return nil, err
 	}
@@ -326,8 +308,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		return nil, err
 	}
 	result.Transactions = []string{tx}
-	result.Step = "subscribe"
-	result.AuthorityExists = true
+	result.AuthorityExists = exists
 	return result, nil
 }
 

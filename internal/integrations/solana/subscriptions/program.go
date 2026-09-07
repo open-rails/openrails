@@ -13,6 +13,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"math"
 
 	solanago "github.com/gagliardetto/solana-go"
 )
@@ -22,6 +23,15 @@ var ProgramID = solanago.MustPublicKeyFromBase58("De1egAFMkMWZSN5rYXRj9CAdheBamo
 
 // AssociatedTokenProgramID is the SPL Associated Token Account program.
 var AssociatedTokenProgramID = solanago.MustPublicKeyFromBase58("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL")
+
+// UnknownInitID is the program's `UNKNOWN_INIT_ID` sentinel for
+// SubscribeParams.ExpectedSubscriptionAuthInitID: it opts `subscribe` into the
+// same-slot init check — the authority's stored init_id (its creation slot) must
+// equal the CURRENT slot, which holds exactly when initialize_subscription_authority
+// runs in the same transaction. A real init_id is a slot (never negative), so the
+// sentinel cannot collide. It is what makes a one-transaction first-time signup
+// possible: the client no longer has to land init and read the id back first.
+const UnknownInitID int64 = math.MinInt64
 
 // Instruction discriminators (leading u8 of instruction data), from the IDL.
 const (

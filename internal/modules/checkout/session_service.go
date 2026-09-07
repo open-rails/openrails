@@ -1244,7 +1244,6 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 	session.RailState["period_hours"] = strconv.FormatUint(terms.period, 10)
 	session.RailState["plan_created_at"] = strconv.FormatInt(terms.createdAt, 10)
 	session.RailState["subscription_pda"] = res.SubscriptionPDA
-	session.RailState["subscribe_step"] = res.Step
 	session.RailState["sign_transactions"] = toAnySlice(res.Transactions)
 	return nil
 }
@@ -1295,8 +1294,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx cont
 	// flow=transaction_request is what makes sessionToResponse build the
 	// solana_pay_url; the subscribe terms travel on RailState exactly like the
 	// wallet path so BuildSolanaPayTransaction can re-derive the PrepareSubscribe
-	// input without trusting client input. subscribe_step starts empty — the first
-	// POST resolves it to "init" or "subscribe" from on-chain authority state.
+	// input without trusting client input.
 	session.RailState["flow"] = "transaction_request"
 	session.RailState["plan_id"] = strconv.FormatUint(terms.planID, 10)
 	session.RailState["mint_symbol"] = terms.mintSymbol
@@ -1306,11 +1304,10 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx cont
 	return nil
 }
 
-// confirmSolanaSubscriptionSession advances the two-step subscribe flow (#262).
-// When the current step is "init", the just-signed init has landed → re-prepare
-// the subscribe transaction and stay requires_action. When "subscribe", the
-// on-chain subscription exists → enroll (verify + first crank + create
-// membership) and mark the session succeeded.
+// confirmSolanaSubscriptionSession completes the wallet-connected subscribe
+// (#262): the signed transaction was the one-step atomic bundle (init when
+// first-time, subscribe, first pull), so the on-chain subscription exists →
+// enroll (verify PDA + create membership) and mark the session succeeded.
 func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Context, session *models.CheckoutSession, req *CheckoutSessionConfirmRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if s.solanaPrepareSubscribe == nil || s.solanaEnroll == nil {
 		return nil, fmt.Errorf("%w: solana recurring billing is not configured", ErrCheckoutSessionValidation)
@@ -1333,45 +1330,7 @@ func (s *CheckoutSessionService) confirmSolanaSubscriptionSession(ctx context.Co
 		return nil, err
 	}
 
-	// Step 1: the signed transaction was init_subscription_authority. Re-prepare
-	// the subscribe transaction (the authority now exists) and stay in
-	// requires_action so the wallet signs the second transaction.
-	if getStringField(session.RailState, "subscribe_step") == "init" {
-		res, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
-			MerchantID:       tenantID,
-			SubscriberWallet: wallet,
-			PlanID:           terms.planID,
-			MintSymbol:       terms.mintSymbol,
-			AmountBaseUnits:  terms.amount,
-			PeriodHours:      terms.period,
-			PlanCreatedAt:    terms.createdAt,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if res.Step != "subscribe" {
-			// Authority still not visible (init not yet confirmed) — ask the caller
-			// to retry; keep the init transaction so it can re-sign/resend if needed.
-			return nil, fmt.Errorf("%w: subscription authority not yet confirmed on-chain; retry", ErrCheckoutSessionConflict)
-		}
-		if session.RailState == nil {
-			session.RailState = map[string]any{}
-		}
-		session.RailState["subscribe_step"] = "subscribe"
-		session.RailState["sign_transactions"] = toAnySlice(res.Transactions)
-		session.Status = models.CheckoutSessionStatusRequiresAction
-		session.UpdatedAt = s.now()
-		if err := s.repo.Update(ctx, session); err != nil {
-			return nil, err
-		}
-		updated, err := s.repo.GetByID(ctx, session.ID)
-		if err != nil {
-			return nil, err
-		}
-		return s.sessionToResponse(updated), nil
-	}
-
-	// Step 2: subscribe has landed → enroll (verify PDA, first crank, membership).
+	// The bundle has landed → enroll (verify PDA, membership).
 	var email string
 	if user != nil && user.Email != nil {
 		email = *user.Email
@@ -2839,23 +2798,17 @@ func (s *CheckoutSessionService) buildSolanaSubscribeTransaction(ctx context.Con
 		return nil, fmt.Errorf("%w: no subscribe transaction produced", ErrCheckoutSessionConflict)
 	}
 
-	// Track the step so the poller knows whether the landed tx was init (advance,
-	// stay pending) or subscribe (enroll). A first-timer's second POST re-derives
-	// the step from on-chain authority state (now "subscribe" once init landed).
-	session.RailState["subscribe_step"] = res.Step
+	// Record the PDA for the poller's confirm. The bundle is one-step (init
+	// folded in for a first-time subscriber), so one signature settles it.
 	session.RailState["subscription_pda"] = res.SubscriptionPDA
 	session.UpdatedAt = s.now()
 	if err := s.repo.Update(ctx, session); err != nil {
 		return nil, err
 	}
 
-	message := "Sign to start your subscription"
-	if res.Step == "init" {
-		message = "Sign to initialize your subscription (one more signature follows)"
-	}
 	return &solanamodule.PayTransactionResponse{
 		TransactionBase64: res.Transactions[0],
-		Message:           message,
+		Message:           "Sign to start your subscription",
 	}, nil
 }
 
@@ -3068,35 +3021,9 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 		return err
 	}
 
-	// Gate on authority existence: if Prepare still returns the init step, the
-	// authority is not on-chain yet (init has not landed / not visible) → the
-	// subscribe tx cannot have landed either. Stay pending.
-	prep, err := s.solanaPrepareSubscribe.Prepare(ctx, recurring.PrepareSubscribeInput{
-		MerchantID:       tenantID,
-		SubscriberWallet: wallet,
-		PlanID:           terms.planID,
-		MintSymbol:       terms.mintSymbol,
-		AmountBaseUnits:  terms.amount,
-		PeriodHours:      terms.period,
-		PlanCreatedAt:    terms.createdAt,
-	})
-	if err != nil {
-		return err
-	}
-	if prep.Step != "subscribe" {
-		// Authority not yet visible → only the init tx (at most) has landed.
-		if session.RailState == nil {
-			session.RailState = map[string]any{}
-		}
-		session.RailState["subscribe_step"] = prep.Step
-		session.UpdatedAt = s.now()
-		_ = s.repo.Update(ctx, session)
-		return solanamodule.ErrSolanaSubscribePending
-	}
-
-	// Authority exists. ConfirmEnrollment verifies the subscription PDA is funded
-	// (the atomic [subscribe+transfer] landed) before creating the membership; if it
-	// is not funded yet the subscribe tx has not landed → stay pending.
+	// ConfirmEnrollment verifies the subscription PDA is funded (the atomic bundle
+	// landed) before creating the membership; if it is not funded yet the bundle
+	// has not landed → stay pending.
 	sub, err := s.solanaEnroll.ConfirmEnrollment(ctx, recurring.EnrollInput{
 		MerchantID:       tenantID,
 		UserID:           session.CustomerID.String(),

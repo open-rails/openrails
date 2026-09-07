@@ -90,19 +90,11 @@ func TestDevnetFailurePaths(t *testing.T) {
 		sub := freshFundedSubscriber(ctx, t, rc, raw, merchant, funder, usdc, 35_000_000, 400_000)
 		h := publishUSDCPlan(ctx, t, planSvc, amount, 720)
 		before, _ := rc.GetTokenBalanceForMint(ctx, merchant.PublicKey(), usdc)
-		res, perr := prepSvc.Prepare(ctx, PrepareSubscribeInput{
+		_, perr := prepSvc.Prepare(ctx, PrepareSubscribeInput{
 			MerchantID: dbtest.TestMerchantID, SubscriberWallet: sub.PublicKey().String(),
 			PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: h.CreatedAt,
 		})
-		// First-timer flow needs init first; the pre-flight rejects at the subscribe step.
-		if res.Step == "init" {
-			require.NoError(t, perr)
-			signAndSendBase64(ctx, t, rc, raw, sub, res.Transactions)
-			_, perr = prepSvc.Prepare(ctx, PrepareSubscribeInput{
-				MerchantID: dbtest.TestMerchantID, SubscriberWallet: sub.PublicKey().String(),
-				PlanID: h.PlanID, MintSymbol: "USDC", AmountBaseUnits: amount, PeriodHours: 720, PlanCreatedAt: h.CreatedAt,
-			})
-		}
+		// One-step signup: the pre-flight rejects a first-timer directly.
 		require.ErrorIs(t, perr, ErrInsufficientUSDC, "underfunded subscribe must be rejected by the pre-flight; got %v", perr)
 		after, _ := rc.GetTokenBalanceForMint(ctx, merchant.PublicKey(), usdc)
 		require.Equal(t, before, after, "no USDC may move when the subscribe is pre-flight rejected")
