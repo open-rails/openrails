@@ -2927,6 +2927,20 @@ func (s *CheckoutSessionService) tierChangePrepareInput(ctx context.Context, ses
 // the reference poller when it detects the reference-tagged tx has landed.
 // Idempotent: a re-confirm of an already-succeeded session is a no-op, and the
 // underlying ConfirmCancel / ConfirmTierChange mirrors are themselves idempotent.
+// pollerConfirmContext prepares the context for a confirm driven by the Solana
+// Pay poller rather than an HTTP request. or#893/#704: such a context carries no
+// request-scoped PSP, yet every provider-bound row the confirm writes
+// (membership, payment, mirror) must be attributable to the account the session
+// was minted against — exactly what the HTTP confirm path pins — or the repos
+// refuse the write (db.ErrNoPSPInContext) and the landed payment is never
+// enrolled.
+func (s *CheckoutSessionService) pollerConfirmContext(ctx context.Context, session *models.CheckoutSession) context.Context {
+	if session == nil {
+		return ctx
+	}
+	return db.WithPSPID(ctx, session.PspID)
+}
+
 func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Context, sessionID uuid.UUID, signature string) error {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
@@ -2935,6 +2949,7 @@ func (s *CheckoutSessionService) ConfirmSolanaLifecycleSession(ctx context.Conte
 	if session.Status == models.CheckoutSessionStatusSucceeded {
 		return nil
 	}
+	ctx = s.pollerConfirmContext(ctx, session)
 	subscriptionID, err := uuid.Parse(strings.TrimSpace(getStringField(session.RailState, "subscription_id")))
 	if err != nil {
 		return fmt.Errorf("%w: subscription_id missing from session", ErrCheckoutSessionValidation)
@@ -2999,6 +3014,7 @@ func (s *CheckoutSessionService) ConfirmSolanaSubscribeSession(ctx context.Conte
 	if session.Status == models.CheckoutSessionStatusSucceeded {
 		return nil
 	}
+	ctx = s.pollerConfirmContext(ctx, session)
 	signature = strings.TrimSpace(signature)
 	if signature == "" {
 		return fmt.Errorf("%w: signature is required", ErrCheckoutSessionValidation)

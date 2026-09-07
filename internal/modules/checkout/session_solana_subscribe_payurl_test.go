@@ -1,8 +1,10 @@
 package checkout
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db"
 	"testing"
 
 	"github.com/google/uuid"
@@ -121,4 +123,19 @@ func TestIsSolanaSubscribeNotLandedErr(t *testing.T) {
 
 	require.False(t, isSolanaSubscribeNotLandedErr(nil))
 	require.False(t, isSolanaSubscribeNotLandedErr(errors.New("create membership: db down")))
+}
+
+// The poller-driven Solana confirms (subscribe / lifecycle) run without a
+// request-scoped PSP; they must pin the session's PSP so the provider-bound rows
+// they write are attributable (or#893) instead of refused with ErrNoPSPInContext.
+func TestPollerConfirmContextPinsSessionPSP(t *testing.T) {
+	svc := &CheckoutSessionService{}
+	pspID := uuid.New()
+
+	ctx := svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{PspID: pspID})
+	require.Equal(t, pspID, db.PSPIDFromContext(ctx))
+
+	// No session / no PSP on the row: nothing is invented.
+	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), nil)))
+	require.Equal(t, uuid.Nil, db.PSPIDFromContext(svc.pollerConfirmContext(context.Background(), &models.CheckoutSession{})))
 }
