@@ -23,9 +23,10 @@ import (
 // Subscriptions program rejects mints carrying ConfidentialTransfer,
 // NonTransferable, PermanentDelegate, TransferHook, TransferFee,
 // MintCloseAuthority, or Pausable). Verified per token by on-chain mint
-// inspection (and create_plan on devnet for USDC):
+// inspection (and create_plan on devnet for the configured test mint):
 //
 //   - USDC  — plain SPL Token, no extensions → eligible (create_plan ACCEPTED on devnet).
+//   - DUSD  — the Doujins devnet test stablecoin, plain SPL Token, no extensions.
 //   - USD1  — plain SPL Token, no extensions → eligible (World Liberty Financial USD; mainnet only).
 //   - USDT  — plain SPL Token, so extension-eligible, but NOT allowlisted: no
 //     devnet deployment exists to run create_plan against, so it stays one-off
@@ -38,7 +39,7 @@ import (
 // Mint extensions are immutable, so a rejected token can never become eligible.
 // One-off purchases are unaffected — they accept the full solanatokens defaults
 // set and FX-quote at purchase time.
-var RecurringStablecoins = []string{"USDC", "USD1"}
+var RecurringStablecoins = []string{"USDC", "USD1", "DUSD"}
 
 // IsRecurringStablecoinSymbol reports whether symbol is on the recurring allowlist.
 func IsRecurringStablecoinSymbol(symbol string) bool {

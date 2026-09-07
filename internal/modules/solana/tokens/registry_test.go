@@ -28,6 +28,7 @@ var registryDecimals = map[string]int{
 	// devnet
 	"4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU": 6, // USDC devnet
 	"CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM": 6, // PYUSD devnet
+	"7R5ehi23KtGj8e5ysBjr39dktJh2KtSFSeH44fd2s22T": 6, // DUSD devnet
 }
 
 // fakeMint serves the recorded on-chain layout for a registry mint. Tests never

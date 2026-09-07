@@ -12,6 +12,7 @@ func TestIsRecurringStablecoinSymbol(t *testing.T) {
 	cases := map[string]bool{
 		"USDC": true, "usdc": true, " USDC ": true,
 		"USD1":  true,  // plain SPL, verified eligible
+		"DUSD":  true,  // plain SPL devnet test stablecoin
 		"PYUSD": false, // Token-2022 PermanentDelegate (devnet error 121)
 		"USDG":  false, // Token-2022 PermanentDelegate+TransferFee+...
 		"SOL":   false, // volatile
