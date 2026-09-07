@@ -26,7 +26,8 @@ import (
 // back and diffs its immutable terms (amount / period / mint) for drift.
 //
 //   - AutoCreate: one-off prices need no plan; recurring prices publish (or
-//     idempotently attach to) a USDC plan by default.
+//     idempotently attach to) a USDC plan in live mode and the DUSD devnet
+//     test plan in test mode.
 //   - Attach: token selects a non-default token for a published plan; plan_pda
 //     attaches an existing plan and resolves its token on-chain.
 //   - Verify: GetAccountData(plan_pda) -> DecodePlanAccount -> diff vs the stored
@@ -40,6 +41,7 @@ type solanaAdapter struct{ svc *Service }
 const (
 	solanaDefaultRecurringToken = "USDC"
 	solanaUSD1RecurringToken    = "USD1"
+	solanaDUSDRecurringToken    = "DUSD"
 	solanaKeyPlanPDA            = "plan_pda"
 	solanaKeyPlanID             = "plan_id"
 	solanaKeyMint               = "mint"
@@ -57,7 +59,7 @@ func (a *solanaAdapter) PendingActionTemplate(priceID uuid.UUID) PendingAction {
 	return PendingAction{
 		Provider: "solana",
 		Action:   "configure_solana_recurring",
-		Hint:     "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC by default; set psp_links.solana.token to use another supported stablecoin)",
+		Hint:     "Configure the merchant's Solana PSP signer, then re-apply to publish the on-chain plan for price " + priceID.String() + " (USDC in live mode, DUSD in test mode; set psp_links.solana.token to select another supported stablecoin)",
 	}
 }
 
@@ -97,7 +99,14 @@ func (a *solanaAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if err := requireUSDBillingForSolanaPublish(in.Currency); err != nil {
 		return nil, err
 	}
-	return a.createRecurringPlan(ctx, in, solanaDefaultRecurringToken)
+	return a.createRecurringPlan(ctx, in, a.defaultRecurringToken())
+}
+
+func (a *solanaAdapter) defaultRecurringToken() string {
+	if a.svc != nil && a.svc.rt != nil && a.svc.rt.Config != nil && a.svc.rt.Config.IsTestMode() {
+		return solanaDUSDRecurringToken
+	}
+	return solanaDefaultRecurringToken
 }
 
 // requireUSDBillingForSolanaPublish gates publishing a NEW recurring plan on
@@ -233,7 +242,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 	pda := strings.TrimSpace(link[solanaKeyPlanPDA])
 	symbol := strings.ToUpper(strings.TrimSpace(link[solanaKeyToken]))
 	if symbol != "" && !isSolanaRecurringToken(symbol) {
-		return nil, fmt.Errorf("psp_links.solana.token must be USDC or USD1, got %q", symbol)
+		return nil, fmt.Errorf("psp_links.solana.token must be USDC, USD1, or DUSD, got %q", symbol)
 	}
 	if pda != "" && symbol != "" {
 		return nil, fmt.Errorf("psp_links.solana.token selects a new plan; omit it when plan_pda is supplied because the existing plan's token is resolved on-chain")
@@ -256,7 +265,7 @@ func (a *solanaAdapter) Attach(ctx context.Context, link map[string]string, in a
 			return nil, fmt.Errorf("solana one-off prices take no psp_links (the settlement token is chosen at checkout); remove psp_links.solana")
 		}
 		if symbol == "" {
-			symbol = solanaDefaultRecurringToken
+			symbol = a.defaultRecurringToken()
 		}
 		out, err := a.createRecurringPlan(ctx, in, symbol)
 		if err != nil {
@@ -374,7 +383,11 @@ func existingSolanaSettlementToken(currency string) (string, error) {
 }
 
 func resolveSolanaTokenFromMint(plan *recurring.PlanService, mint string) (string, error) {
-	for _, symbol := range [...]string{solanaDefaultRecurringToken, solanaUSD1RecurringToken} {
+	for _, symbol := range [...]string{
+		solanaDefaultRecurringToken,
+		solanaUSD1RecurringToken,
+		solanaDUSDRecurringToken,
+	} {
 		configuredMint, err := plan.ResolveMint(symbol)
 		if err == nil && strings.EqualFold(strings.TrimSpace(configuredMint), strings.TrimSpace(mint)) {
 			return symbol, nil
@@ -384,7 +397,9 @@ func resolveSolanaTokenFromMint(plan *recurring.PlanService, mint string) (strin
 }
 
 func isSolanaRecurringToken(symbol string) bool {
-	return symbol == solanaDefaultRecurringToken || symbol == solanaUSD1RecurringToken
+	return symbol == solanaDefaultRecurringToken ||
+		symbol == solanaUSD1RecurringToken ||
+		symbol == solanaDUSDRecurringToken
 }
 
 // Verify reads the on-chain Plan account and diffs its immutable terms against the

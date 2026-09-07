@@ -222,7 +222,7 @@ func IsFeedlessStablecoin(symbol string) bool {
 
 // DefaultDevnetTokens is the DEVNET half of the registry. Devnet mints are
 // per-deployment artefacts, not canonical addresses, so only the three with a
-// stable, widely-used devnet deployment are pinned here. A registry symbol with
+// stable, widely-used devnet deployments are pinned here. A registry symbol with
 // no devnet entry (USDT/USD1/USDG) is simply not selectable under test_mode;
 // see ResolveDeclared for the ad-hoc-token escape hatch.
 func DefaultDevnetTokens() map[string]config.TokenConfig {
@@ -238,6 +238,10 @@ func DefaultDevnetTokens() map[string]config.TokenConfig {
 		"PYUSD": {
 			Name: "PayPal USD (Devnet)",
 			Mint: "CXk2AMBfi3TwaEL2468s6zP8xq9NxTXjp9gjMgzeUynM",
+		},
+		"DUSD": {
+			Name: "Dev USD",
+			Mint: "7R5ehi23KtGj8e5ysBjr39dktJh2KtSFSeH44fd2s22T",
 		},
 	}
 }

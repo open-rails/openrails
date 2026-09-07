@@ -69,7 +69,7 @@ well-known token's on-chain identity:
 | network | built-in symbols |
 |---|---|
 | mainnet | `SOL`, `USDC`, `USDT`, `PYUSD`, `USD1`, `USDG` |
-| devnet (`test_mode`) | `SOL`, `USDC`, `PYUSD` |
+| devnet (`test_mode`) | `SOL`, `USDC`, `PYUSD`, `DUSD` |
 
 The registry is a mint lookup table, **not** an acceptance list. `tokens` is the
 accepted set: declare `{USDC: {}, SOL: {}}` and buyers can pay in exactly those
@@ -84,6 +84,8 @@ this set, never more.
   different token than the one you priced.
 - **Custom symbol** — `mint:` is required; there the mint *is* the token's
   identity.
+- `DUSD` is the Doujins devnet test stablecoin (`Dev USD`). It is not available
+  on mainnet and must never be configured in a live merchant manifest.
 - **`decimals`** — never configurable (#817): read from the SPL mint on-chain.
 - **Under `test_mode`** the devnet column applies. Devnet mints are
   per-deployment artefacts with no canonical address, so a built-in symbol with

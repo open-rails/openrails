@@ -63,6 +63,37 @@ func TestSolanaAdapter_AutoCreateRecurringDefaultsToUSDC(t *testing.T) {
 	}
 }
 
+func TestSolanaAdapter_AutoCreateRecurringDefaultsToDUSDInTestMode(t *testing.T) {
+	const dusdMint = "7R5ehi23KtGj8e5ysBjr39dktJh2KtSFSeH44fd2s22T"
+	hours := 30 * 24
+	days := 30
+	plan := recurring.NewPlanServiceWithReader(
+		&planSubmitterStub{merchantPub: solanago.NewWallet().PublicKey()},
+		mintReaderStub{mint: dusdMint, decimals: 6},
+		"devnet",
+		map[string]config.TokenConfig{"DUSD": {Mint: dusdMint}},
+	)
+	a := &solanaAdapter{svc: &Service{rt: &app.Runtime{
+		Config:            &config.Config{TestMode: config.CredentialPostureSandbox},
+		SolanaPlanService: plan,
+	}}}
+	ctx := merchant.WithID(context.Background(), merchant.ID(uuid.New()))
+
+	got, err := a.AutoCreate(ctx, autoCreateContext{
+		ProductKey:          "premium",
+		Currency:            "usd",
+		UnitAmount:          29_000_000,
+		AccessDurationHours: &hours,
+		BillingCycleDays:    &days,
+	})
+	if err != nil {
+		t.Fatalf("AutoCreate recurring in test mode: %v", err)
+	}
+	if got[solanaKeyMintSymbol] != "DUSD" {
+		t.Fatalf("AutoCreate recurring mint_symbol = %q, want DUSD", got[solanaKeyMintSymbol])
+	}
+}
+
 func TestSolanaAdapter_AutoCreateOneOffNeedsNoPlan(t *testing.T) {
 	a := &solanaAdapter{}
 	hours := 30 * 24
