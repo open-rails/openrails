@@ -217,20 +217,21 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	// before subscribe can be built (subscribe needs its initId). Return the init
 	// tx; the caller signs+sends it, then re-prepares for the subscribe tx.
 	if !exists {
-		var initIx solanago.Instruction = subscriptions.BuildInitSubscriptionAuthority(subscriptions.InitSubscriptionAuthorityParams{
+		initIx := subscriptions.BuildInitSubscriptionAuthority(subscriptions.InitSubscriptionAuthorityParams{
 			Owner:                 subscriber,
 			SubscriptionAuthority: saPDA,
 			TokenMint:             mint,
 			UserATA:               subscriberATA,
 			TokenProgram:          solanago.TokenProgramID,
 		})
-		// Solana Pay subscribe: tag the init tx with the reference so the poller can
-		// detect THIS landed init and advance the session to the subscribe step.
-		initIx, err = withReferenceMeta(initIx, in.Reference)
+		// Solana Pay subscribe: tag the init tx with the reference (its own
+		// instruction — see referenceTagInstruction) so the poller can detect THIS
+		// landed init and advance the session to the subscribe step.
+		ixs, err := withReference([]solanago.Instruction{initIx}, subscriber, in.Reference)
 		if err != nil {
 			return nil, err
 		}
-		tx, err := s.buildUnsignedTxBase64(ctx, subscriber, []solanago.Instruction{initIx})
+		tx, err := s.buildUnsignedTxBase64(ctx, subscriber, ixs)
 		if err != nil {
 			return nil, err
 		}
@@ -316,13 +317,11 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	// poller can detect the landed atomic [subscribe+transfer] bundle and route it
 	// to ConfirmEnrollment. Extra trailing read-only accounts are ignored by the
 	// program, so the on-chain action is unchanged.
-	var taggedSubscribeIx solanago.Instruction = subscribeIx
-	taggedSubscribeIx, err = withReferenceMeta(taggedSubscribeIx, in.Reference)
+	ixs, err := withReference([]solanago.Instruction{subscribeIx, transferIx}, subscriber, in.Reference)
 	if err != nil {
 		return nil, err
 	}
-	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber,
-		[]solanago.Instruction{taggedSubscribeIx, transferIx})
+	tx, err := solanaint.BuildPartiallySignedTx(ctx, in.MerchantID, s.signer, s.rpc, subscriber, ixs)
 	if err != nil {
 		return nil, err
 	}
