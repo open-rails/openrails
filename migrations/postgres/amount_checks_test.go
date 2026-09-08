@@ -128,3 +128,28 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// TestCheckoutSessionModesAdmitSolanaLifecycle asserts that the migration chain
+// widens checkout_sessions_mode_check to the Solana lifecycle modes the engine
+// persists (solana_cancel / solana_tier_change). Static: it checks the
+// migration text; the integration tier proves the INSERT is accepted.
+func TestCheckoutSessionModesAdmitSolanaLifecycle(t *testing.T) {
+	files, err := fs.Glob(FS, "0002_checkout_sessions_solana_lifecycle_modes.up.sql")
+	if err != nil || len(files) != 1 {
+		t.Fatalf("lifecycle-modes migration not found in embedded FS: %v %v", files, err)
+	}
+	content, err := fs.ReadFile(FS, files[0])
+	if err != nil {
+		t.Fatalf("read %s: %v", files[0], err)
+	}
+	sql := collapseWS(string(content))
+	for _, want := range []string{
+		"drop constraint checkout_sessions_mode_check",
+		"add constraint checkout_sessions_mode_check",
+		"'one_off'::text", "'subscription'::text", "'solana_cancel'::text", "'solana_tier_change'::text",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Errorf("%s: expected %q in the mode CHECK migration", files[0], want)
+		}
+	}
+}
