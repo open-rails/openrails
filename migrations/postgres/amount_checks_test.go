@@ -147,6 +147,7 @@ func TestCheckoutSessionModesAdmitSolanaLifecycle(t *testing.T) {
 		"drop constraint checkout_sessions_mode_check",
 		"add constraint checkout_sessions_mode_check",
 		"'one_off'::text", "'subscription'::text", "'solana_cancel'::text", "'solana_tier_change'::text",
+		"not valid", "validate constraint checkout_sessions_mode_check",
 	} {
 		if !strings.Contains(sql, want) {
 			t.Errorf("%s: expected %q in the mode CHECK migration", files[0], want)
