@@ -128,3 +128,35 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// TestCheckoutSessionModesAdmitSolanaLifecycle asserts that the migration chain
+// widens checkout_sessions_mode_check to the Solana lifecycle modes the engine
+// persists (solana_cancel / solana_tier_change). Static: it checks the
+// migration text; the integration tier proves the INSERT is accepted.
+func TestCheckoutSessionModesAdmitSolanaLifecycle(t *testing.T) {
+	read := func(name string) string {
+		content, err := fs.ReadFile(FS, name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return collapseWS(string(content))
+	}
+	widen := read("0002_checkout_sessions_solana_lifecycle_modes.up.sql")
+	for _, want := range []string{
+		"drop constraint checkout_sessions_mode_check",
+		"add constraint checkout_sessions_mode_check",
+		"'one_off'::text", "'subscription'::text", "'solana_cancel'::text", "'solana_tier_change'::text",
+		"not valid",
+	} {
+		if !strings.Contains(widen, want) {
+			t.Errorf("0002: expected %q in the mode CHECK migration", want)
+		}
+	}
+	if strings.Contains(widen, "validate constraint") {
+		t.Error("0002 must not VALIDATE in the same transaction that added the constraint NOT VALID")
+	}
+	validate := read("0003_checkout_sessions_mode_check_validate.up.sql")
+	if !strings.Contains(validate, "validate constraint checkout_sessions_mode_check") {
+		t.Error("0003: expected VALIDATE CONSTRAINT checkout_sessions_mode_check")
+	}
+}
