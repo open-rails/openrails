@@ -134,23 +134,29 @@ func min(a, b int) int {
 // persists (solana_cancel / solana_tier_change). Static: it checks the
 // migration text; the integration tier proves the INSERT is accepted.
 func TestCheckoutSessionModesAdmitSolanaLifecycle(t *testing.T) {
-	files, err := fs.Glob(FS, "0002_checkout_sessions_solana_lifecycle_modes.up.sql")
-	if err != nil || len(files) != 1 {
-		t.Fatalf("lifecycle-modes migration not found in embedded FS: %v %v", files, err)
+	read := func(name string) string {
+		content, err := fs.ReadFile(FS, name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		return collapseWS(string(content))
 	}
-	content, err := fs.ReadFile(FS, files[0])
-	if err != nil {
-		t.Fatalf("read %s: %v", files[0], err)
-	}
-	sql := collapseWS(string(content))
+	widen := read("0002_checkout_sessions_solana_lifecycle_modes.up.sql")
 	for _, want := range []string{
 		"drop constraint checkout_sessions_mode_check",
 		"add constraint checkout_sessions_mode_check",
 		"'one_off'::text", "'subscription'::text", "'solana_cancel'::text", "'solana_tier_change'::text",
-		"not valid", "validate constraint checkout_sessions_mode_check",
+		"not valid",
 	} {
-		if !strings.Contains(sql, want) {
-			t.Errorf("%s: expected %q in the mode CHECK migration", files[0], want)
+		if !strings.Contains(widen, want) {
+			t.Errorf("0002: expected %q in the mode CHECK migration", want)
 		}
+	}
+	if strings.Contains(widen, "validate constraint") {
+		t.Error("0002 must not VALIDATE in the same transaction that added the constraint NOT VALID")
+	}
+	validate := read("0003_checkout_sessions_mode_check_validate.up.sql")
+	if !strings.Contains(validate, "validate constraint checkout_sessions_mode_check") {
+		t.Error("0003: expected VALIDATE CONSTRAINT checkout_sessions_mode_check")
 	}
 }
