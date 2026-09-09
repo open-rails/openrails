@@ -73,6 +73,7 @@ type SubscriptionCreditGranter interface {
 
 type lifecycleEntitlementService interface {
 	ListDistinctEntitlementNamesBySource(context.Context, models.EntitlementSourceType, uuid.UUID) ([]string, error)
+	PushNewEntitlement(context.Context, entitlements.PushNewEntitlementParams) (*models.Entitlement, error)
 	RevokeExistingEntitlement(context.Context, entitlements.RevokeExistingEntitlementParams) error
 	RevokeSourcesForSubscriptionAsOf(context.Context, string, uuid.UUID, time.Time, models.EntitlementRevokeReason, ...models.EntitlementSourceType) error
 	BoundSubscriptionAccess(context.Context, uuid.UUID, time.Time) error
@@ -693,9 +694,8 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
-		entitlementService := entitlements.NewEntitlementService(db, s.Clock())
+		entitlementService := s.newLifecycleEntitlementService(db)
 		paymentService := payments.NewPaymentService(db, s.Clock())
-		entitlementService.SetClock(s.Clock())
 
 		// Lock before checking terminal state or preparing a full-row update.
 		subscription, err := subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
@@ -1066,6 +1066,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 							"subscription_id": subscription.ID,
 							"entitlement":     entName,
 						}).Warn("Failed to revoke entitlement during downgrade")
+						return fmt.Errorf("failed to revoke entitlement %s during downgrade: %w", entName, err)
 					} else {
 						log.WithContext(ctx).WithFields(log.Fields{
 							"subscription_id": subscription.ID,
