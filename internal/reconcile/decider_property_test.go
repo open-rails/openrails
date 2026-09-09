@@ -222,6 +222,11 @@ func TestDecide_PlaneOrderingCannotChangeOutcomes(t *testing.T) {
 		{"watermark freshness only", activeLapsed, EvidenceBundle{WatermarkNewerThanPeriodEnd: true}},
 		{"renewal payment recorded locally, no snapshot", activeLapsed,
 			EvidenceBundle{Charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true}}},
+		{"renewal payment recorded locally with ownership evidence, no snapshot", activeLapsed,
+			EvidenceBundle{Charge: ChargeEvidence{
+				PaymentOpenedCurrentPeriod:   true,
+				RenewalPaymentAfterPeriodEnd: true,
+			}}},
 		{"snapshot: verified renewal charge + roster active future end", activeLapsed,
 			EvidenceBundle{Snapshot: withTxn(roster(SubscriptionStatusActive, &nextEnd, true), TransactionTypeSale, true, lapsed.Add(time.Hour))}},
 		{"snapshot: roster alive future end, no charge (adopt)", activeLapsed,

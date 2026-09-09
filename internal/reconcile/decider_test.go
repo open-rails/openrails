@@ -274,6 +274,13 @@ func TestDecide_FirstPartyLaw(t *testing.T) {
 			active("ccbill", false, lapsed),
 			EvidenceBundle{Charge: ChargeEvidence{RenewalPaymentAfterPeriodEnd: true}},
 			TransitionNone},
+		{"renewal payment overrides nmi ownership evidence → none (advance path owns it)",
+			active("nmi", true, lapsed),
+			EvidenceBundle{Charge: ChargeEvidence{
+				PaymentOpenedCurrentPeriod:   true,
+				RenewalPaymentAfterPeriodEnd: true,
+			}},
+			TransitionNone},
 		{"lapsed but within the grace slack, no evidence → none (wait)",
 			active("ccbill", false, fresh),
 			EvidenceBundle{},

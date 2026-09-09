@@ -538,12 +538,12 @@ func decideFromFirstParty(sub SubscriptionState, ev EvidenceBundle, now time.Tim
 		// to charge. The positive "ours" signal is evidence, never rail.
 		oursToBill := sub.Rail == string(models.RailNMI) && sub.HasPaymentMethod
 		ownership := ev.Charge.PaymentOpenedCurrentPeriod || ev.WatermarkNewerThanPeriodEnd
-		if oursToBill && ownership {
-			return Decision{Kind: TransitionPastDue, GraceEndsAt: sub.PeriodEnd.Add(PeriodGrace), Reason: "period_overdue_ownership_evidence"}
-		}
 		if ev.Charge.RenewalPaymentAfterPeriodEnd {
 			// Billing DID happen — the renewal/advance path owns the row.
 			return Decision{Kind: TransitionNone, Reason: "renewal_payment_recorded"}
+		}
+		if oursToBill && ownership {
+			return Decision{Kind: TransitionPastDue, GraceEndsAt: sub.PeriodEnd.Add(PeriodGrace), Reason: "period_overdue_ownership_evidence"}
 		}
 		if now.Sub(*sub.PeriodEnd) > PeriodGrace {
 			return Decision{Kind: TransitionParkUnknown, Reason: "no_ownership_evidence"}

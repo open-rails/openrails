@@ -854,6 +854,31 @@ func (q *Queries) GetStripeAliasCardSnapshot(ctx context.Context, transactionIds
 	return i, err
 }
 
+const hasCompletedPaymentAtOrAfterPeriodEnd = `-- name: HasCompletedPaymentAtOrAfterPeriodEnd :one
+SELECT EXISTS (
+    SELECT 1
+    FROM openrails.payments purch
+    WHERE purch.merchant_id = $1::uuid
+      AND purch.subscription_id = $2::uuid
+      AND purch.status = 'completed'
+      AND purch.purchased_at >= $3::timestamptz
+      AND purch.deleted_at IS NULL
+)::bool
+`
+
+type HasCompletedPaymentAtOrAfterPeriodEndParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+	PeriodEnd      time.Time
+}
+
+func (q *Queries) HasCompletedPaymentAtOrAfterPeriodEnd(ctx context.Context, arg HasCompletedPaymentAtOrAfterPeriodEndParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasCompletedPaymentAtOrAfterPeriodEnd, arg.MerchantID, arg.SubscriptionID, arg.PeriodEnd)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const linkRefundedPayment = `-- name: LinkRefundedPayment :execrows
 UPDATE openrails.payments
 SET refunded_payment_id = $2
