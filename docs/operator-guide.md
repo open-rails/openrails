@@ -9,8 +9,8 @@ territory. The primary deep manual is [operations.md](operations.md).
 | Service | Required | What it does | Losing it |
 |---|---|---|---|
 | **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns the `openrails` schema. | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
-| **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), card-abuse tracking, and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). Redis holds only transient counters — nothing durable. |
-| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them — without it the DB store is plaintext (loud warning; refused outside development for API-managed merchants). |
+| **Redis-compatible service** (Garnet recommended) | optional | Rate-limit buckets (per-IP / per-user), the atomic usage-billing admission gate (spendgate), card-abuse tracking, and hourly admission-denial aggregates (flushed to Postgres every 5 minutes). | Rate limiting degrades to per-process in-memory counters (logged, automatic). If Redis is configured but unreachable, boot continues but readiness stays failed until it recovers. Deliberately omitting Redis keeps readiness green and uses the per-process fallback. Redis holds only transient counters — nothing durable. |
+| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `openrails.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses the DB store without it outside development, while development warns and permits plaintext. Manifest mode persists no merchant secrets and does not construct this store. |
 
 OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
 (file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
@@ -34,7 +34,9 @@ Postgres specifics worth knowing:
 - `ENV` is REQUIRED and has no default. It decides whether merchant secrets may
   be stored plaintext and whether the DB role must enforce RLS, so an
   undeclared environment refuses to boot instead of quietly meaning
-  "development".
+  "development". Only the exact values `dev` and `development` enable
+  development relaxations; every other non-empty label (including `staging`,
+  `production`, or a misspelling) receives the strict posture.
 - Migrations: `openrails migrate up` applies AuthKit, River, and OpenRails
   migrations (`migrations/postgres/`, baseline `0001_schema.up.sql`, new ones
   start at `0002`). The server validates at boot and refuses to start behind.
@@ -60,8 +62,9 @@ modes"](operations.md#operating-modes-the-safety-levers).
   `sandbox | live`; required outside development (or#915 — no silent live
   default), sandbox by omission in development. Sandbox routes every rail to
   its test environment and refuses live credentials at boot (live Stripe keys
-  rejected, NMI accounts probed with a test card), so no real money can move
-  regardless of write mode.
+  rejected, NMI accounts probed with a test card). Live posture likewise
+  refuses Stripe test keys in every environment instead of silently disabling
+  the rail, so no real money can move under sandbox regardless of write mode.
 
 | Operation | `full` | `limited` | `readonly` |
 |---|---|---|---|
@@ -92,9 +95,19 @@ OpenRails' workers converge state around that:
 | Worker health check | 5 min | seeds `openrails.worker_health`, raises repair alerts when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
-(readiness; `?verbose=1` adds per-dependency detail — DB, Redis, auth). K8s
-aliases `/healthz` / `/readyz`. Embedded hosts wire the same checks into their
-own handler via `Embedded.Ready`.
+(readiness; `?verbose=1` adds per-dependency detail — DB, configured Redis,
+merchant-secret backend, River producer, a locally managed River consumer, and
+auth). K8s aliases `/healthz` / `/readyz`. A standalone
+`run-server --no-workers` process remains live but not ready because it has no
+local job consumer. Embedded hosts wire the dependency checks into their own
+handler via `Embedded.Ready`; a host-owned shared River client is checked
+separately with `CheckJobProgress` because its process state is outside
+OpenRails.
+
+OpenRails currently exposes no Prometheus or runtime telemetry endpoint.
+`/v1/merchant/metrics`, `/query`, and `/schema` are authenticated merchant
+business analytics, not process/runtime metrics; adding runtime observability
+remains parked in tracker issue #701.
 
 **Healthy looks like**: `openrails intents` shows a near-empty active set (the
 sweep flags `pending` older than 24h and `in_flight`/`unknown` older than 2h as

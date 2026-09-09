@@ -24,7 +24,7 @@ flowchart LR
 
 ```bash
 task docker-up                                # Postgres + Garnet(Redis) + migrate + OpenRails
-curl http://localhost:3053/health/ready       # readiness: Postgres, Redis, AuthKit verifier
+curl http://localhost:3053/health/ready       # readiness: dependencies, local workers, AuthKit verifier
 ```
 
 Host ports (all bound to 127.0.0.1): OpenRails `:3053`, Postgres `:5434`,
@@ -39,7 +39,9 @@ there is no separate private/service listener.
   app's database. Apply migrations with `openrails migrate up` before each new
   version boots (the server validates and refuses to start on missing migrations).
 - **A Redis-compatible service** (we recommend Garnet) — optional, backs
-  rate limiting; without it limits are in-memory per-process.
+  rate limiting. If omitted, limits are in-memory per-process and readiness
+  remains green; if configured but unreachable, boot falls back to memory but
+  readiness fails until Redis recovers.
 - **HashiCorp Vault** — optional. Two independent uses: KV storage for merchant
   secrets (`secret_backend: vault`) and Transit signing for Solana custody. See
   [vault.md](vault.md).
@@ -51,6 +53,10 @@ maps onto the config tree by prefix, e.g. `DB_URL` → `db.url`,
 `PROVIDER_WRITE_MODE` → `provider_write_mode`, `SECRET_BACKEND` →
 `secret_backend`. For the two operating dials there are also CLI flags.
 Precedence: **flag beats env beats yaml.**
+
+Only exact `env: dev` or `env: development` values enable development
+relaxations. Every other non-empty environment label is production-strict,
+including `staging`, `production`, and misspellings.
 
 ```bash
 openrails run-server --config /etc/openrails/config.yaml \
@@ -67,8 +73,10 @@ openrails run-server --config /etc/openrails/config.yaml \
 - `test_mode: sandbox | live` — the credential axis, orthogonal to the above.
   `sandbox` routes every rail to its test environment and refuses live
   credentials at boot (live Stripe keys rejected, NMI accounts probed), so no
-  real money can move. Sandbox is allowed in every environment — credential
-  validation, not the env string, keeps it honest.
+  real money can move. `live` similarly refuses Stripe test keys in every
+  environment rather than silently disabling the rail. Sandbox is allowed in
+  every environment — credential validation, not the env string, keeps it
+  honest.
 - Non-default database credentials, and an `https` `auth.issuer`.
 - **Merchant-secret storage** (mode 2 / `merchant_source: api` only): a secret
   backend is required outside development — either Vault

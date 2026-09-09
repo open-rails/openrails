@@ -58,7 +58,7 @@ route's own dedup guards, never a replacement for them.
 |---|---|---|---|
 | GET | `/` | none | JSON service banner `{"service":"billing","status":"ok",...}` |
 | GET | `/health/live` (alias `/healthz`) | none | Unconditional liveness probe |
-| GET | `/health/ready` (alias `/readyz`) | none | Readiness: Postgres, Redis, auth verifier. 200 or 503 `not_ready`; `?verbose=1` adds per-dependency detail |
+| GET | `/health/ready` (alias `/readyz`) | none | Readiness: Postgres, configured Redis, merchant-secret backend, River producer/local consumer, auth verifier. 200 or 503 `not_ready`; `?verbose=1` adds per-dependency detail. `run-server --no-workers` remains not-ready |
 | GET | `/v1/capabilities` | none | Static capability document: `route_groups` (which route sets are mounted) + `routes` (provider-specific toggles: `billing_portal`, `solana`, `solana_signing`, `webhooks`, `secret_write`). ETagged, `Cache-Control: public, max-age=300` |
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
