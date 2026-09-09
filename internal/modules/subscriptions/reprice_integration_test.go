@@ -112,7 +112,7 @@ func newRepriceFixture(t *testing.T) *repriceFixture {
 		lowPriceID: lowPriceID, highPriceID: highPriceID,
 		otherProductPriceID: otherProductPriceID, otherCurrencyPriceID: otherCurrencyPriceID,
 		inactivePriceID: inactivePriceID,
-		nmiPSPID:         dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi"),
+		nmiPSPID:        dbtest.EnsureTestPSP(ctx, t, pool, merchantID, "nmi"),
 	}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.subscription_reprices WHERE merchant_id = $1", merchantID)

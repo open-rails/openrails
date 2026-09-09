@@ -608,4 +608,3 @@ func TestSubscriptionExpiryAtExactBoundary(t *testing.T) {
 		assert.False(t, isEntitled, "Entitlement should NOT be active 1 second after expiry")
 	})
 }
-

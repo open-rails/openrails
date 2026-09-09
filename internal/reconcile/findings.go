@@ -174,11 +174,11 @@ type MaterializeSubscriptionAction struct {
 	ProductID          uuid.UUID
 	// Status is the CANONICAL LOCAL lifecycle state (or#893) the row is created
 	// with — active or past_due; PS-1 only fires for a live remote subscription.
-	Status models.SubscriptionStatus
-	PeriodStartsAt     *time.Time
-	PeriodEndsAt       *time.Time
-	StartedAt          *time.Time
-	UserEmail          string
+	Status         models.SubscriptionStatus
+	PeriodStartsAt *time.Time
+	PeriodEndsAt   *time.Time
+	StartedAt      *time.Time
+	UserEmail      string
 	// IdentityVia documents how identity resolved (vault_id | email) for the
 	// resolution evidence.
 	IdentityVia string

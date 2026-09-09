@@ -38,8 +38,8 @@ type AdminSubscriptionService struct {
 	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
 	PaymentService      *payments.PaymentService
-	StripeService *StripeService
-	clock         clockwork.Clock
+	StripeService       *StripeService
+	clock               clockwork.Clock
 
 	// deferDelete / ccbillCancel enqueue the durable remote-cancel intents for
 	// a merchant-initiated cancel (or#896), admin-origin. Injected

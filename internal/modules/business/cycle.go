@@ -177,10 +177,10 @@ func (s *Service) runDunning(ctx context.Context, ms *money.MoneyService, p *mon
 		}
 		if overdueFor >= FinalNoticeAfterDue {
 			final := map[string]any{
-				"invoice_id":     inv.ID.String(),
-				"invoice_number": number,
-				"amount_due":     inv.AmountDue,
-				"currency":       p.Currency,
+				"invoice_id":                   inv.ID.String(),
+				"invoice_number":               number,
+				"amount_due":                   inv.AmountDue,
+				"currency":                     p.Currency,
 				"suspension_recommendation_at": inv.DueAt.UTC().Add(RecommendSuspensionAfterDue).Format(time.RFC3339),
 			}
 			if err := s.notifyOnce(ctx, p.CustomerID, models.NotificationInvoiceFinalNotice, inv.ID.String(), final, now, res); err != nil {
