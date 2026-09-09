@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/shared/progress"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/riverqueue/river"
 	log "github.com/sirupsen/logrus"
 )
@@ -75,6 +76,7 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 
 	paymentRepo := payments.NewPaymentRepo(w.DB)
 	var drift int
+	var failures int
 	for _, row := range rows {
 		select {
 		case <-ctx.Done():
@@ -86,39 +88,50 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		}
 		progress.Mark(ctx, "solana reconcile subscription "+row.ID.String())
 		sig := *row.LastSignature
-		_, perr := paymentRepo.GetByTransactionID(ctx, models.RailSolana, sig)
-		if perr == nil {
-			continue // ledger is consistent for this pull
-		}
-		if !db.IsNotFound(perr) {
-			// Transient lookup failure: log and move on, don't false-alarm.
-			log.WithContext(ctx).WithError(perr).WithField("signature", sig).
-				Warn("Solana reconcile: payment lookup failed; skipping row")
-			continue
-		}
+		err := w.DB.RunInMerchantScope(ctx, merchant.ID(row.MerchantID), "solana reconcile pull", func(mctx context.Context) error {
+			_, perr := paymentRepo.GetByTransactionID(mctx, models.RailSolana, sig)
+			if perr == nil {
+				return nil // ledger is consistent for this pull
+			}
+			if !db.IsNotFound(perr) {
+				// Transient lookup failure: log and move on, don't false-alarm.
+				log.WithContext(mctx).WithError(perr).WithField("signature", sig).
+					Warn("Solana reconcile: payment lookup failed; skipping row")
+				return nil
+			}
 
-		// Confirmed pull with no payment row -> operator repair.
-		drift++
-		subID := row.SubscriptionID
-		if alertErr := webhooks.RecordLedgerRepairAlert(ctx, w.NotificationService, w.DB, w.now(), webhooks.LedgerRepairAlert{
-			Provider:       string(models.RailSolana),
-			Operation:      "solana_crank_unrecorded_pull",
-			TransactionID:  sig,
-			SubscriptionID: &subID,
-			Err:            fmt.Errorf("confirmed on-chain pull %s has no openrails.payments record", sig),
-			Metadata: map[string]any{
-				"subscription_pda": row.SubscriptionPDA,
-				"merchant_address": row.MerchantAddress,
-				"tenant_id":        row.MerchantID.String(),
-			},
-		}); alertErr != nil {
-			log.WithContext(ctx).WithError(alertErr).WithField("signature", sig).
-				Warn("Solana reconcile: failed to record repair alert")
+			// Confirmed pull with no payment row -> operator repair.
+			drift++
+			subID := row.SubscriptionID
+			if alertErr := webhooks.RecordLedgerRepairAlert(mctx, w.NotificationService, w.DB, w.now(), webhooks.LedgerRepairAlert{
+				Provider:       string(models.RailSolana),
+				Operation:      "solana_crank_unrecorded_pull",
+				TransactionID:  sig,
+				SubscriptionID: &subID,
+				Err:            fmt.Errorf("confirmed on-chain pull %s has no openrails.payments record", sig),
+				Metadata: map[string]any{
+					"subscription_pda": row.SubscriptionPDA,
+					"merchant_address": row.MerchantAddress,
+					"tenant_id":        row.MerchantID.String(),
+				},
+			}); alertErr != nil {
+				log.WithContext(mctx).WithError(alertErr).WithField("signature", sig).
+					Warn("Solana reconcile: failed to record repair alert")
+			}
+			return nil
+		})
+		if err != nil {
+			log.WithContext(ctx).WithError(err).WithField("subscription_pda", row.SubscriptionPDA).
+				Error("Solana reconcile: merchant-scoped row failed; continuing")
+			failures++
 		}
 	}
 	if drift > 0 {
 		log.WithContext(ctx).WithField("drift", drift).
 			Warn("Solana reconcile: confirmed pulls missing ledger payments (#258)")
+	}
+	if failures > 0 {
+		return fmt.Errorf("solana reconcile: %d of %d rows failed", failures, len(rows))
 	}
 	return nil
 }

@@ -15,11 +15,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/riverqueue/river"
 )
 
 // smPresubmitCranker simulates the production CrankService presubmit path:
@@ -74,6 +77,8 @@ type solanaPullFixture struct {
 	chain   *fakeChain
 	row     *models.SolanaSubscription
 	pspID   uuid.UUID
+	priceID uuid.UUID
+	userID  uuid.UUID
 	ctx     context.Context
 }
 
@@ -148,7 +153,22 @@ func newSolanaPullFixture(t *testing.T) *solanaPullFixture {
 	handler := NewSolanaPullIntentHandler(core, intents.NewStore(dbi), chain)
 	// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
 	runner := &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(handler), Config: fullModeConfig()}
-	return &solanaPullFixture{db: dbi, runner: runner, handler: handler, life: life, crank: crank, chain: chain, row: row, pspID: pspID, ctx: ctx}
+	return &solanaPullFixture{
+		db: dbi, runner: runner, handler: handler, life: life, crank: crank, chain: chain,
+		row: row, pspID: pspID, priceID: priceID, userID: userID, ctx: ctx,
+	}
+}
+
+func (fx *solanaPullFixture) worker(database *db.DB) *SolanaCrankWorker {
+	return &SolanaCrankWorker{
+		DB:        database,
+		Clock:     clockwork.NewFakeClockAt(fx.row.NextPullAt.Add(time.Minute)),
+		Cranker:   fx.crank,
+		Lifecycle: fx.life,
+		resolvePlanFn: func(_ context.Context, _ *models.SolanaSubscription) (resolvedPlan, error) {
+			return resolvedPlan{amountBaseUnits: 5_000_000, periodHours: 720, fiatAmount: 5_000_000, currency: "USD", cycleHours: 720}, nil
+		},
+	}
 }
 
 func (fx *solanaPullFixture) enqueueAndExecute(t *testing.T) (uuid.UUID, string) {
@@ -202,6 +222,113 @@ func TestSolanaPullIntent_HappyPath(t *testing.T) {
 	require.Equal(t, id, id2)
 	require.Equal(t, intents.StatusSucceeded, status2, "conflict returns the durable succeeded row")
 	require.Equal(t, 1, fx.crank.calls)
+}
+
+// The River entry point starts with no merchant on its context. Prove the
+// worker itself pins the row's merchant before the FORCE-RLS intent insert;
+// module-level tests use an already-pinned fixture and cannot catch that seam.
+func TestSolanaCrankWorker_RLSScopeCreatesIntent(t *testing.T) {
+	fx := newSolanaPullFixture(t)
+	workerDB := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	worker := fx.worker(workerDB)
+	handler := NewSolanaPullIntentHandler(worker, intents.NewStore(workerDB), fx.chain)
+	worker.Intents = &intents.Runner{
+		Store:    intents.NewStore(workerDB),
+		Registry: intents.NewRegistry(handler),
+		Config:   fullModeConfig(),
+	}
+
+	require.NoError(t, worker.Work(context.Background(), &river.Job[SolanaCrankArgs]{}))
+
+	var count int
+	err := fx.db.Qx(fx.ctx).QueryRow(fx.ctx,
+		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id = $1`,
+		fx.row.SubscriptionID,
+	).Scan(&count)
+	require.NoError(t, err)
+	require.Equal(t, 1, count, "the unprivileged worker must persist exactly one merchant-owned intent")
+}
+
+type scopeCheckingFailStore struct {
+	*intents.Store
+	database    *db.DB
+	calls       int
+	scopedCalls int
+}
+
+func (s *scopeCheckingFailStore) Enqueue(ctx context.Context, _ intents.EnqueueParams) (gen.OpenrailsRailIntent, error) {
+	s.calls++
+	if err := s.database.AssertMerchantScope(ctx, "test solana crank enqueue"); err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
+	s.scopedCalls++
+	return gen.OpenrailsRailIntent{}, fmt.Errorf("forced enqueue failure")
+}
+
+// A row failure is batch-isolated, but the job must still fail after the pass
+// so River retries and worker health cannot report a false success.
+func TestSolanaCrankWorker_RowFailureFailsJob(t *testing.T) {
+	fx := newSolanaPullFixture(t)
+	_ = newSolanaPullFixture(t) // a second due row proves the first failure does not abort the batch
+	workerDB := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	store := &scopeCheckingFailStore{Store: intents.NewStore(workerDB), database: workerDB}
+	worker := fx.worker(workerDB)
+	worker.Intents = &intents.Runner{Store: store}
+
+	err := worker.Work(context.Background(), &river.Job[SolanaCrankArgs]{})
+	require.ErrorContains(t, err, "pull intents failed")
+	require.GreaterOrEqual(t, store.calls, 2)
+	require.Equal(t, store.calls, store.scopedCalls, "every attempted row must run on an asserted merchant scope")
+}
+
+// Reconciliation also starts unscoped. A recorded pull must find its payment,
+// while the same row without that payment must create exactly one repair alert
+// inside the row's merchant scope.
+func TestSolanaReconcileWorker_RLSScopeFindsRecordedPayment(t *testing.T) {
+	fx := newSolanaPullFixture(t)
+	sig := "reconcile-" + uuid.NewString()
+	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx,
+		`UPDATE openrails.solana_subscriptions SET last_signature = $1 WHERE id = $2`,
+		sig, fx.row.ID,
+	)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = fx.db.Qx(fx.ctx).Exec(fx.ctx,
+			`DELETE FROM openrails.notification_queue WHERE data->>'transaction_id' = $1`, sig)
+	})
+
+	subID := fx.row.SubscriptionID
+	paymentID := uuid.New()
+	require.NoError(t, payments.NewPaymentRepo(fx.db).Create(fx.ctx, &models.Payment{
+		ID: paymentID, CustomerID: fx.userID, PriceID: fx.priceID, SubscriptionID: &subID,
+		Rail: models.RailSolana, TransactionID: sig, Amount: 5_000_000, ListAmount: 5_000_000,
+		Currency: "USD", Status: "completed", PspID: &fx.pspID, MoneyMovement: models.MoneyMovementRail,
+		PurchasedAt: time.Now().UTC(), CreatedAt: time.Now().UTC(),
+	}))
+
+	workerDB := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	worker := &SolanaReconcileWorker{DB: workerDB, Clock: clockwork.NewFakeClockAt(time.Now().UTC())}
+	job := &river.Job[SolanaReconcileArgs]{}
+	require.NoError(t, worker.Work(context.Background(), job))
+	require.Equal(t, 0, repairAlertCount(t, fx, sig), "a recorded pull must not raise a false alert")
+
+	require.NoError(t, payments.NewPaymentRepo(fx.db).Delete(fx.ctx, paymentID))
+	require.NoError(t, worker.Work(context.Background(), job))
+	require.Equal(t, 1, repairAlertCount(t, fx, sig), "a genuinely missing payment must raise one scoped alert")
+}
+
+func repairAlertCount(t *testing.T, fx *solanaPullFixture, signature string) int {
+	t.Helper()
+	var count int
+	err := fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `
+		SELECT count(*)
+		  FROM openrails.notification_queue
+		 WHERE event_type = 'system_alert'
+		   AND data->>'operation' = 'solana_crank_unrecorded_pull'
+		   AND data->>'transaction_id' = $1`, signature,
+	).Scan(&count)
+	require.NoError(t, err)
+	return count
 }
 
 // THE #674 solana case: crash between submit and record. The signature was
