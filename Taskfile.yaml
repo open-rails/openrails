@@ -24,6 +24,22 @@ tasks:
     cmds:
       - task -l
 
+  doctor:
+    desc: Diagnose local build and test prerequisites with actionable fixes
+    cmds:
+      - bash scripts/doctor.sh
+
+  setup:
+    desc: Prepare a fresh clone after system prerequisites are installed
+    cmds:
+      - bash scripts/setup.sh
+
+  tooling-test:
+    desc: Run focused regression tests for local developer tooling
+    cmds:
+      - bash scripts/doctor_test.sh
+      - bash scripts/setup_test.sh
+
   build:
     desc: Build the binary locally
     cmds:
