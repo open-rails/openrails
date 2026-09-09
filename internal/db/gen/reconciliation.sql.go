@@ -1854,6 +1854,7 @@ SET last_four = COALESCE(NULLIF($1::text, ''), last_four),
     expiry_date = COALESCE(NULLIF($2::text, ''), expiry_date),
     updated_at = now()
 WHERE id = $3
+  AND merchant_id = $4
   AND (last_four IS DISTINCT FROM NULLIF($1::text, '')
        OR expiry_date IS DISTINCT FROM NULLIF($2::text, ''))
 `
@@ -1862,11 +1863,17 @@ type ReconcileAdoptPaymentMethodParams struct {
 	LastFour   string
 	ExpiryDate string
 	ID         uuid.UUID
+	MerchantID uuid.UUID
 }
 
 // PS-7: adopt the rail's vault metadata for a stored payment method.
 func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg ReconcileAdoptPaymentMethodParams) (int64, error) {
-	result, err := q.db.Exec(ctx, reconcileAdoptPaymentMethod, arg.LastFour, arg.ExpiryDate, arg.ID)
+	result, err := q.db.Exec(ctx, reconcileAdoptPaymentMethod,
+		arg.LastFour,
+		arg.ExpiryDate,
+		arg.ID,
+		arg.MerchantID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -2434,18 +2441,23 @@ func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecord
 const setSubscriptionNextRetry = `-- name: SetSubscriptionNextRetry :execrows
 UPDATE openrails.subscriptions
 SET next_retry_at = $1::timestamptz, updated_at = now()
-WHERE id = $2 AND status = 'past_due' AND next_retry_at IS NULL AND deleted_at IS NULL
+WHERE id = $2
+  AND merchant_id = $3
+  AND status = 'past_due'
+  AND next_retry_at IS NULL
+  AND deleted_at IS NULL
 `
 
 type SetSubscriptionNextRetryParams struct {
 	NextRetryAt time.Time
 	ID          uuid.UUID
+	MerchantID  uuid.UUID
 }
 
 // Repair for dunning_overdue: re-establish the retry schedule so the dunning
 // worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
 func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscriptionNextRetryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setSubscriptionNextRetry, arg.NextRetryAt, arg.ID)
+	result, err := q.db.Exec(ctx, setSubscriptionNextRetry, arg.NextRetryAt, arg.ID, arg.MerchantID)
 	if err != nil {
 		return 0, err
 	}

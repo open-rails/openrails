@@ -4,6 +4,7 @@ package riverjobs
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -206,8 +207,9 @@ func (f *dunningCertaintyFixture) run(t *testing.T) dunningOutcome {
 		if err != nil {
 			return err
 		}
-		outcome = f.worker.processSubscription(ctx, sub, f.lifecycle, f.priceSvc, false)
-		return nil
+		var processErr error
+		outcome, processErr = f.worker.processSubscription(ctx, sub, f.lifecycle, f.priceSvc, false)
+		return processErr
 	}))
 	return outcome
 }
@@ -220,6 +222,24 @@ type dunningRowState struct {
 	cancelledAt         *time.Time
 	deletionScheduledAt *time.Time
 	deleteIntents       int
+}
+
+type failingDunningLifecycle struct {
+	err       error
+	failCalls atomic.Int64
+}
+
+func (f *failingDunningLifecycle) ApplyLocalUnknown(context.Context, *db.DB, *models.Subscription) error {
+	return nil
+}
+
+func (f *failingDunningLifecycle) FailMembership(context.Context, *subscriptions.FailMembershipParams) error {
+	f.failCalls.Add(1)
+	return f.err
+}
+
+func (f *failingDunningLifecycle) RenewMembership(context.Context, *subscriptions.RenewMembershipParams) error {
+	return nil
 }
 
 func (f *dunningCertaintyFixture) state(t *testing.T) dunningRowState {
@@ -366,4 +386,57 @@ func TestDunning_KillSwitchHaltsTerminalCollectionOutcomes(t *testing.T) {
 	assert.NotNil(t, s.cancelledAt)
 	assert.Equal(t, 1, s.deleteIntents,
 		"and only then is the remote NMI schedule stopped through the deferred-delete mechanism")
+}
+
+// #959: a terminal provider decline is already durable before the lifecycle
+// transition runs. If that transition rolls back, release only its exact row
+// claim and fail the River job so the same ordinal is retried without charging
+// again. Leaving the 15-minute claim in place can turn River's early retry into
+// a false-successful "no work" pass.
+func TestDunning_LifecycleFailureReleasesClaimAndSurfacesToRiver(t *testing.T) {
+	f := newDunningCertaintyFixture(t, 24, time.Hour, true)
+	forcedErr := errors.New("forced lifecycle failure")
+	lifecycle := &failingDunningLifecycle{err: forcedErr}
+	f.worker.lifecycle = lifecycle
+	f.worker.Intents = &intents.Runner{Store: intents.NewStore(f.dbi), Config: fullModeConfig()}
+
+	var intentKey string
+	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
+		sub, err := f.subSvc.GetByID(ctx, f.subID)
+		if err != nil {
+			return err
+		}
+		require.Nil(t, sub.RetryAttempts)
+		periodEnd := sub.CurrentPeriodEndsAt.UTC()
+		intentKey = intents.ManualRebillIdempotencyKey(
+			sub.ID, periodEnd, string(models.RailNMI), rebillOrderReference(sub), 0,
+		)
+		_, err = f.dbi.Qx(ctx).Exec(ctx, `
+			INSERT INTO openrails.rail_intents
+			  (merchant_id, rail, psp_id, intent_type, subscription_id,
+			   idempotency_key, status, origin, result_evidence, executed_at)
+			VALUES ($1, 'nmi', $2, $3, $4, $5, 'failed_terminal', 'system',
+			        '{"response_code":261}'::jsonb, now())`,
+			sub.MerchantID, sub.PspID, intents.TypeManualRebill, sub.ID, intentKey)
+		return err
+	}))
+
+	err := f.worker.Work(context.Background(), nil)
+	require.ErrorIs(t, err, forcedErr)
+	assert.Equal(t, int64(1), lifecycle.failCalls.Load())
+
+	state := f.state(t)
+	assert.Nil(t, state.retryAttempts, "a failed lifecycle transition must not advance the charge ordinal")
+	require.NotNil(t, state.lastRetryAt)
+	require.NotNil(t, state.nextRetryAt)
+	assert.True(t, state.nextRetryAt.Equal(*state.lastRetryAt), "the exact claim is immediately eligible for River's backoff retry")
+	assert.False(t, state.nextRetryAt.After(time.Now().UTC()), "released claim must be due now")
+
+	var intentCount int
+	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
+		return f.dbi.Qx(ctx).QueryRow(ctx,
+			`SELECT count(*) FROM openrails.rail_intents WHERE merchant_id = $1 AND idempotency_key = $2`,
+			dbtest.TestMerchantID.UUID(), intentKey).Scan(&intentCount)
+	}))
+	assert.Equal(t, 1, intentCount, "the durable decline is replayed; no fresh charge intent is created")
 }

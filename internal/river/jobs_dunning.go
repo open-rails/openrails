@@ -88,6 +88,10 @@ type DunningWorker struct {
 	// driving lifecycle off the returned status. nil builds a Runner over the
 	// worker's own dependencies.
 	Intents *intents.Runner
+	// lifecycle is an integration-test seam for forcing a transition failure
+	// after the provider outcome is already durable. Production constructs the
+	// concrete lifecycle below so all of its dependencies stay identical.
+	lifecycle dunningLifecycle
 }
 
 // intentRunner returns the configured Runner or self-assembles one (direct
@@ -190,20 +194,25 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	entitlementSvc := entitlements.NewEntitlementService(w.DB, w.Clock)
 	notifSvc := subscriptions.NewNotificationService(w.DB, nil)
 	paymentSvc := payments.NewPaymentService(w.DB, w.Clock)
-	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.Clock)
-	lifecycle.SetConfig(w.Config)
-	moneySvc := money.NewMoneyService(w.DB, w.Clock)
-	lifecycle.SetCreditGranter(moneySvc)
-	if w.DeferDelete != nil {
-		// Terminal cancellations (window expiry, retry exhaustion) schedule
-		// the remote NMI delete through the shared mechanism (#344).
-		lifecycle.SetDeferredDeleteScheduler(w.DeferDelete)
+	lifecycle := w.lifecycle
+	if lifecycle == nil {
+		concrete := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.Clock)
+		concrete.SetConfig(w.Config)
+		moneySvc := money.NewMoneyService(w.DB, w.Clock)
+		concrete.SetCreditGranter(moneySvc)
+		if w.DeferDelete != nil {
+			// Terminal cancellations (window expiry, retry exhaustion) schedule
+			// the remote NMI delete through the shared mechanism (#344).
+			concrete.SetDeferredDeleteScheduler(w.DeferDelete)
+		}
+		lifecycle = concrete
 	}
 	total := 0
 	successCount := 0
 	failCount := 0
 	windowExpiredCount := 0
 	materializedCount := 0
+	var workErr error
 
 	for _, mid := range merchantIDs {
 		if mid == nil {
@@ -231,9 +240,13 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 				"count": len(dueSubscriptions), "merchant_id": merchantID.String(),
 			}).Info("Dunning: processing due subscriptions")
 
+			var merchantErr error
 			for _, sub := range dueSubscriptions {
 				progress.Mark(mctx, "dunning subscription "+sub.ID.String())
-				outcome := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
+				outcome, processErr := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
+				if processErr != nil {
+					merchantErr = errors.Join(merchantErr, fmt.Errorf("subscription %s: %w", sub.ID, processErr))
+				}
 				// #511 Phase E: re-converge this customer inline after the dunning
 				// transition (past_due / grace / terminal cancel / renewal) — already
 				// on the merchant-scoped connection, so call Converge directly. Best-
@@ -253,11 +266,12 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 					failCount++
 				}
 			}
-			return nil
+			return merchantErr
 		}); err != nil {
 			// One merchant's failure must not abort the rest of the run.
 			log.WithContext(ctx).WithError(err).WithField("merchant_id", merchantID.String()).
 				Error("Dunning: merchant pass failed; continuing")
+			workErr = errors.Join(workErr, fmt.Errorf("merchant %s: %w", merchantID, err))
 		}
 	}
 
@@ -270,17 +284,23 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 		"materialized":   materializedCount,
 	}).Info("Dunning: run completed")
 
-	return nil
+	return workErr
+}
+
+type dunningLifecycle interface {
+	ApplyLocalUnknown(context.Context, *db.DB, *models.Subscription) error
+	FailMembership(context.Context, *subscriptions.FailMembershipParams) error
+	RenewMembership(context.Context, *subscriptions.RenewMembershipParams) error
 }
 
 // processSubscription attempts a dunning rebill for a single subscription.
 func (w *DunningWorker) processSubscription(
 	ctx context.Context,
 	sub *models.Subscription,
-	lifecycle *subscriptions.SubscriptionLifecycleService,
+	lifecycle dunningLifecycle,
 	priceSvc *catalog.PriceService,
 	materialize bool,
-) dunningOutcome {
+) (dunningOutcome, error) {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
 	railName := resolveSubscriptionRail(sub)
@@ -288,7 +308,7 @@ func (w *DunningWorker) processSubscription(
 
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		logEntry.Warn("Dunning: past_due subscription has no current period end; skipping rebill")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 
 	periodEnd := sub.CurrentPeriodEndsAt.UTC()
@@ -324,7 +344,7 @@ func (w *DunningWorker) processSubscription(
 	}
 	window := collection.Window(cycleHours)
 	if w.now().UTC().After(periodEnd.Add(window)) {
-		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window)
+		return w.parkStaleSubscription(ctx, logEntry, sub, lifecycle, periodEnd, window), nil
 	}
 
 	// #635: a provider-auto-billed subscription is charged by the provider itself,
@@ -333,7 +353,7 @@ func (w *DunningWorker) processSubscription(
 	if providerAutoBilled {
 		logEntry.WithField("rail", railName).
 			Info("Dunning: provider-auto-billed (vault-less) subscription; skipping rebill, awaiting provider-pull reconciliation (#632/#633)")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 
 	// #730/#788: the armed rail state is the ONLY arming plane — a merchant
@@ -342,13 +362,13 @@ func (w *DunningWorker) processSubscription(
 	// unarmable account parks on the ledger with its fail-closed reason).
 	if !w.storeArmsNMI(ctx, sub) {
 		logEntry.WithFields(log.Fields{"rail": railName, "provider": providerKey}).Warn("NMI rail is not armed for this merchant; skipping")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 
 	orderReference := rebillOrderReference(sub)
 	if orderReference == "" {
 		logEntry.Warn("Dunning: unable to build rebill order reference; skipping rebill")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 
 	// Materialize (#366, mode=limited): record the charge decision as a
@@ -362,7 +382,7 @@ func (w *DunningWorker) processSubscription(
 		genSub, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID)
 		if err != nil {
 			logEntry.WithError(err).Warn("Dunning (materialize): failed to load subscription merchant for rebill intent")
-			return dunningOutcomeFailed
+			return dunningOutcomeFailed, nil
 		}
 		attemptOrdinal := 0
 		if sub.RetryAttempts != nil {
@@ -390,14 +410,14 @@ func (w *DunningWorker) processSubscription(
 		})
 		if err != nil {
 			logEntry.WithError(err).Warn("Dunning (materialize): failed to enqueue rebill intent")
-			return dunningOutcomeFailed
+			return dunningOutcomeFailed, nil
 		}
 		logEntry.WithFields(log.Fields{
 			"intent_id":     row.ID,
 			"intent_status": row.Status,
 			"window_end":    windowEnd,
 		}).Info("Dunning (materialize): charge intent on the ledger; executor drains it when the mode allows")
-		return dunningOutcomeMaterialized
+		return dunningOutcomeMaterialized, nil
 	}
 
 	// #840: our own payment-method row is missing or incomplete. This is the
@@ -419,23 +439,23 @@ func (w *DunningWorker) processSubscription(
 	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
 		if err := lifecycle.ApplyLocalUnknown(ctx, w.DB, sub); err != nil {
 			logEntry.WithError(err).Error("Dunning: failed to park subscription with unusable payment method")
-			return dunningOutcomeFailed
+			return dunningOutcomeFailed, nil
 		}
 		logEntry.WithFields(log.Fields{
 			"payment_method_present": pm != nil,
 			"rail":                   railName,
 		}).Error("Dunning: local payment-method data unusable for rebill (OUR row, not a provider decline); subscription PARKED as unknown — no attempt counted, no cancellation, no provider delete. Operator: reconcile the vault refs")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 
 	claimed, err := w.claimDunningAttempt(ctx, sub, w.now())
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to claim subscription for rebill")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 	if !claimed {
 		logEntry.Info("Dunning: subscription was already claimed or no longer due")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 
 	// The provider-side charge flows through the intent ledger (#358 phase C):
@@ -447,7 +467,7 @@ func (w *DunningWorker) processSubscription(
 	genSub, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID)
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to load subscription merchant for rebill intent")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 	attemptOrdinal := 0
 	if sub.RetryAttempts != nil {
@@ -475,7 +495,7 @@ func (w *DunningWorker) processSubscription(
 	})
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to enqueue durable manual rebill intent")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 	logEntry = logEntry.WithField("intent_id", intent.ID)
 
@@ -488,10 +508,10 @@ func (w *DunningWorker) processSubscription(
 		if refreshed, rerr := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); rerr == nil &&
 			models.SubscriptionStatus(refreshed.Status) == models.StatusPastDue && txnID != "" {
 			logEntry.Warn("Dunning: repairing local lifecycle from durable successful rebill intent")
-			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, rail, txnID)
+			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, rail, txnID), nil
 		}
 		logEntry.Info("Dunning: rebill successful")
-		return dunningOutcomeSucceeded
+		return dunningOutcomeSucceeded, nil
 
 	case intents.StatusFailedTerminal:
 		// Declined (now, or durably on an earlier pass — the evidence carries
@@ -505,7 +525,7 @@ func (w *DunningWorker) processSubscription(
 		// verifier resolves it via the NMI Query API, and on late-confirmed
 		// success the handler's finalize repairs the lifecycle.
 		logEntry.Warn("Dunning: manual rebill status unknown; verifier will resolve via provider reads (no further automatic charge for this attempt)")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 
 	case intents.StatusPending, intents.StatusInFlight, intents.StatusFailedRetryable:
 		// Parked (mode gate, unconfigured client) or owned by another
@@ -513,12 +533,12 @@ func (w *DunningWorker) processSubscription(
 		// window expires it if the blocker outlasts the dunning window.
 		logEntry.WithField("reason", normalize.FromPtr(intent.LastFailureReason)).
 			Info("Dunning: rebill intent not executed this pass; ledger executor will drain it")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 
 	default: // superseded, expired
 		logEntry.WithField("intent_status", intent.Status).
 			Info("Dunning: rebill intent no longer applicable")
-		return dunningOutcomeFailed
+		return dunningOutcomeFailed, nil
 	}
 }
 
@@ -529,10 +549,10 @@ func (w *DunningWorker) applyDeclinedRebill(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
-	lifecycle *subscriptions.SubscriptionLifecycleService,
+	lifecycle dunningLifecycle,
 	rail models.Rail,
 	intent gen.OpenrailsRailIntent,
-) dunningOutcome {
+) (dunningOutcome, error) {
 	reason := normalize.FromPtr(intent.LastFailureReason)
 	if reason == "" {
 		reason = "rebill declined"
@@ -599,9 +619,13 @@ func (w *DunningWorker) applyDeclinedRebill(
 		TerminalCertainty:   certainty,
 		TerminalBlocked:     blocked,
 	}); err != nil {
-		logEntry.WithError(err).Warn("apply failure policy after declined rebill")
+		transitionErr := fmt.Errorf("apply failure policy after declined rebill: %w", err)
+		if releaseErr := w.releaseDunningAttempt(ctx, sub); releaseErr != nil {
+			return dunningOutcomeFailed, errors.Join(transitionErr, releaseErr)
+		}
+		return dunningOutcomeFailed, transitionErr
 	}
-	return dunningOutcomeFailed
+	return dunningOutcomeFailed, nil
 }
 
 // manualRebillEvidenceString reads one string field off the intent's
@@ -646,7 +670,7 @@ func (w *DunningWorker) parkStaleSubscription(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
-	lifecycle *subscriptions.SubscriptionLifecycleService,
+	lifecycle dunningLifecycle,
 	periodEnd time.Time,
 	window time.Duration,
 ) dunningOutcome {
@@ -665,7 +689,7 @@ func (w *DunningWorker) applySuccessfulRebill(
 	ctx context.Context,
 	logEntry *log.Entry,
 	sub *models.Subscription,
-	lifecycle *subscriptions.SubscriptionLifecycleService,
+	lifecycle dunningLifecycle,
 	priceSvc *catalog.PriceService,
 	rail models.Rail,
 	transactionID string,
@@ -700,11 +724,15 @@ func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Sub
 	if w == nil || w.DB == nil || sub == nil {
 		return false, errors.New("dunning worker database and subscription are required")
 	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return false, fmt.Errorf("claim dunning attempt: %w", err)
+	}
 
 	claimedAt := now.UTC()
 	leaseUntil := claimedAt.Add(dunningAttemptLease)
 	rowsAffected, err := w.DB.Gen(ctx).ClaimDunningAttempt(ctx, gen.ClaimDunningAttemptParams{
-		ID: sub.ID, LeaseUntil: leaseUntil, ClaimedAt: claimedAt,
+		ID: sub.ID, MerchantID: merchantID.UUID(), LeaseUntil: leaseUntil, ClaimedAt: claimedAt,
 	})
 	if err != nil {
 		return false, fmt.Errorf("read dunning claim result: %w", err)
@@ -716,6 +744,27 @@ func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Sub
 	sub.LastRetryAt = &claimedAt
 	sub.NextRetryAt = &leaseUntil
 	return true, nil
+}
+
+func (w *DunningWorker) releaseDunningAttempt(ctx context.Context, sub *models.Subscription) error {
+	if w == nil || w.DB == nil || sub == nil || sub.LastRetryAt == nil || sub.NextRetryAt == nil {
+		return errors.New("release dunning attempt requires its claimed subscription")
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("release dunning attempt: %w", err)
+	}
+	rowsAffected, err := w.DB.Gen(ctx).ReleaseDunningAttempt(ctx, gen.ReleaseDunningAttemptParams{
+		ID: sub.ID, MerchantID: merchantID.UUID(), ClaimedAt: *sub.LastRetryAt, LeaseUntil: *sub.NextRetryAt,
+	})
+	if err != nil {
+		return fmt.Errorf("release dunning attempt claim: %w", err)
+	}
+	if rowsAffected == 0 {
+		return errors.New("release dunning attempt claim: subscription claim changed before release")
+	}
+	sub.NextRetryAt = sub.LastRetryAt
+	return nil
 }
 
 func rebillOrderReference(sub *models.Subscription) string {

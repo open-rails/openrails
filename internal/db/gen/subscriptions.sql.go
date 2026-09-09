@@ -18,6 +18,7 @@ SET next_retry_at = $2::timestamptz,
     last_retry_at = $3::timestamptz,
     updated_at = $3::timestamptz
 WHERE id = $1
+  AND merchant_id = $4
   AND status = 'past_due'
   AND next_retry_at IS NOT NULL AND next_retry_at <= $3::timestamptz
   AND deleted_at IS NULL
@@ -27,12 +28,18 @@ type ClaimDunningAttemptParams struct {
 	ID         uuid.UUID
 	LeaseUntil time.Time
 	ClaimedAt  time.Time
+	MerchantID uuid.UUID
 }
 
 // Lease-style claim: pushes next_retry_at out so concurrent dunning runs
 // cannot double-charge; only claims a still-due past_due row.
 func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttemptParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimDunningAttempt, arg.ID, arg.LeaseUntil, arg.ClaimedAt)
+	result, err := q.db.Exec(ctx, claimDunningAttempt,
+		arg.ID,
+		arg.LeaseUntil,
+		arg.ClaimedAt,
+		arg.MerchantID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1673,6 +1680,42 @@ func (q *Queries) MarkCancelledSubscriptionsSuperseded(ctx context.Context, arg 
 		arg.ProductID,
 		arg.SupersededBy,
 		arg.ExcludeID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const releaseDunningAttempt = `-- name: ReleaseDunningAttempt :execrows
+UPDATE openrails.subscriptions
+SET next_retry_at = $1::timestamptz,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND merchant_id = $3
+  AND status = 'past_due'
+  AND last_retry_at = $1::timestamptz
+  AND next_retry_at = $4::timestamptz
+  AND deleted_at IS NULL
+`
+
+type ReleaseDunningAttemptParams struct {
+	ClaimedAt  time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	LeaseUntil time.Time
+}
+
+// A provider decline is already durable before its lifecycle transition runs.
+// If that transition rolls back, make this exact claim immediately eligible
+// for River's retry without advancing the attempt ordinal (and therefore
+// without deriving a fresh charge intent).
+func (q *Queries) ReleaseDunningAttempt(ctx context.Context, arg ReleaseDunningAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseDunningAttempt,
+		arg.ClaimedAt,
+		arg.ID,
+		arg.MerchantID,
+		arg.LeaseUntil,
 	)
 	if err != nil {
 		return 0, err

@@ -412,7 +412,8 @@ func (r *simRig) tick(t *testing.T, ctx context.Context, scope converge.Scope, s
 
 	now := r.clock.Now().UTC()
 	if sub.Status == models.StatusPastDue && sub.NextRetryAt != nil && !sub.NextRetryAt.UTC().After(now) {
-		r.dunning.processSubscription(ctx, sub, r.lifecycle(), r.priceSvc, false)
+		_, processErr := r.dunning.processSubscription(ctx, sub, r.lifecycle(), r.priceSvc, false)
+		require.NoError(t, processErr)
 		sub, err = subscriptions.NewSubscriptionRepo(r.dbi).GetByID(ctx, subID)
 		require.NoError(t, err)
 	}

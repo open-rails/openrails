@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Store persists intents on the ledger. Producers call Enqueue/Supersede from
@@ -326,6 +327,10 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 	if keepPayload && keepEvidence {
 		return nil // nothing to slim
 	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("intents: prune succeeded intent: %w", err)
+	}
 	qx := s.db.Qx(ctx)
 	if keepEvidence {
 		// Drop the payload only; leave result_evidence intact for the handler's
@@ -333,7 +338,7 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
 			    SET payload = NULL, updated_at = now()
-			  WHERE id = $1 AND status = 'succeeded'`, id)
+			  WHERE id = $1 AND merchant_id = $2 AND status = 'succeeded'`, id, mid.UUID())
 		return err
 	}
 	var ev []byte
@@ -348,23 +353,27 @@ func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[s
 		_, err := qx.Exec(ctx,
 			`UPDATE openrails.rail_intents
 			    SET result_evidence = $2, updated_at = now()
-			  WHERE id = $1 AND status = 'succeeded'`, id, ev)
+			  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded'`, id, ev, mid.UUID())
 		return err
 	}
-	_, err := qx.Exec(ctx,
+	_, err = qx.Exec(ctx,
 		`UPDATE openrails.rail_intents
 		    SET payload = NULL, result_evidence = $2, updated_at = now()
-		  WHERE id = $1 AND status = 'succeeded'`, id, ev)
+		  WHERE id = $1 AND merchant_id = $3 AND status = 'succeeded'`, id, ev, mid.UUID())
 	return err
 }
 
 // PruneTerminalPayload removes a short-lived credential from a terminal
 // intent while retaining its status, reason, and non-sensitive evidence.
 func (s *Store) PruneTerminalPayload(ctx context.Context, id uuid.UUID) error {
-	_, err := s.db.Qx(ctx).Exec(ctx,
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("intents: prune terminal intent: %w", err)
+	}
+	_, err = s.db.Qx(ctx).Exec(ctx,
 		`UPDATE openrails.rail_intents
 		    SET payload = NULL, updated_at = now()
-		  WHERE id = $1 AND status = 'failed_terminal'`, id)
+		  WHERE id = $1 AND merchant_id = $2 AND status = 'failed_terminal'`, id, mid.UUID())
 	return err
 }
 
@@ -402,12 +411,17 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 	if err != nil {
 		return fmt.Errorf("intents: marshal progress evidence: %w", err)
 	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("intents: record progress: %w", err)
+	}
 	_, err = s.db.Qx(ctx).Exec(ctx,
 		`UPDATE openrails.rail_intents
 		    SET result_evidence = coalesce(result_evidence, '{}'::jsonb) || $2::jsonb,
 		        updated_at = now()
 		  WHERE id = $1
-		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`, id, b)
+		    AND merchant_id = $3
+		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`, id, b, mid.UUID())
 	return err
 }
 

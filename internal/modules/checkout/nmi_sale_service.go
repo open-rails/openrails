@@ -171,7 +171,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 			return nil, fmt.Errorf("sale succeeded but evidence unreadable: %w", derr)
 		}
 		payload, _ := json.Marshal(cached)
-		_ = s.IdempotencyStore.Complete(ctx, idempOp, idempotencyKey, payload)
+		completeCheckoutIdempotency(ctx, s.IdempotencyStore, idempOp, idempotencyKey, payload)
 		return saleResponse(cached, "Purchase completed successfully"), nil
 	case intents.StatusFailedTerminal:
 		// Verified-clean decline/rejection: no money moved. Direct best-effort

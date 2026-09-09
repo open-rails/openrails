@@ -673,7 +673,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Evidence:   map[string]any{"subscription_id": subID.String(), "next_retry_at": now},
 			Repair: func(ctx context.Context) error {
 				_, e := q.SetSubscriptionNextRetry(ctx, gen.SetSubscriptionNextRetryParams{
-					ID: subID, NextRetryAt: p.e.Now(),
+					ID: subID, MerchantID: scope.Merchant.UUID(), NextRetryAt: p.e.Now(),
 				})
 				return e
 			},
