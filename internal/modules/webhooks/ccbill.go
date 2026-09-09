@@ -1517,7 +1517,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 
 			// End entitlements for this subscription immediately.
 			if err := entSvc.RevokeSourcesForSubscription(ctx, sub.CustomerID.String(), sub.ID, models.EntitlementRevokeRefund, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to revoke entitlements for refunded subscription")
+				return fmt.Errorf("revoke entitlements for refunded subscription %s: %w", sub.ID, err)
 			}
 			if refundLedgerErr != nil {
 				var originalPaymentID *uuid.UUID
@@ -1822,7 +1822,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 
 		// Immediately end entitlements for this subscription.
 		if err := entSvc.RevokeSourcesForSubscription(ctx, sub.CustomerID.String(), sub.ID, models.EntitlementRevokeChargeback, models.EntitlementSourceSubscription, models.EntitlementSourceGrace); err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to revoke entitlements for chargebacked subscription")
+			return fmt.Errorf("revoke entitlements for chargebacked subscription %s: %w", sub.ID, err)
 		}
 		if ledgerErr != nil {
 			var originalPaymentID *uuid.UUID

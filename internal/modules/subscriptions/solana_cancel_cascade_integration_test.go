@@ -5,6 +5,7 @@ package subscriptions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -126,6 +127,112 @@ func TestCancelMembership_SolanaWithoutEnrolledRow(t *testing.T) {
 		"SELECT status FROM openrails.subscriptions WHERE id = $1", subID,
 	).Scan(&subStatus))
 	require.Equal(t, string(models.StatusCancelled), subStatus)
+}
+
+func TestCancelMembership_SolanaCascadeFailureRollsBack(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := uuid.New().String()
+	subID := uuid.New()
+	productID := uuid.New()
+	priceID := uuid.New()
+	insertCatalogAndSub(ctx, t, dbi, now, 30, productID, priceID, subID, userID, now, now.Add(30*24*time.Hour))
+
+	solRepo := solanasubs.NewSolanaSubscriptionRepo(dbi)
+	solRow := newDueSolanaSubscription(now, subID)
+	require.NoError(t, solRepo.Upsert(ctx, solRow))
+	t.Cleanup(func() {
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+	})
+
+	lifecycle := newLifecycleForTest(dbi)
+	injected := errors.New("injected Solana cascade failure")
+	lifecycle.cancelSolanaSubscription = func(context.Context, *db.DB, uuid.UUID) error { return injected }
+	err := lifecycle.CancelMembership(ctx, &CancelMembershipParams{
+		SubscriptionID: &subID,
+		CancelType:     models.CancelTypeUser,
+		RevokeAccess:   true,
+	})
+	require.ErrorIs(t, err, injected)
+
+	var parentStatus string
+	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT status FROM openrails.subscriptions WHERE id = $1", subID).Scan(&parentStatus))
+	require.Equal(t, string(models.StatusActive), parentStatus, "cascade failure must roll the parent cancellation back")
+	got, err := solRepo.GetBySubscriptionID(ctx, subID)
+	require.NoError(t, err)
+	require.Equal(t, models.SolanaSubscriptionActive, got.Status)
+
+	lifecycle.cancelSolanaSubscription = nil
+	require.NoError(t, lifecycle.CancelMembership(ctx, &CancelMembershipParams{
+		SubscriptionID: &subID,
+		CancelType:     models.CancelTypeUser,
+		RevokeAccess:   true,
+	}))
+	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT status FROM openrails.subscriptions WHERE id = $1", subID).Scan(&parentStatus))
+	require.Equal(t, string(models.StatusCancelled), parentStatus)
+	got, err = solRepo.GetBySubscriptionID(ctx, subID)
+	require.NoError(t, err)
+	require.Equal(t, models.SolanaSubscriptionCancelled, got.Status)
+}
+
+func TestListDueSolanaSubscriptions_ExcludesTerminalParent(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+
+	now := time.Now().UTC().Truncate(time.Second)
+	userID := uuid.New().String()
+	subID := uuid.New()
+	productID := uuid.New()
+	priceID := uuid.New()
+	insertCatalogAndSub(ctx, t, dbi, now, 30, productID, priceID, subID, userID, now, now.Add(30*24*time.Hour))
+
+	solRepo := solanasubs.NewSolanaSubscriptionRepo(dbi)
+	solRow := newDueSolanaSubscription(now, subID)
+	require.NoError(t, solRepo.Upsert(ctx, solRow))
+	t.Cleanup(func() {
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.solana_subscriptions WHERE subscription_id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = dbi.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+	})
+
+	due, err := solRepo.ListDue(ctx, now, 0)
+	require.NoError(t, err)
+	require.True(t, containsSolanaSub(due, solRow.ID))
+
+	_, err = dbi.Pool().Exec(ctx,
+		`UPDATE openrails.subscriptions
+		 SET status = 'cancelled', cancel_type = 'user', cancelled_at = $2, ended_at = $2, updated_at = $2
+		 WHERE id = $1`, subID, now)
+	require.NoError(t, err)
+
+	due, err = solRepo.ListDue(ctx, now, 0)
+	require.NoError(t, err)
+	require.False(t, containsSolanaSub(due, solRow.ID), "an active mirror must not make a terminal parent billable")
+}
+
+func newDueSolanaSubscription(now time.Time, subID uuid.UUID) *models.SolanaSubscription {
+	return &models.SolanaSubscription{
+		ID:                       uuid.New(),
+		MerchantID:               dbtest.TestMerchantID.UUID(),
+		SubscriptionID:           subID,
+		SubscriberWallet:         "wallet_" + uuid.NewString(),
+		AuthorityPDA:             "auth_" + uuid.NewString(),
+		SubscriptionPDA:          "subpda_" + uuid.NewString(),
+		PlanPDA:                  "plan_" + uuid.NewString(),
+		MerchantAddress:          "merchant_" + uuid.NewString(),
+		Mint:                     "mint_" + uuid.NewString(),
+		PlanCreatedAtFingerprint: 123,
+		NextPullAt:               now.Add(-time.Hour),
+		Status:                   models.SolanaSubscriptionActive,
+		CreatedAt:                now,
+		UpdatedAt:                now,
+	}
 }
 
 func insertCatalogAndSub(ctx context.Context, t *testing.T, dbi *db.DB, now time.Time, billingDays int, productID, priceID, subID uuid.UUID, userID string, periodStart, paidEnd time.Time) {
