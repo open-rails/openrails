@@ -233,9 +233,10 @@ type Runtime struct {
 	// configured (safe no-op).
 	CardAbuseGuard *abuse.CardAbuseGuard
 
-	riverStarted        bool
-	externalRiverClient bool
-	riverSchema         string // true if River client was provided externally
+	riverStarted          bool
+	workerConsumerRunning atomic.Bool
+	externalRiverClient   bool
+	riverSchema           string // true if River client was provided externally
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without
@@ -313,6 +314,7 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 	// Only stop River client if we created it (not external)
 	if r.RiverClient != nil && r.riverStarted && !r.externalRiverClient {
+		r.workerConsumerRunning.Store(false)
 		log.Info("Stopping River background workers...")
 		if err := r.RiverClient.Stop(ctx); err != nil {
 			// During shutdown, Stop can surface context cancellation if the passed ctx is cancelled.
@@ -428,6 +430,8 @@ func (r *Runtime) RunWorkers(ctx context.Context) error {
 		r.riverStarted = false
 		return err
 	}
+	r.workerConsumerRunning.Store(true)
+	defer r.workerConsumerRunning.Store(false)
 
 	<-ctx.Done()
 	return ctx.Err()

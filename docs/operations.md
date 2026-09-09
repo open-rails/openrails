@@ -40,7 +40,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 
 | Command | Purpose |
 |---|---|
-| `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled) / workers only |
+| `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled; `--no-workers` remains live but not ready) / workers only |
 | `migrate up` / `migrate pg` | apply all migrations / Postgres-only (River + OpenRails) |
 | `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
@@ -562,11 +562,23 @@ liveness beat rather than from its start.
 `GET /health/live` (liveness) and `GET /health/ready` (readiness;
 `?verbose=1` adds per-dependency detail), with K8s aliases `/healthz` /
 `/readyz`. There is no `/health`. Embedded hosts wire the same checks into
-their own handler.
+their own handler. Readiness requires Postgres, configured Redis, the active
+merchant-secret backend, the River producer and a locally managed River worker
+consumer; `run-server --no-workers` is therefore live but not ready. A
+host-owned embedded River client is outside that local-process check and is
+observed with `CheckJobProgress`.
+
+There is no Prometheus/runtime-metrics endpoint. The authenticated
+`/v1/merchant/metrics` query and schema routes expose merchant business
+analytics, not Go/process telemetry; runtime observability remains parked in
+tracker issue #701.
 
 ## Operating modes (the safety levers)
 
-Two orthogonal settings:
+Two orthogonal settings. `env` is the strictness label around them: only exact
+`dev` or `development` values enable development relaxations; every other
+non-empty value, including `staging`, `production`, and misspellings, receives
+the production-strict gates.
 
 - **`provider_write_mode`** (yaml) / `PROVIDER_WRITE_MODE` (env) /
   `--provider-write-mode` (CLI flag; flag beats env beats yaml) — the pure
@@ -623,6 +635,10 @@ key or stale verdict re-probes, and cache failures degrade to probing.
 Sandbox is allowed in every environment (#762) — what keeps it honest is
 rail-credential validation (the live-key refusal and the NMI live-gateway
 probe, which ask the credential itself), not the environment string.
+
+The converse Stripe mismatch is also fatal in every environment: explicit
+`test_mode = live` with an `sk_test_` or `rk_test_` key refuses boot instead of
+silently disabling the configured rail.
 
 ### Cutover: booting against production credentials
 

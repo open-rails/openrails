@@ -16,8 +16,8 @@ OpenRails needs one server-side key per Stripe account: either a standard secret
 accepted; the live/test prefix is enforced against your deployment posture:
 
 - `test_mode: sandbox` + a live key (`sk_live_`/`rk_live_`) → **refuses to boot**.
-- Live mode + a test key → refuses to boot outside development (in development the
-  key is warned about and the rail disabled).
+- `test_mode: live` + a test key (`sk_test_`/`rk_test_`) → **refuses to boot** in
+  every environment rather than silently disabling the rail.
 
 Key health is validated with a read-only `GET /v1/balance` — no charge is made.
 

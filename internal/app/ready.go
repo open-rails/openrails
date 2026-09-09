@@ -25,7 +25,9 @@ type ReadinessDependency struct {
 // fail readiness; when configured, an unreachable Redis DOES fail it), the
 // merchant-secret backend (armed at boot, AND live-reachable when armed with
 // a Vault-backed store — a paused/unreachable Vault fails this even though
-// arming succeeded earlier), and River producer presence.
+// arming succeeded earlier), River producer presence, and — when OpenRails
+// owns River — a running local worker consumer. Host-owned embedded River is
+// started outside this runtime, so its progress is reported by RiverProgress.
 //
 // Returns every dependency's status (for verbose diagnostics) plus a single
 // wrapped error naming the FIRST failing one; nil when everything the running
@@ -62,6 +64,13 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 		riverErr = fmt.Errorf("river producer not initialized")
 	}
 	probe("river", riverErr)
+	if !r.externalRiverClient {
+		var consumerErr error
+		if !r.workerConsumerRunning.Load() {
+			consumerErr = fmt.Errorf("managed River worker consumer is not running")
+		}
+		probe("river_consumer", consumerErr)
+	}
 
 	for _, d := range deps {
 		if !d.Available {
