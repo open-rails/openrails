@@ -24,6 +24,47 @@ tasks:
     cmds:
       - task -l
 
+  doctor:
+    desc: Diagnose local build and test prerequisites with actionable fixes
+    cmds:
+      - bash scripts/doctor.sh
+
+  setup:
+    desc: Prepare a fresh clone after system prerequisites are installed
+    cmds:
+      - bash scripts/setup.sh
+
+  tooling-test:
+    desc: Run focused regression tests for local developer tooling
+    cmds:
+      - bash scripts/doctor_test.sh
+      - bash scripts/setup_test.sh
+      - bash scripts/ci_local_test.sh
+      - bash scripts/pre_push_test.sh
+      - bash scripts/test_integration_test.sh
+
+  ci-local:
+    desc: Run the local Go/shared gates used by CI (database required)
+    cmds:
+      - task tooling-test
+      - bash scripts/check_business_time_test.sh
+      - bash scripts/check_business_time.sh
+      - bash scripts/sql-lint.sh
+      - go mod download
+      - go vet ./...
+      - go build ./...
+      - go vet -tags integration ./...
+      - |
+        for d in examples/*/; do
+          (cd "$d" && go build ./... && go vet ./...)
+        done
+      - go test -count=1 -race ./...
+      - task lint
+      - bash scripts/scan-injected-code.sh --all --self-test
+      - MIGRATION_PREFIX_NO_FETCH=1 bash scripts/migration-prefix-collision.sh
+      # sqlc-check prepares its database or fails; this must never be conditional.
+      - task sqlc-check
+
   build:
     desc: Build the binary locally
     cmds:
@@ -130,6 +171,15 @@ tasks:
     cmds:
       - '{{.SQLC}} generate'
       - '{{.SQLC}} vet'
+
+  sqlc-generate-check:
+    desc: Regenerate sqlc bindings and fail when the working tree differs
+    env:
+      SQLC_DATABASE_URL:
+        sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
+    cmds:
+      - '{{.SQLC}} generate'
+      - git diff --exit-code -- internal/db/gen
 
   sqlc-check:
     desc: CI gate — sqlc generate + vet + query audit + SQL discipline lints

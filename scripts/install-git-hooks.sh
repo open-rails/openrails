@@ -6,9 +6,8 @@
 #
 #   ./scripts/install-git-hooks.sh
 #
-# Installs a pre-commit hook that runs scripts/scan-injected-code.sh over the
-# staged files (see docs/injection-scan.md). The hook is a symlink to the
-# tracked scripts/hooks/pre-commit, so it stays current with the repo.
+# Installs every hook tracked in scripts/hooks/. Each hook is a symlink to its
+# tracked source, so it stays current with the repo.
 #
 # An existing, unrelated hook is never overwritten silently: it is moved aside
 # to <hook>.local and the installer tells you where it went.
@@ -24,17 +23,17 @@ esac
 
 mkdir -p "$hooks_dir"
 
-for hook in pre-commit; do
-	src="$root/scripts/hooks/$hook"
+found_hook=false
+for src in "$root"/scripts/hooks/*; do
+	[ -f "$src" ] || continue
+	found_hook=true
+	hook="$(basename "$src")"
 	dst="$hooks_dir/$hook"
-
-	[ -f "$src" ] || {
-		echo "missing tracked hook: $src" >&2
-		exit 1
-	}
 	chmod +x "$src"
 
-	if [ -L "$dst" ] && [ "$(readlink -f "$dst")" = "$(readlink -f "$src")" ]; then
+	# Links created below always use the absolute source path. Comparing that
+	# exact value is portable to macOS, whose readlink has no -f flag.
+	if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
 		echo "already installed: $dst"
 		continue
 	fi
@@ -48,5 +47,10 @@ for hook in pre-commit; do
 	echo "installed: $dst -> $src"
 done
 
+[ "$found_hook" = true ] || {
+	echo "no tracked hooks found under $root/scripts/hooks" >&2
+	exit 1
+}
+
 echo
-echo "Verify with: ./scripts/scan-injected-code.sh --self-test"
+echo "Verify with: task doctor"
