@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,4 +24,10 @@ func TestIntPtrTo32(t *testing.T) {
 	under := math.MinInt32 - 1
 	got = IntPtrTo32(&under)
 	require.Equal(t, int32(math.MinInt32), *got)
+}
+
+func TestPaymentFromGenPreservesUnregisteredPersistedRail(t *testing.T) {
+	payment, err := PaymentFromGen(gen.OpenrailsPayment{Rail: "paypal"})
+	require.NoError(t, err)
+	require.Equal(t, Rail("paypal"), payment.Rail)
 }
