@@ -17,7 +17,10 @@ fi
 args=()
 for arg in "$@"; do
   if [ "$arg" = "./..." ]; then
-    mapfile -t pkgs < <(integration_packages)
+    pkgs=()
+    while IFS= read -r pkg; do
+      [ -n "$pkg" ] && pkgs+=("$pkg")
+    done < <(integration_packages)
     if [ "${#pkgs[@]}" -eq 0 ]; then
       echo "test_integration.sh: no packages carry the 'integration' build tag; refusing to test nothing" >&2
       exit 1
@@ -32,9 +35,23 @@ done
 export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5434}"
 export GARNET_HOST_PORT="${GARNET_HOST_PORT:-6380}"
 
+port_is_listening() {
+  (exec 3<>"/dev/tcp/127.0.0.1/$1") >/dev/null 2>&1
+}
+
+compose_postgres_owns_port() {
+  docker compose -f docker-compose.yaml port postgres 5432 2>/dev/null |
+    grep -Eq ":$1$"
+}
+
 # An explicitly supplied pair is owned by the caller. Do not start another
 # compose stack (or mutate its ports) when testing against existing services.
 if [[ -z "${OPENRAILS_TEST_DB_DSN:-${OPENRAILS_TEST_DB_URL:-}}" || -z "${OPENRAILS_TEST_REDIS_ADDR:-}" ]]; then
+  if port_is_listening "${POSTGRES_HOST_PORT}" && ! compose_postgres_owns_port "${POSTGRES_HOST_PORT}"; then
+    echo "test_integration.sh: host port ${POSTGRES_HOST_PORT} is already held by a non-Compose process." >&2
+    echo "Set POSTGRES_HOST_PORT to a free port (and let .env derive DB_URL/DB_PORT from it), or stop the listener." >&2
+    exit 1
+  fi
   docker compose -f docker-compose.yaml up -d --wait postgres garnet
 fi
 
