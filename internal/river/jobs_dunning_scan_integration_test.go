@@ -260,6 +260,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
+	lifecycle.SetCreditGranter(moneySvc)
 
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 
@@ -270,7 +271,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 		if gerr != nil {
 			return gerr
 		}
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, false)
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, false)
 		return nil
 	}))
 	assert.Equal(t, dunningOutcomeFailed, outcome)
@@ -302,7 +303,7 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 		if gerr != nil {
 			return gerr
 		}
-		outcome = worker.processSubscription(mctx, autoSub, lifecycle, priceSvc, moneySvc, false)
+		outcome = worker.processSubscription(mctx, autoSub, lifecycle, priceSvc, false)
 		return nil
 	}))
 	assert.Equal(t, dunningOutcomeFailed, outcome)

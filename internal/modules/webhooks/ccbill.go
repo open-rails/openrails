@@ -634,27 +634,6 @@ func (s *CCBillWebhookService) handleNewSaleSuccessInternal(ctx context.Context,
 		return fmt.Errorf("failed to create membership: %w", err)
 	}
 
-	if s.MoneyService != nil {
-		periodEnd := time.Time{}
-		if paidTermEnd != nil {
-			periodEnd = paidTermEnd.UTC()
-		} else if subscription.CurrentPeriodEndsAt != nil {
-			periodEnd = subscription.CurrentPeriodEndsAt.UTC()
-		}
-		if !periodEnd.IsZero() {
-			if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
-				SubscriptionID: subscription.ID,
-				PeriodEnd:      periodEnd,
-				Cadence:        models.CreditGrantCadenceOnce,
-				Source:         "subscription_initial",
-			}); err != nil {
-				// #675: propagate for retry — the deposit is idempotent per
-				// (subscription, label, period_end); warn-and-ack lost the lot.
-				return fmt.Errorf("grant initial subscription credits (CCBill): %w", err)
-			}
-		}
-	}
-
 	if s.CheckoutSessionService != nil {
 		session, err := s.findCCBillCheckoutSession(ctx, data.ReservationID, userID, price.ID)
 		if err != nil {
@@ -2016,27 +1995,6 @@ func (s *CCBillWebhookService) handleRenewalSuccessInternal(ctx context.Context,
 
 	// Note: grace window cleanup happens inside RenewMembership (before pushing the next paid window)
 	// to avoid the grace tail interfering with scheduling.
-
-	if s.MoneyService != nil {
-		periodEnd := time.Time{}
-		if paidTermEnd != nil {
-			periodEnd = paidTermEnd.UTC()
-		} else if subscription.CurrentPeriodEndsAt != nil {
-			periodEnd = subscription.CurrentPeriodEndsAt.UTC()
-		}
-		if !periodEnd.IsZero() {
-			if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
-				SubscriptionID: subscription.ID,
-				PeriodEnd:      periodEnd,
-				Cadence:        models.CreditGrantCadencePerRenewal,
-				Source:         "subscription_renewal",
-			}); err != nil {
-				// #675: propagate for retry — the deposit is idempotent per
-				// (subscription, label, period_end); warn-and-ack lost the lot.
-				return fmt.Errorf("grant renewal subscription credits (CCBill): %w", err)
-			}
-		}
-	}
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"subscriptionID":    subscription.ID,

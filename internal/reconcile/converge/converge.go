@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -151,6 +152,7 @@ func NewConvergeEngine(database *db.DB) *ConvergeEngine {
 	// Side-effect deps (notifications / event log / payments / deferred delete) are
 	// nil: convergence applies LOCAL state only — converge-not-replay.
 	e.lifecycle = subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
+	e.lifecycle.SetCreditGranter(money.NewMoneyService(database, clockwork.NewRealClock()))
 	e.passes = []Pass{&derivePass{e: e}, &lifePass{e: e}, &conPass{e: e}}
 	e.notify = &notifyPass{e: e}
 	return e

@@ -125,6 +125,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
+	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: the pass runs on a merchant-scoped
 	// connection, so both the read and the enqueue carry the GUC. On the bare
@@ -138,7 +139,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 		if e != nil {
 			return e
 		}
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
 		return nil
 	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
@@ -172,7 +173,7 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 
 	// Idempotent: a second materialize pass refreshes the same pending intent.
 	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
 		return nil
 	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
@@ -271,6 +272,7 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
+	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: the pass runs on a merchant-scoped
 	// connection, so both the read and the lifecycle writes carry the GUC.
@@ -280,7 +282,7 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, moneySvc, true)
+		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
 		return nil
 	}))
 	assert.Equal(t, dunningOutcomeWindowExpired, outcome)

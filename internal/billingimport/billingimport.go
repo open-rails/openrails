@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -230,6 +231,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// and deferred-delete scheduler share this transaction so subscription,
 		// evidence, payment and intent writes cannot partially commit.
 		lc := subscriptions.NewSubscriptionLifecycleService(txdb, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(asOf))
+		lc.SetCreditGranter(money.NewMoneyService(txdb, clockwork.NewFakeClockAt(asOf)))
 		deferDelete := intents.NewNMIDeleteScheduler(txdb, nil, intents.OriginUser, "billing-import terminal cancel, remote may be alive")
 		lc.SetDeferredDeleteScheduler(deferDelete)
 

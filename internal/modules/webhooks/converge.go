@@ -5,13 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -84,34 +82,15 @@ func markSubscriptionDirty(ctx context.Context, enq SubscriptionConvergeEnqueuer
 
 // afterConvergeTransition lands the rail-agnostic post-transition effects the
 // old payload-apply handlers carried:
-//   - TransitionRenew: grant the period's subscription credits (idempotent per
-//     (subscription, label, period_end)); a failure propagates so the job
-//     retries — warn-and-ack loses the lot (#675).
 //   - TransitionPastDue: payment-method-failed notification (best-effort).
-func afterConvergeTransition(ctx context.Context, deps convergeDeps, sub *models.Subscription, res reconcile.SubscriptionConvergence, now time.Time) error {
+//
+// Renewal credits are part of the lifecycle transition's transaction; there
+// is deliberately no post-transition credit write here.
+func afterConvergeTransition(ctx context.Context, deps convergeDeps, sub *models.Subscription, res reconcile.SubscriptionConvergence) error {
 	if !res.Applied {
 		return nil
 	}
 	switch res.Decision.Kind {
-	case reconcile.TransitionRenew:
-		if deps.MoneyService == nil || deps.SubscriptionService == nil {
-			return nil
-		}
-		updated, err := deps.SubscriptionService.GetByID(ctx, sub.ID)
-		if err != nil {
-			return fmt.Errorf("converge: reload subscription for renewal credits: %w", err)
-		}
-		if updated.CurrentPeriodEndsAt == nil || updated.CurrentPeriodEndsAt.IsZero() {
-			return nil
-		}
-		if err := deps.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
-			SubscriptionID: updated.ID,
-			PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
-			Cadence:        models.CreditGrantCadencePerRenewal,
-			Source:         "subscription_renewal",
-		}); err != nil {
-			return fmt.Errorf("converge: grant renewal subscription credits: %w", err)
-		}
 	case reconcile.TransitionPastDue:
 		if deps.NotificationService == nil {
 			return nil
@@ -137,7 +116,5 @@ func afterConvergeTransition(ctx context.Context, deps convergeDeps, sub *models
 // convergeDeps are the shared service dependencies of the per-rail converge
 // implementations.
 type convergeDeps struct {
-	MoneyService        *money.MoneyService
-	SubscriptionService *subscriptions.SubscriptionService
 	NotificationService *subscriptions.NotificationService
 }

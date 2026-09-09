@@ -344,6 +344,7 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uu
 		payments.NewPaymentService(h.DB, h.Clock),
 		h.Clock,
 	)
+	lifecycle.SetCreditGranter(money.NewMoneyService(h.DB, h.Clock))
 	lifecycle.SetConfig(h.Config)
 
 	amount := int64(0)
@@ -366,20 +367,6 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uu
 		return fmt.Errorf("renew membership: %w", err)
 	}
 
-	// Credits mirror the dunning worker's post-renew grant: failures are
-	// logged, never failed — the renewal itself is the money-critical part.
-	if updated, err := h.DB.Gen(ctx).GetSubscriptionByID(ctx, p.SubscriptionID); err != nil {
-		log.WithContext(ctx).WithError(err).Warn("manual rebill finalize: load subscription after renew for credit grants")
-	} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-		if err := money.NewMoneyService(h.DB, h.Clock).GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
-			SubscriptionID: p.SubscriptionID,
-			PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
-			Cadence:        models.CreditGrantCadencePerRenewal,
-			Source:         "subscription_renewal",
-		}); err != nil {
-			log.WithContext(ctx).WithError(err).Warn("manual rebill finalize: grant subscription credits after successful rebill")
-		}
-	}
 	return nil
 }
 

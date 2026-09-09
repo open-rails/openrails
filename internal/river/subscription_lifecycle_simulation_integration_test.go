@@ -373,7 +373,9 @@ func newSimRigWithStep(t *testing.T, dbi *db.DB, start time.Time, stub *nmiStub,
 }
 
 func (r *simRig) lifecycle() *subscriptions.SubscriptionLifecycleService {
-	return subscriptions.NewSubscriptionLifecycleService(r.dbi, r.productSvc, r.priceSvc, r.entitlementSvc, r.notifSvc, r.paymentSvc, r.clock)
+	lifecycle := subscriptions.NewSubscriptionLifecycleService(r.dbi, r.productSvc, r.priceSvc, r.entitlementSvc, r.notifSvc, r.paymentSvc, r.clock)
+	lifecycle.SetCreditGranter(r.moneySvc)
+	return lifecycle
 }
 
 // convergeToFixpoint drives the DERIVE/LIFE/CON engine to a stable state for
@@ -410,7 +412,7 @@ func (r *simRig) tick(t *testing.T, ctx context.Context, scope converge.Scope, s
 
 	now := r.clock.Now().UTC()
 	if sub.Status == models.StatusPastDue && sub.NextRetryAt != nil && !sub.NextRetryAt.UTC().After(now) {
-		r.dunning.processSubscription(ctx, sub, r.lifecycle(), r.priceSvc, r.moneySvc, false)
+		r.dunning.processSubscription(ctx, sub, r.lifecycle(), r.priceSvc, false)
 		sub, err = subscriptions.NewSubscriptionRepo(r.dbi).GetByID(ctx, subID)
 		require.NoError(t, err)
 	}

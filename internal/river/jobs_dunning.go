@@ -192,13 +192,13 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	paymentSvc := payments.NewPaymentService(w.DB, w.Clock)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.Clock)
 	lifecycle.SetConfig(w.Config)
+	moneySvc := money.NewMoneyService(w.DB, w.Clock)
+	lifecycle.SetCreditGranter(moneySvc)
 	if w.DeferDelete != nil {
 		// Terminal cancellations (window expiry, retry exhaustion) schedule
 		// the remote NMI delete through the shared mechanism (#344).
 		lifecycle.SetDeferredDeleteScheduler(w.DeferDelete)
 	}
-	moneySvc := money.NewMoneyService(w.DB, w.Clock)
-
 	total := 0
 	successCount := 0
 	failCount := 0
@@ -233,7 +233,7 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 
 			for _, sub := range dueSubscriptions {
 				progress.Mark(mctx, "dunning subscription "+sub.ID.String())
-				outcome := w.processSubscription(mctx, &sub, lifecycle, priceSvc, moneySvc, materialize)
+				outcome := w.processSubscription(mctx, &sub, lifecycle, priceSvc, materialize)
 				// #511 Phase E: re-converge this customer inline after the dunning
 				// transition (past_due / grace / terminal cancel / renewal) — already
 				// on the merchant-scoped connection, so call Converge directly. Best-
@@ -279,7 +279,6 @@ func (w *DunningWorker) processSubscription(
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
-	moneySvc *money.MoneyService,
 	materialize bool,
 ) dunningOutcome {
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
@@ -489,7 +488,7 @@ func (w *DunningWorker) processSubscription(
 		if refreshed, rerr := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); rerr == nil &&
 			models.SubscriptionStatus(refreshed.Status) == models.StatusPastDue && txnID != "" {
 			logEntry.Warn("Dunning: repairing local lifecycle from durable successful rebill intent")
-			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, moneySvc, rail, txnID)
+			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, rail, txnID)
 		}
 		logEntry.Info("Dunning: rebill successful")
 		return dunningOutcomeSucceeded
@@ -668,7 +667,6 @@ func (w *DunningWorker) applySuccessfulRebill(
 	sub *models.Subscription,
 	lifecycle *subscriptions.SubscriptionLifecycleService,
 	priceSvc *catalog.PriceService,
-	moneySvc *money.MoneyService,
 	rail models.Rail,
 	transactionID string,
 ) dunningOutcome {
@@ -692,21 +690,6 @@ func (w *DunningWorker) applySuccessfulRebill(
 	}); err != nil {
 		logEntry.WithError(err).Error("renew membership after successful rebill")
 		return dunningOutcomeFailed
-	}
-
-	if moneySvc != nil {
-		if updated, err := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); err != nil {
-			logEntry.WithError(err).Warn("load subscription after rebill for credit grants")
-		} else if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-			if err := moneySvc.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
-				SubscriptionID: sub.ID,
-				PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
-				Cadence:        models.CreditGrantCadencePerRenewal,
-				Source:         "subscription_renewal",
-			}); err != nil {
-				logEntry.WithError(err).Warn("grant subscription credits after successful rebill")
-			}
-		}
 	}
 
 	logEntry.Info("Dunning: rebill successful")

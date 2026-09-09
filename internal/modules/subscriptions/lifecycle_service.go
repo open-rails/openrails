@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
@@ -37,6 +38,7 @@ type SubscriptionLifecycleService struct {
 	EntitlementService  *entitlements.EntitlementService
 	NotificationService *NotificationService
 	PaymentService      *payments.PaymentService // For creating Payment records on renewal
+	creditGranter       SubscriptionCreditGranter
 
 	// These seams keep terminal state changes and their access side effects
 	// testable as one transaction without changing the public service API.
@@ -49,6 +51,24 @@ type SubscriptionLifecycleService struct {
 	// When nil, terminal dunning cancellations leave the remote NMI
 	// subscription alive (caller-side paths or #107 reconciliation handle it).
 	deferDelete DeferredDeleteScheduler
+}
+
+// SubscriptionCreditGrantParams is the lifecycle-owned description of a
+// subscription balance grant. The money module implements the transaction-aware
+// writer without forcing subscriptions to import it (money already imports this
+// package, so dependency inversion avoids a cycle).
+type SubscriptionCreditGrantParams struct {
+	SubscriptionID uuid.UUID
+	PeriodEnd      time.Time
+	Cadence        models.CreditGrantCadence
+	Source         string
+}
+
+// SubscriptionCreditGranter writes subscription credits through the supplied
+// transaction-bound query catalog. Implementations must not open another
+// transaction: membership state and its balance are one commit.
+type SubscriptionCreditGranter interface {
+	GrantSubscriptionCreditsTx(context.Context, *gen.Queries, SubscriptionCreditGrantParams) error
 }
 
 type lifecycleEntitlementService interface {
@@ -129,6 +149,12 @@ func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
 	s.Config = cfg
 }
 
+// SetCreditGranter installs the transaction-aware subscription credit writer.
+// A credit-bearing lifecycle fails closed when this dependency is absent.
+func (s *SubscriptionLifecycleService) SetCreditGranter(granter SubscriptionCreditGranter) {
+	s.creditGranter = granter
+}
+
 // SetDeferredDeleteScheduler injects the deferred NMI delete scheduler (#344
 // follow-up). Wired post-construction in the composition root once the River
 // producer exists, mirroring UserSubscriptionService.SetDeferredDeleteScheduler.
@@ -186,7 +212,7 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		dbb := db.NewWithPgxTx(tx)
 		var err error
-		subscription, notifications, err = s.createMembershipCore(ctx, dbb, params)
+		subscription, notifications, err = s.CreateMembershipTx(ctx, dbb, params)
 		return err
 	})
 	if err != nil {
@@ -204,7 +230,38 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 	if txDB == nil {
 		return nil, nil, errors.New("transaction DB is required")
 	}
-	return s.createMembershipCore(ctx, txDB, params)
+	subscription, notifications, err := s.createMembershipCore(ctx, txDB, params)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.grantSubscriptionCreditsTx(ctx, txDB, subscription, models.CreditGrantCadenceOnce, "subscription_initial"); err != nil {
+		return nil, nil, fmt.Errorf("grant initial subscription credits: %w", err)
+	}
+	return subscription, notifications, nil
+}
+
+func (s *SubscriptionLifecycleService) grantSubscriptionCreditsTx(
+	ctx context.Context,
+	txDB *db.DB,
+	subscription *models.Subscription,
+	cadence models.CreditGrantCadence,
+	source string,
+) error {
+	if subscription == nil || subscription.CurrentPeriodEndsAt == nil || subscription.CurrentPeriodEndsAt.IsZero() {
+		return nil
+	}
+	if s.creditGranter == nil {
+		if len(subscription.CreditsSpecSnapshot) > 0 {
+			return errors.New("subscription credit granter is required for a credit-bearing membership")
+		}
+		return nil
+	}
+	return s.creditGranter.GrantSubscriptionCreditsTx(ctx, txDB.Gen(ctx), SubscriptionCreditGrantParams{
+		SubscriptionID: subscription.ID,
+		PeriodEnd:      subscription.CurrentPeriodEndsAt.UTC(),
+		Cadence:        cadence,
+		Source:         source,
+	})
 }
 
 func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context, dbb *db.DB, params *CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
@@ -841,6 +898,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 					"subscription_id": subscription.ID,
 					"rail":            params.Rail,
 				}).Info("Renewal already processed; skipping duplicate lifecycle mutation")
+				if err := s.grantSubscriptionCreditsTx(ctx, db, subscription, models.CreditGrantCadencePerRenewal, "subscription_renewal"); err != nil {
+					return fmt.Errorf("repair duplicate renewal subscription credits: %w", err)
+				}
 				return nil
 			}
 		}
@@ -1012,6 +1072,10 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 			}
 
 			// Any new entitlements introduced by the downgrade target product are granted by the renewal push above.
+		}
+
+		if err := s.grantSubscriptionCreditsTx(ctx, db, subscription, models.CreditGrantCadencePerRenewal, "subscription_renewal"); err != nil {
+			return fmt.Errorf("grant renewal subscription credits: %w", err)
 		}
 
 		// Notify user
@@ -1570,6 +1634,9 @@ func (s *SubscriptionLifecycleService) ResolveUnknownSubscription(ctx context.Co
 			sub.ClearRetrySchedule()
 			if err := NewSubscriptionRepo(dbb).UpdateAt(ctx, sub, now); err != nil {
 				return fmt.Errorf("resolve unknown (renewed) %s: %w", sub.ID, err)
+			}
+			if err := s.grantSubscriptionCreditsTx(ctx, dbb, sub, models.CreditGrantCadencePerRenewal, "subscription_renewal"); err != nil {
+				return fmt.Errorf("resolve unknown (renewed) credits %s: %w", sub.ID, err)
 			}
 			return nil
 		case ResolveAdopted:

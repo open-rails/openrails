@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -430,6 +431,7 @@ func (w *ProviderRefreshWorker) runUnknownReconcile(ctx context.Context, mid uui
 		clock = clockwork.NewRealClock()
 	}
 	lc := subscriptions.NewSubscriptionLifecycleService(w.DB, nil, nil, nil, nil, nil, clock)
+	lc.SetCreditGranter(money.NewMoneyService(w.DB, clock))
 	if w.DeferDelete != nil {
 		// #679: a stale-decline cancel must durably queue the deferred NMI
 		// delete; without this the lifecycle WARNs and the remote keeps retrying.
