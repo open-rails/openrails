@@ -36,7 +36,6 @@ func SecurityHeadersHTTP() HTTPMiddleware {
 			h := w.Header()
 			h.Set("X-Frame-Options", "DENY")
 			h.Set("X-Content-Type-Options", "nosniff")
-			h.Set("X-XSS-Protection", "1; mode=block")
 			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 			h.Set("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'")
 			h.Set("Server", "")
