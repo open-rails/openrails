@@ -145,6 +145,7 @@ docker-compose.test.yml
 .codegraph/
 
 # agent git worktrees (never track)
+.claude/scheduled_tasks.lock
 .claude/worktrees/
 .gstack/
 
