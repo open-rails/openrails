@@ -80,7 +80,7 @@ func newRootCmd() *cobra.Command {
 		RunE:  runServer,
 		Short: "Start the OpenRails server",
 	}
-	serverCmd.Flags().Bool("no-workers", false, "Disable background workers in this server process")
+	serverCmd.Flags().Bool("no-workers", false, "Disable background workers in this server process (readiness remains not-ready)")
 	serverCmd.Flags().String("merchant-manifest", "", "MODE-1 (#723) merchant manifest converged at boot (default: the conventional "+bootstrap.DefaultMerchantConfigManifestPath+" when present; an explicit path must exist)")
 
 	workerCmd := &cobra.Command{

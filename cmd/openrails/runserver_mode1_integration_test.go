@@ -161,7 +161,15 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	go func() { done <- root.Execute() }()
 
 	base := fmt.Sprintf("http://127.0.0.1:%d", port)
-	waitForServerReady(t, base+"/readyz", done)
+	waitForServerLive(t, base+"/health/live", done)
+
+	readyResp, err := http.Get(base + "/readyz?verbose=1")
+	require.NoError(t, err)
+	readyBody, err := io.ReadAll(readyResp.Body)
+	require.NoError(t, err)
+	require.NoError(t, readyResp.Body.Close())
+	require.Equal(t, http.StatusServiceUnavailable, readyResp.StatusCode)
+	require.Contains(t, string(readyBody), `"river_consumer":{"available":false`)
 
 	// The manifest converged as DB projections: merchant row + armed NMI psps
 	// row — and the #348 probe went through the injected fake gateway.
@@ -290,16 +298,16 @@ func TestRunServerAPIModeRefusesMerchantManifest(t *testing.T) {
 	require.Contains(t, err.Error(), "merchant_source=api refuses")
 }
 
-func waitForServerReady(t *testing.T, readyURL string, done <-chan error) {
+func waitForServerLive(t *testing.T, liveURL string, done <-chan error) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
 	for time.Now().Before(deadline) {
 		select {
 		case err := <-done:
-			t.Fatalf("run-server exited before becoming ready: %v", err)
+			t.Fatalf("run-server exited before becoming live: %v", err)
 		default:
 		}
-		resp, err := http.Get(readyURL)
+		resp, err := http.Get(liveURL)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
@@ -309,7 +317,7 @@ func waitForServerReady(t *testing.T, readyURL string, done <-chan error) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	t.Fatal("run-server did not become ready in time")
+	t.Fatal("run-server did not become live in time")
 }
 
 func shutdownRunServer(t *testing.T, done <-chan error) {

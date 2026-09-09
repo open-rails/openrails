@@ -13,9 +13,12 @@ import (
 // It delegates to the internal/app.Runtime checks shared with the standalone
 // surface's /readyz, so both report the SAME posture: Postgres, Redis (only
 // when configured), the merchant-secret backend (armed + live-reachable), and
-// River producer presence. Returns a wrapped error naming the first failing
-// dependency; nil when every dependency the running configuration actually
-// depends on is healthy.
+// River producer presence. OpenRails-managed River additionally requires the
+// local consumer to be running; a host-owned shared River client is outside
+// this process-level check, and hosts use CheckJobProgress for its live fleet
+// verdict. Returns a wrapped error naming the first failing dependency; nil
+// when every dependency the running configuration actually depends on is
+// healthy.
 func (e *Embedded) Ready(ctx context.Context) error {
 	if e == nil || e.app == nil || e.app.Runtime == nil {
 		return fmt.Errorf("embedded: not initialized")

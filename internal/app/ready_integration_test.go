@@ -68,7 +68,7 @@ func TestEnsureMerchantsService_ArmingFailureOutsideDev(t *testing.T) {
 
 // TestReady_FullStackGreenAndNamesVaultOutage proves Runtime.Ready end to end
 // (#748): green when Postgres, a Vault-backed armed merchants service, and
-// River are all healthy and Redis is simply unconfigured (optional — must
+// River producer and consumer are healthy and Redis is simply unconfigured (optional — must
 // never fail readiness); it then names "merchant_secrets" when that SAME
 // armed backend goes unreachable, proving a successful arm at boot is never
 // mistaken for staying healthy.
@@ -96,6 +96,13 @@ func TestReady_FullStackGreenAndNamesVaultOutage(t *testing.T) {
 	rt.RiverProducer = producer
 
 	deps, err := rt.Ready(ctx)
+	require.ErrorContains(t, err, "river_consumer")
+	require.False(t, requireReadinessDependency(t, deps, "river_consumer").Available,
+		"managed River must not be ready before its consumer starts")
+
+	rt.workerConsumerRunning.Store(true)
+	t.Cleanup(func() { rt.workerConsumerRunning.Store(false) })
+	deps, err = rt.Ready(ctx)
 	require.NoError(t, err, "full stack green, got deps=%+v", deps)
 	for _, d := range deps {
 		require.Truef(t, d.Available, "%s should be available: %v", d.Name, d.Err)
@@ -120,4 +127,15 @@ func TestReady_FullStackGreenAndNamesVaultOutage(t *testing.T) {
 		}
 	}
 	require.True(t, found, "merchant_secrets must appear in the dependency detail")
+}
+
+func requireReadinessDependency(t *testing.T, deps []ReadinessDependency, name string) ReadinessDependency {
+	t.Helper()
+	for _, dep := range deps {
+		if dep.Name == name {
+			return dep
+		}
+	}
+	require.FailNow(t, "readiness dependency not found", "name=%s deps=%+v", name, deps)
+	return ReadinessDependency{}
 }
