@@ -156,6 +156,10 @@ services:
       # superuser/BYPASSRLS role in EVERY environment, development included.
       ENV: "${ENV:-development}"
       TEST_MODE: "${TEST_MODE:-sandbox}"
+      # The zero-config Compose profile is an interactive sandbox, so provider
+      # writes are enabled by default. Production still fail-closes to readonly
+      # when this setting is omitted outside this local profile.
+      PROVIDER_WRITE_MODE: "${PROVIDER_WRITE_MODE:-full}"
       PORT: "3053"
       API_URL: "${API_URL:-http://localhost:3053}"
       AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:3053}"
