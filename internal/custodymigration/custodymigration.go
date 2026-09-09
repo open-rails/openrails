@@ -52,7 +52,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -545,20 +544,6 @@ func nilIfEmpty(s string) *string {
 	}
 	v := strings.TrimSpace(s)
 	return &v
-}
-
-// SortedCounts renders Counts in a stable operator-facing order.
-func (r Result) SortedCounts() []string {
-	keys := make([]string, 0, len(r.Counts))
-	for k := range r.Counts {
-		keys = append(keys, string(k))
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, k := range keys {
-		out = append(out, fmt.Sprintf("%s=%d", k, r.Counts[Outcome(k)]))
-	}
-	return out
 }
 
 // chargeViaFor picks the post-remap charge transport. Network-token charging is

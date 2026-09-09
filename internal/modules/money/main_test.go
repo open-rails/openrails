@@ -3,12 +3,7 @@
 package money_test
 
 import (
-	"context"
 	"testing"
-
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -31,20 +26,6 @@ func fullModeConfig() *config.Config {
 
 // strptr returns a pointer to s — a shared helper for the money integration suite.
 func strptr(s string) *string { return &s }
-
-// seedCustomer materializes the openrails.customers row a direct money-row
-// insert needs to satisfy the customer_id FK. customers is UUID-only (#491): the
-// id IS the payable customer id; merchant_id is the canonical test merchant (#336:
-// no default merchant).
-func seedCustomer(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tsID uuid.UUID) {
-	t.Helper()
-	dbtest.EnsureTestMerchant(ctx, t, pool)
-	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id)
-		 VALUES ($1, $2)
-		 ON CONFLICT DO NOTHING`, tsID, dbtest.TestMerchantID.UUID())
-	require.NoError(t, err)
-}
 
 // spendErr collapses SpendCredits' (transaction, error) to just the error, so a
 // test that only cares that the spend succeeded can stay a one-liner:

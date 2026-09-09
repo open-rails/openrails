@@ -421,11 +421,6 @@ func WithAuthenticator(a billingauth.Authenticator) StandaloneOption {
 	return func(c *standaloneConfig) { c.authenticator = a }
 }
 
-// WithDelegatedAuthenticator overrides the self-service delegated seam (#339).
-func WithDelegatedAuthenticator(a billingauth.DelegatedAuthenticator) StandaloneOption {
-	return func(c *standaloneConfig) { c.delegatedAuthenticator = a }
-}
-
 // StartStandalone boots the standalone server for an integration test. The server
 // connects as the unprivileged openrails_app role (NOBYPASSRLS), so the per-merchant
 // RLS policies enforce exactly as in production — every integration test exercises

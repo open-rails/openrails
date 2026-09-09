@@ -540,19 +540,3 @@ func hoursSpec(hours int) string {
 	}
 	return fmt.Sprintf("%dh", hours)
 }
-
-func secondsSpec(seconds int64) string {
-	if seconds == 0 {
-		return ""
-	}
-	if seconds%86400 == 0 {
-		return fmt.Sprintf("%dd", seconds/86400)
-	}
-	if seconds%3600 == 0 {
-		return fmt.Sprintf("%dh", seconds/3600)
-	}
-	if seconds%60 == 0 {
-		return fmt.Sprintf("%dm", seconds/60)
-	}
-	return fmt.Sprintf("%ds", seconds)
-}

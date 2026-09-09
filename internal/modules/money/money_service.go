@@ -554,8 +554,6 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 	return db.EnsureCustomerRowQ(ctx, q, tenantID, tsid)
 }
 
-func stringPtr(s string) *string { return &s }
-
 // depositTx records a money-in as a #514 credit grant (kind=credit), then
 // materializes it (derive-2) into a #512 ledger deposit (DR processor_clearing /
 // CR customer_balance). The grant IS the FIFO credit lot — there is no separate

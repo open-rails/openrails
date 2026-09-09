@@ -3,9 +3,6 @@
 package tests
 
 import (
-	"bytes"
-	"io"
-	"net/http/httptest"
 	"sync"
 	"testing"
 
@@ -45,16 +42,6 @@ func getSharedTestSuite(t *testing.T) *TestContainerSuite {
 	sharedSuite.harness.SetT(t)
 	sharedSuite.ResetMutableRuntimeState()
 	return sharedSuite
-}
-
-// Helper function to log HTTP response for debugging
-func logResponse(t *testing.T, w *httptest.ResponseRecorder, testName string) {
-	t.Helper()
-	body := w.Body.String()
-	if body == "" {
-		body = "(empty body)"
-	}
-	t.Logf("[%s]: Status=%d, Body=%s", testName, w.Code, body)
 }
 
 // setupTestServer returns the shared suite's real standalone server.
@@ -110,9 +97,4 @@ func CleanupSharedSuite() {
 	if sharedSuite != nil {
 		sharedSuite.Cleanup()
 	}
-}
-
-// newRequestBody creates an io.ReadCloser from a byte slice for HTTP request bodies.
-func newRequestBody(data []byte) io.ReadCloser {
-	return io.NopCloser(bytes.NewReader(data))
 }
