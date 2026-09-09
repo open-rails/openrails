@@ -88,12 +88,19 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENC
 -- (github.com/open-rails/authkit's own migrations). Unlike River, granted at
 -- the SCHEMA boundary rather than by table name: this repo does not own or
 -- want to track AuthKit's internal table shape, exactly as openrails.* is
--- granted at the openrails schema boundary above.
-GRANT USAGE ON SCHEMA profiles TO openrails_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA profiles TO openrails_app;
-GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA profiles TO openrails_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA profiles GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openrails_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA profiles GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO openrails_app;
+-- granted at the openrails schema boundary above. Embedded hosts must migrate
+-- AuthKit first so these grants land; the guard lets an isolated OpenRails
+-- schema harness apply without inventing a sibling-owned profiles schema.
+DO $$
+BEGIN
+  IF to_regnamespace('profiles') IS NOT NULL THEN
+    GRANT USAGE ON SCHEMA profiles TO openrails_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA profiles TO openrails_app;
+    GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA profiles TO openrails_app;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA profiles GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openrails_app;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA profiles GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO openrails_app;
+  END IF;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- Types

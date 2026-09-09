@@ -98,7 +98,7 @@ Recreating one:
 | Local compose stack | `task docker-reset` — `down -v` (deletes the `postgres_data` volume) then `docker-up`, which re-runs `openrails-migrate` against an empty server. Plain `task docker-down` keeps the volume and therefore keeps the stale ledger. |
 | A dev/staging server you can't drop the volume of | `DROP DATABASE` + `CREATE DATABASE`, then `openrails migrate up`. |
 | A long-lived hand-rolled test pool | Drop `public.migrations` along with the schema — migratekit reads its ledger there, and a surviving ledger makes it *skip* re-applying the baseline. (The integration suite is unaffected: it creates a fresh per-run database every time.) |
-| An EMBEDDED host's database (one schema inside the host's DB) | `DROP SCHEMA openrails CASCADE` + `DELETE FROM public.migrations WHERE app = 'openrails'`, then restart the host so it re-applies the chain. |
+| An EMBEDDED host's database (one schema inside the host's DB) | Stop the host, then run `task db-reset-embedded DSN='…'`. It is plan-only by default and prints the exact `host:port/database` allow-list entry and confirmation token. To apply, set that entry in `OPENRAILS_RESET_TARGETS` and rerun with `CONFIRM='…'`; the schema drop and exact OpenRails/Postgres/schema ledger delete commit together. Restart the host so it re-applies the chain. |
 
 You will not have to notice this yourself: the engine REFUSES to start when the
 ledger records migrations the build no longer carries (`OrphanedMigrationsError`,

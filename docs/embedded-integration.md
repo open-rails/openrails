@@ -54,6 +54,13 @@ migratekit.MigrationSource{
 }
 ```
 
+Apply sibling migration chains in this order: **AuthKit (`profiles`), River
+(`public`), then OpenRails (`openrails`)**. The OpenRails baseline tolerates an
+absent sibling schema so isolated schema tests can apply it, but skipped grants
+are not retroactive: an embedded runtime needs AuthKit's schema to exist before
+OpenRails grants `openrails_app` access to it. Run every chain with the same
+owner/migration role so the default privileges also cover later sibling tables.
+
 The engine never runs migrations itself — it validates the tracking key at boot and
 refuses to start if any migration is missing.
 
