@@ -41,6 +41,7 @@ tasks:
       - bash scripts/setup_test.sh
       - bash scripts/ci_local_test.sh
       - bash scripts/pre_push_test.sh
+      - bash scripts/test_integration_test.sh
 
   ci-local:
     desc: Run the local Go/shared gates used by CI (database required)

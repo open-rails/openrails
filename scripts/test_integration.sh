@@ -44,15 +44,43 @@ compose_postgres_owns_port() {
     grep -Eq ":$1$"
 }
 
-# An explicitly supplied pair is owned by the caller. Do not start another
-# compose stack (or mutate its ports) when testing against existing services.
-if [[ -z "${OPENRAILS_TEST_DB_DSN:-${OPENRAILS_TEST_DB_URL:-}}" || -z "${OPENRAILS_TEST_REDIS_ADDR:-}" ]]; then
+compose_service_running() {
+  [[ -n "$(docker compose -f docker-compose.yaml ps --status running -q "$1" 2>/dev/null)" ]]
+}
+
+compose_services=()
+started_services=()
+
+if [[ -z "${OPENRAILS_TEST_DB_DSN:-${OPENRAILS_TEST_DB_URL:-}}" ]]; then
   if port_is_listening "${POSTGRES_HOST_PORT}" && ! compose_postgres_owns_port "${POSTGRES_HOST_PORT}"; then
     echo "test_integration.sh: host port ${POSTGRES_HOST_PORT} is already held by a non-Compose process." >&2
     echo "Set POSTGRES_HOST_PORT to a free port (and let .env derive DB_URL/DB_PORT from it), or stop the listener." >&2
     exit 1
   fi
-  docker compose -f docker-compose.yaml up -d --wait postgres garnet
+  compose_services+=(postgres)
+  compose_service_running postgres || started_services+=(postgres)
+fi
+
+if [[ -z "${OPENRAILS_TEST_REDIS_ADDR:-}" ]]; then
+  compose_services+=(garnet)
+  compose_service_running garnet || started_services+=(garnet)
+fi
+
+cleanup_started_services() {
+  status=$?
+  trap - EXIT
+  if ! docker compose -f docker-compose.yaml stop "${started_services[@]}"; then
+    echo "test_integration.sh: failed to stop started Compose dependencies: ${started_services[*]}" >&2
+    [[ "$status" -ne 0 ]] || status=1
+  fi
+  exit "$status"
+}
+
+if [[ "${#compose_services[@]}" -gt 0 ]]; then
+  if [[ "${OPENRAILS_KEEP_STACK:-0}" != "1" && "${#started_services[@]}" -gt 0 ]]; then
+    trap cleanup_started_services EXIT
+  fi
+  docker compose -f docker-compose.yaml up -d --wait "${compose_services[@]}"
 fi
 
 export OPENRAILS_TEST_DB_DSN="${OPENRAILS_TEST_DB_DSN:-${OPENRAILS_TEST_DB_URL:-postgresql://admin:admin_password@127.0.0.1:${POSTGRES_HOST_PORT}/openrails_db?sslmode=disable}}"
