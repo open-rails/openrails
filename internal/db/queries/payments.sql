@@ -211,6 +211,17 @@ WHERE purch.subscription_id = $1
 ORDER BY purch.purchased_at DESC
 LIMIT 1;
 
+-- name: HasCompletedPaymentAtOrAfterPeriodEnd :one
+SELECT EXISTS (
+    SELECT 1
+    FROM openrails.payments purch
+    WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND purch.subscription_id = sqlc.arg(subscription_id)::uuid
+      AND purch.status = 'completed'
+      AND purch.purchased_at >= sqlc.arg(period_end)::timestamptz
+      AND purch.deleted_at IS NULL
+)::bool;
+
 -- name: GetLatestChargeBySubscriptionID :one
 SELECT * FROM openrails.payments purch
 WHERE purch.subscription_id = $1

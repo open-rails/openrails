@@ -324,6 +324,30 @@ func TestManualRebillRecoveredSubscriptionSupersedes(t *testing.T) {
 	assert.Zero(t, fake.saleCalls.Load(), "a recovered subscription must never be re-charged")
 }
 
+// TestManualRebillPaidPeriodSupersedes: a renewal payment can land before the
+// subscription advance commits. The durable payment is enough to supersede a
+// stale dunning charge even while the subscription still reads past_due.
+func TestManualRebillPaidPeriodSupersedes(t *testing.T) {
+	fx := seedPastDueSubscription(t)
+	fake, client := newFakeNMIRebillGateway(t)
+
+	_, err := fx.db.Pool().Exec(context.Background(), `
+		INSERT INTO openrails.payments
+			(id, merchant_id, customer_id, price_id, subscription_id, rail, psp_id,
+			 transaction_id, amount, list_amount, currency, status, money_movement, purchased_at)
+		SELECT $1, merchant_id, customer_id, price_id, id, rail, psp_id,
+		       $2, 999, 999, 'USD', 'completed', 'rail', $3
+		FROM openrails.subscriptions
+		WHERE id = $4`, uuid.New(), "txn-renewal-"+uuid.NewString()[:8], fx.periodEnd, fx.subID)
+	require.NoError(t, err)
+
+	row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+	require.NoError(t, err)
+	assert.Equal(t, StatusSuperseded, row.Status)
+	assert.Zero(t, fake.saleCalls.Load(), "a paid billing period must never be re-charged")
+	assert.Zero(t, fake.queryCalls.Load(), "local payment evidence supersedes without a provider call")
+}
+
 // TestManualRebillWindowExpiryNeverFires: an intent that outlives the dunning
 // window (mode outage longer than the window) expires instead of charging a
 // stale period.

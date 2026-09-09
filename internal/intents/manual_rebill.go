@@ -142,6 +142,17 @@ func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.UTC().Unix() != p.PeriodEnd.UTC().Unix() {
 		return SupersededBy("billing period advanced past the dunned period"), nil
 	}
+	paid, err := h.DB.Gen(ctx).HasCompletedPaymentAtOrAfterPeriodEnd(ctx, gen.HasCompletedPaymentAtOrAfterPeriodEndParams{
+		MerchantID:     intent.MerchantID,
+		SubscriptionID: p.SubscriptionID,
+		PeriodEnd:      *sub.CurrentPeriodEndsAt,
+	})
+	if err != nil {
+		return Relevance{}, fmt.Errorf("check dunned period payment: %w", err)
+	}
+	if paid {
+		return SupersededBy("billing period already has a completed payment"), nil
+	}
 	return StillRelevant(), nil
 }
 
