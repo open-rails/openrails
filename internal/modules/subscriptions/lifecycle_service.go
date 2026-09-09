@@ -345,7 +345,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			if existingSubscription.CustomerID.String() != params.UserID {
 				return nil, nil, fmt.Errorf("payment transaction subscription belongs to a different user")
 			}
-			if existingSubscription.Status != models.StatusPending {
+			switch existingSubscription.Status {
+			case models.StatusActive, models.StatusPastDue:
 				log.WithContext(ctx).WithFields(log.Fields{
 					"subscription_id": existingSubscription.ID,
 					"user_id":         params.UserID,
@@ -353,6 +354,10 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 					"transaction_id":  params.TransactionID,
 				}).Info("Membership payment already exists; skipping duplicate membership creation")
 				return existingSubscription, nil, nil
+			case models.StatusPending:
+				// Continue below and activate the paid pending subscription.
+			default:
+				return nil, nil, fmt.Errorf("payment transaction is linked to a subscription with status %q", existingSubscription.Status)
 			}
 			if existingPendingSub != nil && existingPendingSub.ID != existingSubscription.ID {
 				return nil, nil, fmt.Errorf("payment transaction is linked to a different pending subscription")

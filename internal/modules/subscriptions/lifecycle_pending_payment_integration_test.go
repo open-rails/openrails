@@ -8,11 +8,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 )
+
+type countingSubscriptionCreditGranter struct {
+	calls int
+}
+
+func (g *countingSubscriptionCreditGranter) GrantSubscriptionCreditsTx(context.Context, *gen.Queries, SubscriptionCreditGrantParams) error {
+	g.calls++
+	return nil
+}
 
 func seedPendingSubscriptionWithPayment(t *testing.T, f *failopenFixture, procSubID, txnID string) uuid.UUID {
 	t.Helper()
@@ -105,4 +115,79 @@ func TestCreateMembership_ActivatesPendingSubscriptionFoundOnlyByPayment(t *test
 	require.Equal(t, subID, sub.ID)
 	require.Equal(t, models.StatusActive, sub.Status)
 	assertPendingActivatedOnce(t, f, subID, txnID)
+}
+
+func TestCreateMembership_ReplaysRecordedPaymentForBillableSubscription(t *testing.T) {
+	for _, status := range []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue} {
+		t.Run(string(status), func(t *testing.T) {
+			f := newFailopenFixture(t, 24*30, true)
+			ctx := failopenCtx()
+			txnID := "txn_billable_replay_" + uuid.NewString()
+			subID := seedPendingSubscriptionWithPayment(t, f, "sub_billable_replay_"+uuid.NewString(), txnID)
+			periodStart := time.Now().UTC()
+			periodEnd := periodStart.Add(30 * 24 * time.Hour)
+			_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
+				SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4
+				WHERE id=$1`, subID, status, periodStart, periodEnd)
+			require.NoError(t, err)
+
+			sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
+				UserID:        f.userID,
+				PriceID:       f.priceID,
+				Rail:          models.RailNMI,
+				TransactionID: txnID,
+			})
+			require.NoError(t, err)
+			require.Equal(t, subID, sub.ID)
+			require.Equal(t, status, sub.Status)
+		})
+	}
+}
+
+func TestCreateMembership_RejectsRecordedPaymentForNonBillableSubscription(t *testing.T) {
+	tests := []struct {
+		name   string
+		status models.SubscriptionStatus
+	}{
+		{name: "cancelled after provider expiry", status: models.StatusCancelled},
+		{name: "unknown pending provider verification", status: models.StatusUnknown},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFailopenFixture(t, 24*30, true)
+			ctx := failopenCtx()
+			txnID := "txn_non_billable_replay_" + uuid.NewString()
+			subID := seedPendingSubscriptionWithPayment(t, f, "sub_non_billable_replay_"+uuid.NewString(), txnID)
+			periodStart := time.Now().UTC()
+			periodEnd := periodStart.Add(30 * 24 * time.Hour)
+			if tt.status == models.StatusCancelled {
+				cancelType := models.CancelTypeExpired
+				_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
+					SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4,
+					    cancelled_at=$3, cancel_type=$5,
+					    credits_spec_snapshot='{"welcome":{"unit":"USD","amount":25,"cadence":"once"}}'::jsonb
+					WHERE id=$1`, subID, tt.status, periodStart, periodEnd, cancelType)
+				require.NoError(t, err)
+			} else {
+				_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
+					SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4,
+					    credits_spec_snapshot='{"welcome":{"unit":"USD","amount":25,"cadence":"once"}}'::jsonb
+					WHERE id=$1`, subID, tt.status, periodStart, periodEnd)
+				require.NoError(t, err)
+			}
+
+			credits := &countingSubscriptionCreditGranter{}
+			f.lifecycle.SetCreditGranter(credits)
+			sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
+				UserID:        f.userID,
+				PriceID:       f.priceID,
+				Rail:          models.RailNMI,
+				TransactionID: txnID,
+			})
+			require.Nil(t, sub)
+			require.ErrorContains(t, err, "status \""+string(tt.status)+"\"")
+			require.Zero(t, credits.calls, "a rejected replay must not grant subscription credits")
+			require.Equal(t, tt.status, f.loadSub(t, subID).Status)
+		})
+	}
 }
