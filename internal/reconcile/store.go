@@ -385,12 +385,10 @@ var (
 		"derive.grant.missing",
 	}
 	// FreeloaderFindingTypes: ACCESS WITHOUT PAYING — live access whose
-	// source is PROVEN dead or absent (#691: stale ≠ freeloader). The
+	// source is PROVEN absent or reversed (#691: stale ≠ freeloader). The
 	// dead-sub-live-window check (derive.grant_effect.mismatch, revoke
 	// direction) is deliberately NOT in the set: it is AUTO-repaired (the
-	// missed #691 closure) in the same sweep, so it never sits open — its
-	// standing-window shape surfaces here as derive.entitlement.unjustified
-	// instead.
+	// missed #691 closure) in the same sweep, so it never sits open.
 	FreeloaderFindingTypes = []string{
 		"derive.entitlement.unjustified",
 		"derive.grant_effect.excess",

@@ -161,16 +161,14 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		seedSub(deadSub, "cancelled", "rd-dead-"+suffix)
 		seedSub(unknownSub, "unknown", "rd-unknown-"+suffix)
 		// Legacy-shaped LIVE windows (no grants) sourced by each sub. The dead
-		// sub's window is BOUNDED but overruns its entitled bound (#690: the
-		// standing-window shape belongs to derive.entitlement.unjustified, ADMIN);
-		// the unknown sub keeps a standing window (access intact, #664/#691).
+		// sub's window is STANDING even though its terminal bound has passed;
+		// the unknown sub keeps the same shape (access intact, #664/#691).
 		seedEnt := func(id, subID uuid.UUID, feature string, endAt *time.Time) {
 			exec(`INSERT INTO openrails.entitlements (id, customer_id, entitlement, start_at, end_at, source_id, source_type, merchant_id)
 			      VALUES ($1,$2,$3,$4,$5,$6,'subscription',$7)`,
 				id, customer, feature, now.Add(-40*24*time.Hour), endAt, subID, merchantID)
 		}
-		overrun := now.Add(20 * 24 * time.Hour)
-		seedEnt(deadEnt, deadSub, "rd-feat-dead-"+suffix, &overrun)
+		seedEnt(deadEnt, deadSub, "rd-feat-dead-"+suffix, nil)
 		seedEnt(unknownEnt, unknownSub, "rd-feat-unk-"+suffix, nil)
 		return nil
 	}))
@@ -196,6 +194,12 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 		// access-ended row for the window this very run just bounded.
 		require.Equal(t, 2, res.Findings, "dead-sub mismatch + access-ended notify; unknown sub untouched")
 		require.Equal(t, 2, res.AutoFixed)
+		var findingStatus string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT status FROM openrails.reconciliation_findings
+			 WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
+			merchantID, "subscription:"+deadSub.String()).Scan(&findingStatus))
+		require.Equal(t, "auto_fixed", findingStatus, "standing terminal access must use the exact AUTO mismatch finding")
 
 		// Repair = the missed #691 closure: the window is BOUNDED at the
 		// entitled bound (GREATEST(paid-through, ended_at)), not revoked.
