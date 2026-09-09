@@ -631,7 +631,13 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		alreadyCancelled int
 		ledgerErr        error
 		ledgerAlertErr   error
+		terminationErr   error
 	)
+	rememberTerminationError := func(err error) {
+		if terminationErr == nil {
+			terminationErr = err
+		}
+	}
 	processedSubs := make(map[uuid.UUID]struct{})
 
 	for i, cb := range body.Chargebacks {
@@ -727,10 +733,12 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 					reconcileErrors++
 					cbMetadata["termination_status"] = "failed"
 					cbMetadata["termination_error"] = "subscription lifecycle service unavailable"
+					rememberTerminationError(errors.New("subscription lifecycle service unavailable"))
 				} else if s.SubscriptionService == nil {
 					reconcileErrors++
 					cbMetadata["termination_status"] = "failed"
 					cbMetadata["termination_error"] = "subscription service unavailable"
+					rememberTerminationError(errors.New("subscription service unavailable"))
 				} else {
 
 					subscription, subErr := s.SubscriptionService.GetByID(ctx, match.SubscriptionID)
@@ -738,6 +746,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 						reconcileErrors++
 						cbMetadata["termination_status"] = "failed"
 						cbMetadata["termination_error"] = fmt.Sprintf("failed to load subscription: %v", subErr)
+						rememberTerminationError(fmt.Errorf("load subscription %s: %w", match.SubscriptionID, subErr))
 					} else {
 						reasonCodeDisplay := reasonCode
 						if reasonCodeDisplay == "" {
@@ -769,6 +778,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 							reconcileErrors++
 							cbMetadata["termination_status"] = "failed"
 							cbMetadata["termination_error"] = err.Error()
+							rememberTerminationError(fmt.Errorf("cancel subscription %s: %w", match.SubscriptionID, err))
 						} else {
 							if subscription.Status == models.StatusCancelled {
 								alreadyCancelled++
@@ -830,7 +840,10 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		"reconcile_failures": reconcileErrors,
 	}).Warn("NMI chargeback batch processed with automated reconciliation")
 	if ledgerAlertErr != nil {
-		return fmt.Errorf("persist NMI chargeback ledger repair alert: %w", ledgerAlertErr)
+		terminationErr = errors.Join(terminationErr, fmt.Errorf("persist NMI chargeback ledger repair alert: %w", ledgerAlertErr))
+	}
+	if terminationErr != nil {
+		return fmt.Errorf("terminate subscriptions for NMI chargeback batch: %w", terminationErr)
 	}
 	return nil
 }
@@ -995,23 +1008,23 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		rail := models.Rail(s.Rail)
 		cancelReason := "Refund processed"
 
-		if s.SubscriptionLifecycleService != nil {
-			if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-				Rail:               &rail,
-				RailSubscriptionID: &nmiSubID,
-				SubscriptionID:     &subscription.ID,
-				CancelType:         models.CancelTypeMerchant,
-				CancelFeedback:     &cancelReason,
-				RevokeAccess:       true,
-			}); err != nil {
-				log.WithContext(ctx).WithError(err).Error("Failed to cancel membership after refund")
-			} else {
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id":      subscription.ID,
-					"rail_subscription_id": nmiSubID,
-				}).Info("Subscription cancelled after refund meet threshold")
-			}
+		if s.SubscriptionLifecycleService == nil {
+			return fmt.Errorf("subscription lifecycle service is required to terminate NMI refund subscription %s", subscription.ID)
 		}
+		if err := s.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
+			Rail:               &rail,
+			RailSubscriptionID: &nmiSubID,
+			SubscriptionID:     &subscription.ID,
+			CancelType:         models.CancelTypeMerchant,
+			CancelFeedback:     &cancelReason,
+			RevokeAccess:       true,
+		}); err != nil {
+			return fmt.Errorf("cancel membership after NMI refund: %w", err)
+		}
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id":      subscription.ID,
+			"rail_subscription_id": nmiSubID,
+		}).Info("Subscription cancelled after refund meet threshold")
 	}
 
 	log.WithContext(ctx).WithFields(log.Fields{

@@ -4,12 +4,14 @@ package subscriptions
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -102,6 +104,49 @@ type failopenWindow struct {
 	SourceType string
 	RevokedAt  *time.Time
 	DeletedAt  *time.Time
+}
+
+type failingLifecycleEntitlements struct {
+	lifecycleEntitlementService
+	listErr          error
+	revokeErr        error
+	revokeSourcesErr error
+	boundErr         error
+}
+
+func (f *failingLifecycleEntitlements) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.lifecycleEntitlementService.ListDistinctEntitlementNamesBySource(ctx, sourceType, sourceID)
+}
+
+func (f *failingLifecycleEntitlements) RevokeExistingEntitlement(ctx context.Context, params entitlements.RevokeExistingEntitlementParams) error {
+	if f.revokeErr != nil {
+		return f.revokeErr
+	}
+	return f.lifecycleEntitlementService.RevokeExistingEntitlement(ctx, params)
+}
+
+func (f *failingLifecycleEntitlements) RevokeSourcesForSubscriptionAsOf(ctx context.Context, userID string, subscriptionID uuid.UUID, asOf time.Time, reason models.EntitlementRevokeReason, sourceTypes ...models.EntitlementSourceType) error {
+	if f.revokeSourcesErr != nil {
+		return f.revokeSourcesErr
+	}
+	return f.lifecycleEntitlementService.RevokeSourcesForSubscriptionAsOf(ctx, userID, subscriptionID, asOf, reason, sourceTypes...)
+}
+
+func (f *failingLifecycleEntitlements) BoundSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
+	if f.boundErr != nil {
+		return f.boundErr
+	}
+	return f.lifecycleEntitlementService.BoundSubscriptionAccess(ctx, subscriptionID, endAt)
+}
+
+func (f *failopenFixture) failLifecycleEntitlements(failure failingLifecycleEntitlements) {
+	f.lifecycle.entitlementServiceFactory = func(dbb *db.DB, c clockwork.Clock) lifecycleEntitlementService {
+		failure.lifecycleEntitlementService = entitlements.NewEntitlementService(dbb, c)
+		return &failure
+	}
 }
 
 func (f *failopenFixture) windows(t *testing.T, subID uuid.UUID, sourceType string) []failopenWindow {
@@ -305,6 +350,63 @@ func TestFailOpen_ImmediateCancelRevokesNow(t *testing.T) {
 	assert.False(t, f.entitledAt(t, time.Now().UTC().Add(time.Minute)))
 }
 
+func TestFailOpen_ImmediateCancelRollsBackWhenRevocationFails(t *testing.T) {
+	f := newFailopenFixture(t, 30*24, true)
+	ctx := failopenCtx()
+	sub, _ := f.create(t, models.RailNMI)
+	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
+
+	injected := errors.New("injected entitlement revocation failure")
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{revokeSourcesErr: injected})
+	err := f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
+		SubscriptionID: &sub.ID,
+		CancelType:     models.CancelTypeChargeback,
+		RevokeAccess:   true,
+	})
+	require.ErrorIs(t, err, injected)
+	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status, "failed access closure must roll the terminal status back")
+	assert.True(t, f.entitledAt(t, farFuture), "failed cancellation must leave the prior access unchanged")
+
+	f.lifecycle.entitlementServiceFactory = nil
+	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
+		SubscriptionID: &sub.ID,
+		CancelType:     models.CancelTypeChargeback,
+		RevokeAccess:   true,
+	}))
+	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
+	assert.False(t, f.entitledAt(t, farFuture), "a retry must close access and status together")
+}
+
+func TestFailOpen_PeriodEndCancelRollsBackWhenBoundingFails(t *testing.T) {
+	f := newFailopenFixture(t, 30*24, true)
+	ctx := failopenCtx()
+	sub, _ := f.create(t, models.RailNMI)
+
+	injected := errors.New("injected entitlement bound failure")
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{boundErr: injected})
+	err := f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
+		SubscriptionID: &sub.ID,
+		CancelType:     models.CancelTypeUser,
+		RevokeAccess:   false,
+	})
+	require.ErrorIs(t, err, injected)
+	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
+	windows := f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
+	require.Len(t, windows, 1)
+	assert.Nil(t, windows[0].EndAt, "failed period-end cancellation must not leave a partial closure")
+
+	f.lifecycle.entitlementServiceFactory = nil
+	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
+		SubscriptionID: &sub.ID,
+		CancelType:     models.CancelTypeUser,
+		RevokeAccess:   false,
+	}))
+	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
+	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
+	require.Len(t, windows, 1)
+	assert.NotNil(t, windows[0].EndAt)
+}
+
 // TestFailOpen_ReactivateRestoresStanding: resuming a period-end cancel re-opens
 // the standing window (the advance-written closure is undone).
 func TestFailOpen_ReactivateRestoresStanding(t *testing.T) {
@@ -411,6 +513,52 @@ func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
 	assert.Equal(t, models.CancelTypeExpired, *terminal.CancelType)
 	assert.Nil(t, terminal.NextRetryAt, "the 0-retry tier never schedules a retry")
 	assert.False(t, f.entitledAt(t, time.Now().UTC().Add(time.Minute)), "terminal dunning closes the standing window")
+}
+
+func TestFailOpen_DunningExhaustionRollsBackWhenEntitlementListingFails(t *testing.T) {
+	f := newFailopenFixture(t, 24, true)
+	ctx := failopenCtx()
+	sub, _ := f.create(t, models.RailNMI)
+	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
+
+	injected := errors.New("injected entitlement listing failure")
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{listErr: injected})
+	err := f.lifecycle.FailMembership(ctx, &FailMembershipParams{
+		Rail:            models.RailNMI,
+		SubscriptionID:  &sub.ID,
+		AttemptRecorded: true,
+	})
+	require.ErrorIs(t, err, injected)
+	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
+	assert.True(t, f.entitledAt(t, farFuture))
+
+	f.lifecycle.entitlementServiceFactory = nil
+	require.NoError(t, f.lifecycle.FailMembership(ctx, &FailMembershipParams{
+		Rail:            models.RailNMI,
+		SubscriptionID:  &sub.ID,
+		AttemptRecorded: true,
+	}))
+	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
+	assert.False(t, f.entitledAt(t, farFuture))
+}
+
+func TestFailOpen_ExpirationRollsBackWhenEntitlementRevocationFails(t *testing.T) {
+	f := newFailopenFixture(t, 30*24, true)
+	ctx := failopenCtx()
+	sub, _ := f.create(t, models.RailNMI)
+	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
+
+	injected := errors.New("injected entitlement revoke failure")
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{revokeErr: injected})
+	err := f.lifecycle.ExpireMembership(ctx, sub.ID)
+	require.ErrorIs(t, err, injected)
+	require.Equal(t, models.StatusActive, f.loadSub(t, sub.ID).Status)
+	assert.True(t, f.entitledAt(t, farFuture))
+
+	f.lifecycle.entitlementServiceFactory = nil
+	require.NoError(t, f.lifecycle.ExpireMembership(ctx, sub.ID))
+	require.Equal(t, models.StatusCancelled, f.loadSub(t, sub.ID).Status)
+	assert.False(t, f.entitledAt(t, farFuture))
 }
 
 // failopenDeferredDelete records ScheduleNMIDelete calls (#679 regression leg).

@@ -38,12 +38,40 @@ type SubscriptionLifecycleService struct {
 	NotificationService *NotificationService
 	PaymentService      *payments.PaymentService // For creating Payment records on renewal
 
+	// These seams keep terminal state changes and their access side effects
+	// testable as one transaction without changing the public service API.
+	entitlementServiceFactory func(*db.DB, clockwork.Clock) lifecycleEntitlementService
+	cancelSolanaSubscription  func(context.Context, *db.DB, uuid.UUID) error
+
 	// deferDelete enqueues the deferred NMI delete_subscription job (#344
 	// follow-up). Optional: injected via SetDeferredDeleteScheduler in the
 	// composition root (same pattern as UserSubscriptionService.deferDelete).
 	// When nil, terminal dunning cancellations leave the remote NMI
 	// subscription alive (caller-side paths or #107 reconciliation handle it).
 	deferDelete DeferredDeleteScheduler
+}
+
+type lifecycleEntitlementService interface {
+	ListDistinctEntitlementNamesBySource(context.Context, models.EntitlementSourceType, uuid.UUID) ([]string, error)
+	RevokeExistingEntitlement(context.Context, entitlements.RevokeExistingEntitlementParams) error
+	RevokeSourcesForSubscriptionAsOf(context.Context, string, uuid.UUID, time.Time, models.EntitlementRevokeReason, ...models.EntitlementSourceType) error
+	BoundSubscriptionAccess(context.Context, uuid.UUID, time.Time) error
+}
+
+func (s *SubscriptionLifecycleService) newLifecycleEntitlementService(dbb *db.DB) lifecycleEntitlementService {
+	if s.entitlementServiceFactory != nil {
+		return s.entitlementServiceFactory(dbb, s.Clock())
+	}
+	entSvc := entitlements.NewEntitlementService(dbb, s.Clock())
+	entSvc.SetClock(s.Clock())
+	return entSvc
+}
+
+func (s *SubscriptionLifecycleService) cancelSolanaSubscriptionForLifecycle(ctx context.Context, dbb *db.DB, subscriptionID uuid.UUID) error {
+	if s.cancelSolanaSubscription != nil {
+		return s.cancelSolanaSubscription(ctx, dbb, subscriptionID)
+	}
+	return cancelSolanaSubscriptionCascade(ctx, dbb, subscriptionID)
 }
 
 func (s *SubscriptionLifecycleService) assertActiveTransitionAllowed(ctx context.Context, subscription *models.Subscription, trigger string, allowOverride bool) error {
@@ -1383,30 +1411,26 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 		return fmt.Errorf("apply local cancellation: update subscription %s: %w", sub.ID, err)
 	}
 
-	// #264 cascade: stop the Solana cranker. Log-and-continue (never fail the
-	// cancel on the cascade), matching the user path; idempotent + tolerant of a
-	// missing solana_subscriptions row.
+	// #264 cascade: stop the Solana cranker in the same transaction. A genuinely
+	// missing mirror remains an idempotent no-op; every other error must roll the
+	// parent cancellation back so a retry cannot leave the cranker active.
 	if sub.Rail == models.RailSolana {
-		if err := cancelSolanaSubscriptionCascade(ctx, dbb, sub.ID); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-				Error("failed to cascade cancellation to solana_subscriptions row; cranker may keep pulling")
+		if err := s.cancelSolanaSubscriptionForLifecycle(ctx, dbb, sub.ID); err != nil {
+			return fmt.Errorf("apply local cancellation: cancel Solana subscription %s: %w", sub.ID, err)
 		}
 	}
 
-	entSvc := entitlements.NewEntitlementService(dbb, s.Clock())
-	entSvc.SetClock(s.Clock())
+	entSvc := s.newLifecycleEntitlementService(dbb)
 	if len(c.RevokeSources) > 0 {
 		if err := entSvc.RevokeSourcesForSubscriptionAsOf(ctx, sub.CustomerID.String(), sub.ID, c.RevokeAsOf, c.RevokeReason, c.RevokeSources...); err != nil {
-			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-				Error("failed to revoke entitlements during local cancellation")
+			return fmt.Errorf("apply local cancellation: revoke subscription %s entitlements: %w", sub.ID, err)
 		}
 	}
 	// #691 closure: a terminal cancel is PROOF — write the window end on disk now
 	// (period-end cancels leave the paid runway; the standing window must not
 	// outlive it). Idempotent; no-op when the revoke above already closed access.
 	if err := entSvc.BoundSubscriptionAccess(ctx, sub.ID, endedAt); err != nil {
-		log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).
-			Error("failed to bound entitlement windows during local cancellation")
+		return fmt.Errorf("apply local cancellation: bound subscription %s access: %w", sub.ID, err)
 	}
 	return nil
 }
@@ -1673,8 +1697,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
-		entSvc := entitlements.NewEntitlementService(db, s.Clock())
-		entSvc.SetClock(s.Clock()) // Propagate clock for testing
+		entSvc := s.newLifecycleEntitlementService(db)
 
 		subscription, err := subService.subscriptionRepo.GetByIDForUpdate(ctx, subscriptionID)
 		if err != nil {
@@ -1711,46 +1734,37 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		if entSvc != nil {
 			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
 			if err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to list entitlements for expired subscription")
-			} else {
-				st := models.EntitlementSourceSubscription
-				sid := subscription.ID
-				for _, entName := range names {
-					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.CustomerID.String(),
-						Entitlement: entName,
-						SourceType:  &st,
-						SourceID:    &sid,
-						Reason:      models.EntitlementRevokeDunning,
-					}); err != nil {
-						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"entitlement":     entName,
-						}).Error("failed to revoke entitlement for expired subscription")
-					}
+				return fmt.Errorf("list entitlements for expired subscription %s: %w", subscription.ID, err)
+			}
+			st := models.EntitlementSourceSubscription
+			sid := subscription.ID
+			for _, entName := range names {
+				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+					UserID:      subscription.CustomerID.String(),
+					Entitlement: entName,
+					SourceType:  &st,
+					SourceID:    &sid,
+					Reason:      models.EntitlementRevokeDunning,
+				}); err != nil {
+					return fmt.Errorf("revoke entitlement %q for expired subscription %s: %w", entName, subscription.ID, err)
 				}
 			}
 
 			// Terminal expiration: immediately remove any grace windows for this subscription too.
 			graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
 			if err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to list grace entitlements for expired subscription")
-			} else {
-				st := models.EntitlementSourceGrace
-				sid := subscription.ID
-				for _, entName := range graceNames {
-					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.CustomerID.String(),
-						Entitlement: entName,
-						SourceType:  &st,
-						SourceID:    &sid,
-						Reason:      models.EntitlementRevokeDunning,
-					}); err != nil {
-						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"entitlement":     entName,
-						}).Error("failed to revoke grace entitlement for expired subscription")
-					}
+				return fmt.Errorf("list grace entitlements for expired subscription %s: %w", subscription.ID, err)
+			}
+			st = models.EntitlementSourceGrace
+			for _, entName := range graceNames {
+				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+					UserID:      subscription.CustomerID.String(),
+					Entitlement: entName,
+					SourceType:  &st,
+					SourceID:    &sid,
+					Reason:      models.EntitlementRevokeDunning,
+				}); err != nil {
+					return fmt.Errorf("revoke grace entitlement %q for expired subscription %s: %w", entName, subscription.ID, err)
 				}
 			}
 		}
@@ -1857,8 +1871,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		productService := catalog.NewProductService(db)
 		notificationRepo := NewNotificationQueueRepo(db)
 		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
-		entSvc := entitlements.NewEntitlementService(db, s.Clock())
-		entSvc.SetClock(s.Clock()) // Propagate clock for testing
+		entSvc := s.newLifecycleEntitlementService(db)
 
 		subscription, err := subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
 		if err != nil {
@@ -2117,49 +2130,40 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if subscription.Status == models.StatusCancelled && entSvc != nil {
 			names, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceSubscription, subscription.ID)
 			if err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to list entitlements for failed subscription")
-			} else {
-				st := models.EntitlementSourceSubscription
-				sid := subscription.ID
-				for _, entName := range names {
-					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.CustomerID.String(),
-						Entitlement: entName,
-						SourceType:  &st,
-						SourceID:    &sid,
-						Reason:      models.EntitlementRevokeDunning,
-					}); err != nil {
-						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"entitlement":     entName,
-						}).Error("failed to revoke entitlement for failed subscription")
-					}
-				}
-				log.WithContext(ctx).WithFields(log.Fields{
-					"subscription_id": subscription.ID,
-				}).Warn("Revoked entitlements after max dunning failures")
+				return fmt.Errorf("list entitlements for failed subscription %s: %w", subscription.ID, err)
 			}
+			st := models.EntitlementSourceSubscription
+			sid := subscription.ID
+			for _, entName := range names {
+				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+					UserID:      subscription.CustomerID.String(),
+					Entitlement: entName,
+					SourceType:  &st,
+					SourceID:    &sid,
+					Reason:      models.EntitlementRevokeDunning,
+				}); err != nil {
+					return fmt.Errorf("revoke entitlement %q for failed subscription %s: %w", entName, subscription.ID, err)
+				}
+			}
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID,
+			}).Warn("Revoked entitlements after max dunning failures")
 
 			// Terminal dunning failure: remove any grace windows too so access doesn't continue.
 			graceNames, err := entSvc.ListDistinctEntitlementNamesBySource(ctx, models.EntitlementSourceGrace, subscription.ID)
 			if err != nil {
-				log.WithContext(ctx).WithError(err).Error("failed to list grace entitlements for failed subscription")
-			} else {
-				st := models.EntitlementSourceGrace
-				sid := subscription.ID
-				for _, entName := range graceNames {
-					if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
-						UserID:      subscription.CustomerID.String(),
-						Entitlement: entName,
-						SourceType:  &st,
-						SourceID:    &sid,
-						Reason:      models.EntitlementRevokeDunning,
-					}); err != nil {
-						log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-							"subscription_id": subscription.ID,
-							"entitlement":     entName,
-						}).Error("failed to revoke grace entitlement for failed subscription")
-					}
+				return fmt.Errorf("list grace entitlements for failed subscription %s: %w", subscription.ID, err)
+			}
+			st = models.EntitlementSourceGrace
+			for _, entName := range graceNames {
+				if err := entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+					UserID:      subscription.CustomerID.String(),
+					Entitlement: entName,
+					SourceType:  &st,
+					SourceID:    &sid,
+					Reason:      models.EntitlementRevokeDunning,
+				}); err != nil {
+					return fmt.Errorf("revoke grace entitlement %q for failed subscription %s: %w", entName, subscription.ID, err)
 				}
 			}
 		}
