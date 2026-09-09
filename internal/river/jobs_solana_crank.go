@@ -175,6 +175,7 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 	}
 	log.WithContext(ctx).WithField("count", len(due)).Info("Solana cranker: processing due subscriptions")
 
+	failures := 0
 	for _, row := range due {
 		select {
 		case <-ctx.Done():
@@ -188,25 +189,33 @@ func (w *SolanaCrankWorker) Work(ctx context.Context, _ *river.Job[SolanaCrankAr
 		// next_pull_at anchor), inline execution, pre-submit signature
 		// write-ahead. Crash at any point ⇒ verify-then-resolve off the
 		// recorded signature, never a paid-but-unrenewed subscriber.
-		if _, err := w.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
-			MerchantID:     row.MerchantID,
-			Provider:       string(models.RailSolana),
-			PspID:          row.PspID,
-			IntentType:     TypeSolanaPull,
-			SubscriptionID: &row.SubscriptionID,
-			Payload: SolanaPullPayload{
-				SubscriptionPDA: row.SubscriptionPDA,
-				RowID:           row.ID,
-				NextPullAt:      row.NextPullAt.UTC(),
-			},
-			IdempotencyKey: SolanaPullIdempotencyKey(row.ID, row.NextPullAt),
-			NextAttemptAt:  w.now(),
-			Origin:         intents.OriginSystem,
-			OriginReason:   "solana recurring pull (cranking)",
-		}); err != nil {
+		err := w.DB.RunInMerchantScope(ctx, merchant.ID(row.MerchantID), "solana crank pull intent", func(mctx context.Context) error {
+			_, err := w.Intents.EnqueueAndExecute(mctx, intents.EnqueueParams{
+				MerchantID:     row.MerchantID,
+				Provider:       string(models.RailSolana),
+				PspID:          row.PspID,
+				IntentType:     TypeSolanaPull,
+				SubscriptionID: &row.SubscriptionID,
+				Payload: SolanaPullPayload{
+					SubscriptionPDA: row.SubscriptionPDA,
+					RowID:           row.ID,
+					NextPullAt:      row.NextPullAt.UTC(),
+				},
+				IdempotencyKey: SolanaPullIdempotencyKey(row.ID, row.NextPullAt),
+				NextAttemptAt:  w.now(),
+				Origin:         intents.OriginSystem,
+				OriginReason:   "solana recurring pull (cranking)",
+			})
+			return err
+		})
+		if err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_pda", row.SubscriptionPDA).
-				Warn("Solana cranker: post pull intent failed")
+				Error("Solana cranker: post pull intent failed; continuing")
+			failures++
 		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("solana crank: %d of %d pull intents failed", failures, len(due))
 	}
 	return nil
 }
