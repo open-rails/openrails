@@ -33,7 +33,8 @@ func TestDunningWorkerSkipsPastDueWithoutPeriodEndWithoutPanic(t *testing.T) {
 	}
 
 	require.NotPanics(t, func() {
-		outcome := worker.processSubscription(context.Background(), sub, nil, nil, false)
+		outcome, err := worker.processSubscription(context.Background(), sub, nil, nil, false)
+		require.NoError(t, err)
 		require.Equal(t, dunningOutcomeFailed, outcome)
 	})
 }

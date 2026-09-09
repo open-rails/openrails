@@ -1680,6 +1680,42 @@ func (q *Queries) MarkCancelledSubscriptionsSuperseded(ctx context.Context, arg 
 	return result.RowsAffected(), nil
 }
 
+const releaseDunningAttempt = `-- name: ReleaseDunningAttempt :execrows
+UPDATE openrails.subscriptions
+SET next_retry_at = $1::timestamptz,
+    updated_at = $1::timestamptz
+WHERE id = $2
+  AND merchant_id = $3
+  AND status = 'past_due'
+  AND last_retry_at = $1::timestamptz
+  AND next_retry_at = $4::timestamptz
+  AND deleted_at IS NULL
+`
+
+type ReleaseDunningAttemptParams struct {
+	ClaimedAt  time.Time
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	LeaseUntil time.Time
+}
+
+// A provider decline is already durable before its lifecycle transition runs.
+// If that transition rolls back, make this exact claim immediately eligible
+// for River's retry without advancing the attempt ordinal (and therefore
+// without deriving a fresh charge intent).
+func (q *Queries) ReleaseDunningAttempt(ctx context.Context, arg ReleaseDunningAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseDunningAttempt,
+		arg.ClaimedAt,
+		arg.ID,
+		arg.MerchantID,
+		arg.LeaseUntil,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setStripeSubscriptionPaymentMethod = `-- name: SetStripeSubscriptionPaymentMethod :execrows
 UPDATE openrails.subscriptions SET
     payment_method_id = $1::uuid,

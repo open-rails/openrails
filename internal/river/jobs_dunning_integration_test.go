@@ -229,8 +229,9 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	mctx := dbtest.WithTestMerchant(ctx)
 	var outcome dunningOutcome
 	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
-		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, false)
-		return nil
+		var processErr error
+		outcome, processErr = worker.processSubscription(sctx, sub, lifecycle, priceSvc, false)
+		return processErr
 	}))
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 
@@ -388,7 +389,11 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, false)
+		var processErr error
+		outcome, processErr = worker.processSubscription(sctx, sub, lifecycle, priceSvc, false)
+		if processErr != nil {
+			return processErr
+		}
 		refreshed, err = dbi.Gen(sctx).GetSubscriptionByID(sctx, subID)
 		return err
 	}))

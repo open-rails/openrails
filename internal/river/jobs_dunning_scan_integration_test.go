@@ -271,8 +271,9 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 		if gerr != nil {
 			return gerr
 		}
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, false)
-		return nil
+		var processErr error
+		outcome, processErr = worker.processSubscription(mctx, sub, lifecycle, priceSvc, false)
+		return processErr
 	}))
 	assert.Equal(t, dunningOutcomeFailed, outcome)
 	assert.Zero(t, nmiMutations.Load(), "nothing chargeable exists; no provider mutation may be sent")
@@ -303,8 +304,9 @@ func TestDunningScan_MissingPaymentMethodParksInsteadOfFailing(t *testing.T) {
 		if gerr != nil {
 			return gerr
 		}
-		outcome = worker.processSubscription(mctx, autoSub, lifecycle, priceSvc, false)
-		return nil
+		var processErr error
+		outcome, processErr = worker.processSubscription(mctx, autoSub, lifecycle, priceSvc, false)
+		return processErr
 	}))
 	assert.Equal(t, dunningOutcomeFailed, outcome)
 	assert.Zero(t, nmiMutations.Load(), "provider-auto-billed sub must never be charged by us")

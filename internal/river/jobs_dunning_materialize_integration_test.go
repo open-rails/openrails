@@ -139,8 +139,9 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 		if e != nil {
 			return e
 		}
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
-		return nil
+		var processErr error
+		outcome, processErr = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
+		return processErr
 	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	assert.Zero(t, nmiMutations.Load(), "materialize must not send a provider mutation")
@@ -173,8 +174,9 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 
 	// Idempotent: a second materialize pass refreshes the same pending intent.
 	require.NoError(t, dbi.RunInMerchantConn(dbtest.WithTestMerchant(ctx), func(mctx context.Context) error {
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
-		return nil
+		var processErr error
+		outcome, processErr = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
+		return processErr
 	}))
 	assert.Equal(t, dunningOutcomeMaterialized, outcome)
 	var intentCount int
@@ -282,8 +284,9 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		outcome = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
-		return nil
+		var processErr error
+		outcome, processErr = worker.processSubscription(mctx, sub, lifecycle, priceSvc, true)
+		return processErr
 	}))
 	assert.Equal(t, dunningOutcomeWindowExpired, outcome)
 	assert.Zero(t, nmiMutations.Load(), "window expiry never charges")
