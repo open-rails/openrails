@@ -42,6 +42,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 |---|---|
 | `run-server [--no-workers]` / `run-worker` | serve the public API (+ workers unless disabled) / workers only |
 | `migrate up` / `migrate pg` | apply all migrations / Postgres-only (River + OpenRails) |
+| `migrate status [--json]` | compare embedded OpenRails migrations with the applied ledger; non-zero unless names and hashes match exactly |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] [mutation flags]` | push merchant groups + PSP declarations + secrets from `merchants.yaml` |
 | `push-merchant-catalog [--file] [mutation flags]` | terraform-style catalog apply (OpenRails rows + provider objects) |
