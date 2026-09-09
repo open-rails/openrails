@@ -529,7 +529,9 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		// Idempotently (re)record the product access grant for one-time purchases
 		// (issue #250) so a replayed webhook/poll repairs a missing grant the same
 		// way it repairs entitlements.
-		s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours)
+		if err := s.grantProductAccess(ctx, req.UserID, product.ID, existingPayment.ID, existingPayment.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours); err != nil {
+			return nil, fmt.Errorf("failed to repair product access for existing payment: %w", err)
+		}
 
 		// Re-deposit the purchase credit/currency grants (#472); idempotent per
 		// (payment, label) so re-delivery repairs without double-granting.
@@ -537,7 +539,9 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		if len(creditsSpec) == 0 {
 			creditsSpec = product.CreditsSpec
 		}
-		s.grantPurchaseCredits(ctx, req.UserID, creditsSpec, existingPayment.ID, existingPayment.SubscriptionID != nil)
+		if err := s.grantPurchaseCredits(ctx, req.UserID, creditsSpec, existingPayment.ID, existingPayment.SubscriptionID != nil); err != nil {
+			return nil, fmt.Errorf("failed to repair purchase credits for existing payment: %w", err)
+		}
 
 		grantedEntitlements := make([]string, 0, len(entitlementsSpec))
 		for entName := range entitlementsSpec {
@@ -569,12 +573,16 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 	// Durable product ownership/access grant (issue #250) for one-time product
 	// purchases — additive to the feature entitlements granted above. Keyed on the
 	// payment id so it is idempotent; skipped for subscription purchases.
-	s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours)
+	if err := s.grantProductAccess(ctx, req.UserID, product.ID, paymentID, req.SubscriptionID != nil, price.AutoRenew, price.AccessDurationHours); err != nil {
+		return nil, fmt.Errorf("failed to grant product access after payment: %w", err)
+	}
 
 	// Credit/currency balance grants (#472) — the other half of "what you get"
 	// alongside entitlements. Keyed on payment id for idempotency; skipped for
 	// subscription purchases (those grant credits per period).
-	s.grantPurchaseCredits(ctx, req.UserID, product.CreditsSpec, paymentID, req.SubscriptionID != nil)
+	if err := s.grantPurchaseCredits(ctx, req.UserID, product.CreditsSpec, paymentID, req.SubscriptionID != nil); err != nil {
+		return nil, fmt.Errorf("failed to grant purchase credits after payment: %w", err)
+	}
 
 	var delayedStart *time.Time
 	if coverage.HasCoverage && coverage.EndDate != nil {
@@ -598,12 +606,12 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 // The access window comes from the price's access_duration_hours (#622): a finite
 // value sets ends_at (rental, possibly sub-day); nil = durable ownership. A nil
 // ProductAccessService makes this a no-op so existing call sites/tests are unaffected.
-func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID string, productID, paymentID uuid.UUID, isSubscription, autoRenew bool, accessDurationHours *int) {
+func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID string, productID, paymentID uuid.UUID, isSubscription, autoRenew bool, accessDurationHours *int) error {
 	if s.ProductAccessService == nil {
-		return
+		return nil
 	}
 	if isSubscription || autoRenew {
-		return
+		return nil
 	}
 	var endsAt *time.Time
 	if accessDurationHours != nil && *accessDurationHours > 0 {
@@ -619,13 +627,12 @@ func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID
 		PaymentID:  &pid,
 		EndsAt:     endsAt,
 	}); err != nil {
-		// Non-fatal: the payment + entitlements already succeeded. Log and
-		// continue so a grant write failure never blocks fulfilment; refunds
-		// revoke by payment id regardless.
 		log.WithError(err).WithFields(log.Fields{
 			"user_id": userID, "product_id": productID, "payment_id": paymentID,
 		}).Error("failed to record product access grant after purchase")
+		return err
 	}
+	return nil
 }
 
 // grantPurchaseCredits deposits a one-time purchase's credit/currency balances
@@ -633,14 +640,14 @@ func (s *CheckoutPurchaseService) grantProductAccess(ctx context.Context, userID
 // per (payment, grant label) inside MoneyService, so a replayed webhook/poll
 // never double-grants. Skipped for subscription purchases (those grant credits
 // via GrantSubscriptionCredits per period). A nil MoneyService makes this a no-op.
-func (s *CheckoutPurchaseService) grantPurchaseCredits(ctx context.Context, userID string, creditsSpec models.CreditsSpec, paymentID uuid.UUID, isSubscription bool) {
+func (s *CheckoutPurchaseService) grantPurchaseCredits(ctx context.Context, userID string, creditsSpec models.CreditsSpec, paymentID uuid.UUID, isSubscription bool) error {
 	if s.MoneyService == nil || len(creditsSpec) == 0 || isSubscription {
-		return
+		return nil
 	}
 	payer := identity.CustomerIDFromString(userID)
 	if payer.IsZero() {
 		log.WithField("user_id", userID).Error("skip purchase credit grant: payer is not a UUID")
-		return
+		return fmt.Errorf("purchase credit payer %q is not a UUID", userID)
 	}
 	if err := s.MoneyService.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
 		Payer:     payer,
@@ -648,12 +655,12 @@ func (s *CheckoutPurchaseService) grantPurchaseCredits(ctx context.Context, user
 		Spec:      creditsSpec,
 		Source:    "purchase",
 	}); err != nil {
-		// Non-fatal: the payment + entitlements already succeeded. Log and continue
-		// so a grant write failure never blocks fulfilment; re-delivery repairs it.
 		log.WithError(err).WithFields(log.Fields{
 			"user_id": userID, "payment_id": paymentID,
 		}).Error("failed to grant purchase credits")
+		return err
 	}
+	return nil
 }
 
 // grantProductEntitlements grants the product's entitlements for the access

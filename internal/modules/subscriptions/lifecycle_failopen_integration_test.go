@@ -243,6 +243,97 @@ func TestResumeMembership_RollsBackStatusWhenAccessReopenFails(t *testing.T) {
 	require.Nil(t, windows[0].EndAt, "a successful retry must restore standing access")
 }
 
+func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
+	f := newFailopenFixture(t, 30*24, true)
+	ctx := failopenCtx()
+	sub, railSubID := f.create(t, models.RailNMI)
+	original := f.loadSub(t, sub.ID)
+	require.NotNil(t, original.CurrentPeriodEndsAt)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	targetProductID, targetPriceID := uuid.New(), uuid.New()
+	description := "Downgrade target"
+	_, err := f.q.CreateProduct(ctx, gen.CreateProductParams{
+		MerchantID:       dbtest.TestMerchantID.UUID(),
+		ID:               targetProductID,
+		Key:              "downgrade_target_" + uuid.NewString(),
+		DisplayName:      "Downgrade Target",
+		Description:      &description,
+		EntitlementsSpec: []byte(`{}`),
+		Archived:         false,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	require.NoError(t, err)
+	cycleHours := int32(30 * 24)
+	_, err = f.q.CreatePrice(ctx, gen.CreatePriceParams{
+		MerchantID:          dbtest.TestMerchantID.UUID(),
+		ID:                  targetPriceID,
+		ProductID:           targetProductID,
+		Amount:              4990000,
+		Currency:            "USD",
+		AccessDurationHours: &cycleHours,
+		AutoRenew:           true,
+		CreatedAt:           now,
+		UpdatedAt:           now,
+	})
+	require.NoError(t, err)
+	_, err = f.pool.Exec(ctx, `UPDATE openrails.subscriptions SET scheduled_price_id=$2 WHERE id=$1`, sub.ID, targetPriceID)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.entitlements WHERE source_id=$1`, sub.ID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, sub.ID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.notification_queue WHERE customer_id=$1`, sub.CustomerID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub.ID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, targetPriceID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, targetProductID)
+	})
+
+	periodStart := original.CurrentPeriodEndsAt.UTC()
+	periodEnd := periodStart.Add(30 * 24 * time.Hour)
+	txnID := "downgrade_renewal_" + uuid.NewString()
+	params := &RenewMembershipParams{
+		Rail:                  models.RailNMI,
+		RailSubscriptionID:    railSubID,
+		TransactionID:         txnID,
+		Amount:                4990000,
+		AmountProvided:        true,
+		Currency:              "USD",
+		CurrentPeriodStartsAt: &periodStart,
+		CurrentPeriodEndsAt:   &periodEnd,
+	}
+
+	injected := errors.New("injected downgrade revoke failure")
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{revokeErr: injected})
+	err = f.lifecycle.RenewMembership(ctx, params)
+	require.ErrorIs(t, err, injected)
+
+	afterFailure := f.loadSub(t, sub.ID)
+	require.Equal(t, original.PriceID, afterFailure.PriceID)
+	require.Equal(t, original.ProductID, afterFailure.ProductID)
+	require.Equal(t, &targetPriceID, afterFailure.ScheduledPriceID)
+	require.Equal(t, original.CurrentPeriodEndsAt.UTC(), afterFailure.CurrentPeriodEndsAt.UTC())
+	var paymentCount int
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id=$1`, txnID).Scan(&paymentCount))
+	require.Zero(t, paymentCount, "the renewal payment marker must roll back with the failed downgrade effect")
+	windows := f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
+	require.Len(t, windows, 1)
+	require.Nil(t, windows[0].RevokedAt, "the old-tier access must remain intact when the renewal rolls back")
+
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{})
+	require.NoError(t, f.lifecycle.RenewMembership(ctx, params))
+	afterRetry := f.loadSub(t, sub.ID)
+	require.Equal(t, targetPriceID, afterRetry.PriceID)
+	require.Equal(t, targetProductID, afterRetry.ProductID)
+	require.Nil(t, afterRetry.ScheduledPriceID)
+	require.Equal(t, periodEnd, afterRetry.CurrentPeriodEndsAt.UTC())
+	require.NoError(t, f.pool.QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id=$1`, txnID).Scan(&paymentCount))
+	require.Equal(t, 1, paymentCount)
+	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
+	require.Len(t, windows, 1)
+	require.NotNil(t, windows[0].RevokedAt, "the successful retry must remove the old-tier entitlement")
+}
+
 // TestFailOpen_WebhookSilence: an active auto-renew sub gets ONE standing
 // window (end_at NULL); the period end passing with total webhook silence
 // changes nothing; parking `unknown` (what the converge sweep does) changes
