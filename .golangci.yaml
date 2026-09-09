@@ -67,3 +67,7 @@ linters:
       # missing ctx there cannot hang a production worker.
       - path: _test\.go
         linters: [noctx, bodyclose]
+
+formatters:
+  enable:
+    - gofmt

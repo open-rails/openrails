@@ -30,12 +30,18 @@ fi
 # the up-migrations, subtract the excluded paths, and pass early only when the
 # remainder is genuinely zero. If a file exists that squawk should have seen,
 # the run happens and the guards below apply unchanged.
-mapfile -t all_migrations < <(ls migrations/postgres/*.up.sql 2>/dev/null || true)
+all_migrations=()
+while IFS= read -r migration; do
+    [ -n "$migration" ] && all_migrations+=("$migration")
+done < <(ls migrations/postgres/*.up.sql 2>/dev/null || true)
 if [ "${#all_migrations[@]}" -eq 0 ]; then
     echo "migration-lint: no migrations found at all — the layout moved. Fix that before trusting this gate." 1>&2
     exit 1
 fi
-mapfile -t excluded < <(sed -n '/^excluded_paths *= *\[/,/^\]/p' .squawk.toml | grep -oE '"[^"]+"' | tr -d '"')
+excluded=()
+while IFS= read -r path; do
+    [ -n "$path" ] && excluded+=("$path")
+done < <(sed -n '/^excluded_paths *= *\[/,/^\]/p' .squawk.toml | grep -oE '"[^"]+"' | tr -d '"')
 lintable=0
 for f in "${all_migrations[@]}"; do
     skip=0

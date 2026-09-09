@@ -34,6 +34,17 @@ func TestEnvExampleRoundTrip(t *testing.T) {
 	vars, err := godotenv.Read(examplePath)
 	require.NoError(t, err)
 	require.NotEmpty(t, vars)
+	require.Equal(t, "5434", vars["DB_PORT"])
+	require.Contains(t, vars["DB_URL"], ":5434/openrails_db")
+
+	// The standalone connection settings derive from the one Compose host-port
+	// dial. Moving the stack must not require three coordinated edits.
+	raw, err := os.ReadFile(examplePath)
+	require.NoError(t, err)
+	moved, err := godotenv.Unmarshal(strings.Replace(string(raw), "POSTGRES_HOST_PORT=5434", "POSTGRES_HOST_PORT=5544", 1))
+	require.NoError(t, err)
+	require.Equal(t, "5544", moved["DB_PORT"])
+	require.Contains(t, moved["DB_URL"], ":5544/openrails_db")
 
 	compose, err := os.ReadFile(filepath.Join("..", "docker-compose.yaml"))
 	require.NoError(t, err)
@@ -63,8 +74,6 @@ func TestEnvExampleRoundTrip(t *testing.T) {
 	})
 	os.Clearenv()
 	dir := t.TempDir()
-	raw, err := os.ReadFile(examplePath)
-	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), raw, 0o600))
 	t.Chdir(dir)
 

@@ -28,6 +28,14 @@
 set -euo pipefail
 export LC_ALL=C # byte-wise matching; grep -P must not choke on invalid UTF-8
 
+# NUL-delimited mapfile support arrived in Bash 4.4. Refusing immediately is
+# safer than silently weakening a security scanner on macOS's stock Bash 3.2.
+if (( BASH_VERSINFO[0] < 4 || (BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] < 4) )); then
+	echo "scan-injected-code.sh requires Bash 4.4+ (found ${BASH_VERSION})." >&2
+	echo "macOS: brew install bash, then put \"\$(brew --prefix bash)/bin\" before /bin in PATH." >&2
+	exit 2
+fi
+
 # --- tunables ----------------------------------------------------------------
 
 MAX_SPACES=100             # rule 1: consecutive spaces (non-Markdown)

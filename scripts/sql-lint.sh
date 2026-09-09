@@ -19,7 +19,10 @@ PATTERN='\.(Query|QueryRow|Exec)\((ctx|r\.Context\(\)|context\.(Background|TODO)
 # auditor itself (its whole job is talking to pg_catalog).
 EXCLUDE_DIRS='internal/db/gen/|internal/dbtest/|internal/db/sqlaudit/'
 
-mapfile -t allowed < <(grep -vE '^\s*(#|$)' "$ALLOWLIST" | awk '{print $2}')
+allowed=()
+while IFS= read -r path; do
+  [ -n "$path" ] && allowed+=("$path")
+done < <(grep -vE '^\s*(#|$)' "$ALLOWLIST" | awk '{print $2}')
 
 violations=()
 while IFS= read -r f; do

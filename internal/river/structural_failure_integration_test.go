@@ -37,7 +37,9 @@ type sfDriftArgs struct{}
 
 func (sfDriftArgs) Kind() string { return sfDriftKind }
 
-type sfDriftWorker struct{ river.WorkerDefaults[sfDriftArgs] }
+type sfDriftWorker struct {
+	river.WorkerDefaults[sfDriftArgs]
+}
 
 // The exact error the stacks returned once the or#877 fan-out shipped against a
 // schema the or#893 re-squash could no longer reach.
@@ -53,7 +55,9 @@ type sfNoMerchArgs struct{}
 
 func (sfNoMerchArgs) Kind() string { return sfNoMerchKind }
 
-type sfNoMerchWorker struct{ river.WorkerDefaults[sfNoMerchArgs] }
+type sfNoMerchWorker struct {
+	river.WorkerDefaults[sfNoMerchArgs]
+}
 
 // The exact error the stacks returned for the 15 days before that: the pull ran
 // on a bare job context, so the rail resolver had no merchant to resolve.
@@ -68,7 +72,9 @@ type sfTransientArgs struct{}
 
 func (sfTransientArgs) Kind() string { return sfTransientKind }
 
-type sfTransientWorker struct{ river.WorkerDefaults[sfTransientArgs] }
+type sfTransientWorker struct {
+	river.WorkerDefaults[sfTransientArgs]
+}
 
 // serialization_failure is the control: a Postgres error that IS transient and
 // whose retries must survive the classifier untouched.

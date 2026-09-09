@@ -313,6 +313,10 @@ curl http://localhost:3053/health/ready
 go get github.com/open-rails/openrails
 ```
 
+The local Compose profile defaults to sandbox credentials with provider writes enabled
+(`TEST_MODE=sandbox`, `PROVIDER_WRITE_MODE=full`). Set `PROVIDER_WRITE_MODE=readonly`
+before `task docker-up` when you want a read-only local stack.
+
 Then pick your integration path below.
 
 ---
