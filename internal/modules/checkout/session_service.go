@@ -395,7 +395,7 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	if claimed && s.idempotencyService != nil && strings.TrimSpace(req.IdempotencyKey) != "" {
 		fingerprint := checkoutSessionRequestFingerprintForRail(req, user, resp.Payment.Rail)
 		payload, _ := json.Marshal(checkoutSessionIdempotencyResult{RequestFingerprint: fingerprint, Response: resp})
-		_ = s.idempotencyService.Complete(ctx, checkoutSessionIdempotencyOp, req.IdempotencyKey, payload)
+		completeCheckoutIdempotency(ctx, s.idempotencyService, checkoutSessionIdempotencyOp, req.IdempotencyKey, payload)
 	}
 
 	return resp, nil

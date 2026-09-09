@@ -1014,7 +1014,7 @@ func (s *CheckoutService) nmiSubscriptionPendingResponse(ctx context.Context, su
 		TransactionID:  transactionID,
 		DelayedStart:   delayedStartStr,
 	})
-	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
+	completeCheckoutIdempotency(ctx, s.IdempotencyService, idempOp, idempotencyKey, cachedResult)
 
 	message := "Subscription created successfully"
 	if delayedStart != nil {
@@ -1035,7 +1035,7 @@ func (s *CheckoutService) nmiSubscriptionSuccessResponse(ctx context.Context, su
 		SubscriptionID: subscriptionID.String(),
 		TransactionID:  transactionID,
 	})
-	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
+	completeCheckoutIdempotency(ctx, s.IdempotencyService, idempOp, idempotencyKey, cachedResult)
 
 	return &CheckoutResponse{
 		Status:         "success",
@@ -2066,7 +2066,7 @@ func (s *CheckoutService) processUpgrade(
 		ProrationTransactionID: prorationTransactionID,
 		Message:                successMessage,
 	})
-	_ = s.IdempotencyService.Complete(ctx, idempOp, idempotencyKey, cachedResult)
+	completeCheckoutIdempotency(ctx, s.IdempotencyService, idempOp, idempotencyKey, cachedResult)
 
 	return &CheckoutResponse{
 		Status:         "success",

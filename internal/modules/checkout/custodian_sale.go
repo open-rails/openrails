@@ -217,7 +217,7 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 			return nil, fmt.Errorf("sale succeeded but evidence unreadable: %w", derr)
 		}
 		payload, _ := json.Marshal(cached)
-		_ = s.IdempotencyStore.Complete(ctx, idempOp, idempotencyKey, payload)
+		completeCheckoutIdempotency(ctx, s.IdempotencyStore, idempOp, idempotencyKey, payload)
 		return saleResponse(cached, "Purchase completed successfully"), nil
 	case intents.StatusFailedTerminal:
 		reason := "payment failed"
