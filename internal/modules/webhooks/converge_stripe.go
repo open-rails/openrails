@@ -115,10 +115,8 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 	}).Info("stripe converge: decided from fetched truth")
 
 	return sub.CustomerID, afterConvergeTransition(ctx, convergeDeps{
-		MoneyService:        s.MoneyService,
-		SubscriptionService: s.SubscriptionService,
 		NotificationService: s.NotificationService,
-	}, sub, res, now)
+	}, sub, res)
 }
 
 // createFromFetchedRecord is the signup/first-invoice leg: a Stripe checkout
@@ -197,18 +195,6 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 	log.WithContext(ctx).WithFields(log.Fields{
 		"rail_subscription_id": railSubID, "subscription_id": sub.ID, "user_id": userID,
 	}).Info("stripe converge: membership created from fetched record")
-
-	// Initial credit lot (idempotent per (subscription, label, period_end)).
-	if s.MoneyService != nil && sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.IsZero() {
-		if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
-			SubscriptionID: sub.ID,
-			PeriodEnd:      sub.CurrentPeriodEndsAt.UTC(),
-			Cadence:        models.CreditGrantCadenceOnce,
-			Source:         "subscription_initial",
-		}); err != nil {
-			return sub.CustomerID, fmt.Errorf("stripe converge: grant initial subscription credits: %w", err)
-		}
-	}
 
 	s.markCheckoutSessionSucceeded(ctx, rec, userID, priceID, transactionID, sub.ID)
 	return sub.CustomerID, nil

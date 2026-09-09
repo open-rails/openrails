@@ -10,16 +10,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
-type GrantSubscriptionCreditsParams struct {
-	SubscriptionID uuid.UUID
-	PeriodEnd      time.Time
-	Cadence        models.CreditGrantCadence // once|per_renewal
-	Source         string                    // for deposit transaction (e.g., "subscription_initial", "subscription_renewal")
-}
+type GrantSubscriptionCreditsParams = subscriptions.SubscriptionCreditGrantParams
 
 // validateCreditGrantSpec validates one credit/currency grant spec (#472). The
 // grant key is just a label; a non-empty key scopes per-grant idempotency. Unit
@@ -76,6 +72,29 @@ func expiryLogValue(t *time.Time) string {
 // deposit (the spec key is a label, not a credit_type — #472). Idempotent per
 // (subscription_id, grant key, period_end) via a deterministic deposit SourceID.
 func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params GrantSubscriptionCreditsParams) error {
+	if err := s.validateSubscriptionCreditGrant(params); err != nil {
+		return err
+	}
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		return s.grantSubscriptionCreditsTx(ctx, gen.New(tx), params)
+	})
+}
+
+// GrantSubscriptionCreditsTx applies a subscription credit grant through the
+// caller's transaction-bound query catalog. It deliberately opens no
+// transaction; SubscriptionLifecycleService owns the commit that also changes
+// membership state.
+func (s *MoneyService) GrantSubscriptionCreditsTx(ctx context.Context, q *gen.Queries, params subscriptions.SubscriptionCreditGrantParams) error {
+	if err := s.validateSubscriptionCreditGrant(params); err != nil {
+		return err
+	}
+	if q == nil {
+		return fmt.Errorf("transaction query catalog required")
+	}
+	return s.grantSubscriptionCreditsTx(ctx, q, params)
+}
+
+func (s *MoneyService) validateSubscriptionCreditGrant(params subscriptions.SubscriptionCreditGrantParams) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
@@ -91,81 +110,81 @@ func (s *MoneyService) GrantSubscriptionCredits(ctx context.Context, params Gran
 	if strings.TrimSpace(params.Source) == "" {
 		return fmt.Errorf("source required")
 	}
+	return nil
+}
 
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		now := s.now()
+func (s *MoneyService) grantSubscriptionCreditsTx(ctx context.Context, q *gen.Queries, params subscriptions.SubscriptionCreditGrantParams) error {
+	now := s.now()
 
-		sub, err := q.GetSubscriptionByID(ctx, params.SubscriptionID)
-		if err != nil {
+	sub, err := q.GetSubscriptionByID(ctx, params.SubscriptionID)
+	if err != nil {
+		return err
+	}
+
+	var creditsSpec models.CreditsSpec
+	if err := fromJSONBC(sub.CreditsSpecSnapshot, &creditsSpec, "subscriptions.credits_spec_snapshot"); err != nil {
+		return err
+	}
+	if len(creditsSpec) == 0 {
+		prod, perr := q.GetProductByID(ctx, sub.ProductID)
+		if perr != nil {
+			return perr
+		}
+		if err := fromJSONBC(prod.CreditsSpec, &creditsSpec, "products.credits_spec"); err != nil {
 			return err
 		}
+	}
 
-		var creditsSpec models.CreditsSpec
-		if err := fromJSONBC(sub.CreditsSpecSnapshot, &creditsSpec, "subscriptions.credits_spec_snapshot"); err != nil {
-			return err
-		}
-		if len(creditsSpec) == 0 {
-			prod, perr := q.GetProductByID(ctx, sub.ProductID)
-			if perr != nil {
-				return perr
-			}
-			if err := fromJSONBC(prod.CreditsSpec, &creditsSpec, "products.credits_spec"); err != nil {
-				return err
-			}
-		}
-
-		if len(creditsSpec) == 0 {
-			return nil
-		}
-
-		for label, spec := range creditsSpec {
-			label = strings.TrimSpace(label)
-			if err := s.validateCreditGrantSpec(ctx, q, label, spec); err != nil {
-				return err
-			}
-
-			cadence := spec.Cadence
-			if cadence == "" {
-				cadence = models.CreditGrantCadenceOnce
-			}
-			if cadence != params.Cadence {
-				continue
-			}
-
-			grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s", cadence, sub.ID, label)
-			if cadence == models.CreditGrantCadencePerRenewal {
-				grantKey = fmt.Sprintf("%s:%s", grantKey, params.PeriodEnd.UTC().Format(time.RFC3339Nano))
-			}
-			// #491: source_id is the natural-key string (uuidv7 pk + UNIQUE natural key); no uuidv5.
-			grantID := grantKey
-
-			expiresAt := grantExpiry(now, spec)
-			if _, err := s.depositTx(ctx, q, DepositParams{
-				Invoker:   sub.CustomerID.String(),
-				Currency:  spec.UnitCode(),
-				Amount:    spec.Amount,
-				Source:    strings.TrimSpace(params.Source),
-				SourceID:  &grantID,
-				ExpiresAt: expiresAt,
-			}); err != nil {
-				return err
-			}
-
-			log.WithContext(ctx).WithFields(log.Fields{
-				"subscription_id": sub.ID,
-				"period_end":      params.PeriodEnd.UTC(),
-				"grant_label":     label,
-				"unit":            spec.UnitCode(),
-				"amount":          spec.Amount,
-				"expires_at":      expiryLogValue(expiresAt),
-				"cadence":         cadence,
-				"grant_id":        grantID,
-			}).Info("subscription credit grant applied")
-		}
-
+	if len(creditsSpec) == 0 {
 		return nil
-	})
+	}
+
+	for label, spec := range creditsSpec {
+		label = strings.TrimSpace(label)
+		if err := s.validateCreditGrantSpec(ctx, q, label, spec); err != nil {
+			return err
+		}
+
+		cadence := spec.Cadence
+		if cadence == "" {
+			cadence = models.CreditGrantCadenceOnce
+		}
+		if cadence != params.Cadence {
+			continue
+		}
+
+		grantKey := fmt.Sprintf("openrails:sub_credit_grant:%s:%s:%s", cadence, sub.ID, label)
+		if cadence == models.CreditGrantCadencePerRenewal {
+			grantKey = fmt.Sprintf("%s:%s", grantKey, params.PeriodEnd.UTC().Format(time.RFC3339Nano))
+		}
+		// #491: source_id is the natural-key string (uuidv7 pk + UNIQUE natural key); no uuidv5.
+		grantID := grantKey
+
+		expiresAt := grantExpiry(now, spec)
+		if _, err := s.depositTx(ctx, q, DepositParams{
+			Invoker:   sub.CustomerID.String(),
+			Currency:  spec.UnitCode(),
+			Amount:    spec.Amount,
+			Source:    strings.TrimSpace(params.Source),
+			SourceID:  &grantID,
+			ExpiresAt: expiresAt,
+		}); err != nil {
+			return err
+		}
+
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": sub.ID,
+			"period_end":      params.PeriodEnd.UTC(),
+			"grant_label":     label,
+			"unit":            spec.UnitCode(),
+			"amount":          spec.Amount,
+			"expires_at":      expiryLogValue(expiresAt),
+			"cadence":         cadence,
+			"grant_id":        grantID,
+		}).Info("subscription credit grant applied")
+	}
+
+	return nil
 }
 
 // GrantPurchaseCreditsParams grants a one-off purchase's credit/currency balances

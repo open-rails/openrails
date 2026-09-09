@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -677,6 +678,7 @@ type LifecycleDecisionApplier struct {
 // queuing the deferred NMI delete.
 func NewDecisionApplier(database *db.DB, deferDelete subscriptions.DeferredDeleteScheduler) *LifecycleDecisionApplier {
 	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
+	lc.SetCreditGranter(money.NewMoneyService(database, clockwork.NewRealClock()))
 	if deferDelete != nil {
 		lc.SetDeferredDeleteScheduler(deferDelete)
 	}

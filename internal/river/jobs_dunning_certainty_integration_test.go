@@ -172,6 +172,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	f.lifecycle.SetDeferredDeleteScheduler(
 		intents.NewNMIDeleteScheduler(dbi, nil, intents.OriginSystem, "dunning terminal cancellation"))
 	f.moneySvc = money.NewMoneyService(dbi, nil)
+	f.lifecycle.SetCreditGranter(f.moneySvc)
 	f.subSvc = subscriptions.NewSubscriptionService(dbi, f.priceSvc, productSvc, nil, nil, nil)
 	// or#865: the worker's self-assembled intent Runner parks every intent when
 	// no mode is stated — these tests assert on charges that actually fire and
@@ -205,7 +206,7 @@ func (f *dunningCertaintyFixture) run(t *testing.T) dunningOutcome {
 		if err != nil {
 			return err
 		}
-		outcome = f.worker.processSubscription(ctx, sub, f.lifecycle, f.priceSvc, f.moneySvc, false)
+		outcome = f.worker.processSubscription(ctx, sub, f.lifecycle, f.priceSvc, false)
 		return nil
 	}))
 	return outcome

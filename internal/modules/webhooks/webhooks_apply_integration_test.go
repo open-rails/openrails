@@ -695,6 +695,8 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, nil, paymentSvc)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
+	moneySvc := money.NewMoneyService(dbi)
+	lifecycle.SetCreditGranter(moneySvc)
 
 	body, err := json.Marshal(CCBillRenewalSuccessEvent{
 		TransactionID:      "txn_" + uuid.New().String(),
@@ -713,9 +715,16 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 		DB:                           dbi,
 		SubscriptionService:          subSvc,
 		SubscriptionLifecycleService: lifecycle,
-		MoneyService:                 money.NewMoneyService(dbi),
+		MoneyService:                 moneySvc,
 	}
 	err = svc.handleRenewalSuccess(ctx)
 	require.Error(t, err, "credit grant failure must fail the event for retry, not warn-and-ack")
 	require.False(t, IsWebhookErrorNonRetryable(err))
+
+	updated, loadErr := q.GetSubscriptionByID(ctx, subID)
+	require.NoError(t, loadErr)
+	require.Equal(t, periodEnd, updated.CurrentPeriodEndsAt.UTC(), "failed credit grant must roll back the renewal boundary")
+	var paymentCount int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM openrails.payments WHERE subscription_id = $1", subID).Scan(&paymentCount))
+	require.Zero(t, paymentCount, "failed credit grant must roll back the renewal payment")
 }

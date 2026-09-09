@@ -116,10 +116,8 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 	}).Info("nmi converge: decided from fetched truth")
 
 	return sub.CustomerID, afterConvergeTransition(ctx, convergeDeps{
-		MoneyService:        s.MoneyService,
-		SubscriptionService: s.SubscriptionService,
 		NotificationService: s.NotificationService,
-	}, sub, res, now)
+	}, sub, res)
 }
 
 // activatePendingFromProbe is the signup leg: a pending NMI subscription
@@ -209,22 +207,6 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 		"transaction_id":       probe.SuccessTransactionID,
 	}).Info("nmi converge: pending subscription activated from fetched settled charge")
 
-	if s.MoneyService != nil && s.SubscriptionService != nil {
-		updated, err := s.SubscriptionService.GetByID(ctx, sub.ID)
-		if err != nil {
-			return fmt.Errorf("nmi converge: load subscription for initial credit grants: %w", err)
-		}
-		if updated.CurrentPeriodEndsAt != nil && !updated.CurrentPeriodEndsAt.IsZero() {
-			if err := s.MoneyService.GrantSubscriptionCredits(ctx, money.GrantSubscriptionCreditsParams{
-				SubscriptionID: updated.ID,
-				PeriodEnd:      updated.CurrentPeriodEndsAt.UTC(),
-				Cadence:        models.CreditGrantCadenceOnce,
-				Source:         "subscription_initial",
-			}); err != nil {
-				return fmt.Errorf("nmi converge: grant initial subscription credits: %w", err)
-			}
-		}
-	}
 	return nil
 }
 

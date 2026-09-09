@@ -220,6 +220,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
+	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: a merchant in the Go context is
 	// not enough — the pass must run on a merchant-scoped CONNECTION, or every
@@ -228,7 +229,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	mctx := dbtest.WithTestMerchant(ctx)
 	var outcome dunningOutcome
 	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
-		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, moneySvc, false)
+		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, false)
 		return nil
 	}))
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
@@ -374,6 +375,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
+	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: read AND repair on a
 	// merchant-scoped connection. On the bare context subscriptions' FORCEd RLS
@@ -386,7 +388,7 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, moneySvc, false)
+		outcome = worker.processSubscription(sctx, sub, lifecycle, priceSvc, false)
 		refreshed, err = dbi.Gen(sctx).GetSubscriptionByID(sctx, subID)
 		return err
 	}))

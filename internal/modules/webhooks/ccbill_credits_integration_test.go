@@ -124,6 +124,7 @@ func TestCCBillRenewalSuccess_GrantsCreditsOnce(t *testing.T) {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, nil, nil)
 	moneySvc := money.NewMoneyService(dbi)
+	lifecycle.SetCreditGranter(moneySvc)
 
 	nextRenewal := now.Add(30 * 24 * time.Hour).Format("2006-01-02")
 	ts := now.Format("2006-01-02 15:04:05")
