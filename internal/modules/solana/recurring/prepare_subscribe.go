@@ -357,21 +357,6 @@ func isReadFailure(err error) bool {
 	return errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "never succeeded")
 }
 
-// buildUnsignedTxBase64 assembles an unsigned transaction (payer = subscriber,
-// who signs + pays gas) with a recent blockhash and returns it base64-encoded for
-// the wallet to deserialize, sign, and send.
-func (s *PrepareSubscribeService) buildUnsignedTxBase64(ctx context.Context, payer solanago.PublicKey, ixs []solanago.Instruction) (string, error) {
-	blockhash, err := s.rpc.GetLatestBlockhash(ctx)
-	if err != nil {
-		return "", fmt.Errorf("recurring: get recent blockhash: %w", err)
-	}
-	tx, err := solanago.NewTransaction(ixs, blockhash, solanago.TransactionPayer(payer))
-	if err != nil {
-		return "", fmt.Errorf("recurring: build transaction: %w", err)
-	}
-	return marshalUnsignedTxBase64(tx)
-}
-
 // readInitID reads the i64 LE initId from the SubscriptionAuthority account data.
 func readInitID(data []byte) (int64, error) {
 	end := subscriptionAuthorityInitIDOffset + 8

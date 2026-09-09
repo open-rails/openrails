@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
 // repriceFixture provisions one product with two co-active, same-currency
@@ -509,21 +508,4 @@ func TestRepriceAllPriorVersions_NoticeWindow_AcknowledgeShortNotice(t *testing.
 	scheduled, err := f.repriceRepo.GetScheduledForSubscription(ctx, pinned)
 	require.NoError(t, err)
 	require.True(t, scheduled.AcknowledgedShortNotice, "audit evidence durably persisted on the row")
-}
-
-// fakeCharger captures the last charge.Request it received, so tests can
-// assert the stored-credential anchor (Context.PriorRef) stays identical
-// across a reprice while only the amount changes.
-type fakeCharger struct {
-	lastReq charge.Request
-	result  charge.Result
-	err     error
-}
-
-func (c *fakeCharger) Charge(_ context.Context, req charge.Request) (charge.Result, error) {
-	c.lastReq = req
-	if c.err != nil {
-		return charge.Result{}, c.err
-	}
-	return c.result, nil
 }

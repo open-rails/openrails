@@ -280,15 +280,6 @@ func TestSolanaPayTransferRequestNotAffected(t *testing.T) {
 	assert.False(t, hasSolanaPayURL || payment["solana_pay_url"] == "", "transfer_request should not have solana_pay_url")
 }
 
-// setupTestSuiteWithSolanaPayConfig extends setupTestSuiteWithSolana with
-// merchant profile config.
-func setupTestSuiteWithSolanaPayConfig(t *testing.T) (*TestContainerSuite, string, string) {
-	suite, token, userID := setupTestSuiteWithSolana(t)
-	seedSolanaPayMerchantProfile(t, suite)
-	suite.Config.APIURL = "https://api.test.com"
-	return suite, token, userID
-}
-
 func seedSolanaPayMerchantProfile(t *testing.T, suite *TestContainerSuite) {
 	t.Helper()
 	_, err := suite.Pool.Exec(suite.ctx, `

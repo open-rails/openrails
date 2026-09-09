@@ -16,6 +16,7 @@ func TestSecurityHeadersHTTPSetsCSP(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/products", nil))
 	require.Equal(t, "DENY", w.Header().Get("X-Frame-Options"))
 	require.Equal(t, "nosniff", w.Header().Get("X-Content-Type-Options"))
+	require.Empty(t, w.Header().Get("X-XSS-Protection"))
 	require.Contains(t, w.Header().Get("Content-Security-Policy"), "default-src 'none'")
 }
 

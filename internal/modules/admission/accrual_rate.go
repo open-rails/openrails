@@ -39,13 +39,6 @@ func NewAccrualRateMeter(database *db.DB) *AccrualRateMeter {
 	return &AccrualRateMeter{db: database}
 }
 
-// SetClock overrides the clock (tests). Nil-safe.
-func (m *AccrualRateMeter) SetClock(now func() time.Time) {
-	if m != nil {
-		m.now = now
-	}
-}
-
 func (m *AccrualRateMeter) clock() time.Time {
 	if m == nil || m.now == nil {
 		return time.Now().UTC()

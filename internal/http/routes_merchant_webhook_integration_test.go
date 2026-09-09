@@ -188,10 +188,6 @@ func seedPSP(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID s
 	seedPSPEnv(t, pool, merchantID, provider, "live", accountID)
 }
 
-func seedArchivedPSP(t *testing.T, pool *pgxpool.Pool, merchantID, provider, accountID string) {
-	seedArchivedPSPEnv(t, pool, merchantID, provider, "live", accountID)
-}
-
 func seedArchivedPSPEnv(t *testing.T, pool *pgxpool.Pool, merchantID, provider, environment, accountID string) {
 	t.Helper()
 	_, err := pool.Exec(context.Background(), `

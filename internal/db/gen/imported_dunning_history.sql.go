@@ -12,53 +12,8 @@ import (
 	"github.com/google/uuid"
 )
 
-const insertImportedDunningHistory = `-- name: InsertImportedDunningHistory :execrows
-
-INSERT INTO openrails.imported_dunning_history (
-    id, merchant_id, subscription_id, customer_id, event_type, rail,
-    occurred_at, source, detail
-) VALUES (
-    $1, $2, $3,
-    $4, $5, $6,
-    $7, $8,
-    $9
-)
-ON CONFLICT (id) DO NOTHING
-`
-
-type InsertImportedDunningHistoryParams struct {
-	ID             uuid.UUID
-	MerchantID     uuid.UUID
-	SubscriptionID *uuid.UUID
-	CustomerID     *uuid.UUID
-	EventType      string
-	Rail           string
-	OccurredAt     time.Time
-	Source         string
-	Detail         []byte
-}
-
-// openrails.imported_dunning_history — append-only legacy dunning forensics
-// (#735; doujins #387 import target). Display/report evidence only.
-func (q *Queries) InsertImportedDunningHistory(ctx context.Context, arg InsertImportedDunningHistoryParams) (int64, error) {
-	result, err := q.db.Exec(ctx, insertImportedDunningHistory,
-		arg.ID,
-		arg.MerchantID,
-		arg.SubscriptionID,
-		arg.CustomerID,
-		arg.EventType,
-		arg.Rail,
-		arg.OccurredAt,
-		arg.Source,
-		arg.Detail,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const listDunningHistoryEvents = `-- name: ListDunningHistoryEvents :many
+
 SELECT
     ev.source_table::text AS source_table,
     ev.event_type::text AS event_type,
@@ -124,6 +79,8 @@ type ListDunningHistoryEventsRow struct {
 	OccurredAt         time.Time
 }
 
+// openrails.imported_dunning_history — append-only legacy dunning forensics
+// (#735; doujins #387 import target). Display/report evidence only.
 // Dunning-forensics history feed (#735): imported legacy rows ∪ failed
 // payments, merchant-scoped, oldest first. Structured so #733's
 // subscription_status_transitions can join as another UNION branch.

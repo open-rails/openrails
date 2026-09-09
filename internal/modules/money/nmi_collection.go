@@ -24,18 +24,6 @@ func NewNMICollectionAdapter(client *nmi.NMIClient) *NMICollectionAdapter {
 	return &NMICollectionAdapter{Charger: nmidirect.New(client)}
 }
 
-func NewNMICollectionAdapters(clients map[string]*nmi.NMIClient) map[string]CollectionAdapter {
-	adapters := make(map[string]CollectionAdapter, len(clients))
-	for rail, client := range clients {
-		rail = normalizeRail(rail)
-		if rail == "" || client == nil {
-			continue
-		}
-		adapters[rail] = NewNMICollectionAdapter(client)
-	}
-	return adapters
-}
-
 func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error) {
 	if a == nil || a.Charger == nil {
 		return ChargeResult{}, fmt.Errorf("nmi collection adapter not initialized")

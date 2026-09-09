@@ -28,7 +28,7 @@ to concrete code (enum, table, or manifest key).
 
 | Term | Meaning |
 |---|---|
-| Rail | A payment gateway **kind** OpenRails codes against — `models.Rail`: `nmi`, `ccbill`, `stripe`, `solana`, `paypal`. One adapter per rail under `internal/integrations/<rail>`. |
+| Rail | A payment gateway **kind** OpenRails codes against — `models.Rail`: `nmi`, `ccbill`, `stripe`, `solana`. One adapter per rail under `internal/integrations/<rail>`. |
 | PSP | A merchant's concrete **account on a rail** — credentials + operator-declared `account_id` + manifest key. Row: `openrails.psps` (`psps.key`, e.g. `mobius` on rail `nmi`); manifest: `merchants.<slug>.psps.<key>.<rail>`. Catalog `psp_links` and the checkout wire speak PSP keys. Renamed from `rail_merchant_accounts` (earlier `provider_accounts`) — the retired names fail loudly, no aliases. |
 | Custodian account | A merchant's concrete **account with a custodian** — credentials + operator-declared `account_id` (the vendor's tenant id) + manifest key. Row: `openrails.custodians` (`custodians.key`); manifest: `merchants.<slug>.custodians.<key>.<kind>`. Referenced by `psps.custodian_id`, so several PSPs can charge cards out of one vault (or#880). |
 | `account_id` | Operator-declared, opaque PSP (or custodian) label — never derived from credentials at runtime, on **every** rail. It is a segment of the merchant-secret path (`psps/<rail>/<env>/<account_id>/<key>`, `custodians/<kind>/<env>/<account_id>/<key>`), so deriving it from a credential would need the credential, which needs the path, which needs the id. NMI = the dashboard Gateway ID; Stripe = `acct_…`; CCBill = `clientAccnum-clientSubacc` (dash-joined); Solana = derived from the signer pubkey (a declared value is warned and ignored). |

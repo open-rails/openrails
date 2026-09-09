@@ -428,19 +428,6 @@ func (s schemaTables) missingRLS(tbl string) []string {
 	return missing
 }
 
-// merchantOwnedTables returns the merchant-scoped tables the deployed schema
-// declares (sorted). Other schema tests consume it instead of a static list.
-func merchantOwnedTables(t *testing.T) []string {
-	t.Helper()
-	s := deriveSchemaTables(t, loadAllSchema(t))
-	out := make([]string, 0, len(s.merchantScoped))
-	for tbl := range s.merchantScoped {
-		out = append(out, tbl)
-	}
-	sort.Strings(out)
-	return out
-}
-
 // #336: there is no default merchant. The consolidated schema creates the
 // merchants table but seeds no rows — merchants (and their credit types) are
 // provisioned explicitly by the control plane / bootstrap, never defaulted.

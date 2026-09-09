@@ -137,12 +137,6 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC;
 
--- name: ListSubscriptionsByCustomerRail :many
-SELECT * FROM openrails.subscriptions sub
-WHERE sub.customer_id = $1 AND sub.rail = $2
-  AND sub.deleted_at IS NULL
-ORDER BY sub.created_at DESC;
-
 -- name: SetStripeSubscriptionPaymentMethod :execrows
 -- Stripe provider truth owns the payment-method selection for Stripe-managed
 -- subscriptions. The exact PSP predicate prevents one account's webhook from

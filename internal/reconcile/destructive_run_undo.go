@@ -2,7 +2,6 @@ package reconcile
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -287,22 +286,4 @@ func divergenceOf(m *gen.ListRailIntentsForRunRow, ambiguous bool) IntentDiverge
 		d.Consequence = irreversibleConsequence(m.IntentType)
 	}
 	return d
-}
-
-// MarshalCoverage renders a run's stored coverage proof for display. A run is
-// only as trustworthy as the proof that authorised it, so the undo surfaces it
-// rather than leaving it in the table.
-func MarshalCoverage(raw []byte) string {
-	if len(raw) == 0 {
-		return "(none recorded)"
-	}
-	var v any
-	if err := json.Unmarshal(raw, &v); err != nil {
-		return string(raw)
-	}
-	out, err := json.Marshal(v)
-	if err != nil {
-		return string(raw)
-	}
-	return string(out)
 }

@@ -251,60 +251,6 @@ func (q *Queries) ListLivePSPsForRail(ctx context.Context, arg ListLivePSPsForRa
 	return items, nil
 }
 
-const listPSPsForCustodian = `-- name: ListPSPsForCustodian :many
-
-SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
-WHERE merchant_id = $1::uuid
-  AND custodian_id = $2::uuid
-ORDER BY rail, account_id
-`
-
-type ListPSPsForCustodianParams struct {
-	MerchantID  uuid.UUID
-	CustodianID uuid.UUID
-}
-
-// or#880: the custody sibling moved to internal/db/queries/custodians.sql
-// (ResolveCustodianOwnerByIdentity). Custody identity is the CUSTODIAN's, not
-// a PSP's — and one custodian may back several PSPs, so "the" PSP was never a
-// well-defined answer.
-// One merchant's PSPs that reference a custodian, read inside that merchant's
-// scope. Custody arrangements are rare, so this is the small side of the join.
-func (q *Queries) ListPSPsForCustodian(ctx context.Context, arg ListPSPsForCustodianParams) ([]OpenrailsPsp, error) {
-	rows, err := q.db.Query(ctx, listPSPsForCustodian, arg.MerchantID, arg.CustodianID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsPsp
-	for rows.Next() {
-		var i OpenrailsPsp
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Rail,
-			&i.Environment,
-			&i.AccountID,
-			&i.Key,
-			&i.Evidence,
-			&i.FirstSeenAt,
-			&i.LastVerifiedAt,
-			&i.ReplacedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Archived,
-			&i.CustodianID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
 SELECT id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived, custodian_id FROM openrails.psps
 WHERE merchant_id = $1::uuid

@@ -64,11 +64,6 @@ UPDATE openrails.payment_method_notices
    AND id = sqlc.arg(id)
    AND resolved_at IS NULL;
 
--- name: GetPaymentMethodNoticeBySubscription :one
-SELECT * FROM openrails.payment_method_notices
- WHERE merchant_id = sqlc.arg(merchant_id)
-   AND subscription_id = sqlc.arg(subscription_id);
-
 -- name: ListDuePaymentMethodNoticeMerchants :many
 SELECT merchant_id FROM openrails.due_payment_method_notice_merchant_ids(
     sqlc.arg(now)::timestamptz,
