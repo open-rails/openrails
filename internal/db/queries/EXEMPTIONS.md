@@ -124,6 +124,13 @@ session, which is the whole point — a context value would prove nothing), and
 `internal/integrationharness/harness.go` sets it via `set_config`. Neither is a
 query.
 
+`internal/migrate/reset.go` is PERMANENT because the operator-only embedded
+reset must keep its fixed schema DDL, migratekit-ledger delete and advisory lock
+inside one `pgx` transaction. sqlc cannot express the DDL or lock, and splitting
+the exact ledger delete from that transaction would remove the reset's rollback
+guarantee. The target identity, allow-list and confirmation are validated before
+the transaction starts.
+
 `internal/river/progress.go` is PERMANENT for a different reason: it reads
 **River's own** `river_job` table, which is not part of OpenRails' schema, is
 created by River's migrator rather than `migrations/`, and lives in a schema

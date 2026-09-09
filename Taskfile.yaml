@@ -123,6 +123,16 @@ tasks:
       - docker compose -f docker-compose.yaml --profile all --profile e2e-sandbox down -v
       - task: docker-up
 
+  db-reset-embedded:
+    desc: Plan or explicitly confirm a scoped reset of an embedded OpenRails schema
+    requires:
+      vars: [DSN]
+    env:
+      OPENRAILS_RESET_DSN: '{{.DSN}}'
+      OPENRAILS_RESET_CONFIRMATION: '{{.CONFIRM}}'
+    cmds:
+      - go run ./tools/dbreset
+
   docker-logs:
     desc: Tail openrails logs from docker compose stack
     cmds:
