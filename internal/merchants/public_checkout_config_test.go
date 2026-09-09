@@ -229,7 +229,7 @@ func TestPublicPSPConfigForWithholdsIncompletePSPs(t *testing.T) {
 	}
 
 	// A rail with no browser profile at all is withheld, not guessed at.
-	if _, _, ok := PublicPSPConfigFor(PSPScope{Rail: "paypal"}, nil); ok {
+	if _, _, ok := PublicPSPConfigFor(PSPScope{Rail: "unknown"}, nil); ok {
 		t.Error("a rail with no public profile must be withheld")
 	}
 

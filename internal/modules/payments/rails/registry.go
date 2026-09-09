@@ -217,21 +217,6 @@ var descriptors = []Descriptor{
 		"",                                      // CancelPortalURL
 		[]CredentialKey{{"private_key", false}}, // operator-only signer
 	},
-	{
-		models.RailPayPal,
-		"PayPal", // DisplayName
-		false,    // HasPSPs (no integration; display-only vestige)
-		false,    // HasRemoteCustomer
-		false,    // SupportsChargeSavedMethod
-		false,    // SupportsCatalogTrial
-		false,    // SupportsPaymentMethodCRUD
-		false,    // OpenRailsDrivenDunning
-		false,    // RemoteDeleteOnTerminalCancel
-		autoBilledNever,
-		cancelDestructive,
-		"", // CancelPortalURL
-		nil,
-	},
 }
 
 var registry = func() map[models.Rail]Descriptor {

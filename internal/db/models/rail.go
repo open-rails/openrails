@@ -15,7 +15,6 @@ const (
 	RailCCBill Rail = "ccbill" // CCBill gateway (self-contained)
 	RailSolana Rail = "solana" // Solana crypto payments (self-contained)
 	RailStripe Rail = "stripe" // Stripe gateway (subscriptions + one-time)
-	RailPayPal Rail = "paypal" // PayPal gateway (self-contained)
 )
 
 // EventSource is WHO sent an inbound provider event. Almost always a rail — but

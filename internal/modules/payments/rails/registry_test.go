@@ -12,7 +12,7 @@ import (
 // descriptor's required fields are filled. The unkeyed literals already force
 // every FIELD at compile time; this forces every RAIL.
 func TestRegistryCompleteness(t *testing.T) {
-	enum := []models.Rail{models.RailNMI, models.RailCCBill, models.RailSolana, models.RailStripe, models.RailPayPal}
+	enum := []models.Rail{models.RailNMI, models.RailCCBill, models.RailSolana, models.RailStripe}
 	if len(descriptors) != len(enum) {
 		t.Fatalf("registry has %d descriptors, enum has %d rails", len(descriptors), len(enum))
 	}
@@ -71,7 +71,6 @@ func TestRegistryPinnedFacts(t *testing.T) {
 		// 4 keys: secret_key, webhook_signing_secret, _thin, _previous (#856 rollover overlap).
 		{models.RailStripe, true, true, false, true, 4, false, false, false, true, false, CancelModeReversible},
 		{models.RailSolana, false, false, true, true, 0, false, false, false, false, false, CancelModeDestructive},
-		{models.RailPayPal, false, false, false, false, 0, false, false, false, false, false, CancelModeDestructive},
 	}
 	// #682: the rebill-driver mode is EXPLICIT now — a method ref alone no longer
 	// flips NMI to our-rebill; RebillDriver does.

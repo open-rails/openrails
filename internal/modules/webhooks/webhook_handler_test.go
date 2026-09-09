@@ -237,8 +237,8 @@ func TestWebhookHandlerRegistry(t *testing.T) {
 	if h, ok := reg.Handler("nmi"); !ok || h.Rail() != "nmi" {
 		t.Errorf("Handler(nmi) should resolve to the nmi handler")
 	}
-	if _, ok := reg.Handler("paypal"); ok {
-		t.Errorf("Handler(paypal) = found, want not found")
+	if _, ok := reg.Handler("unknown"); ok {
+		t.Errorf("Handler(unknown) = found, want not found")
 	}
 }
 

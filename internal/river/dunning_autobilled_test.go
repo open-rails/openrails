@@ -30,7 +30,7 @@ func TestSubscriptionProviderAutoBilled(t *testing.T) {
 		{"nmi ref without openrails mode → auto-billed", "nmi", &models.PaymentMethod{RailMethodRef: "vault-123", RebillDriver: models.RebillDriverProvider}, true},
 		{"nmi openrails mode without ref → our-rebill", "nmi", &models.PaymentMethod{RebillDriver: models.RebillDriverOpenRails}, false},
 		{"stripe → not this path", "stripe", nil, false},
-		{"unknown rail → false", "paypal", nil, false},
+		{"unknown rail → false", "unknown", nil, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
