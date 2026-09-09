@@ -25,7 +25,11 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 		r.ErrorJSON(http.StatusInternalServerError, "findings ledger unavailable")
 		return nil, false
 	}
-	return &reconcile.PGStore{DB: r.State.DB}, true
+	store := &reconcile.PGStore{DB: r.State.DB}
+	if r.Clock != nil {
+		store.Now = r.Clock.Now
+	}
+	return store, true
 }
 
 // findingView is one queue item: the persisted record plus the parsed

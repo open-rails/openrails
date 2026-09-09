@@ -204,8 +204,11 @@ func (c SnapshotCoverage) CanPruneTransactions() bool {
 // fetchers that cannot filter a class server-side return the full set and
 // leave narrowing to the caller.
 type FetchParams struct {
-	Since          time.Time
-	Until          time.Time
+	Since time.Time
+	Until time.Time
+	// ObservedAt is the owning engine's clock at the provider-read boundary.
+	// A zero value preserves the standalone fetcher's physical-clock default.
+	ObservedAt     time.Time
 	SubscriptionID string
 	CustomerID     string
 	// PspID is the OpenRails psps.id being pulled.
@@ -214,6 +217,13 @@ type FetchParams struct {
 	PspID     string
 	Rail      string
 	AccountID string
+}
+
+func fetchObservedAt(params FetchParams) time.Time {
+	if !params.ObservedAt.IsZero() {
+		return params.ObservedAt.UTC()
+	}
+	return time.Now().UTC()
 }
 
 // RailFetcher pulls a provider's declared state into a RemoteSnapshot.

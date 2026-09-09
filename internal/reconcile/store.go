@@ -80,10 +80,18 @@ type Store interface {
 // PGStore persists runs + findings via the sqlc layer on a merchant-pinned
 // connection.
 type PGStore struct {
-	DB *db.DB
+	DB  *db.DB
+	Now func() time.Time
 }
 
 var _ Store = (*PGStore)(nil)
+
+func (s *PGStore) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC()
+	}
+	return time.Now().UTC()
+}
 
 func marshalEvidence(m map[string]any) []byte {
 	if len(m) == 0 {
@@ -539,7 +547,7 @@ func (s *PGStore) Gauges(ctx context.Context) (QueueGauges, error) {
 		}
 	}
 	pressure, err := s.DB.Gen(ctx).CountUnknownSubsPastPaidThrough(ctx, gen.CountUnknownSubsPastPaidThroughParams{
-		MerchantID: tid.UUID(), Now: time.Now().UTC(),
+		MerchantID: tid.UUID(), Now: s.now(),
 	})
 	if err != nil {
 		return g, err

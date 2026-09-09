@@ -71,9 +71,10 @@ const nmiQueryPageLimit = 1000
 const nmiV5PageLimit = 100
 
 func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error) {
+	now := fetchObservedAt(params)
 	snap := &RemoteSnapshot{
 		Provider:     ProviderNMI,
-		FetchedAt:    time.Now().UTC(),
+		FetchedAt:    now,
 		Capabilities: f.Capabilities(),
 	}
 
@@ -84,7 +85,7 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 	}
 	snap.PaymentMethods = vault
 
-	subs, err := f.fetchSubscriptions(ctx, params, identity)
+	subs, err := f.fetchSubscriptions(ctx, params, identity, now)
 	if err != nil {
 		return nil, fmt.Errorf("nmi subscription roster: %w", err)
 	}
@@ -121,7 +122,7 @@ type nmiCustomerIdentity struct {
 	Username string
 }
 
-func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams, identity map[string]nmiCustomerIdentity) ([]RemoteSubscription, error) {
+func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams, identity map[string]nmiCustomerIdentity, now time.Time) ([]RemoteSubscription, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -157,7 +158,7 @@ func (f *NMIFetcher) fetchSubscriptions(ctx context.Context, params FetchParams,
 		}
 	}
 
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	today := now.Truncate(24 * time.Hour)
 	out := make([]RemoteSubscription, 0, len(subs))
 	for _, s := range subs {
 		railCustomerRef := strings.TrimSpace(s.CustomerVaultID)

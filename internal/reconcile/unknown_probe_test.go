@@ -94,7 +94,7 @@ func nmiSaleXML(txnID, orderID, actionType, success string, at time.Time, amount
 
 func TestNMISubscriptionProber_ChargedPeriodResolvesRenewed(t *testing.T) {
 	f := newNMIProbeFixture(t)
-	now := time.Now().UTC()
+	now := time.Date(2040, time.June, 12, 15, 30, 0, 0, time.UTC)
 	periodEnd := now.Add(-3 * 24 * time.Hour)
 	localID := uuid.New()
 	railSub := "psub_1"
@@ -103,8 +103,11 @@ func TestNMISubscriptionProber_ChargedPeriodResolvesRenewed(t *testing.T) {
 	nextCharge := now.Add(27 * 24 * time.Hour).Format("2006-01-02")
 	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","next_billing_date":"%s"}`, railSub, nextCharge)
 
-	snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: localID, RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+	snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{
+		LocalID: localID, RailSubscriptionID: railSub, PeriodEnd: &periodEnd, ObservedAt: now,
+	})
 	require.NoError(t, err)
+	require.Equal(t, now, snap.FetchedAt, "snapshot evidence must use the owning reconcile clock")
 
 	require.Len(t, snap.Transactions, 1)
 	txn := snap.Transactions[0]
@@ -222,7 +225,7 @@ func (p *fakeStripeLivenessProber) ProbeSubscription(ctx context.Context, id str
 }
 
 func TestStripeSubscriptionProber_Verdicts(t *testing.T) {
-	now := time.Now().UTC()
+	now := time.Date(2040, time.July, 13, 16, 30, 0, 0, time.UTC)
 	periodEnd := now.Add(-3 * 24 * time.Hour)
 	railSub := "sub_stripe_1"
 	remoteStart := periodEnd // Stripe advanced: new period opened at the old end
@@ -284,8 +287,11 @@ func TestStripeSubscriptionProber_Verdicts(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			prober := &StripeSubscriptionProber{Prober: &fakeStripeLivenessProber{rec: c.rec}}
-			snap, err := prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+			snap, err := prober.ProbeSubscription(context.Background(), ProbeSubject{
+				LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd, ObservedAt: now,
+			})
 			require.NoError(t, err)
+			assert.Equal(t, now, snap.FetchedAt, "snapshot evidence must use the owning reconcile clock")
 			v := decideUnknown(railSub, &periodEnd, snap, now, 14*24*time.Hour)
 			assert.Equal(t, c.wantKind, v.Kind)
 			assert.Equal(t, c.wantGone, v.RemoteGone)
@@ -351,7 +357,7 @@ func ccbillStatusXML(status, expiry string) string {
 
 // #696: viewSubscriptionStatus snapshots + the ONE decider's verdicts.
 func TestCCBillSubscriptionProber_Verdicts(t *testing.T) {
-	now := time.Now().UTC()
+	now := time.Date(2040, time.August, 14, 17, 30, 0, 0, time.UTC)
 	periodEnd := now.Add(-5 * 24 * time.Hour)
 	railSub := "0123456789"
 	futureExpiry := now.Add(25 * 24 * time.Hour)
@@ -359,8 +365,11 @@ func TestCCBillSubscriptionProber_Verdicts(t *testing.T) {
 	t.Run("recurring active with future expiry adopts the provider clock", func(t *testing.T) {
 		f := newCCBillProbeFixture(t)
 		f.answer.Store(ccbillStatusXML("2", futureExpiry.Format("20060102")))
-		snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd})
+		snap, err := f.prober.ProbeSubscription(context.Background(), ProbeSubject{
+			LocalID: uuid.New(), RailSubscriptionID: railSub, PeriodEnd: &periodEnd, ObservedAt: now,
+		})
 		require.NoError(t, err)
+		assert.Equal(t, now, snap.FetchedAt, "snapshot evidence must use the owning reconcile clock")
 		require.Len(t, snap.Subscriptions, 1)
 		assert.Equal(t, SubscriptionStatusActive, snap.Subscriptions[0].Status)
 		assert.Equal(t, "2", snap.Subscriptions[0].RawStatus)

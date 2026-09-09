@@ -6,6 +6,18 @@ internal/http/handlers/solana_supported_tokens.go|quotedAt := time.Now()|externa
 internal/http/handlers/webhook.go|ReceivedAt:     time.Now(),|infrastructure_time|Physical webhook receipt timestamp|2
 internal/http/handlers/webhook.go|ReceivedAt: time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1
 internal/http/handlers/webhook_basistheory.go|ReceivedAt:     time.Now(),|infrastructure_time|Physical webhook receipt timestamp|1
+internal/intents/basistheory_account_updater.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
+internal/intents/ccbill_cancel.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
+internal/intents/nmi_delete.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
+internal/intents/nmi_payment_method_delete.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
+internal/intents/nmi_payment_method_update.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
+internal/intents/nmi_payment_method_update.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
+internal/intents/nmi_payment_source_update.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied handler clock takes precedence|1
+internal/intents/nmi_payment_source_update.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue eligibility for an immediately due provider operation uses physical time|1
+internal/intents/refund.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied refund clock takes precedence|1
+internal/intents/runner.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied runner clock takes precedence|1
+internal/intents/runner.go|return clockwork.NewRealClock().NewTicker(d)|infrastructure_time|Intent lease heartbeat cadence uses elapsed physical time without a supplied runner clock|1
+internal/intents/store.go|}, time.Now().UTC()); err != nil {|infrastructure_time|Anti-credential-compromise rolling rate ceiling uses physical time|1
 internal/modules/admission/accrual_rate.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/admission/admitter.go|a.denials.Record(ctx, merchantID, customer.UUID().String(), code, time.Now())|infrastructure_time|Request deadline/hold lifetime and denial observation use physical time|1
 internal/modules/admission/admitter.go|holdLifetime, err := holdTTL(req.ExpiresAt, time.Now())|infrastructure_time|Request deadline/hold lifetime and denial observation use physical time|1
@@ -78,6 +90,18 @@ internal/modules/webhooks/converge_stripe.go|return time.Now()|business_time_bou
 internal/modules/webhooks/ledger_repair_alert.go|now = time.Now()|business_time_boundary|Default repair alert time only when caller supplied no time|1
 internal/modules/webhooks/nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
+internal/reconcile/appliers.go|return time.Now().UTC()|business_time_boundary|Explicit default local-writer clock boundary; owning engine clock takes precedence|1
+internal/reconcile/converge/converge.go|clock := clockwork.NewRealClock()|business_time_boundary|Explicit converge-engine construction boundary; each run synchronizes lifecycle and credit services to its owning clock|1
+internal/reconcile/destructive_run_converge.go|now := time.Now().UTC()|db_audit_timestamp|Before-image capture and reversal audit timestamps use the actual operation time|2
+internal/reconcile/destructive_run_converge.go|MerchantID: mid, ID: runID, Status: status, Now: time.Now().UTC(), Affected: payload,|db_audit_timestamp|Destructive-run completion audit timestamp|1
+internal/reconcile/engine.go|return time.Now().UTC()|business_time_boundary|Explicit reconcile-engine default clock boundary; supplied engine clock takes precedence|1
+internal/reconcile/prune.go|now := time.Now().UTC()|db_audit_timestamp|Prune and rollback row audit timestamps use the actual operator-action time|2
+internal/reconcile/prune.go|MerchantID: mid, ID: runID, Status: "completed", Now: time.Now().UTC(), Affected: affectedJSON(res),|db_audit_timestamp|Successful prune-run completion audit timestamp|1
+internal/reconcile/prune.go|MerchantID: merchantID, ID: runID, Status: "failed", Now: time.Now().UTC(), Affected: affectedJSON(res),|db_audit_timestamp|Failed prune-run completion audit timestamp|1
+internal/reconcile/reconcile.go|return time.Now().UTC()|business_time_boundary|Standalone provider fetch default; owning reconcile paths pass an observation instant|1
+internal/reconcile/solana.go|return time.Now().UTC()|business_time_boundary|Explicit standalone Solana fetcher default; owning reconcile clock takes precedence|1
+internal/reconcile/store.go|return time.Now().UTC()|business_time_boundary|Explicit findings-gauge default; request and engine owners supply their business clock|1
+internal/reconcile/unknown_probe.go|return time.Now().UTC()|business_time_boundary|Standalone provider probe default; owning reconcile paths pass an observation instant|1
 internal/river/job_liveness.go|tracker := progress.NewTracker(time.Now())|infrastructure_time|Worker progress tracker elapsed-time origin|1
 internal/river/jobs_admission_denials.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_business_cycle.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

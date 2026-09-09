@@ -23,10 +23,12 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 	e := NewConvergeEngine(appDB)
+	now := time.Date(2042, time.April, 5, 6, 7, 8, 0, time.UTC)
+	e.Now = func() time.Time { return now }
 	suffix := uuid.NewString()[:8]
 	productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
 	var customer uuid.UUID
-	old := time.Now().UTC().Add(-5 * 24 * time.Hour) // 5 days ago (> 72h threshold)
+	old := now.Add(-5 * 24 * time.Hour) // 5 days ago (> 72h threshold)
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
@@ -90,8 +92,15 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		require.Equal(t, 1, res.Findings)
 		require.Equal(t, 1, res.AutoFixed, "proven provider coverage releases the held repair")
 		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
+		var cancelledAt, endedAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT status::text, cancelled_at, ended_at FROM openrails.subscriptions WHERE id=$1`, subID).
+			Scan(&status, &cancelledAt, &endedAt))
 		require.Equal(t, "cancelled", status)
+		require.NotNil(t, cancelledAt)
+		require.NotNil(t, endedAt)
+		require.Equal(t, now, cancelledAt.UTC(), "lifecycle timestamp must use ConvergeEngine.Now")
+		require.Equal(t, now, endedAt.UTC(), "decision timestamp must use ConvergeEngine.Now")
 		return nil
 	}))
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {

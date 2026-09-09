@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
 // #665: the ONE subscription state-machine decider. Every plane — bulk pull
@@ -669,20 +670,30 @@ type DecisionApplier interface {
 // LifecycleDecisionApplier is the production DecisionApplier: load the row,
 // route through ApplyDecision on the same merchant-scoped handle.
 type LifecycleDecisionApplier struct {
-	DB *db.DB
-	LC *subscriptions.SubscriptionLifecycleService
+	DB    *db.DB
+	LC    *subscriptions.SubscriptionLifecycleService
+	clock clockwork.Clock
 }
 
 // NewDecisionApplier builds the production applier. deferDelete may be nil
 // (CLI pulls): a stale-decline cancel then logs the wiring gap instead of
 // queuing the deferred NMI delete.
-func NewDecisionApplier(database *db.DB, deferDelete subscriptions.DeferredDeleteScheduler) *LifecycleDecisionApplier {
-	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
-	lc.SetCreditGranter(money.NewMoneyService(database, clockwork.NewRealClock()))
+func NewDecisionApplier(database *db.DB, deferDelete subscriptions.DeferredDeleteScheduler, clocks ...clockwork.Clock) *LifecycleDecisionApplier {
+	clock := timeutil.FirstClock(clocks...)
+	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clock)
+	lc.SetCreditGranter(money.NewMoneyService(database, clock))
 	if deferDelete != nil {
 		lc.SetDeferredDeleteScheduler(deferDelete)
 	}
-	return &LifecycleDecisionApplier{DB: database, LC: lc}
+	return &LifecycleDecisionApplier{DB: database, LC: lc, clock: clock}
+}
+
+// SetClock keeps the decision instant and every lifecycle side effect on the
+// owning reconcile engine's clock.
+func (a *LifecycleDecisionApplier) SetClock(clock clockwork.Clock) {
+	a.clock = timeutil.FirstClock(clock)
+	a.LC.SetClock(a.clock)
+	a.LC.SetCreditGranter(money.NewMoneyService(a.DB, a.clock))
 }
 
 func (a *LifecycleDecisionApplier) ApplyDecision(ctx context.Context, subscriptionID uuid.UUID, d Decision) (bool, error) {
@@ -690,5 +701,5 @@ func (a *LifecycleDecisionApplier) ApplyDecision(ctx context.Context, subscripti
 	if err != nil {
 		return false, fmt.Errorf("apply decision: load subscription %s: %w", subscriptionID, err)
 	}
-	return ApplyDecision(ctx, a.DB, a.LC, sub, d, time.Now().UTC())
+	return ApplyDecision(ctx, a.DB, a.LC, sub, d, a.clock.Now().UTC())
 }

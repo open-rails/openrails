@@ -134,7 +134,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 			if floor := now.Add(-opts.LookbackCap); since.Before(floor) {
 				since = floor
 			}
-			snap, err = fetcher.Fetch(ctx, FetchParams{Since: since, Until: now})
+			snap, err = fetcher.Fetch(ctx, FetchParams{Since: since, Until: now, ObservedAt: now})
 			if err != nil {
 				// Provider unreachable: subs stay unknown, caller backs off.
 				res.RailErrors[provider] = err.Error()
@@ -199,7 +199,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 				// the row unknown (retried next pass).
 				res.Probed++
 				if psnap, perr := prober.ProbeSubscription(ctx, ProbeSubject{
-					LocalID: r.ID, RailSubscriptionID: r.RailSubscriptionID, PeriodEnd: r.CurrentPeriodEndsAt,
+					LocalID: r.ID, RailSubscriptionID: r.RailSubscriptionID, PeriodEnd: r.CurrentPeriodEndsAt, ObservedAt: now,
 				}); perr != nil {
 					log.WithContext(ctx).WithError(perr).WithFields(log.Fields{
 						"subscription_id": r.ID, "rail": rail,
