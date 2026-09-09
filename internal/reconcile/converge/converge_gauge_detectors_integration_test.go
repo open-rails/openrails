@@ -19,7 +19,7 @@ import (
 
 // #690 detector tests: the freeloader detector (derive.entitlement.unjustified),
 // the cross-month duplicate-ownership detector (consistency.duplicate.
-// ownership), and the #691 runway guard on the dead-subs check.
+// ownership), and the #691 terminal-window closure/runway guard.
 
 // TestConverge_DeadSubRunwayGuard (#690 hazard fix): a user-cancelled sub's
 // PAID RUNWAY window (bounded to period end) is NOT excess — the sweep leaves
@@ -111,9 +111,11 @@ func TestConverge_DeadSubRunwayGuard(t *testing.T) {
 	}))
 }
 
-// TestConverge_DeriveEntitlementUnjustified: the three freeloader legs fire ADMIN
-// findings with the revoke/admin-grant recommendation; stale-but-live sources
-// (unknown/past_due standing windows, #691) and paid shapes never fire.
+// TestConverge_DeriveEntitlementUnjustified: the two policy-ambiguous freeloader
+// legs fire ADMIN findings with the revoke/admin-grant recommendation. Terminal
+// subscription windows are unambiguous missed propagation and belong to the
+// AUTO mismatch detector; stale-but-live sources (unknown/past_due standing
+// windows, #691) and paid shapes never fire.
 func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
@@ -126,8 +128,8 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 
 	// windows
 	entMissingSub := uuid.New() // leg A: standing window, sub row missing
-	entTerminal := uuid.New()   // leg B: standing window, cancelled sub, bound passed
-	entRunway := uuid.New()     // leg B negative: standing window, cancelled sub, grant covers now
+	entTerminal := uuid.New()   // AUTO: standing window, cancelled sub, bound passed
+	entRunway := uuid.New()     // AUTO: standing window bounded to its paid runway
 	entUnknown := uuid.New()    // negative: standing window of an unknown sub
 	entPastDue := uuid.New()    // negative: standing window of a past_due sub
 	entRefunded := uuid.New()   // leg C: one_off window, refunded payment, no grant
@@ -198,7 +200,7 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		seedEnt(entPaidOneOff, "orph-paid-"+suffix, "one_off", payCompleted, &oneOffEnd)
 
 		// subRunway's per-period grant still covers now (paid through runwayEnd):
-		// its standing window is a missed closure but NOT yet freeloading.
+		// its standing window must be bounded to that runway, not revoked now.
 		gl := grants.New(appDB.Gen(ctx), merchantID)
 		_, err := gl.Grant(ctx, grants.GrantInput{
 			Customer: customer, Kind: grants.Entitlement, Source: grants.Subscription,
@@ -222,7 +224,7 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		})
 	})
 
-	assertUnjustified := func(ctx context.Context, entID uuid.UUID, wantCause string) map[string]any {
+	assertUnjustified := func(ctx context.Context, entID uuid.UUID, wantCause string) {
 		t.Helper()
 		var status, severity string
 		var prose *string
@@ -245,7 +247,6 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		require.Equal(t, entID.String(), rec.Params["entitlement_id"])
 		require.Len(t, rec.Alternatives, 1)
 		require.Equal(t, recommend.ActionRecordAdminGrant, rec.Alternatives[0].Action)
-		return rec.Params
 	}
 	noUnjustified := func(ctx context.Context, entID uuid.UUID, label string) {
 		t.Helper()
@@ -262,39 +263,43 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 		require.NoError(t, err)
 
 		assertUnjustified(ctx, entMissingSub, "missing_subscription")
-		params := assertUnjustified(ctx, entTerminal, "terminal_subscription_standing")
-		asOf, hasAsOf := params["as_of"].(string)
-		require.True(t, hasAsOf, "terminal-standing recommendation carries the entitled bound as as_of")
-		parsed, err := time.Parse(time.RFC3339, asOf)
-		require.NoError(t, err)
-		require.WithinDuration(t, bound, parsed, 2*time.Second)
 		assertUnjustified(ctx, entRefunded, "refunded_payment")
 
-		noUnjustified(ctx, entRunway, "#691: paid runway (grant covers now) is not freeloading — no finding until past period end")
+		noUnjustified(ctx, entTerminal, "terminal standing access belongs to the AUTO mismatch detector")
+		noUnjustified(ctx, entRunway, "terminal paid runway belongs to the AUTO mismatch detector")
 		noUnjustified(ctx, entUnknown, "#691: stale unknown sub is not a freeloader")
 		noUnjustified(ctx, entPastDue, "#691: past_due standing window is not a freeloader")
 		noUnjustified(ctx, entPaidOneOff, "a completed payment justifies its window")
 
-		// Partition: the LIVE dangling-sub window belongs to the unjustified check —
-		// the CON reference check must not double-fire on it; and the dead-subs
-		// AUTO check must not touch STANDING windows of terminal subs.
+		// Partition: the LIVE dangling-sub window belongs to the unjustified check,
+		// while standing terminal windows belong only to the AUTO mismatch check.
 		var n int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='consistency.reference.source_reference' AND subject_key=$2`,
 			merchantID, "entitlement:"+entMissingSub.String()).Scan(&n))
 		require.Zero(t, n, "partition: live dangling window is unjustified-only")
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT count(*) FROM openrails.reconciliation_findings
-			 WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
-			merchantID, "subscription:"+subTerminal.String()).Scan(&n))
-		require.Zero(t, n, "partition: standing window of a terminal sub is unjustified-only, not the dead-subs AUTO check")
+		for _, subID := range []uuid.UUID{subTerminal, subRunway} {
+			var status string
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+				`SELECT status FROM openrails.reconciliation_findings
+				 WHERE merchant_id=$1 AND finding_type='derive.grant_effect.mismatch' AND subject_key=$2`,
+				merchantID, "subscription:"+subID.String()).Scan(&status))
+			require.Equal(t, "auto_fixed", status, "terminal standing access must use the exact AUTO mismatch finding")
+		}
 
-		// Surface-only: every window is untouched.
-		for _, id := range []uuid.UUID{entMissingSub, entTerminal, entRefunded} {
+		// Policy-ambiguous windows remain surface-only and untouched.
+		for _, id := range []uuid.UUID{entMissingSub, entRefunded} {
 			var revokedAt, endAt *time.Time
 			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at, end_at FROM openrails.entitlements WHERE id=$1`, id).Scan(&revokedAt, &endAt))
 			require.Nil(t, revokedAt, "never auto-revoked (policy #690)")
+		}
+		for id, wantEnd := range map[uuid.UUID]time.Time{entTerminal: bound, entRunway: runwayEnd} {
+			var revokedAt, endAt *time.Time
+			require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT revoked_at, end_at FROM openrails.entitlements WHERE id=$1`, id).Scan(&revokedAt, &endAt))
+			require.Nil(t, revokedAt, "terminal access is bounded, not revoked")
+			require.NotNil(t, endAt)
+			require.WithinDuration(t, wantEnd, *endAt, 2*time.Second)
 		}
 		return nil
 	}))
@@ -308,7 +313,7 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 			`SELECT count(*) FROM openrails.reconciliation_findings
 			 WHERE merchant_id=$1 AND finding_type='derive.entitlement.unjustified' AND subject_key=ANY($2)`,
 			merchantID, subjects).Scan(&n))
-		require.Equal(t, 3, n, "three freeloader shapes, one finding each, no duplicates")
+		require.Equal(t, 2, n, "two freeloader shapes, one finding each, no duplicates")
 		return nil
 	}))
 }

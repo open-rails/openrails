@@ -942,10 +942,14 @@ WHERE s.merchant_id = $1::uuid
       WHERE e.merchant_id = s.merchant_id
         AND e.source_type = 'subscription' AND e.source_id = s.id
         AND e.revoked_at IS NULL AND e.deleted_at IS NULL
-        AND e.end_at IS NOT NULL
-        AND e.end_at > $3::timestamptz
-        AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
-             OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
+        AND (
+            e.end_at IS NULL
+            OR (
+                e.end_at > $3::timestamptz
+                AND (GREATEST(s.current_period_ends_at, s.ended_at) IS NULL
+                     OR e.end_at > GREATEST(s.current_period_ends_at, s.ended_at))
+            )
+        )
   )
 ORDER BY GREATEST(s.current_period_ends_at, s.ended_at) NULLS FIRST, s.id
 LIMIT $4::int
@@ -968,7 +972,8 @@ type ListDeadSubsWithLiveEntitlementsRow struct {
 
 // #665 DERIVE `derive.grant_effect.mismatch` (revoke direction) — moved from
 // the legacy pull engine's PS-9. A terminally-dead sub still projecting a
-// BOUNDED live window past its entitled bound: propagation of a recorded
+// STANDING window or a bounded live window past its entitled bound:
+// propagation of a recorded
 // terminal decision, AUTO (both facts present — NOT the confirmed-absence
 // case). `unknown` is deliberately excluded: access stays intact while
 // provider verification is pending (#664).
@@ -978,15 +983,14 @@ type ListDeadSubsWithLiveEntitlementsRow struct {
 // RUNWAY window bounded to period end (BoundSubscriptionAccess), which is NOT
 // excess; only the part of a window extending past the bound is. Repair =
 // BoundSubscriptionAccess(sub, bound) — the missed/correct #691 closure.
-// Both timestamps NULL (imported oddity) => NULL bound, any live bounded
-// window counts and the repair bounds at `now`.
+// Both timestamps NULL (imported oddity) => NULL bound, any live window counts
+// and the repair bounds at `now`.
 //
 // Partition (#690, one condition = one finding type):
 //
-//	bounded window past the bound, sub row present  -> HERE (AUTO closure)
-//	STANDING window (end_at NULL) of a terminal sub -> derive.entitlement.unjustified (ADMIN)
-//	sub row missing entirely                        -> derive.entitlement.unjustified (ADMIN)
-//	terminated GRANT with a live window             -> derive.grant_effect.excess (AUTO)
+//	standing/bounded-overrun window, terminal sub -> HERE (AUTO closure)
+//	sub row missing entirely                     -> derive.entitlement.unjustified (ADMIN)
+//	terminated GRANT with a live window          -> derive.grant_effect.excess (AUTO)
 //
 // customer_id nullable: NULL = merchant-wide sweep.
 // or#837: LONGEST-DEAD first, capped — the overrun that has been granting
@@ -1488,15 +1492,10 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 const listUnjustifiedEntitlementWindows = `-- name: ListUnjustifiedEntitlementWindows :many
 SELECT e.id AS entitlement_id, e.customer_id, e.entitlement,
        e.source_type, e.source_id, e.start_at, e.end_at,
-       COALESCE(s.status::text, '') AS sub_status,
-       s.product_id AS sub_product_id,
-       s.current_period_ends_at AS sub_period_ends_at,
-       s.ended_at AS sub_ended_at,
        pay.id AS payment_id,
        pr.product_id AS payment_product_id,
        CASE
            WHEN e.source_type = 'subscription' AND s.id IS NULL THEN 'missing_subscription'
-           WHEN e.source_type = 'subscription' THEN 'terminal_subscription_standing'
            ELSE 'refunded_payment'
        END::text AS cause
 FROM openrails.entitlements e
@@ -1538,9 +1537,6 @@ WHERE e.merchant_id = $1::uuid
   )
   AND (
       (e.source_type = 'subscription' AND s.id IS NULL)
-      OR (e.source_type = 'subscription'
-          AND s.status = 'cancelled'
-          AND e.end_at IS NULL)
       OR (e.source_type = 'one_off' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
 ORDER BY e.start_at, e.id
@@ -1562,10 +1558,6 @@ type ListUnjustifiedEntitlementWindowsRow struct {
 	SourceID         uuid.UUID
 	StartAt          time.Time
 	EndAt            *time.Time
-	SubStatus        *string
-	SubProductID     *uuid.UUID
-	SubPeriodEndsAt  *time.Time
-	SubEndedAt       *time.Time
 	PaymentID        *uuid.UUID
 	PaymentProductID *uuid.UUID
 	Cause            string
@@ -1577,12 +1569,9 @@ type ListUnjustifiedEntitlementWindowsRow struct {
 // window (not revoked/deleted, started, unbounded or ending in the future)
 // whose justification chain is PROVEN broken. Post-#691 fail-open, "live
 // window past paid-through" is NORMAL for a standing auto-renew projection
-// (stale ≠ freeloader) — a freeloader's SOURCE is proven dead or absent:
+// (stale ≠ freeloader) — a freeloader's SOURCE is proven absent or reversed:
 //
 //	missing_subscription           - source_type=subscription, no sub row at all
-//	terminal_subscription_standing - STANDING (end_at NULL) window whose sub is
-//	                                 terminal: the #691 closure event should
-//	                                 have bounded it and never did
 //	refunded_payment               - one_off window whose payment was refunded,
 //	                                 with no live grant justifying the access
 //
@@ -1626,10 +1615,6 @@ func (q *Queries) ListUnjustifiedEntitlementWindows(ctx context.Context, arg Lis
 			&i.SourceID,
 			&i.StartAt,
 			&i.EndAt,
-			&i.SubStatus,
-			&i.SubProductID,
-			&i.SubPeriodEndsAt,
-			&i.SubEndedAt,
 			&i.PaymentID,
 			&i.PaymentProductID,
 			&i.Cause,

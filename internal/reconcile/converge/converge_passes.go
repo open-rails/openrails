@@ -271,15 +271,15 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 
 	// Revoke direction: a terminally-dead sub (cancelled/expired/failed —
 	// `unknown` keeps access, #664) still projecting subscription-sourced
-	// BOUNDED windows past its entitled bound. #690/#691 paid-through guard:
+	// STANDING windows or bounded windows past its entitled bound.
+	// #690/#691 paid-through guard:
 	// the bound is GREATEST(paid-through, ended_at) — a user cancel leaves a
 	// PAID RUNWAY window bounded to period end, which is never excess before
 	// the bound. Propagation of a recorded terminal decision, so AUTO and NOT
 	// confirmed-absence gated; repair writes the missed/correct #691 closure
 	// (bounds live windows at the bound, drops scheduled ones past it) so the
-	// runway survives while the overrun is cleaned. STANDING (end_at NULL)
-	// windows of terminal subs are the freeloader case (derive.entitlement.
-	// unjustified below, ADMIN) — the partition keeps one condition per check.
+	// runway survives while the overrun is cleaned. A terminal standing window
+	// is unambiguous missed propagation, so it follows the same AUTO repair.
 	dead, err := q.ListDeadSubsWithLiveEntitlements(ctx, gen.ListDeadSubsWithLiveEntitlementsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
 	})
@@ -315,9 +315,8 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	// derive.entitlement.unjustified (#690, renamed from derive.entitlement.
 	// orphan in migration 066 — "orphaned" is the paying-without-access
 	// category) — the FREELOADER detector: a LIVE window whose source is
-	// PROVEN dead or absent (sub row missing; standing window of a terminal
-	// sub whose closure never landed; refunded one-off payment) with no live
-	// grant justifying the access. Post-#691 fail-open, stale is NOT
+	// PROVEN absent or reversed (sub row missing; refunded one-off payment) with
+	// no live grant justifying the access. Post-#691 fail-open, stale is NOT
 	// freeloading — standing windows of live/unknown/past_due subs never
 	// surface here. ADMIN surface-only (policy: access removal is an operator
 	// decision, never automatic on a derived conclusion), with the #692
@@ -345,37 +344,22 @@ func latestTime(a, b *time.Time) *time.Time {
 	return b
 }
 
-// unjustifiedEntitlementFinding renders one freeloader window as an ADMIN
-// finding carrying the #692 recommendation: revoke (default; as-of the
-// entitled bound when the terminal sub recorded one) or record an admin grant
-// instead.
+// unjustifiedEntitlementFinding renders one policy-ambiguous freeloader window
+// as an ADMIN finding carrying the #692 recommendation: revoke (default) or
+// record an admin grant instead.
 func unjustifiedEntitlementFinding(o *gen.ListUnjustifiedEntitlementWindowsRow) ConvergeFinding {
-	asOf := ""
-	bound := latestTime(o.SubPeriodEndsAt, o.SubEndedAt)
-	if o.Cause == "terminal_subscription_standing" && bound != nil {
-		asOf = bound.UTC().Format(time.RFC3339)
-	}
 	productID := ""
-	if o.SubProductID != nil {
-		productID = o.SubProductID.String()
-	}
 	if o.PaymentProductID != nil {
 		productID = o.PaymentProductID.String()
 	}
 	alt := recommend.RecordAdminGrantRec(o.CustomerID.String(), productID, "known-legitimate access")
-	rec := recommend.RevokeEntitlementRec(o.EntitlementID.String(), asOf, &alt)
+	rec := recommend.RevokeEntitlementRec(o.EntitlementID.String(), "", &alt)
 
 	ev := map[string]any{
 		"entitlement_id": o.EntitlementID.String(), "customer_id": o.CustomerID.String(),
 		"entitlement": o.Entitlement, "source_type": o.SourceType, "source_id": o.SourceID.String(),
 		"cause":               o.Cause,
 		recommend.EvidenceKey: rec.Map(),
-	}
-	if o.SubStatus != nil && *o.SubStatus != "" {
-		ev["subscription_status"] = *o.SubStatus
-	}
-	if bound != nil {
-		ev["entitled_bound"] = bound.UTC()
 	}
 	if o.PaymentID != nil {
 		ev["payment_id"] = o.PaymentID.String()
@@ -386,9 +370,6 @@ func unjustifiedEntitlementFinding(o *gen.ListUnjustifiedEntitlementWindowsRow) 
 	case "missing_subscription":
 		prose = fmt.Sprintf("Live entitlement %q for customer %s references subscription %s, which does not exist — access has no justification. Revoke the window, or record an admin grant if it is known-legitimate.",
 			o.Entitlement, o.CustomerID, o.SourceID)
-	case "terminal_subscription_standing":
-		prose = fmt.Sprintf("Standing (open-ended) entitlement %q outlives its terminal subscription %s and its paid runway — the closure event never bounded it. Revoke the window as of the entitled bound, or record an admin grant if it is known-legitimate.",
-			o.Entitlement, o.SourceID)
 	default: // refunded_payment
 		prose = fmt.Sprintf("Live entitlement %q is sourced by refunded payment %s with no live grant justifying the access. Revoke the window, or record an admin grant if it is known-legitimate.",
 			o.Entitlement, o.SourceID)
