@@ -255,25 +255,17 @@ func (w ResumeSubscriptionWorker) resume(ctx context.Context, args ResumeSubscri
 	}).Info("processing subscription resume")
 
 	if sub.Rail == models.RailStripe {
+		if w.SubscriptionLifecycleService == nil {
+			return fmt.Errorf("subscription lifecycle service unavailable")
+		}
 		stripeSvc := &subscriptions.StripeService{Config: w.Config, Rails: w.Rails}
 		if err := stripeSvc.ResumeSubscription(ctx, sub.RailSubscriptionID); err != nil {
 			return err
 		}
-
-		sub.Status = models.StatusActive
-		sub.CancelledAt = nil
-		sub.CancelType = nil
-		sub.CancelFeedback = nil
-		sub.EndedAt = nil
-		if err := w.SubscriptionService.Update(ctx, sub); err != nil {
-			return err
-		}
-		// #691: undo the advance-written cancel closure — the resumed auto-renew
-		// sub's window goes back to STANDING (end_at NULL).
-		if w.EntitlementService != nil {
-			if err := w.EntitlementService.ResumeSubscriptionAccess(ctx, sub.ID); err != nil {
-				return fmt.Errorf("resume subscription access windows: %w", err)
-			}
+		if _, err := w.SubscriptionLifecycleService.ResumeMembership(ctx, &subscriptions.ResumeMembershipParams{
+			SubscriptionID: sub.ID,
+		}); err != nil {
+			return fmt.Errorf("resume Stripe membership locally: %w", err)
 		}
 		return nil
 	}

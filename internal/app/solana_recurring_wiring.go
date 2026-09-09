@@ -84,6 +84,7 @@ func (r *Runtime) ArmSolanaRecurringServices(
 		chainReader,
 		r.SubscriptionLifecycleService,
 		subscriptions,
+		r.DB,
 		network,
 		tokens,
 	)

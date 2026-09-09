@@ -222,6 +222,100 @@ func TestConverge_DeriveGrantEffectMismatch_RevokeDirection(t *testing.T) {
 	}))
 }
 
+// #955: a historical split-commit Stripe resume can leave an active auto-renew
+// subscription with an expired bounded window that still overlaps its recorded
+// running period. The older grant-direction detector treats that overlap as an
+// existing projection; this exact mismatch reopens the standing window.
+func TestConverge_DeriveGrantEffectMismatch_ExpiredBoundedResume(t *testing.T) {
+	appDB := startReconcilePostgres(t)
+	merchantID := dbtest.TestMerchantID.UUID()
+	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
+	e := NewConvergeEngine(appDB)
+	suffix := uuid.NewString()[:8]
+	feature := "feat-resume-" + suffix
+	productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
+	var customer uuid.UUID
+	now := time.Now().UTC()
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		customer = dbtest.EnsureCustomerIDPgx(ctx, t, appDB.Qx(ctx), uuid.NewString())
+		exec := func(sql string, args ...any) {
+			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
+			require.NoError(t, err)
+		}
+		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
+		      VALUES ($1,$2,$2,$3,jsonb_build_object($4::text, null),$5)`,
+			productID, "resume-prod-"+suffix, "resume-tier-"+suffix, feature, merchantID)
+		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
+		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
+		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "stripe")
+		periodStart, periodEnd := now.Add(-20*24*time.Hour), now.Add(10*24*time.Hour)
+		exec(`INSERT INTO openrails.subscriptions
+		        (id, price_id, product_id, status, rail, rail_subscription_id,
+		         current_period_starts_at, current_period_ends_at, started_at,
+		         entitlements_spec_snapshot, customer_id, merchant_id, psp_id)
+		      VALUES ($1,$2,$3,'active','stripe',$4,$5,$6,$5,jsonb_build_object($7::text, null),$8,$9,$10)`,
+			subID, priceID, productID, "resume-sub-"+suffix, periodStart, periodEnd, feature, customer, merchantID, pspID)
+
+		// This ended grant and its bounded effect are historical records, so the
+		// normal missing-grant and missing-live-grant detectors remain quiet.
+		boundedEnd := now.Add(-24 * time.Hour)
+		gl := grants.New(appDB.Gen(ctx), merchantID)
+		g, err := gl.Grant(ctx, grants.GrantInput{
+			Customer: customer, Kind: grants.Entitlement, Source: grants.Subscription,
+			SourceID: subID.String(), Spec: &grants.Spec{Entitlements: []string{feature}},
+			StartsAt: periodStart, EndsAt: &boundedEnd,
+		})
+		require.NoError(t, err)
+		exec(`INSERT INTO openrails.entitlements
+		        (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type, grant_id)
+		      VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',$8)`,
+			uuid.New(), merchantID, customer, feature, periodStart, boundedEnd, subID, g.ID)
+		return nil
+	}))
+
+	t.Cleanup(func() {
+		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`, merchantID, "subscription:"+subID.String())
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, subID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
+			return nil
+		})
+	})
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
+		require.NoError(t, err)
+		require.Equal(t, 1, res.Findings)
+		require.Equal(t, 1, res.AutoFixed)
+
+		var findingType, status string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT finding_type, status FROM openrails.reconciliation_findings
+			 WHERE merchant_id=$1 AND subject_key=$2`,
+			merchantID, "subscription:"+subID.String()).Scan(&findingType, &status))
+		require.Equal(t, "derive.grant_effect.mismatch", findingType, "acceptance requires the exact finding type")
+		require.Equal(t, "auto_fixed", status)
+
+		var endAt *time.Time
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT end_at FROM openrails.entitlements
+			 WHERE source_type='subscription' AND source_id=$1 AND revoked_at IS NULL AND deleted_at IS NULL`, subID).Scan(&endAt))
+		require.Nil(t, endAt, "the active auto-renew window must be standing again")
+		return nil
+	}))
+
+	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
+		require.NoError(t, err)
+		require.Zero(t, res.Findings, "the repaired standing window must be idempotent")
+		return nil
+	}))
+}
+
 func timePtrOrNil(cond bool, t time.Time) *time.Time {
 	if !cond {
 		return nil

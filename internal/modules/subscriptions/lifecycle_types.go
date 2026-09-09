@@ -51,6 +51,10 @@ type ReactivateMembershipParams struct {
 	AllowTerminalReactivation bool
 }
 
+type ResumeMembershipParams struct {
+	SubscriptionID uuid.UUID
+}
+
 var ErrTerminalTransitionBlocked = errors.New("terminal-to-active transition blocked by lifecycle policy")
 
 type TerminalTransitionBlockedError struct {

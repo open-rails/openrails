@@ -9,7 +9,9 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
@@ -27,8 +29,13 @@ type tierChangeConfirmRPC interface {
 // *subscriptions.SubscriptionLifecycleService): cancel the OLD membership and
 // create the NEW one.
 type tierChangeLifecycle interface {
-	CancelMembership(ctx context.Context, params *submod.CancelMembershipParams) error
-	CreateMembership(ctx context.Context, params *submod.CreateMembershipParams) (*models.Subscription, error)
+	CancelMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error)
+	CreateMembershipTx(ctx context.Context, txDB *db.DB, params *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error)
+	DispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue)
+}
+
+type tierChangeTransactor interface {
+	MerchantTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error
 }
 
 // tierChangeStore is the on-chain state store the mirror reads + writes
@@ -38,8 +45,8 @@ type tierChangeLifecycle interface {
 type tierChangeStore interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
 	GetBySubscriptionPDA(ctx context.Context, pda string) (*models.SolanaSubscription, error)
-	Upsert(ctx context.Context, s *models.SolanaSubscription) error
-	SetStatus(ctx context.Context, id uuid.UUID, status string) error
+	UpsertTx(ctx context.Context, txDB *db.DB, s *models.SolanaSubscription) error
+	SetStatusTx(ctx context.Context, txDB *db.DB, id uuid.UUID, status string) error
 }
 
 // ConfirmTierChangeInput describes a confirmed on-chain tier change to mirror.
@@ -109,13 +116,13 @@ type ConfirmTierChangeResult struct {
 // signature here. We confirm it landed + SUCCEEDED on-chain and only then MIRROR
 // it into the DB:
 //
+//   - atomically cancel the OLD membership + mirror row, releasing the
+//     database's live tier-group slot;
 //   - create the NEW membership (rail=solana, rail_subscription_id =
 //     new subscription PDA, recording the prorated first charge for an upgrade /
 //     no charge for a downgrade) + upsert the NEW solana_subscriptions row
 //     (status active) with next_pull_at set per kind (upgrade => now+period;
-//     downgrade => old period end);
-//   - cancel the OLD membership (immediate) + flip the OLD solana_subscriptions
-//     row to cancelled (the cranker stops pulling the old plan).
+//     downgrade => old period end). Any failure rolls the OLD cancellation back.
 //
 // It is idempotent/resumable: if the NEW row already exists (a prior confirm
 // committed), it returns the existing new subscription without re-mirroring.
@@ -123,6 +130,7 @@ type ConfirmTierChangeService struct {
 	rpc        tierChangeConfirmRPC
 	lifecycle  tierChangeLifecycle
 	store      tierChangeStore
+	transactor tierChangeTransactor
 	network    string
 	tokens     map[string]config.TokenConfig
 	commitment rpc.CommitmentType
@@ -133,11 +141,12 @@ type ConfirmTierChangeService struct {
 // the Confirmed commitment; the wallet-built signature carries no known chain
 // terminal, so the watch runs until the caller's context ends (xs-007 row
 // 36). network ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(rpcClient tierChangeConfirmRPC, lifecycle tierChangeLifecycle, store tierChangeStore, transactor tierChangeTransactor, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
 		rpc:        rpcClient,
 		lifecycle:  lifecycle,
 		store:      store,
+		transactor: transactor,
 		network:    network,
 		tokens:     normalizeRecurringTokens(firstTokenMap(tokens)),
 		commitment: rpc.CommitmentConfirmed,
@@ -166,9 +175,13 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		return nil, fmt.Errorf("recurring: downgrade requires the old period end (deferred first pull)")
 	}
 
+	if s.transactor == nil {
+		return nil, fmt.Errorf("recurring: tier-change transaction manager is required")
+	}
+
 	// Idempotency/resumability: if the NEW row already exists, a prior confirm
 	// already mirrored this tier change. Return the existing new subscription
-	// without re-running the (non-transactional) mirror. We look up by the NEW
+	// without re-running the transactional mirror. We look up by the NEW
 	// subscription PDA because the OLD row gets cancelled in-place.
 	if existing, err := s.store.GetBySubscriptionPDA(ctx, in.NewSubscriptionPDA); err == nil && existing != nil && existing.SubscriptionID != uuid.Nil {
 		return &ConfirmTierChangeResult{
@@ -204,10 +217,9 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	}
 
 	// ---- MIRROR (billing-critical) ----
-	// Order: create the NEW membership + row FIRST, then cancel the OLD. A retry
-	// after a partial failure is safe because CreateMembership/Upsert are keyed on
-	// the new PDA and CancelMembership is a no-op on an already-cancelled
-	// membership; the idempotency guard above short-circuits a completed confirm.
+	// Create the new membership + mirror and cancel the old membership + mirror
+	// in one database transaction. A failed mirror therefore leaves no partial
+	// state for the idempotency guard to mistake for a completed switch.
 
 	now := s.now().UTC()
 	newPeriodStart := now
@@ -245,7 +257,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		paymentMeta = map[string]any{"solana_tier_change": "downgrade"}
 	}
 
-	newSub, err := s.lifecycle.CreateMembership(ctx, &submod.CreateMembershipParams{
+	createParams := &submod.CreateMembershipParams{
 		UserID:                in.UserID,
 		PriceID:               in.NewPriceID,
 		Rail:                  models.RailSolana,
@@ -258,39 +270,59 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		CurrentPeriodStartsAt: &newPeriodStart,
 		CurrentPeriodEndsAt:   &newPeriodEnd,
 		PaymentMetadata:       paymentMeta,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("recurring: create new membership: %w", err)
 	}
 
-	// Build the NEW on-chain row. Subscriber + merchant + authority are unchanged
-	// (same wallet + mint, same merchant for a same-group tier change); the plan
-	// PDA + subscription PDA are derived from the merchant + new plan id.
-	newRow, err := s.buildNewRow(oldRow, newSub.ID, in, newPDA, newPeriodEnd)
+	var (
+		newSub        *models.Subscription
+		notifications []*models.NotificationQueue
+	)
+	err = s.transactor.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txDB := db.NewWithPgxTx(tx)
+
+		// Release the old row's live tier-group slot before inserting the new
+		// membership. Both operations share this transaction, so any later error
+		// restores the old membership and its access automatically.
+		cancelType := models.CancelTypeMerchant
+		cancelResult, cancelErr := s.lifecycle.CancelMembershipTx(ctx, txDB, &submod.CancelMembershipParams{
+			SubscriptionID: &in.OldSubscriptionID,
+			CancelType:     cancelType,
+			RevokeAccess:   true,
+		})
+		if cancelErr != nil {
+			return fmt.Errorf("recurring: mirror old-membership cancel: %w", cancelErr)
+		}
+		if oldRow.ID != uuid.Nil {
+			if err := s.store.SetStatusTx(ctx, txDB, oldRow.ID, models.SolanaSubscriptionCancelled); err != nil {
+				return fmt.Errorf("recurring: mark old solana subscription cancelled: %w", err)
+			}
+		}
+
+		var createNotifications []*models.NotificationQueue
+		newSub, createNotifications, err = s.lifecycle.CreateMembershipTx(ctx, txDB, createParams)
+		if err != nil {
+			return fmt.Errorf("recurring: create new membership: %w", err)
+		}
+
+		// Subscriber + merchant + authority are unchanged. The new plan and
+		// subscription PDAs identify the newly mirrored on-chain membership.
+		newRow, buildErr := s.buildNewRow(oldRow, newSub.ID, in, newPDA, newPeriodEnd)
+		if buildErr != nil {
+			return buildErr
+		}
+		if err := s.store.UpsertTx(ctx, txDB, newRow); err != nil {
+			return fmt.Errorf("recurring: persist new solana subscription: %w", err)
+		}
+
+		notifications = append(notifications, createNotifications...)
+		if cancelResult != nil {
+			notifications = append(notifications, cancelResult.Notifications...)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if err := s.store.Upsert(ctx, newRow); err != nil {
-		return nil, fmt.Errorf("recurring: persist new solana subscription: %w", err)
-	}
-
-	// Mirror the OLD-side cancel LAST: cancel the membership immediately and flip
-	// the old on-chain row to cancelled so the cranker stops pulling the old plan.
-	// The on-chain cancel already happened atomically inside the tx — this is the
-	// DB mirror. Idempotent: re-cancelling is a no-op.
-	cancelType := models.CancelTypeMerchant
-	if err := s.lifecycle.CancelMembership(ctx, &submod.CancelMembershipParams{
-		SubscriptionID: &in.OldSubscriptionID,
-		CancelType:     cancelType,
-		RevokeAccess:   true,
-	}); err != nil {
-		return nil, fmt.Errorf("recurring: mirror old-membership cancel: %w", err)
-	}
-	// Belt-and-suspenders: ensure the old on-chain row is cancelled even if the
-	// lifecycle cascade did not reach it. SetStatus is idempotent.
-	if oldRow.ID != uuid.Nil {
-		_ = s.store.SetStatus(ctx, oldRow.ID, models.SolanaSubscriptionCancelled)
-	}
+	s.lifecycle.DispatchNotifications(ctx, notifications)
 
 	return &ConfirmTierChangeResult{NewSubscription: newSub}, nil
 }

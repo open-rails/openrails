@@ -76,6 +76,7 @@ type lifecycleEntitlementService interface {
 	RevokeExistingEntitlement(context.Context, entitlements.RevokeExistingEntitlementParams) error
 	RevokeSourcesForSubscriptionAsOf(context.Context, string, uuid.UUID, time.Time, models.EntitlementRevokeReason, ...models.EntitlementSourceType) error
 	BoundSubscriptionAccess(context.Context, uuid.UUID, time.Time) error
+	ResumeSubscriptionAccess(context.Context, uuid.UUID) error
 }
 
 func (s *SubscriptionLifecycleService) newLifecycleEntitlementService(dbb *db.DB) lifecycleEntitlementService {
@@ -175,7 +176,10 @@ func (s *SubscriptionLifecycleService) now() time.Time {
 // window is pre-appended. Historical `grace` rows are still revoked on
 // renewal/cancel/terminal paths.)
 
-func (s *SubscriptionLifecycleService) dispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue) {
+// DispatchNotifications delivers notification rows after their surrounding
+// transaction commits. Transaction-aware lifecycle callers use this to avoid
+// sending messages for work that may still roll back.
+func (s *SubscriptionLifecycleService) DispatchNotifications(ctx context.Context, notifications []*models.NotificationQueue) {
 	if s.NotificationService == nil {
 		return
 	}
@@ -219,7 +223,7 @@ func (s *SubscriptionLifecycleService) CreateMembership(ctx context.Context, par
 		return nil, err
 	}
 
-	s.dispatchNotifications(ctx, notifications)
+	s.DispatchNotifications(ctx, notifications)
 
 	return subscription, nil
 }
@@ -1110,9 +1114,48 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		return nil
 	}
 
-	s.dispatchNotifications(ctx, notifications)
+	s.DispatchNotifications(ctx, notifications)
 
 	return nil
+}
+
+// ResumeMembership restores a reversibly-cancelled subscription and its
+// standing entitlement projection in one transaction.
+func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, params *ResumeMembershipParams) (*models.Subscription, error) {
+	if params == nil || params.SubscriptionID == uuid.Nil {
+		return nil, fmt.Errorf("resume membership: subscription id is required")
+	}
+
+	now := s.now().UTC()
+	var resumed *models.Subscription
+	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		txdb := db.NewWithPgxTx(tx)
+		subscription, err := NewSubscriptionRepo(txdb).GetByIDForUpdate(ctx, params.SubscriptionID)
+		if err != nil {
+			return fmt.Errorf("resume membership: load subscription: %w", err)
+		}
+		if !Resumable(subscription, now) {
+			return fmt.Errorf("resume membership: subscription %s is not resumable", subscription.ID)
+		}
+
+		subscription.Status = models.StatusActive
+		subscription.CancelledAt = nil
+		subscription.CancelType = nil
+		subscription.CancelFeedback = nil
+		subscription.EndedAt = nil
+		if err := NewSubscriptionRepo(txdb).UpdateAt(ctx, subscription, now); err != nil {
+			return fmt.Errorf("resume membership: update subscription: %w", err)
+		}
+		if err := s.newLifecycleEntitlementService(txdb).ResumeSubscriptionAccess(ctx, subscription.ID); err != nil {
+			return fmt.Errorf("resume membership: reopen subscription access: %w", err)
+		}
+		resumed = subscription
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resumed, nil
 }
 
 // ReactivateMembership reactivates a previously cancelled subscription and restores
@@ -1264,12 +1307,6 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 
 // CancelMembership cancels a subscription and revokes associated roles
 func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, params *CancelMembershipParams) error {
-	notifications := make([]*models.NotificationQueue, 0, 1)
-
-	// Variables to capture from transaction for the completion log
-	var subscriptionID uuid.UUID
-	var userID string
-
 	var procName string
 	if params.Rail != nil {
 		procName = string(*params.Rail)
@@ -1289,132 +1326,138 @@ func (s *SubscriptionLifecycleService) CancelMembership(ctx context.Context, par
 		"cancel_feedback_provided":  cancelFeedback != "",
 	}).Info("Starting membership cancellation flow")
 
+	var result *CancelMembershipTxResult
 	err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		db := db.NewWithPgxTx(tx)
-		priceService := catalog.NewPriceService(db)
-		productService := catalog.NewProductService(db)
-		notificationRepo := NewNotificationQueueRepo(db)
-		subService := NewSubscriptionService(db, priceService, productService, nil, s.Clock())
-
-		// Use rail name for gateway lookup
-		// Find subscription
-		var subscription *models.Subscription
 		var err error
-
-		if params.SubscriptionID != nil {
-			subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
-		} else if params.RailSubscriptionID != nil && params.Rail != nil {
-			subscription, err = subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
-		} else {
-			return fmt.Errorf("either subscription_id or rail details must be provided")
-		}
-
-		if err != nil {
-			log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for cancellation")
-			return fmt.Errorf("subscription not found: %w", err)
-		}
-
-		// A late event must preserve the existing cancellation and its terminal reason.
-		if subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
-			return nil
-		}
-
-		// Capture values for the completion log after transaction
-		subscriptionID = subscription.ID
-		userID = subscription.CustomerID.String()
-
-		// Cancellation policy (caller-owned): an immediate revoke truncates the
-		// paid period to now; a period-end cancel keeps paid access until the term
-		// ends and only forfeits the pre-appended #368 grace window. The terminal
-		// status flip + Solana cascade + entitlement revoke are the shared local-
-		// state core (ApplyLocalCancellation), so this path can never diverge from
-		// the LIFE-plane convergence repairs.
-		now := s.now()
-		endAt := now
-		if params.RevokeAccess {
-			// Immediate revocation
-			subscription.CurrentPeriodEndsAt = &now
-			// Keep period bounds valid when revoking a future-dated window.
-			// Some records may have CurrentPeriodStartsAt in the future due to precomputed renewals.
-			if subscription.CurrentPeriodStartsAt != nil && !subscription.CurrentPeriodStartsAt.Before(now) {
-				adjustedStart := now.Add(-time.Second)
-				subscription.CurrentPeriodStartsAt = &adjustedStart
-			}
-		} else if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
-			// Period-end cancellation: keep access until paid term ends.
-			endAt = *subscription.CurrentPeriodEndsAt
-		}
-
-		// Immediate (revoke now / already-ended period): revoke the subscription's
-		// paid windows AND any scheduled grace. Period-end: forfeit only the
-		// scheduled grace window (#368), keep paid access until term end.
-		immediate := params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)
-		revokeReason := models.EntitlementRevokeAdmin
-		revokeSources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
-		if immediate {
-			if params.CancelType == models.CancelTypeChargeback {
-				revokeReason = models.EntitlementRevokeChargeback
-			}
-			revokeSources = []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace}
-		}
-
-		if err := s.ApplyLocalCancellation(ctx, db, subscription, LocalCancellation{
-			EndedAt:       endAt,
-			CancelType:    params.CancelType,
-			Feedback:      params.CancelFeedback,
-			RevokeReason:  revokeReason,
-			RevokeAsOf:    now,
-			RevokeSources: revokeSources,
-		}); err != nil {
-			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
-				"subscription_id": subscription.ID,
-			}).Error("Failed to apply local cancellation")
-			return err
-		}
-		log.WithContext(ctx).WithFields(log.Fields{
-			"subscription_id": subscription.ID,
-			"user_id":         subscription.CustomerID.String(),
-			"status":          subscription.Status,
-			"ended_at":        subscription.EndedAt,
-			"period_end":      subscription.CurrentPeriodEndsAt,
-		}).Info("Updated subscription record during cancellation")
-
-		reason := PremiumEndReasonAdmin
-		switch params.CancelType {
-		case models.CancelTypeUser:
-			reason = PremiumEndReasonUserCancel
-		case models.CancelTypeExpired:
-			reason = PremiumEndReasonExpired
-		case models.CancelTypeMerchant:
-			reason = PremiumEndReasonRail
-		}
-
-		notification := &models.NotificationQueue{
-			ID:         uuidutil.NewV7(),
-			CustomerID: subscription.CustomerID,
-			EventType:  models.NotificationPremiumEnded,
-			Data:       map[string]any{"reason": string(reason)},
-		}
-		if err := notificationRepo.Create(ctx, notification); err != nil {
-			log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
-		} else {
-			notifications = append(notifications, notification)
-		}
-
-		return nil
+		result, err = s.CancelMembershipTx(ctx, db.NewWithPgxTx(tx), params)
+		return err
 	})
-
 	if err != nil {
 		return err
 	}
 
-	s.dispatchNotifications(ctx, notifications)
+	s.DispatchNotifications(ctx, result.Notifications)
 	log.WithContext(ctx).WithFields(log.Fields{
-		"subscription_id": subscriptionID,
-		"user_id":         userID,
+		"subscription_id": result.SubscriptionID,
+		"user_id":         result.UserID,
 	}).Info("Membership cancellation flow completed")
 
 	return nil
+}
+
+// CancelMembershipTx applies cancellation using the caller's transaction. The
+// caller owns commit/rollback and must dispatch the returned notifications only
+// after a successful commit.
+func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, txDB *db.DB, params *CancelMembershipParams) (*CancelMembershipTxResult, error) {
+	if txDB == nil {
+		return nil, errors.New("transaction DB is required")
+	}
+
+	priceService := catalog.NewPriceService(txDB)
+	productService := catalog.NewProductService(txDB)
+	notificationRepo := NewNotificationQueueRepo(txDB)
+	subService := NewSubscriptionService(txDB, priceService, productService, nil, s.Clock())
+
+	var subscription *models.Subscription
+	var err error
+	if params.SubscriptionID != nil {
+		subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
+	} else if params.RailSubscriptionID != nil && params.Rail != nil {
+		subscription, err = subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
+	} else {
+		return nil, fmt.Errorf("either subscription_id or rail details must be provided")
+	}
+	if err != nil {
+		log.WithContext(ctx).WithError(err).Warn("Failed to locate subscription for cancellation")
+		return nil, fmt.Errorf("subscription not found: %w", err)
+	}
+
+	result := &CancelMembershipTxResult{
+		SubscriptionID: subscription.ID,
+		UserID:         subscription.CustomerID.String(),
+		Notifications:  make([]*models.NotificationQueue, 0, 1),
+	}
+	// A late event must preserve the existing cancellation and its terminal reason.
+	if subscription.Status == models.StatusCancelled && NormalizeCancelType(subscription.CancelType) == string(models.CancelTypeChargeback) {
+		return result, nil
+	}
+
+	// Cancellation policy (caller-owned): an immediate revoke truncates the
+	// paid period to now; a period-end cancel keeps paid access until the term
+	// ends and only forfeits the pre-appended #368 grace window. The terminal
+	// status flip + Solana cascade + entitlement revoke are the shared local-
+	// state core (ApplyLocalCancellation), so this path can never diverge from
+	// the LIFE-plane convergence repairs.
+	now := s.now()
+	endAt := now
+	if params.RevokeAccess {
+		subscription.CurrentPeriodEndsAt = &now
+		if subscription.CurrentPeriodStartsAt != nil && !subscription.CurrentPeriodStartsAt.Before(now) {
+			adjustedStart := now.Add(-time.Second)
+			subscription.CurrentPeriodStartsAt = &adjustedStart
+		}
+	} else if subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.After(now) {
+		endAt = *subscription.CurrentPeriodEndsAt
+	}
+
+	immediate := params.RevokeAccess || subscription.CurrentPeriodEndsAt == nil || !subscription.CurrentPeriodEndsAt.After(now)
+	revokeReason := models.EntitlementRevokeAdmin
+	revokeSources := []models.EntitlementSourceType{models.EntitlementSourceGrace}
+	if immediate {
+		if params.CancelType == models.CancelTypeChargeback {
+			revokeReason = models.EntitlementRevokeChargeback
+		}
+		revokeSources = []models.EntitlementSourceType{models.EntitlementSourceSubscription, models.EntitlementSourceGrace}
+	}
+
+	if err := s.ApplyLocalCancellation(ctx, txDB, subscription, LocalCancellation{
+		EndedAt:       endAt,
+		CancelType:    params.CancelType,
+		Feedback:      params.CancelFeedback,
+		RevokeReason:  revokeReason,
+		RevokeAsOf:    now,
+		RevokeSources: revokeSources,
+	}); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("subscription_id", subscription.ID).Error("Failed to apply local cancellation")
+		return nil, err
+	}
+	log.WithContext(ctx).WithFields(log.Fields{
+		"subscription_id": subscription.ID,
+		"user_id":         subscription.CustomerID.String(),
+		"status":          subscription.Status,
+		"ended_at":        subscription.EndedAt,
+		"period_end":      subscription.CurrentPeriodEndsAt,
+	}).Info("Updated subscription record during cancellation")
+
+	reason := PremiumEndReasonAdmin
+	switch params.CancelType {
+	case models.CancelTypeUser:
+		reason = PremiumEndReasonUserCancel
+	case models.CancelTypeExpired:
+		reason = PremiumEndReasonExpired
+	case models.CancelTypeMerchant:
+		reason = PremiumEndReasonRail
+	}
+	notification := &models.NotificationQueue{
+		ID:         uuidutil.NewV7(),
+		CustomerID: subscription.CustomerID,
+		EventType:  models.NotificationPremiumEnded,
+		Data:       map[string]any{"reason": string(reason)},
+	}
+	if err := notificationRepo.Create(ctx, notification); err != nil {
+		log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
+	} else {
+		result.Notifications = append(result.Notifications, notification)
+	}
+
+	return result, nil
+}
+
+// CancelMembershipTxResult contains commit-safe cancellation side effects.
+type CancelMembershipTxResult struct {
+	SubscriptionID uuid.UUID
+	UserID         string
+	Notifications  []*models.NotificationQueue
 }
 
 // LocalCancellation describes a side-effect-free terminal cancellation of a
@@ -1855,7 +1898,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 		return err
 	}
 
-	s.dispatchNotifications(ctx, notifications)
+	s.DispatchNotifications(ctx, notifications)
 	log.WithContext(ctx).WithField("subscription_id", subscriptionID).Info("Membership expiration flow completed")
 
 	return nil
@@ -2303,7 +2346,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}).Info("scheduled deferred NMI delete after terminal payment failure (committed with the cancellation)")
 	}
 
-	s.dispatchNotifications(ctx, notifications)
+	s.DispatchNotifications(ctx, notifications)
 
 	return nil
 }

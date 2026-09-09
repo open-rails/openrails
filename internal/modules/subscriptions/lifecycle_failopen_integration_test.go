@@ -112,6 +112,7 @@ type failingLifecycleEntitlements struct {
 	revokeErr        error
 	revokeSourcesErr error
 	boundErr         error
+	resumeErr        error
 }
 
 func (f *failingLifecycleEntitlements) ListDistinctEntitlementNamesBySource(ctx context.Context, sourceType models.EntitlementSourceType, sourceID uuid.UUID) ([]string, error) {
@@ -140,6 +141,13 @@ func (f *failingLifecycleEntitlements) BoundSubscriptionAccess(ctx context.Conte
 		return f.boundErr
 	}
 	return f.lifecycleEntitlementService.BoundSubscriptionAccess(ctx, subscriptionID, endAt)
+}
+
+func (f *failingLifecycleEntitlements) ResumeSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID) error {
+	if f.resumeErr != nil {
+		return f.resumeErr
+	}
+	return f.lifecycleEntitlementService.ResumeSubscriptionAccess(ctx, subscriptionID)
 }
 
 func (f *failopenFixture) failLifecycleEntitlements(failure failingLifecycleEntitlements) {
@@ -195,6 +203,44 @@ func (f *failopenFixture) create(t *testing.T, rail models.Rail) (*models.Subscr
 	})
 	require.NoError(t, err)
 	return sub, procSubID
+}
+
+func TestResumeMembership_RollsBackStatusWhenAccessReopenFails(t *testing.T) {
+	f := newFailopenFixture(t, 30*24, true)
+	ctx := failopenCtx()
+	sub, _ := f.create(t, models.RailStripe)
+	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
+		SubscriptionID: &sub.ID,
+		CancelType:     models.CancelTypeUser,
+		RevokeAccess:   false,
+	}))
+
+	cancelled := f.loadSub(t, sub.ID)
+	require.Equal(t, models.StatusCancelled, cancelled.Status)
+	windows := f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
+	require.Len(t, windows, 1)
+	require.NotNil(t, windows[0].EndAt)
+	boundedAt := windows[0].EndAt.UTC()
+
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{resumeErr: errors.New("injected resume failure")})
+	_, err := f.lifecycle.ResumeMembership(ctx, &ResumeMembershipParams{SubscriptionID: sub.ID})
+	require.ErrorContains(t, err, "injected resume failure")
+
+	stillCancelled := f.loadSub(t, sub.ID)
+	require.Equal(t, models.StatusCancelled, stillCancelled.Status)
+	require.NotNil(t, stillCancelled.CancelledAt)
+	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
+	require.Len(t, windows, 1)
+	require.NotNil(t, windows[0].EndAt)
+	require.Equal(t, boundedAt, windows[0].EndAt.UTC(), "access window must roll back with the status write")
+
+	f.failLifecycleEntitlements(failingLifecycleEntitlements{})
+	resumed, err := f.lifecycle.ResumeMembership(ctx, &ResumeMembershipParams{SubscriptionID: sub.ID})
+	require.NoError(t, err)
+	require.Equal(t, models.StatusActive, resumed.Status)
+	windows = f.windows(t, sub.ID, string(models.EntitlementSourceSubscription))
+	require.Len(t, windows, 1)
+	require.Nil(t, windows[0].EndAt, "a successful retry must restore standing access")
 }
 
 // TestFailOpen_WebhookSilence: an active auto-renew sub gets ONE standing

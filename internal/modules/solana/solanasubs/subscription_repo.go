@@ -82,6 +82,14 @@ func (r *SolanaSubscriptionRepo) Upsert(ctx context.Context, s *models.SolanaSub
 	})
 }
 
+// UpsertTx persists a mirror row through the caller's transaction.
+func (r *SolanaSubscriptionRepo) UpsertTx(ctx context.Context, txDB *db.DB, s *models.SolanaSubscription) error {
+	if txDB == nil {
+		return errors.New("transaction DB is required")
+	}
+	return NewSolanaSubscriptionRepo(txDB).Upsert(ctx, s)
+}
+
 // GetBySubscriptionPDA returns the row for an on-chain subscription PDA.
 func (r *SolanaSubscriptionRepo) GetBySubscriptionPDA(ctx context.Context, pda string) (*models.SolanaSubscription, error) {
 	row, err := r.db.Gen(ctx).GetSolanaSubscriptionByPDA(ctx, pda)
@@ -281,6 +289,14 @@ func (r *SolanaSubscriptionRepo) SetStatus(ctx context.Context, id uuid.UUID, st
 		Status:    status,
 		UpdatedAt: time.Now().UTC(),
 	})
+}
+
+// SetStatusTx transitions a mirror row through the caller's transaction.
+func (r *SolanaSubscriptionRepo) SetStatusTx(ctx context.Context, txDB *db.DB, id uuid.UUID, status string) error {
+	if txDB == nil {
+		return errors.New("transaction DB is required")
+	}
+	return NewSolanaSubscriptionRepo(txDB).SetStatus(ctx, id, status)
 }
 
 func (r *SolanaSubscriptionRepo) activeMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
