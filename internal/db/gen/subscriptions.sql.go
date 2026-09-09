@@ -18,6 +18,7 @@ SET next_retry_at = $2::timestamptz,
     last_retry_at = $3::timestamptz,
     updated_at = $3::timestamptz
 WHERE id = $1
+  AND merchant_id = $4
   AND status = 'past_due'
   AND next_retry_at IS NOT NULL AND next_retry_at <= $3::timestamptz
   AND deleted_at IS NULL
@@ -27,12 +28,18 @@ type ClaimDunningAttemptParams struct {
 	ID         uuid.UUID
 	LeaseUntil time.Time
 	ClaimedAt  time.Time
+	MerchantID uuid.UUID
 }
 
 // Lease-style claim: pushes next_retry_at out so concurrent dunning runs
 // cannot double-charge; only claims a still-due past_due row.
 func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttemptParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimDunningAttempt, arg.ID, arg.LeaseUntil, arg.ClaimedAt)
+	result, err := q.db.Exec(ctx, claimDunningAttempt,
+		arg.ID,
+		arg.LeaseUntil,
+		arg.ClaimedAt,
+		arg.MerchantID,
+	)
 	if err != nil {
 		return 0, err
 	}

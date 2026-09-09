@@ -724,11 +724,15 @@ func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Sub
 	if w == nil || w.DB == nil || sub == nil {
 		return false, errors.New("dunning worker database and subscription are required")
 	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return false, fmt.Errorf("claim dunning attempt: %w", err)
+	}
 
 	claimedAt := now.UTC()
 	leaseUntil := claimedAt.Add(dunningAttemptLease)
 	rowsAffected, err := w.DB.Gen(ctx).ClaimDunningAttempt(ctx, gen.ClaimDunningAttemptParams{
-		ID: sub.ID, LeaseUntil: leaseUntil, ClaimedAt: claimedAt,
+		ID: sub.ID, MerchantID: merchantID.UUID(), LeaseUntil: leaseUntil, ClaimedAt: claimedAt,
 	})
 	if err != nil {
 		return false, fmt.Errorf("read dunning claim result: %w", err)
@@ -746,8 +750,12 @@ func (w *DunningWorker) releaseDunningAttempt(ctx context.Context, sub *models.S
 	if w == nil || w.DB == nil || sub == nil || sub.LastRetryAt == nil || sub.NextRetryAt == nil {
 		return errors.New("release dunning attempt requires its claimed subscription")
 	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return fmt.Errorf("release dunning attempt: %w", err)
+	}
 	rowsAffected, err := w.DB.Gen(ctx).ReleaseDunningAttempt(ctx, gen.ReleaseDunningAttemptParams{
-		ID: sub.ID, MerchantID: sub.MerchantID, ClaimedAt: *sub.LastRetryAt, LeaseUntil: *sub.NextRetryAt,
+		ID: sub.ID, MerchantID: merchantID.UUID(), ClaimedAt: *sub.LastRetryAt, LeaseUntil: *sub.NextRetryAt,
 	})
 	if err != nil {
 		return fmt.Errorf("release dunning attempt claim: %w", err)

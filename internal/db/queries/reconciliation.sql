@@ -503,6 +503,7 @@ SET last_four = COALESCE(NULLIF(sqlc.arg(last_four)::text, ''), last_four),
     expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
     updated_at = now()
 WHERE id = sqlc.arg(id)
+  AND merchant_id = sqlc.arg(merchant_id)
   AND (last_four IS DISTINCT FROM NULLIF(sqlc.arg(last_four)::text, '')
        OR expiry_date IS DISTINCT FROM NULLIF(sqlc.arg(expiry_date)::text, ''));
 
@@ -708,7 +709,11 @@ LIMIT sqlc.arg(row_limit);
 -- worker resumes (a CURRENT retry within grace — not a replay of missed cycles).
 UPDATE openrails.subscriptions
 SET next_retry_at = sqlc.arg(next_retry_at)::timestamptz, updated_at = now()
-WHERE id = sqlc.arg(id) AND status = 'past_due' AND next_retry_at IS NULL AND deleted_at IS NULL;
+WHERE id = sqlc.arg(id)
+  AND merchant_id = sqlc.arg(merchant_id)
+  AND status = 'past_due'
+  AND next_retry_at IS NULL
+  AND deleted_at IS NULL;
 
 -- #665 DERIVE `derive.grant_effect.mismatch` (grant direction) — moved from the
 -- legacy pull engine's PS-9. An `active` sub in a RUNNING period whose product

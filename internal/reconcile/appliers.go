@@ -138,10 +138,15 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 }
 
 func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, err
+	}
 	n, err := w.DB.Gen(ctx).ReconcileAdoptPaymentMethod(ctx, gen.ReconcileAdoptPaymentMethodParams{
 		LastFour:   a.LastFour,
 		ExpiryDate: a.ExpiryDate,
 		ID:         a.PaymentMethodID,
+		MerchantID: tid.UUID(),
 	})
 	return n > 0, err
 }

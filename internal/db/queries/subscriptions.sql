@@ -330,6 +330,7 @@ SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
     last_retry_at = sqlc.arg(claimed_at)::timestamptz,
     updated_at = sqlc.arg(claimed_at)::timestamptz
 WHERE id = $1
+  AND merchant_id = sqlc.arg(merchant_id)
   AND status = 'past_due'
   AND next_retry_at IS NOT NULL AND next_retry_at <= sqlc.arg(claimed_at)::timestamptz
   AND deleted_at IS NULL;
