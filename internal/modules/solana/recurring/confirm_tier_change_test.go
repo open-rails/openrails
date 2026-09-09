@@ -8,6 +8,8 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -24,24 +26,32 @@ type fakeTierLifecycle struct {
 	cancelCalls int
 }
 
-func (f *fakeTierLifecycle) CreateMembership(_ context.Context, p *submod.CreateMembershipParams) (*models.Subscription, error) {
+func (f *fakeTierLifecycle) CreateMembershipTx(_ context.Context, _ *db.DB, p *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
 	f.createCalls++
 	f.created = p
 	if f.createErr != nil {
-		return nil, f.createErr
+		return nil, nil, f.createErr
 	}
 	id := f.newSubID
 	if id == uuid.Nil {
 		id = uuid.New()
 		f.newSubID = id
 	}
-	return &models.Subscription{ID: id}, nil
+	return &models.Subscription{ID: id}, nil, nil
 }
 
-func (f *fakeTierLifecycle) CancelMembership(_ context.Context, p *submod.CancelMembershipParams) error {
+func (f *fakeTierLifecycle) CancelMembershipTx(_ context.Context, _ *db.DB, p *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error) {
 	f.cancelCalls++
 	f.cancelled = p
-	return f.cancelErr
+	return &submod.CancelMembershipTxResult{}, f.cancelErr
+}
+
+func (f *fakeTierLifecycle) DispatchNotifications(context.Context, []*models.NotificationQueue) {}
+
+type directTierTransactor struct{}
+
+func (directTierTransactor) MerchantTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error {
+	return fn(ctx, nil)
 }
 
 // fakeTierStore stubs the on-chain state store. existingByPDA powers the
@@ -52,6 +62,7 @@ type fakeTierStore struct {
 	upserted      *models.SolanaSubscription
 	statusSet     map[uuid.UUID]string
 	upsertCalls   int
+	statusErr     error
 }
 
 func (f *fakeTierStore) GetBySubscriptionID(_ context.Context, _ uuid.UUID) (*models.SolanaSubscription, error) {
@@ -60,17 +71,38 @@ func (f *fakeTierStore) GetBySubscriptionID(_ context.Context, _ uuid.UUID) (*mo
 func (f *fakeTierStore) GetBySubscriptionPDA(_ context.Context, _ string) (*models.SolanaSubscription, error) {
 	return f.existingByPDA, nil
 }
-func (f *fakeTierStore) Upsert(_ context.Context, s *models.SolanaSubscription) error {
+func (f *fakeTierStore) UpsertTx(_ context.Context, _ *db.DB, s *models.SolanaSubscription) error {
 	f.upsertCalls++
 	f.upserted = s
 	return nil
 }
-func (f *fakeTierStore) SetStatus(_ context.Context, id uuid.UUID, status string) error {
+func (f *fakeTierStore) SetStatusTx(_ context.Context, _ *db.DB, id uuid.UUID, status string) error {
+	if f.statusErr != nil {
+		return f.statusErr
+	}
 	if f.statusSet == nil {
 		f.statusSet = map[uuid.UUID]string{}
 	}
 	f.statusSet[id] = status
 	return nil
+}
+
+func TestConfirmTierChange_OldMirrorStatusFailureIsReturned(t *testing.T) {
+	oldRow := newOldRow()
+	injected := errors.New("old mirror status failed")
+	store := &fakeTierStore{oldRow: oldRow, statusErr: injected}
+	life := &fakeTierLifecycle{}
+	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, life, store, directTierTransactor{}, "mainnet")
+	in := baseConfirmInput(oldRow.SubscriptionID)
+	in.IsUpgrade = true
+
+	_, err := svc.Confirm(context.Background(), in)
+	if !errors.Is(err, injected) {
+		t.Fatalf("Confirm error = %v, want injected SetStatus failure", err)
+	}
+	if life.createCalls != 0 {
+		t.Fatal("new membership must not be created after the old mirror status write fails")
+	}
 }
 
 func newOldRow() *models.SolanaSubscription {
@@ -114,7 +146,7 @@ func TestConfirmTierChange_Upgrade_MirrorsNewAndCancelsOld(t *testing.T) {
 	store := &fakeTierStore{oldRow: oldRow}
 	life := &fakeTierLifecycle{}
 	frozen := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, life, store, "mainnet")
+	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, life, store, directTierTransactor{}, "mainnet")
 	svc.now = func() time.Time { return frozen }
 
 	in := baseConfirmInput(oldRow.SubscriptionID)
@@ -169,7 +201,7 @@ func TestConfirmTierChange_Downgrade_DefersFirstPullToOldPeriodEnd(t *testing.T)
 	oldRow := newOldRow()
 	store := &fakeTierStore{oldRow: oldRow}
 	life := &fakeTierLifecycle{}
-	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, life, store, "mainnet")
+	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, life, store, directTierTransactor{}, "mainnet")
 
 	oldPeriodEnd := time.Date(2026, 7, 15, 9, 0, 0, 0, time.UTC)
 	in := baseConfirmInput(oldRow.SubscriptionID)
@@ -195,7 +227,7 @@ func TestConfirmTierChange_OnChainFailure_NoMirror(t *testing.T) {
 	// Outcome with a non-nil Err -> Succeeded() == false.
 	svc := NewConfirmTierChangeService(
 		&fakeConfirmRPC{outcome: &solanaint.TransactionOutcome{Err: errors.New("reverted")}},
-		life, store, "mainnet",
+		life, store, directTierTransactor{}, "mainnet",
 	)
 	in := baseConfirmInput(oldRow.SubscriptionID)
 	in.IsUpgrade = true
@@ -215,7 +247,7 @@ func TestConfirmTierChange_NeverConfirmed_NoMirror(t *testing.T) {
 	life := &fakeTierLifecycle{}
 	svc := NewConfirmTierChangeService(
 		&fakeConfirmRPC{err: errors.New("timed out")},
-		life, store, "mainnet",
+		life, store, directTierTransactor{}, "mainnet",
 	)
 	in := baseConfirmInput(oldRow.SubscriptionID)
 	in.IsUpgrade = true
@@ -238,7 +270,7 @@ func TestConfirmTierChange_Idempotent_ReturnsExisting(t *testing.T) {
 	}
 	life := &fakeTierLifecycle{}
 	rpcStub := &fakeConfirmRPC{outcome: okOutcome()}
-	svc := NewConfirmTierChangeService(rpcStub, life, store, "mainnet")
+	svc := NewConfirmTierChangeService(rpcStub, life, store, directTierTransactor{}, "mainnet")
 
 	in := baseConfirmInput(oldRow.SubscriptionID)
 	in.IsUpgrade = true
@@ -262,7 +294,7 @@ func TestConfirmTierChange_Idempotent_ReturnsExisting(t *testing.T) {
 func TestConfirmTierChange_Downgrade_RequiresOldPeriodEnd(t *testing.T) {
 	oldRow := newOldRow()
 	store := &fakeTierStore{oldRow: oldRow}
-	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, &fakeTierLifecycle{}, store, "mainnet")
+	svc := NewConfirmTierChangeService(&fakeConfirmRPC{outcome: okOutcome()}, &fakeTierLifecycle{}, store, directTierTransactor{}, "mainnet")
 	in := baseConfirmInput(oldRow.SubscriptionID)
 	in.IsUpgrade = false // no OldPeriodEndsAt
 	if _, err := svc.Confirm(context.Background(), in); err == nil {

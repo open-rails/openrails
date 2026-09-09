@@ -181,8 +181,9 @@ WHERE ent.id = $1
 -- name: ResumeEntitlementsBySubscription :exec
 -- #691 resume: re-open the LATEST live window per (customer, entitlement) of a
 -- resumed auto-renew subscription (end_at = NULL), undoing an advance-written
--- cancel closure. Only the latest window per timeline (older bounded windows are
--- history), and only when no other live window would overlap [start, infinity)
+-- cancel closure. This also repairs the historical split-commit case after the
+-- bounded window has elapsed. Only the latest window per timeline (older bounded
+-- windows are history), and only when no other live window would overlap [start, infinity)
 -- — the GIST no-overlap constraint stays intact.
 UPDATE openrails.entitlements ent SET
     end_at = NULL,
@@ -196,7 +197,6 @@ WHERE ent.deleted_at IS NULL
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
       AND e.end_at IS NOT NULL
-      AND e.end_at > sqlc.arg(now)::timestamptz
       AND NOT EXISTS (
           SELECT 1 FROM openrails.entitlements o
           WHERE o.merchant_id = e.merchant_id

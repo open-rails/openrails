@@ -599,6 +599,7 @@ func ConfirmSolanaTierChange(r *httprequest.Request) {
 		r.State.SolanaRPCResolver.ChainReader(),
 		r.State.SubscriptionLifecycleService,
 		solanasubs.NewSolanaSubscriptionRepo(r.State.DB),
+		r.State.DB,
 		network,
 		tokens,
 	)

@@ -668,6 +668,41 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
 ORDER BY current_period_ends_at;
 
+-- #955 DERIVE: the historical Stripe-resume split commit. The subscription is
+-- active and its auto-renew price promises standing access, but every live
+-- subscription window has already ended. Re-opening the latest bounded window
+-- is safe: revoked/deleted windows remain recorded decisions and are excluded.
+-- name: ListActiveAutoRenewSubsWithExpiredBoundedAccess :many
+SELECT DISTINCT s.id, s.customer_id
+FROM openrails.subscriptions s
+JOIN openrails.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'active'
+  AND p.auto_renew
+  AND EXISTS (
+      SELECT 1 FROM openrails.entitlements expired
+      WHERE expired.merchant_id = s.merchant_id
+        AND expired.source_type = 'subscription'
+        AND expired.source_id = s.id
+        AND expired.revoked_at IS NULL
+        AND expired.deleted_at IS NULL
+        AND expired.end_at IS NOT NULL
+        AND expired.end_at <= sqlc.arg(now)::timestamptz
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.entitlements live
+      WHERE live.merchant_id = s.merchant_id
+        AND live.source_type = 'subscription'
+        AND live.source_id = s.id
+        AND live.revoked_at IS NULL
+        AND live.deleted_at IS NULL
+        AND (live.end_at IS NULL OR live.end_at > sqlc.arg(now)::timestamptz)
+  )
+ORDER BY s.id
+LIMIT sqlc.arg(row_limit);
+
 -- name: SetSubscriptionNextRetry :execrows
 -- Repair for dunning_overdue: re-establish the retry schedule so the dunning
 -- worker resumes (a CURRENT retry within grace — not a replay of missed cycles).

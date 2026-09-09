@@ -248,8 +248,10 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan unprojected subscriptions: %w", err)
 	}
+	unprojectedSubscriptions := make(map[uuid.UUID]struct{}, len(unprojected))
 	for i := range unprojected {
 		s := unprojected[i]
+		unprojectedSubscriptions[s.ID] = struct{}{}
 		out = append(out, ConvergeFinding{
 			Type:       "derive.grant_effect.mismatch",
 			Shape:      ShapeMismatch,
@@ -265,6 +267,44 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 				// Row shape matches ListUngrantedSubscriptions; EntitlementsSpec
 				// carries ONLY the missing features, so derive-1 fills the gap.
 				return gl.DeriveSubscriptionGrant(ctx, gen.ListUngrantedSubscriptionsRow(s))
+			},
+		})
+	}
+
+	// #955 historical Stripe-resume split commit: status became active, but the
+	// standing access projection remained bounded and has since elapsed. The
+	// transaction fix prevents new instances; this AUTO repair reopens the
+	// latest non-revoked subscription window for existing ones.
+	expiredBounded, err := q.ListActiveAutoRenewSubsWithExpiredBoundedAccess(ctx, gen.ListActiveAutoRenewSubsWithExpiredBoundedAccessParams{
+		MerchantID: scope.Merchant.UUID(), CustomerID: customer, Now: now, RowLimit: convergeScanCap,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("derive: scan active subscriptions with expired bounded access: %w", err)
+	}
+	for i := range expiredBounded {
+		s := expiredBounded[i]
+		// The established grant-direction detector already repairs a bounded
+		// window that does not overlap the running period. Avoid emitting two
+		// findings for that shape; this branch owns the historical resume shape
+		// that still overlaps the period yet no longer grants access, plus rows
+		// whose recorded period itself has elapsed.
+		if _, alreadyCovered := unprojectedSubscriptions[s.ID]; alreadyCovered {
+			continue
+		}
+		out = append(out, ConvergeFinding{
+			Type:       "derive.grant_effect.mismatch",
+			Shape:      ShapeMismatch,
+			Class:      ClassAuto,
+			Severity:   "high",
+			SubjectKey: "subscription:" + s.ID.String(),
+			Provider:   "self",
+			Evidence: map[string]any{
+				"subscription_id": s.ID.String(), "customer_id": s.CustomerID.String(),
+				"direction": "standing", "cause": "active_auto_renew_bounded_access_expired",
+			},
+			Repair: func(ctx context.Context) error {
+				ctx = merchant.WithID(ctx, scope.Merchant)
+				return entitlements.NewEntitlementService(p.e.DB).ResumeSubscriptionAccess(ctx, s.ID)
 			},
 		})
 	}

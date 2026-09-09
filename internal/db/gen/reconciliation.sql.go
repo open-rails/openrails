@@ -769,6 +769,79 @@ func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Con
 	return items, nil
 }
 
+const listActiveAutoRenewSubsWithExpiredBoundedAccess = `-- name: ListActiveAutoRenewSubsWithExpiredBoundedAccess :many
+SELECT DISTINCT s.id, s.customer_id
+FROM openrails.subscriptions s
+JOIN openrails.prices p ON p.id = s.price_id AND p.merchant_id = s.merchant_id
+WHERE s.merchant_id = $1::uuid
+  AND ($2::uuid IS NULL OR s.customer_id = $2::uuid)
+  AND s.deleted_at IS NULL
+  AND s.status = 'active'
+  AND p.auto_renew
+  AND EXISTS (
+      SELECT 1 FROM openrails.entitlements expired
+      WHERE expired.merchant_id = s.merchant_id
+        AND expired.source_type = 'subscription'
+        AND expired.source_id = s.id
+        AND expired.revoked_at IS NULL
+        AND expired.deleted_at IS NULL
+        AND expired.end_at IS NOT NULL
+        AND expired.end_at <= $3::timestamptz
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM openrails.entitlements live
+      WHERE live.merchant_id = s.merchant_id
+        AND live.source_type = 'subscription'
+        AND live.source_id = s.id
+        AND live.revoked_at IS NULL
+        AND live.deleted_at IS NULL
+        AND (live.end_at IS NULL OR live.end_at > $3::timestamptz)
+  )
+ORDER BY s.id
+LIMIT $4
+`
+
+type ListActiveAutoRenewSubsWithExpiredBoundedAccessParams struct {
+	MerchantID uuid.UUID
+	CustomerID *uuid.UUID
+	Now        time.Time
+	RowLimit   int64
+}
+
+type ListActiveAutoRenewSubsWithExpiredBoundedAccessRow struct {
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// #955 DERIVE: the historical Stripe-resume split commit. The subscription is
+// active and its auto-renew price promises standing access, but every live
+// subscription window has already ended. Re-opening the latest bounded window
+// is safe: revoked/deleted windows remain recorded decisions and are excluded.
+func (q *Queries) ListActiveAutoRenewSubsWithExpiredBoundedAccess(ctx context.Context, arg ListActiveAutoRenewSubsWithExpiredBoundedAccessParams) ([]ListActiveAutoRenewSubsWithExpiredBoundedAccessRow, error) {
+	rows, err := q.db.Query(ctx, listActiveAutoRenewSubsWithExpiredBoundedAccess,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Now,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveAutoRenewSubsWithExpiredBoundedAccessRow
+	for rows.Next() {
+		var i ListActiveAutoRenewSubsWithExpiredBoundedAccessRow
+		if err := rows.Scan(&i.ID, &i.CustomerID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveMerchantIDs = `-- name: ListActiveMerchantIDs :many
 SELECT id FROM openrails.merchants
 WHERE status = 'active' AND deleted_at IS NULL
