@@ -1,18 +1,6 @@
 -- openrails.imported_dunning_history — append-only legacy dunning forensics
 -- (#735; doujins #387 import target). Display/report evidence only.
 
--- name: InsertImportedDunningHistory :execrows
-INSERT INTO openrails.imported_dunning_history (
-    id, merchant_id, subscription_id, customer_id, event_type, rail,
-    occurred_at, source, detail
-) VALUES (
-    sqlc.arg(id), sqlc.arg(merchant_id), sqlc.narg(subscription_id),
-    sqlc.narg(customer_id), sqlc.arg(event_type), sqlc.arg(rail),
-    sqlc.arg(occurred_at), sqlc.arg(source),
-    sqlc.narg(detail)
-)
-ON CONFLICT (id) DO NOTHING;
-
 -- Dunning-forensics history feed (#735): imported legacy rows ∪ failed
 -- payments, merchant-scoped, oldest first. Structured so #733's
 -- subscription_status_transitions can join as another UNION branch.

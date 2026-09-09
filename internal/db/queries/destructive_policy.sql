@@ -32,15 +32,6 @@ SET enabled = sqlc.arg(enabled)::boolean,
     reason = sqlc.narg(reason)::text,
     updated_at = now();
 
--- name: SetMerchantDestructiveActionsEnabled :exec
-INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, updated_by, reason, updated_at)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(enabled)::boolean, sqlc.narg(updated_by)::text, sqlc.narg(reason)::text, now())
-ON CONFLICT (merchant_id) DO UPDATE SET
-    destructive_actions_enabled = EXCLUDED.destructive_actions_enabled,
-    updated_by = EXCLUDED.updated_by,
-    reason = EXCLUDED.reason,
-    updated_at = now();
-
 -- name: ArmMerchantEnforcement :exec
 -- #835: bless a merchant for ENFORCING pulls, after an operator reviewed the
 -- findings its first advisory pull produced.

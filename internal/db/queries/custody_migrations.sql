@@ -78,20 +78,6 @@ INSERT INTO openrails.custody_migrations (
 )
 RETURNING *;
 
--- name: GetCustodyMigrationForTarget :one
--- Idempotency read: has THIS instrument already reached THIS custodian token?
-SELECT * FROM openrails.custody_migrations
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-  AND to_rail_method_ref = sqlc.arg(to_rail_method_ref)::text;
-
--- name: ListCustodyMigrationsForBatch :many
--- The operator's after-the-fact report for one run.
-SELECT * FROM openrails.custody_migrations
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND batch_id = sqlc.arg(batch_id)::uuid
-ORDER BY created_at, id;
-
 -- name: GetPaymentMethodForCustodianToken :one
 -- Conflict guard: a custodian token addresses exactly one instrument. If the
 -- export maps two source vault entries onto one token (or onto a token another

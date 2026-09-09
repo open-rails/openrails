@@ -90,20 +90,6 @@ SELECT * FROM openrails.payments purch
 WHERE purch.rail = $1 AND purch.transaction_id = $2
   AND purch.deleted_at IS NULL;
 
--- name: ListPaymentsByPriceID :many
-SELECT * FROM openrails.payments purch
-WHERE purch.price_id = $1
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL
-ORDER BY purch.purchased_at DESC;
-
--- name: ListPaymentsByRail :many
-SELECT * FROM openrails.payments purch
-WHERE purch.rail = $1
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL
-ORDER BY purch.purchased_at DESC;
-
 -- name: DeletePayment :execrows
 DELETE FROM openrails.payments WHERE id = $1
   AND deleted_at IS NULL;
@@ -195,22 +181,6 @@ WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY purch.purchased_at DESC
 LIMIT sqlc.arg(page_limit)::int OFFSET sqlc.arg(page_offset)::int;
 
--- name: GetLatestPaymentByCustomerRail :one
-SELECT * FROM openrails.payments purch
-WHERE purch.customer_id = $1
-  AND purch.rail = $2
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL
-ORDER BY purch.purchased_at DESC
-LIMIT 1;
-
--- name: GetLatestPaymentBySubscriptionID :one
-SELECT * FROM openrails.payments purch
-WHERE purch.subscription_id = $1
-  AND purch.deleted_at IS NULL
-ORDER BY purch.purchased_at DESC
-LIMIT 1;
-
 -- name: HasCompletedPaymentAtOrAfterPeriodEnd :one
 SELECT EXISTS (
     SELECT 1
@@ -230,17 +200,6 @@ WHERE purch.subscription_id = $1
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC
 LIMIT 1;
-
--- name: CountPaymentOutcomesBySubjectRail :one
-SELECT
-    count(*) FILTER (WHERE purch.amount > 0
-        AND COALESCE(purch.status::text, 'completed') = 'completed')::bigint AS successful,
-    count(*) FILTER (WHERE COALESCE(purch.status::text, 'completed') = 'failed')::bigint AS failed
-FROM openrails.payments purch
-WHERE purch.customer_id = $1
-  AND purch.rail = $2
-  AND COALESCE(purch.metadata ->> 'nmi_subscription_order_id', '') = ''
-  AND purch.deleted_at IS NULL;
 
 -- name: MarkPaymentFailed :exec
 UPDATE openrails.payments SET status = 'failed' WHERE id = $1

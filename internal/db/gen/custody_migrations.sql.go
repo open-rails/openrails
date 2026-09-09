@@ -41,46 +41,6 @@ func (q *Queries) CountInFlightChargeIntentsForPaymentMethod(ctx context.Context
 	return column_1, err
 }
 
-const getCustodyMigrationForTarget = `-- name: GetCustodyMigrationForTarget :one
-SELECT id, merchant_id, batch_id, payment_method_id, rail, from_custodian, from_custodian_id, from_rail_customer_ref, from_rail_method_ref, from_psp_id, to_custodian, to_custodian_id, to_rail_method_ref, to_psp_id, exported_at, outcome, reason, created_at FROM openrails.custody_migrations
-WHERE merchant_id = $1::uuid
-  AND payment_method_id = $2::uuid
-  AND to_rail_method_ref = $3::text
-`
-
-type GetCustodyMigrationForTargetParams struct {
-	MerchantID      uuid.UUID
-	PaymentMethodID uuid.UUID
-	ToRailMethodRef string
-}
-
-// Idempotency read: has THIS instrument already reached THIS custodian token?
-func (q *Queries) GetCustodyMigrationForTarget(ctx context.Context, arg GetCustodyMigrationForTargetParams) (OpenrailsCustodyMigration, error) {
-	row := q.db.QueryRow(ctx, getCustodyMigrationForTarget, arg.MerchantID, arg.PaymentMethodID, arg.ToRailMethodRef)
-	var i OpenrailsCustodyMigration
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.BatchID,
-		&i.PaymentMethodID,
-		&i.Rail,
-		&i.FromCustodian,
-		&i.FromCustodianID,
-		&i.FromRailCustomerRef,
-		&i.FromRailMethodRef,
-		&i.FromPspID,
-		&i.ToCustodian,
-		&i.ToCustodianID,
-		&i.ToRailMethodRef,
-		&i.ToPspID,
-		&i.ExportedAt,
-		&i.Outcome,
-		&i.Reason,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getPaymentMethodForCustodianToken = `-- name: GetPaymentMethodForCustodianToken :one
 SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid
@@ -131,58 +91,6 @@ func (q *Queries) GetPaymentMethodForCustodianToken(ctx context.Context, arg Get
 		&i.AccountUpdaterCheckedAt,
 	)
 	return i, err
-}
-
-const listCustodyMigrationsForBatch = `-- name: ListCustodyMigrationsForBatch :many
-SELECT id, merchant_id, batch_id, payment_method_id, rail, from_custodian, from_custodian_id, from_rail_customer_ref, from_rail_method_ref, from_psp_id, to_custodian, to_custodian_id, to_rail_method_ref, to_psp_id, exported_at, outcome, reason, created_at FROM openrails.custody_migrations
-WHERE merchant_id = $1::uuid
-  AND batch_id = $2::uuid
-ORDER BY created_at, id
-`
-
-type ListCustodyMigrationsForBatchParams struct {
-	MerchantID uuid.UUID
-	BatchID    uuid.UUID
-}
-
-// The operator's after-the-fact report for one run.
-func (q *Queries) ListCustodyMigrationsForBatch(ctx context.Context, arg ListCustodyMigrationsForBatchParams) ([]OpenrailsCustodyMigration, error) {
-	rows, err := q.db.Query(ctx, listCustodyMigrationsForBatch, arg.MerchantID, arg.BatchID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsCustodyMigration
-	for rows.Next() {
-		var i OpenrailsCustodyMigration
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.BatchID,
-			&i.PaymentMethodID,
-			&i.Rail,
-			&i.FromCustodian,
-			&i.FromCustodianID,
-			&i.FromRailCustomerRef,
-			&i.FromRailMethodRef,
-			&i.FromPspID,
-			&i.ToCustodian,
-			&i.ToCustodianID,
-			&i.ToRailMethodRef,
-			&i.ToPspID,
-			&i.ExportedAt,
-			&i.Outcome,
-			&i.Reason,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const lockPaymentMethodForCustodyRemap = `-- name: LockPaymentMethodForCustodyRemap :one

@@ -103,38 +103,6 @@ func (q *Queries) ClaimDuePaymentMethodNotices(ctx context.Context, arg ClaimDue
 	return items, nil
 }
 
-const getPaymentMethodNoticeBySubscription = `-- name: GetPaymentMethodNoticeBySubscription :one
-SELECT id, merchant_id, customer_id, subscription_id, rail, failure_code, parked_at, rungs_sent, next_notice_at, resolved_at, resolution, created_at, updated_at FROM openrails.payment_method_notices
- WHERE merchant_id = $1
-   AND subscription_id = $2
-`
-
-type GetPaymentMethodNoticeBySubscriptionParams struct {
-	MerchantID     uuid.UUID
-	SubscriptionID uuid.UUID
-}
-
-func (q *Queries) GetPaymentMethodNoticeBySubscription(ctx context.Context, arg GetPaymentMethodNoticeBySubscriptionParams) (OpenrailsPaymentMethodNotice, error) {
-	row := q.db.QueryRow(ctx, getPaymentMethodNoticeBySubscription, arg.MerchantID, arg.SubscriptionID)
-	var i OpenrailsPaymentMethodNotice
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.SubscriptionID,
-		&i.Rail,
-		&i.FailureCode,
-		&i.ParkedAt,
-		&i.RungsSent,
-		&i.NextNoticeAt,
-		&i.ResolvedAt,
-		&i.Resolution,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const listDuePaymentMethodNoticeMerchants = `-- name: ListDuePaymentMethodNoticeMerchants :many
 SELECT merchant_id FROM openrails.due_payment_method_notice_merchant_ids(
     $1::timestamptz,

@@ -163,30 +163,3 @@ func (q *Queries) SetDestructiveActionSwitch(ctx context.Context, arg SetDestruc
 	_, err := q.db.Exec(ctx, setDestructiveActionSwitch, arg.Enabled, arg.UpdatedBy, arg.Reason)
 	return err
 }
-
-const setMerchantDestructiveActionsEnabled = `-- name: SetMerchantDestructiveActionsEnabled :exec
-INSERT INTO openrails.merchant_destructive_policy (merchant_id, destructive_actions_enabled, updated_by, reason, updated_at)
-VALUES ($1::uuid, $2::boolean, $3::text, $4::text, now())
-ON CONFLICT (merchant_id) DO UPDATE SET
-    destructive_actions_enabled = EXCLUDED.destructive_actions_enabled,
-    updated_by = EXCLUDED.updated_by,
-    reason = EXCLUDED.reason,
-    updated_at = now()
-`
-
-type SetMerchantDestructiveActionsEnabledParams struct {
-	MerchantID uuid.UUID
-	Enabled    bool
-	UpdatedBy  *string
-	Reason     *string
-}
-
-func (q *Queries) SetMerchantDestructiveActionsEnabled(ctx context.Context, arg SetMerchantDestructiveActionsEnabledParams) error {
-	_, err := q.db.Exec(ctx, setMerchantDestructiveActionsEnabled,
-		arg.MerchantID,
-		arg.Enabled,
-		arg.UpdatedBy,
-		arg.Reason,
-	)
-	return err
-}
