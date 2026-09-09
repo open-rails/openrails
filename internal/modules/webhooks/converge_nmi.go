@@ -96,6 +96,7 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 		LocalID:            sub.ID,
 		RailSubscriptionID: sub.RailSubscriptionID,
 		PeriodEnd:          sub.CurrentPeriodEndsAt,
+		ObservedAt:         now,
 	})
 	if err != nil {
 		// Provider API down: the queued job IS the dirty mark — retry later.

@@ -30,6 +30,16 @@ type ProbeSubject struct {
 	// PeriodEnd bounds the charge probe; nil (legacy import with no local
 	// period evidence) skips the charge lookup — the roster read alone answers.
 	PeriodEnd *time.Time
+	// ObservedAt is the owning reconcile clock at the provider-read boundary.
+	// A zero value preserves the standalone prober's physical-clock default.
+	ObservedAt time.Time
+}
+
+func probeObservedAt(subj ProbeSubject) time.Time {
+	if !subj.ObservedAt.IsZero() {
+		return subj.ObservedAt.UTC()
+	}
+	return time.Now().UTC()
 }
 
 // SubscriptionProber resolves provider truth for ONE subscription when the
@@ -52,7 +62,7 @@ func (p *NMISubscriptionProber) ProbeSubscription(ctx context.Context, subj Prob
 	if strings.TrimSpace(subj.RailSubscriptionID) == "" {
 		return nil, errors.New("rail subscription id is required")
 	}
-	now := time.Now().UTC()
+	now := probeObservedAt(subj)
 	snap := &RemoteSnapshot{
 		Provider:  ProviderNMI,
 		FetchedAt: now,
@@ -151,7 +161,7 @@ func (p *StripeSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	if err != nil {
 		return nil, err
 	}
-	return StripeSnapshotFromLiveness(subj.RailSubscriptionID, rec, time.Now().UTC()), nil
+	return StripeSnapshotFromLiveness(subj.RailSubscriptionID, rec, probeObservedAt(subj)), nil
 }
 
 // StripeSnapshotFromLiveness maps one fetched Stripe subscription record onto a
@@ -242,7 +252,7 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	}
 	snap := &RemoteSnapshot{
 		Provider:  ProviderCCBill,
-		FetchedAt: time.Now().UTC(),
+		FetchedAt: probeObservedAt(subj),
 		// The SMS answer names THIS subscription — exhaustive for this subject.
 		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
 		Capabilities: Capabilities{Subscriptions: true},

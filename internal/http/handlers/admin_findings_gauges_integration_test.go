@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -126,11 +127,12 @@ func TestFindingsGaugesFreeloaderDetectorEndToEnd(t *testing.T) {
 // the gauge. Nonzero pressure is allowed — max_age trending up is the alert.
 func TestFindingsGaugesVerificationPressure(t *testing.T) {
 	fx := newFindingsFixture(t)
+	now := time.Date(2045, time.September, 15, 18, 30, 0, 0, time.UTC)
+	fx.rt.Clock = clockwork.NewFakeClockAt(now)
 	product2, price2 := fx.seedSecondProduct()
 
 	seedUnknown := func(productID, priceID uuid.UUID, pastBy time.Duration) uuid.UUID {
 		subID := uuid.New()
-		now := time.Now().UTC()
 		fx.exec(`INSERT INTO openrails.subscriptions
 		          (id, price_id, product_id, status, rail, rail_subscription_id,
 		           current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id, psp_id)
@@ -144,16 +146,16 @@ func TestFindingsGaugesVerificationPressure(t *testing.T) {
 
 	probe := fx.gauges()
 	assert.EqualValues(t, 2, probe.Gauges.VerificationPressure.Count)
-	assert.InDelta(t, 3*3600, probe.Gauges.VerificationPressure.MaxAgeSeconds, 120, "max age tracks the OLDEST lapsed paid-through")
+	assert.EqualValues(t, 3*3600, probe.Gauges.VerificationPressure.MaxAgeSeconds, "max age tracks the OLDEST lapsed paid-through on the request clock")
 	// A pressure reading, not an error: no findings, other gauges untouched.
 	assert.Zero(t, probe.Gauges.Freeloaders)
 	assert.Zero(t, probe.Gauges.TotalOpen)
 
 	// Verification resolves the oldest sub (renewed) -> count and max age drop.
-	fx.exec(`UPDATE openrails.subscriptions SET status = 'active', current_period_ends_at = now() + interval '30 days' WHERE id = $1`, oldest)
+	fx.exec(`UPDATE openrails.subscriptions SET status = 'active', current_period_ends_at = $2 WHERE id = $1`, oldest, now.Add(30*24*time.Hour))
 	probe = fx.gauges()
 	assert.EqualValues(t, 1, probe.Gauges.VerificationPressure.Count)
-	assert.InDelta(t, 3600, probe.Gauges.VerificationPressure.MaxAgeSeconds, 120)
+	assert.EqualValues(t, 3600, probe.Gauges.VerificationPressure.MaxAgeSeconds)
 }
 
 // TestFindingsDuplicateOwnershipDetectorEndToEnd: the cross-month ownership

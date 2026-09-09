@@ -146,13 +146,14 @@ type ConvergeEngine struct {
 // NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes
 // (#511 Phase D) plus the post-repair NOTIFY stage (#789).
 func NewConvergeEngine(database *db.DB) *ConvergeEngine {
-	e := &ConvergeEngine{DB: database, Now: func() time.Time { return time.Now().UTC() }}
+	clock := clockwork.NewRealClock()
+	e := &ConvergeEngine{DB: database, Now: func() time.Time { return clock.Now().UTC() }}
 	// Real clock: the LIFE pass passes its own detection instants (now / grace-end)
 	// explicitly into the cores, so the lifecycle clock only stamps cancelled_at.
 	// Side-effect deps (notifications / event log / payments / deferred delete) are
 	// nil: convergence applies LOCAL state only — converge-not-replay.
-	e.lifecycle = subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clockwork.NewRealClock())
-	e.lifecycle.SetCreditGranter(money.NewMoneyService(database, clockwork.NewRealClock()))
+	e.lifecycle = subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clock)
+	e.lifecycle.SetCreditGranter(money.NewMoneyService(database, clock))
 	e.passes = []Pass{&derivePass{e: e}, &lifePass{e: e}, &conPass{e: e}}
 	e.notify = &notifyPass{e: e}
 	return e
@@ -196,6 +197,9 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (ConvergeRes
 	if scope.Merchant.UUID() == uuid.Nil {
 		return res, fmt.Errorf("converge: scope.Merchant required")
 	}
+	runClock := clockwork.NewFakeClockAt(e.Now().UTC())
+	e.lifecycle.SetClock(runClock)
+	e.lifecycle.SetCreditGranter(money.NewMoneyService(e.DB, runClock))
 
 	var collected []ConvergeFinding
 	for _, p := range e.passes {

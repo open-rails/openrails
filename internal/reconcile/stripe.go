@@ -67,7 +67,7 @@ func (f *StripeFetcher) Capabilities() Capabilities {
 func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error) {
 	snap := &RemoteSnapshot{
 		Provider:     ProviderStripe,
-		FetchedAt:    time.Now().UTC(),
+		FetchedAt:    fetchObservedAt(params),
 		Capabilities: f.Capabilities(),
 	}
 	snap.Coverage.TransactionsExhaustive = true

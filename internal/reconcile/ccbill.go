@@ -59,9 +59,10 @@ func (f *CCBillFetcher) Capabilities() Capabilities {
 }
 
 func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error) {
+	observedAt := fetchObservedAt(params)
 	snap := &RemoteSnapshot{
 		Provider:     ProviderCCBill,
-		FetchedAt:    time.Now().UTC(),
+		FetchedAt:    observedAt,
 		Capabilities: f.Capabilities(),
 	}
 
@@ -80,7 +81,7 @@ func (f *CCBillFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	// when the caller didn't bound the fetch.
 	until := params.Until
 	if until.IsZero() {
-		until = time.Now().UTC()
+		until = observedAt
 	}
 	since := params.Since
 	if since.IsZero() {

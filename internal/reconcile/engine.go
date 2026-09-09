@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
@@ -271,6 +272,7 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	if params.Mode == ModeEnforce && e.Writer == nil {
 		return nil, fmt.Errorf("reconcile: enforce mode requires a LocalWriter")
 	}
+	e.syncDBClocks()
 
 	providers := params.Providers
 	if len(providers) == 0 {
@@ -343,6 +345,15 @@ func (e *Engine) Run(ctx context.Context, params RunParams) (*RunResult, error) 
 	return result, nil
 }
 
+func (e *Engine) syncDBClocks() {
+	if store, ok := e.Store.(*PGStore); ok {
+		store.Now = e.now
+	}
+	if writer, ok := e.Writer.(*PGLocalWriter); ok {
+		writer.Now = e.now
+	}
+}
+
 // EvidenceFloorReader yields a merchant's #835 evidence-staleness floor.
 // internal/destructive.Gate implements it.
 type EvidenceFloorReader interface {
@@ -384,11 +395,12 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 	rep.PspID = binding.ID.String()
 	snap, err := fetcher.Fetch(ctx, FetchParams{
-		Since:     params.Since,
-		Until:     params.Until,
-		PspID:     binding.ID.String(),
-		Rail:      binding.Rail,
-		AccountID: binding.AccountID,
+		Since:      params.Since,
+		Until:      params.Until,
+		ObservedAt: e.now(),
+		PspID:      binding.ID.String(),
+		Rail:       binding.Rail,
+		AccountID:  binding.AccountID,
 	})
 	if err != nil {
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
@@ -784,7 +796,8 @@ func evidenceTime(m map[string]any, key string) (time.Time, bool) {
 // already converged or the write was skipped), and the first hard error.
 func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, bool, error) {
 	a := f.Apply
-	evidence := map[string]any{"applied_at": e.now().Format(time.RFC3339)}
+	now := e.now()
+	evidence := map[string]any{"applied_at": now.Format(time.RFC3339)}
 	switch {
 	case a.Decide != nil:
 		// #665: subscription state transitions route through the ONE decider
@@ -792,6 +805,9 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 		// SQL applier.
 		if e.Decisions == nil {
 			return nil, false, fmt.Errorf("no decision applier wired (enforce with subscription transitions requires Engine.Decisions)")
+		}
+		if setter, ok := e.Decisions.(interface{ SetClock(clockwork.Clock) }); ok {
+			setter.SetClock(clockwork.NewFakeClockAt(now))
 		}
 		changed, err := e.Decisions.ApplyDecision(ctx, a.Decide.SubscriptionID, a.Decide.Decision)
 		if err != nil {

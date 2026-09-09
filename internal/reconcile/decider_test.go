@@ -1,11 +1,35 @@
 package reconcile
 
 import (
-	"github.com/open-rails/openrails/internal/modules/collection"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jonboulle/clockwork"
+
+	"github.com/open-rails/openrails/internal/modules/collection"
 )
+
+func TestLifecycleDecisionApplierClockOwnership(t *testing.T) {
+	now := time.Date(2041, time.March, 4, 5, 6, 7, 0, time.UTC)
+	applier := NewDecisionApplier(nil, nil, clockwork.NewFakeClockAt(now))
+
+	if got := applier.clock.Now(); !got.Equal(now) {
+		t.Fatalf("decision clock = %v, want %v", got, now)
+	}
+	if got := applier.LC.Clock().Now(); !got.Equal(now) {
+		t.Fatalf("lifecycle clock = %v, want %v", got, now)
+	}
+
+	later := now.Add(48 * time.Hour)
+	applier.SetClock(clockwork.NewFakeClockAt(later))
+	if got := applier.clock.Now(); !got.Equal(later) {
+		t.Fatalf("updated decision clock = %v, want %v", got, later)
+	}
+	if got := applier.LC.Clock().Now(); !got.Equal(later) {
+		t.Fatalf("updated lifecycle clock = %v, want %v", got, later)
+	}
+}
 
 // #632/#633 (via #665): the pure snapshot-resolution law of the ONE decider,
 // fixture-tested with hand-built provider snapshots (no DB, no provider calls).

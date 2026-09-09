@@ -249,9 +249,13 @@ func (f *SolanaFetcher) now() time.Time {
 }
 
 func (f *SolanaFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnapshot, error) {
+	now := f.now()
+	if !params.ObservedAt.IsZero() {
+		now = params.ObservedAt.UTC()
+	}
 	snap := &RemoteSnapshot{
 		Provider:     ProviderSolana,
-		FetchedAt:    time.Now().UTC(),
+		FetchedAt:    now,
 		Capabilities: f.Capabilities(),
 	}
 
@@ -262,8 +266,6 @@ func (f *SolanaFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 
 	// Plan accounts are shared across subscribers; decode each once.
 	planCache := map[string]*subscriptions.PlanAccount{}
-	now := f.now()
-
 	// #720: a narrowed fetch (operator asked for this one subscription/
 	// customer specifically) always reads, bypassing the due-window filter.
 	narrowed := params.SubscriptionID != "" || params.CustomerID != ""
