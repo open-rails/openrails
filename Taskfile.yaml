@@ -40,6 +40,7 @@ tasks:
       - bash scripts/doctor_test.sh
       - bash scripts/setup_test.sh
       - bash scripts/ci_local_test.sh
+      - bash scripts/pre_push_test.sh
 
   ci-local:
     desc: Run the local Go/shared gates used by CI (database required)
@@ -169,6 +170,15 @@ tasks:
     cmds:
       - '{{.SQLC}} generate'
       - '{{.SQLC}} vet'
+
+  sqlc-generate-check:
+    desc: Regenerate sqlc bindings and fail when the working tree differs
+    env:
+      SQLC_DATABASE_URL:
+        sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
+    cmds:
+      - '{{.SQLC}} generate'
+      - git diff --exit-code -- internal/db/gen
 
   sqlc-check:
     desc: CI gate — sqlc generate + vet + query audit + SQL discipline lints

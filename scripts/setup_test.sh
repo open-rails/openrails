@@ -8,7 +8,7 @@ trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/scripts/hooks" "$fixture/bin"
 cp "$root/scripts/setup.sh" "$fixture/scripts/setup.sh"
 cp "$root/scripts/install-git-hooks.sh" "$fixture/scripts/install-git-hooks.sh"
-cp "$root/scripts/hooks/pre-commit" "$fixture/scripts/hooks/pre-commit"
+cp "$root"/scripts/hooks/* "$fixture/scripts/hooks/"
 cp "$root/.env.example" "$fixture/.env.example"
 git -C "$fixture" init -q
 
@@ -18,6 +18,7 @@ export SETUP_TEST_LOG="$log"
 printf '%s\n' '#!/bin/sh' \
     '[ -f .env ] || { echo "doctor ran before .env existed" >&2; exit 1; }' \
     '[ -L .git/hooks/pre-commit ] || { echo "doctor ran before hooks were installed" >&2; exit 1; }' \
+    '[ -L .git/hooks/pre-push ] || { echo "doctor ran before hooks were installed" >&2; exit 1; }' \
     'echo doctor >> "$SETUP_TEST_LOG"' >"$fixture/scripts/doctor.sh"
 printf '%s\n' '#!/bin/sh' 'echo "go $*" >> "$SETUP_TEST_LOG"' >"$fixture/bin/go"
 printf '%s\n' '#!/bin/sh' 'echo "docker $*" >> "$SETUP_TEST_LOG"' >"$fixture/bin/docker"

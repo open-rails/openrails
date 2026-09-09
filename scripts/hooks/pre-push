@@ -1,0 +1,12 @@
+#!/bin/sh
+# Fast compile/generated-code guard before publishing a branch. Integration
+# tests remain in their explicit task/CI lanes.
+set -eu
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+go build ./...
+go vet -tags integration ./...
+bash scripts/check_business_time.sh
+task sqlc-generate-check
