@@ -1469,10 +1469,7 @@ func validateEncryption(cfg *EncryptionConfig) error {
 	return nil
 }
 
-// validateStripeKeyForTestMode checks if the Stripe API key prefix matches the
-// test_mode axis. If there's a mismatch, it logs a warning and clears the key to
-// disable Stripe. This prevents accidentally processing real charges in a test
-// environment or test charges in a live one.
+// ValidateRailSet checks every declared rail and its credential posture.
 func ValidateRailSet(cfg *Config, rails PSPSet) error {
 	if len(rails) == 0 {
 		return nil
@@ -1484,17 +1481,14 @@ func ValidateRailSet(cfg *Config, rails PSPSet) error {
 	if err := validateRails(cfg, rails, isDev); err != nil {
 		return fmt.Errorf("rails validation failed: %w", err)
 	}
-	return validateStripeKeyForTestMode(cfg, rails, isDev)
+	return validateStripeKeyForTestMode(cfg, rails)
 }
 
 // validateStripeKeyForTestMode enforces the two credential/test_mode
-// mismatches SYMMETRICALLY (#748): a live key can never run under
-// test_mode=true, and — outside development — a test key can never run under
-// test_mode=false. Both used to diverge: the first hard-failed, the second
-// only warned and silently cleared the key, leaving the rail off behind a
-// "healthy" boot. Development keeps the warn-and-clear for the second case so
-// a local .env with a leftover test key doesn't need to be hand-edited.
-func validateStripeKeyForTestMode(cfg *Config, rails PSPSet, isDev bool) error {
+// mismatches symmetrically: a live key can never run under sandbox posture,
+// and a test key can never run under live posture. A mismatch must fail boot
+// rather than silently disable a configured rail.
+func validateStripeKeyForTestMode(cfg *Config, rails PSPSet) error {
 	if cfg == nil {
 		cfg = &Config{}
 	}
@@ -1520,15 +1514,7 @@ func validateStripeKeyForTestMode(cfg *Config, rails PSPSet, isDev bool) error {
 			return fmt.Errorf("stripe rail %q: live key (sk_live_/rk_live_) is not allowed when test_mode is enabled; use a test key or unset test_mode", strings.ToLower(strings.TrimSpace(name)))
 		}
 		if !cfg.IsTestMode() && isTestKey {
-			if !isDev {
-				// #748: mirror the live-key-under-test_mode hard guarantee above —
-				// a live deployment must never boot "healthy" with the rail silently
-				// disabled because a test key snuck into a live-mode config.
-				return fmt.Errorf("stripe rail %q: test key (sk_test_/rk_test_) is not allowed outside development when test_mode is disabled; use a live key or set test_mode=true", strings.ToLower(strings.TrimSpace(name)))
-			}
-			log.Warnf("⚠️  Stripe test key provided for rail %q but test_mode is disabled (live credentials) - disabling Stripe", strings.ToLower(strings.TrimSpace(name)))
-			log.Warn("   Use a live-mode key (sk_live_/rk_live_), or set test_mode=sandbox for sandbox testing")
-			stripeProc.Stripe.SecretKey = ""
+			return fmt.Errorf("stripe rail %q: test key (sk_test_/rk_test_) is not allowed when test_mode=live; use a live key or set test_mode=sandbox", strings.ToLower(strings.TrimSpace(name)))
 		}
 	}
 	return nil
