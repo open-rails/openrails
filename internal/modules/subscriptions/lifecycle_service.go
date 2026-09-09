@@ -406,7 +406,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	case price.AccessDurationHours != nil:
 		// Truthful window from the price's declared access duration — covers both
 		// recurring and one-off/durable prices (RecurringCycleHours is AutoRenew-gated).
-		periodEndsAt = now.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
+		periodEndsAt = periodStartsAt.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
 	default:
 		// #651: no provider period and no declared access duration. Don't silently
 		// invent a cadence — warn, then fall back to 30d so the row stays valid.
@@ -415,7 +415,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			"product_id": price.ProductID,
 			"user_id":    params.UserID,
 		}).Warn("price has no access duration and provider supplied no period end; defaulting membership period to 30d")
-		periodEndsAt = now.Add(30 * 24 * time.Hour)
+		periodEndsAt = periodStartsAt.Add(30 * 24 * time.Hour)
 	}
 	product, err := productService.GetByID(ctx, price.ProductID)
 	if err != nil {

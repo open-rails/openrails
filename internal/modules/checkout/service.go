@@ -970,7 +970,6 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 	}
 
 	now := s.now().UTC()
-	periodEnd := nmiSubscriptionPeriodEnd(now, price)
 	railSubscriptionID := providerSubscriptionID
 	var email *string
 	if req.Email != "" {
@@ -983,7 +982,6 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 		RailSubscriptionID:    &railSubscriptionID,
 		UserEmail:             email,
 		CurrentPeriodStartsAt: &now,
-		CurrentPeriodEndsAt:   &periodEnd,
 		TransactionID:         transactionID,
 		Amount:                price.Amount,
 		AmountProvided:        true,
@@ -994,13 +992,6 @@ func (s *CheckoutService) activateImmediateNMISubscription(ctx context.Context, 
 		return nil, fmt.Errorf("failed to activate NMI subscription: %w", err)
 	}
 	return s.nmiSubscriptionSuccessResponse(ctx, subscriptionID, transactionID, idempOp, idempotencyKey)
-}
-
-func nmiSubscriptionPeriodEnd(start time.Time, price *models.Price) time.Time {
-	if ch := price.RecurringCycleHours(); ch != nil {
-		return start.Add(time.Duration(*ch) * time.Hour)
-	}
-	return start.Add(30 * 24 * time.Hour)
 }
 
 func (s *CheckoutService) nmiSubscriptionPendingResponse(ctx context.Context, subscriptionID uuid.UUID, transactionID string, delayedStart *time.Time, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
