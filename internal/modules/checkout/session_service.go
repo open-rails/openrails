@@ -436,10 +436,7 @@ func (s *CheckoutSessionService) startPendingHeartbeat(ctx context.Context, key 
 }
 
 func (s *CheckoutSessionService) newPendingTicker(d time.Duration) clockwork.Ticker {
-	if s.clock != nil {
-		return s.clock.NewTicker(d)
-	}
-	return clockwork.NewRealClock().NewTicker(d)
+	return timeutil.FirstClock(s.clock).NewTicker(d)
 }
 
 func canonicalizeCheckoutPaymentName(payment *CheckoutSessionPaymentRequest) {

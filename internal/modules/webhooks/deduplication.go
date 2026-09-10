@@ -190,10 +190,7 @@ func (s *DeduplicationService) lease() time.Duration {
 }
 
 func (s *DeduplicationService) now() time.Time {
-	if s.clock != nil {
-		return s.clock.Now()
-	}
-	return time.Now()
+	return timeutil.FirstClock(s.clock).Now()
 }
 
 // startPendingHeartbeat renews the pending lease while the handler runs, so
@@ -227,10 +224,7 @@ func (s *DeduplicationService) startPendingHeartbeat(ctx context.Context, op, ke
 }
 
 func (s *DeduplicationService) newTicker(d time.Duration) clockwork.Ticker {
-	if s.clock != nil {
-		return s.clock.NewTicker(d)
-	}
-	return clockwork.NewRealClock().NewTicker(d)
+	return timeutil.FirstClock(s.clock).NewTicker(d)
 }
 
 // ProcessWebhook handles webhook deduplication and processing coordination.

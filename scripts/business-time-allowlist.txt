@@ -53,13 +53,6 @@ internal/modules/payments/payment.go|return time.Now()|business_time_boundary|Ex
 internal/modules/payments/rail_customer_service.go|now := time.Now().UTC()|db_audit_timestamp|Provider customer creation audit timestamp|1
 internal/modules/payments/stripe_card.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
 internal/modules/productaccess/product_access_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/replaycache/service.go|CreatedAt: time.Now(),|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|3
-internal/modules/replaycache/service.go|entry.expiresAt = time.Now().Add(s.ttl)|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
-internal/modules/replaycache/service.go|entry.record.CreatedAt = time.Now()|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
-internal/modules/replaycache/service.go|expiresAt: time.Now().Add(ttl),|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
-internal/modules/replaycache/service.go|if time.Now().Before(entry.expiresAt) {|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
-internal/modules/replaycache/service.go|now := time.Now()|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|2
-internal/modules/replaycache/service.go|record.CreatedAt = time.Now()|infrastructure_time|Replay cache TTL and record lifecycle use elapsed real time|1
 internal/modules/solana/pay.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/solana/poller.go|if time.Now().Before(next) {|infrastructure_time|Provider polling retry and backoff eligibility|1
 internal/modules/solana/poller.go|p.retryAfter[reference] = time.Now().Add(backoff)|infrastructure_time|Provider polling retry and backoff eligibility|2
