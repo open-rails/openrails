@@ -12,7 +12,7 @@ func TestMerchantBillingEnvKey(t *testing.T) {
 	// or#915: the env overlay carries ONLY credentials + branding — secrets
 	// (which must stay out of committed YAML) plus display_name/profile.
 	tests := map[string]string{
-		"BILLING_VERSION":                                                        "version",
+		"BILLING_VERSION":                                                         "version",
 		"BILLING_MERCHANTS_HOST_ONE_DISPLAY_NAME":                                 "merchants.host-one.display_name",
 		"BILLING_MERCHANTS_HOST_ONE_PROFILE_FROM_EMAIL":                           "merchants.host-one.profile.from_email",
 		"BILLING_MERCHANTS_HOST_ONE_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY":         "merchants.host-one.psps.mobius.nmi.secrets.security_key",
