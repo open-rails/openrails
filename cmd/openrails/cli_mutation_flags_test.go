@@ -58,3 +58,17 @@ func TestPushCommandsRejectOtherManifestShapes(t *testing.T) {
 		})
 	}
 }
+
+func TestPushCommandsHaveNoDryRunFlag(t *testing.T) {
+	push := newPushCatalogCmd()
+	if push.Flags().Lookup("dry-run") != nil {
+		t.Fatal("push-merchant-catalog must not declare --dry-run")
+	}
+	cfg := newPushMerchantConfigCmd()
+	if cfg.Flags().Lookup("dry-run") != nil {
+		t.Fatal("push-merchant-config must not declare --dry-run")
+	}
+	if newPushAuthBootstrapCmd().Flags().Lookup("dry-run") == nil {
+		t.Fatal("push-auth-bootstrap must declare its plan-only --dry-run flag")
+	}
+}
