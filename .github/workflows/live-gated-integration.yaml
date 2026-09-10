@@ -5,8 +5,8 @@ name: Live-Gated Integration
 # run NOWHERE. Weekly cron + on-demand, mirroring solana-devnet-integration.yaml.
 #
 # Every job is enforcing (continue-on-error is never set) but the WORKFLOW is
-# not a required check — a sandbox outage must not block merges. The scheduled
-# NMI proof fails when its required credentials are absent; green must mean the
+# not a required check — a sandbox outage must not block merges. Every named
+# proof fails when its required credentials are absent; green must mean the
 # tests executed, not that every live test silently skipped.
 #
 # Required GitHub Actions secrets (Settings -> Secrets and variables -> Actions):
@@ -72,8 +72,8 @@ jobs:
 
   # Live invoice collection against real provider test accounts (#241/#619):
   # Stripe test-mode invoice collection + NMI sandbox invoice collection.
-  # Doubly gated: OPENRAILS_LIVE_RAIL_TESTS=1 opt-in AND per-rail credentials;
-  # each test t.Skips when its key is absent.
+  # Doubly gated: OPENRAILS_LIVE_RAIL_TESTS=1 opt-in AND per-rail credentials.
+  # The tests retain local skip guards, but this workflow rejects absent keys.
   live-invoice-collection:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -93,10 +93,12 @@ jobs:
           NMI_SANDBOX_SECURITY_KEY: ${{ secrets.NMI_SANDBOX_SECURITY_KEY }}
         run: |
           if [ -z "${OPENRAILS_TEST_STRIPE_SECRET_KEY}" ]; then
-            echo "::warning::OPENRAILS_TEST_STRIPE_SECRET_KEY not set — the Stripe invoice leg will self-skip (create the repo secret; RAILS_STRIPE_SECRET_KEY is retired)"
+            echo "::error::OPENRAILS_TEST_STRIPE_SECRET_KEY not set — refusing a green-but-empty Stripe invoice proof"
+            exit 1
           fi
           if [ -z "${NMI_SANDBOX_SECURITY_KEY}" ]; then
-            echo "::warning::NMI_SANDBOX_SECURITY_KEY not set — the NMI invoice leg will self-skip"
+            echo "::error::NMI_SANDBOX_SECURITY_KEY not set — refusing a green-but-empty NMI invoice proof"
+            exit 1
           fi
           bash scripts/test_integration.sh \
             -run 'TestLiveStripeInvoiceCollectionAgainstTestAccount|TestLiveNMIInvoiceCollectionAgainstSandbox' \
@@ -104,9 +106,9 @@ jobs:
 
   # `stripe_integration` lane (#694 hygiene): TestStripeModelBUpgrade_Integration
   # (real Stripe TEST mode, Model-B upgrade proration, #268) carried an orphaned
-  # tag that ran in NO suite. It self-skips without STRIPE_SECRET_KEY. The vet
-  # step compiles the tag even when the secret is absent, so bit-rot in the
-  # tagged file goes red here instead of rotting silently.
+  # tag that ran in NO suite. The test retains a local skip guard, but this
+  # workflow rejects an absent STRIPE_SECRET_KEY. The vet step compiles the tag,
+  # so bit-rot in the tagged file goes red before the live proof starts.
   # The KNOWN-RED note that used to live here is resolved: the tagged file
   # compiles on dev (`go vet -tags stripe_integration ./internal/modules/subscriptions/`).
   # This job is what promotes the Stripe tier-change cells in
@@ -130,6 +132,7 @@ jobs:
           STRIPE_SECRET_KEY: ${{ secrets.OPENRAILS_TEST_STRIPE_SECRET_KEY }}
         run: |
           if [ -z "${STRIPE_SECRET_KEY}" ]; then
-            echo "::warning::OPENRAILS_TEST_STRIPE_SECRET_KEY repo secret not set — test will self-skip (skip-if-absent preserved)"
+            echo "::error::OPENRAILS_TEST_STRIPE_SECRET_KEY not set — refusing a green-but-empty Stripe Model-B proof"
+            exit 1
           fi
           go test -tags stripe_integration -run TestStripeModelBUpgrade_Integration -v -timeout 900s ./internal/modules/subscriptions/

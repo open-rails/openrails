@@ -95,6 +95,12 @@ func TestConverge_NeedsVerification_FlipsAutoBilledToUnknown(t *testing.T) {
 		require.Equal(t, "unknown", status(subStripe), "silent lapsed stripe (provider-billed) -> unknown")
 		require.Equal(t, "past_due", status(subNMIPaid), "vaulted nmi WITH payment evidence -> past_due (dunning may engage)")
 		require.Equal(t, "active", status(subCurrent), "current sub untouched")
+
+		var findingType string
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+			`SELECT finding_type FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
+			merchantID, "subscription:"+subCCBill.String()).Scan(&findingType))
+		require.Equal(t, "life.subscription.needs_verification", findingType)
 		return nil
 	}))
 

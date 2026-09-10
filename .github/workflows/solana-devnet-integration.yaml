@@ -15,6 +15,8 @@ name: Solana Devnet Integration
 #                                  ATA is funded from https://faucet.circle.com
 #                                  (Solana devnet, USDC). The allowlist only
 #                                  resolves real USDC, not a self-minted token.
+#   OPENRAILS_TEST_SOLANA_PRIVATE_KEY — base58 key for the documented
+#                                  money-movement proof wallet.
 #
 # Locally these live in `.env.devnet` (gitignored); in CI they come from the
 # secrets above.
@@ -27,6 +29,14 @@ on:
     inputs:
       run_multirebill:
         description: 'Also run the multi-HOUR multi-rebill test (TestDevnetSustainedRebill, ~3h). Off by default — too slow/expensive for the daily run.'
+        type: boolean
+        default: false
+      run_extended:
+        description: 'Run the four extended devnet lifecycle, tier-change, multi-subscription and failure-path proofs (~3h).'
+        type: boolean
+        default: false
+      run_money_movement_proof:
+        description: 'Run the integration-harness Solana money-movement data-boundary proof.'
         type: boolean
         default: false
 
@@ -45,7 +55,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
           cache: true
       - name: Download modules
         run: go mod download
@@ -76,7 +86,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.24'
+          go-version-file: go.mod
           cache: true
       - name: Download modules
         run: go mod download
@@ -91,3 +101,59 @@ jobs:
             exit 1
           fi
           go test -tags devnet -run TestDevnetSustainedRebill -v -timeout 3h ./internal/modules/solana/recurring/...
+
+  # Extended real-chain coverage. Kept dispatch-only because the cancellation
+  # proof waits for an hourly period rollover and the suite consumes devnet
+  # USDC. Each formerly dormant test is named explicitly so filter drift cannot
+  # turn this into a green-but-empty job.
+  devnet-extended:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_extended }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download modules
+        run: go mod download
+      - name: Extended devnet proofs
+        env:
+          HELIUS_API_KEY: ${{ secrets.HELIUS_API_KEY }}
+          SOLANA_DEVNET_PAYER_KEY: ${{ secrets.SOLANA_DEVNET_PAYER_KEY }}
+          SOLANA_DEVNET_SUBSCRIBER_KEY: ${{ secrets.SOLANA_DEVNET_SUBSCRIBER_KEY }}
+        run: |
+          if [ -z "${HELIUS_API_KEY}" ] || [ -z "${SOLANA_DEVNET_PAYER_KEY}" ] || [ -z "${SOLANA_DEVNET_SUBSCRIBER_KEY}" ]; then
+            echo "HELIUS_API_KEY, SOLANA_DEVNET_PAYER_KEY and SOLANA_DEVNET_SUBSCRIBER_KEY secrets are required" >&2
+            exit 1
+          fi
+          go test -tags devnet -run '^TestDevnetMultiSub$' -v -timeout 30m ./internal/modules/solana/recurring/...
+          go test -tags devnet -run '^TestDevnetTierChange$' -v -timeout 20m ./internal/modules/solana/recurring/...
+          go test -tags devnet -run '^TestDevnetFailurePaths$' -v -timeout 20m ./internal/modules/solana/recurring/...
+          go test -tags devnet -run '^TestDevnetLifecycle$/^CancelStopsAtPeriodEnd$' -v -timeout 130m ./internal/modules/solana/recurring/...
+
+  # This proof is DB-backed and separately keyed from the recurring-devnet
+  # fixtures. Dispatching it now supplies and enforces the gate that previously
+  # existed only inside the test and therefore skipped in every workflow.
+  solana-money-movement-proof:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_money_movement_proof }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Download modules
+        run: go mod download
+      - name: Solana money-movement proof
+        env:
+          OPENRAILS_TEST_SOLANA_PRIVATE_KEY: ${{ secrets.OPENRAILS_TEST_SOLANA_PRIVATE_KEY }}
+        run: |
+          if [ -z "${OPENRAILS_TEST_SOLANA_PRIVATE_KEY}" ]; then
+            echo "::error::OPENRAILS_TEST_SOLANA_PRIVATE_KEY not set — refusing a green-but-empty money-movement proof"
+            exit 1
+          fi
+          bash scripts/test_integration.sh -run '^TestSolanaDevnetMoneyMovementProof$' -v ./internal/integrationharness/

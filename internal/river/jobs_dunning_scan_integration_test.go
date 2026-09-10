@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/riverqueue/river"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -137,6 +138,81 @@ func TestDunningScan_DueQueryFilters(t *testing.T) {
 	// skips the run cleanly instead of erroring the River job.
 	worker := &DunningWorker{DB: dbi}
 	require.NoError(t, worker.Work(context.Background(), &river.Job[DunningArgs]{Args: DunningArgs{}}))
+}
+
+func TestDunningWorker_ReadOnlyScansWithoutMutating(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	dbi := dbtest.OpenAppDB(t, dbtest.SharedPostgresDSN(t))
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	q := gen.New(pool)
+	dbtest.EnsureTestMerchant(ctx, t, dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t)).Pool())
+	now := time.Now().UTC().Truncate(time.Second)
+
+	productID, priceID := uuid.New(), uuid.New()
+	description := "Readonly dunning"
+	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
+		ID: productID, Key: "readonly_dunning_" + uuid.NewString(), DisplayName: "Readonly Dunning",
+		MerchantID: dbtest.TestMerchantID.UUID(), Description: &description, CreatedAt: now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	billingHours := int32(720)
+	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
+		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD",
+		MerchantID: dbtest.TestMerchantID.UUID(), AccessDurationHours: &billingHours, AutoRenew: true,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	require.NoError(t, err)
+	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, pool, uuid.NewString())
+	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	nextRetryAt := now.Add(-time.Hour)
+	subID := seedScanSubscription(ctx, t, q, productID, priceID, customerID, pspID, string(models.RailNMI), models.StatusPastDue, &nextRetryAt)
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
+	})
+
+	var beforeStatus string
+	var beforeNextRetryAt *time.Time
+	var beforeUpdatedAt time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status, next_retry_at, updated_at FROM openrails.subscriptions WHERE id=$1`, subID).
+		Scan(&beforeStatus, &beforeNextRetryAt, &beforeUpdatedAt))
+
+	hook := logtest.NewGlobal()
+	t.Cleanup(hook.Reset)
+	worker := &DunningWorker{
+		DB:          dbi,
+		NMIResolver: fakeDunningNMIResolver{},
+		Config:      &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly},
+	}
+	require.NoError(t, worker.Work(context.Background(), &river.Job[DunningArgs]{Args: DunningArgs{}}))
+
+	foundScan := false
+	for _, entry := range hook.AllEntries() {
+		if entry.Message == "Readonly mode: found due subscriptions but skipping dunning mutations" {
+			foundScan = true
+			break
+		}
+	}
+	require.True(t, foundScan, "read-only mode must still enumerate and scan due subscriptions")
+
+	var afterStatus string
+	var afterNextRetryAt *time.Time
+	var afterUpdatedAt time.Time
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT status, next_retry_at, updated_at FROM openrails.subscriptions WHERE id=$1`, subID).
+		Scan(&afterStatus, &afterNextRetryAt, &afterUpdatedAt))
+	require.Equal(t, beforeStatus, afterStatus)
+	require.Equal(t, beforeNextRetryAt, afterNextRetryAt)
+	require.Equal(t, beforeUpdatedAt, afterUpdatedAt)
+
+	var intentCount int
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, subID).Scan(&intentCount))
+	require.Zero(t, intentCount, "read-only scan must not materialize a charge intent")
 }
 
 // TestDunningScan_MissingPaymentMethodParksInsteadOfFailing pins the two
