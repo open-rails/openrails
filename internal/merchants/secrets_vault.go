@@ -10,15 +10,9 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ErrVaultNotConfigured is returned by every vaultSecretStore operation until a
-// live Vault client is wired in. The store is constructable (so managed wiring
-// can reference it) but deliberately fails closed rather than silently returning
-// empty secrets — a missing webhook signing secret must NEVER be treated as
-// "verification disabled".
-//
-// It wraps ErrSecretBackendUnavailable: an unconfigured Vault is an OPERATIONAL
-// (retryable) state, NOT a terminal "secret absent" — callers must never read it
-// as "verification disabled".
+// ErrVaultNotConfigured reports that a Vault-backed store has no client. It
+// wraps ErrSecretBackendUnavailable so callers treat the condition as retryable,
+// not as an absent secret.
 var ErrVaultNotConfigured = fmt.Errorf("%w: vault-backed secret store is not configured (no live Vault client)", ErrSecretBackendUnavailable)
 
 // VaultKV is the minimal KV-v2 surface the Vault-backed store needs. A real
@@ -42,20 +36,14 @@ type VaultKV interface {
 // One merchant's secrets are therefore physically isolated under its own path
 // prefix, and a Vault policy can grant a merchant operator read/write to ONLY its
 // own subtree. The value field stored at each path is keyed "value".
-//
-// This adapter is a STUB: when client is nil (the default until managed wiring
-// injects a real VaultKV) every operation returns ErrVaultNotConfigured. The DB-
-// backed store remains the dev / self-hosted default, so nothing here is required
-// to build or run the rest of OpenRails.
 type vaultSecretStore struct {
 	mount  string
 	client VaultKV
 }
 
-// NewVaultSecretStore returns a Vault-backed MerchantSecretStore. mount is the KV-v2
-// mount path (e.g. "secret"). client may be nil — in that case the store is a
-// documented stub that fails closed with ErrVaultNotConfigured, which is the
-// state until a managed deployment injects a live VaultKV.
+// NewVaultSecretStore returns a Vault-backed MerchantSecretStore. mount is the
+// KV-v2 mount path (e.g. "secret"). A nil client creates a fail-closed store
+// whose operations return ErrVaultNotConfigured.
 func NewVaultSecretStore(mount string, client VaultKV) MerchantSecretStore {
 	mount = strings.Trim(strings.TrimSpace(mount), "/")
 	if mount == "" {

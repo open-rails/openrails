@@ -8,7 +8,8 @@ OpenRails uses Vault for two **independent** capabilities (#661). Grant only wha
 | **Transit signing** | Solana `vault_transit` custody — Vault signs, the key never leaves | `transit/sign/<your-key>`, `transit/keys/<your-key>` |
 
 They are decoupled: run **transit-only** (Vault signs Solana, secrets live in the DB or the boot
-manifest), **KV-only**, or both. Mounts are fixed: KV-v2 at `secret`, Transit at `transit`.
+manifest), **KV-only**, or both. Mounts default to `secret` for KV-v2 and `transit` for Transit;
+override them with `vault.kv_mount` and `vault.transit_mount` when needed.
 
 ## Where merchant secrets live
 
@@ -46,7 +47,7 @@ stay in the DB, the key that unwraps them never does.
 
 OpenRails authenticates to Vault **once, as itself**; there is no per-merchant Vault auth.
 Merchant isolation is enforced in OpenRails code by the path addressing (every secret lives under
-that merchant's slug subtree). Operational consequences:
+that merchant's UUID subtree). Operational consequences:
 
 - The Vault policy scopes what the **process** may do, not what any merchant may do. Protect the
   app credential accordingly: it can read every merchant's secrets the policy grants.

@@ -355,11 +355,10 @@ type EncryptionConfig struct {
 	MasterKey string `koanf:"master_key,omitempty"`
 }
 
-// VaultConfig selects a HashiCorp Vault backend for per-merchant secrets (issue
-// #251). When Enabled, the merchant secret store resolves to Vault KV-v2 (same
-// (merchant, name) addressing) instead of DB+envelope, and Solana signing uses
-// Vault Transit (the key never leaves Vault). Disabled by default; self-hosted
-// uses the DB+envelope store. KV and Transit mounts default to "secret" and
+// VaultConfig configures a HashiCorp Vault connection for merchant-secret KV
+// storage and Solana Transit signing (issue #251). Enabling the connection does
+// not select either capability: SecretBackend selects KV storage, and each
+// Solana PSP selects its signer. KV and Transit mounts default to "secret" and
 // "transit" (KVMount/TransitMount below); the secret cache TTL is fixed in code.
 type VaultConfig struct {
 	Enabled    bool   `koanf:"enabled,omitempty"`
