@@ -107,6 +107,21 @@ Every other route set gets no CORS headers at all. See docs/operations.md's
 "Browser CORS doctrine" for the reasoning (bearer JWTs, not cookies, are the
 security boundary).
 
+### Host merchant directory reads
+
+Hosts with an attached control plane can use two cross-merchant directory
+reads. They return the same `controlplane.MerchantRef` projection but answer
+different questions:
+
+- `controlplane.ListMerchantsForSubject` discovers the active merchants where
+  an authenticated AuthKit subject has a customer record. Use it for a
+  customer's merchant picker and enforce the returned relationship when the
+  customer selects a merchant.
+- `controlplane.ListMerchantRefs` resolves display names for merchant slugs the
+  host has already authorized, such as slugs from AuthKit merchant-group
+  memberships. It is a label lookup, not an authorization check; never pass
+  arbitrary client-supplied slugs to it as proof of access.
+
 ## Payment Providers
 
 Embedded hosts have two credential planes; `config.yaml` carries neither:
