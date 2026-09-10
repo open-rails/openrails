@@ -9,6 +9,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -188,6 +189,8 @@ func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requestID := httprequest.EnsureRequestID(r)
+			w.Header().Set("X-Request-ID", requestID)
 			if skip[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return
@@ -196,9 +199,10 @@ func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
 			sw := &statusWriter{ResponseWriter: w}
 			next.ServeHTTP(sw, r)
 			log.WithFields(log.Fields{
-				"status":  sw.status(),
-				"latency": time.Since(start).String(),
-				"ip":      r.RemoteAddr,
+				"status":     sw.status(),
+				"latency":    time.Since(start).String(),
+				"ip":         r.RemoteAddr,
+				"request_id": requestID,
 			}).Info(r.Method + " " + r.URL.Path)
 		})
 	}

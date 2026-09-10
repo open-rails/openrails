@@ -156,7 +156,18 @@ func (r *Request) APIError(err *api.APIError) {
 	r.t.WriteJSON(err.HTTPStatus, err.ToResponse())
 }
 
-const maxErrorRequestIDLength = 128
+const maxRequestIDLength = 128
+
+// EnsureRequestID returns a bounded request correlation identifier and stores
+// it on the HTTP request so middleware and handlers share one value.
+func EnsureRequestID(r *http.Request) string {
+	requestID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+	if requestID == "" || len(requestID) > maxRequestIDLength {
+		requestID = uuid.NewString()
+	}
+	r.Header.Set("X-Request-ID", requestID)
+	return requestID
+}
 
 // RequestID returns the request's correlation identifier, generating one when
 // the caller did not supply a usable value. The same value is propagated to
@@ -165,12 +176,8 @@ func (r *Request) RequestID() string {
 	if r.requestID != "" {
 		return r.requestID
 	}
-	requestID := strings.TrimSpace(r.Request.Header.Get("X-Request-ID"))
-	if requestID == "" || len(requestID) > maxErrorRequestIDLength {
-		requestID = uuid.NewString()
-	}
+	requestID := EnsureRequestID(r.Request)
 	r.requestID = requestID
-	r.Request.Header.Set("X-Request-ID", requestID)
 	r.SetHeader("X-Request-ID", requestID)
 	return requestID
 }

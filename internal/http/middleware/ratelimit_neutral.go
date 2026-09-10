@@ -710,11 +710,30 @@ func ClassifyBucket(path, method string) string {
 		return "payment-methods"
 	case strings.HasPrefix(path, "/v1/me/subscriptions") && (method == http.MethodPost || method == http.MethodPut || method == http.MethodDelete):
 		return "subscriptions"
-	case strings.HasPrefix(path, "/v1/checkout") && method == http.MethodPost:
+	case method == http.MethodPost && isCheckoutPath(path):
 		return "checkout"
 	default:
 		return "default"
 	}
+}
+
+func isCheckoutPath(path string) bool {
+	if path == "/v1/checkout" || strings.HasPrefix(path, "/v1/checkout/") ||
+		path == "/v1/me/checkout" || strings.HasPrefix(path, "/v1/me/checkout/") {
+		return true
+	}
+
+	const customerPrefix = "/v1/customers/"
+	if !strings.HasPrefix(path, customerPrefix) {
+		return false
+	}
+	rest := strings.TrimPrefix(path, customerPrefix)
+	idEnd := strings.IndexByte(rest, '/')
+	if idEnd <= 0 {
+		return false
+	}
+	checkoutPath := rest[idEnd:]
+	return checkoutPath == "/checkout" || strings.HasPrefix(checkoutPath, "/checkout/")
 }
 
 func captchaShouldEnforce(cfg *config.CaptchaConfig, req *http.Request, bucket string) bool {

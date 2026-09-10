@@ -176,24 +176,25 @@ func TestManifestSolanaSignerEvidence(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	accountID := solanago.PublicKeyFromBytes(pub).String()
-	exampleAccountID := "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
-	examplePrivateKey := "2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT"
+	localKey, err := solanago.NewRandomPrivateKey()
+	require.NoError(t, err)
+	localAccountID := localKey.PublicKey().String()
 	secrets, err := newManifestSecretValues("solana", map[string]string{
-		"private_key": examplePrivateKey,
+		"private_key": localKey.String(),
 	})
 	require.NoError(t, err)
 
 	got, gotAccountID, err := manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{}, secrets, nil)
 	require.NoError(t, err)
 	require.Equal(t, map[string]string{"mode": "local_keypair"}, got)
-	require.Equal(t, exampleAccountID, gotAccountID)
+	require.Equal(t, localAccountID, gotAccountID)
 
 	// A declared account_id is IGNORED (warned), never an error — derived from the key.
-	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", exampleAccountID, ProviderRailAccountConfig{
+	_, gotAccountID, err = manifestProviderSignerEvidence(context.Background(), "solana", accountID, ProviderRailAccountConfig{
 		Signer: &PSPSignerConfig{Mode: "local_keypair"},
 	}, secrets, nil)
 	require.NoError(t, err)
-	require.Equal(t, exampleAccountID, gotAccountID, "declared account_id ignored; derived from the keypair")
+	require.Equal(t, localAccountID, gotAccountID, "declared account_id ignored; derived from the keypair")
 
 	_, _, err = manifestProviderSignerEvidence(context.Background(), "solana", "", ProviderRailAccountConfig{
 		Signer: &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"},
