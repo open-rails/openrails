@@ -26,14 +26,14 @@ func (g *countingSubscriptionCreditGranter) GrantSubscriptionCreditsTx(context.C
 
 func seedPendingSubscriptionWithPayment(t *testing.T, f *failopenFixture, procSubID, txnID string) uuid.UUID {
 	t.Helper()
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	now := time.Now().UTC()
 	subID := uuid.New()
 	customerID := uuid.MustParse(f.userID)
 	_, err := f.pool.Exec(ctx, `INSERT INTO openrails.subscriptions
 		(id, price_id, product_id, status, rail, rail_subscription_id, started_at, customer_id, merchant_id, psp_id)
 		VALUES ($1, $2, $3, 'pending', 'nmi', $4, $5, $6, $7, $8)`,
-		subID, f.priceID, f.productID, procSubID, now, customerID, dbtest.TestMerchantID.UUID(), failopenPSP)
+		subID, f.priceID, f.productID, procSubID, now, customerID, dbtest.TestMerchantID.UUID(), f.pspID)
 	require.NoError(t, err)
 	require.NoError(t, payments.NewPaymentService(f.dbi, nil).Create(ctx, &models.Payment{
 		ID:             uuid.New(),
@@ -41,7 +41,7 @@ func seedPendingSubscriptionWithPayment(t *testing.T, f *failopenFixture, procSu
 		PriceID:        f.priceID,
 		SubscriptionID: &subID,
 		Rail:           models.RailNMI,
-		PspID:          &failopenPSP,
+		PspID:          &f.pspID,
 		TransactionID:  txnID,
 		Amount:         9990000,
 		ListAmount:     9990000,
@@ -76,7 +76,7 @@ func assertPendingActivatedOnce(t *testing.T, f *failopenFixture, subID uuid.UUI
 
 func TestCreateMembership_ActivatesPendingSubscriptionWithRecordedPayment(t *testing.T) {
 	f := newFailopenFixture(t, 24*30, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	procSubID := "sub_pending_paid_" + uuid.NewString()
 	txnID := "txn_pending_paid_" + uuid.NewString()
 	subID := seedPendingSubscriptionWithPayment(t, f, procSubID, txnID)
@@ -101,7 +101,7 @@ func TestCreateMembership_ActivatesPendingSubscriptionWithRecordedPayment(t *tes
 
 func TestCreateMembership_ActivatesPendingSubscriptionFoundOnlyByPayment(t *testing.T) {
 	f := newFailopenFixture(t, 24*30, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	txnID := "txn_pending_paid_" + uuid.NewString()
 	subID := seedPendingSubscriptionWithPayment(t, f, "sub_pending_paid_"+uuid.NewString(), txnID)
 
@@ -121,7 +121,7 @@ func TestCreateMembership_ReplaysRecordedPaymentForBillableSubscription(t *testi
 	for _, status := range []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue} {
 		t.Run(string(status), func(t *testing.T) {
 			f := newFailopenFixture(t, 24*30, true)
-			ctx := failopenCtx()
+			ctx := f.ctx()
 			txnID := "txn_billable_replay_" + uuid.NewString()
 			subID := seedPendingSubscriptionWithPayment(t, f, "sub_billable_replay_"+uuid.NewString(), txnID)
 			periodStart := time.Now().UTC()
@@ -155,7 +155,7 @@ func TestCreateMembership_RejectsRecordedPaymentForNonBillableSubscription(t *te
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFailopenFixture(t, 24*30, true)
-			ctx := failopenCtx()
+			ctx := f.ctx()
 			txnID := "txn_non_billable_replay_" + uuid.NewString()
 			subID := seedPendingSubscriptionWithPayment(t, f, "sub_non_billable_replay_"+uuid.NewString(), txnID)
 			periodStart := time.Now().UTC()
