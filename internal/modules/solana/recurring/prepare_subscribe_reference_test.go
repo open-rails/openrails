@@ -73,11 +73,8 @@ func TestPrepareSubscribe_AttachesReferenceToSubscribeStep(t *testing.T) {
 func TestPrepareSubscribe_AttachesReferenceToFirstTimerBundle(t *testing.T) {
 	// Shrink the read-after-write retry so the absent-authority path (which retries
 	// the empty read up to the bound before treating it as first-time) is fast.
-	orig := authorityReadBackoff
-	authorityReadBackoff = time.Millisecond
-	defer func() { authorityReadBackoff = orig }()
-
 	svc, _ := newSubscribeSvc(t, subFakeRPCAbsent{balance: 50_000_000})
+	svc.authorityReadBackoff = time.Millisecond
 	in := newSubscribeInput(t)
 	reference := randKeyStr(t)
 	in.Reference = reference

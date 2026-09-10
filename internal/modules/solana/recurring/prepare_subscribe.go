@@ -48,17 +48,16 @@ func (e *InsufficientUSDCError) Unwrap() error { return ErrInsufficientUSDC }
 // the devnet lifecycle test (reads offset 98 between init and subscribe).
 const subscriptionAuthorityInitIDOffset = 98
 
-// authorityReadMaxAttempts / authorityReadBackoff bound the read-after-write
+// authorityReadMaxAttempts / defaultAuthorityReadBackoff bound the read-after-write
 // retry on the SubscriptionAuthority account (#274). After init_subscription_authority
 // confirms, the RPC node serving the re-prepare may still lag behind that write,
 // so a single GetAccountData can observe a missing or short account. We retry up
 // to ~10 attempts ~1s apart (capped, context-aware) until the account is present
 // AND long enough to read initId.
-const authorityReadMaxAttempts = 10
-
-// authorityReadBackoff is a var (not const) only so tests can shrink the delay;
-// production keeps the ~1s read-after-write pacing.
-var authorityReadBackoff = time.Second
+const (
+	authorityReadMaxAttempts    = 10
+	defaultAuthorityReadBackoff = time.Second
+)
 
 // prepareRPC is the minimal RPC surface PrepareSubscribe needs (satisfied by
 // *solanaint.RPCClient): read on-chain account state + a recent blockhash to
@@ -100,6 +99,9 @@ type PrepareSubscribeService struct {
 	rpc     prepareRPC
 	network string
 	tokens  map[string]config.TokenConfig
+	// authorityReadBackoff shortens the retry only in package tests; zero keeps
+	// the production default.
+	authorityReadBackoff time.Duration
 }
 
 // NewPrepareSubscribeService builds a PrepareSubscribeService. signer is the
@@ -209,7 +211,7 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	// right after a bundle lands, the RPC node may not yet serve the just-written
 	// account, so we retry until it is present and readable rather than racing a
 	// single read. Absent after the retries means first-time subscriber.
-	initID, exists, err := readAuthorityInitID(ctx, s.rpc, saPDA)
+	initID, exists, err := readAuthorityInitIDWithBackoff(ctx, s.authorityBackoff(), s.rpc, saPDA)
 	if err != nil {
 		return nil, err
 	}
@@ -385,6 +387,15 @@ func readInitID(data []byte) (int64, error) {
 // and return the init tx — re-preparing again will retry the read. A present-but-short
 // account is always an error (it should never happen once the account exists).
 func readAuthorityInitID(ctx context.Context, rpc accountDataReader, saPDA solanago.PublicKey) (int64, bool, error) {
+	return readAuthorityInitIDWithBackoff(ctx, defaultAuthorityReadBackoff, rpc, saPDA)
+}
+
+func readAuthorityInitIDWithBackoff(
+	ctx context.Context,
+	backoff time.Duration,
+	rpc accountDataReader,
+	saPDA solanago.PublicKey,
+) (int64, bool, error) {
 	var lastShort int
 	sawShort := false
 	for attempt := 0; attempt < authorityReadMaxAttempts; attempt++ {
@@ -392,7 +403,7 @@ func readAuthorityInitID(ctx context.Context, rpc accountDataReader, saPDA solan
 			select {
 			case <-ctx.Done():
 				return 0, false, fmt.Errorf("recurring: subscription authority read canceled: %w", ctx.Err())
-			case <-time.After(authorityReadBackoff):
+			case <-time.After(backoff):
 			}
 		}
 		data, err := rpc.GetAccountData(ctx, saPDA)
@@ -423,4 +434,11 @@ func readAuthorityInitID(ctx context.Context, rpc accountDataReader, saPDA solan
 	// Stayed empty across every attempt → treat as a genuinely absent authority
 	// (first-time subscriber): caller returns the init tx.
 	return 0, false, nil
+}
+
+func (s *PrepareSubscribeService) authorityBackoff() time.Duration {
+	if s.authorityReadBackoff > 0 {
+		return s.authorityReadBackoff
+	}
+	return defaultAuthorityReadBackoff
 }
