@@ -11,8 +11,9 @@ integration tests.
 
 ## Integration tests
 
-All integration tests carry the build tag `integration`. Backing services
-resolve in order:
+The ordinary Docker-backed integration suite carries the build tag
+`integration`; live/on-chain exceptions use the `devnet` and
+`stripe_integration` tags documented below. Backing services resolve in order:
 
 1. `OPENRAILS_TEST_DB_URL` (or `OPENRAILS_TEST_DB_DSN`) — an admin DSN; the
    harness creates an isolated per-run database on that server.
@@ -56,15 +57,17 @@ expands `./...` to only the integration-tagged packages, and runs
 `OPENRAILS_INTEGRATION_TIMEOUT`, default 25m). The suite is self-cleaning
 (per-run DBs are dropped; a reaper removes orphans).
 
+PR CI narrows ordinary integration coverage to the packages touched by the
+diff and always includes `internal/integrationharness`. Narrow diffs use one
+serial shard; changes to shared surfaces run the complete tagged package set
+in two balanced shards, each with a six-minute test timeout and its own service
+stack. `.github/workflows/ci-full.yaml` is the unsharded backstop: every Monday
+at 05:00 UTC and on manual dispatch it runs the complete tagged suite serially
+against one stack.
+
 Query-layer checks: `task test-query-contracts` and `task test-query-perf`
 run `internal/db/querytest` against a migrated Postgres
 (`QUERY_TEST_DATABASE_URL` overrides `OPENRAILS_TEST_DB_URL`).
-
-### Known fragility
-
-Running a SINGLE integration package in isolation can hit a pre-existing
-`*_merchant_fk` fixture-seeding failure (the merchant isn't seeded for that
-subset). Not a regression — the full suite seeds it correctly.
 
 ## Business time and test clocks
 
@@ -80,8 +83,10 @@ Business-time code must use the runtime `clockwork.Clock` (production boots
 with `clockwork.NewRealClock()` at the composition boundary). Infrastructure
 code may use wall-clock time when wall-clock behavior is the thing itself.
 
-Tests inject a fake clock before runtime construction and advance it instead
-of sleeping:
+Pass `WithSuiteClock` to `setupTestSuite` and advance the returned clock instead
+of sleeping. A fresh suite receives the clock before runtime construction; the
+ordinary shared suite swaps its runtime-wide `SettableClock` delegate for the
+test and restores it with `t.Cleanup`:
 
 ```go
 clock := clockwork.NewFakeClockAt(time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC))
@@ -90,16 +95,13 @@ suite := setupTestSuite(t, WithSuiteClock(clock))
 clock.Advance(30 * 24 * time.Hour)
 ```
 
-Prefer `WithSuiteClock`; `SetMockClock` is a compatibility helper for older
-tests that patch the shared runtime after construction.
-
-Rail-side test clocks (e.g. Stripe Test Clocks) are separate from app time:
-the rail clock produces realistic external events, the OpenRails fake clock
-controls how the app interprets them. Advance both deliberately.
+Prefer `WithSuiteClock`; `SetMockClock` is the compatibility helper for tests
+that must swap the shared runtime clock after setup.
 
 **Guardrail:** `bash scripts/check_business_time.sh` (first step of
 `task test`) scans business/domain paths (`internal/modules`, `internal/river`,
-`internal/db/repo`, `internal/http/handlers`, `pkg/service`) for direct
+`internal/http/handlers`, `internal/reconcile`, `internal/intents`,
+`pkg/service`) for direct
 `time.Now()`, SQL `NOW()`/`CURRENT_TIMESTAMP`, and
 `clockwork.NewRealClock()`. Existing allowed usages are classified in
 `scripts/business-time-allowlist.txt` (`file|fragment|classification|reason`
@@ -119,9 +121,10 @@ contract host orchestrators use. Two editions:
   and partial capture, insufficient-balance 402, failure release, idempotent
   replay, and owner scoping, asserting ledger rows directly.
 - **Deployed-stack harness** — `scripts/unified_billing_e2e.sh` (POSIX sh +
-  curl). Hits a running standalone instance; needs `OPENRAILS_API_KEY` and
-  `BASE_URL`. Fresh credit type per run keeps balances deterministic. Runs
-  fine from an `alpine/curl` container on the stack's network.
+  curl). Hits a running standalone instance; needs `OPENRAILS_API_KEY`.
+  `BASE_URL` defaults to `http://127.0.0.1:3053`. Fresh credit type per run
+  keeps balances deterministic. Runs fine from an `alpine/curl` container on
+  the stack's network.
 
 ### NMI live sandbox lifecycle
 
@@ -130,19 +133,24 @@ account**. `TestNMILiveLifecycleE2E` registers a live NMI provider, ensures a
 sandbox recurring plan, vaults a sandbox test card server-side (the Customer
 Vault equivalent of browser Collect.js tokenization — OpenRails never accepts
 a raw PAN), runs one-off + subscription checkouts, verifies remote state via
-NMI's Query API, verifies signed webhook ingestion + idempotent replay, and
-cancels. `TestLiveSandboxStoredCredentialCITThenMIT` executes an initial
-customer-initiated stored-card transaction and a subsequent merchant-initiated
-transaction tied to the initial NMI transaction ID. Requires
+NMI's Query API, and cancels. `TestLiveSandboxStoredCredentialCITThenMIT`
+executes an initial customer-initiated stored-card transaction and a subsequent
+merchant-initiated transaction tied to the initial NMI transaction ID. Requires
 `NMI_SANDBOX_SECURITY_KEY` (loaded from `.env`; the tests skip without it).
 Sandbox test cards move no real money; charge amounts are randomized per run
 to dodge NMI duplicate-transaction checks.
 
+The separate `.github/workflows/live-gated-integration.yaml` runs weekly and
+on demand. Its enforcing lanes run five NMI sandbox proofs, two live invoice
+collection proofs (Stripe and NMI), and the Stripe Model-B upgrade proof under
+`stripe_integration`. Each lane fails when a credential required by its named
+proofs is absent; these provider-sandbox jobs are not required merge checks.
+
 Supporting targets: `task docker-up-e2e-sandbox` (stack + AuthKit issuer),
 `task mint-jwt` (needs `AUTHKIT_DEV_MINT_SECRET`; prints `E2E_RUN_ID` /
 `E2E_USER_ID` / a JWT), `task e2e-dump-local` (dump local rows for the current
-run), `task nmi-query TXN_ID=… | SUB_ID=…` (NMI Query API, needs
-`NMI_QUERY_SECURITY_KEY`). For real inbound webhooks, see
+run), and either `task nmi-query TXN_ID=…` or `task nmi-query SUB_ID=…` (NMI
+Query API, needs `NMI_QUERY_SECURITY_KEY`). For real inbound webhooks, see
 [local-webhooks.md](local-webhooks.md).
 
 ### Solana recurring (devnet)
@@ -151,17 +159,21 @@ On-chain mechanics tests carry the `devnet` build tag and run against Solana
 devnet with a funded payer:
 
 ```bash
-SOLANA_DEVNET_PAYER_KEY=<funded> SOLANA_DEVNET_SUBSCRIBER_KEY=<funded> HELIUS_API_KEY=<key> \
-  go test -tags devnet -v -timeout 580s ./internal/integrations/solana/...
+SOLANA_DEVNET_PAYER_KEY=<funded> \
+SOLANA_DEVNET_SUBSCRIBER_KEY=<usdc-funded> \
+HELIUS_API_KEY=<key> \
+  go test -tags devnet -run 'TestDevnetLifecycle/FastPlan' -v -timeout 480s \
+  ./internal/modules/solana/recurring/...
 ```
 
-Proven there: full plan/subscribe/transfer/cancel lifecycle; partial pulls
-capped at the plan amount per period; cancel vs revoke semantics
-(`cancel_subscription` does NOT stop pulls — the subscriber's SPL `Revoke` is
-the real stop, surfacing as token OwnerMismatch on the next crank); and
-submit-and-confirm before a pull counts as success. CI runs the real-USDC
-service-layer test daily and the multi-hour rebill test on manual dispatch
-(`.github/workflows/solana-devnet-integration.yaml`).
+The devnet suite proves atomic subscribe plus the first pull, the same-period
+cap, cancellation blocking future-period pulls, sustained rebilling,
+insufficient-funds and revoked-delegate classifications, independent multiple
+subscriptions, and tier changes. `.github/workflows/solana-devnet-integration.yaml`
+runs the bounded FastPlan proof daily. Manual dispatch can additionally run the
+multi-hour rebill, the four extended lifecycle/multi-subscription/tier-change/
+failure proofs, and the separately keyed integration-harness money-movement
+proof.
 
 The full-stack flow (checkout `payment.rail: "solana"` →
 `next_action: solana_sign_transactions` → wallet signs → confirm → first

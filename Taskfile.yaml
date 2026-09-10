@@ -42,6 +42,7 @@ tasks:
       - bash scripts/ci_local_test.sh
       - bash scripts/pre_push_test.sh
       - bash scripts/test_integration_test.sh
+      - bash scripts/e2e_dump_local_test.sh
 
   ci-local:
     desc: Run the local Go/shared gates used by CI (database required)
