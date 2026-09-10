@@ -69,10 +69,11 @@ func TestConverge_LifeSubscriptionPendingStaleWaitsForSourceProof(t *testing.T) 
 		var status string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id=$1`, subID).Scan(&status))
 		require.Equal(t, "pending", status, "the subscription must survive an unproven absence")
-		var findingStatus string
+		var findingType, findingStatus string
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
-			merchantID, "subscription:"+subID.String()).Scan(&findingStatus))
+			`SELECT finding_type, status FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key=$2`,
+			merchantID, "subscription:"+subID.String()).Scan(&findingType, &findingStatus))
+		require.Equal(t, "life.subscription.pending_stale", findingType)
 		require.Equal(t, "reconcile_required", findingStatus)
 		return nil
 	}))
