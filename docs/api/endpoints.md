@@ -181,9 +181,14 @@ an existing top-up fallback can become the displayed collection choice.
 
 ### Checkout (delegated)
 
-`POST /v1/me/checkout`, `GET /v1/me/checkout/{id}`,
-`POST /v1/me/checkout/{id}/confirm` — same semantics as `/v1/checkout`
-(section 2) with the delegated token as the buyer.
+Same semantics as `/v1/checkout` (section 2), with the delegated token as the
+buyer.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/me/checkout` | Create a checkout session |
+| GET | `/v1/me/checkout/{id}` | Retrieve the caller's checkout session |
+| POST | `/v1/me/checkout/{id}/confirm` | Confirm the caller's Solana checkout session |
 
 ### Customer treasury (`/v1/customers/{customer_id}/*`)
 
@@ -273,12 +278,24 @@ for those routes.
 | GET | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:read` | Full billing profile: trust, balances, entitlements, subscriptions of every status (newest 100, with `status`), history, redacted payment-method metadata. Sections degrade independently: a failed collection-defaults read logs and returns the methods without `collection_default_currencies` instead of failing the profile |
 | GET | `/v1/merchant/customers/{customer_id}/payment-methods` | `merchant:customer-settings:read` | Redacted saved-method metadata (admins can never create/update/delete customer methods) |
 | GET | `/v1/merchant/customers/{customer_id}/payments` | `merchant:payments:read` | One customer's payment history |
+| GET | `/v1/merchant/customers/{customer_id}/credits` | `merchant:customer-settings:read` | Credit-grant lots, including remaining and expired amounts |
+| DELETE | `/v1/merchant/customers/{customer_id}/credits/{grant_id}` | `merchant:credits:revoke` | Revoke the unspent remainder of one credit grant |
+| GET | `/v1/merchant/customers/{customer_id}/credit-transactions` | `merchant:customer-settings:read` | Paginated credit ledger. Query: `currency`, `limit`, `offset` |
 | POST | `/v1/merchant/customers/{customer_id}/payments/off-channel` | `merchant:customer-settings:update` | Record an off-channel/manual purchase through the normal purchase path |
 | POST | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:update` | Manually grant an entitlement (grant ledger) |
 | DELETE | `/v1/merchant/customers/{customer_id}/entitlements/{id}` | `merchant:customer-settings:update` | Revoke a manual entitlement grant |
 | POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
 | POST | `/v1/merchant/customers/{customer_id}/credits` | `merchant:credits:grant` | Grant credits (or#906): `{ currency, amount, source_id, invoker?, source?, expires_at?, description? }` — the human-admin deposit. `source_id` is the reproducible idempotency key (same semantics as the machine deposit above); `source` defaults to `admin`, `invoker` to the customer id. Owner-level permission (NOT held by the fixed support role); rate-limited as an admin grant operation |
+| GET | `/v1/merchant/customers/{customer_id}/business-profile` | `merchant:customer-settings:read` | Read business onboarding, invoicing and credit posture; 404 for a consumer |
+| PUT | `/v1/merchant/customers/{customer_id}/business-profile` | `merchant:customer-settings:update` | Onboard or update a business payer, including terms acceptance and invoice profile |
+| DELETE | `/v1/merchant/customers/{customer_id}/business-profile` | `merchant:customer-settings:update` | Return to consumer posture; refused while the payer has an outstanding balance |
+| GET | `/v1/merchant/business-customers` | `merchant:customer-settings:read` | List onboarded business payers |
+| GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:read` | Read invoicing terms, tax facts, contacts and memo |
+| PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:update` | Replace the profile used for future invoice snapshots |
+| GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | `merchant:customer-settings:read` | List the payer's negotiated meter rate cards |
+| PUT | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | `merchant:customer-settings:update` | Set the payer's negotiated rate and optional included allowance |
+| DELETE | `/v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}` | `merchant:customer-settings:update` | Restore the merchant-default rate for future usage |
 
 ### Payments & subscriptions
 
@@ -291,8 +308,25 @@ for those routes.
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
 | POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately |
 | POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |
+| POST | `/v1/merchant/subscriptions/{id}/change-tier` | `merchant:subscriptions:update` | Apply a same-group tier change. Body `{ "price_id": "..." }` |
+| POST | `/v1/merchant/subscriptions/{id}/change-tier/preview` | `merchant:subscriptions:update` | Preview the same tier change without mutation |
 | PUT | `/v1/merchant/subscriptions/{id}/payment-method` | `merchant:subscriptions:update` | Reassign to another saved method of the same customer |
 | POST | `/v1/merchant/subscriptions/{id}/reprice` | `merchant:subscriptions:update` | Schedule one subscription's price move at its next renewal on/after `effective_at` |
+
+### Invoice administration
+
+Full request and state-transition details are in
+[invoice-administration.md](../invoice-administration.md).
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/v1/merchant/invoices` | `merchant:invoices:read` | List invoices with customer, currency, status and period filters |
+| GET | `/v1/merchant/invoices/{id}` | `merchant:invoices:read` | Read one invoice and its available actions |
+| GET | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:read` | List collection and remittance history |
+| POST | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:update` | Record an idempotent external remittance; does not charge a provider |
+| POST | `/v1/merchant/invoices/{id}/retry-collection` | `merchant:invoices:collect` | Retry provider collection with an explicit saved method and idempotency key |
+| POST | `/v1/merchant/invoices/{id}/uncollectible` | `merchant:invoices:update` | Stop collection while retaining the debt |
+| POST | `/v1/merchant/invoices/{id}/void` | `merchant:invoices:update` | Void an eligible invoice and write off its remaining debt |
 
 ### Reprices & plan migrations
 
@@ -339,6 +373,12 @@ manifest and reboot instead. Reads stay live.
 | POST | `/v1/merchant/catalog/publish` | Push OpenRails definitions to providers |
 | POST | `/v1/merchant/catalog/ask` | Catalog copilot Q&A (read permission; never mutates) |
 | POST | `/v1/merchant/catalog/copilot/confirm` | Log a copilot draft as confirmed (write permission; audit log only, exempt from the manifest guard) |
+| GET | `/v1/merchant/catalog/meters` | List usage-meter definitions |
+| GET | `/v1/merchant/catalog/meters/{key}` | Read one usage meter |
+| GET | `/v1/merchant/catalog/meters/{key}/overrides` | List negotiated customer overrides for a meter |
+| PUT | `/v1/merchant/catalog/meters/{key}` | Create or replace a usage-meter definition |
+| PUT | `/v1/merchant/catalog/meters/{key}/rate-card` | Set the merchant-default rate card |
+| DELETE | `/v1/merchant/catalog/meters/{key}/rate-card` | Remove the merchant-default rate card |
 
 Catalog product and price lists return `{items, total, limit, offset}`. `limit`
 and `offset` are the effective query values: nonpositive limits default to 100,
@@ -421,6 +461,8 @@ no merchant context.
 | GET | `/v1/platform/merchants/{id}` | `root:merchants:read` | One merchant |
 | DELETE | `/v1/platform/merchants/{id}` | `root:merchants:delete` | Soft-delete a merchant |
 | POST | `/v1/platform/merchants/{id}/restore` | `root:merchants:restore` | Restore a soft-deleted merchant |
+| GET | `/v1/platform/worker-health` | `root:worker-health:read` | Cross-merchant worker health, including last-error text |
+| DELETE | `/v1/platform/admin-rate-limit-lockouts/{user_id}` | `root:admin-rate-limits:unlock` | Clear one human administrator's distributed lockout |
 
 ## 6. Webhooks (inbound, per rail)
 
@@ -430,18 +472,18 @@ boundary). Success returns `200 { "status": "accepted" }`.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/webhooks/{rail}` | The standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
-| POST | `/v1/webhooks/{rail}/{account_id}` | Same, with the receiving PSP account pinned in the path (direct Stripe; multi-account rails) |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{rail}` | Embedded only: the host pins one merchant, so the `{merchant}` slug resolves it and THAT merchant's signing secret verifies the payload |
-| POST | `/billing/v1/merchants/{merchant}/webhooks/{rail}/{account_id}` | Embedded only, per-account (e.g. multiple NMI accounts) |
+| POST | `/v1/webhooks/{provider}` | The standalone surface: NMI-backed rails / CCBill; the merchant is derived from the payload's account identity |
+| POST | `/v1/webhooks/{provider}/{account_id}` | Same, with the receiving PSP account pinned in the path (direct Stripe; multi-account rails) |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}` | Embedded only: the host pins one merchant, so the `{merchant}` slug resolves it and THAT merchant's signing secret verifies the payload |
+| POST | `/billing/v1/merchants/{merchant}/webhooks/{provider}/{account_id}` | Embedded only, per-account (e.g. multiple NMI accounts) |
 
-`{rail}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
+`{provider}` is the gateway KIND — `nmi`, `ccbill`, `stripe`, `solana`,
 `basistheory`. It is never a PSP key: `mobius` and `paykings` both post to
 `/v1/webhooks/nmi` and are told apart by `{account_id}` or the payload's own
 account identity.
 
 Deployments using per-merchant hostnames (`api.<slug>.<domain>`) additionally
-serve `/v1/webhooks/{rail}[/{account_id}]` with the merchant resolved from
+serve `/v1/webhooks/{provider}[/{account_id}]` with the merchant resolved from
 the Host header.
 
 Verification per rail:

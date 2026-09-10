@@ -30,11 +30,6 @@ if [ -z "$E2E_RUN_ID" ] && [ -z "$E2E_USER_ID" ]; then
   exit 1
 fi
 
-FILTER_BY_RUN="false"
-if [ -n "$E2E_RUN_ID" ]; then
-  FILTER_BY_RUN="true"
-fi
-
 echo "Dumping local OpenRails rows..."
 echo "  E2E_RUN_ID:  ${E2E_RUN_ID:-<not set>}"
 echo "  E2E_USER_ID: ${E2E_USER_ID:-<not set>}"
@@ -47,32 +42,45 @@ SQL="\\set ON_ERROR_STOP on
 
 \\echo '--- checkout_sessions ---'
 SELECT id, status, rail, price_id, transaction_id, subscription_id, payment_id, created_at
-FROM billing.checkout_sessions
-WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "metadata->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'"; fi)
+FROM openrails.checkout_sessions
+WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
+     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
+   ))
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- payment_methods ---'
-SELECT id, user_id, rail, vault_id, created_at
-FROM billing.payment_methods
-WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "metadata->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'"; fi)
+SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, created_at
+FROM openrails.payment_methods
+WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
+     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
+   ))
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- subscriptions ---'
-SELECT id, user_id, status, rail, rail_subscription_id, price_id, created_at
-FROM billing.subscriptions
-WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "gateway_response->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'::uuid"; fi)
+SELECT id, customer_id, status, rail, rail_subscription_id, price_id, created_at
+FROM openrails.subscriptions
+WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND gateway_response->>'e2e_run_id' = :'e2e_run_id')
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
+     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
+   ))
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- payments ---'
-SELECT id, user_id, rail, transaction_id, amount, currency, purchased_at
-FROM billing.payments
-WHERE $(if [ "$FILTER_BY_RUN" = "true" ]; then echo "metadata->>'e2e_run_id' = '${E2E_RUN_ID}'"; else echo "user_id = '${E2E_USER_ID}'::uuid"; fi)
+SELECT id, customer_id, rail, transaction_id, amount, currency, purchased_at
+FROM openrails.payments
+WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
+     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
+   ))
 ORDER BY purchased_at DESC
 LIMIT 50;
 "
 
 docker compose -f "$COMPOSE_FILE" exec -T postgres \
-  psql -U admin -d openrails_db -v ON_ERROR_STOP=1 -c "$SQL"
+  psql -U admin -d openrails_db -v ON_ERROR_STOP=1 \
+  -v e2e_run_id="$E2E_RUN_ID" -v e2e_user_id="$E2E_USER_ID" <<<"$SQL"

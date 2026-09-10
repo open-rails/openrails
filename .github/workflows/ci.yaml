@@ -47,7 +47,9 @@ jobs:
           while IFS= read -r f; do
             [ -z "$f" ] && continue
             case "$f" in
-              # Docs and metadata: affect no job.
+              # The route reference has an executable parity check.
+              docs/api/endpoints.md) go=true ;;
+              # Other docs and metadata affect no job.
               docs/*|*.md|.trivyignore|LICENSE*|.gitignore) ;;
               # Toolchain / module surface: all Go and integration checks.
               go.mod|go.sum|docker-compose*|Dockerfile*) go=true; broad=true ;;
