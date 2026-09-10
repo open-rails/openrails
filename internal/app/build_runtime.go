@@ -751,13 +751,10 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	repriceRepo := subscriptions.NewRepriceRepo(database)
 	repriceService := subscriptions.NewRepriceService(database, repriceRepo, priceService, subscriptionService, notificationService, merchantconfig.NewStore(database), clock)
 
-	// #779 catalog copilot: read-only Q&A always (gated on
-	// llm.catalog_copilot_enabled); the Phase 2 draft_* tools additionally on
-	// llm.catalog_drafting_enabled, which MUST stay off until #781 (server-
-	// side notice-window enforcement) ships — see config.go's field doc.
-	// Rides the SAME LLM client as the dashboard (one provider/model/key
-	// config for the whole deployment); its own Redis-backed rate limiter
-	// (own key namespace, never shares #756's budget).
+	// Catalog Q&A and drafting are independently opt-in. Draft tools only
+	// propose changes; the reprice API owns #781 notice-window enforcement.
+	// The copilot shares the dashboard LLM client and uses its own rate-limit
+	// namespace.
 	var copilotLimiter copilot.AskLimiter
 	if redisClient != nil {
 		copilotLimiter = copilot.NewAskLimiter(redisClient, clock.Now)

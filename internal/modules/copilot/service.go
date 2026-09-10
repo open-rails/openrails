@@ -1,16 +1,7 @@
-// Package copilot implements #779: the console catalog copilot. It extends
-// the #741/#756 LLM surface (schema-carries-the-intelligence, haiku-first,
-// fail-closed feature gates) from METRICS to the CATALOG: merchants ask
-// questions about products/prices/subscribers and, once #781 lands, draft
-// price changes conversationally.
-//
-// The one safety principle (non-negotiable, per the 2026-07-07 design
-// ruling): the model NEVER mutates. Its only write-shaped output is a DRAFT
-// of the same structured payload the human console produces (a #777 wizard
-// plan or a catalog diff), rendered through the wizard's own review step for
-// human confirmation. Every constraint the API enforces (same-currency,
-// same-product, active-price) is enforced there, not reimplemented here —
-// LLM proposes, primitives dispose.
+// Package copilot provides merchant-scoped catalog Q&A and optional drafting.
+// The model can query catalog summaries but cannot mutate them. Draft tools
+// return typed proposals for the console's human-reviewed mutation flow, where
+// the API enforces authorization and catalog constraints again.
 package copilot
 
 import (
@@ -63,12 +54,9 @@ type RepricePreviewer interface {
 	List(ctx context.Context, filter subscriptions.SubscriptionRepriceFilter, limit, offset int) ([]*models.SubscriptionReprice, error)
 }
 
-// Deps are the catalog copilot's collaborators. LLM may be nil (the feature
-// fails closed); Enabled is the llm.catalog_copilot_enabled consent (Q&A
-// sends aggregate catalog/subscriber-count data to the provider, like #756);
-// DraftingEnabled additionally arms the Phase 2 draft_* tools — MUST stay
-// false until #781 ships (see doctrine.go); Limiter may be nil (no
-// rate limiting).
+// Deps are the catalog copilot's collaborators. LLM may be nil, which leaves
+// the feature disabled. Enabled and Drafting are separate consent gates;
+// Limiter may be nil when the caller accepts no rate limiting.
 type Deps struct {
 	Products ProductReader
 	Prices   PriceReader
@@ -119,11 +107,8 @@ func (s *Service) SetLLM(l dashboard.LLM) { s.llm = l }
 // llm.catalog_copilot_enabled consent.
 func (s *Service) Configured() bool { return s != nil && s.llm != nil && s.enabled }
 
-// DraftingConfigured reports whether Phase 2 drafting tools are armed. Gated
-// on the SAME deployment flag as #781's presence per the tracker ruling:
-// stays false — drafting tools absent from the tool list entirely, not
-// present-but-erroring — until an operator flips llm.catalog_drafting_enabled
-// (intended: after both #779 and #781 merge).
+// DraftingConfigured reports whether drafting tools may be offered to the
+// model. Disabled tools are absent from the tool list.
 func (s *Service) DraftingConfigured() bool { return s.Configured() && s.drafting }
 
 func (s *Service) now() time.Time {
