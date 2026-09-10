@@ -24,13 +24,10 @@ import (
 // in the corresponding review step; the human's confirm click is the only
 // path that actually calls those APIs, which enforce every constraint anew.
 
-// noticeWindowDaysDoctrine mirrors web/admin/src/pages/catalog/price-wizard-logic.ts's
-// NOTICE_WINDOW_DAYS (#777) — duplicated, not imported (frontend/backend
-// boundary). It is a DEFAULT the copilot proposes, never an enforced floor:
-// #773/#777 shipped no server-side minimum-notice check, and #781 (in
-// flight) is what will make the API itself refuse an early increase. Once
-// #781 ships, this const should be replaced by reading the merchant's
-// configured window from the API.
+// noticeWindowDaysDoctrine is the copilot's fallback effective-date proposal
+// for an increase and matches subscriptions.DefaultRepriceNoticeWindowDays.
+// The console validates the proposal against the loaded merchant setting, and
+// the reprice API enforces that setting before mutation.
 const noticeWindowDaysDoctrine = 30
 
 func priceDirection(newAmount, currentAmount int64) string {

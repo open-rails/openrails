@@ -456,10 +456,9 @@ type LLMConfig struct {
 
 	// CatalogDraftingEnabled additionally arms the #779 Phase 2 draft_* tools
 	// inside the catalog copilot loop (draft_price_change / draft_catalog_diff
-	// — proposals only, never a mutation). Safe to enable since #781 shipped
-	// (2026-07-07): the server-side notice-window enforcement the copilot's
-	// safety story depends on ("the API refuses what the wizard would refuse")
-	// is live. Stays an explicit per-deployment consent like AskEnabled.
+	// — proposals only, never a mutation). #781's server-side notice-window
+	// enforcement is active. Drafting remains explicit per-deployment consent,
+	// separate from catalog Q&A.
 	// Default false (fail-closed). Env: LLM_CATALOG_DRAFTING_ENABLED.
 	CatalogDraftingEnabled bool `koanf:"catalog_drafting_enabled,omitempty"`
 }
@@ -479,8 +478,8 @@ func (c *LLMConfig) CatalogCopilotConfigured() bool {
 }
 
 // CatalogDraftingConfigured reports whether the #779 Phase 2 draft_* tools
-// are armed: catalog Q&A configured AND the explicit catalog_drafting_enabled
-// consent (see the field doc — stays false until #781 ships).
+// are armed: catalog Q&A configured and explicit catalog_drafting_enabled
+// consent.
 func (c *LLMConfig) CatalogDraftingConfigured() bool {
 	return c.CatalogCopilotConfigured() && c.CatalogDraftingEnabled
 }

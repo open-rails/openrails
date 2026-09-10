@@ -39,7 +39,7 @@ type Config struct {
 	CatalogCopilotEnabled bool `json:"catalog_copilot_enabled"`
 	// CatalogDraftingEnabled mirrors the #779 Phase 2 gate
 	// (llm.catalog_drafting_enabled): false hides the drafting UI entirely —
-	// the copilot panel stays Q&A-only. Stays false until #781 ships.
+	// the copilot panel stays Q&A-only.
 	CatalogDraftingEnabled bool `json:"catalog_drafting_enabled"`
 }
 

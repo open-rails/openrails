@@ -15,8 +15,7 @@ export interface BootstrapConfig {
   // key): false renders the catalog copilot panel as a pointed empty-state.
   catalog_copilot_enabled: boolean
   // #779 Phase 2 gate (llm.catalog_drafting_enabled): false hides the
-  // drafting affordances — the copilot panel stays Q&A-only. Stays false
-  // until #781 (server-side notice-window enforcement) ships.
+  // drafting affordances and leaves the copilot panel in Q&A-only mode.
   catalog_drafting_enabled: boolean
 }
 
