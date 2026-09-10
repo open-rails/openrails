@@ -172,7 +172,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   and the DB→Vault migration runbook:
   [vault.md](vault.md).
 - **Naming**: addressed as `(merchant_id, name)` in code; Vault path
-  `secret/openrails/merchants/<merchant-slug>/<name>`. A 15-minute TTL cache
+  `secret/openrails/merchants/<merchant-uuid>/<name>`. A 15-minute TTL cache
   fronts all backends — out-of-band Vault writes converge within one TTL, no
   restart needed.
 - **Rotation within the same PSP** is a non-event: the account
