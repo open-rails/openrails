@@ -96,7 +96,7 @@ func TestHostPrincipal_InvalidPrincipalsRejected(t *testing.T) {
 			MerchantID: dbtest.TestMerchantID.String(),
 		}, http.StatusUnauthorized},
 		{"non-uuid merchant", &billingauth.DelegatedPrincipal{
-			MerchantID: "tensorhub", SubjectID: "user-1",
+			MerchantID: "host-four", SubjectID: "user-1",
 		}, http.StatusUnauthorized},
 		{"unknown grant smuggled", &billingauth.DelegatedPrincipal{
 			MerchantID: dbtest.TestMerchantID.String(), SubjectID: "user-1",

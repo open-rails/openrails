@@ -23,12 +23,12 @@ const MerchantBillingEnvPrefix = "BILLING_"
 // Routable shapes (schema-aware so single underscores need no array indexes):
 //
 //	BILLING_VERSION -> version
-//	BILLING_MERCHANTS_DOUJINS_DISPLAY_NAME -> merchants.doujins.display_name
-//	BILLING_MERCHANTS_DOUJINS_PROFILE_FROM_EMAIL -> merchants.doujins.profile.from_email
-//	BILLING_MERCHANTS_DOUJINS_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY
-//	-> merchants.doujins.psps.mobius.nmi.secrets.security_key
-//	BILLING_MERCHANTS_DOUJINS_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY
-//	-> merchants.doujins.custodians.bt.basis_theory.secrets.api_key
+//	BILLING_MERCHANTS_HOST_ONE_DISPLAY_NAME -> merchants.host-one.display_name
+//	BILLING_MERCHANTS_HOST_ONE_PROFILE_FROM_EMAIL -> merchants.host-one.profile.from_email
+//	BILLING_MERCHANTS_HOST_ONE_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY
+//	-> merchants.host-one.psps.mobius.nmi.secrets.security_key
+//	BILLING_MERCHANTS_HOST_ONE_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY
+//	-> merchants.host-one.custodians.bt.basis_theory.secrets.api_key
 //
 // Map-key spans are lower-kebab-cased. Keep merchant/PSP keys
 // lowercase, avoid underscores in the YAML keys, and avoid the fixed section
@@ -148,7 +148,7 @@ func custodianEnvKey(base string, tokens []string) string {
 // still uses a retired PSP anchor (PSPS <- ACCOUNTS <- RAIL_MERCHANT_ACCOUNTS
 // <- PROVIDER_ACCOUNTS). Without this the old var
 // would not just be dropped — the single-token PSPS anchor would mis-split
-// it into a wrong merchant key ("doujins-rail-merchant") and overlay config
+// it into a wrong merchant key ("host-one-rail-merchant") and overlay config
 // nobody declared. The retired anchors are therefore poison token sequences
 // anywhere in the name (which also means a merchant key span must not contain
 // them, e.g. a merchant slugged "provider" cannot use env overlays).

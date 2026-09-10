@@ -23,7 +23,7 @@ import (
 // not survive a flush — so a replay after a flush was re-graded, re-consumed
 // the payer's grace, and the engine's own changed-amount refusal could never
 // fire inside the TTL. Hosts compensated with claim tables of their own
-// (tensorhub th#1464's outbox fingerprint); this is what retires them.
+// (host-four upstream#1464's outbox fingerprint); this is what retires them.
 //
 // FLUSHING IS THE POINT. Every proof below flushes Redis between the two
 // reports, because that is exactly the difference between "deduped" and

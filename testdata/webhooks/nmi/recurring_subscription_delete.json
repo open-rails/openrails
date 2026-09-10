@@ -40,8 +40,8 @@
                 "is_test_mode": false
             },
             "merchant": {
-                "id": "579145",
-                "name": "Hmovie-Moe"
+                "id": "100001",
+                "name": "Example Merchant"
             },
             "next_charge_date": "1970-01-01",
             "order_description": "",

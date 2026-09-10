@@ -1,10 +1,13 @@
 # OpenRails — project guide for Claude
 
 OpenRails is a multi-merchant billing/payments platform (Go). It runs **standalone**
-(hosted SaaS, many merchants) and **embedded** (a host app embeds it for one merchant —
-e.g. doujins, cozy-art). One merchant ↔ one controlling org (deliberately 1:1).
-The repo is **source-available** — keep secrets and customer/account-specific
-identifiers OUT of committed files (code, trackers, this file).
+(hosted SaaS, many merchants) and **embedded** (a host app embeds it for one merchant).
+One merchant ↔ one controlling org (deliberately 1:1). The repo is **source-available** —
+keep secrets and customer/account-specific identifiers OUT of editable committed
+files (code, trackers, this file). Previously applied migration bodies are immutable
+integrity artifacts and must not be rewritten solely to change their prose.
+Neutral examples in this repository use `host-one` through `host-four`; these are
+placeholders, not customer or repository names.
 
 ## Money
 - All amounts are **micros** (millionths of a currency unit). Not cents, not millicents.
@@ -21,7 +24,8 @@ identifiers OUT of committed files (code, trackers, this file).
   their own PSP names. A PSP is NOT the acquiring bank — it's the service layer (Stripe bundles
   acquiring; MobiusPay is a high-risk ISO fronting NMI gateway tech; solana is the self-custody
   wallet slot, the one deliberate stretch of the term).
-- By repo: doujins / hentai0 → mobius (NMI) + ccbill + solana; cozy-art → stripe; tensorhub → none.
+- Example profiles: two embedded hosts may share NMI, CCBill, and Solana PSPs;
+  another may use Stripe; a metered-usage host may have no payment PSP.
 - ALL outbound Stripe HTTP goes through the choke-point client `internal/integrations/stripeapi`
   (readonly mode blocks writes at the transport). It pins the Stripe API version via
   `stripeapi.APIVersion` — ONE const drives both the outbound `Stripe-Version` header AND the

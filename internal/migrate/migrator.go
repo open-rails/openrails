@@ -123,9 +123,9 @@ func (e *OrphanedMigrationsError) Error() string {
 //
 // or#901 installed the check inside RunPostgres, which only the standalone
 // binary calls. An embedded host applies the migratekit chain itself
-// (tensorhub's runOpenRailsMigrations) and relies on the engine's own
+// (host-four's runOpenRailsMigrations) and relies on the engine's own
 // init-time validation, so the fence protected exactly the deployment that
-// was never frozen. th#1627 is the bill: tensorhub's dev stack sat on the
+// was never frozen. upstream#1627 is the bill: host-four's dev stack sat on the
 // pre-squash schema, `billing_policies` did not exist, and every billed
 // admission answered 500 while both ValidatePostgresMigrations and
 // ApplyMigrations reported success.

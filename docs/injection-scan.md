@@ -4,9 +4,9 @@
 "Contagious Interview" / PolinRider class) that infected three contractor
 machines and appended an obfuscated dropper to build-config files in every repo
 they could write to, recurring every few weeks from 2025-11 to 2026-05 across
-`doujins`, `hentai0`, and `doujins-legacy` (`vite.config.js`,
+`host-one`, `host-two`, and `host-one-legacy` (`vite.config.js`,
 `webpack.config.js`, `frontend/tailwind.config.ts`, `frontend/postcss.config.cjs`,
-and `frontend/scripts/setup-husky.mjs` in `cozy-art`).
+and `frontend/scripts/setup-husky.mjs` in `host-three`).
 
 The payload is appended to the **end of the last line** of a config, behind a
 run of ~2784 spaces, so it is invisible in an editor and in `git diff` unless
@@ -93,10 +93,9 @@ rules carry the weight.
 
 ### Why R4 needs corroboration
 
-A bare hostname is not enough. `doujins-legacy` legitimately ships the Blocto
-multi-chain wallet SDK, and three committed bundles (`public/js/746.js`,
-`public/js/ios/746.js`, `public/js/ios/node_modules_blocto_sdk_*.js`) name
-`bsc-dataseed`. Same-*line* co-occurrence is not enough either: those bundles
+A bare hostname is not enough. A legitimate multi-chain wallet SDK can include
+`bsc-dataseed` in minified bundles. Same-*line* co-occurrence is not enough
+either: those bundles
 are a single 379 KB line, so every string in the SDK shares a line with every
 other string. Distance is what separates them — the nearest execution-ish token
 in the benign bundles (`detached`) sits 61,100 characters from the hostname,
@@ -113,12 +112,10 @@ the build. Exit status is unaffected by notes.
 
 ### Why the scoping is what it is
 
-Every threshold below was measured across all seven trees carrying this scanner
-(`doujins`, `hentai0`, `doujins-legacy`, `hentai0-legacy`, `cozy-art`,
-`openrails`, `openrails-saas`), and every one produces zero findings on them.
+Every threshold below was measured across the repositories carrying this scanner,
+and each produced zero findings.
 
-- **R6 at 250, not 500.** The longest legitimate config line across the seven
-  trees is 199 (`cozy-art frontend/vite.config.ts:50`).
+- **R6 at 250, not 500.** The longest legitimate config line is 199 characters.
 - **R7 at 40.** The highest legitimate interior-whitespace total is 31.
 - **R8 is scoped two ways on purpose.** "Any occurrence" tree-wide costs 34
   false positives — real no-break spaces inside content strings in minified
@@ -135,8 +132,8 @@ Every threshold below was measured across all seven trees carrying this scanner
 - **R13 matches the `__meta` container, not `client_id`.** The Petra and
   Nightly wallet manifests legitimately carry `oauth2.client_id`; matching
   `client_id` alone turns one true positive into three findings.
-- **The config file set does not include a bare `*rc.js`.** It would match the
-  vendored `public/vendor/codemirror/mode/mirc/mirc.js` in both legacy trees.
+- **The config file set does not include a bare `*rc.js`.** It would match a
+  vendored CodeMirror mode file.
 - **R14 is anchored to the last line, and that is what makes it free.** The same
   gap test applied to *every* line costs 9 / 1 / 15 / 11 / 1 / 3 / 2 false
   positives across the seven trees (aligned trailing comments in Go and PHP);
@@ -145,8 +142,7 @@ Every threshold below was measured across all seven trees carrying this scanner
   last lines). Anchored to the final non-blank line with a >=40 gap: **0**.
 
 Binary files are skipped by every rule except R11 (`grep -I`). Without that, raw
-JPEG bytes trip R1: two images in `hentai0-legacy` (`public/img/samplenft.jpg`,
-`public/common/img/default.jpg`) contain 100+ consecutive space bytes.
+JPEG bytes can trip R1 because they contain long runs of space bytes.
 
 ### Build configs
 
@@ -155,8 +151,8 @@ R6-R10 and the wide form of R12 apply to the build-config set:
 - `*.config.<ext>` (any extension), plus
   `vite|webpack|tailwind|postcss|next|rollup|svelte|astro|nuxt.config.*`
 - `gulpfile.*`, `Gruntfile.*`
-- `setup-*.{js,mjs,cjs,ts}` — the `cozy-art` worm target
-  (`frontend/scripts/setup-husky.mjs`) matches no `*.config.*` pattern
+- `setup-*.{js,mjs,cjs,ts}` — covers build setup files that match no
+  `*.config.*` pattern
 - `.husky/*`
 
 ### Exclusions
@@ -174,15 +170,13 @@ seven trees:
   R12 (both quote the signatures they describe) but are still subject to R1.
 
 Lockfiles, `*.min.js`, `*.map`, `public/js/`, `dist/` and other vendored or
-built directories are **not** excluded — they were checked across all seven
-repos and produce no blocking findings, so excluding them would only carve out
+built directories are **not** excluded — they produce no blocking findings, so
+excluding them would only carve out
 the kind of unreadable build artifact a payload most wants to live in.
 `git ls-files` already keeps `node_modules/` out of scope.
 
-Validated clean at time of writing (0 blocking findings, whole tree):
-`doujins` (1951 files), `hentai0` (938), `doujins-legacy` (1500, 3 notes),
-`hentai0-legacy` (944), `cozy-art` (557), `openrails` (1865),
-`openrails-saas` (265).
+Validated clean at time of writing: zero blocking findings across the scanned
+repositories.
 
 ## If it fires
 

@@ -6,7 +6,7 @@
 # PolinRider class) that appended an obfuscated dropper to build-config files on
 # infected contributor machines and rode into this repo inside otherwise normal
 # commits (2025-11 .. 2026-05: vite/webpack/tailwind/postcss configs, and
-# frontend/scripts/setup-husky.mjs in cozy-art).
+# frontend/scripts/setup-husky.mjs).
 #
 # The payload hides after a ~2800-space run on the last line of a config file,
 # so it is invisible in an editor and in `git diff` without scrolling right. The
@@ -229,7 +229,7 @@ for f in ${raw[@]+"${raw[@]}"}; do
 		CONTENT_FILES+=("$f")
 	fi
 	# Rule 1 excludes Markdown: padded Markdown tables legitimately carry long
-	# space runs (a real doujins doc has a 166-space run).
+	# space runs in Markdown tables.
 	[[ $f =~ \.mdx?$ ]] || WS_FILES+=("$f")
 	if [[ $f =~ $CONFIG_RE ]]; then CONFIG_FILES+=("$f"); fi
 	if [[ $f =~ $SOURCE_EXT_RE ]]; then SOURCE_FILES+=("$f"); fi
@@ -433,8 +433,8 @@ grep_rule R3-detached-spawn \
 # Rule 4 — blockchain dead-drop C2 resolution, corroborated by an execution
 # primitive within ${DEAD_DROP_WINDOW} characters.
 #
-# A bare hostname is NOT enough: doujins-legacy legitimately ships the Blocto
-# multi-chain wallet SDK, whose minified bundles mention bsc-dataseed. Nor is
+# A bare hostname is NOT enough: a legitimate multi-chain wallet SDK may
+# mention bsc-dataseed in a minified bundle. Nor is
 # same-LINE co-occurrence enough - those bundles are a single 379 KB line, so
 # every string in the SDK shares a line with every other string. What separates
 # them from a dropper is distance: in the benign bundles the nearest
@@ -511,8 +511,7 @@ grep_rule R5-marker \
 # hand-written and short-lined; every dimension a dropper inflates is capped.
 for cfg in ${CONFIG_FILES[@]+"${CONFIG_FILES[@]}"}; do
 	# Rule 6 — code appended past the last legitimate statement. The longest
-	# legitimate config line across these repos is 199 chars (cozy-art
-	# frontend/vite.config.ts:50).
+	# legitimate config line in the scanned repositories is 199 characters.
 	read -r len lineno < <(
 		awk 'length($0) > m { m = length($0); n = FNR } END { print m + 0, n + 0 }' "$cfg"
 	)

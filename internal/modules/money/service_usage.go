@@ -18,7 +18,7 @@ import (
 // CaptureUsageEventParams records an analytics usage_event linked to an EXISTING
 // capture credit_transaction WITHOUT a second ledger debit (the capture already
 // debited the ledger). This is distinct from RecordUsage, which debits. It powers
-// the service usage rollup (#311) so the tensorhub platform's /budget-usage +
+// the service usage rollup (#311) so an operator's budget-usage and
 // revenue analytics can be served from OpenRails as the billing source of truth.
 type CaptureUsageEventParams struct {
 	CustomerID uuid.UUID
@@ -29,7 +29,7 @@ type CaptureUsageEventParams struct {
 	EventType string // the metered event kind, e.g. "owner/endpoint"
 	Amount    int64  // host-priced captured amount (>= 0)
 	// Resource is the caller-supplied free-form string for what was metered
-	// (opaque to OpenRails; e.g. tensorhub maps its endpoint slug here). Optional.
+	// (opaque to OpenRails; an endpoint slug is one example). Optional.
 	Resource         string
 	Dimensions       map[string]int64
 	Metadata         map[string]any // string long-tail dims (function_name, tier, ...)
@@ -194,7 +194,7 @@ type ResourceRevenueDailyRow struct {
 // ResourceRevenueDaily returns per-day revenue (sum of captured usage_event
 // amounts; older rows used a USD-specific internal unit conversion) for
 // a resource (typed attribution column), across ALL payers in the merchant, over
-// [from, to). Powers e.g. tensorhub endpoint revenue analytics (#410).
+// [from, to). Powers endpoint revenue analytics (#410).
 func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")

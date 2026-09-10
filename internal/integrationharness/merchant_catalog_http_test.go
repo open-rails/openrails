@@ -1580,7 +1580,7 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 
 	// The example is multi-merchant; exercise the HTTP apply path against the
 	// anthropic catalog (legacy usage_limits + subscription prices, which the
-	// applier fully supports). Rate-card apply (digital-ocean/cozy) gets its own
+	// applier fully supports). Rate-card apply gets its own
 	// test when the applier persists rate_cards (#638).
 	var entry exampleCatalogEntry
 	for _, c := range file.Catalogs {

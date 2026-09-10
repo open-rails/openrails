@@ -49,8 +49,8 @@ type AdminGrantImportResult struct {
 
 // ImportAdminGrants records each admin comp as a source_type=admin entitlement
 // grant and materializes its entitlement window, idempotent by SourceID (#636).
-// This is the seam that lets the doujins legacy migrate hand admin/manual access
-// over as a FACT instead of writing openrails.entitlements directly. Runs in a
+// This lets a legacy migration hand admin/manual access over as a fact instead
+// of writing openrails.entitlements directly. Runs in a
 // single merchant-scoped connection (RLS). A real DB error aborts the batch; a
 // product with no entitlements_spec is counted (NoSpec) and skipped.
 func ImportAdminGrants(ctx context.Context, opts AdminGrantImportOptions) (AdminGrantImportResult, error) {

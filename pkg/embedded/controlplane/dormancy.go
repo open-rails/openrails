@@ -5,7 +5,7 @@ package controlplane
 // authkit primitive it consumes — DeletePermissionGroup with an EXPLICIT
 // ReleaseSlug, pinned to the merchant persona. A host runs it on its own
 // cadence (openrails-saas: a River worker calling SweepDormantMerchants once
-// per tick, armed via its own destructive setting; th#1774 is the shape).
+// per tick, armed via its own destructive setting; upstream#1774 is the shape).
 
 import (
 	"context"

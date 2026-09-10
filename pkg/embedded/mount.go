@@ -109,9 +109,8 @@ func SelfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator) (http.Ha
 
 func selfHandler(e *Embedded, authn billingauth.DelegatedAuthenticator, providerRouteOverride *routesurface.ProviderRoutes) (http.Handler, error) {
 	// #913: checked first (static misconfiguration beats runtime state), and
-	// the error names the standard bridge — every observed host either
-	// hand-rolled this wrong (th#1765) or never wired it and shipped a
-	// 404ing self surface (ca#269).
+	// the error names the standard bridge so the self-service surface cannot be
+	// wired incorrectly or omitted.
 	if authn == nil {
 		return nil, fmt.Errorf("embedded billing: RouteSetCustomer (self surface) requires MountOptions.DelegatedAuthenticator — hosts with their own AuthKit verifier use pkg/embedded/authkit.NewDelegatedAuthenticator(verifier, boundMerchantID, opts...); remote-issuer hosts use NewVerifierDelegatedAuthenticator(issuers, audience, boundMerchantID, opts...)")
 	}

@@ -36,8 +36,8 @@ func TestMode2SeedOnceImporterFlow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, MerchantManifestReconcileOptions{Insert: true}, opts)
 
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
@@ -48,13 +48,13 @@ func TestMode2SeedOnceImporterFlow(t *testing.T) {
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	// MODE-2 empty DB → seed.
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, opts))
 
 	var merchantIDText string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantIDText))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
 	merchantID, err := merchant.ParseID(merchantIDText)
 	require.NoError(t, err)
 

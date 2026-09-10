@@ -80,7 +80,7 @@ func TestDelegatedAuthenticator_DefaultsToCanonicalPreset(t *testing.T) {
 	require.Equal(t, "https://auth.host.example", p.Issuer)
 }
 
-// doujins #803's two blockers, through the exported options: a liveness veto
+// host-one #803's two blockers, through the exported options: a liveness veto
 // on a token that verifies, and a request-scoped grant.
 func TestDelegatedAuthenticator_AdmissionAndResolver(t *testing.T) {
 	t.Parallel()

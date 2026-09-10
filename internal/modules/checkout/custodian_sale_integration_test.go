@@ -171,7 +171,7 @@ func newCustodianSaleFixture(t *testing.T, networkTokens bool) *custodianSaleFix
 	rails := railresolve.FixedSet{
 		"mobius-bt": {
 			Rail:      models.RailNMI,
-			AccountID: "579145",
+			AccountID: "100001",
 			NMI:       &config.NMIRailConfig{SecurityKey: "sk_gateway_test"},
 			Custody: &config.CustodianConfig{
 				Key:           "bt",

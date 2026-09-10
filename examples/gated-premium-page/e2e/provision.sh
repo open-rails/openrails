@@ -3,7 +3,8 @@
 # real NMI sandbox. Proven end-to-end 2026-07-28 (see ../E2E.md, tracker #825).
 #
 # Requires in the repo root .env (never printed):
-#   NMI_SANDBOX_SECURITY_KEY  NMI_TOKENIZATION_KEY  [NMI_WEBHOOK_SIGNING_SECRET]
+#   NMI_SANDBOX_SECURITY_KEY  NMI_TOKENIZATION_KEY  NMI_ACCOUNT_ID
+#   [NMI_WEBHOOK_SIGNING_SECRET]
 #
 # What it does (and why it deviates from the README's MODE-1 story — the
 # shipped `openrails run-server` never loads /etc/openrails/merchants.yaml at boot,
@@ -33,7 +34,7 @@ set -a; source "$REPO/.env"; set +a
 : "${NMI_TOKENIZATION_KEY:?set in $REPO/.env}"
 NMI_TOKENIZATION_URL=${NMI_TOKENIZATION_URL:-https://secure.networkmerchants.com/token/Collect.js}
 NMI_WEBHOOK_SIGNING_SECRET=${NMI_WEBHOOK_SIGNING_SECRET:-demo-webhook-secret}
-NMI_ACCOUNT_ID=${NMI_ACCOUNT_ID:-579145} # operator-declared label (NMI Gateway ID)
+: "${NMI_ACCOUNT_ID:?set NMI_ACCOUNT_ID to the sandbox Gateway ID}"
 BASE=${OPENRAILS_BASE_URL:-http://localhost:3053}
 
 echo "== build demo + helpers"

@@ -26,6 +26,6 @@ fresh-database cutover.
 
 Validation uses disposable `openrails_or927_*` databases in the audit PostgreSQL
 instance. A read-only census found no OpenRails/billing schema in the15 retained
-AuthKit/Cozy databases visible on this host. Other audit fixtures are retained for
+AuthKit/host-app databases visible on this host. Other audit fixtures are retained for
 their owners; their histories must not be relabeled as the new baseline. No remote
 deployment or retained application database was reset by this change.

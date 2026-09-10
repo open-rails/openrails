@@ -113,7 +113,7 @@ func TestCaptureHold_RedisFlushFallback(t *testing.T) {
 // the caller's request id ALONE. The admit was deliberately placed with a
 // NON-default source ("usage") and the retry echoes nothing — before or#907
 // this exact shape rebuilt the coordinate at the "admit" default, missed the
-// lookup, and debited a second time (the hole that forced tensorhub th#969's
+// lookup, and debited a second time (the hole that forced host-four upstream#969's
 // settlement outbox parking).
 func TestCaptureHold_FallbackRetryIsIdempotent(t *testing.T) {
 	svc, ms, rdb, payer, ctx := captureFallbackEnv(t)

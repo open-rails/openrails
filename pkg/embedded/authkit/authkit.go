@@ -33,7 +33,7 @@
 // is not enough for a privileged surface: JWT verification is stateless, so a
 // banned or deleted subject keeps a valid token until it expires, and a grant
 // like "is this user a billing admin?" is a live DB read, not a claim. Hosts
-// that had to hand-roll a bridge for those two decisions (doujins #803) plug
+// that had to hand-roll a bridge for those two decisions (host-one #803) plug
 // them in here instead. OpenRails never learns what a host's admission or
 // grant authority IS — the host injects it, and no OpenRails package imports
 // authkit's client to go looking.
@@ -102,7 +102,7 @@ func WithUserAdmission(a Admission) Option {
 
 // WithoutTokenRoles drops the token's role snapshot from the resulting
 // billingauth.UserContext. A JWT role list is stale for the whole token
-// lifetime; a host that authorizes from a live authority instead (doujins
+// lifetime; a host that authorizes from a live authority instead (host-one
 // #774) omits it rather than passing a snapshot nothing should read.
 func WithoutTokenRoles() Option {
 	return func(o *options) { o.omitTokenRoles = true }
@@ -152,7 +152,7 @@ func WithRolePermissions(mapper func(roles []string) []string) DelegatedOption {
 //
 // It runs AFTER the admission veto, so an inadmissible subject never reaches
 // the lookup. Resolve from a LIVE authority, not cl.Roles: the token's role
-// snapshot is stale for the token's lifetime (doujins #774).
+// snapshot is stale for the token's lifetime (host-one #774).
 func WithPermissionResolver(r PermissionResolver) DelegatedOption {
 	return func(o *delegatedOptions) { o.resolver = r }
 }
@@ -227,9 +227,9 @@ func NewVerifierAuthenticator(issuers []string, expectedAud string, opts ...Opti
 // the HOST's own verifier. It returns a DelegatedPrincipal carrying:
 //
 //   - MerchantID: the ENGINE's bound merchant, pinned here at construction —
-//     never anything read from the caller's token. tensorhub's hand-rolled
+//     never anything read from the caller's token. host-four's hand-rolled
 //     bridge pinned the caller's org UUID and scoped every request's RLS to a
-//     nonexistent merchant (th#1765); this parameter exists so that bug is
+//     nonexistent merchant (upstream#1765); this parameter exists so that bug is
 //     unwritable. Injecting a verifier does not weaken it: the verifier only
 //     produces claims, and the merchant pin is never read from them.
 //   - SubjectID: the token's `sub` claim (the acting end user).
@@ -238,9 +238,9 @@ func NewVerifierAuthenticator(issuers []string, expectedAud string, opts ...Opti
 //     WithRolePermissions for another role vocabulary, WithPermissionResolver
 //     for a grant that needs the request or a live authority.
 //
-// Every host used to hand-write this mapping; tensorhub's was a live bug
-// (th#1765) and cozy-art simply never wrote one, 404ing its whole
-// self-service surface (ca#269). Pass the result as
+// Every host used to hand-write this mapping; host-four's was a live bug
+// (upstream#1765) and host-three simply never wrote one, 404ing its whole
+// self-service surface (upstream#269). Pass the result as
 // embedded.MountOptions.DelegatedAuthenticator.
 func NewDelegatedAuthenticator(v Verifier, merchantID string, opts ...DelegatedOption) (billingauth.DelegatedAuthenticator, error) {
 	if v == nil {

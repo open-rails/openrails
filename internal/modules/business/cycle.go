@@ -40,7 +40,7 @@ import (
 )
 
 // Ladder windows, measured from an invoice's due_at. Deliberately constants
-// for now (tensorhub's runcycle shipped with exactly these defaults): a
+// for now (host-four's runcycle shipped with exactly these defaults): a
 // merchant-config knob is additive when a merchant actually asks.
 const (
 	// FinalNoticeAfterDue is how long past due before the final notice.

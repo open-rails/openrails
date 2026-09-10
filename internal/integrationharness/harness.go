@@ -6,13 +6,13 @@
 // test can drive identical operation scripts against both and assert parity (the
 // embed conformance test is the first consumer; #485):
 //
-//   - EMBEDDED no-auth HOST (Server 1, ≈ doujins minus auth). Builds the engine
+//   - EMBEDDED no-auth HOST (Server 1, ≈ host-one minus auth). Builds the engine
 //     with embed.New (host-owns-auth) and serves the embedded /v1/merchant/*
 //     surface over httptest with a TRUSTING API-key resolver that accepts
 //     every request and pins the bound merchant — it verifies NOTHING (fine for
-//     tests). This is "doujins with a no-op authenticator": real HTTP, real
+//     tests). This is "host-one with a no-op authenticator": real HTTP, real
 //     engine, no auth checks. Mirrors internal/billing/openrailsembed in the
-//     doujins repo (the shape reference).
+//     host-one repo (the shape reference).
 //
 //   - STANDALONE real server + real AuthKit (Server 2, the production path).
 //     Boots the actual standalone server (internal/bootstrap/serverboot +
@@ -283,7 +283,7 @@ func NewPersistent(t *testing.T, ctx context.Context) *Harness {
 // trustingResolver is the embedded no-auth host's API-key resolver: it
 // accepts EVERY presented token as a merchant-wide credential for the
 // bound merchant and verifies NOTHING. This is the "no-op authenticator" half of
-// "doujins minus auth" — the host is trusted for its own merchant, exactly as an
+// "host-one minus auth" — the host is trusted for its own merchant, exactly as an
 // embedding host treats its own in-process engine. It replaces the per-test
 // stubResolver the conformance test used to carry.
 type trustingResolver struct {

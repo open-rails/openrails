@@ -55,12 +55,12 @@ func TestPGHistorySource(t *testing.T) {
 		}
 		// Imported legacy dunning row with correlation keys in detail.
 		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source, detail)
-		      VALUES ($1,'charge_failure','nmi',$2,'doujins_users_logs',
+		      VALUES ($1,'charge_failure','nmi',$2,'host-one_users_logs',
 		              '{"rail_subscription_id":"legacy-sub-`+sfx+`","rail_transaction_id":"legacy-txn-`+sfx+`","status":"declined","amount_micros":9990000}'::jsonb)`,
 			merchantA.UUID(), t1)
 		// Off-rail imported row: must not surface for a ["nmi"] query.
 		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source)
-		      VALUES ($1,'charge_failure','ccbill',$2,'doujins_users_logs')`, merchantA.UUID(), t1)
+		      VALUES ($1,'charge_failure','ccbill',$2,'host-one_users_logs')`, merchantA.UUID(), t1)
 		// Failed payment = go-forward dunning evidence.
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,

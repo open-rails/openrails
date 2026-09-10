@@ -163,26 +163,26 @@ func TestReconcileMerchantManifestEnsuresTenants(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, hostThreeMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
 
 	var tenantID, permissionGroupID string
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT id::text, permission_group_id
 		  FROM openrails.merchants
-		 WHERE slug = 'cozy-art'
+		 WHERE slug = 'host-three'
 	`).Scan(&tenantID, &permissionGroupID))
 
 	// #567: permission_group_id now holds the merchant permission-group's internal id.
-	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup("cozy-art"))
+	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, controlplane.MerchantGroup("host-three"))
 	require.NoError(t, err)
 	require.Equal(t, groupID, permissionGroupID, "manifest bootstrap should bind the merchant directory row to its permission-group id")
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, hostThreeMerchantManifest(), MerchantManifestReconcileOptions{Insert: true}))
 
 	require.NoError(t, pool.QueryRow(ctx, `
 			SELECT permission_group_id
 		  FROM openrails.merchants
-		 WHERE slug = 'cozy-art'
+		 WHERE slug = 'host-three'
 	`).Scan(&permissionGroupID))
 	require.Equal(t, groupID, permissionGroupID)
 }
@@ -191,10 +191,10 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.Profile = MerchantProfileConfig{
-		DisplayName: "Cozy Art Billing",
+		DisplayName: "Host Three Billing",
 		LogoURL:     "https://cdn.example/logo.png",
 		FromEmail:   "billing@example.com",
 		SupportURL:  "https://example.com/support",
@@ -209,12 +209,12 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	var displayName, logoURL, fromEmail, supportURL string
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -226,7 +226,7 @@ func TestReconcileMerchantManifestAppliesMerchantConfiguration(t *testing.T) {
 		FROM openrails.merchant_configurations
 		WHERE merchant_id = $1::uuid
 	`, merchantID).Scan(&displayName, &logoURL, &fromEmail, &supportURL))
-	require.Equal(t, "Cozy Art Billing", displayName)
+	require.Equal(t, "Host Three Billing", displayName)
 	require.Equal(t, "https://cdn.example/logo.png", logoURL)
 	require.Equal(t, "billing@example.com", fromEmail)
 	require.Equal(t, "https://example.com/support", supportURL)
@@ -258,8 +258,8 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.PSPs = map[string]PSPConfig{
 		"ccbill": {
 			"ccbill": {
@@ -272,12 +272,12 @@ func TestReconcileMerchantManifestStoresCCBillTypedSecrets(t *testing.T) {
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 	var accountID string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT account_id
@@ -314,8 +314,8 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	const (
 		accountID       = "AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9"
 		recipientWallet = "9hSR6S7WPtxmTojgo6GG3k4yDPecgJY292j7xrsUGWBu"
@@ -334,12 +334,12 @@ func TestReconcileMerchantManifestStoresSolanaPSPConfig(t *testing.T) {
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	var evidenceBytes []byte
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -374,10 +374,10 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 
 	threshold := int64(75_000_000)
 	floor := int64(2_000_000)
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
-	mt.DisplayName = "Cozy Art"
-	mt.Profile = MerchantProfileConfig{DisplayName: "Cozy Art Billing", FromEmail: "billing@example.com"}
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
+	mt.DisplayName = "Host Three"
+	mt.Profile = MerchantProfileConfig{DisplayName: "Host Three Billing", FromEmail: "billing@example.com"}
 	mt.Invoice = &InvoiceConfig{
 		CollectionThreshold:   &threshold,
 		MonthlyFloor:          &floor,
@@ -393,7 +393,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				AccountID: "579145",
+				AccountID: "100001",
 				Settings: map[string]any{
 					"tokenization_url": "https://secure.networkmerchants.com/token/Collect.js",
 					"tokenization_key": "live-token",
@@ -408,7 +408,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 		// archived sibling still round-trips through dump.
 		"mobius-secondary": {
 			"nmi": {
-				AccountID: "681902",
+				AccountID: "100002",
 				Archived:  true,
 				Secrets: map[string]string{
 					"security_key": "test-security",
@@ -425,7 +425,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	// First push creates the merchant; second push syncs the display name onto the
 	// existing merchant row (the `found` path) — mirrors a real re-apply.
@@ -434,7 +434,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 
 	// merchant_configurations carries the invoice policy.
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 	parsedMerchantID, err := merchant.ParseID(merchantID)
 	require.NoError(t, err)
 	var boundary string
@@ -470,7 +470,7 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	var liveKey string
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT key FROM openrails.psps
-		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND account_id = '579145'
+		WHERE merchant_id = $1::uuid AND rail = 'nmi' AND account_id = '100001'
 	`, merchantID).Scan(&liveKey))
 	require.Equal(t, "mobius", liveKey)
 
@@ -482,12 +482,12 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", tokenization.CollectJSURL)
 
 	// dump the merchant back into the manifest shape.
-	dumped, err := DumpMerchantConfig(ctx, cfg, cp, "cozy-art", DumpMerchantConfigOptions{})
+	dumped, err := DumpMerchantConfig(ctx, cfg, cp, "host-three", DumpMerchantConfigOptions{})
 	require.NoError(t, err)
 	require.Len(t, dumped.Merchants, 1)
-	d := dumped.Merchants["cozy-art"]
-	require.Equal(t, "Cozy Art", d.DisplayName)
-	require.Equal(t, "Cozy Art Billing", d.Profile.DisplayName)
+	d := dumped.Merchants["host-three"]
+	require.Equal(t, "Host Three", d.DisplayName)
+	require.Equal(t, "Host Three Billing", d.Profile.DisplayName)
 	require.Equal(t, "billing@example.com", d.Profile.FromEmail)
 
 	require.NotNil(t, d.Invoice)
@@ -522,23 +522,23 @@ func TestMerchantConfigPushDumpRoundTrip(t *testing.T) {
 	}
 	// #697: the dash-form CCBill composite id survives push⇄dump verbatim.
 	require.Equal(t, "945280-0000", ccbillDump.AccountID)
-	require.Contains(t, byAccount, "579145")
-	require.Contains(t, byAccount, "681902")
-	require.False(t, byAccount["579145"].Archived)
-	require.True(t, byAccount["681902"].Archived, "the archived sibling survives push -> dump")
-	require.Empty(t, byAccount["579145"].Secrets, "redacted dump omits secret values entirely")
-	require.NotContains(t, byAccount["579145"].Secrets, "tokenization_key")
-	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byAccount["579145"].Settings["tokenization_url"])
-	require.Equal(t, "live-token", byAccount["579145"].Settings["tokenization_key"])
+	require.Contains(t, byAccount, "100001")
+	require.Contains(t, byAccount, "100002")
+	require.False(t, byAccount["100001"].Archived)
+	require.True(t, byAccount["100002"].Archived, "the archived sibling survives push -> dump")
+	require.Empty(t, byAccount["100001"].Secrets, "redacted dump omits secret values entirely")
+	require.NotContains(t, byAccount["100001"].Secrets, "tokenization_key")
+	require.Equal(t, "https://secure.networkmerchants.com/token/Collect.js", byAccount["100001"].Settings["tokenization_url"])
+	require.Equal(t, "live-token", byAccount["100001"].Settings["tokenization_key"])
 
 	// the dump re-marshals to valid YAML that re-parses (round-trip closure).
 	encoded, err := MarshalMerchantManifest(dumped)
 	require.NoError(t, err)
 	reparsed, err := ParseMerchantConfigManifest(encoded)
 	require.NoError(t, err)
-	require.NotNil(t, reparsed.Merchants["cozy-art"].Invoice)
-	require.Len(t, reparsed.Merchants["cozy-art"].PSPs, 3)
-	require.Equal(t, "945280-0000", reparsed.Merchants["cozy-art"].PSPs["ccbill"]["ccbill"].AccountID)
+	require.NotNil(t, reparsed.Merchants["host-three"].Invoice)
+	require.Len(t, reparsed.Merchants["host-three"].PSPs, 3)
+	require.Equal(t, "945280-0000", reparsed.Merchants["host-three"].PSPs["ccbill"]["ccbill"].AccountID)
 }
 
 func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T) {
@@ -556,8 +556,8 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 		Token:      vault.Token,
 	}}
 
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
@@ -568,12 +568,12 @@ func TestReconcileMerchantManifestUsesConfiguredVaultSecretBackend(t *testing.T)
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantIDText string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantIDText))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
 	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_vault_123", "secret_key")
 	require.NoError(t, err)
 	vaultPath := "secret/openrails/merchants/" + merchantIDText + "/" + secretName
@@ -608,8 +608,8 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 		MasterKey: base64.StdEncoding.EncodeToString(key),
 	}}
 
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
@@ -620,12 +620,12 @@ func TestReconcileMerchantManifestUsesEncryptedDBSecretBackend(t *testing.T) {
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantIDText string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantIDText))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantIDText))
 	secretName, err := merchants.PSPSecretName("stripe", "test", "acct_db_123", "secret_key")
 	require.NoError(t, err)
 
@@ -650,7 +650,7 @@ func TestReconcileMerchantManifestSerializesConcurrentReplicas(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	manifest := cozyArtMerchantManifest()
+	manifest := hostThreeMerchantManifest()
 
 	start := make(chan struct{})
 	var successes atomic.Int32
@@ -876,12 +876,12 @@ func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlp
 	return cp
 }
 
-func cozyArtMerchantManifest() *BillingConfig {
+func hostThreeMerchantManifest() *BillingConfig {
 	return &BillingConfig{
 		Version: BootstrapManifestVersion,
 		Merchants: map[string]MerchantConfig{
-			"cozy-art": {
-				DisplayName: "Cozy Art",
+			"host-three": {
+				DisplayName: "Host Three",
 			},
 		},
 	}

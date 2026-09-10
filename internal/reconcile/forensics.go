@@ -17,7 +17,7 @@ import (
 //  2. "local"    — the local retry fields (last_retry_at / retry_attempts /
 //     next_retry_at), imported from legacy by the migration;
 //  3. "history"  — Postgres history (#735): the imported legacy
-//     rebill/scheduler history (doujins #387) plus failed-payment rows —
+//     rebill/scheduler history plus failed-payment rows —
 //     deep history the provider APIs cannot return.
 type DunningForensics struct {
 	Provider              Provider `json:"provider"`

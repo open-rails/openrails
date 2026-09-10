@@ -50,9 +50,9 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	_, err = pool.Exec(ctx, `
 		INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, archived, evidence)
 		VALUES ($1::uuid, 'nmi', 'test', $2, false, $3::jsonb)
-	`, tn.ID.String(), "681902", `{"settings":{"tokenization_key":"tok_sandbox_681"}}`)
+	`, tn.ID.String(), "100002", `{"settings":{"tokenization_key":"tok_sandbox_681"}}`)
 	require.NoError(t, err)
-	nmiWebhookName, err := PSPSecretName("nmi", "test", "681902", "webhook_signing_secret")
+	nmiWebhookName, err := PSPSecretName("nmi", "test", "100002", "webhook_signing_secret")
 	require.NoError(t, err)
 	_, err = store.Put(ctx, tn.ID, nmiWebhookName, "nmi_whsec_681")
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestSandboxPostureResolvesTestScopedCredentials(t *testing.T) {
 	require.Equal(t, "tok_sandbox_681", tok.TokenizationKey)
 
 	// The checkout-session availability probe path.
-	wantKeyName, err := PSPSecretName("nmi", "test", "681902", "security_key")
+	wantKeyName, err := PSPSecretName("nmi", "test", "100002", "security_key")
 	require.NoError(t, err)
 	gotKeyName, ok, err := svc.ActivePSPSecretName(ctx, tn.ID, "nmi", "test", "security_key")
 	require.NoError(t, err)

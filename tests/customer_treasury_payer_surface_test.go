@@ -208,7 +208,7 @@ func TestCustomerTreasuryPayerSurface_MerchantTokenAndCrossCustomerRejected(t *t
 }
 
 // TestCustomerTreasuryPayerSurface_SubjectPayer is the or#916 embedded shape:
-// the host principal's SUBJECT (e.g. a tensorhub org uuid) is the payer, and
+// the host principal's SUBJECT (e.g. a host-four org uuid) is the payer, and
 // :customer_id names that subject. Before or#916 the scope check matched only
 // MERCHANT coordinates, 403ing every subject payer with a correct permission
 // catalog; the subject must authorize on its own identity + customer:* grants.
@@ -219,7 +219,7 @@ func TestCustomerTreasuryPayerSurface_SubjectPayer(t *testing.T) {
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 
-	// The acting subject IS the payer (an org uuid in the tensorhub shape).
+	// The acting subject IS the payer (an org uuid in the host-four shape).
 	orgSubject := uuid.NewString()
 	orgPayer := identity.CustomerIDFromString(orgSubject)
 
@@ -240,7 +240,7 @@ func TestCustomerTreasuryPayerSurface_SubjectPayer(t *testing.T) {
 	})
 
 	// Own subject id → 200 with the org's OWN balance (pre-or#916: 403
-	// customer_scope_mismatch, the th#1765/or#913-filed bug).
+	// customer_scope_mismatch, the upstream#1765/or#913-filed bug).
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+orgSubject+"/balance?currency=EUR", nil)
 	require.Equal(t, http.StatusOK, resp.status, "subject payer must read its own balance: %s", resp.body)
 	body := decodeJSONObject(t, resp.body)

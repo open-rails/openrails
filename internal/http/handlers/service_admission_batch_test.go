@@ -94,7 +94,7 @@ func TestAdmitInputFromRequest_UsesTrustLevel(t *testing.T) {
 	require.Equal(t, "trusted", got.TrustLevel)
 }
 
-// TestServiceAdmitBatchVerdicts_LogsTheCause is th#1627's regression gate. The
+// TestServiceAdmitBatchVerdicts_LogsTheCause is upstream#1627's regression gate. The
 // verdict's wire string is a deliberate constant — it crosses into the host's
 // tenant-facing error — but the CAUSE must reach the operator log. It did not:
 // `403 credit_authorize_failed ... status=500 admission check failed` was the
@@ -111,7 +111,7 @@ func TestServiceAdmitBatchVerdicts_LogsTheCause(t *testing.T) {
 
 	payer := uuid.NewString()
 	out := serviceAdmitBatchVerdicts(context.Background(),
-		[]serviceAdmitRequest{{CustomerID: payer, Invoker: "user:a", RequestID: "r1", Source: "tensorhub"}},
+		[]serviceAdmitRequest{{CustomerID: payer, Invoker: "user:a", RequestID: "r1", Source: "host-four"}},
 		func(billingidentity.CustomerID) bool { return true },
 		func(context.Context, billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
 			return nil, cause

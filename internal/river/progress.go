@@ -30,8 +30,7 @@ import (
 //
 // river_job is the primary signal deliberately. worker_health.last_success_at
 // is written by WorkerHealthMiddleware, so a fleet running without that
-// middleware reports never_succeeded for every kind forever (100% false alarms,
-// measured 19/25 on cozy-art, 20/24 on tensorhub). river_job is written by
+// middleware reports never_succeeded for every kind forever. river_job is written by
 // River itself, so it stays truthful regardless of how the host wired things.
 
 // Progress verdicts. Empty string means healthy.

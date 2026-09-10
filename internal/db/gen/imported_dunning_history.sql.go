@@ -80,7 +80,7 @@ type ListDunningHistoryEventsRow struct {
 }
 
 // openrails.imported_dunning_history — append-only legacy dunning forensics
-// (#735; doujins #387 import target). Display/report evidence only.
+// (#735 import target). Display/report evidence only.
 // Dunning-forensics history feed (#735): imported legacy rows ∪ failed
 // payments, merchant-scoped, oldest first. Structured so #733's
 // subscription_status_transitions can join as another UNION branch.

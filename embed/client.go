@@ -63,8 +63,8 @@ type localClient struct {
 // openrails_app role the payable-customer materialization inside Admit was
 // denied outright ("new row violates row-level security policy for table
 // customers", 42501), i.e. the embedded seam's admission surface 500'd for
-// every host — doujins, hentai0 and cozy-art all consume it. Pinning here
-// fixes the whole transcribed surface at its one shared entry point rather
+// every embedding host. Pinning here fixes the whole transcribed surface at its
+// one shared entry point rather
 // than per handler.
 func (c *localClient) merchantScope(ctx context.Context, fn func(ctx context.Context) error) error {
 	mctx, err := c.merchantCtx(ctx)

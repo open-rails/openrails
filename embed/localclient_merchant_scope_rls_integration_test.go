@@ -28,7 +28,7 @@ import (
 //	status=500 admission check failed: ERROR: new row violates row-level
 //	security policy for table "customers" (SQLSTATE 42501)
 //
-// That is live product surface — doujins, hentai0 and cozy-art all consume it.
+// That is live product surface — host-one, host-two and host-three all consume it.
 //
 // Unlike the pre-existing embed fixtures, this test seeds its customer under the
 // merchant the engine is actually BOUND to, so a failure here is the product's,

@@ -341,9 +341,9 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	}
 
 	body := map[string]any{
-		"slug":     "cozy-art-ci",
-		"issuer":   "https://cozy.art",
-		"jwks_uri": "https://cozy.art/.well-known/jwks.json",
+		"slug":     "host-three-ci",
+		"issuer":   "https://host-three.example",
+		"jwks_uri": "https://host-three.example/.well-known/jwks.json",
 		"enabled":  true,
 	}
 	raw, err := json.Marshal(body)
@@ -358,11 +358,11 @@ func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) 
 	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, CustomerGroup(customerID))
 	require.NoError(t, err)
 	require.NotEmpty(t, groupID)
-	app, err := cp.Core().GetRemoteApplication(ctx, "https://cozy.art")
+	app, err := cp.Core().GetRemoteApplication(ctx, "https://host-three.example")
 	require.NoError(t, err)
 	require.Equal(t, groupID, app.PermissionGroupID)
-	require.Equal(t, "https://cozy.art", app.Issuer)
-	require.Equal(t, "cozy-art-ci", app.Slug)
+	require.Equal(t, "https://host-three.example", app.Issuer)
+	require.Equal(t, "host-three-ci", app.Slug)
 }
 
 func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {

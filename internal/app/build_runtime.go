@@ -529,7 +529,7 @@ func validateDatabase(cfg *config.Config, database *db.DB) error {
 		return err
 	}
 
-	// th#1627/or#901: the CONVERSE check — a database recording migrations this
+	// The converse check rejects a database recording migrations this
 	// build no longer carries. migratekit only asks "embedded ⊆ applied", which a
 	// re-squashed chain satisfies while applying nothing, freezing the schema at
 	// the old shape. This is the only migration seam an embedded host cannot skip.

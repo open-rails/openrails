@@ -44,7 +44,7 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 		}
 		byMerchant[tg.Merchant] = tg.Manifest
 	}
-	for _, want := range []string{"anthropic", "digital-ocean", "cozy-creator", "tensorhub"} {
+	for _, want := range []string{"anthropic", "digital-ocean", "host-three", "host-four"} {
 		if byMerchant[want] == nil {
 			t.Fatalf("example missing merchant %q (got %d merchants)", want, len(targets))
 		}
@@ -54,9 +54,9 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 	if len(byMerchant["anthropic"].UsageLimits) < 1 {
 		t.Error("anthropic should declare usage_limits")
 	}
-	// tensorhub: legacy credit grants still validate (additive).
-	if len(flattenProducts(byMerchant["tensorhub"])) < 2 {
-		t.Error("tensorhub should declare prepaid products")
+	// host-four: legacy credit grants still validate (additive).
+	if len(flattenProducts(byMerchant["host-four"])) < 2 {
+		t.Error("host-four should declare prepaid products")
 	}
 
 	// ---- digital-ocean: the #638 rate-card model ----
@@ -117,16 +117,16 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 		t.Error("digital-ocean has no allowance (pooled bandwidth)")
 	}
 
-	// ---- cozy-creator: 4 membership tiers + variable credit top-up (#639/#640) ----
-	cozyProducts := flattenProducts(byMerchant["cozy-creator"])
+	// ---- host-three: 4 membership tiers + variable credit top-up (#639/#640) ----
+	hostProducts := flattenProducts(byMerchant["host-three"])
 	for _, key := range []string{"novice", "craftsman", "expert", "grandmaster"} {
-		if _, ok := cozyProducts[key]; !ok {
-			t.Errorf("cozy-creator missing membership tier %q", key)
+		if _, ok := hostProducts[key]; !ok {
+			t.Errorf("host-three missing membership tier %q", key)
 		}
 	}
-	topup, ok := cozyProducts["image-credit-topup"]
+	topup, ok := hostProducts["image-credit-topup"]
 	if !ok || len(topup.Credits) != 1 || topup.Credits[0].Amount != nil || len(topup.Prices) != 1 {
-		t.Fatal("cozy-creator missing image-credit-topup credit offer")
+		t.Fatal("host-three missing image-credit-topup credit offer")
 	}
 	offer := catalog.RatePrice{
 		Model:   topup.Prices[0].Model,
@@ -181,12 +181,12 @@ func TestLoadCatalogPushTargetsRejectsAuthAndMerchants(t *testing.T) {
 	path := writeCatalogPushManifest(t, `version: 1
 auth:
   permission_groups:
-    - slug: doujins
+    - slug: host-one
 merchants:
-  - slug: doujins
-    name: Doujins
+  - slug: host-one
+    name: Host One
 catalogs:
-  - merchant: doujins
+  - merchant: host-one
     products: []
 `)
 
@@ -199,7 +199,7 @@ catalogs:
 func TestLoadCatalogPushTargetsParsesMultiMerchantCatalogs(t *testing.T) {
 	raw := []byte(`version: 1
 catalogs:
-  - merchant: doujins
+  - merchant: host-one
     products:
       - key: smoke-basic
         display_name: Smoke Basic
@@ -210,7 +210,7 @@ catalogs:
             unit_amount: 100
             duration: 30d
             auto_renew: true
-  - merchant: cozy-art
+  - merchant: host-three
     products:
       - key: premium-basic
         display_name: Premium Basic
@@ -230,7 +230,7 @@ catalogs:
 	if len(targets) != 2 {
 		t.Fatalf("len(targets) = %d, want 2", len(targets))
 	}
-	if targets[0].Merchant != "doujins" || targets[1].Merchant != "cozy-art" {
+	if targets[0].Merchant != "host-one" || targets[1].Merchant != "host-three" {
 		t.Fatalf("merchants = %q, %q", targets[0].Merchant, targets[1].Merchant)
 	}
 	if targets[0].Manifest.TierGroups[0].Key != "smoke" {

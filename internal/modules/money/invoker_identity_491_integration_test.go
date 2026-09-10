@@ -24,8 +24,8 @@ func TestInvokerIdentityAndPayerNaturalKey(t *testing.T) {
 	q := gen.New(pool)
 
 	t.Run("subject_natural_key_is_idempotent_across_issuers", func(t *testing.T) {
-		issuerA := "https://doujins.example"
-		issuerB := "https://hentai0.example"
+		issuerA := "https://host-one.example"
+		issuerB := "https://host-two.example"
 		subjAID := uuid.New()
 		subjBID := uuid.New()
 		subjA := subjAID.String()

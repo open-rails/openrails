@@ -124,7 +124,7 @@ merchants:
     psps:
       mobius:
         nmi:
-          account_id: "579145"
+          account_id: "100001"
           secrets:
             security_key: sandbox-security-key
 `, mode1TestMerchantSlug)
@@ -198,7 +198,7 @@ func TestRunServerMode1BootArmsNMIPSPFromManifest(t *testing.T) {
 	require.NoError(t, scoped.QueryRow(ctx, `
 		SELECT count(*) FROM openrails.psps
 		 WHERE merchant_id = $1 AND rail = 'nmi' AND environment = 'test'
-		   AND account_id = '579145' AND NOT archived
+		   AND account_id = '100001' AND NOT archived
 	`, merchantID).Scan(&pspCount))
 	require.Equal(t, 1, pspCount, "MODE-1 boot must arm the manifest NMI PSP")
 	require.Positive(t, probeHits.Load(), "the #348 test_mode arm probe must hit the injected gateway")

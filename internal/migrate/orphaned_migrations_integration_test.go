@@ -23,7 +23,7 @@ import (
 // or#901: reproduce, through the REAL migrator entrypoint, the condition that
 // silently killed both money-path reconcile jobs for 15 days.
 //
-// Both e2e stacks recorded openrails migrations 1..12 (from a tensorhub pin
+// Both e2e stacks recorded openrails migrations 1..12 (from a host-four pin
 // whose chain reached 12). or#893's re-squash then folded 0002-0085 into a
 // rewritten 0001 and deleted the rest, leaving the embedded set {0001, 0002}.
 // migratekit only ever asks "is every embedded migration applied?", so names

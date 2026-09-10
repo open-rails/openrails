@@ -26,7 +26,7 @@ type UsageEvent struct {
 	// Currency is the native OpenRails currency this usage amount is denominated in.
 	Currency string `json:"currency"`
 	// Resource is the caller-supplied free-form string for what was metered
-	// (opaque to OpenRails; e.g. tensorhub endpoint slug). Nullable.
+	// (opaque to OpenRails; for example, an endpoint slug). Nullable.
 	Resource *string `json:"resource,omitempty"`
 	// EventType is the metered endpoint / model (e.g. "gpt-4o").
 	EventType string `json:"event_type"`

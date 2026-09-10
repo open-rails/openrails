@@ -6,7 +6,7 @@
 // The reusable integrationharness boots both surfaces over the same migrated
 // dbtest Postgres:
 //
-//   - Server 1, EMBEDDED no-auth HOST (≈ doujins minus auth): embed.New +
+//   - Server 1, EMBEDDED no-auth HOST (≈ host-one minus auth): embed.New +
 //     the real embedded /v1/merchant/* surface on httptest, behind the REAL
 //     service-credential route gate wired to a TRUSTING resolver (no auth).
 //   - Server 2, STANDALONE real server + real AuthKit: the actual standalone gin

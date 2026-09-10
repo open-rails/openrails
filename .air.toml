@@ -27,7 +27,6 @@ exclude_dir = [
   ".task",
   "agents",
   "bin",
-  "cozy_client",
   "docs",
   "examples",
   "frontend",

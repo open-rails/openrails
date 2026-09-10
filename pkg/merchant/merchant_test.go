@@ -67,7 +67,7 @@ func TestValidateSlug(t *testing.T) {
 	// hyphens, no leading/trailing hyphen, <=63 chars; normalized
 	// (trim+lowercase) first. Valid INCLUDING inputs that only become valid after
 	// normalize (trim+lower).
-	valid := []string{"tensorhub", "doujins", "monkey", "a", "ab", "a-b-c", "x1-2y", "  Tensorhub  ", "UPPER"}
+	valid := []string{"host-four", "host-one", "monkey", "a", "ab", "a-b-c", "x1-2y", "  Host-Four  ", "UPPER"}
 	for _, s := range valid {
 		if err := ValidateSlug(s); err != nil {
 			t.Errorf("ValidateSlug(%q) = %v, want nil", s, err)

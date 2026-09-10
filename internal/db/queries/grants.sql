@@ -404,7 +404,7 @@ ORDER BY g.created_at;
 -- #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
 -- granting state (active/cancelled/unknown) for a product that PROMISES entitlements,
 -- with NO subscription-sourced grant yet. After the migrate/convergence split the
--- doujins migrate moves subscriptions as source-of-truth (#724) but no longer
+-- host-one migrate moves subscriptions as source-of-truth (#724) but no longer
 -- writes their entitlements — derive-1 materializes the grant + entitlement window
 -- from the stored subscription. Window is computed Go-side (mirrors the retired
 -- migrate logic): [COALESCE(current_period_starts_at,started_at),
@@ -439,7 +439,7 @@ ORDER BY COALESCE(s.current_period_starts_at, s.started_at);
 
 -- #631 DERIVE `derive.wallet.missing`: completed solana wallet payments
 -- carrying a stored access window (metadata.expiration_rfc3339) for a grantable
--- product, with NO grant yet. The doujins migrate moved these payments as
+-- product, with NO grant yet. The host-one migrate moved these payments as
 -- source-of-truth (rail=solana, amount>0) but no longer derives their membership
 -- entitlement — derive-1 materializes grant + window [purchased_at,
 -- expiration_rfc3339). Distinct from the general `derive.grant.missing` (payments)
@@ -503,9 +503,9 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND jsonb_exists(COALESCE(g.spec_snapshot->'entitlements', '[]'::jsonb), sqlc.arg(entitlement)::text);
 
 -- #636 idempotency for admin-grant import: is there already an entitlement grant
--- from this admin source? Lets the doujins migrate hand admin comps over as grants
+-- from this admin source? Lets the host-one migrate hand admin comps over as grants
 -- (source_type=admin) and re-run safely — convergence derive-2 projects the
--- entitlement, so doujins never writes entitlements directly.
+-- entitlement, so host-one never writes entitlements directly.
 -- name: AdminGrantExistsForSource :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.grants g

@@ -17,7 +17,7 @@ func TestRequireBillingCurrencyRejectsCustom(t *testing.T) {
 	if err := RequireBillingCurrency(""); err == nil {
 		t.Error("empty currency must be rejected")
 	}
-	err := RequireBillingCurrency("tensorhub/gold")
+	err := RequireBillingCurrency("host-four/gold")
 	if !errors.Is(err, ErrBillingUnitRequired) {
 		t.Errorf("qualified custom unit must be rejected at billing, got %v", err)
 	}

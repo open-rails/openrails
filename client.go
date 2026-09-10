@@ -57,7 +57,7 @@ func WithMerchant(ctx context.Context, id MerchantID) context.Context {
 	return merchant.WithID(ctx, id)
 }
 
-// AdmissionClient is the Tensorhub hot path: batch admission, settle, release,
+// AdmissionClient is the metered-usage hot path: batch admission, settle, release,
 // wasted-spend reporting, and trust-level read.
 type AdmissionClient interface {
 	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)

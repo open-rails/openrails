@@ -17,7 +17,7 @@ const (
 	// USD1 (World Liberty Financial USD) — Crypto.USD1/USD. Verified against
 	// Pyth's Hermes feed registry on 2026-06-11:
 	//   https://hermes.pyth.network/v2/price_feeds?query=USD1
-	// (live + publishing; #360 — its absence crash-looped the doujins stack).
+	// (live + publishing; #360).
 	PythFeedUSD1USD = "0a2425d43486780990d8b63543029e20556be51fd756cca584212f4d539611d4"
 	// USDG (Global Dollar, Paxos) — Crypto.USDG/USD. Verified against Pyth's
 	// Hermes feed registry on 2026-06-11:

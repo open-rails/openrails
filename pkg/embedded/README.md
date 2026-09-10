@@ -146,7 +146,7 @@ openrails, err := embedded.New(embedded.Options{
             Name: "mobius",
             Config: config.PSPConfig{
                 Rail:      models.RailNMI,
-                AccountID: "579145",
+                AccountID: "100001",
                 NMI:       &config.NMIRailConfig{SecurityKey: mobiusSecurityKey},
             },
         },

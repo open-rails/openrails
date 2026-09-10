@@ -2,7 +2,7 @@
 // Service admit no longer uses it for request/token/image throughput; retained
 // callers use it explicitly for non-money rate-limit use cases.
 //
-// Built natively (the user's cozy-creator/ratelimiter is a reference only, not
+// Built natively (a host's rate limiter is a reference only, not
 // imported). Counters live in Redis/Garnet. The check+increment across all
 // windows is one atomic server-side op via a Lua script (portable across Redis
 // and Garnet; the interpreter overhead is microseconds, dominated by the network

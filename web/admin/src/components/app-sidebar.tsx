@@ -81,7 +81,7 @@ export function AppSidebar() {
     <Sidebar variant="inset" collapsible="icon">
       <SidebarHeader>
         {/* No product lockup: this console mounts inside the host's own app
-            (doujins, cozy-art), where a vendor mark belongs to someone else's
+            (host-one, host-three), where a vendor mark belongs to someone else's
             product. The merchant switcher is the orientation that matters here,
             and it names the merchant and role rather than the software. */}
         <MerchantSwitcher />

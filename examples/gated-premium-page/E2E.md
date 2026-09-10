@@ -7,9 +7,9 @@ approved synchronously by NMI; `/premium` unlocked; no inbound webhook needed).
 
 ## Run it
 
-Prereqs: repo-root `.env` with `NMI_SANDBOX_SECURITY_KEY`, `NMI_TOKENIZATION_KEY`
-(and optionally `NMI_WEBHOOK_SIGNING_SECRET`, `NMI_TOKENIZATION_URL`,
-`NMI_ACCOUNT_ID`); docker; `jq`; Go.
+Prereqs: repo-root `.env` with `NMI_SANDBOX_SECURITY_KEY`, `NMI_TOKENIZATION_KEY`,
+and `NMI_ACCOUNT_ID` (and optionally `NMI_WEBHOOK_SIGNING_SECRET` and
+`NMI_TOKENIZATION_URL`); docker; `jq`; Go.
 
 ```bash
 cd examples/gated-premium-page

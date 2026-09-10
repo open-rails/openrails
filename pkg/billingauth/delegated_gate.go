@@ -12,9 +12,8 @@ import (
 // authenticate the delegated token, enforce one permission (wildcard grants
 // supported), and map the delegated principal onto the billing Principal.
 //
-// Extracted verbatim from the byte-identical copies doujins and hentai0 each
-// carried (doujins #770 U15) so the two hosts of the shared merchant cannot
-// drift on authorization semantics.
+// Centralizing this gate keeps embedding hosts from drifting on authorization
+// semantics.
 type DelegatedGate struct {
 	authn DelegatedAuthenticator
 }

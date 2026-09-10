@@ -134,7 +134,7 @@ func serviceAdmitBatchVerdicts(
 			continue
 		}
 		if err != nil {
-			// th#1627: the wire string stays stable and non-leaky (it reaches the
+			// upstream#1627: the wire string stays stable and non-leaky (it reaches the
 			// host's tenant boundary), but the CAUSE must not be discarded — a 500
 			// whose only content is the constant "admission check failed" cost a
 			// cross-stack bisect to attribute. Operators read this log.

@@ -43,8 +43,8 @@ func rolePermissions(mapper func([]string) []string) PermissionResolver {
 
 // The or#913 contract: the principal's merchant is the ENGINE's bound
 // merchant from construction — never anything read from the caller's token
-// (tensorhub pinned the caller's org UUID and broke RLS on every request,
-// th#1765). Subject is the sub claim; issuer is the verified iss; permissions
+// (host-four pinned the caller's org UUID and broke RLS on every request,
+// upstream#1765). Subject is the sub claim; issuer is the verified iss; permissions
 // come from the injected resolver.
 func TestDelegatedAuthenticator_MapsClaimsOntoEnginePinnedPrincipal(t *testing.T) {
 	t.Parallel()
@@ -150,7 +150,7 @@ func TestDelegatedAuthenticator_AdmissionVetoPrecedesPermissionResolution(t *tes
 }
 
 // or#918: the resolver sees the REQUEST, which is what a role→permission
-// mapper cannot — doujins grants merchant:* only on the admin path so the hot
+// mapper cannot — host-one grants merchant:* only on the admin path so the hot
 // self path stays free of authority lookups.
 func TestDelegatedAuthenticator_PermissionResolverSeesTheRequest(t *testing.T) {
 	t.Parallel()

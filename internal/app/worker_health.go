@@ -18,9 +18,8 @@ import (
 // #895: the bookkeeping middleware is installed PER WORKER, at registration,
 // not on the client. It used to be a client-level river.Config.Middleware
 // entry, which meant an embedded host could adopt the fleet via AddWorkersTo
-// and simply omit it — measured on two hosts, where every periodic kind then
-// reported never_succeeded forever (19/25 on cozy-art, 20/24 on tensorhub:
-// 100% false alarms, which trains operators to ignore the real signal). River
+// and simply omit it, causing every periodic kind to report never_succeeded
+// forever. River
 // honours Worker.Middleware(job) per work unit (internal/jobexecutor), so
 // attaching it here makes the omission unrepresentable: registering an
 // OpenRails worker registers its bookkeeping, with no host cooperation.

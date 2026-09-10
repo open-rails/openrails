@@ -112,10 +112,10 @@ const (
 //
 // Every AuthKit-embedding host used to hand-roll the mapping from its own
 // role vocabulary onto this catalog, and both observed attempts were bugs:
-// tensorhub's map emitted exactly two invented permission strings and pinned
-// the WRONG merchant, 403ing its whole /customers/* subtree (th#1765);
-// cozy-art wrote no bridge at all, so its entire self-service surface
-// silently 404'd (ca#269). This preset is the documented DEFAULT for the
+// host-four's map emitted exactly two invented permission strings and pinned
+// the WRONG merchant, 403ing its whole /customers/* subtree (upstream#1765);
+// host-three wrote no bridge at all, so its entire self-service surface
+// silently 404'd (upstream#269). This preset is the documented DEFAULT for the
 // common AuthKit-host role shapes; a host with a different vocabulary
 // supplies its own mapping instead (see pkg/embedded/authkit
 // WithRolePermissions) — the preset is a default, never a constraint.
@@ -125,7 +125,7 @@ const (
 //   - owner, admin       → PresetOwnerPermissions: the full wildcard tier,
 //     merchant:* AND customer:*. Both globs on purpose: the self-service /
 //     treasury surface gates on customer:* strings, so merchant:* alone would
-//     403 an owner reading its own organization's balance — the th#1765
+//     403 an owner reading its own organization's balance — the upstream#1765
 //     failure shape.
 //   - member             → PresetMemberPermissions: the customer self-service
 //     set (balance read, billing update, spend-delegations read/update,

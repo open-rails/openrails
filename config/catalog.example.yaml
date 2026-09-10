@@ -262,7 +262,7 @@ catalogs:
                     db-s-1vcpu-1gb: { unit_amount: 22_320, maximum_amount: 15_000_000 }
                     db-s-2vcpu-4gb: { unit_amount: 89_290, maximum_amount: 60_000_000 }
 
-  - merchant: cozy-creator
+  - merchant: host-three
     credit_balances:
       - key: ai-image-gen
         unit: ai-image-credit
@@ -271,8 +271,8 @@ catalogs:
     products:
       - key: novice
         display_name: Novice
-        description: Monthly Cozy Art membership with expiring image credits.
-        tier_group: cozy
+        description: Monthly Host Three membership with expiring image credits.
+        tier_group: membership
         tier_rank: 1
         entitlements:
           - tier:novice
@@ -289,8 +289,8 @@ catalogs:
 
       - key: craftsman
         display_name: Craftsman
-        description: Monthly Cozy Art membership with expiring image credits.
-        tier_group: cozy
+        description: Monthly Host Three membership with expiring image credits.
+        tier_group: membership
         tier_rank: 2
         entitlements:
           - tier:craftsman
@@ -307,8 +307,8 @@ catalogs:
 
       - key: expert
         display_name: Expert
-        description: Monthly Cozy Art membership with expiring image credits.
-        tier_group: cozy
+        description: Monthly Host Three membership with expiring image credits.
+        tier_group: membership
         tier_rank: 3
         entitlements:
           - tier:expert
@@ -325,8 +325,8 @@ catalogs:
 
       - key: grandmaster
         display_name: Grandmaster
-        description: Monthly Cozy Art membership with expiring image credits.
-        tier_group: cozy
+        description: Monthly Host Three membership with expiring image credits.
+        tier_group: membership
         tier_rank: 4
         entitlements:
           - tier:grandmaster
@@ -370,7 +370,7 @@ catalogs:
                 - up_to: null
                   unit_amount: 8_000
 
-  - merchant: tensorhub
+  - merchant: host-four
     credit_balances:
       - key: inference-api
         unit: api-credit

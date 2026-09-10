@@ -34,7 +34,7 @@ type AuthenticatorConfig struct {
 	Admit Admission
 	// OmitTokenRoles drops the token's role snapshot from the resulting
 	// UserContext. A JWT role list is stale for the token's lifetime, so a host
-	// that authorizes from a live authority instead (doujins #774) sets this
+	// that authorizes from a live authority instead sets this
 	// rather than passing a snapshot nothing should read.
 	OmitTokenRoles bool
 }

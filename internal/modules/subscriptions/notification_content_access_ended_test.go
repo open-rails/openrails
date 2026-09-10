@@ -10,8 +10,8 @@ func TestRenderAccessEndedEmail(t *testing.T) {
 	endedAt := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 
 	t.Run("with signup url", func(t *testing.T) {
-		c := RenderAccessEndedEmail("Doujins", "https://example.com/signup", "alice", endedAt)
-		if c.Subject != "Your Doujins premium access has ended" {
+		c := RenderAccessEndedEmail("Host One", "https://example.com/signup", "alice", endedAt)
+		if c.Subject != "Your Host One premium access has ended" {
 			t.Fatalf("subject = %q", c.Subject)
 		}
 		if !strings.Contains(c.HTML, "Hi alice,") {
@@ -35,7 +35,7 @@ func TestRenderAccessEndedEmail(t *testing.T) {
 	})
 
 	t.Run("without signup url", func(t *testing.T) {
-		c := RenderAccessEndedEmail("Doujins", "", "", endedAt)
+		c := RenderAccessEndedEmail("Host One", "", "", endedAt)
 		if strings.Contains(c.HTML, "href=") || strings.Contains(c.HTML, "Sign up again</a>") {
 			t.Errorf("HTML must not render CTA without a URL: %q", c.HTML)
 		}

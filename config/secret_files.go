@@ -12,8 +12,8 @@ import (
 // renders secrets out of Vault (Vault Agent template, k8s secret volume, CSI)
 // into a directory mounted read-only in the container — one file per secret,
 // filename = the env-var name, content = the value. OpenRails needs no live
-// Vault connection at runtime. Same directory convention as the doujins /
-// hentai0 host apps; env always overrides files.
+// Vault connection at runtime. Embedded host apps use the same directory
+// convention; env always overrides files.
 
 // DefaultSecretsPath is where operator-rendered secret files are expected;
 // VAULT_SECRETS_PATH overrides it.

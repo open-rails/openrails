@@ -26,7 +26,7 @@ import (
 // inspection (and create_plan on devnet for the configured test mint):
 //
 //   - USDC  — plain SPL Token, no extensions → eligible (create_plan ACCEPTED on devnet).
-//   - DUSD  — the Doujins devnet test stablecoin, plain SPL Token, no extensions.
+//   - DUSD  — the Host One devnet test stablecoin, plain SPL Token, no extensions.
 //   - USD1  — plain SPL Token, no extensions → eligible (World Liberty Financial USD; mainnet only).
 //   - USDT  — plain SPL Token, so extension-eligible, but NOT allowlisted: no
 //     devnet deployment exists to run create_plan against, so it stays one-off

@@ -152,7 +152,7 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 // seedStripeSubscriptionPrice inserts a product + auto-renewing price mapped to
-// a Stripe price id, mirroring how cozy-art catalogs its Stripe plans.
+// a Stripe price id, mirroring how host-three catalogs its Stripe plans.
 func seedStripeSubscriptionPrice(t *testing.T, suite *TestContainerSuite, stripePriceID string) uuid.UUID {
 	t.Helper()
 	ctx := suite.MerchantCtx()

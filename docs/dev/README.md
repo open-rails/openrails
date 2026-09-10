@@ -102,9 +102,9 @@ Recreating one:
 
 You will not have to notice this yourself: the engine REFUSES to start when the
 ledger records migrations the build no longer carries (`OrphanedMigrationsError`,
-or#901/th#1627), on both the standalone `migrate up` path and the embedded
+or#901/upstream#1627), on both the standalone `migrate up` path and the embedded
 runtime-init path. Before that fence existed the symptom was not a migration
-error but a schema that silently lacked whatever the squash folded in — th#1627
+error but a schema that silently lacked whatever the squash folded in — upstream#1627
 was an embedded host answering 500 on every billed admission for hours while
 both of migratekit's checks reported success.
 

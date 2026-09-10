@@ -24,7 +24,7 @@ version: 1
 products:
   - key: initiate
     display_name: Novice
-    tier_group: cozy
+    tier_group: membership
     tier_rank: 1
     entitlements: [tier:initiate]
     prices:
@@ -35,7 +35,7 @@ products:
         psps: [stripe]
   - key: craftsman
     display_name: Craftsman
-    tier_group: cozy
+    tier_group: membership
     tier_rank: 2
     entitlements: [tier:craftsman]
     prices:

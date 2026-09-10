@@ -33,7 +33,7 @@ type ConvergeMerchantResult struct {
 // a legacy migration materializes every derive-1 grant + entitlement immediately
 // instead of waiting for the next sweep interval. Re-runnable / no-op when clean.
 //
-// Cutover note (#637): a FROM-SCRATCH migration (doujins #724, which stops writing
+// Cutover note (#637): a from-scratch migration that stops writing
 // entitlements) produces NO orphan entitlements, so this pass derives everything
 // cleanly with grant provenance. An IN-PLACE cutover over data migrated by the OLD
 // code must first revoke the migrate-written orphan entitlements (grant_id IS NULL)

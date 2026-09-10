@@ -44,7 +44,7 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
 	const tenantID = "tnt_store_880"
-	const primaryGateway = "579145-880store"
+	const primaryGateway = "100001-880store"
 	const backupGateway = "579146-880store"
 
 	bt := newFakeBTServer(t)

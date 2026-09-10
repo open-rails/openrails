@@ -10,8 +10,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// #813 embedded-facade parity for plan migrations: hosts (e.g. cozy-art)
-// drive the operator workflow in-process — same service the merchant HTTP
+// #813 embedded-facade parity for plan migrations: hosts drive the operator
+// workflow in-process through the same service the merchant HTTP
 // routes wrap. Requests/results are the module types re-exported so embedded
 // callers never import internal/.
 //
