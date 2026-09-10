@@ -1,6 +1,6 @@
 # Stage 1: admin console SPA (#754 — dist is never committed; the image build
 # owns the embed). Node is a BUILD-time dependency only.
-FROM node:22-alpine AS console
+FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS console
 
 WORKDIR /web/admin
 RUN npm install -g --ignore-scripts pnpm@11.0.0
@@ -13,7 +13,7 @@ RUN pnpm --config.verify-deps-before-run=false run build --outDir /out --emptyOu
 
 
 # Stage 2: build
-FROM golang:1.26.6-alpine AS builder
+FROM golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS builder
 
 # Install build dependencies
 RUN apk add --no-cache git ca-certificates
@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 
 # Stage 3: production
-FROM alpine:3.19
+FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
 
 # Install runtime dependencies (include wget for healthcheck)
 RUN apk --no-cache add ca-certificates tzdata wget
