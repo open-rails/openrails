@@ -7,7 +7,6 @@ type SchemaDoc struct {
 	Measures   []SchemaMeasure   `json:"measures"`
 	Dimensions []SchemaDimension `json:"dimensions"`
 	Grains     []string          `json:"grains"`
-	Derived    []DerivedFormula  `json:"derived"`
 	Deferred   []string          `json:"deferred"`
 	Caveats    []string          `json:"caveats"`
 	Examples   []SchemaExample   `json:"examples"`
@@ -52,7 +51,6 @@ func intp(v int) *int { return &v }
 func Schema() SchemaDoc {
 	doc := SchemaDoc{
 		Grains:   Grains,
-		Derived:  Derived,
 		Deferred: Deferred,
 		Caveats:  Caveats,
 		Limits:   SchemaLimits{MaxBuckets: MaxBuckets, MaxLimit: MaxLimit},
