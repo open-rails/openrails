@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.0.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Verify release tag
+        run: node -e "const p=require('./package.json'); const tag='v'+p.version; if (process.env.GITHUB_REF_NAME !== tag) throw new Error('release tag must be '+tag)"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Check package
+        run: pnpm check
+
+      - name: Install browser
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Test cross-origin checkout
+        run: pnpm test:browser
+
+      - name: Build release archive
+        run: |
+          mkdir release
+          pnpm pack --pack-destination release
+
+      - name: Publish package
+        run: npm publish "./release/openrails-checkout-${GITHUB_REF_NAME#v}.tgz" --access public --provenance=false
