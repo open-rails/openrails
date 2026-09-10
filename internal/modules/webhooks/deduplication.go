@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/replaycache"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -34,6 +36,7 @@ type DeduplicationService struct {
 	db *db.DB
 	// pendingLease overrides webhookPendingLease (tests only; zero = default).
 	pendingLease time.Duration
+	clock        clockwork.Clock
 }
 
 // NonRetryableWebhookError marks a processing failure as terminal.
@@ -81,11 +84,15 @@ func IsWebhookErrorNonRetryable(err error) bool {
 // cache flush would re-run the effects. Nothing in production ever built one;
 // only unit tests did, and a construction the production graph cannot produce
 // is not worth the branches it costs everywhere downstream.
-func NewDeduplicationService(idem *replaycache.Store, database *db.DB) (*DeduplicationService, error) {
+func NewDeduplicationService(
+	idem *replaycache.Store,
+	database *db.DB,
+	clocks ...clockwork.Clock,
+) (*DeduplicationService, error) {
 	if database == nil {
 		return nil, fmt.Errorf("webhook dedup: a database is required — Postgres webhook_events is the dedup truth (#678)")
 	}
-	return &DeduplicationService{idem: idem, db: database}, nil
+	return &DeduplicationService{idem: idem, db: database, clock: timeutil.FirstClock(clocks...)}, nil
 }
 
 // dedupMarkCtxKey carries the in-flight event's truth-row identity so handlers
@@ -182,19 +189,28 @@ func (s *DeduplicationService) lease() time.Duration {
 	return webhookPendingLease
 }
 
+func (s *DeduplicationService) now() time.Time {
+	if s.clock != nil {
+		return s.clock.Now()
+	}
+	return time.Now()
+}
+
 // startPendingHeartbeat renews the pending lease while the handler runs, so
 // stale-pending takeover only fires for dead holders, not slow ones (#678).
 // Returned func stops the heartbeat.
 func (s *DeduplicationService) startPendingHeartbeat(ctx context.Context, op, key string) func() {
 	hbCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(s.lease() / 4)
+		defer close(done)
+		ticker := s.newTicker(s.lease() / 4)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-hbCtx.Done():
 				return
-			case <-ticker.C:
+			case <-ticker.Chan():
 				if _, err := s.idem.RenewPending(hbCtx, op, key); err != nil && hbCtx.Err() == nil {
 					log.WithContext(hbCtx).WithError(err).WithFields(log.Fields{
 						"op":      op,
@@ -204,7 +220,17 @@ func (s *DeduplicationService) startPendingHeartbeat(ctx context.Context, op, ke
 			}
 		}
 	}()
-	return cancel
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func (s *DeduplicationService) newTicker(d time.Duration) clockwork.Ticker {
+	if s.clock != nil {
+		return s.clock.NewTicker(d)
+	}
+	return clockwork.NewRealClock().NewTicker(d)
 }
 
 // ProcessWebhook handles webhook deduplication and processing coordination.
@@ -249,7 +275,7 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 				return nil
 			}
 			if alreadyExists && rec.Status == replaycache.StatusPending {
-				if time.Since(rec.CreatedAt) > s.lease() {
+				if s.now().Sub(rec.CreatedAt) > s.lease() {
 					taken, err := s.idem.TryTakeoverPending(ctx, op, trimmedEventID, s.lease())
 					if err != nil {
 						return fmt.Errorf("failed to take over stale webhook idempotency: %w", err)

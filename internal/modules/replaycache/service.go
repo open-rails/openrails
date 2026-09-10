@@ -67,6 +67,7 @@ type Record struct {
 type Store struct {
 	client *redis.Client
 	ttl    time.Duration
+	now    func() time.Time
 
 	mu       sync.RWMutex
 	memStore map[string]*memEntry
@@ -79,25 +80,37 @@ type memEntry struct {
 	expiresAt time.Time
 }
 
-func NewStore(redisClient *redis.Client) *Store {
-	s := &Store{
-		client:   redisClient,
-		ttl:      DefaultTTL,
-		memStore: make(map[string]*memEntry),
-		stopCh:   make(chan struct{}),
+type Option func(*Store)
+
+// WithClock sets the application clock used for lease age and record timestamps.
+func WithClock(now func() time.Time) Option {
+	return func(s *Store) {
+		if now != nil {
+			s.now = now
+		}
 	}
-
-	go s.cleanupLoop()
-
-	return s
 }
 
-func NewStoreWithTTL(redisClient *redis.Client, ttl time.Duration) *Store {
+func NewStore(redisClient *redis.Client, options ...Option) *Store {
+	return newStore(redisClient, DefaultTTL, options...)
+}
+
+func NewStoreWithTTL(redisClient *redis.Client, ttl time.Duration, options ...Option) *Store {
+	return newStore(redisClient, ttl, options...)
+}
+
+func newStore(redisClient *redis.Client, ttl time.Duration, options ...Option) *Store {
 	s := &Store{
 		client:   redisClient,
 		ttl:      ttl,
+		now:      time.Now,
 		memStore: make(map[string]*memEntry),
 		stopCh:   make(chan struct{}),
+	}
+	for _, option := range options {
+		if option != nil {
+			option(s)
+		}
 	}
 	go s.cleanupLoop()
 	return s
@@ -111,7 +124,7 @@ func (s *Store) cleanupLoop() {
 		select {
 		case <-ticker.C:
 			s.mu.Lock()
-			now := time.Now()
+			now := s.now()
 			for key, entry := range s.memStore {
 				if now.After(entry.expiresAt) {
 					delete(s.memStore, key)
@@ -175,10 +188,11 @@ func (s *Store) tryTakeoverPendingRedis(ctx context.Context, redisKey string, ol
 			}
 			return err
 		}
-		if record.Status != StatusPending || time.Since(record.CreatedAt) <= olderThan {
+		now := s.now()
+		if record.Status != StatusPending || now.Sub(record.CreatedAt) <= olderThan {
 			return nil
 		}
-		record.CreatedAt = time.Now()
+		record.CreatedAt = now
 		recordJSON, err := json.Marshal(record)
 		if err != nil {
 			return fmt.Errorf("marshal record: %w", err)
@@ -208,11 +222,12 @@ func (s *Store) tryTakeoverPendingMemory(key string, olderThan time.Duration) bo
 	if !ok || entry == nil || entry.record == nil {
 		return false
 	}
-	if entry.record.Status != StatusPending || time.Since(entry.record.CreatedAt) <= olderThan {
+	now := s.now()
+	if entry.record.Status != StatusPending || now.Sub(entry.record.CreatedAt) <= olderThan {
 		return false
 	}
-	entry.record.CreatedAt = time.Now()
-	entry.expiresAt = time.Now().Add(s.ttl)
+	entry.record.CreatedAt = now
+	entry.expiresAt = now.Add(s.ttl)
 	return true
 }
 
@@ -227,7 +242,7 @@ func (s *Store) beginRedis(ctx context.Context, redisKey string) (*Record, bool,
 
 	record := &Record{
 		Status:    StatusPending,
-		CreatedAt: time.Now(),
+		CreatedAt: s.now(),
 	}
 
 	recordJSON, err := json.Marshal(record)
@@ -255,7 +270,7 @@ func (s *Store) beginMemory(key string) (*Record, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	now := time.Now()
+	now := s.now()
 	if entry, ok := s.memStore[key]; ok {
 		if now.Before(entry.expiresAt) {
 			return cloneRecord(entry.record), true, nil
@@ -281,7 +296,7 @@ func (s *Store) Complete(ctx context.Context, operation, key string, result json
 	record := &Record{
 		Status:    StatusSuccess,
 		Result:    result,
-		CreatedAt: time.Now(),
+		CreatedAt: s.now(),
 	}
 
 	if s.client != nil {
@@ -306,7 +321,7 @@ func (s *Store) Fail(ctx context.Context, operation, key string, failure error) 
 	record := &Record{
 		Status:    StatusFailed,
 		Error:     errMsg,
-		CreatedAt: time.Now(),
+		CreatedAt: s.now(),
 	}
 
 	failureTTL := s.ttl / 2
@@ -372,7 +387,7 @@ func (s *Store) getMemory(key string) *Record {
 	defer s.mu.RUnlock()
 
 	if entry, ok := s.memStore[key]; ok {
-		if time.Now().Before(entry.expiresAt) {
+		if s.now().Before(entry.expiresAt) {
 			return cloneRecord(entry.record)
 		}
 	}
@@ -400,7 +415,7 @@ func (s *Store) setMemoryWithTTL(key string, record *Record, ttl time.Duration) 
 	defer s.mu.Unlock()
 	s.memStore[key] = &memEntry{
 		record:    cloneRecord(record),
-		expiresAt: time.Now().Add(ttl),
+		expiresAt: s.now().Add(ttl),
 	}
 }
 
