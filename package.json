@@ -50,7 +50,7 @@
   },
   "publishConfig": {
     "access": "public",
-    "provenance": true
+    "provenance": false
   },
   "peerDependencies": {
     "react": ">=19 <20",
