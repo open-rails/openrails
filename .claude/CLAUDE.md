@@ -78,17 +78,18 @@ identifiers OUT of committed files (code, trackers, this file).
   Handlers may call `gen` for orchestration-free reads. Never add a wrapper just to "complete" a layer.
 
 ## Trackers (issues)
-- `agents/{progress,future,completed}.md`. One `# #<id>:` section per issue; `next_id` counter lives
-  in progress.md; one per-repo id space shared across all three files.
-- CONCURRENT-EDIT SAFE: only ever edit/append YOUR OWN issue's section with a targeted string
-  replacement — never rewrite the whole file (another agent may be editing it).
+- The tracker is the separate `open-rails/tracker` repository (normally the
+  `../tracker` workspace sibling). OpenRails issues are one file each: active
+  `openrails/<id>.md`, parked `openrails/future/<id>.md`, and completed
+  `openrails/completed/<id>.md`. `openrails/README.md` owns the shared `next_id`
+  counter and active index; moves update both affected indexes.
+- CONCURRENT-EDIT SAFE: only edit the issue you own and its index entries;
+  never rewrite an index wholesale while another agent may be editing it.
 
 ## Tests
 - Integration tests: build tag `integration`, run against testcontainers (Postgres + Redis) or
-  `OPENRAILS_TEST_DB_URL` / `REDIS_ADDR`. The full suite is self-cleaning and green.
-- Known fragility: running a SINGLE integration package in isolation can hit a pre-existing
-  `*_merchant_fk` fixture-seeding failure (the merchant isn't seeded for that subset). That's NOT a
-  regression — the full suite seeds it correctly.
+  `OPENRAILS_TEST_DB_URL` (fallback `OPENRAILS_TEST_DB_DSN`) /
+  `OPENRAILS_TEST_REDIS_ADDR`. Each package gets an isolated, self-cleaning database.
 - `tests/` is a SEPARATE package that asserts behavioural contracts end-to-end. A deliberate
   behaviour change must sweep it too — `grep tests/` for the codes/constants/statuses you changed.
   Twice now (or#870, or#842) a fix updated only its own package's tests and left `tests/` red
