@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -75,10 +76,12 @@ func TestRegistry_CoreTierComplete(t *testing.T) {
 
 func TestSchema_CarriesExamplesAndCaveats(t *testing.T) {
 	doc := Schema()
-	require.NotEmpty(t, doc.Derived)
 	require.NotEmpty(t, doc.Deferred)
 	require.NotEmpty(t, doc.Caveats)
 	require.GreaterOrEqual(t, len(doc.Examples), 5)
+	payload, err := json.Marshal(doc)
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), `"derived"`)
 	// The golden example.
 	found := false
 	for _, ex := range doc.Examples {

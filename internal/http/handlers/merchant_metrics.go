@@ -15,7 +15,7 @@ import (
 )
 
 // MerchantMetricsSchema handles GET /v1/merchant/metrics/schema: the registry
-// dump (measures + formulas + dims + DERIVED formulas + caveats + examples) —
+// dump (measures + formulas + dims + caveats + examples) —
 // the client/LLM context document.
 func MerchantMetricsSchema(r *httprequest.Request) {
 	r.JSON(http.StatusOK, metrics.Schema())

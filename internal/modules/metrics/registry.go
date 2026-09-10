@@ -534,27 +534,6 @@ var Measures = []Measure{
 		Dims:        []string{"rail"}},
 }
 
-// DerivedFormula documents a DERIVED-tier metric: /schema-only, composed
-// client-side from CORE measures.
-type DerivedFormula struct {
-	Name        string `json:"name"`
-	Formula     string `json:"formula"`
-	Description string `json:"description"`
-}
-
-// Derived is the /schema-documented DERIVED tier (not implemented server-side).
-var Derived = []DerivedFormula{
-	{Name: "arr", Formula: "mrr * 12", Description: "annualized recurring revenue"},
-	{Name: "arpu", Formula: "mrr / subscriptions(filter status:active)", Description: "average recurring revenue per active subscription"},
-	{Name: "net_new_subscriptions", Formula: "new_subscriptions - cancellations", Description: "net member change per bucket"},
-	{Name: "refund_rate", Formula: "refund_count / payment_count", Description: "refunds per settled payment"},
-	{Name: "effective_unit_price", Formula: "usage_revenue / usage_units", Description: "average recognized revenue per usage event"},
-	{Name: "subscription_revenue", Formula: "gross_revenue filter stream:subscription", Description: "gross revenue from the subscription stream"},
-	{Name: "one_time_revenue", Formula: "gross_revenue filter stream:one_time", Description: "gross revenue from one-time products"},
-	{Name: "units_sold", Formula: "payment_count filter stream:one_time", Description: "one-time product units sold"},
-	{Name: "subscriptions_in_dunning", Formula: "subscriptions filter status:past_due", Description: "subs currently in dunning at t"},
-}
-
 // Deferred names measures deliberately NOT built yet (so they are not
 // relitigated); add when a dashboard proves the need.
 var Deferred = []string{
