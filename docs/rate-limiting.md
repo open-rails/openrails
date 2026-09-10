@@ -32,7 +32,7 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 
 | Bucket | Config key | Default rpm | Routes |
 |---|---|---|---|
-| `checkout` | `checkout` | 10 | `POST /v1/checkout*` only — see note |
+| `checkout` | `checkout` | 10 | Browser checkout create/confirm POSTs — see note |
 | `subscriptions` | `subscribe` | 20 | `POST/PUT/DELETE /v1/me/subscriptions*` |
 | `payment-methods` | `payment` | 40 | `/v1/me/payment-methods*` (any method) |
 | `webhook` | `webhook` | 1200 | `/v1/webhooks*`, `/v1/merchants/*/webhooks/*` |
@@ -42,10 +42,9 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 A bucket with no configured limit falls back to the `default` entry; a configured limit ≤ 0
 means 60 rpm.
 
-> **Honest classification note**: the `checkout` bucket matches only the `/v1/checkout` path
-> prefix (the public checkout surface). The browser self-service `POST /v1/me/checkout` and the
-> customer-treasury `POST /v1/customers/{id}/checkout` are **not** classified as `checkout` —
-> they land in `default` (300 rpm), so the tight card-testing limit does not apply to them.
+> The `checkout` bucket covers POSTs under the public `/v1/checkout`, self-service
+> `/v1/me/checkout`, and customer-treasury `/v1/customers/{id}/checkout` route families.
+> Read-only GETs remain in `default`.
 
 > **Webhooks are per-IP, and all webhooks from a rail share one source-IP bucket** (fixed rail
 > IPs). The high default absorbs rebill runs and event bursts without 429-ing payment events;
