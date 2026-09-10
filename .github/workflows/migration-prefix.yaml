@@ -1,7 +1,7 @@
 name: migration prefix
 
-# or#919 (ported from tensorhub th#1790) — a migration number claimed on this
-# branch may have been taken on `master` five minutes ago, and nothing else in
+# A migration number claimed on this branch may have been taken on `master`
+# five minutes ago, and nothing else in
 # CI would say a word.
 #
 # THIS REPO IS WHERE THE OUTAGE HAPPENED. or#908 (PR #275) and or#911 (PR #276)
@@ -18,8 +18,8 @@ name: migration prefix
 # before a sibling landed is evidence about a tree that no longer exists.
 #
 # A GREEN CHECK IS AN EARLY WARNING, NOT A GATE. The guard is necessary but not
-# sufficient: tensorhub's instance PASSED on a genuinely colliding tree because
-# master moved AFTER the job ran. Until the ruleset ticks "require branches to
+# sufficient: the check can pass on a genuinely colliding tree if master moves
+# after the job runs. Until the ruleset ticks "require branches to
 # be up to date before merging" (which forces the re-run when master moves),
 # nothing structural closes that window.
 #

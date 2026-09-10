@@ -73,8 +73,8 @@ func CustomerGroup(customerID string) authkit.GroupRef {
 
 // Groups returns the OpenRails permission-group type catalog (#567): the two
 // flat top-level personas (`merchant`, `customer`) declared under `root`. Fixed
-// catalogs, CustomRoles=false (custom roles + deep hierarchy are tensorhub's
-// domain). authkit injects the intrinsic `root` type and auto-seeds each type's
+// catalogs, CustomRoles=false. authkit injects the intrinsic `root` type and
+// auto-seeds each type's
 // `owner` role (= `<type>:*`). Suitable for core.Config.RBAC.
 func Groups() []authcore.PersonaDef {
 	return []authcore.PersonaDef{

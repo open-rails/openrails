@@ -13,7 +13,7 @@ import (
 // PermissionResolver resolves the acting principal's OpenRails permissions
 // from the verified claims AND the live request (#918). It supersedes the
 // role→permission mapping for hosts whose grant is not a function of the
-// token: doujins' merchant-admin authority is a DB read scoped to the admin
+// token: a merchant-admin authority can be a DB read scoped to the admin
 // path, which a func([]string) []string cannot express. An error rejects the
 // request fail-closed; a host that wants a softer fallback returns the reduced
 // permission set with a nil error.
@@ -24,9 +24,8 @@ type PermissionResolver func(ctx context.Context, r *http.Request, cl verify.Cla
 // (#913). It verifies the host's bearer token and maps the claims onto a
 // DelegatedPrincipal pinned to ONE explicit merchant — the embedding engine's
 // bound merchant, supplied at construction, NEVER anything read from the
-// caller's token. (tensorhub's hand-rolled bridge pinned the CALLER's org
-// UUID instead, scoping every request's RLS to a nonexistent merchant —
-// th#1765.)
+// caller's token. Pinning a caller's organization UUID instead would scope
+// every request's RLS to the wrong merchant.
 type DelegatedAuthenticator struct {
 	cfg DelegatedConfig
 }

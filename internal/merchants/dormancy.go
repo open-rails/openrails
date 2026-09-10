@@ -1,5 +1,5 @@
 // or#914 item 5: the dormant-merchant sweep (ak#264 ruling 5 v3 — authkit has
-// ZERO dormancy machinery; the HOST owns the policy; tensorhub th#1774 is the
+// ZERO dormancy machinery; the HOST owns the policy; host-four upstream#1774 is the
 // reference shape). A hosted product accretes never-used merchants: a user
 // claims a name, connects nothing, and camps it forever. The sweep selects
 // never-used merchants from openrails' own tables (no provider connected, no
@@ -195,7 +195,7 @@ func (s *Service) SweepDormant(ctx context.Context, cfg DormancySweepConfig, rel
 		if warnCount == 1 {
 			res.Warned++
 			// The WARNING. The persisted notice plus this line IS the notice
-			// (th#1774 precedent: delivery to the owner is the host's, e.g.
+			// (upstream#1774 precedent: delivery to the owner is the host's, e.g.
 			// email); the warning lead is measured from it.
 			log.WithFields(fields).WithField("deletable_after", firstWarnedAt.Add(cfg.WarningLead)).
 				Warn("dormant merchant placed on deletion notice (or#914): never used, past ttl — will be deleted with its slug RELEASED unless it shows activity")

@@ -8,7 +8,7 @@ import (
 
 // #360: every default mainnet token MUST be coverable by the pricing policy —
 // either a built-in Pyth feed or a USD-pegged registry entry. This is the
-// token-registry regression for the doujins crash-loop ("solana token USD1
+// token-registry regression for the host-one crash-loop ("solana token USD1
 // missing pyth price feed"): defaults and the feed map must never diverge into
 // a fatal state again.
 func TestDefaultMainnetTokensAllPriceable(t *testing.T) {

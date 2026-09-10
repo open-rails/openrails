@@ -367,7 +367,7 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 	require.Equal(t, int64(1), cell(t, byReason, map[string]string{"failure_reason": "insufficient_funds"}, "payment_failures"))
 	require.Equal(t, int64(1), cell(t, byReason, map[string]string{"failure_reason": "expired_card"}, "payment_failures"))
 
-	// The doujins golden tile: unique failed INITIAL customers by reason.
+	// The host-one golden tile: unique failed INITIAL customers by reason.
 	golden := run(t, svc, ctxA, usd(&metrics.Query{
 		Measures: []string{"unique_failed_customers"},
 		By:       []string{"failure_reason"},

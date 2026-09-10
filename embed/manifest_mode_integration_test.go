@@ -513,7 +513,7 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 		"fail-closed error names the missing credential: %v", err)
 }
 
-// TestManifestMode_ReadSideBindKeepsWorking: hentai0's shape — an empty
+// TestManifestMode_ReadSideBindKeepsWorking: host-two's shape — an empty
 // MerchantConfig upsert binds to an existing merchant, declares no truth, and
 // stays legal in manifest mode.
 func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
@@ -524,7 +524,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("mbind%d", nano)
 
-	// Writer host (doujins shape) declares the merchant.
+	// Writer host (host-one shape) declares the merchant.
 	writerCfg := manifestModeConfig(dsn)
 	writer, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: writerCfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
@@ -535,7 +535,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 		_, _ = appDB.Pool().Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = $1`, id.UUID())
 	})
 
-	// Reader host (hentai0 shape): empty MerchantConfig — pure bind.
+	// Reader host (host-two shape): empty MerchantConfig — pure bind.
 	readerCfg := manifestModeConfig(dsn)
 	reader, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: readerCfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
@@ -548,7 +548,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 
 // bootManifestRuntimeWithRailAccounts boots a MODE-1 runtime declaring
 // railAccounts through UpsertMerchantConfig directly (no manifest bytes/YAML,
-// no catalog) — the same doujins/hentai0 shape as
+// no catalog) — the same host-one/host-two shape as
 // TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders. Options.PaymentProviders
 // is deliberately unset, so Runtime.Rails (the legacy boot-config bridge) stays
 // empty while Runtime.Merchants arms from the DB-projected accounts (#775).

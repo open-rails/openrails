@@ -43,7 +43,7 @@
   "threeDSecure": "NOT_APPLICABLE",
   "scaResponseStatus": "Y",
   "paymentAccount": "693a3b8d0d888c3d04800000004bacd",
-  "formName": "HMovie-Premium",
+  "formName": "example-premium",
   "nextRenewalDate": "2025-09-04",
   "referringUrl": "https://example.com/upgrade",
   "flexId": "75383d6a-41d4-4bd0-ac12-6c8c37fde5e6"

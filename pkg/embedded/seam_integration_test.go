@@ -18,12 +18,12 @@ import (
 
 func TestMain(m *testing.M) { dbtest.RunMain(m) }
 
-// End-to-end of the doujins->openrails seam (#631/#636/#637), the faithful proxy
+// End-to-end of the host-one->openrails seam (#631/#636/#637), the faithful proxy
 // for the from-scratch legacy migration: seed FACTS the migrate writes (an active
 // subscription + a solana wallet payment, with NO grants/entitlements), hand an
 // admin comp over via the public ImportAdminGrants, then ConvergeMerchant — and
 // assert OpenRails materialized a grant + entitlement for each cohort. Exercises
-// the exact public embed API the doujins legacy_migrate calls.
+// the exact public embed API the host-one legacy_migrate calls.
 func TestEmbeddedSeam_ImportAdminGrantsThenConverge(t *testing.T) {
 	_, appDSN := dbtest.SharedRLSPostgres(t)
 	pool, err := pgxpool.New(context.Background(), appDSN)
@@ -82,7 +82,7 @@ func TestEmbeddedSeam_ImportAdminGrantsThenConverge(t *testing.T) {
 	})
 
 	// (1) Admin comp handed over as a grant via the public seam (Config nil ->
-	// DefaultSchema, identical to the doujins embed wiring).
+	// DefaultSchema, identical to the host-one embed wiring).
 	res, err := ImportAdminGrants(context.Background(), AdminGrantImportOptions{
 		PGXPool:    pool,
 		MerchantID: dbtest.TestMerchantID,

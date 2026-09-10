@@ -204,7 +204,7 @@ func TestConverge_DeriveSubscription_OverlapRecordsGrantWithoutWindow(t *testing
 	}))
 }
 
-// #695 flap regression, subscription shape (the doujins import): a customer with
+// #695 flap regression, subscription shape (the host-one import): a customer with
 // an ACTIVE auto-renew sub projecting a STANDING window (#691, end_at NULL) plus
 // an old CANCELLED sub for the same product/feature whose historical period sits
 // inside the standing window and has NO grant. Pre-#695 this flapped forever:
@@ -254,7 +254,7 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		exec(`INSERT INTO openrails.entitlements (id,merchant_id,customer_id,entitlement,start_at,end_at,source_id,source_type,grant_id)
 		      VALUES ($1,$2,$3,$4,$5,NULL,$6,'subscription',$7)`, standingEnt, merchantID, cust, feat, subStart, activeSub, activeGrant)
 		// OLD cancelled sub, same product/feature, historical period, NO grant —
-		// the doujins dual-history import shape.
+		// the host-one dual-history import shape.
 		exec(`INSERT INTO openrails.subscriptions (id,merchant_id,customer_id,product_id,price_id,status,rail,rail_subscription_id,started_at,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,ended_at,psp_id)
 		      VALUES ($1,$2,$3,$4,$5,'cancelled','ccbill',$6,$7,$7,$8,$8,'user',$8,$9)`,
 			cancelledSub, merchantID, cust, prod, price, "flap-old-"+sfx, oldStart, oldEnd, pspID)

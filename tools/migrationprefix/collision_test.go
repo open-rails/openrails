@@ -1,18 +1,6 @@
-// Package migrationprefix holds the behaviour proof for
-// scripts/migration-prefix-collision.sh (or#919, ported from tensorhub
-// th#1790).
-//
-// Every case below builds REAL git repositories in temp dirs — an "origin" that
-// owns the numbers and a clone that plays the lane — and runs the ACTUAL script
-// against them over a real `git fetch`. Nothing here mocks git, the remote, or
-// the diff, because the property under test is precisely that the script goes
-// to the network for master rather than trusting the tree it was handed.
-//
-// Detection is never inlined in these tests. tensorhub's original guard test
-// carried its own copy of the detection logic and had been green since the day
-// it was written — which is indistinguishable from having quietly stopped
-// checking, because the real tree is never dirty. These tests drive the real
-// script over hand-built duplicates and assert it goes RED.
+// Package migrationprefix tests the migration-prefix collision guard against
+// temporary Git repositories. The tests exercise the script and its fetch of
+// the target branch instead of duplicating its detection logic.
 package migrationprefix
 
 import (

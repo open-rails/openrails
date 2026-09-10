@@ -22,8 +22,8 @@ import (
 // that could drift — and the "same" custodian silently became two.
 func custodyManifest(t *testing.T) *BillingConfig {
 	t.Helper()
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.Custodians = map[string]CustodianConfig{
 		"bt": {
 			models.CustodianBasisTheory: {
@@ -39,7 +39,7 @@ func custodyManifest(t *testing.T) *BillingConfig {
 	mt.PSPs = map[string]PSPConfig{
 		"mobius-bt": {
 			"nmi": {
-				AccountID: "579145-880",
+				AccountID: "100001-880",
 				Custodian: "bt",
 				Secrets:   map[string]string{"security_key": "sk_primary_880"},
 			},
@@ -52,7 +52,7 @@ func custodyManifest(t *testing.T) *BillingConfig {
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 	return manifest
 }
 
@@ -64,7 +64,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	// ONE custodian row, carrying the identity and the declared settings.
 	var custodianID, key, kind, environment, accountID string
@@ -93,7 +93,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 		referenced[acct] = cid
 	}
 	require.NoError(t, rows.Err())
-	require.Equal(t, map[string]string{"579145-880": custodianID, "579146-880": custodianID}, referenced)
+	require.Equal(t, map[string]string{"100001-880": custodianID, "579146-880": custodianID}, referenced)
 
 	// The custodial secret is stored ONCE, under the CUSTODIAN's identity —
 	// not once per PSP that charges through it.
@@ -115,7 +115,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 
 	// Each gateway keeps its OWN security_key — custody shares the vault, not
 	// the thing that charges.
-	for accountID, want := range map[string]string{"579145-880": "sk_primary_880", "579146-880": "sk_backup_880"} {
+	for accountID, want := range map[string]string{"100001-880": "sk_primary_880", "579146-880": "sk_backup_880"} {
 		name, err := merchants.PSPSecretName("nmi", "test", accountID, "security_key")
 		require.NoError(t, err)
 		var value string
@@ -140,11 +140,11 @@ func TestReconcileMerchantManifestRefusesUndeclaredCustodianReference(t *testing
 	cp := newMerchantManifestControlPlane(t, pool)
 
 	manifest := custodyManifest(t)
-	mt := manifest.Merchants["cozy-art"]
+	mt := manifest.Merchants["host-three"]
 	psp := mt.PSPs["mobius-bt"]["nmi"]
 	psp.Custodian = "typo-bt"
 	mt.PSPs["mobius-bt"]["nmi"] = psp
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	err := ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 	require.Error(t, err)
@@ -160,7 +160,7 @@ func TestReconcileMerchantManifestRefusesCustodianOnUnsupportedRail(t *testing.T
 	cp := newMerchantManifestControlPlane(t, pool)
 
 	manifest := custodyManifest(t)
-	mt := manifest.Merchants["cozy-art"]
+	mt := manifest.Merchants["host-three"]
 	mt.PSPs = map[string]PSPConfig{
 		"stripe": {
 			"stripe": {
@@ -170,7 +170,7 @@ func TestReconcileMerchantManifestRefusesCustodianOnUnsupportedRail(t *testing.T
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	err := ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 	require.Error(t, err)
@@ -194,11 +194,11 @@ func TestReconcileMerchantManifestRefusesInlineCustodySettings(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			manifest := custodyManifest(t)
-			mt := manifest.Merchants["cozy-art"]
+			mt := manifest.Merchants["host-three"]
 			psp := mt.PSPs["mobius-bt"]["nmi"]
 			psp.Settings = settings
 			mt.PSPs["mobius-bt"]["nmi"] = psp
-			manifest.Merchants["cozy-art"] = mt
+			manifest.Merchants["host-three"] = mt
 
 			err := ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 			require.Error(t, err)
@@ -225,11 +225,11 @@ func TestReconcileMerchantManifestRefusesIncompleteCustodian(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			manifest := custodyManifest(t)
-			mt := manifest.Merchants["cozy-art"]
+			mt := manifest.Merchants["host-three"]
 			entry := mt.Custodians["bt"][models.CustodianBasisTheory]
 			mutate(&entry)
 			mt.Custodians["bt"][models.CustodianBasisTheory] = entry
-			manifest.Merchants["cozy-art"] = mt
+			manifest.Merchants["host-three"] = mt
 
 			err := ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 			require.Error(t, err)
@@ -246,11 +246,11 @@ func TestReconcileMerchantManifestRefusesUnknownCustodianKind(t *testing.T) {
 	cp := newMerchantManifestControlPlane(t, pool)
 
 	manifest := custodyManifest(t)
-	mt := manifest.Merchants["cozy-art"]
+	mt := manifest.Merchants["host-three"]
 	mt.Custodians = map[string]CustodianConfig{
 		"hs": {"hyperswitch": {AccountID: "tnt_hs", Secrets: map[string]string{"api_key": "k"}}},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	err := ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 	require.Error(t, err)

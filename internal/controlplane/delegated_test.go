@@ -35,7 +35,7 @@ const (
 	testDelegatedKID     = "test-kid-1"
 	canonicalAudience    = "openrails"
 	testDelegatedSubject = "end-user-42"
-	wrongAudience        = "tensorhub"
+	wrongAudience        = "host-four"
 )
 
 // newTestDelegatedVerifier builds a Verifier identical to newDelegatedVerifier's
@@ -151,7 +151,7 @@ func TestResolveDelegatedIgnoresBrowserOriginForAuthorization(t *testing.T) {
 	v, err := newDelegatedVerifier(&authcore.Client{}, "")
 	require.NoError(t, err)
 	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
-		Slug:    "doujins",
+		Slug:    "host-one",
 		Issuer:  testDelegatedIssuer,
 		JWKSURI: jwks.URL + "/.well-known/jwks.json",
 		Enabled: true,
@@ -189,7 +189,7 @@ func TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS(t *testing.T) {
 	v, err := newDelegatedVerifier(&authcore.Client{}, "")
 	require.NoError(t, err)
 	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
-		Slug:    "doujins",
+		Slug:    "host-one",
 		Issuer:  testDelegatedIssuer,
 		JWKSURI: jwks.URL + "/.well-known/jwks.json",
 		Enabled: true,

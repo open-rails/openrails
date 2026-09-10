@@ -29,7 +29,7 @@ import (
 )
 
 // or#918 end to end: the admission seam absorbs BOTH decisions a privileged
-// host used to keep a hand-rolled bridge for (doujins #803), over real
+// host used to keep a hand-rolled bridge for (host-one #803), over real
 // AuthKit, real tokens, real permission-group state and the real embedded
 // mount — no stub authenticator anywhere.
 //
@@ -43,7 +43,7 @@ import (
 //     (func([]string) []string) cannot express either half.
 //
 // It also pins the two properties that make the seam safe to adopt: the
-// merchant stays the engine's bound merchant (never token-derived, th#1765),
+// merchant stays the engine's bound merchant (never token-derived, upstream#1765),
 // and WithMerchantSlug is load-bearing — or#916's merchant-payer treasury
 // address is the slug.
 func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
@@ -67,7 +67,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	app := rt.Embedded().App()
 	app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
-	// The host's own AuthKit, beside the engine — the doujins shape.
+	// The host's own AuthKit, beside the engine — the host-one shape.
 	require.NoError(t, embcp.Attach(ctx, app, cfg, nil), "attach control plane")
 	_, err = embcp.RunBootstrap(ctx, app, embcp.BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug})
 	require.NoError(t, err, "control plane bootstrap links the merchant permission group")
@@ -92,7 +92,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	// the token was minted BEFORE this grant and never learns about it.
 	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(adminID), controlplane.MerchantRoleOwner), "grant merchant owner")
 
-	// --- the seam, wired the way doujins would wire it -------------------
+	// --- the seam, wired the way host-one would wire it -------------------
 	var lookups []string
 	admissions := 0
 	liveUserGate := func(ctx context.Context, _ *http.Request, cl verify.Claims) error {
@@ -108,7 +108,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	}
 	// The merchant surface + a request naming the merchant's own treasury
 	// account are the only paths worth a live authority read; the /v1/me self
-	// path stays free of them (doujins #774's posture).
+	// path stays free of them (host-one #774's posture).
 	needsMerchantAuthority := func(r *http.Request) bool {
 		p := r.URL.Path
 		return strings.HasPrefix(p, "/billing/v1/merchant") ||
@@ -193,7 +193,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 
 	// (4) The merchant pin is the ENGINE's, and the slug is load-bearing: the
 	// same seam without WithMerchantSlug cannot resolve the merchant-payer
-	// address at all, even for the merchant admin (th#1765/or#916).
+	// address at all, even for the merchant admin (upstream#1765/or#916).
 	unslugged, err := orauthkit.NewDelegatedAuthenticator(
 		cp.AuthService().Verifier(), dbtest.TestMerchantID.String(),
 		orauthkit.WithPermissionResolver(grant),

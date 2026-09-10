@@ -174,13 +174,13 @@ version: 1
 products:
   - key: initiate
     display_name: Novice
-    tier_group: cozy
+    tier_group: membership
     tier_rank: 1
     prices:
       - {currency: usd, unit_amount: 1200, duration: 30d, auto_renew: true, psps: [stripe]}
   - key: craftsman
     display_name: Craftsman
-    tier_group: cozy
+    tier_group: membership
     tier_rank: 2
     prices:
       - {currency: usd, unit_amount: 1300, duration: 30d, auto_renew: true, psps: [stripe]}
@@ -244,12 +244,12 @@ func TestPlan_UnchangedAndUpdate(t *testing.T) {
 	f := newFakeApplier()
 
 	// initiate is fully converged -> unchanged.
-	initiate := f.seedProduct("initiate", "cozy", 1, false)
+	initiate := f.seedProduct("initiate", "membership", 1, false)
 	initiate.DisplayName = "Novice"
 	f.seedPrice(initiate.ID, 1200, "USD", 30*24, false, "stripe")
 
 	// craftsman has a different display name + active matching price -> product update, price unchanged.
-	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
+	craftsman := f.seedProduct("craftsman", "membership", 2, false)
 	craftsman.DisplayName = "OLD NAME"
 	f.seedPrice(craftsman.ID, 1300, "USD", 30*24, false, "stripe")
 
@@ -280,7 +280,7 @@ func TestPlan_PriceSetSemantics_ArchiveAndCreate(t *testing.T) {
 	// declared) -> archive $12, create $13. The $12 is "starter 12 -> 13".
 	m := loadFrom(t, planManifest)
 	f := newFakeApplier()
-	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
+	craftsman := f.seedProduct("craftsman", "membership", 2, false)
 	craftsman.DisplayName = "Craftsman"
 	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false) // undeclared old price
 
@@ -372,10 +372,10 @@ products:
 func TestPlanWithOptions_AdditiveDoesNotArchiveMissingProductsOrPrices(t *testing.T) {
 	m := loadFrom(t, planManifest)
 	f := newFakeApplier()
-	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
+	craftsman := f.seedProduct("craftsman", "membership", 2, false)
 	craftsman.DisplayName = "Craftsman"
 	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false) // undeclared old price
-	f.seedProduct("expert", "cozy", 3, false)            // undeclared product
+	f.seedProduct("expert", "membership", 3, false)      // undeclared product
 
 	plan, err := PlanWithOptions(context.Background(), f, m, PlanOptions{})
 	if err != nil {
@@ -399,7 +399,7 @@ func TestPlanWithOptions_AdditiveDoesNotArchiveMissingProductsOrPrices(t *testin
 func TestPlan_ReactivateArchivedDeclaredPrice(t *testing.T) {
 	m := loadFrom(t, planManifest)
 	f := newFakeApplier()
-	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
+	craftsman := f.seedProduct("craftsman", "membership", 2, false)
 	craftsman.DisplayName = "Craftsman"
 	// The declared $13 price exists but is archived -> activate.
 	f.seedPrice(craftsman.ID, 1300, "USD", 30*24, true, "stripe")
@@ -419,7 +419,7 @@ func TestPlan_RemovedProductArchived(t *testing.T) {
 	// active product in the same tier group -> archive expert.
 	m := loadFrom(t, planManifest)
 	f := newFakeApplier()
-	f.seedProduct("expert", "cozy", 3, false)
+	f.seedProduct("expert", "membership", 3, false)
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
@@ -440,11 +440,11 @@ func TestApply_DrivesFacade(t *testing.T) {
 	m := loadFrom(t, planManifest)
 	f := newFakeApplier()
 	// craftsman exists with old $12 active; initiate is new.
-	craftsman := f.seedProduct("craftsman", "cozy", 2, false)
+	craftsman := f.seedProduct("craftsman", "membership", 2, false)
 	craftsman.DisplayName = "Craftsman"
 	f.seedPrice(craftsman.ID, 1200, "USD", 30*24, false)
 	// stray product to archive.
-	f.seedProduct("expert", "cozy", 3, false)
+	f.seedProduct("expert", "membership", 3, false)
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {

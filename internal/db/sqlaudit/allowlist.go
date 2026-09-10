@@ -10,7 +10,7 @@ import (
 )
 
 // Exemption is one reviewed allowlist entry: `rule subject # rationale` under a
-// `## PERMANENT` or `## DEBT` section. Format is shared with tensorhub's gate.
+// `## PERMANENT` or `## DEBT` section. Format is shared with host-four's gate.
 type Exemption struct {
 	Class     string // PERMANENT (bounded by design) or DEBT (a tracked bug)
 	Rule      string

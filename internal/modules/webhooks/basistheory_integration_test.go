@@ -111,7 +111,7 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 		// tenant id resolves to — not off a PSP. Two PSPs share one custodian
 		// here, which is exactly the case that had no answer before.
 		RailConfigs: railresolve.FixedSet{
-			"mobius-bt":        {Rail: models.RailNMI, AccountID: "579145", NMI: &config.NMIRailConfig{SecurityKey: "sk_gateway_test"}, Custody: btCustodian},
+			"mobius-bt":        {Rail: models.RailNMI, AccountID: "100001", NMI: &config.NMIRailConfig{SecurityKey: "sk_gateway_test"}, Custody: btCustodian},
 			"mobius-bt-backup": {Rail: models.RailNMI, AccountID: "579146", NMI: &config.NMIRailConfig{SecurityKey: "sk_gateway_backup"}, Custody: btCustodian},
 		},
 	}

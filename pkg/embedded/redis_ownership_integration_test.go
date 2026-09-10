@@ -14,7 +14,7 @@ import (
 )
 
 // An injected Redis client is borrowed from the host: Close must leave it
-// usable (cozy-art ca#198 — closing the host's shared client silently broke
+// usable (host-three upstream#198 — closing the host's shared client silently broke
 // its auth ephemeral store).
 func TestClose_DoesNotCloseInjectedRedisClient(t *testing.T) {
 	// The app role, not the superuser: embedded boot refuses a BYPASSRLS pool in

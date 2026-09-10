@@ -9,7 +9,7 @@ import (
 
 // ----------------------------------------------------------------------------
 // #360 Solana token pricing policy: resolution must NEVER fail over token
-// pricing (degrade-not-die). Incident: the doujins stack crash-looped with
+// pricing (degrade-not-die). Incident: the host-one stack crash-looped with
 // "solana token USD1 missing pyth price feed". #788 moved the policy from the
 // boot bridge (configureSolanaRail) to resolution time (NormalizeForNetwork).
 // ----------------------------------------------------------------------------

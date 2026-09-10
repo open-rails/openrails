@@ -3,11 +3,11 @@
 #
 # Drives the FULL unified-billing money path against a *running, standalone*
 # OpenRails over its API-key-authenticated public service routes — the exact
-# server-to-server contract gen-orchestrator / Tensorhub use in production
+# server-to-server contract gen-orchestrator / Host Four use in production
 # (issue #233 topology, #222 public service routes). Unlike the in-repo Go harness
 # (tests/unified_billing_e2e_test.go, which needs testcontainers), this hits a
 # real deployed service + its own Postgres, so it runs anywhere the stack is up
-# (e.g. ~/cozy/e2e) and is the artifact that proved #244 end-to-end.
+# (e.g. ~/openrails-e2e) and is the artifact that proved #244 end-to-end.
 #
 # Covers: create credit-type -> deposit -> GET balance (#247) -> atomic
 # authorize+hold (#235) -> partial capture -> balance reflects actual ->
@@ -19,7 +19,7 @@
 #   USER_ID=66666666-6666-6666-6666-666666666666 \
 #     sh scripts/unified_billing_e2e.sh
 #
-# In ~/cozy/e2e: provide a merchant API key, then run this from a container ON
+# In ~/openrails-e2e: provide a merchant API key, then run this from a container ON
 # the e2e_default network (openrails:3053 is not host-published):
 #   docker run --rm --network e2e_default \
 #     -v "$PWD/scripts/unified_billing_e2e.sh:/h.sh:ro" \

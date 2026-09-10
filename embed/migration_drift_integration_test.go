@@ -22,17 +22,17 @@ import (
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
-// th#1627 / or#901: an EMBEDDED host must refuse to boot on a database whose
+// upstream#1627 / or#901: an EMBEDDED host must refuse to boot on a database whose
 // migration ledger records names this build no longer carries.
 //
 // or#901 installed the drift fence in migrate.RunPostgres — the STANDALONE
-// binary's entrypoint. An embedded host never calls it: tensorhub applies the
+// binary's entrypoint. An embedded host never calls it: host-four applies the
 // migratekit chain itself and depends on the engine's own init-time validation
 // (internal/app.validateDatabase), which only asked migratekit's one question,
 // "is every embedded migration applied?". A re-squashed chain answers yes while
 // applying nothing.
 //
-// The bill was th#1627: tensorhub's dev stack recorded openrails 1..12, the
+// The bill was upstream#1627: host-four's dev stack recorded openrails 1..12, the
 // post-squash embedded set is {1, 2}, so the openrails schema stayed frozen at
 // the pre-squash shape. openrails.billing_policies did not exist, and the
 // trust-level ladder sync 500'd at every boot while every billed admission
@@ -102,7 +102,7 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	}
 
 	// This is the hole: migratekit's own validator still calls the frozen
-	// database fully migrated, which is exactly why th#1627 reached production
+	// database fully migrated, which is exactly why upstream#1627 reached production
 	// as 500s instead of a failed deploy.
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)

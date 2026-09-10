@@ -38,7 +38,7 @@ func TestSecretNameRejectsTraversal(t *testing.T) {
 	for _, name := range []string{
 		"psps/stripe/live/acct_884_test/secret_key",
 		"psps/nmi/live/100884/security_key",
-		"psps/nmi/production/579145/security_key",
+		"psps/nmi/production/100001/security_key",
 	} {
 		if got := cleanSecretName(name); got == "" {
 			t.Errorf("cleanSecretName(%q) rejected a legitimate name", name)

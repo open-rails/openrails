@@ -113,7 +113,7 @@ What the engine enforces (verified):
 
 Recommendation (not engine-enforced): treat exposing `/admin/` like exposing
 any login page. If your deployment doesn't want the console reachable at all in
-production, gate it at boot — e.g. the doujins host refuses to boot with
+production, gate it at boot — e.g. an embedded host may refuse to boot with
 `admin_console.enabled` in a production-like env precisely because the SPA is
 unauthenticated at the transport layer, making it dev-only by convention.
 Standalone SaaS deployments that do serve it in production should front it with

@@ -14,7 +14,7 @@ import (
 // HistoryEvent is one Postgres history row used as the THIRD dunning evidence
 // source: alongside the provider-pulled transaction timeline ("provider") and
 // the local retry fields ("local"), the imported legacy dunning history
-// (doujins #387) and failed-payment rows carry history the provider APIs
+// and failed-payment rows carry history the provider APIs
 // cannot return.
 type HistoryEvent struct {
 	// Table is the originating Postgres table (imported_dunning_history |

@@ -16,8 +16,8 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	threshold, grace := int64(50_000_000), 7
 	mt.BillingPolicies = map[string]BillingPolicyConfig{
 		"api_line": {
@@ -36,12 +36,12 @@ func TestReconcileMerchantManifestAppliesBillingPolicies(t *testing.T) {
 		{Policy: "api_line"},
 		{Policy: "cloud_monthly", Tier: "cloud"},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 
 	var merchantID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&merchantID))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
 
 	// The window duration is stored in SECONDS, and the kind's limit lands in the
 	// kind's own field.
@@ -139,10 +139,10 @@ func TestReconcileMerchantManifestRefusesInvalidBillingPolicy(t *testing.T) {
 		}, "window:"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			manifest := cozyArtMerchantManifest()
-			mt := manifest.Merchants["cozy-art"]
+			manifest := hostThreeMerchantManifest()
+			mt := manifest.Merchants["host-three"]
 			mt.BillingPolicies = map[string]BillingPolicyConfig{"bad": tc.policy}
-			manifest.Merchants["cozy-art"] = mt
+			manifest.Merchants["host-three"] = mt
 			err := ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 			require.ErrorContains(t, err, tc.want)
 		})

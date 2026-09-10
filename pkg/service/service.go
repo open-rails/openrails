@@ -60,8 +60,7 @@ var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 // coordinates written before or#907 for default-source admits are identical.
 // It is deliberately NOT the admit-time source: that lived in the Redis hold
 // ref the first capture consumes, and rebuilding it from a caller echo is what
-// made a blank echo a second debit (tensorhub th#969's outbox existed to
-// compensate).
+// made a blank echo a second debit.
 const captureSourceNamespace = "admit"
 
 type CaptureHoldRequest struct {
@@ -90,7 +89,7 @@ type CaptureHoldRequest struct {
 	// the capture's.
 	EventType string
 	// Resource is the caller-supplied free-form string for what was metered
-	// (opaque; e.g. tensorhub maps its endpoint slug here). Optional.
+	// (opaque; an endpoint slug is one example). Optional.
 	Resource   string
 	Dimensions map[string]int64
 	Metadata   map[string]any
@@ -534,7 +533,7 @@ type ResourceRevenueDailyRow struct {
 
 // ResourceRevenueDaily returns per-day revenue for a resource (typed
 // attribution column) across all payers in the merchant over [from, to) — powers
-// tensorhub endpoint revenue analytics (#410).
+// endpoint revenue analytics (#410).
 func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {

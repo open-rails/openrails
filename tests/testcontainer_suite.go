@@ -88,7 +88,7 @@ const testNMIProviderKey = "mobius"
 // testNMIPSPID is the suite's ONE active NMI PSP (#788: the mobius gateway id from defaultSuiteRails — the harness
 // seeds it as the armed rail state every consumer resolves).
 func testNMIPSPID() string {
-	return envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "579145")
+	return envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "100001")
 }
 
 // WithSuiteClock injects the initial clock before the runtime, services,
@@ -224,7 +224,7 @@ func defaultSuiteRails(stripeSecretKey string) config.PSPSet {
 		// runtime RAILS_ config prefix is retired; don't teach operators a dead one).
 		testNMIProviderKey: {
 			Rail:      models.RailNMI,
-			AccountID: envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "579145"),
+			AccountID: envOrDefault("OPENRAILS_TEST_MOBIUS_GATEWAY_ID", "100001"),
 			NMI: &config.NMIRailConfig{
 				SecurityKey:          envOrDefault("OPENRAILS_TEST_MOBIUS_SECURITY_KEY", "6457Thfj624V5r7WUwc5v6a68Zsd6YEm"),
 				WebhookSigningSecret: envOrDefault("OPENRAILS_TEST_MOBIUS_WEBHOOK_SECRET", ""),

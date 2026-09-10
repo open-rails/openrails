@@ -24,8 +24,7 @@ type catalogOptions struct {
 
 // newPushCatalogCmd builds the `openrails push-merchant-catalog` command — a terraform-style
 // declarative apply of a YAML catalog manifest
-// (issue #162). It mirrors cozy-art's sync-product-catalog pipeline:
-// load -> validate -> plan -> print -> (no mutation flags? stop : apply).
+// (issue #162). It loads, validates, plans, prints, and applies a catalog.
 //
 // The command runs in-process through a catalog-sized runtime: Postgres plus the
 // catalog/provider facades, without starting the server runtime.

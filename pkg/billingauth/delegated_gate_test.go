@@ -42,7 +42,7 @@ func TestDelegatedGateAuthorize(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodGet, "/billing/v1/me", nil)
 	base := &DelegatedPrincipal{
 		MerchantID:   "00000000-0000-0000-0000-000000000001",
-		MerchantSlug: "doujins",
+		MerchantSlug: "host-one",
 		SubjectID:    "user-1",
 		Permissions:  []string{"billing:*"},
 		Email:        "u@example.com",
@@ -103,7 +103,7 @@ func TestDelegatedGateAuthorize(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if got.UserContext.UserID != "user-1" || got.UserContext.Merchant != "doujins" {
+		if got.UserContext.UserID != "user-1" || got.UserContext.Merchant != "host-one" {
 			t.Fatalf("principal mapping wrong: %+v", got)
 		}
 	})

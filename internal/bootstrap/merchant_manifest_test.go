@@ -31,13 +31,13 @@ func TestParseMerchantConfigManifest(t *testing.T) {
 	manifest, err := ParseMerchantConfigManifest([]byte(`
 version: 1
 merchants:
-  cozy-art:
-    display_name: Cozy Art
+  host-three:
+    display_name: Host Three
     remote_application:
-      issuer: https://auth.cozy.art
-      jwks_uri: https://auth.cozy.art/.well-known/jwks.json
+      issuer: https://auth.host-three.example
+      jwks_uri: https://auth.host-three.example/.well-known/jwks.json
     profile:
-      display_name: Cozy Art Billing
+      display_name: Host Three Billing
       logo_url: https://cdn.example/logo.png
       from_email: billing@example.com
       support_url: https://example.com/support
@@ -58,11 +58,11 @@ merchants:
 `))
 	require.NoError(t, err)
 	require.Len(t, manifest.Merchants, 1)
-	m := manifest.Merchants["cozy-art"]
-	require.Equal(t, "Cozy Art Billing", m.Profile.DisplayName)
+	m := manifest.Merchants["host-three"]
+	require.Equal(t, "Host Three Billing", m.Profile.DisplayName)
 	require.NotNil(t, m.RemoteApplication)
-	require.Equal(t, "https://auth.cozy.art", m.RemoteApplication.Issuer)
-	require.Equal(t, "https://auth.cozy.art/.well-known/jwks.json", m.RemoteApplication.JWKSURI)
+	require.Equal(t, "https://auth.host-three.example", m.RemoteApplication.Issuer)
+	require.Equal(t, "https://auth.host-three.example/.well-known/jwks.json", m.RemoteApplication.JWKSURI)
 	require.Len(t, m.PSPs, 2)
 	require.Equal(t, "acct_test_123", m.PSPs["stripe"]["stripe"].AccountID)
 }
@@ -229,8 +229,8 @@ func TestParseMerchantConfigManifestValidationErrors(t *testing.T) {
 		return `
 version: 1
 merchants:
-  cozy-art:
-    display_name: Cozy Art
+  host-three:
+    display_name: Host Three
 ` + fragment
 	}
 	for _, tc := range []struct {
@@ -260,12 +260,12 @@ merchants:
 		},
 		{
 			name: "missing merchant display name",
-			body: "version: 1\nmerchants:\n  cozy-art: {}\n",
-			want: `merchant "cozy-art" display_name is required`,
+			body: "version: 1\nmerchants:\n  host-three: {}\n",
+			want: `merchant "host-three" display_name is required`,
 		},
 		{
 			name: "merchant name removed",
-			body: "version: 1\nmerchants:\n  cozy-art:\n    name: Cozy Art\n",
+			body: "version: 1\nmerchants:\n  host-three:\n    name: Host Three\n",
 			want: "unknown field \"name\"",
 		},
 		{
@@ -275,27 +275,27 @@ merchants:
 		},
 		{
 			name: "issuer section removed",
-			body: base("    issuer:\n      issuer: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/.well-known/jwks.json\n"),
+			body: base("    issuer:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/.well-known/jwks.json\n"),
 			want: "issuer",
 		},
 		{
 			name: "remote application missing issuer",
-			body: base("    remote_application:\n      jwks_uri: https://auth.cozy.art/.well-known/jwks.json\n"),
+			body: base("    remote_application:\n      jwks_uri: https://auth.host-three.example/.well-known/jwks.json\n"),
 			want: "remote_application.issuer is required",
 		},
 		{
 			name: "remote application both trust sources",
-			body: base("    remote_application:\n      issuer: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/jwks\n      public_keys:\n        - public_key_pem: x\n"),
+			body: base("    remote_application:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/jwks\n      public_keys:\n        - public_key_pem: x\n"),
 			want: "exactly one of jwks_uri, jwks, or public_keys",
 		},
 		{
 			name: "remote application no trust source",
-			body: base("    remote_application:\n      issuer: https://auth.cozy.art\n"),
+			body: base("    remote_application:\n      issuer: https://auth.host-three.example\n"),
 			want: "must set jwks_uri, jwks, or public_keys",
 		},
 		{
 			name: "remote application allowed origins removed",
-			body: base("    remote_application:\n      issuer: https://auth.cozy.art\n      jwks_uri: https://auth.cozy.art/jwks\n      allowed_origins:\n        - https://auth.cozy.art\n"),
+			body: base("    remote_application:\n      issuer: https://auth.host-three.example\n      jwks_uri: https://auth.host-three.example/jwks\n      allowed_origins:\n        - https://auth.host-three.example\n"),
 			want: "allowed_origins",
 		},
 		{
@@ -310,23 +310,23 @@ merchants:
 		},
 		{
 			name: "api_host with scheme rejected (#850)",
-			body: base("    api_host: https://api.cozy.art\n"),
+			body: base("    api_host: https://api.host-three.example\n"),
 			want: "api_host",
 		},
 		{
 			name: "api_host with path rejected (#850)",
-			body: base("    api_host: api.cozy.art/v1\n"),
+			body: base("    api_host: api.host-three.example/v1\n"),
 			want: "api_host",
 		},
 		{
 			name: "renamed key rail_merchant_accounts rejected with pointer (#698)",
 			body: base("    rail_merchant_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
-			want: "merchants.cozy-art.rail_merchant_accounts was renamed to psps",
+			want: "merchants.host-three.rail_merchant_accounts was renamed to psps",
 		},
 		{
 			name: "pre-#683 key provider_accounts rejected with pointer",
 			body: base("    provider_accounts:\n      stripe:\n        stripe:\n          account_id: acct_test_123\n"),
-			want: "merchants.cozy-art.provider_accounts was renamed to psps",
+			want: "merchants.host-three.provider_accounts was renamed to psps",
 		},
 		{
 			name: "PSP routing removed",
@@ -380,8 +380,8 @@ func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
 	encoded, err := MarshalMerchantManifest(&BillingConfig{
 		Version: 1,
 		Merchants: map[string]MerchantConfig{
-			"cozy-art": {
-				DisplayName: "Cozy Art",
+			"host-three": {
+				DisplayName: "Host Three",
 				PSPs: map[string]PSPConfig{
 					"stripe": {"stripe": {AccountID: "acct_test_123"}},
 				},
@@ -394,7 +394,7 @@ func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
 
 	reparsed, err := ParseMerchantConfigManifest(encoded)
 	require.NoError(t, err)
-	require.Equal(t, "acct_test_123", reparsed.Merchants["cozy-art"].PSPs["stripe"]["stripe"].AccountID)
+	require.Equal(t, "acct_test_123", reparsed.Merchants["host-three"].PSPs["stripe"]["stripe"].AccountID)
 }
 
 // A declared Solana account_id is IGNORED, not rejected: parsing succeeds (it is
@@ -402,7 +402,7 @@ func TestMarshalMerchantManifestEmitsPSPsKey(t *testing.T) {
 // signer to derive from is the only Solana parse error.
 func TestParseMerchantConfigManifestSolanaAccountIDIgnored(t *testing.T) {
 	base := func(fragment string) string {
-		return "version: 1\nmerchants:\n  cozy-art:\n    display_name: Cozy Art\n" + fragment
+		return "version: 1\nmerchants:\n  host-three:\n    display_name: Host Three\n" + fragment
 	}
 	withAccountID := base("    psps:\n      solana:\n        solana:\n          account_id: AKnL4NNf3DGWZJS6cPknBuEGnVsV4A4m5tgebLHaRSZ9\n          signer: { mode: local_keypair }\n          secrets:\n            private_key: 2AXDGYSE4f2sz7tvMMzyHvUfcoJmxudvdhBcmiUSo6iuCXagjUCKEQF21awZnUGxmwD4m9vGXuC3qieHXJQHAcT\n")
 	_, err := ParseMerchantConfigManifest([]byte(withAccountID))

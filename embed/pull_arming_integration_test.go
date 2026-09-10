@@ -26,7 +26,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #699: a doujins-shaped embedded boot — NO Options.PaymentProviders, provider
+// #699: a host-one-shaped embedded boot — NO Options.PaymentProviders, provider
 // credentials declared ONLY through the merchant manifest (UpsertMerchantConfig
 // seeds the per-merchant secrets store) — arms the pull plane: worker
 // registration builds the merchants service, and the per-merchant builder
@@ -86,7 +86,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 	require.NotNil(t, runtime)
 
 	// Worker registration is where hosts fold OpenRails' workers into their
-	// River client (doujins RegisterRiverWorkers) — it must arm the merchants
+	// River client (host-one RegisterRiverWorkers) — it must arm the merchants
 	// service even though no standalone HTTP server ever runs.
 	require.NoError(t, runtime.AddBillingWorkersTo(ctx, river.NewWorkers()))
 	require.NotNil(t, runtime.Merchants, "#699: worker registration builds the merchants service from the store")
@@ -166,7 +166,7 @@ func (f *pullFakeNMI) sawKey(key string) bool {
 	return false
 }
 
-// pullCLIManifestMerchant provisions one MODE-1 merchant the doujins way
+// pullCLIManifestMerchant provisions one MODE-1 merchant the host-one way
 // (embed.New + UpsertMerchantConfig — DB projections only, secrets in the
 // server's memory) and tears the server down, leaving the one-off-CLI shape:
 // rows on disk, NO store secrets, manifest as the only credential source.

@@ -313,7 +313,7 @@ type serviceEndpointRevenueRequest struct {
 
 // ServiceResourceRevenue returns per-day revenue for a resource (by usage_event
 // the typed resource column) across all customers in the merchant (#410) — powers
-// tensorhub endpoint revenue analytics. Operator API key, credits:read.
+// host-four endpoint revenue analytics. Operator API key, credits:read.
 func ServiceResourceRevenue(r *httprequest.Request) {
 	var req serviceEndpointRevenueRequest
 	if !r.BindJSON(&req) {
@@ -341,7 +341,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a customer over a
-// window (#311) — the OpenRails-sourced data behind the tensorhub platform's
+// window (#311) — the OpenRails-sourced data behind the host-four platform's
 // /budget-usage + revenue analytics. Operator API key, credits:read scope.
 func ServiceUsageRollup(r *httprequest.Request) {
 	var req serviceUsageRollupRequest

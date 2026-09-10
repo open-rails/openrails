@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/pkg/billingauth"
 )
 
-// TestRequiredMWPinsUserContextForHandler is the regression test for the cozy-art
+// TestRequiredMWPinsUserContextForHandler is the regression test for the host-three
 // E2E finding: requiredMW authenticated the bearer, but the handler's
 // r.UserContext() came back empty (the net/http Transport cached its own
 // *http.Request and never saw the UserContext requiredMW stored). Handlers then

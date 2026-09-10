@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# or#919 (ported from tensorhub th#1790, `576f0e31`): does this change claim a
-# migration number that `origin/master` has ALREADY used for a different file?
+# Checks whether this change claims a migration number that `origin/master`
+# already uses for a different file.
 #
 # THE FAILURE THIS CATCHES — AND THIS REPO IS WHERE IT ACTUALLY HAPPENED.
 # migratekit keys the applied-migrations ledger by the numeric PREFIX, so two

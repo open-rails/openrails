@@ -45,19 +45,19 @@ func testModeReconcileConfig() *config.Config {
 }
 
 func nmiManifestWithSecurityKey(securityKey string) *BillingConfig {
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				AccountID: "681902",
+				AccountID: "100002",
 				Secrets: map[string]string{
 					"security_key": securityKey,
 				},
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 	return manifest
 }
 
@@ -84,7 +84,7 @@ func TestReconcileMerchantManifestRefusesLiveNMIUnderTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Zero(t, count, "a refused arm must never persist the PSP row")
 }
@@ -109,7 +109,7 @@ func TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Equal(t, 1, count, "a simulated (sandbox) account arms normally")
 }
@@ -136,7 +136,7 @@ func TestReconcileMerchantManifestNMIProbeIndeterminateNeverRefuses(t *testing.T
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Equal(t, 1, count)
 }
@@ -186,17 +186,17 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 	}))
 	defer server.Close()
 
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
 	mt.PSPs = map[string]PSPConfig{
 		"mobius": {
 			"nmi": {
-				AccountID: "681902",
+				AccountID: "100002",
 				Secrets:   map[string]string{"security_key": "live-security-key-prod"},
 			},
 		},
 	}
-	manifest.Merchants["cozy-art"] = mt
+	manifest.Merchants["host-three"] = mt
 
 	cfg := &config.Config{Env: "development", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, TestMode: config.CredentialPostureLive}
 	err := ReconcileMerchantManifestData(ctx, cfg, cp, manifest, MerchantManifestReconcileOptions{
@@ -207,7 +207,7 @@ func TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode(t *testing.T) {
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '681902'
+		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
 	require.Equal(t, 1, count)
 }

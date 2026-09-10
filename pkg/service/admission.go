@@ -877,7 +877,7 @@ type WastedSpendResult struct {
 // claim was a cache: it expired, it did not survive a flush, and a replay after
 // a flush was re-graded and re-counted against the payer's grace. It also made
 // the engine's own changed-amount refusal unreachable inside the TTL, which is
-// why hosts grew claim tables of their own (th#1464's outbox fingerprint).
+// why a durable claim is required.
 //
 // Consequences worth stating, because they are the contract now:
 //

@@ -238,8 +238,6 @@ func liveEnvPaths() []string {
 	}
 	return []string{
 		filepath.Join(home, "openrails", ".env"),
-		filepath.Join(home, "cozy", "cozy-art", ".env"),
-		filepath.Join(home, "doujins", ".env"),
 	}
 }
 

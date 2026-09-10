@@ -22,34 +22,34 @@ func TestReconcileMerchantManifestAppliesAPIHost(t *testing.T) {
 
 	readHost := func() *string {
 		var apiHost *string
-		require.NoError(t, pool.QueryRow(ctx, `SELECT api_host FROM openrails.merchants WHERE slug = 'cozy-art'`).Scan(&apiHost))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT api_host FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&apiHost))
 		return apiHost
 	}
 
 	// Declared host is applied (normalized: case + port stripped).
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
-	mt.APIHost = "API.Cozy.Example:8443"
-	manifest.Merchants["cozy-art"] = mt
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
+	mt.APIHost = "API.Host.Example:8443"
+	manifest.Merchants["host-three"] = mt
 	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 	host := readHost()
 	require.NotNil(t, host)
-	require.Equal(t, "api.cozy.example", *host)
+	require.Equal(t, "api.host.example", *host)
 
 	// Omitted api_host leaves the stored value untouched (so a host assigned
 	// via the merchant-admin route survives a manifest re-apply).
-	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, cozyArtMerchantManifest(), MerchantManifestReconcileOptions{Insert: true, Overwrite: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, hostThreeMerchantManifest(), MerchantManifestReconcileOptions{Insert: true, Overwrite: true}))
 	host = readHost()
 	require.NotNil(t, host)
-	require.Equal(t, "api.cozy.example", *host)
+	require.Equal(t, "api.host.example", *host)
 
 	// A changed declared host re-asserts (declarative identity, not seed-once).
-	mt.APIHost = "api2.cozy.example"
-	manifest.Merchants["cozy-art"] = mt
+	mt.APIHost = "api2.host.example"
+	manifest.Merchants["host-three"] = mt
 	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true}))
 	host = readHost()
 	require.NotNil(t, host)
-	require.Equal(t, "api2.cozy.example", *host)
+	require.Equal(t, "api2.host.example", *host)
 }
 
 func TestReconcileMerchantManifestAPIHostTakenFailsLoudly(t *testing.T) {
@@ -60,7 +60,7 @@ func TestReconcileMerchantManifestAPIHostTakenFailsLoudly(t *testing.T) {
 	first := &BillingConfig{
 		Version: BootstrapManifestVersion,
 		Merchants: map[string]MerchantConfig{
-			"cozy-art": {DisplayName: "Cozy Art", APIHost: "api.shared.example"},
+			"host-three": {DisplayName: "Host Three", APIHost: "api.shared.example"},
 		},
 	}
 	require.NoError(t, ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, first, MerchantManifestReconcileOptions{Insert: true}))
@@ -84,10 +84,10 @@ func TestReconcileMerchantManifestRejectsInvalidAPIHost(t *testing.T) {
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 
-	manifest := cozyArtMerchantManifest()
-	mt := manifest.Merchants["cozy-art"]
-	mt.APIHost = "https://api.cozy.example"
-	manifest.Merchants["cozy-art"] = mt
+	manifest := hostThreeMerchantManifest()
+	mt := manifest.Merchants["host-three"]
+	mt.APIHost = "https://api.host.example"
+	manifest.Merchants["host-three"] = mt
 	err := ReconcileMerchantManifestData(ctx, apiModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{Insert: true})
 	require.Error(t, err)
 	require.ErrorIs(t, err, merchants.ErrInvalidAPIHost)

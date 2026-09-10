@@ -9,11 +9,11 @@ import (
 // silently provision a merchant with no rails.
 func TestParseMerchantConfigStrict(t *testing.T) {
 	valid := []byte(`
-display_name: Doujins
+display_name: Host One
 psps:
   mobius:
     nmi:
-      account_id: "579145"
+      account_id: "100001"
       secrets:
         security_key: sk
         webhook_signing_secret: whs
@@ -27,22 +27,22 @@ psps:
 	}
 
 	typo := []byte(`
-display_name: Doujins
+display_name: Host One
 acounts:
   mobius:
     nmi:
-      account_id: "579145"
+      account_id: "100001"
 `)
 	if _, err := ParseMerchantConfig(typo); err == nil {
 		t.Fatal("typo'd 'acounts:' must be rejected, not silently dropped")
 	}
 
 	renamed := []byte(`
-display_name: Doujins
+display_name: Host One
 rail_merchant_accounts:
   mobius:
     nmi:
-      account_id: "579145"
+      account_id: "100001"
 `)
 	_, err = ParseMerchantConfig(renamed)
 	if err == nil || !strings.Contains(err.Error(), "renamed to psps") {

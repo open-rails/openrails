@@ -41,7 +41,7 @@ func sandboxModeConfig(dsn string, source string) *config.Config {
 		// the old implicit "test_mode accepts any IP" bypass: the extra CIDR is a
 		// declared credential, honored only under sandbox posture and only while
 		// the PSP catalog proves no live CCBill PSP exists. httptest posts from
-		// loopback, so the harness must declare it — same as hentai0's compose
+		// loopback, so the harness must declare it — same as host-two's compose
 		// suite and internal/http's merchant-webhook suite.
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
@@ -198,7 +198,7 @@ func cleanupCCBillWebhookMerchant(t *testing.T, mid merchant.ID) {
 	})
 }
 
-// TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd is the hentai0 shape
+// TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd is the host-two shape
 // (#788): MODE 1 manifest-armed ccbill account, checkout session opened over
 // the embedded customer surface, then the merchant-scoped NewSaleSuccess
 // webhook processed synchronously — accepted, subscription created, session
@@ -408,7 +408,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 }
 
 // fetchCCBillPriceID resolves the seeded catalog's price id over the public
-// catalog surface (same as hentai0's harness does).
+// catalog surface (same as host-two's harness does).
 func fetchCCBillPriceID(t *testing.T, serverURL string) string {
 	t.Helper()
 	resp, err := http.Get(serverURL + "/v1/prices")

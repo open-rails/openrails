@@ -11,7 +11,7 @@ import (
 )
 
 // Rule ids. Each catches a distinct failure class; keep them few and sharp.
-// Names are shared with tensorhub's equivalent gate so allowlists stay portable.
+// Names are shared with host-four's equivalent gate so allowlists stay portable.
 const (
 	// RuleUnboundedMany: a :many query whose result set is bounded by nothing
 	// but the merchant. Row count grows with records on file, not with activity.
@@ -30,7 +30,7 @@ const (
 	// col. This is what a missing index looks like UNDER RLS, where the
 	// merchant_id index always hands the planner some index path so the miss
 	// never surfaces as a Seq Scan. Catalog truth, not planner choice: a column
-	// indexed by any other index is never flagged. (openrails-only — tensorhub
+	// indexed by any other index is never flagged. (openrails-only — host-four
 	// has no RLS, so it has no equivalent.)
 	RuleUnindexedFilter = "unindexed-filter"
 )

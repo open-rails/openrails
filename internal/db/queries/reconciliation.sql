@@ -836,7 +836,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- consistency.reference.source_reference. ADMIN surface-only — revoking access
 -- is an operator decision, never auto (policy, #690).
 --
--- Verification SQL (2026-07-01 doujins analysis, measured ZERO on the full
+-- Verification SQL (2026-07-01 host-one analysis, measured ZERO on the full
 -- re-import): (1) grant-justification by source — live windows LEFT JOIN live
 -- grants on (customer, source) counting NULLs per source_type; (2)
 -- window-vs-paid-through by status — live windows joined to subscriptions

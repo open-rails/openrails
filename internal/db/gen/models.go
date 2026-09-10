@@ -578,7 +578,7 @@ type OpenrailsHostLifecycleEvent struct {
 	DedupeKey string
 }
 
-// Append-only imported legacy dunning history (#735; doujins #387 import target). Display/forensics evidence only.
+// Append-only imported legacy dunning history (#735 import target). Display/forensics evidence only.
 type OpenrailsImportedDunningHistory struct {
 	ID             uuid.UUID
 	MerchantID     uuid.UUID
@@ -587,7 +587,7 @@ type OpenrailsImportedDunningHistory struct {
 	EventType      string
 	Rail           string
 	OccurredAt     time.Time
-	// Legacy origin of the imported row, e.g. doujins_users_logs, mobius_schedulers.
+	// Legacy origin of the imported row, for example a users log or provider scheduler.
 	Source string
 	// Verbatim normalized legacy payload. Correlation keys the reconcile history source extracts when present: rail_subscription_id, rail_transaction_id, status, amount_micros.
 	Detail    []byte
@@ -1505,7 +1505,7 @@ type OpenrailsUsageEvent struct {
 	InvokerID string
 	// Native OpenRails currency code; amount uses this currency internal precision.
 	Currency string
-	// Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.
+	// Caller-supplied free-form string for what was metered (for example, an endpoint or plan slug). Opaque to OpenRails; nullable, not a FK.
 	Resource         *string
 	EventType        string
 	Dimensions       []byte

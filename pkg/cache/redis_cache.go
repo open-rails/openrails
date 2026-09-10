@@ -49,7 +49,7 @@ func (c *RedisCache) Clear(ctx context.Context) error {
 
 // Close is a no-op: the redis client is injected (NewRedisCache borrows it),
 // so its owner — Runtime for self-dialed clients, the host for injected ones —
-// closes it. Closing here poisoned host-shared clients (cozy-art ca#198).
+// closes it. Closing here would poison a host-shared client.
 func (c *RedisCache) Close() error {
 	return nil
 }

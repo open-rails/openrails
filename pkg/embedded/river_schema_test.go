@@ -18,7 +18,7 @@ func TestResolveHostRiverSchema(t *testing.T) {
 		{"empty adopts the default", "", "openrails", config.RiverSchema, false},
 		{"whitespace adopts the default", "  ", "openrails", config.RiverSchema, false},
 		{"public stays public", "public", "openrails", "public", false},
-		{"host-owned schema is adopted", "doujins_river", "openrails", "doujins_river", false},
+		{"host-owned schema is adopted", "host-one_river", "openrails", "host-one_river", false},
 		{"billing schema is refused", "openrails", "openrails", "", true},
 		{"custom billing schema is refused", "acme_billing", "acme_billing", "", true},
 	}

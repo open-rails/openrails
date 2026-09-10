@@ -10,8 +10,8 @@ name: Live-Gated Integration
 # tests executed, not that every live test silently skipped.
 #
 # Required GitHub Actions secrets (Settings -> Secrets and variables -> Actions):
-#   NMI_SANDBOX_SECURITY_KEY   — real NMI sandbox account security key (the
-#                                doujins Mobius sandbox; test card 4111 approved).
+#   NMI_SANDBOX_SECURITY_KEY   — real NMI sandbox account security key (test
+#                                card 4111 approved).
 #   NMI_WEBHOOK_SIGNING_SECRET — sandbox webhook signing secret (lifecycle e2e).
 #   NMI_TOKENIZATION_KEY       — Collect.js browser-tokenization proof.
 #   OPENRAILS_TEST_STRIPE_SECRET_KEY — Stripe TEST-mode key (sk_test_/rk_test_)

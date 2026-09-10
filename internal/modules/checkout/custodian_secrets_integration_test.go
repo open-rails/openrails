@@ -34,7 +34,7 @@ func TestCustodianHeldCardResolvesFromStoreBothModes(t *testing.T) {
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
 
 	const tenantID = "tnt_c12_test"
-	const primaryGateway = "579145-c12"
+	const primaryGateway = "100001-c12"
 	const backupGateway = "579146-c12"
 
 	// Layer B rows (identical in both modes — mode 1 converges the same rows).

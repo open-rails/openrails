@@ -609,7 +609,7 @@ func specFeatures(raw []byte) ([]string, error) {
 //
 // derive-1 today only repairs EXISTING grants (MissingEffects/Unretracted) and
 // SURFACES ungranted one-off payments for an operator. After the migrate/
-// convergence split the doujins migrate inserts source-of-truth subscriptions +
+// convergence split the host-one migrate inserts source-of-truth subscriptions +
 // solana wallet payments but NO grants/entitlements (#724) — so the engine must
 // CREATE the grant + entitlement window from the bare source. These detections
 // are source-keyed (source_type+source_id), so they are a NO-OP for live data
@@ -673,7 +673,7 @@ func (l *Ledger) AdminGrantExists(ctx context.Context, sourceID string) (bool, e
 // GrantAdmin records an operator/manual "comp" as a source-of-truth admin grant
 // (source_type=admin) + materializes its entitlement window(s) — derive-1 for the
 // access FACT that has no payment/subscription behind it (#636). The host (e.g. the
-// doujins legacy migrate) hands over the comp instead of writing entitlements.
+// host-one legacy migrate) hands over the comp instead of writing entitlements.
 // Idempotent by sourceID. end nil = indefinite. The grant is ALWAYS recorded
 // (#695 provenance); a feature whose window overlaps an existing live window gets
 // NO window (derive-2's absent-by-overlap no-op). Returns the number of feature-

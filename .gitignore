@@ -5,7 +5,6 @@
 *.so
 *.dylib
 /billing
-/doujins-billing
 /billing-server
 *.test
 

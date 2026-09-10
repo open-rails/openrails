@@ -20,7 +20,7 @@ import (
 // provisioning API: an embedded host declares its merchant's PSPs
 // via rt.UpsertMerchantConfig (no raw SQL, no control plane), the rows
 // land bound to the merchant, and re-running it is idempotent. This is the call
-// doujins #426 makes from `migrate legacy`.
+// host-one #426 makes from `migrate legacy`.
 func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -39,7 +39,7 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 		DisplayName: slug,
 		PSPs: map[string]embed.PSPConfig{
 			"mobius": {
-				"nmi": {AccountID: "579145"},
+				"nmi": {AccountID: "100001"},
 			},
 			"ccbill": {
 				"ccbill": {AccountID: "945280-0000"},

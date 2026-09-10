@@ -324,7 +324,7 @@ through `VerifyRequest` — your whole credential chain (API-key branch,
 2FA-enrollment gate, issuer enrichment) — so billing cannot end up with a
 weaker check than the rest of your app, and an in-process host never refetches
 its own keys over HTTP. The merchant pin is YOUR engine's bound merchant in
-every flavour, never anything from the caller's token (#913/th#1765).
+every flavour, never anything from the caller's token (#913/upstream#1765).
 
 By default `Permissions` comes from the canonical role→permission preset
 `permissions.ForRoles` (owner/admin → `merchant:*` + `customer:*`; member → the

@@ -92,7 +92,7 @@ func TestGetPlatformWorkerHealthIncludesErrorText(t *testing.T) {
 	})
 	_, err := dbi.Qx(ctx).Exec(ctx,
 		`INSERT INTO openrails.worker_health (worker_kind, last_error_at, last_error, consecutive_failures)
-		 VALUES ($1, now(), 'merchant acme-slug subscription 0f0f: PSP 579145 declined', 3)`, kind)
+		 VALUES ($1, now(), 'merchant acme-slug subscription 0f0f: PSP 100001 declined', 3)`, kind)
 	require.NoError(t, err)
 
 	recorder := httptest.NewRecorder()

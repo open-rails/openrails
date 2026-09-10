@@ -843,7 +843,7 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*merc
 		req.Options.Insert = true
 		req.Options.Overwrite = true
 		// Prune needs a store to list; a storeless call (read-side bind with no
-		// accounts, e.g. hentai0's empty config) has nothing to prune.
+		// accounts) has nothing to prune.
 		req.Options.Prune = req.SecretStore != nil
 	}
 	database := req.Database

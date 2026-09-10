@@ -84,7 +84,7 @@ this set, never more.
   different token than the one you priced.
 - **Custom symbol** — `mint:` is required; there the mint *is* the token's
   identity.
-- `DUSD` is the Doujins devnet test stablecoin (`Dev USD`). It is not available
+- `DUSD` is an embedded host's devnet test stablecoin (`Dev USD`). It is not available
   on mainnet and must never be configured in a live merchant manifest.
 - **`decimals`** — never configurable (#817): read from the SPL mint on-chain.
 - **Under `test_mode`** the devnet column applies. Devnet mints are

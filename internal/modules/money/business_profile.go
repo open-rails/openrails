@@ -17,8 +17,7 @@ import (
 
 // or#908: the B2B business-profile record and its two chokepoints.
 //
-// POSTURE DOCTRINE (upstreamed from tensorhub th#1462): business posture is a
-// CONSEQUENCE of onboarding, never a settable flag. The
+// Business posture is a consequence of onboarding, never a settable flag. The
 // customer_business_profiles row IS the posture — there is no boolean to flip,
 // so a posture with no terms acceptance behind it is unrepresentable. The only
 // way in is OnboardBusinessCustomer (terms acceptance required); the only way

@@ -133,7 +133,7 @@ func (r *Request) ErrorJSON(code int, msg string) {
 // verbatim against the request id.
 //
 // ErrorJSON(500, "...") drops whatever error the handler was holding, so an
-// internal failure reaches the operator as a bare constant. th#1627: three
+// internal failure reaches the operator as a bare constant. upstream#1627: three
 // boot-time `set billing policy failed` lines and a 500 on every billed
 // admission carried no cause at all, and attributing them cost a bisect across
 // two standing stacks. Every 500 that has an error in hand should use this.

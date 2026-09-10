@@ -235,7 +235,7 @@ type Decision struct {
 // AdmitInput is one admission request.
 type AdmitInput struct {
 	Merchant, Customer, Currency string
-	RequestID                    string // idempotency key (provider/tensorhub request id)
+	RequestID                    string // idempotency key (provider/host-four request id)
 	Invoker                      string // recorded so capture's durable ledger write carries attribution
 	Source                       string // admit-time source namespace (informational; NOT part of the capture coordinate since or#907)
 	Cost                         int64  // estimate, minor units

@@ -14,7 +14,7 @@ import (
 // InsertCaptureUsageEvent appends a usage_event WITHOUT a second ledger debit
 // (distinct from RecordUsage, which debits), and ServiceUsageRollup returns
 // per-dimension-VALUE spend grouped by endpoint / tier. This is the data behind
-// the tensorhub platform /budget-usage surface (#410).
+// the host-four platform /budget-usage surface (#410).
 func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	_, ms, payer, ctx := authzEnv(t)
 

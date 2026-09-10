@@ -98,7 +98,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 		// MODE 1 (#723): this call IS the manifest. Identity/config/account rows
 		// reconcile as DB projections; secrets seed the runtime's in-memory plane
 		// (never a persistent store). An empty MerchantConfig stays a legal
-		// read-side bind (hentai0). ProvisionMerchant forces Insert+Overwrite+
+		// read-side bind (host-two). ProvisionMerchant forces Insert+Overwrite+
 		// Prune so a re-run (host reboot) steamrolls stale in-memory values.
 		if a.Runtime == nil || a.Runtime.ManifestSecrets == nil {
 			return merchant.ID{}, fmt.Errorf("openrails embed: merchant_source=manifest requires the runtime manifest secret plane (#723)")

@@ -18,7 +18,7 @@ import (
 // at the canonical embedded paths, authenticated by the host-supplied
 // DelegatedAuthenticator, with the per-route permission gates intact.
 // They mirror the ginroutes host-principal tests but assert the EMBEDDED
-// path prefix — the contract tensorhub mounts against.
+// path prefix — the contract host-four mounts against.
 
 type stubSelfAuthenticator struct {
 	principal *billingauth.DelegatedPrincipal

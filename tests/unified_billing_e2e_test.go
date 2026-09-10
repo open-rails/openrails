@@ -5,7 +5,7 @@ package tests
 // Unified billing e2e harness (issue #244, OpenRails side) — #513/#512 model.
 //
 // Issue #244 asks for an end-to-end test of the unified billing money path
-// across gen-orchestrator -> Tensorhub -> embedded OpenRails. The full
+// across gen-orchestrator -> Host Four -> embedded OpenRails. The full
 // three-service live flow lives in the embedding repo; what we prove HERE is
 // that OpenRails' own standalone surfaces implement the unified money lifecycle
 // correctly: ADMIT for an estimate (places a Redis spendgate hold), CAPTURE the
@@ -29,7 +29,7 @@ package tests
 //
 // Everything flows over the service-credential-authenticated PUBLIC service routes
 // (deposit, admit, capture, release, balance) — the standalone server-to-server
-// contract gen-orchestrator / Tensorhub actually use.
+// contract gen-orchestrator / Host Four actually use.
 
 import (
 	"bytes"
@@ -57,7 +57,7 @@ import (
 // billingE2EHarness is a small reusable driver over the service-credential-authenticated public
 // service routes. It mirrors the harness style already established in
 // service_facade_parity_test.go (stubServiceCredentialResolver + RegisterServiceRoutes) so
-// the same server-to-server contract gen-orchestrator / Tensorhub use is exercised here.
+// the same server-to-server contract gen-orchestrator / Host Four use is exercised here.
 type billingE2EHarness struct {
 	t          *testing.T
 	suite      *TestContainerSuite
@@ -414,7 +414,7 @@ func TestUnifiedBilling_OwnerScoping(t *testing.T) {
 }
 
 // TestUnifiedBilling_LifecycleViaPublicServiceCredentialRoutes is the end-to-end
-// "happy path" a gen-orchestrator / Tensorhub driver runs for a single job, all
+// "happy path" a gen-orchestrator / Host Four driver runs for a single job, all
 // over the service-credential-authenticated public surface: fund -> admit estimate ->
 // capture actual -> ledger conserved, with the public balance endpoint agreeing.
 func TestUnifiedBilling_LifecycleViaPublicServiceCredentialRoutes(t *testing.T) {

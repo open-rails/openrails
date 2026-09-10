@@ -56,8 +56,8 @@ statement cache, so its connection uses `QueryExecModeExec`.)
 
 ### Rules
 
-Rule names are shared with tensorhub's equivalent gate so allowlists stay
-portable. `unindexed-filter` is openrails-only: tensorhub has no RLS.
+Rule names are shared with host-four's equivalent gate so allowlists stay
+portable. `unindexed-filter` is openrails-only: host-four has no RLS.
 
 - **`unbounded-many`** — a `:many` query over a merchant-scoped table with
   no `LIMIT` and no bounding predicate. Bounding means `col = $n` on an indexed
