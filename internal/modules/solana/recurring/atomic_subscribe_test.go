@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"testing"
+	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
@@ -105,11 +106,8 @@ func TestPrepareSubscribe_AtomicCosignedBundle(t *testing.T) {
 // carrying the program's UNKNOWN_INIT_ID sentinel (same-slot init check). Still
 // two required signers with exactly the cranker slot pre-signed.
 func TestPrepareSubscribe_FirstTimerGetsOneStepBundle(t *testing.T) {
-	orig := authorityReadBackoff
-	authorityReadBackoff = 0
-	defer func() { authorityReadBackoff = orig }()
-
 	svc, _ := newSubscribeSvc(t, subFakeRPCAbsent{balance: 50_000_000})
+	svc.authorityReadBackoff = time.Nanosecond
 	res, err := svc.Prepare(context.Background(), newSubscribeInput(t))
 	if err != nil {
 		t.Fatalf("Prepare: %v", err)
@@ -170,11 +168,8 @@ func TestPrepareSubscribe_ReturningSubscriberEchoesRealInitID(t *testing.T) {
 // Pre-flight applies to first-timers too: the bundle pulls the first period, so
 // an underfunded wallet is refused before anything is built.
 func TestPrepareSubscribe_FirstTimerPreflightInsufficient(t *testing.T) {
-	orig := authorityReadBackoff
-	authorityReadBackoff = 0
-	defer func() { authorityReadBackoff = orig }()
-
 	svc, _ := newSubscribeSvc(t, subFakeRPCAbsent{balance: 1_000_000})
+	svc.authorityReadBackoff = time.Nanosecond
 	_, err := svc.Prepare(context.Background(), newSubscribeInput(t))
 	if !errors.Is(err, ErrInsufficientUSDC) {
 		t.Fatalf("error must wrap ErrInsufficientUSDC, got %v", err)

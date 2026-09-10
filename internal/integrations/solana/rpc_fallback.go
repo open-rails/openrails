@@ -368,15 +368,14 @@ func (c *RPCFallbackClient) GetAccountData(ctx context.Context, address solanago
 	return data, err
 }
 
-// minContextSlotReadAttempts / Backoff bound the slot-gated read retry. A node
-// that lags the requested minContextSlot returns an error; we retry the whole
-// fallback chain (a different node may already be caught up) until one answers at
-// or beyond the slot, or the bound is reached.
-const minContextSlotReadAttempts = 8
-
-// minContextSlotReadBackoff is a var (not const) only so tests can shrink it;
-// production keeps the ~500ms pacing while lagging nodes catch up.
-var minContextSlotReadBackoff = 500 * time.Millisecond
+// minContextSlotReadAttempts / minContextSlotReadBackoff bound the slot-gated
+// read retry. A node that lags the requested minContextSlot returns an error;
+// we retry the whole fallback chain (a different node may already be caught up)
+// until one answers at or beyond the slot, or the bound is reached.
+const (
+	minContextSlotReadAttempts = 8
+	minContextSlotReadBackoff  = 500 * time.Millisecond
+)
 
 // GetAccountDataAtSlot is GetAccountData gated on minContextSlot: the read is
 // evaluated only against a node that has reached `minSlot` (the slot our write
@@ -477,13 +476,21 @@ func (c *RPCFallbackClient) GetTokenAccountBalanceAtSlot(ctx context.Context, ac
 // retry (nodes catch up within a few hundred ms). Non-slot errors and success
 // return immediately.
 func retryMinContextSlot(ctx context.Context, read func(context.Context) error) error {
+	return retryMinContextSlotWithBackoff(ctx, minContextSlotReadBackoff, read)
+}
+
+func retryMinContextSlotWithBackoff(
+	ctx context.Context,
+	backoff time.Duration,
+	read func(context.Context) error,
+) error {
 	var lastErr error
 	for attempt := 0; attempt < minContextSlotReadAttempts; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
-			case <-time.After(minContextSlotReadBackoff):
+			case <-time.After(backoff):
 			}
 		}
 		err := read(ctx)

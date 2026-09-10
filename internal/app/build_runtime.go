@@ -778,8 +778,12 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 
 	railPMService := paymentmethods.NewRailPaymentMethodService(paymentMethodService, subscriptionService, database, cfg, clock)
 	subscriptionService.RailPaymentMethodService = railPMService
-	idempotencyService := replaycache.NewStore(redisClient)
-	webhookIdempotencyService := replaycache.NewStoreWithTTL(redisClient, webhooks.WebhookIdempotencyTTL)
+	idempotencyService := replaycache.NewStore(redisClient, replaycache.WithClock(clock.Now))
+	webhookIdempotencyService := replaycache.NewStoreWithTTL(
+		redisClient,
+		webhooks.WebhookIdempotencyTTL,
+		replaycache.WithClock(clock.Now),
+	)
 	// #579: a THIRD idempotency instance backs the client-facing Idempotency-Key
 	// HTTP replay middleware, separate from the internal checkout dedup
 	// (idempotencyService) and webhook dedup (webhookIdempotencyService) above.
@@ -819,7 +823,7 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 	planMigrationService := subscriptions.NewPlanMigrationService(repriceService, &subscriptions.StripeService{Config: cfg, Rails: railConfigs}, subscriptions.NewNMIPlanPusher(collectionResolver), paymentMethodService)
 
 	// #678: Postgres (webhook_events) is the dedup truth; Redis is cache + lease coordination.
-	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database)
+	deduplicationService, err := webhooks.NewDeduplicationService(webhookIdempotencyService, database, clock)
 	if err != nil {
 		return nil, err
 	}

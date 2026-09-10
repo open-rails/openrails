@@ -157,9 +157,7 @@ func TestIsMinContextSlotError(t *testing.T) {
 }
 
 func TestRetryMinContextSlot_RetriesLagThenSucceeds(t *testing.T) {
-	orig := minContextSlotReadBackoff
-	minContextSlotReadBackoff = time.Millisecond
-	defer func() { minContextSlotReadBackoff = orig }()
+	t.Parallel()
 	calls := 0
 	read := func(ctx context.Context) error {
 		calls++
@@ -168,8 +166,7 @@ func TestRetryMinContextSlot_RetriesLagThenSucceeds(t *testing.T) {
 		}
 		return nil
 	}
-	// Shrink the package backoff isn't possible (const); rely on ctx not firing.
-	if err := retryMinContextSlot(context.Background(), read); err != nil {
+	if err := retryMinContextSlotWithBackoff(context.Background(), time.Millisecond, read); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if calls != 3 {

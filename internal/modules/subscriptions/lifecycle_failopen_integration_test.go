@@ -37,6 +37,7 @@ type failopenFixture struct {
 	q         *gen.Queries
 	lifecycle *SubscriptionLifecycleService
 	entSvc    *entitlements.EntitlementService
+	pspID     uuid.UUID
 	productID uuid.UUID
 	priceID   uuid.UUID
 	userID    string
@@ -53,8 +54,8 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	// arrive in the shape every production caller does — checkout's stampPSP,
 	// the intent runner and the webhook plane all pin the routed PSP on ctx
 	// before any provider-bound row is written.
-	failopenPSP = dbtest.EnsureTestPSP(context.Background(), t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
-	ctx := failopenCtx()
+	pspID := dbtest.EnsureTestPSP(context.Background(), t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	ctx := db.WithPSPID(dbtest.WithTestMerchant(context.Background()), pspID)
 	q := gen.New(pool)
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -84,7 +85,7 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 
-	f := &failopenFixture{dbi: dbi, pool: pool, q: q, lifecycle: lifecycle, entSvc: entitlementSvc, productID: productID, priceID: priceID, userID: userID, ent: entName}
+	f := &failopenFixture{dbi: dbi, pool: pool, q: q, lifecycle: lifecycle, entSvc: entitlementSvc, pspID: pspID, productID: productID, priceID: priceID, userID: userID, ent: entName}
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE source_id IN (SELECT id FROM openrails.subscriptions WHERE product_id = $1)", productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id::text = $1", userID)
@@ -175,7 +176,7 @@ func (f *failopenFixture) windows(t *testing.T, subID uuid.UUID, sourceType stri
 
 func (f *failopenFixture) entitledAt(t *testing.T, at time.Time) bool {
 	t.Helper()
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	ok, err := f.entSvc.IsEntitled(ctx, f.userID, f.ent, at)
 	require.NoError(t, err)
 	return ok
@@ -183,7 +184,7 @@ func (f *failopenFixture) entitledAt(t *testing.T, at time.Time) bool {
 
 func (f *failopenFixture) loadSub(t *testing.T, id uuid.UUID) *models.Subscription {
 	t.Helper()
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	subSvc := NewSubscriptionService(f.dbi, catalog.NewPriceService(f.dbi), catalog.NewProductService(f.dbi), nil, nil, nil, nil)
 	sub, err := subSvc.GetByID(ctx, id)
 	require.NoError(t, err)
@@ -192,7 +193,7 @@ func (f *failopenFixture) loadSub(t *testing.T, id uuid.UUID) *models.Subscripti
 
 func (f *failopenFixture) create(t *testing.T, rail models.Rail) (*models.Subscription, string) {
 	t.Helper()
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	procSubID := "sub_failopen_" + uuid.New().String()
 	sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
 		UserID:             f.userID,
@@ -207,7 +208,7 @@ func (f *failopenFixture) create(t *testing.T, rail models.Rail) (*models.Subscr
 
 func TestResumeMembership_RollsBackStatusWhenAccessReopenFails(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailStripe)
 	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
 		SubscriptionID: &sub.ID,
@@ -245,7 +246,7 @@ func TestResumeMembership_RollsBackStatusWhenAccessReopenFails(t *testing.T) {
 
 func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, railSubID := f.create(t, models.RailNMI)
 	original := f.loadSub(t, sub.ID)
 	require.NotNil(t, original.CurrentPeriodEndsAt)
@@ -342,7 +343,7 @@ func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 // sweep the window is already open-ended, so access holds trivially.
 func TestFailOpen_WebhookSilence(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	paid := f.windows(t, sub.ID, "subscription")
@@ -395,7 +396,7 @@ func TestFailOpen_WebhookSilence(t *testing.T) {
 // detection agrees the per-period grants are satisfied by the standing window.
 func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, procSubID := f.create(t, models.RailNMI)
 
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
@@ -436,7 +437,7 @@ func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 	// DERIVE parity: no per-period grant is reported as missing its effect —
 	// the standing window satisfies them (detection mirrors MaterializeGrant).
 	customerID := f.loadSub(t, sub.ID).CustomerID
-	missing, err := f.q.ListLiveGrantsMissingEffects(failopenCtx(), gen.ListLiveGrantsMissingEffectsParams{
+	missing, err := f.q.ListLiveGrantsMissingEffects(f.ctx(), gen.ListLiveGrantsMissingEffectsParams{
 		MerchantID: dbtest.TestMerchantID.UUID(), CustomerID: &customerID,
 	})
 	require.NoError(t, err)
@@ -448,7 +449,7 @@ func TestFailOpen_RenewalRecordsPeriodGrantNotWindow(t *testing.T) {
 // system cannot extend a cancelled sub. Access ends exactly at period end.
 func TestFailOpen_UserCancelClosesAtPeriodEnd(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 	created := f.loadSub(t, sub.ID)
 	require.NotNil(t, created.CurrentPeriodEndsAt)
@@ -473,7 +474,7 @@ func TestFailOpen_UserCancelClosesAtPeriodEnd(t *testing.T) {
 // TestFailOpen_ImmediateCancelRevokesNow: an immediate revoke closes access now.
 func TestFailOpen_ImmediateCancelRevokesNow(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	require.NoError(t, f.lifecycle.CancelMembership(ctx, &CancelMembershipParams{
@@ -489,7 +490,7 @@ func TestFailOpen_ImmediateCancelRevokesNow(t *testing.T) {
 
 func TestFailOpen_ImmediateCancelRollsBackWhenRevocationFails(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
 
@@ -516,7 +517,7 @@ func TestFailOpen_ImmediateCancelRollsBackWhenRevocationFails(t *testing.T) {
 
 func TestFailOpen_PeriodEndCancelRollsBackWhenBoundingFails(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	injected := errors.New("injected entitlement bound failure")
@@ -548,7 +549,7 @@ func TestFailOpen_PeriodEndCancelRollsBackWhenBoundingFails(t *testing.T) {
 // the standing window (the advance-written closure is undone).
 func TestFailOpen_ReactivateRestoresStanding(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, procSubID := f.create(t, models.RailNMI)
 	created := f.loadSub(t, sub.ID)
 
@@ -586,7 +587,7 @@ func TestFailOpen_ReactivateRestoresStanding(t *testing.T) {
 // windows minted.
 func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
 
@@ -631,7 +632,7 @@ func TestFailOpen_DunningExhaustionClosesAccess(t *testing.T) {
 // dunning_worker FailMembership cadence tests (#694).
 func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
 	f := newFailopenFixture(t, 24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	reason := "rebill declined"
@@ -654,7 +655,7 @@ func TestFailOpen_DailyCycleFirstFailureTerminal(t *testing.T) {
 
 func TestFailOpen_DunningExhaustionRollsBackWhenEntitlementListingFails(t *testing.T) {
 	f := newFailopenFixture(t, 24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
 
@@ -681,7 +682,7 @@ func TestFailOpen_DunningExhaustionRollsBackWhenEntitlementListingFails(t *testi
 
 func TestFailOpen_ExpirationRollsBackWhenEntitlementRevocationFails(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 	farFuture := time.Now().UTC().Add(90 * 24 * time.Hour)
 
@@ -715,7 +716,7 @@ func (d *failopenDeferredDelete) WithTx(pgx.Tx) DeferredDeleteScheduler { return
 // (no regression).
 func TestFailOpen_ResolveCancelledRemoteAlive(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	deferDelete := &failopenDeferredDelete{}
 	f.lifecycle.SetDeferredDeleteScheduler(deferDelete)
 
@@ -753,7 +754,7 @@ func TestFailOpen_BoundedPurchaseKeepsInterval(t *testing.T) {
 // must not mint overlapping bounded windows next to the standing one.
 func TestFailOpen_MaterializeReplayIsIdempotent(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, procSubID := f.create(t, models.RailNMI)
 	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
 		Rail:               models.RailNMI,
@@ -794,12 +795,10 @@ func TestFailOpen_MaterializeReplayIsIdempotent(t *testing.T) {
 	assert.Equal(t, before, countWindows(), "derive replay must not create windows next to the standing one")
 }
 
-// failopenCtx is the production context shape for a provider-bound write: the
+// ctx is the production context shape for a provider-bound write: the
 // merchant, plus the PSP the caller routed to (or#893). The id is resolved, not
 // assumed: EnsureTestPSP reuses whatever account this database already has on
 // the rail.
-var failopenPSP uuid.UUID
-
-func failopenCtx() context.Context {
-	return db.WithPSPID(dbtest.WithTestMerchant(context.Background()), failopenPSP)
+func (f *failopenFixture) ctx() context.Context {
+	return db.WithPSPID(dbtest.WithTestMerchant(context.Background()), f.pspID)
 }

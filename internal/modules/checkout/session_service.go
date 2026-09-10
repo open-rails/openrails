@@ -416,13 +416,13 @@ func (s *CheckoutSessionService) startPendingHeartbeat(ctx context.Context, key 
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		ticker := time.NewTicker(s.lease() / 4)
+		ticker := s.newPendingTicker(s.lease() / 4)
 		defer ticker.Stop()
 		for {
 			select {
 			case <-hbCtx.Done():
 				return
-			case <-ticker.C:
+			case <-ticker.Chan():
 				if _, err := s.idempotencyService.RenewPending(hbCtx, checkoutSessionIdempotencyOp, key); err != nil && hbCtx.Err() == nil {
 					log.WithContext(hbCtx).WithError(err).Warn("checkout session pending-lease renewal failed")
 				}
@@ -433,6 +433,10 @@ func (s *CheckoutSessionService) startPendingHeartbeat(ctx context.Context, key 
 		cancel()
 		<-done
 	}
+}
+
+func (s *CheckoutSessionService) newPendingTicker(d time.Duration) clockwork.Ticker {
+	return timeutil.FirstClock(s.clock).NewTicker(d)
 }
 
 func canonicalizeCheckoutPaymentName(payment *CheckoutSessionPaymentRequest) {

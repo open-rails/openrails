@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -29,11 +30,16 @@ type dedupHarness struct {
 	idem *replaycache.Store
 }
 
-func newDedupHarness(t *testing.T) *dedupHarness {
+func newDedupHarness(t *testing.T, clocks ...clockwork.Clock) *dedupHarness {
 	t.Helper()
 	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	idem := replaycache.NewStore(nil)
-	svc, err := NewDeduplicationService(idem, dbi)
+	var options []replaycache.Option
+	if len(clocks) > 0 {
+		options = append(options, replaycache.WithClock(clocks[0].Now))
+	}
+	idem := replaycache.NewStore(nil, options...)
+	t.Cleanup(idem.Close)
+	svc, err := NewDeduplicationService(idem, dbi, clocks...)
 	require.NoError(t, err)
 	return &dedupHarness{ctx: dbtest.WithTestMerchant(context.Background()), db: dbi, svc: svc, idem: idem}
 }
@@ -197,7 +203,8 @@ func TestProcessWebhook_PendingDuplicateDoesNotProcessConcurrently(t *testing.T)
 // A handler slower than the pending lease must stay exclusive: the heartbeat
 // renews the lease, so a redelivery is rejected instead of taking over (#678).
 func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
-	h := newDedupHarness(t)
+	clock := clockwork.NewFakeClockAt(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC))
+	h := newDedupHarness(t, clock)
 	h.svc.pendingLease = 100 * time.Millisecond
 	evt := h.eventID(t, "tx-slow")
 
@@ -219,9 +226,24 @@ func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 	}()
 
 	<-started
-	time.Sleep(3 * h.svc.pendingLease) // well past the lease; heartbeat must have renewed it
+	require.NoError(t, clock.BlockUntilContext(t.Context(), 1))
+	rec, err := h.idem.Get(h.ctx, "webhook.ccbill.RenewalSuccess", evt)
+	require.NoError(t, err)
+	require.NotNil(t, rec)
+	lastBeat := rec.CreatedAt
+	for range 12 {
+		clock.Advance(h.svc.pendingLease / 4)
+		require.Eventually(t, func() bool {
+			rec, getErr := h.idem.Get(h.ctx, "webhook.ccbill.RenewalSuccess", evt)
+			if getErr != nil || rec == nil || !rec.CreatedAt.After(lastBeat) {
+				return false
+			}
+			lastBeat = rec.CreatedAt
+			return true
+		}, time.Second, time.Millisecond, "heartbeat must renew the pending record")
+	}
 
-	err := h.svc.ProcessWebhook(
+	err = h.svc.ProcessWebhook(
 		h.ctx, evt, "RenewalSuccess", models.RailCCBill.EventSource(), nil,
 		func(context.Context) error {
 			attempts.Add(1)
@@ -239,7 +261,8 @@ func TestProcessWebhook_SlowHandlerKeepsLeaseViaHeartbeat(t *testing.T) {
 // A genuinely dead holder (pending record, no heartbeat) is still taken over
 // after the lease ages out.
 func TestProcessWebhook_DeadHolderIsTakenOver(t *testing.T) {
-	h := newDedupHarness(t)
+	clock := clockwork.NewFakeClockAt(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC))
+	h := newDedupHarness(t, clock)
 	h.svc.pendingLease = 50 * time.Millisecond
 	evt := h.eventID(t, "tx-dead")
 
@@ -248,7 +271,7 @@ func TestProcessWebhook_DeadHolderIsTakenOver(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, existed)
 
-	time.Sleep(2 * h.svc.pendingLease)
+	clock.Advance(2 * h.svc.pendingLease)
 
 	attempts := 0
 	err = h.svc.ProcessWebhook(

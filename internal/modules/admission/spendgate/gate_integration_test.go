@@ -340,8 +340,9 @@ func TestGate_WindowAccumulates(t *testing.T) {
 func TestGate_AbandonedHoldRecomputeRestoresCapacity(t *testing.T) {
 	g, _, ctx := newGate(t)
 	m, c, cur := payer()
+	requestID := rid()
 
-	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: rid(), Cost: 600, AccountBalance: 1000, HoldTTL: 200 * time.Millisecond})
+	d, err := g.Admit(ctx, spendgate.AdmitInput{Merchant: m, Customer: c, Currency: cur, RequestID: requestID, Cost: 600, AccountBalance: 1000, HoldTTL: 200 * time.Millisecond})
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 
@@ -349,8 +350,11 @@ func TestGate_AbandonedHoldRecomputeRestoresCapacity(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(600), held)
 
-	// Let the hold record expire; the gauge still says 600.
-	time.Sleep(300 * time.Millisecond)
+	// Let the server-side hold record expire; the gauge still says 600.
+	require.Eventually(t, func() bool {
+		_, exists, resolveErr := g.Resolve(ctx, m, requestID)
+		return resolveErr == nil && !exists
+	}, time.Second, 10*time.Millisecond)
 
 	// This admit would be denied against the stale gauge (1000-600-600 < 0);
 	// the recompute drops the expired hold and admits.
@@ -376,9 +380,12 @@ func TestGate_ReleaseAfterBucketExpiryNoNegativeWindow(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, d.Allowed)
 
-	// Bucket TTL = remaining window + 1s <= 1.3s real time; wait it out. The fake
-	// clock stays put, so the release targets the SAME (now expired) bucket key.
-	time.Sleep(1500 * time.Millisecond)
+	// Bucket TTL = remaining window + 1s <= 1.3s server time. The fake clock
+	// stays put, so polling reads the SAME bucket until it expires.
+	require.Eventually(t, func() bool {
+		usage, usageErr := g.WindowUsage(ctx, m, c, cur, pol, req)
+		return usageErr == nil && len(usage) == 1 && usage[0].Used == 0
+	}, 2*time.Second, 10*time.Millisecond)
 
 	require.NoError(t, g.Release(ctx, spendgate.ReleaseInput{Merchant: m, Customer: c, Currency: cur, RequestID: r}))
 

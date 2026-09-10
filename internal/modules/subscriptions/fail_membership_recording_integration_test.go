@@ -16,7 +16,7 @@ import (
 // active->past_due hop in the SAME transaction.
 func TestFailMembership_RecordsFailedAttemptAndTransition(t *testing.T) {
 	f := newFailopenFixture(t, 30*24, true)
-	ctx := failopenCtx()
+	ctx := f.ctx()
 	sub, _ := f.create(t, models.RailNMI)
 
 	code := "202"

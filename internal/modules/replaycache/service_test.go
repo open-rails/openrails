@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/jonboulle/clockwork"
 )
 
 func TestTryTakeoverPendingMemory(t *testing.T) {
@@ -37,13 +39,14 @@ func TestTryTakeoverPendingMemory(t *testing.T) {
 
 func TestRenewPendingMemory(t *testing.T) {
 	ctx := context.Background()
-	svc := NewStore(nil)
+	clock := clockwork.NewFakeClockAt(time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC))
+	svc := NewStore(nil, WithClock(clock.Now))
 
 	if _, _, err := svc.Begin(ctx, "webhook.test", "evt_hb"); err != nil {
 		t.Fatalf("begin: %v", err)
 	}
 
-	time.Sleep(time.Millisecond)
+	clock.Advance(time.Minute)
 	renewed, err := svc.RenewPending(ctx, "webhook.test", "evt_hb")
 	if err != nil {
 		t.Fatalf("renew pending: %v", err)
@@ -55,8 +58,8 @@ func TestRenewPendingMemory(t *testing.T) {
 	if err != nil || rec == nil {
 		t.Fatalf("get: %v", err)
 	}
-	if time.Since(rec.CreatedAt) > 500*time.Millisecond {
-		t.Fatal("renewal should refresh CreatedAt")
+	if !rec.CreatedAt.Equal(clock.Now()) {
+		t.Fatalf("renewal timestamp = %s, want %s", rec.CreatedAt, clock.Now())
 	}
 
 	// Completed records must not be resurrected to pending by a late heartbeat.

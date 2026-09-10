@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/riverqueue/river"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
@@ -84,6 +85,8 @@ func TestProgressMonitor_DetectsFleetNeverStarted(t *testing.T) {
 	regs.NoteKind(progKind)
 	regs.NotePeriod(progKind, time.Second)
 	monitor := newProgressMonitor(t, dbi, regs)
+	clock := clockwork.NewFakeClockAt(time.Now().UTC())
+	monitor.Clock = clock
 
 	// A REAL client, fully wired — and deliberately never started. This is
 	// exactly the state that used to be invisible: the in-River detector could
@@ -108,7 +111,7 @@ func TestProgressMonitor_DetectsFleetNeverStarted(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, first.Progressing, "inside the boot grace window nothing is late yet")
 
-	time.Sleep(2 * time.Second)
+	clock.Advance(2 * time.Second)
 	stalled, err := monitor.Check(ctx)
 	require.NoError(t, err)
 
@@ -155,6 +158,10 @@ func TestProgressMonitor_DetectsQueueNotDraining(t *testing.T) {
 	regs.NoteKind(progKind)
 	regs.NotePeriod(progKind, time.Second)
 	monitor := newProgressMonitor(t, dbi, regs)
+	// Offset the monitor so advancing past boot grace leaves it aligned with
+	// River's real database timestamps.
+	clock := clockwork.NewFakeClockAt(time.Now().UTC().Add(-2 * time.Second))
+	monitor.Clock = clock
 
 	unservedQueue := "test_unserved_" + uuid.NewString()[:8]
 	workers := river.NewWorkers()
@@ -185,7 +192,7 @@ func TestProgressMonitor_DetectsQueueNotDraining(t *testing.T) {
 		return countRiverJobs(t, "available") > 0
 	}, 30*time.Second, 100*time.Millisecond, "River must be inserting the periodic job")
 
-	time.Sleep(2 * time.Second)
+	clock.Advance(2 * time.Second)
 	report, err := monitor.Check(ctx)
 	require.NoError(t, err)
 

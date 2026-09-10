@@ -44,20 +44,12 @@ func authorityBytes(initID int64) []byte {
 	return buf
 }
 
-func withFastBackoff(t *testing.T) {
-	t.Helper()
-	prev := authorityReadBackoff
-	authorityReadBackoff = time.Millisecond
-	t.Cleanup(func() { authorityReadBackoff = prev })
-}
-
 // Settles after a few empty (read-after-write-lagged) reads and returns the right initId.
 func TestReadAuthorityInitID_SettlesAfterEmptyReads(t *testing.T) {
-	withFastBackoff(t)
 	const want int64 = 424242
 	rpc := &fakePrepareRPC{empties: 3, data: authorityBytes(want)}
 
-	got, exists, err := readAuthorityInitID(context.Background(), rpc, solanago.PublicKey{})
+	got, exists, err := readAuthorityInitIDWithBackoff(context.Background(), time.Millisecond, rpc, solanago.PublicKey{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,11 +66,10 @@ func TestReadAuthorityInitID_SettlesAfterEmptyReads(t *testing.T) {
 
 // First read already has the account: no retry needed.
 func TestReadAuthorityInitID_PresentImmediately(t *testing.T) {
-	withFastBackoff(t)
 	const want int64 = 7
 	rpc := &fakePrepareRPC{empties: 0, data: authorityBytes(want)}
 
-	got, exists, err := readAuthorityInitID(context.Background(), rpc, solanago.PublicKey{})
+	got, exists, err := readAuthorityInitIDWithBackoff(context.Background(), time.Millisecond, rpc, solanago.PublicKey{})
 	if err != nil || !exists || got != want {
 		t.Fatalf("got (%d,%v,%v), want (%d,true,nil)", got, exists, err, want)
 	}
@@ -90,10 +81,9 @@ func TestReadAuthorityInitID_PresentImmediately(t *testing.T) {
 // Never present: stays empty across every attempt → treated as a genuinely absent
 // authority (first-time subscriber), exists=false, no error.
 func TestReadAuthorityInitID_NeverPresentIsFirstTime(t *testing.T) {
-	withFastBackoff(t)
 	rpc := &fakePrepareRPC{empties: 1000} // always empty
 
-	got, exists, err := readAuthorityInitID(context.Background(), rpc, solanago.PublicKey{})
+	got, exists, err := readAuthorityInitIDWithBackoff(context.Background(), time.Millisecond, rpc, solanago.PublicKey{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -110,10 +100,9 @@ func TestReadAuthorityInitID_NeverPresentIsFirstTime(t *testing.T) {
 
 // Account appears but stays too short to read initId → never-settled error.
 func TestReadAuthorityInitID_ShortAccountErrors(t *testing.T) {
-	withFastBackoff(t)
 	rpc := &fakePrepareRPC{empties: 0, data: make([]byte, subscriptionAuthorityInitIDOffset)} // 1 byte short
 
-	_, exists, err := readAuthorityInitID(context.Background(), rpc, solanago.PublicKey{})
+	_, exists, err := readAuthorityInitIDWithBackoff(context.Background(), time.Millisecond, rpc, solanago.PublicKey{})
 	if err == nil {
 		t.Fatalf("expected an error when the account never reaches initId length")
 	}
@@ -124,11 +113,10 @@ func TestReadAuthorityInitID_ShortAccountErrors(t *testing.T) {
 
 // A hard RPC error surfaces immediately.
 func TestReadAuthorityInitID_RPCErrorSurfaces(t *testing.T) {
-	withFastBackoff(t)
 	sentinel := errors.New("boom")
 	rpc := &fakePrepareRPC{getErr: sentinel}
 
-	_, _, err := readAuthorityInitID(context.Background(), rpc, solanago.PublicKey{})
+	_, _, err := readAuthorityInitIDWithBackoff(context.Background(), time.Millisecond, rpc, solanago.PublicKey{})
 	if err == nil || !errors.Is(err, sentinel) {
 		t.Fatalf("expected wrapped RPC error, got %v", err)
 	}
@@ -136,17 +124,11 @@ func TestReadAuthorityInitID_RPCErrorSurfaces(t *testing.T) {
 
 // A canceled context aborts the retry loop with the context error.
 func TestReadAuthorityInitID_ContextCanceled(t *testing.T) {
-	authorityReadBackoff = 50 * time.Millisecond
-	t.Cleanup(func() { authorityReadBackoff = time.Second })
-
 	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	rpc := &fakePrepareRPC{empties: 1000} // forces a backoff wait on attempt 2
-	go func() {
-		time.Sleep(10 * time.Millisecond)
-		cancel()
-	}()
 
-	_, _, err := readAuthorityInitID(ctx, rpc, solanago.PublicKey{})
+	_, _, err := readAuthorityInitIDWithBackoff(ctx, time.Hour, rpc, solanago.PublicKey{})
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	}
