@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -699,10 +700,13 @@ func TestClaimLeaseHeartbeat_SlowHandlerIsNotTakenOver(t *testing.T) {
 	row := fx.enqueueDelete(t, OriginUser, time.Now().Add(-time.Minute))
 
 	const lease = 300 * time.Millisecond
+	clock := clockwork.NewFakeClockAt(time.Now().UTC())
 	first := fx.runner(client, fullModeConfig())
 	first.Lease = lease
+	first.Clock = clock
 	second := fx.runner(client, fullModeConfig())
 	second.Lease = lease
+	second.Clock = clock
 
 	firstDone := make(chan Stats, 1)
 	go func() {
@@ -717,12 +721,24 @@ func TestClaimLeaseHeartbeat_SlowHandlerIsNotTakenOver(t *testing.T) {
 	require.NotNil(t, claimedAtStart)
 
 	// Several leases later the row is still held, because the beat kept it.
-	time.Sleep(4 * lease)
+	require.NoError(t, clock.BlockUntilContext(t.Context(), 1))
+	lastClaim := *claimedAtStart
+	for range 16 {
+		clock.Advance(lease / 4)
+		require.Eventually(t, func() bool {
+			claimedUntil := fx.intent(t, row.ID).ClaimedUntil
+			if claimedUntil == nil || !claimedUntil.After(lastClaim) {
+				return false
+			}
+			lastClaim = *claimedUntil
+			return true
+		}, time.Second, time.Millisecond, "heartbeat must renew the claim")
+	}
 	held := fx.intent(t, row.ID)
 	require.Equal(t, StatusInFlight, held.Status)
 	require.NotNil(t, held.ClaimedUntil)
 	require.True(t, held.ClaimedUntil.After(*claimedAtStart), "claimed_until was renewed: %s -> %s", claimedAtStart, held.ClaimedUntil)
-	require.True(t, held.ClaimedUntil.After(time.Now()), "the renewed lease is live")
+	require.True(t, held.ClaimedUntil.After(clock.Now()), "the renewed lease is live")
 
 	stats, err := second.RunExecuteOnce(context.Background())
 	require.NoError(t, err)
