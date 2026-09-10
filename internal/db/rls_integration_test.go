@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -45,17 +46,15 @@ func mustID(s string) merchant.ID {
 // logic is unaffected, so a few retries keep the suite from flaking.
 func newDBRetry(t *testing.T, dsn string) *DB {
 	t.Helper()
-	var lastErr error
-	for i := 0; i < 8; i++ {
-		d, err := NewDB(t.Context(), &config.DBConfig{URL: dsn})
+	var result *DB
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		database, err := NewDB(t.Context(), &config.DBConfig{URL: dsn})
+		assert.NoError(collect, err)
 		if err == nil {
-			return d
+			result = database
 		}
-		lastErr = err
-		time.Sleep(2 * time.Second)
-	}
-	require.NoError(t, lastErr)
-	return nil
+	}, 16*time.Second, 250*time.Millisecond, "connect to the RLS test database")
+	return result
 }
 
 const rlsSetupDDL = `

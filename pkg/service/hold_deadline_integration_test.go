@@ -16,6 +16,14 @@ import (
 
 func testMerchantKey() string { return dbtest.TestMerchantID.UUID().String() }
 
+func nextShortUnixDeadline() time.Time {
+	deadline := time.Now().UTC().Truncate(time.Second).Add(time.Second)
+	if time.Until(deadline) < 100*time.Millisecond {
+		deadline = deadline.Add(time.Second)
+	}
+	return deadline
+}
+
 // xs-007 row 33: an admission hold lives exactly as long as its owner
 // declared. There is no default lifetime; a running job extends its own.
 func TestAdmitHold_LifetimeIsTheCallerDeclaredDeadline(t *testing.T) {
@@ -39,7 +47,7 @@ func TestAdmitHold_LifetimeIsTheCallerDeclaredDeadline(t *testing.T) {
 
 	// 2) The hold expires at the declared deadline — and at nothing else.
 	reqID := uuid.NewString()
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := nextShortUnixDeadline()
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:z", InvokerType: "payer", Currency: money.DefaultCurrency,
 		EstimatedAmount: 500, Source: "usage", SourceID: reqID, ExpiresAtUnix: deadline.Unix(),
@@ -58,7 +66,9 @@ func TestAdmitHold_LifetimeIsTheCallerDeclaredDeadline(t *testing.T) {
 
 	// 3) The still-running job re-declares: the hold outlives its first estimate.
 	require.NoError(t, svc.ExtendHold(ctx, reqID, time.Now().Add(time.Hour)))
-	time.Sleep(2500 * time.Millisecond)
+	pointerTTL, err := rdb.PTTL(ctx, "sg:req:"+testMerchantKey()+":"+reqID).Result()
+	require.NoError(t, err)
+	require.Greater(t, pointerTTL, 59*time.Minute, "the pointer expiry moved beyond the original deadline")
 	require.EqualValues(t, 1, holdKeys(), "an extended hold survives its original deadline")
 
 	// 4) Settling ends it; extending after that is refused, never resurrected.
@@ -81,16 +91,17 @@ func TestAdmitHold_LifetimeIsTheCallerDeclaredDeadline(t *testing.T) {
 func TestAdmitHold_AbandonedHoldLapsesAtItsDeadline(t *testing.T) {
 	svc, _, rdb, payer, ctx := captureFallbackEnv(t)
 	reqID := uuid.NewString()
+	deadline := nextShortUnixDeadline()
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:z", InvokerType: "payer", Currency: money.DefaultCurrency,
-		EstimatedAmount: 500, Source: "usage", SourceID: reqID, ExpiresAtUnix: time.Now().Add(time.Second).Unix(),
+		EstimatedAmount: 500, Source: "usage", SourceID: reqID, ExpiresAtUnix: deadline.Unix(),
 	})
 	require.NoError(t, err)
 	require.True(t, res.Allowed)
 
-	time.Sleep(2100 * time.Millisecond)
-	n, err := rdb.Exists(ctx, "sg:req:"+testMerchantKey()+":"+reqID).Result()
-	require.NoError(t, err)
-	require.EqualValues(t, 0, n, "the abandoned hold lapsed at its declared deadline")
+	require.Eventually(t, func() bool {
+		n, existsErr := rdb.Exists(ctx, "sg:req:"+testMerchantKey()+":"+reqID).Result()
+		return existsErr == nil && n == 0
+	}, 2*time.Second, 10*time.Millisecond, "the abandoned hold must lapse at its declared deadline")
 	require.ErrorIs(t, svc.ExtendHold(ctx, reqID, time.Now().Add(time.Hour)), billingservice.ErrHoldNotFound)
 }
