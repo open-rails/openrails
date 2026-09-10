@@ -179,8 +179,14 @@ tasks:
       SQLC_DATABASE_URL:
         sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
     cmds:
+      - |
+        if [ -z "${SQLC_DATABASE_URL:-}" ]; then
+          echo "sqlc: SQLC_DATABASE_URL is empty — query audit cannot run." >&2
+          exit 1
+        fi
       - '{{.SQLC}} generate'
       - '{{.SQLC}} vet'
+      - CGO_ENABLED=1 go test ./internal/db/sqlaudit/ -run TestQueryAudit -count=1
 
   sqlc-generate-check:
     desc: Regenerate sqlc bindings and fail when the working tree differs
