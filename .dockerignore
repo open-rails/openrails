@@ -56,9 +56,7 @@ testdata/
 test/
 
 # Environment files
-.env
-.env.local
-.env.*.local
+.env*
 
 # Temporary files
 tmp/
