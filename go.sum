@@ -214,10 +214,10 @@ github.com/moby/docker-image-spec v1.3.1 h1:jMKff3w6PgbfSa69GfNg+zN/XLhfXJGnEx3N
 github.com/moby/docker-image-spec v1.3.1/go.mod h1:eKmb5VW8vQEh/BAr2yvVNvuiJuY6UIocYsFu/DxxRpo=
 github.com/moby/go-archive v0.3.0 h1:nos4BtzzUIqB406BgQnWGMI4qib9BZ8XUHU+ucv/n1c=
 github.com/moby/go-archive v0.3.0/go.mod h1:Npdv43fFqlhZW7Xo8fbm3ZMYFvAGNviUPqX21VERbcE=
-github.com/moby/moby/api v1.54.3-0.20260603163940-285b47192d4b h1:FkRCciFnF70Rj+/8SBUR6cU/w13JvtS2BfQyHlPa6uc=
-github.com/moby/moby/api v1.54.3-0.20260603163940-285b47192d4b/go.mod h1:+RQ6wluLwtYaTd1WnPLykIDPekkuyD/ROWQClE83pzs=
-github.com/moby/moby/client v0.4.2-0.20260603163940-285b47192d4b h1:DSpH+msj1u9Aa0lSGZFczWF0LrNjwkf4HqiJJ8zp0PU=
-github.com/moby/moby/client v0.4.2-0.20260603163940-285b47192d4b/go.mod h1:z52C9O2POPOsnxZAy//WtKcQ32P+jT/NGeXu/7nfjGQ=
+github.com/moby/moby/api v1.54.2 h1:wiat9QAhnDQjA7wk1kh/TqHz2I1uUA7M7t9SAl/JNXg=
+github.com/moby/moby/api v1.54.2/go.mod h1:+RQ6wluLwtYaTd1WnPLykIDPekkuyD/ROWQClE83pzs=
+github.com/moby/moby/client v0.4.1 h1:DMQgisVoMkmMs7fp3ROSdiBnoAu8+vo3GggFl06M/wY=
+github.com/moby/moby/client v0.4.1/go.mod h1:z52C9O2POPOsnxZAy//WtKcQ32P+jT/NGeXu/7nfjGQ=
 github.com/moby/patternmatcher v0.6.1 h1:qlhtafmr6kgMIJjKJMDmMWq7WLkKIo23hsrpR3x084U=
 github.com/moby/patternmatcher v0.6.1/go.mod h1:hDPoyOpDY7OrrMDLaYoY3hf52gNCR/YOUYxkhApJIxc=
 github.com/moby/sys/sequential v0.7.0 h1:ASQNGNROJSuOO6LL6bPHbKvuZu6NU8P4ldPWk31zj/8=
@@ -244,8 +244,8 @@ github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 h1:yf
 github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729/go.mod h1:hVoHR2EVESiICEMbg137etN/Lx+lSrHPTD39Z/uE+2s=
 github.com/onsi/gomega v1.10.1 h1:o0+MgICZLuZ7xjH7Vx6zS/zcu93/BEp1VwkIW1mEXCE=
 github.com/onsi/gomega v1.10.1/go.mod h1:iN09h71vgCQne3DLsj+A5owkum+a2tYe+TOCB1ybHNo=
-github.com/open-rails/authkit v0.99.1 h1:7Yt7dSgXDWfXzddw/4mpSFa1hOTln6sJJ210Mn/CpTY=
-github.com/open-rails/authkit v0.99.1/go.mod h1:8IvRMfMdOKhy4BAukwqFD4JRNfwovIFtdwoDw1F/NqU=
+github.com/open-rails/authkit v0.99.2 h1:ay6x0dPzuC/7f/W8bOClfLwqIRdRlPky4S1Rxg260Sg=
+github.com/open-rails/authkit v0.99.2/go.mod h1:8IvRMfMdOKhy4BAukwqFD4JRNfwovIFtdwoDw1F/NqU=
 github.com/open-rails/migratekit v1.8.0 h1:tnY/nq3o/XXXhwzhQ+g0bsXlgfsxSt0ftkqxJP1J9/4=
 github.com/open-rails/migratekit v1.8.0/go.mod h1:FmXhq5556xhvcDHx1wP3rNH1UBv408GHrxLw9gWXn6k=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
