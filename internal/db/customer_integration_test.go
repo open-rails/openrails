@@ -78,9 +78,8 @@ func seedForeignCustomer(ctx context.Context, t *testing.T, pool gen.DBTX) (uuid
 // without transferring or modifying the original customer identity.
 func TestEnsureCustomerID_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 	ctx := context.Background()
-	// The privileged handle IS the subject of this test: the guard has to hold
-	// where RLS does not. A bare SharedPGXPool is RLS-enforcing with no
-	// app.merchant_id, so seeding customers on it fails WITH CHECK (42501).
+	// Import/bootstrap can span merchants; its explicit ownership tuple must
+	// preserve both rows even on a privileged handle.
 	pool := dbtest.SharedSuperuserPGXPool(t)
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)
@@ -99,8 +98,7 @@ func TestEnsureCustomerID_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 // Commerce materialization creates an independent FK target for each merchant.
 func TestEnsureCustomerRow_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 	ctx := context.Background()
-	// Privileged for the same reason as the sibling above: FK checks bypass RLS,
-	// so the silent-no-op corruption this guards is reachable precisely here.
+	// Privileged to exercise explicit merchant identity independent of RLS.
 	pool := dbtest.SharedSuperuserPGXPool(t)
 
 	dbtest.EnsureTestMerchant(ctx, t, pool)

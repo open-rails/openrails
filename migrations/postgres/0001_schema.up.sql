@@ -2120,6 +2120,9 @@ ALTER TABLE ONLY openrails.ledger_accounts
     ADD CONSTRAINT ledger_accounts_merchant_id_id_key UNIQUE (merchant_id, id);
 
 ALTER TABLE ONLY openrails.ledger_accounts
+    ADD CONSTRAINT ledger_accounts_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
+
+ALTER TABLE ONLY openrails.ledger_accounts
     ADD CONSTRAINT ledger_accounts_pkey PRIMARY KEY (id);
 
 CREATE INDEX idx_ledger_accounts_customer ON openrails.ledger_accounts USING btree (customer_id) WHERE (customer_id IS NOT NULL);
@@ -4806,7 +4809,7 @@ CREATE INDEX idx_operation_authorizations_open_capacity ON openrails.operation_a
 CREATE INDEX idx_operation_authorizations_payer ON openrails.operation_authorizations USING btree (merchant_id, payer_id, created_at DESC);
 
 ALTER TABLE ONLY openrails.operation_authorizations
-    ADD CONSTRAINT operation_authorizations_ledger_account_fk FOREIGN KEY (merchant_id, ledger_account_id) REFERENCES openrails.ledger_accounts(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT operation_authorizations_ledger_account_fk FOREIGN KEY (merchant_id, payer_id, ledger_account_id) REFERENCES openrails.ledger_accounts(merchant_id, customer_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.operation_authorizations
     ADD CONSTRAINT operation_authorizations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;

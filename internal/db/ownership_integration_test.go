@@ -111,8 +111,13 @@ func TestOwnedRowsRejectForeignParentsAndPreserveDeletionScope(t *testing.T) {
 	var privileged bool
 	require.NoError(t, a.pool.QueryRow(ctx, "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user").Scan(&privileged))
 	require.False(t, privileged)
-	deposit, err := ledger.New(gen.New(a.pool), a.merchant).Deposit(ctx, payer, "USD", 1000,
+	moneyLedger := ledger.New(gen.New(a.pool), a.merchant)
+	deposit, err := moneyLedger.Deposit(ctx, payer, "USD", 1000,
 		ledger.Coord{Operation: ledger.OpDeposit, Source: "ownership", SourceID: uuid.NewString()}, uuid.Nil)
+	require.NoError(t, err)
+	balance, err := moneyLedger.EnsureCustomerBalance(ctx, payer, "USD")
+	require.NoError(t, err)
+	otherBalance, err := moneyLedger.EnsureCustomerBalance(ctx, a.extraPayer, "USD")
 	require.NoError(t, err)
 	cases := []struct {
 		name, constraint, query string
@@ -129,6 +134,7 @@ func TestOwnedRowsRejectForeignParentsAndPreserveDeletionScope(t *testing.T) {
 		{"grant", "grants_payment_fk", `INSERT INTO openrails.grants(merchant_id,customer_id,kind,source_type,payment_id) VALUES($1,$2,'entitlement','purchase',$3)`, []any{a.merchant, payer, a.payment}, 2, b.payment},
 		{"entitlement_payer", "entitlements_grant_fk", `INSERT INTO openrails.entitlements(merchant_id,customer_id,grant_id,source_id,source_type,entitlement,start_at) VALUES($1,$2,$3,$3,'grant','ownership-access',now())`, []any{a.merchant, payer, a.grant}, 1, a.extraPayer},
 		{"usage_unit", "usage_events_ledger_transfer_fk", `INSERT INTO openrails.usage_events(merchant_id,customer_id,currency,ledger_transfer_id,invoker_id,event_type,amount,source,source_id) VALUES($1,$2,$3,$4,'invoker','usage',1000,'ownership','event')`, []any{a.merchant, payer, "USD", deposit.ID}, 2, "EUR"},
+		{"authorization_payer", "operation_authorizations_ledger_account_fk", `INSERT INTO openrails.operation_authorizations(merchant_id,payer_id,ledger_account_id,operation_id,record_owner,authorized_usd_micros,claim_reference,authorization_body_bytes,authorization_body_digest) VALUES($1,$2,$3,'ownership-operation','host',1,'claim','body'::bytea,public.digest('body'::bytea,'sha256'))`, []any{a.merchant, payer, balance}, 2, otherBalance},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
