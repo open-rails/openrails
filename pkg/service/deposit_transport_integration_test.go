@@ -17,8 +17,10 @@ import (
 func TestDepositTermsThroughEmbeddedAndRemoteClients(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
-	clients := map[string]openrails.Client{
-		"embedded": h.StartEmbeddedHost("USD").Runtime().Client(),
+	embeddedClient, err := h.StartEmbeddedHost("USD").Runtime().Client()
+	require.NoError(t, err)
+	clients := map[string]*openrails.Client{
+		"embedded": embeddedClient,
 		"remote":   h.StartStandalone("USD").Client(),
 	}
 	for name, client := range clients {
