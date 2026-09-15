@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -71,7 +72,7 @@ func (s *MoneyService) belowThresholdAccounts(ctx context.Context) ([]moneyInAcc
 		return nil, err
 	}
 	tenantID := tid.UUID()
-	rows, err := s.db.Gen(ctx).ListBelowThresholdMoneyAccounts(ctx, tenantID)
+	rows, err := s.db.Gen(ctx).ListBelowThresholdMoneyAccounts(ctx, gen.ListBelowThresholdMoneyAccountsParams{MerchantID: tenantID, AsOf: s.now()})
 	if err != nil {
 		return nil, err
 	}

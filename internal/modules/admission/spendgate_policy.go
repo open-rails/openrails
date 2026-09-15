@@ -12,13 +12,8 @@ import (
 	"github.com/open-rails/openrails/pkg/identity"
 )
 
-// SpendgatePolicyLoader builds a spendgate.Policy (the cap config the Redis admit
-// gate enforces) for one (payer, trustLevel, request) from the or#897 billing
-// policy registry + invoker_spend_limits. Every window's limit is expressed
-// in the REQUEST currency (FX-converted when a window is denominated in another
-// currency), so the gate runs in a single currency per admit. #513: this read
-// replaces the per-request Postgres budget reservation. The final capacity
-// snapshot + Redis reserve now share the existing customer-row money lock.
+// SpendgatePolicyLoader resolves policy and delegation windows inside the
+// admission transaction. FX conversion expresses each limit in the request unit.
 type SpendgatePolicyLoader struct {
 	policies *BillingPolicyStore
 	budgets  *InvokerSpendLimitStore
@@ -37,7 +32,7 @@ func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, payer identit
 }
 
 // Load turns an already-resolved policy plus the payer's delegated grants into
-// the scoped windows the Redis gate enforces, in requestCurrency. req supplies
+// the scoped windows the SQL gate enforces, in requestCurrency. req supplies
 // the principals so the invoker_tier scope (whose policy key IS the trust level)
 // resolves to a per-invoker window that applies only at the matching trust level.
 //
@@ -181,7 +176,7 @@ func (l *SpendgatePolicyLoader) convert(ctx context.Context, scope spendgate.Sco
 // payerCapacity is the affordability snapshot the spendgate is evaluated
 // against: spendable balance (ledger customer_balance counters, O(1)) plus the
 // arrears credit line still available, used as the gate's negative floor.
-// In-flight request holds are enforced by Redis.
+// In-flight request reservations are already included in capacity.Held.
 //
 // The bound policy's KIND decides whether prior debt reduces the line, and that
 // single branch is the whole distinction between or#897's two seed businesses:

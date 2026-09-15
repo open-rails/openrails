@@ -141,6 +141,25 @@ type OpenrailsAdmissionDenialsHourly struct {
 	UpdatedAt    time.Time
 }
 
+type OpenrailsAdmissionOperation struct {
+	MerchantID         uuid.UUID
+	RequestID          string
+	PayerID            uuid.UUID
+	Currency           string
+	EstimatedAmount    int64
+	AvailableAmount    int64
+	Terms              []byte
+	RequestedExpiresAt *time.Time
+	ExpiresAt          *time.Time
+	AdmittedAt         time.Time
+	WindowKeys         []string
+	State              string
+	CaptureTerms       []byte
+	CapturedAmount     *int64
+	CapturedAt         *time.Time
+	ReleasedAt         *time.Time
+}
+
 // #736 per-merchant metric threshold rules. template + params compile to a #733 metrics query the evaluator runs on a slow tick; fired_at/cleared_at are edge-triggered state (fire once on crossing, clear on recrossing).
 type OpenrailsAlertRule struct {
 	ID         uuid.UUID

@@ -214,54 +214,6 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 	return err
 }
 
-const insertUsageEventIfAbsent = `-- name: InsertUsageEventIfAbsent :exec
-INSERT INTO openrails.usage_events (
-    id, merchant_id, customer_id, invoker_id, currency, resource,
-    event_type, dimensions, amount, source, source_id,
-    ledger_transfer_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, $7, $5, $6, COALESCE($15, '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14)
-ON CONFLICT (merchant_id, customer_id, currency, event_type, source, source_id) DO NOTHING
-`
-
-type InsertUsageEventIfAbsentParams struct {
-	ID               uuid.UUID
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	InvokerID        string
-	Resource         *string
-	EventType        string
-	Currency         string
-	Amount           int64
-	Source           string
-	SourceID         string
-	LedgerTransferID *uuid.UUID
-	Metadata         []byte
-	OccurredAt       time.Time
-	CreatedAt        time.Time
-	Dimensions       []byte
-}
-
-func (q *Queries) InsertUsageEventIfAbsent(ctx context.Context, arg InsertUsageEventIfAbsentParams) error {
-	_, err := q.db.Exec(ctx, insertUsageEventIfAbsent,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.InvokerID,
-		arg.Resource,
-		arg.EventType,
-		arg.Currency,
-		arg.Amount,
-		arg.Source,
-		arg.SourceID,
-		arg.LedgerTransferID,
-		arg.Metadata,
-		arg.OccurredAt,
-		arg.CreatedAt,
-		arg.Dimensions,
-	)
-	return err
-}
-
 const resourceRevenueDaily = `-- name: ResourceRevenueDaily :many
 SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
        ue.currency,

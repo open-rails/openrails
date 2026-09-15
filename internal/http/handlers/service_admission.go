@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
@@ -127,12 +128,24 @@ func serviceAdmitBatchVerdicts(
 			out[i] = admitFailure(http.StatusBadRequest, "customer_id required", "customer_id")
 			continue
 		}
+		var invalid *spendgate.ValidationError
+		if err := spendgate.ValidateRequest(item.RequestID, item.EstimatedAmount, item.AccrualRateDeltaPerHour); errors.As(err, &invalid) {
+			out[i] = admitFailure(http.StatusBadRequest, invalid.Message, invalid.Param)
+			continue
+		}
 		if !allows(*payer) {
 			out[i] = admitFailure(http.StatusForbidden, "service_credential_customer_scope_denied", "")
 			continue
 		}
 		res, err := admit(ctx, admitInputFromRequest(item, *payer))
 		switch {
+		case errors.As(err, &invalid):
+			out[i] = admitFailure(http.StatusBadRequest, invalid.Message, invalid.Param)
+			continue
+		case errors.Is(err, billingservice.ErrIdempotencyKeyReused):
+			details := api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeIdempotencyKeyReused, err.Error()).ToResponse().Error
+			out[i] = serviceAdmitVerdict{Status: http.StatusConflict, Error: &details}
+			continue
 		case errors.Is(err, billingservice.ErrHoldDeadlineRequired):
 			out[i] = admitFailure(http.StatusBadRequest, "expires_at required when estimated_amount places a hold", "expires_at")
 			continue

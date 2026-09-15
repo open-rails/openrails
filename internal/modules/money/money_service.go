@@ -235,7 +235,7 @@ ORDER BY currency`, tenantID, payerID)
 	return out, nil
 }
 
-// AdmissionCapacity is the O(1) affordability snapshot consumed by the Redis
+// AdmissionCapacity is the affordability snapshot consumed by the SQL
 // service-admit gate.
 type AdmissionCapacity struct {
 	Balance     int64
@@ -248,12 +248,9 @@ type AdmissionCapacity struct {
 	OutstandingOwed int64
 }
 
-// WithLockedAdmissionCapacity evaluates fn while holding the same PostgreSQL
-// customer-row mutex used by every money mutation and durable operation
-// authorization. The live admission path must execute its Redis reserve Lua
-// inside fn: PG -> Redis is the single cross-store ordering, so a durable
-// reservation cannot commit between this capacity read and hold placement.
-func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string, fn func(AdmissionCapacity) error) error {
+// WithLockedAdmissionCapacity holds the merchant policy read lock, then the payer
+// money lock. The callback receives the same transaction for admission writes.
+func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string, fn func(context.Context, *db.DB, AdmissionCapacity) error) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
@@ -275,25 +272,29 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 	payerID := payer.UUID()
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
+		if _, err := q.ReadMerchantSettingsLock(ctx, tenantID); err != nil {
 			return err
 		}
-		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 			return err
 		}
 		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
 		if _, err := txSvc.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
 			return err
 		}
+		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
+			return err
+		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
 			MerchantID: tenantID,
 			CustomerID: payerID,
 			Currency:   cur,
+			AsOf:       s.now(),
 		})
 		if err != nil {
 			return err
 		}
-		return fn(admissionCapacityFromRow(row))
+		return fn(ctx, s.db.NewWithPgxTx(tx), admissionCapacityFromRow(row))
 	})
 }
 
@@ -331,6 +332,7 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 		MerchantID: tenantID,
 		CustomerID: payerID,
 		Currency:   cur,
+		AsOf:       s.now(),
 	})
 	if err != nil {
 		return AdmissionCapacity{}, err
@@ -756,7 +758,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // (Balance = ledger customer-balance counters, HeldBalance = durable open
 // operation authorizations)
 // computed UNDER the lock. HeldBalance includes durable open operation
-// authorizations; Redis request-admission holds remain outside this snapshot.
+// authorizations and live request reservations.
 // Every spend/hold/capture/deposit/expiry path calls this before
 // reading/mutating the customer's blocks so no two mutations on the same
 // customer interleave (no overdraft, atomic hold placement).
@@ -799,16 +801,15 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 	}
 	var held int64
 	if found {
-		held, err = q.SumOpenOperationAuthorizationMicros(ctx, gen.SumOpenOperationAuthorizationMicrosParams{
-			MerchantID: tenantID, LedgerAccountID: acc,
+		held, err = q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
+			MerchantID: tenantID, PayerID: payerID, Currency: cur, AsOf: s.now(),
 		})
 		if err != nil {
 			return nil, err
 		}
 	}
-	// Redis request-admission holds remain owned by spendgate and are added by
-	// that gate. HeldBalance here is only durable financial reservations linked
-	// to this ledger account, so every ordinary spend path respects them.
+	// One held total covers live request reservations and provider authorizations.
+	// Every ordinary spend path therefore respects both without double counting.
 	return &models.MoneyBalance{
 		MerchantID:  tenantID,
 		CustomerID:  payerID,

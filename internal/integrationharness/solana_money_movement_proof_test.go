@@ -291,12 +291,14 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 	require.NoError(t, err)
 	require.Len(t, verdicts, 1)
 	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-	require.NoError(t, client.Capture(ctx, requestID, 2_000, &openrails.CaptureUsage{
+	capture, err := client.Capture(ctx, requestID, 2_000, &openrails.CaptureUsage{
 		EventType: "vm-runtime",
 		Resource:  "vm-small",
 		Source:    "solana-money-movement",
 		SourceID:  requestID,
-	}))
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 2_000, capture.Amount)
 
 	from := time.Now().Add(-time.Hour)
 	to := time.Now().Add(time.Hour)

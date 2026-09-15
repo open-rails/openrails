@@ -2,12 +2,9 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type CreditGrant = money.CreditGrant
@@ -50,16 +47,7 @@ func (s *Service) RevokeCreditGrant(ctx context.Context, payer identity.Customer
 		return nil, err
 	}
 	defer release()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	result, err := s.moneyService().RevokeCreditGrant(ctx, payer, grantID, reason, func(ctx context.Context, currency string) (int64, error) {
-		if s.rt.RedisClient == nil {
-			return 0, fmt.Errorf("credit revocation unavailable: live admission holds cannot be checked")
-		}
-		return spendgate.New(s.rt.RedisClient).HeldAmount(ctx, mid.String(), payer.UUID().String(), currency)
-	})
+	result, err := s.moneyService().RevokeCreditGrant(ctx, payer, grantID, reason)
 	if err != nil {
 		return nil, err
 	}

@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -113,9 +112,9 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	admitted, err := svc.Admit(a, AdmitInput{CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: "payer", Currency: old + "/tokens", EstimatedAmount: 25, SourceID: requestID, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed)
-	held, err := spendgate.New(redis).HeldAmount(ctx, merchantA.String(), payer.UUID().String(), canonical)
+	heldBalance, err := svc.GetCreditAccount(a, payer, old+"/tokens")
 	require.NoError(t, err)
-	require.EqualValues(t, 25, held)
+	require.EqualValues(t, 25, heldBalance.HeldAmount)
 	// Rename while old still aliases A: both names resolve the same registry UUID.
 	names[groupA] = newName
 	claims[newName] = groupA
@@ -155,16 +154,16 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 		_, err = svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 101})
 		require.ErrorIs(t, err, money.ErrInsufficientCredits)
 	}
-	held, err = spendgate.New(redis).HeldAmount(ctx, merchantA.String(), payer.UUID().String(), canonical)
+	heldBalance, err = svc.GetCreditAccount(a, payer, newName+"/tokens")
 	require.NoError(t, err)
-	require.EqualValues(t, 25, held)
+	require.EqualValues(t, 25, heldBalance.HeldAmount)
 	account, err = svc.GetCreditAccount(a, payer, newName+"/tokens")
 	require.NoError(t, err)
 	require.EqualValues(t, 100, account.BalanceAmount)
 	captured, err := svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 25, EventType: "render", Resource: "test-render"})
 	require.NoError(t, err)
-	require.Equal(t, newName+"/tokens", captured.Currency)
-	replay, err := svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 25, CustomerID: payer.UUID().String(), Currency: newName + "/tokens", Invoker: payer.UUID().String()})
+	require.Equal(t, canonical, captured.Currency)
+	replay, err := svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 25, EventType: "render", Resource: "test-render"})
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
 	account, err = svc.GetCreditAccount(a, payer, newName+"/tokens")

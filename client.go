@@ -63,7 +63,7 @@ type AdmissionClient interface {
 	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
 	// Capture settles the admission/authorize hold request_id at the actual
 	// amount, optionally recording a usage analytics event (#311/#410).
-	Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error
+	Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) (*CaptureReceipt, error)
 	// Release frees the admission/authorize hold request_id without charging.
 	Release(ctx context.Context, requestID string) error
 	// ExtendHold re-declares the deadline of the live hold request_id: the job
@@ -290,9 +290,11 @@ type AdmitRequest struct {
 // AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
 // DenyCode when available. A successful money-bearing admit creates a request_id
-// keyed Redis hold. A deny is returned as (Allowed=false, nil error) on both
+// keyed SQL operation. A deny is returned as (Allowed=false, nil error) on both
 // transports even though HTTP maps it to 402/403/429.
 type AdmitResponse struct {
+	// Allowed preserves the original decision on replay. Use Active to decide
+	// whether the operation still has a live reservation; terminal receipts are not new authority.
 	Allowed             bool       `json:"allowed"`
 	BlockedBy           string     `json:"blocked_by,omitempty"`
 	DenyCode            string     `json:"deny_code,omitempty"`
@@ -301,37 +303,31 @@ type AdmitResponse struct {
 	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
 	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
 	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
+	Replayed            bool       `json:"replayed"`
+	State               string     `json:"state,omitempty"`
 }
+
+// Active reports a currently open, originally allowed admission. A denied
+// result has no operation state; an expired or terminal replay is never active.
+func (r *AdmitResponse) Active() bool { return r != nil && r.Allowed && r.State == "open" }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
 // OpenRails can serve per-resource/function/tier/invoker spend (#410). Nil = no
-// usage event (a plain capture).
-//
-// It also carries OPTIONAL fallback payer coordinates (#676): the admit-time
-// request→payer pointer lives in Redis and can be lost (flush/failover/TTL
-// overrun). Supplying CustomerID+Currency lets the capture land anyway — a
-// rendered service is always chargeable. Retries dedupe on the request id
-// alone (or#907); nothing here participates in the idempotency coordinate.
-// These fields are independent of EventType.
+// usage event (a plain capture). Usage and the financial capture commit together.
+// The first capture fixes these terms; a changed retry returns ErrIdempotencyKeyReused.
 type CaptureUsage struct {
-	// CustomerID/Currency/Invoker are the #676 capture-durability fallback
-	// coordinates (see type doc). Optional; ignored while the admit pointer is
-	// live.
-	CustomerID string
-	Currency   string
-	Invoker    string
-
 	// EventType classifies the usage event (e.g. "inference", "storage"). Required
 	// for the event to be recorded; a blank EventType suppresses the usage event.
-	EventType string
+	EventType string `json:"event_type,omitempty"`
 	// Resource is the host-defined resource attribution key (e.g. model name, endpoint).
-	Resource string
+	Resource string `json:"resource,omitempty"`
 	// Metadata holds arbitrary key/value dimensions for analytics rollups.
-	Metadata map[string]any
+	Metadata map[string]any `json:"metadata,omitempty"`
 	// Source identifies the system that generated this usage event.
-	Source string
+	Source string `json:"source,omitempty"`
 	// SourceID is the idempotency key for this usage event within the Source namespace.
-	SourceID string
+	SourceID   string           `json:"source_id,omitempty"`
+	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 }
 
 // BalanceResponse is the GET /v1/merchant/credits/balance snapshot (handler
@@ -627,7 +623,8 @@ type AdmitBatchVerdict struct {
 	Result *AdmitResponse `json:"result,omitempty"`
 }
 
-// Allowed reports whether this item was admitted.
+// Allowed reports whether this item has a live admission. Result.Allowed records
+// the original decision even when a replay's state is expired or terminal.
 func (v AdmitBatchVerdict) Allowed() bool {
-	return v.Status == 200 && v.Result != nil && v.Result.Allowed
+	return v.Status == 200 && v.Result.Active()
 }

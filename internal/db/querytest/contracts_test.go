@@ -272,7 +272,7 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	require.Equal(t, invoiceID, invoice.ID)
 
 	resource := "query-contract-resource"
-	err = q.InsertUsageEventIfAbsent(ctx, gen.InsertUsageEventIfAbsentParams{
+	err = q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
 		ID:         uuid.New(),
 		MerchantID: merchantID,
 		CustomerID: customerID,

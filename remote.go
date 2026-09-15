@@ -201,46 +201,32 @@ func (c *Client) GetDeposit(ctx context.Context, customerID, sourceID string) (*
 	return &out, nil
 }
 
-// captureBody is the POST /v1/merchant/admissions/:id/capture body. The wire
-// field is "amount" (the handler binds it as REQUIRED). customer_id / currency /
-// invoker are the ADDITIVE #676 fallback payer coordinates.
-type captureBody struct {
-	Amount     int64          `json:"amount"`
-	CustomerID string         `json:"customer_id,omitempty"`
-	Currency   string         `json:"currency,omitempty"`
-	Invoker    string         `json:"invoker,omitempty"`
-	EventType  string         `json:"event_type,omitempty"`
-	Resource   string         `json:"resource,omitempty"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	Source     string         `json:"source,omitempty"`
-	SourceID   string         `json:"source_id,omitempty"`
+// Capture settles an original admission. Exact retries return the original
+// receipt; changed amount or usage terms return ErrIdempotencyKeyReused.
+func (c *Client) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) (*CaptureReceipt, error) {
+	if strings.TrimSpace(requestID) == "" {
+		return nil, invalidErr("capture requires request_id")
+	}
+	body := CaptureRequest{Amount: &capturedAmount}
+	if usage != nil {
+		body.CaptureUsage = *usage
+	}
+	path := admissionActionPath(requestID, "capture")
+	var out CaptureReceipt
+	if err := c.do(ctx, http.MethodPost, path, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
-// Capture implements Client (handler ServiceCaptureHold). Idempotent on the
-// request_id UNCONDITIONALLY (or#907): the durable coordinate is composed from
-// the request id and engine constants alone, so any retry dedupes and a
-// changed-amount retry is refused with ErrIdempotencyKeyReused. A nil error
-// means OpenRails accepted the capture.
-func (c *Client) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error {
-	if strings.TrimSpace(requestID) == "" {
-		return invalidErr("capture requires request_id")
+// admissionActionPath preserves arbitrary request IDs as one URL segment.
+// PathEscape leaves whole dot segments intact; ServeMux would clean those away.
+func admissionActionPath(requestID, action string) string {
+	segment := url.PathEscape(strings.TrimSpace(requestID))
+	if segment == "." || segment == ".." {
+		segment = strings.ReplaceAll(segment, ".", "%2E")
 	}
-	body := captureBody{Amount: capturedAmount}
-	if usage != nil {
-		// #676 fallback payer coordinates travel regardless of EventType.
-		body.CustomerID = usage.CustomerID
-		body.Currency = usage.Currency
-		body.Invoker = usage.Invoker
-	}
-	if usage != nil && strings.TrimSpace(usage.EventType) != "" {
-		body.EventType = usage.EventType
-		body.Resource = usage.Resource
-		body.Metadata = usage.Metadata
-		body.Source = usage.Source
-		body.SourceID = usage.SourceID
-	}
-	path := "/v1/merchant/admissions/" + url.PathEscape(strings.TrimSpace(requestID)) + "/capture"
-	return c.do(ctx, http.MethodPost, path, body, nil)
+	return "/v1/merchant/admissions/" + segment + "/" + action
 }
 
 // Release implements Client (handler ServiceReleaseHold). Idempotent on the
@@ -249,7 +235,7 @@ func (c *Client) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("release requires request_id")
 	}
-	path := "/v1/merchant/admissions/" + url.PathEscape(strings.TrimSpace(requestID)) + "/release"
+	path := admissionActionPath(requestID, "release")
 	return c.do(ctx, http.MethodPost, path, nil, nil)
 }
 
@@ -261,7 +247,7 @@ func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 	if expiresAt.IsZero() {
 		return invalidErr("extend requires expires_at")
 	}
-	path := "/v1/merchant/admissions/" + url.PathEscape(strings.TrimSpace(requestID)) + "/extend"
+	path := admissionActionPath(requestID, "extend")
 	body := map[string]any{"expires_at": expiresAt.Unix()}
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }

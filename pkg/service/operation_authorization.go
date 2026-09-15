@@ -3,13 +3,11 @@ package service
 import (
 	"context"
 	"crypto/sha256"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -83,14 +81,10 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	if err != nil {
 		return nil, err
 	}
-	if rt.RedisClient == nil {
-		return nil, fmt.Errorf("operation authorization unavailable: redis admission capacity is not configured")
-	}
 	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
 	if err != nil {
 		return nil, err
 	}
-	gate := spendgate.New(rt.RedisClient)
 	auth, err := s.moneyService().OpenOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationInput{
 		OperationID:             req.OperationID,
 		Payer:                   req.Payer,
@@ -99,8 +93,6 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 		ClaimReference:          req.ClaimReference,
 		AuthorizationBody:       req.AuthorizationBody,
 		AuthorizationBodySHA256: req.AuthorizationBodySHA256,
-	}, func(ctx context.Context) (int64, error) {
-		return gate.HeldAmount(ctx, merchantID.String(), req.Payer.UUID().String(), "USD")
 	})
 	if err != nil {
 		return nil, err

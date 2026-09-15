@@ -19,8 +19,6 @@ internal/intents/runner.go|return time.Now().UTC()|business_time_boundary|Explic
 internal/intents/runner.go|return clockwork.NewRealClock().NewTicker(d)|infrastructure_time|Intent lease heartbeat cadence uses elapsed physical time without a supplied runner clock|1
 internal/intents/store.go|}, time.Now().UTC()); err != nil {|infrastructure_time|Anti-credential-compromise rolling rate ceiling uses physical time|1
 internal/modules/admission/accrual_rate.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/modules/admission/admitter.go|a.denials.Record(ctx, merchantID, customer.UUID().String(), code, time.Now())|infrastructure_time|Request deadline/hold lifetime and denial observation use physical time|1
-internal/modules/admission/admitter.go|holdLifetime, err := holdTTL(req.ExpiresAt, time.Now())|infrastructure_time|Request deadline/hold lifetime and denial observation use physical time|1
 internal/modules/admission/policy.go|now := time.Now().UTC()|db_audit_timestamp|Policy and binding creation and update audit timestamp|3
 internal/modules/alerting/service.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/business/cycle.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

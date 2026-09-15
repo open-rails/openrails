@@ -113,9 +113,9 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	require.Equal(t, "money", a2.Result.BlockedBy)
 
 	// 3) Capture r1 at 500 (actual < estimate) → 200; durable ledger debit lands.
-	w := post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{"amount": 500})
+	w := post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{"amount": "500"})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), `"Replayed":false`, "first capture moved the money")
+	require.Contains(t, w.Body.String(), `"replayed":false`, "first capture moved the money")
 	bal, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "1000 − 500 captured = 500")
@@ -126,17 +126,17 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	// coordinate and debited again. Now the request id is the whole key:
 	// 200, Replayed=true, balance unchanged.
 	w = post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{
-		"amount": 500, "customer_id": payerID.String(), "currency": money.DefaultCurrency, "invoker": "user:a",
+		"amount": "500",
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), `"Replayed":true`, "the retry moved nothing and must say so")
+	require.Contains(t, w.Body.String(), `"replayed":true`, "the retry moved nothing and must say so")
 	bal, err = ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(500), bal.Balance, "an at-least-once capture retry must not double debit")
 
 	// 3c) A retry that CHANGES the amount is a caller bug: 409, nothing moves.
 	w = post("/v1/merchant/admissions/"+r1+"/capture", map[string]any{
-		"amount": 900, "customer_id": payerID.String(), "currency": money.DefaultCurrency, "invoker": "user:a",
+		"amount": "900",
 	})
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "idempotency_key_reused")

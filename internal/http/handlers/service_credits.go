@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/api"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
@@ -39,27 +41,7 @@ type serviceDepositRequest struct {
 	Description *string `json:"description"`
 }
 
-type serviceCaptureRequest struct {
-	Amount int64 `json:"amount" binding:"required"`
-
-	// Fallback payer coordinates (#676, additive): used only when the admit-time
-	// Redis pointer is gone, so a rendered service stays chargeable. The
-	// idempotency coordinate is the path request_id alone (or#907) — there is no
-	// admit_source echo any more; a retry dedupes regardless of what the admit
-	// was placed with.
-	CustomerID string `json:"customer_id,omitempty"`
-	Currency   string `json:"currency,omitempty"`
-	Invoker    string `json:"invoker,omitempty"`
-
-	// Usage analytics (#311): when event_type is set, the capture also appends a
-	// usage_event (no second debit) for the platform usage/revenue rollup.
-	EventType  string           `json:"event_type,omitempty"`
-	Resource   string           `json:"resource,omitempty"`
-	Dimensions map[string]int64 `json:"dimensions,omitempty"`
-	Metadata   map[string]any   `json:"metadata,omitempty"`
-	Source     string           `json:"source,omitempty"`
-	SourceID   string           `json:"source_id,omitempty"`
-}
+type serviceCaptureRequest = openrails.CaptureRequest
 
 func parseServiceCustomerID(raw string) (*billingidentity.CustomerID, error) {
 	raw = strings.TrimSpace(raw)
@@ -569,6 +551,19 @@ func ServiceGetDeposit(r *httprequest.Request) {
 	r.SuccessJSON(trx)
 }
 
+func requireAdmissionScope(r *httprequest.Request, svc *billingservice.Service, requestID string) bool {
+	payer, err := svc.AdmissionCustomer(r.Request.Context(), requestID)
+	if errors.Is(err, spendgate.ErrNotFound) {
+		r.ErrorJSON(http.StatusNotFound, "admission operation not found")
+		return false
+	}
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "admission lookup failed")
+		return false
+	}
+	return requireServiceCustomerScope(r, payer)
+}
+
 func ServiceCaptureHold(r *httprequest.Request) {
 	requestID := strings.TrimSpace(r.Param("id"))
 	if requestID == "" {
@@ -579,12 +574,8 @@ func ServiceCaptureHold(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	// #676: a supplied fallback customer_id must pass the credential's customer
-	// scope (parity with deposit/withdraw).
-	if fbCustomer, err := parseServiceCustomerID(req.CustomerID); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	} else if fbCustomer != nil && !requireServiceCustomerScope(r, *fbCustomer) {
+	if req.Amount == nil || *req.Amount < 0 {
+		r.ErrorJSON(http.StatusBadRequest, "nonnegative amount is required")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -592,12 +583,12 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
+	if !requireAdmissionScope(r, svc, requestID) {
+		return
+	}
 	trx, err := svc.CaptureHold(r.Request.Context(), billingservice.CaptureHoldRequest{
 		RequestID:  requestID,
-		Amount:     req.Amount,
-		CustomerID: req.CustomerID,
-		Currency:   req.Currency,
-		Invoker:    req.Invoker,
+		Amount:     *req.Amount,
 		EventType:  req.EventType,
 		Resource:   req.Resource,
 		Dimensions: req.Dimensions,
@@ -630,7 +621,14 @@ func ServiceReleaseHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
+	if !requireAdmissionScope(r, svc, requestID) {
+		return
+	}
 	if err := svc.ReleaseHold(r.Request.Context(), requestID); err != nil {
+		if errors.Is(err, spendgate.ErrCaptured) {
+			r.ErrorJSON(http.StatusConflict, "captured admission cannot be released")
+			return
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "release failed")
 		return
 	}
@@ -661,6 +659,9 @@ func ServiceExtendHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
+	if !requireAdmissionScope(r, svc, requestID) {
+		return
+	}
 	err = svc.ExtendHold(r.Request.Context(), requestID, time.Unix(req.ExpiresAt, 0).UTC())
 	switch {
 	case err == nil:
@@ -669,6 +670,8 @@ func ServiceExtendHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "hold_not_found")
 	case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
 		r.ErrorJSON(http.StatusBadRequest, "expires_at already passed")
+	case errors.Is(err, spendgate.ErrDeadlineShortened):
+		r.ErrorJSON(http.StatusBadRequest, "extension cannot shorten the deadline")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "extend failed")
 	}

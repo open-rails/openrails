@@ -45,13 +45,7 @@ func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGrad
 const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    COALESCE((
-        SELECT SUM(oa.authorized_usd_micros)
-        FROM openrails.operation_authorizations oa
-        WHERE oa.merchant_id = a.merchant_id
-          AND oa.ledger_account_id = a.id
-          AND oa.state = 'open'
-    ), 0)::bigint AS held,
+    openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, $1::timestamptz)::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
@@ -68,14 +62,15 @@ LEFT JOIN openrails.ledger_accounts ar
  AND ar.customer_id = a.customer_id
  AND ar.currency = a.currency
  AND ar.account_type = 'arrears_liability'
-WHERE a.merchant_id = $1::uuid
-  AND a.customer_id = $2::uuid
-  AND a.currency = $3::text
+WHERE a.merchant_id = $2::uuid
+  AND a.customer_id = $3::uuid
+  AND a.currency = $4::text
   AND a.account_type = 'customer_balance'
 LIMIT 1
 `
 
 type GetAdmissionCapacityParams struct {
+	AsOf       time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
@@ -95,7 +90,12 @@ type GetAdmissionCapacityRow struct {
 // durable operation authorizations are financial reservations and therefore
 // travel in this Postgres snapshot.
 func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapacityParams) (GetAdmissionCapacityRow, error) {
-	row := q.db.QueryRow(ctx, getAdmissionCapacity, arg.MerchantID, arg.CustomerID, arg.Currency)
+	row := q.db.QueryRow(ctx, getAdmissionCapacity,
+		arg.AsOf,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
 	var i GetAdmissionCapacityRow
 	err := row.Scan(
 		&i.Balance,
@@ -178,19 +178,13 @@ WITH avail AS (
            s.auto_topup_payment_method_id, s.last_topup_at,
            COALESCE((
                SELECT (a.credits_posted - a.debits_posted)
-                    - COALESCE((
-                        SELECT SUM(oa.authorized_usd_micros)
-                        FROM openrails.operation_authorizations oa
-                        WHERE oa.merchant_id = a.merchant_id
-                          AND oa.ledger_account_id = a.id
-                          AND oa.state = 'open'
-                    ), 0)
+                    - openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, $1::timestamptz)
                FROM openrails.ledger_accounts a
                WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
                  AND a.currency = s.currency AND a.account_type = 'customer_balance'
            ), 0)::bigint AS available
     FROM openrails.money_settings s
-    WHERE s.merchant_id = $1 AND s.low_balance_threshold IS NOT NULL
+    WHERE s.merchant_id = $2::uuid AND s.low_balance_threshold IS NOT NULL
 )
 SELECT merchant_id, customer_id, currency, available,
        COALESCE(low_balance_threshold, 0)::bigint AS threshold,
@@ -199,6 +193,11 @@ SELECT merchant_id, customer_id, currency, available,
 FROM avail
 WHERE available < low_balance_threshold
 `
+
+type ListBelowThresholdMoneyAccountsParams struct {
+	AsOf       time.Time
+	MerchantID uuid.UUID
+}
 
 type ListBelowThresholdMoneyAccountsRow struct {
 	MerchantID               uuid.UUID
@@ -214,10 +213,9 @@ type ListBelowThresholdMoneyAccountsRow struct {
 
 // Money-in workers (#239/#240): accounts whose DERIVED available balance
 // (#512 ledger customer_balance) is under their configured low-balance
-// threshold. Redis request holds are not part of this durable scan; durable
-// operation authorizations are.
-func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, merchantID uuid.UUID) ([]ListBelowThresholdMoneyAccountsRow, error) {
-	rows, err := q.db.Query(ctx, listBelowThresholdMoneyAccounts, merchantID)
+// threshold. Both request and provider reservations reduce available funds.
+func (q *Queries) ListBelowThresholdMoneyAccounts(ctx context.Context, arg ListBelowThresholdMoneyAccountsParams) ([]ListBelowThresholdMoneyAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listBelowThresholdMoneyAccounts, arg.AsOf, arg.MerchantID)
 	if err != nil {
 		return nil, err
 	}

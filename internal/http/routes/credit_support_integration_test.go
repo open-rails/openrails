@@ -108,12 +108,12 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	code, body = request(http.MethodDelete, wrongCustomer, "owner", mid, map[string]string{"reason": "wrong customer"})
 	require.Equal(t, 404, code, body)
 	// Real Redis admission reserves capacity while holding the same PG row lock.
-	gate := spendgate.New(redis)
+	gate := spendgate.New(database)
 	holdID := uuid.NewString()
 	mctx := merchant.WithID(ctx, merchant.ID(mid))
 	require.NoError(t, database.RunInMerchantScope(mctx, merchant.ID(mid), "credit support hold", func(ctx context.Context) error {
-		return ms.WithLockedAdmissionCapacity(ctx, customer, "USD", func(cap money.AdmissionCapacity) error {
-			decision, err := gate.Admit(ctx, spendgate.AdmitInput{Merchant: mid.String(), Customer: customer.UUID().String(), Currency: "USD", RequestID: holdID, Cost: 100, AccountBalance: cap.Balance - cap.Held, HoldTTL: time.Minute})
+		return ms.WithLockedAdmissionCapacity(ctx, customer, "USD", func(ctx context.Context, txDB *db.DB, cap money.AdmissionCapacity) error {
+			decision, err := gate.Admit(ctx, txDB.Gen(ctx), spendgate.AdmitInput{Customer: customer.UUID(), Currency: "USD", RequestID: holdID, Cost: 100, AccountBalance: cap.Balance - cap.Held, ExpiresAt: time.Now().Add(time.Minute)})
 			if err != nil {
 				return err
 			}
@@ -124,7 +124,7 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	code, body = request(http.MethodDelete, revokePath, "owner", mid, map[string]string{"reason": "held"})
 	require.Equal(t, 409, code, body)
 	require.Equal(t, "credit_grant_held", body["error"].(map[string]any)["code"])
-	require.NoError(t, gate.Release(ctx, spendgate.ReleaseInput{Merchant: mid.String(), Customer: customer.UUID().String(), Currency: "USD", RequestID: holdID}))
+	require.NoError(t, gate.Release(mctx, holdID))
 	code, body = request(http.MethodDelete, revokePath, "owner", mid, map[string]string{"reason": "support removal"})
 	require.Equal(t, 200, code, body)
 	require.Equal(t, "revoked", body["grant"].(map[string]any)["state"])

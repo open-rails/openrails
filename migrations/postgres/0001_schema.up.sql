@@ -5077,3 +5077,61 @@ CREATE VIEW openrails.orphaned_episodes WITH (security_invoker='true') AS
 COMMENT ON VIEW openrails.orphaned_episodes IS '#690 episode analytics, the mirror of freeloader_episodes: spans where payment coverage existed (subscription paid-through snapshot, or a completed one_off payment with a finite access window for an entitlement-promising product) but no entitlement window covered the time. Open episodes (paid-through still in the future) end at now(). Same approximations: paid-through is the current-period snapshot; window coverage is contiguous-from-the-left (uncovered TAIL only — a wrongly-early revocation shows as the tail from revoked_at to paid-through).';
 
 GRANT SELECT ON TABLE openrails.orphaned_episodes TO openrails_app;
+
+-- Admission operation reservations (issue989)
+CREATE TABLE openrails.admission_operations (
+    merchant_id uuid NOT NULL,
+    request_id text NOT NULL CHECK (octet_length(request_id) BETWEEN 1 AND 255),
+    payer_id uuid NOT NULL,
+    currency text NOT NULL CONSTRAINT admission_operations_currency_shape CHECK (currency ~ '^[A-Z]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    estimated_amount bigint NOT NULL CHECK (estimated_amount >= 0),
+    available_amount bigint NOT NULL CHECK (available_amount >= 0),
+    terms jsonb NOT NULL CHECK (jsonb_typeof(terms) = 'object' AND octet_length(terms::text) <= 65536),
+    requested_expires_at timestamptz,
+    expires_at timestamptz,
+    admitted_at timestamptz NOT NULL,
+    window_keys text[] NOT NULL,
+    state text NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'released', 'captured')),
+    capture_terms jsonb CHECK (jsonb_typeof(capture_terms) = 'object' AND octet_length(capture_terms::text) <= 65536),
+    captured_amount bigint,
+    captured_at timestamptz,
+    released_at timestamptz,
+    PRIMARY KEY (merchant_id, request_id),
+    FOREIGN KEY (merchant_id, payer_id) REFERENCES openrails.customers (merchant_id, id),
+    CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
+    CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
+    CHECK (
+        (state = 'open' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NULL)
+        OR (state = 'released' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NOT NULL)
+        OR (state = 'captured' AND capture_terms IS NOT NULL AND captured_amount IS NOT NULL AND captured_amount >= 0 AND captured_at IS NOT NULL)
+    )
+);
+CREATE INDEX admission_operations_held ON openrails.admission_operations (merchant_id, payer_id, currency, expires_at)
+    WHERE state = 'open';
+CREATE INDEX admission_operations_windows ON openrails.admission_operations (merchant_id, payer_id, currency, admitted_at)
+    WHERE state <> 'released';
+CREATE INDEX admission_operations_window_keys ON openrails.admission_operations USING gin (window_keys)
+    WHERE state <> 'released';
+ALTER TABLE openrails.admission_operations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.admission_operations FORCE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.admission_operations
+    USING (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid)
+    WITH CHECK (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid);
+GRANT SELECT, INSERT ON openrails.admission_operations TO openrails_app;
+GRANT UPDATE (expires_at, state, capture_terms, captured_amount, captured_at, released_at) ON openrails.admission_operations TO openrails_app;
+
+-- One derived financial hold total, shared by every spend and authorization path.
+CREATE FUNCTION openrails.financial_held_amount(merchant uuid, payer uuid, unit text, as_of timestamptz)
+RETURNS bigint LANGUAGE sql STABLE SECURITY INVOKER AS $$
+    SELECT (
+        COALESCE((SELECT SUM(oa.authorized_usd_micros)
+            FROM openrails.operation_authorizations oa
+            JOIN openrails.ledger_accounts a ON a.merchant_id = oa.merchant_id AND a.id = oa.ledger_account_id
+            WHERE oa.merchant_id = merchant AND a.customer_id = payer AND a.currency = unit AND oa.state = 'open'), 0)
+        + COALESCE((SELECT SUM(estimated_amount) FROM openrails.admission_operations
+            WHERE merchant_id = merchant AND payer_id = payer AND currency = unit AND state = 'open'
+              AND (expires_at IS NULL OR expires_at > as_of)), 0)
+    )::bigint;
+$$;
+REVOKE ALL ON FUNCTION openrails.financial_held_amount(uuid, uuid, text, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION openrails.financial_held_amount(uuid, uuid, text, timestamptz) TO openrails_app;

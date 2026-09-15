@@ -43,7 +43,7 @@ func TestProviderBillingObservationQualificationLifecycle(t *testing.T) {
 		defer func() { _ = tx.Rollback(context.Background()) }()
 		boundCtx, txDB, bindErr := dbi.BindMerchantTx(ctx, tx, dbtest.TestMerchantID)
 		require.NoError(t, bindErr)
-		_, openErr := svc.OpenOperationAuthorizationInTx(boundCtx, txDB, in, func(context.Context) (int64, error) { return 0, nil })
+		_, openErr := svc.OpenOperationAuthorizationInTx(boundCtx, txDB, in)
 		require.NoError(t, openErr)
 		require.NoError(t, tx.Commit(ctx))
 		return in

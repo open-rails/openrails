@@ -95,7 +95,7 @@ func TestQueryPerformance(t *testing.T) {
 			// Hot admission affordability snapshot (ledger_accounts + money_settings).
 			Name: "admission_capacity", MaxExecutionMS: 75, MaxSharedReadBlocks: 64,
 			SQL:           gen.QueryText["GetAdmissionCapacity"],
-			Args:          []any{merchantID, seed.HotCustomerID, perfCurrency},
+			Args:          []any{now, merchantID, seed.HotCustomerID, perfCurrency},
 			ForbidSeqScan: []string{"ledger_accounts", "money_settings"},
 		},
 		{

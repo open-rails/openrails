@@ -74,14 +74,11 @@ type AdmitResult struct {
 	DenyCode            string     `json:"deny_code,omitempty"`
 	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
 	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
+	Replayed            bool       `json:"replayed"`
+	State               string     `json:"state,omitempty"`
 }
 
-// Admit runs service admission: the delegated wasted-spend cutoff + the single
-// atomic spendgate EVAL (affordability + spend-cap windows + Redis hold). The gate
-// + Postgres→policy loader are built from the runtime per call (both cheap,
-// stateless). The payer's Postgres money lock spans the final capacity read and
-// Redis reserve so durable and Redis reservations cannot consume the same funds;
-// there are still no per-request Postgres reservation rows.
+// Admit evaluates policy and reserves a durable request operation in one payer transaction.
 func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -92,20 +89,17 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	if s.rt.RedisClient == nil {
-		return nil, fmt.Errorf("admission unavailable: redis not configured")
-	}
 	if in.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
+		return nil, &spendgate.ValidationError{Param: "customer_id", Message: "customer_id required"}
 	}
-	if in.EstimatedAmount > 0 {
+	{
 		in.SourceID = strings.TrimSpace(in.SourceID)
-		if in.SourceID == "" {
-			return nil, fmt.Errorf("request_id required")
+		if err := spendgate.ValidateRequest(in.SourceID, in.EstimatedAmount, in.AccrualRateDeltaPerHour); err != nil {
+			return nil, err
 		}
 		in.InvokerType = strings.TrimSpace(in.InvokerType)
 		if in.InvokerType != string(identity.InvokerTypePayer) && in.InvokerType != string(identity.InvokerTypeDelegated) {
-			return nil, fmt.Errorf("invoker_type must be payer or delegated")
+			return nil, &spendgate.ValidationError{Param: "invoker_type", Message: "invoker_type must be payer or delegated"}
 		}
 	}
 	currency, err := s.resolveCurrency(ctx, in.Currency)
@@ -113,7 +107,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		return nil, err
 	}
 
-	gate := spendgate.New(s.rt.RedisClient)
+	gate := spendgate.New(s.rt.DB)
+	gate.SetClock(s.now)
 	loader := admission.NewSpendgatePolicyLoader(
 		admission.NewBillingPolicyStore(s.rt.DB),
 		admission.NewInvokerSpendLimitStore(s.rt.DB),
@@ -169,9 +164,10 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		BlockedBy:           dec.BlockedBy,
 		DenyCode:            dec.DenyCode,
 		RetryAfterSeconds:   dec.RetryAfterSeconds,
+		Replayed:            dec.Replayed, State: dec.State,
 	}
-	if dec.Allowed && in.EstimatedAmount > 0 {
-		res.HoldExpiresAt = &exp
+	if dec.Allowed {
+		res.HoldExpiresAt = dec.HoldExpiresAt
 	}
 	res.Currency, err = s.DisplayCurrency(ctx, currency)
 	if err != nil {
@@ -347,7 +343,7 @@ type InvokerSpendWindow struct {
 // against on payer's account, with their live metering (or#930).
 //
 // It is a READ over the accounting admission already keeps: the same grants the
-// admit path resolves (LoadDelegatedWindows), metered by the same Redis counters
+// admit path resolves (LoadDelegatedWindows), metered by the same durable SQL operations
 // and hold records the gate writes. Nothing here counts anything.
 //
 // PAYER-SCOPE WINDOWS ARE DELIBERATELY ABSENT. The payer's own caps and product
@@ -364,9 +360,6 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	if s.rt.RedisClient == nil {
-		return nil, fmt.Errorf("spend windows unavailable: redis not configured")
-	}
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
@@ -378,7 +371,7 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 	if err != nil {
 		return nil, err
 	}
-	tid, err := merchant.Require(ctx)
+	_, err = merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -408,8 +401,10 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 		return nil, err
 	}
 
-	usage, err := spendgate.New(s.rt.RedisClient).WindowUsage(
-		ctx, tid.UUID().String(), payer.UUID().String(), currency, spendgate.Policy{Scopes: scopes}, req)
+	gate := spendgate.New(s.rt.DB)
+	gate.SetClock(s.now)
+	usage, err := gate.WindowUsage(
+		ctx, payer.UUID(), currency, spendgate.Policy{Scopes: scopes}, req)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -210,14 +211,14 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 		err      error
 	}
 	lockedAdmission := func(p identity.CustomerID, requestID string, cost int64, entered chan<- struct{}, release <-chan struct{}) admissionResult {
-		gate := spendgate.New(rdb)
+		gate := spendgate.New(rt.emb.App().Runtime.DB)
 		var decision spendgate.Decision
-		err := rt.emb.App().Runtime.MoneyService.WithLockedAdmissionCapacity(merchantCtx, p, "USD", func(capacity money.AdmissionCapacity) error {
+		err := rt.emb.App().Runtime.MoneyService.WithLockedAdmissionCapacity(merchantCtx, p, "USD", func(merchantCtx context.Context, txDB *db.DB, capacity money.AdmissionCapacity) error {
 			var gateErr error
-			decision, gateErr = gate.Admit(merchantCtx, spendgate.AdmitInput{
-				Merchant: dbtest.TestMerchantID.String(), Customer: p.UUID().String(), Currency: "USD",
+			decision, gateErr = gate.Admit(merchantCtx, txDB.Gen(merchantCtx), spendgate.AdmitInput{
+				Customer: p.UUID(), Currency: "USD",
 				RequestID: requestID, Cost: cost, AccountBalance: capacity.Balance - capacity.Held,
-				HoldTTL: time.Hour,
+				ExpiresAt: time.Now().Add(time.Hour),
 			})
 			if entered != nil {
 				close(entered)

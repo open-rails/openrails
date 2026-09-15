@@ -4,7 +4,6 @@ package money_test
 
 import (
 	"testing"
-	"time"
 
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
@@ -20,16 +19,6 @@ func TestCaptureHold_ArrearsSpillsToOwed(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 300, Source: "seed"})
-	require.NoError(t, err)
-
-	_, err = svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer:           payer,
-		Invoker:         "user:a",
-		Currency:        money.DefaultCurrency,
-		EstimatedAmount: 800,
-		Key:             money.MustIdempotencyKey(money.OpCapture, "req", "h1"),
-		ExpiresAt:       time.Now().Add(time.Hour),
-	})
 	require.NoError(t, err)
 
 	_, err = svc.CaptureAuthorized(ctx, money.SpendParams{

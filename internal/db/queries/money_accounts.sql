@@ -30,13 +30,7 @@ ORDER BY currency;
 -- travel in this Postgres snapshot.
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    COALESCE((
-        SELECT SUM(oa.authorized_usd_micros)
-        FROM openrails.operation_authorizations oa
-        WHERE oa.merchant_id = a.merchant_id
-          AND oa.ledger_account_id = a.id
-          AND oa.state = 'open'
-    ), 0)::bigint AS held,
+    openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, sqlc.arg(as_of)::timestamptz)::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
@@ -123,27 +117,20 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 -- name: ListBelowThresholdMoneyAccounts :many
 -- Money-in workers (#239/#240): accounts whose DERIVED available balance
 -- (#512 ledger customer_balance) is under their configured low-balance
--- threshold. Redis request holds are not part of this durable scan; durable
--- operation authorizations are.
+-- threshold. Both request and provider reservations reduce available funds.
 WITH avail AS (
     SELECT s.merchant_id, s.customer_id, s.currency,
            s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount,
            s.auto_topup_payment_method_id, s.last_topup_at,
            COALESCE((
                SELECT (a.credits_posted - a.debits_posted)
-                    - COALESCE((
-                        SELECT SUM(oa.authorized_usd_micros)
-                        FROM openrails.operation_authorizations oa
-                        WHERE oa.merchant_id = a.merchant_id
-                          AND oa.ledger_account_id = a.id
-                          AND oa.state = 'open'
-                    ), 0)
+                    - openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, sqlc.arg(as_of)::timestamptz)
                FROM openrails.ledger_accounts a
                WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
                  AND a.currency = s.currency AND a.account_type = 'customer_balance'
            ), 0)::bigint AS available
     FROM openrails.money_settings s
-    WHERE s.merchant_id = $1 AND s.low_balance_threshold IS NOT NULL
+    WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.low_balance_threshold IS NOT NULL
 )
 SELECT merchant_id, customer_id, currency, available,
        COALESCE(low_balance_threshold, 0)::bigint AS threshold,

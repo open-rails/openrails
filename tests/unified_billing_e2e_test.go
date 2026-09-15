@@ -191,7 +191,7 @@ func (h *billingE2EHarness) mustAdmit(userID, source, requestID string, amount i
 func (h *billingE2EHarness) capture(requestID string, amount int64) *httptest.ResponseRecorder {
 	h.t.Helper()
 	return h.do(http.MethodPost, "/v1/merchant/admissions/"+requestID+"/capture", map[string]any{
-		"amount": amount,
+		"amount": strconv.FormatInt(amount, 10),
 	})
 }
 
@@ -200,9 +200,7 @@ func (h *billingE2EHarness) release(requestID string) *httptest.ResponseRecorder
 	return h.do(http.MethodPost, "/v1/merchant/admissions/"+requestID+"/release", nil)
 }
 
-// balance reads available + held via the public balance route. NOTE: under #513
-// held is Redis-only and not surfaced here, so HeldBalance is always 0 — assert
-// in-flight holds via admit gating instead.
+// balance reads durable available and held amounts through the public route.
 type balanceView struct {
 	Balance     int64
 	HeldBalance int64
@@ -436,5 +434,5 @@ func TestUnifiedBilling_LifecycleViaPublicServiceCredentialRoutes(t *testing.T) 
 	// the endpoint reports 0.
 	bal := h.balance(user)
 	require.Equal(t, int64(16_800), bal.Balance, "balance endpoint reflects the ledger")
-	require.Equal(t, int64(0), bal.HeldBalance, "held is Redis-only; the endpoint reports 0")
+	require.Equal(t, int64(0), bal.HeldBalance, "capture removes its reservation")
 }

@@ -99,25 +99,16 @@ type PassThroughProviderCostSettlementInput struct {
 	SettlementBody        []byte
 }
 
-// AdmissionHeldReader reads the live Redis request-admission reservation total
-// while the caller holds OpenRails' PostgreSQL customer-row money lock. New
-// admissions take the same lock before mutating Redis, so this snapshot cannot
-// race a new hold into existence.
-type AdmissionHeldReader func(context.Context) (int64, error)
-
 // OpenOperationAuthorizationInTx validates account capacity and inserts (or
 // byte-for-byte replays) an open authorization through the transaction-scoped
 // DB returned by db.BindMerchantTx. It never commits or rolls back the caller's
 // transaction.
-func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, in OperationAuthorizationInput, readAdmissionHeld AdmissionHeldReader) (*OperationAuthorization, error) {
+func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, in OperationAuthorizationInput) (*OperationAuthorization, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if txDB == nil {
 		return nil, fmt.Errorf("operation authorization requires a bound transaction")
-	}
-	if readAdmissionHeld == nil {
-		return nil, fmt.Errorf("operation authorization requires live admission-held capacity")
 	}
 	if err := validateOperationAuthorizationInput(in); err != nil {
 		return nil, err
@@ -154,19 +145,7 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		return nil, fmt.Errorf("operation authorization: customer balance ledger account was not materialized")
 	}
 
-	// PG -> Redis is the sole cross-store ordering. Live admission takes this
-	// same customer lock across its capacity read and Redis Lua reservation;
-	// while we hold it, no new request hold can appear between this read and the
-	// durable authorization insert. Capture/release may only reduce Redis held.
-	admissionHeld, err := readAdmissionHeld(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read live admission-held capacity: %w", err)
-	}
-	capacity, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "durable authorization holds")
-	if err != nil {
-		return nil, err
-	}
-	capacity, err = subtractOperationCapacity(capacity, admissionHeld, "redis admission holds")
+	capacity, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "financial holds")
 	if err != nil {
 		return nil, err
 	}
