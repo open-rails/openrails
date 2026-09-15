@@ -29,7 +29,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 		replayed := row.State == "captured"
 		if replayed && (row.CapturedAmount == nil || *row.CapturedAmount != amount) {
 			return &IdempotencyConflict{Operation: string(OpCapture), Source: "admit", SourceID: requestID,
-				Field: "amount", Committed: row.CapturedAmount, Retried: amount}
+				Field: "amount", Committed: derefInt(row.CapturedAmount), Retried: amount}
 		}
 		terms, err := spendgate.OriginalTerms(row)
 		if err != nil {

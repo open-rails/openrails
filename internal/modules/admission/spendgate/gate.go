@@ -20,10 +20,11 @@ import (
 )
 
 var (
-	ErrNotFound         = errors.New("admission operation not found")
-	ErrExpired          = errors.New("admission deadline has passed")
-	ErrDeadlineRequired = errors.New("admission deadline is required")
-	ErrCaptured         = errors.New("admission operation is already captured")
+	ErrNotFound          = errors.New("admission operation not found")
+	ErrExpired           = errors.New("admission deadline has passed")
+	ErrDeadlineRequired  = errors.New("admission deadline is required")
+	ErrCaptured          = errors.New("admission operation is already captured")
+	ErrDeadlineShortened = errors.New("extension cannot shorten the deadline")
 )
 
 type Conflict struct{ Field string }
@@ -308,7 +309,7 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 			return ErrExpired
 		}
 		if row.ExpiresAt != nil && until.Before(*row.ExpiresAt) {
-			return fmt.Errorf("extension cannot shorten the deadline")
+			return ErrDeadlineShortened
 		}
 		_, err := d.Gen(ctx).ExtendAdmissionOperation(ctx, gen.ExtendAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AsOf: g.Now(), ExpiresAt: until.UTC()})
 		return err

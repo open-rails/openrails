@@ -625,6 +625,10 @@ func ServiceReleaseHold(r *httprequest.Request) {
 		return
 	}
 	if err := svc.ReleaseHold(r.Request.Context(), requestID); err != nil {
+		if errors.Is(err, spendgate.ErrCaptured) {
+			r.ErrorJSON(http.StatusConflict, "captured admission cannot be released")
+			return
+		}
 		r.ErrorJSON(http.StatusInternalServerError, "release failed")
 		return
 	}
@@ -666,6 +670,8 @@ func ServiceExtendHold(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, "hold_not_found")
 	case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
 		r.ErrorJSON(http.StatusBadRequest, "expires_at already passed")
+	case errors.Is(err, spendgate.ErrDeadlineShortened):
+		r.ErrorJSON(http.StatusBadRequest, "extension cannot shorten the deadline")
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "extend failed")
 	}

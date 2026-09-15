@@ -295,30 +295,3 @@ func (q *Queries) ReleaseAdmissionOperation(ctx context.Context, arg ReleaseAdmi
 	}
 	return result.RowsAffected(), nil
 }
-
-const sumAdmissionReservations = `-- name: SumAdmissionReservations :one
-SELECT COALESCE(SUM(estimated_amount), 0)::bigint AS held
-FROM openrails.admission_operations
-WHERE merchant_id = $1::uuid AND payer_id = $2::uuid
-  AND currency = $3::text AND state = 'open'
-  AND (expires_at IS NULL OR expires_at > $4::timestamptz)
-`
-
-type SumAdmissionReservationsParams struct {
-	MerchantID uuid.UUID
-	PayerID    uuid.UUID
-	Currency   string
-	AsOf       time.Time
-}
-
-func (q *Queries) SumAdmissionReservations(ctx context.Context, arg SumAdmissionReservationsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumAdmissionReservations,
-		arg.MerchantID,
-		arg.PayerID,
-		arg.Currency,
-		arg.AsOf,
-	)
-	var held int64
-	err := row.Scan(&held)
-	return held, err
-}

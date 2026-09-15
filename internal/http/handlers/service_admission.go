@@ -118,6 +118,10 @@ func serviceAdmitBatchVerdicts(
 ) []serviceAdmitVerdict {
 	out := make([]serviceAdmitVerdict, len(items))
 	for i, item := range items {
+		if id := strings.TrimSpace(item.RequestID); id == "" || len(id) > 255 {
+			out[i] = admitFailure(http.StatusBadRequest, "request_id must contain 1 to 255 bytes", "request_id")
+			continue
+		}
 		if item.EstimatedAmount < 0 {
 			out[i] = admitFailure(http.StatusBadRequest, "estimated_amount must be >= 0", "estimated_amount")
 			continue
@@ -133,6 +137,10 @@ func serviceAdmitBatchVerdicts(
 		}
 		res, err := admit(ctx, admitInputFromRequest(item, *payer))
 		switch {
+		case errors.Is(err, billingservice.ErrIdempotencyKeyReused):
+			details := api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeIdempotencyKeyReused, err.Error()).ToResponse().Error
+			out[i] = serviceAdmitVerdict{Status: http.StatusConflict, Error: &details}
+			continue
 		case errors.Is(err, billingservice.ErrHoldDeadlineRequired):
 			out[i] = admitFailure(http.StatusBadRequest, "expires_at required when estimated_amount places a hold", "expires_at")
 			continue

@@ -5,13 +5,14 @@ package tests
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -174,11 +175,10 @@ func TestOr930InvokerSpendWindowsSelfRead(t *testing.T) {
 	// from the window's Redis key; boundaries land at offset + k*duration forever.
 	// A now+duration implementation lands off-phase and fails this.
 	durMs := int64(windowSeconds) * 1000
-	// The gate's key structure: sg:{merchant:customer}:currency:w:scope:scope_id:key,
-	// with ':' scrubbed out of the scope id so it cannot break the composite key.
-	offsetMs := fixedWindowOffsetMs(fmt.Sprintf("sg:{%s:%s}:%s:w:invoker:%s:day",
-		dbtest.TestMerchantID.UUID().String(), payerID.String(), currency,
-		strings.ReplaceAll(invokerA, ":", "_")), durMs)
+	parts, err := json.Marshal([]string{fmt.Sprintf("%s/%s/%s", dbtest.TestMerchantID.UUID(), payerID, currency), "invoker", invokerA, "", "day"})
+	require.NoError(t, err)
+	key := sha256.Sum256(parts)
+	offsetMs := fixedWindowOffsetMs(hex.EncodeToString(key[:]), durMs)
 	require.Zero(t, (winA.ResetsAt.UnixMilli()-offsetMs)%durMs,
 		"resets_at must sit on offset + k*duration, not now+duration")
 	require.True(t, winA.ResetsAt.After(time.Now()), "the boundary is in the future")

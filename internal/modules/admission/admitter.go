@@ -387,18 +387,6 @@ var ErrHoldDeadlineRequired = errors.New("admission: expires_at is required when
 // ErrHoldDeadlinePassed: the declared deadline is already in the past.
 var ErrHoldDeadlinePassed = errors.New("admission: expires_at is already in the past")
 
-// holdTTL derives the hold's lifetime from the caller's declared deadline.
-func holdTTL(expiresAt time.Time, now time.Time) (time.Duration, error) {
-	if expiresAt.IsZero() {
-		return 0, ErrHoldDeadlineRequired
-	}
-	d := expiresAt.Sub(now)
-	if d <= 0 {
-		return 0, ErrHoldDeadlinePassed
-	}
-	return d, nil
-}
-
 // effectiveWastedCurrency validates the wasted-spend windows resolve to one
 // currency (cross-currency wasted policies are unsupported in one policy).
 func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {

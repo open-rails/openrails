@@ -293,6 +293,8 @@ type AdmitRequest struct {
 // keyed Redis hold. A deny is returned as (Allowed=false, nil error) on both
 // transports even though HTTP maps it to 402/403/429.
 type AdmitResponse struct {
+	// Allowed preserves the original decision on replay. Use Active to decide
+	// whether the operation still has a live reservation; terminal receipts are not new authority.
 	Allowed             bool       `json:"allowed"`
 	BlockedBy           string     `json:"blocked_by,omitempty"`
 	DenyCode            string     `json:"deny_code,omitempty"`
@@ -306,6 +308,10 @@ type AdmitResponse struct {
 	Replayed bool   `json:"replayed"`
 	State    string `json:"state,omitempty"`
 }
+
+// Active reports a currently open, originally allowed admission. A denied
+// result has no operation state; an expired or terminal replay is never active.
+func (r *AdmitResponse) Active() bool { return r != nil && r.Allowed && r.State == "open" }
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
 // OpenRails can serve per-resource/function/tier/invoker spend (#410). Nil = no
@@ -618,7 +624,8 @@ type AdmitBatchVerdict struct {
 	Result *AdmitResponse `json:"result,omitempty"`
 }
 
-// Allowed reports whether this item was admitted.
+// Allowed reports whether this item has a live admission. Result.Allowed records
+// the original decision even when a replay's state is expired or terminal.
 func (v AdmitBatchVerdict) Allowed() bool {
-	return v.Status == 200 && v.Result != nil && v.Result.Allowed
+	return v.Status == 200 && v.Result.Active()
 }

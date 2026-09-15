@@ -94,6 +94,7 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 			continue
 		}
 		for _, w := range sw.Windows {
+			w.Scope = sw.Scope
 			rw := resolvedWindow{Window: w, scopeID: sw.ScopeID}
 			if sw.Scope == ScopeRole {
 				rw.invoker = req.Invoker

@@ -243,23 +243,3 @@ func (q *Queries) SettleOperationAuthorizationPassThroughProviderCost(ctx contex
 	)
 	return i, err
 }
-
-const sumOpenOperationAuthorizationMicros = `-- name: SumOpenOperationAuthorizationMicros :one
-SELECT COALESCE(SUM(authorized_usd_micros), 0)::bigint AS authorized_usd_micros
-FROM openrails.operation_authorizations
-WHERE merchant_id = $1::uuid
-  AND ledger_account_id = $2::uuid
-  AND state = 'open'
-`
-
-type SumOpenOperationAuthorizationMicrosParams struct {
-	MerchantID      uuid.UUID
-	LedgerAccountID uuid.UUID
-}
-
-func (q *Queries) SumOpenOperationAuthorizationMicros(ctx context.Context, arg SumOpenOperationAuthorizationMicrosParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumOpenOperationAuthorizationMicros, arg.MerchantID, arg.LedgerAccountID)
-	var authorized_usd_micros int64
-	err := row.Scan(&authorized_usd_micros)
-	return authorized_usd_micros, err
-}

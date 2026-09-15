@@ -25,4 +25,6 @@ Capture returns one shared `CaptureReceipt` in Go and HTTP: request ID, original
 
 All spending paths use one held total: live request estimates plus open provider-operation authorizations. Each is counted once. Capture transitions its own request out of held state before posting the charge in the same transaction, preserving every other reservation. Provider-operation authorizations retain their distinct lifetime and settlement rules.
 
+The separate accrual-rate policy compares observed, reported usage with the requested prospective delta. Zero-estimate requests still pass this policy. It is not a strict instantaneous concurrency quota: newly started work can be ahead of the usage meter, and live rate ownership requires its own provider-obligation contract. Durable request spend windows do not claim to solve that separate policy.
+
 Capture, release and extension resolve the durable payer and enforce the credential's customer scope before mutation. Financial application code remains identical through the shared embedded and remote Client.
