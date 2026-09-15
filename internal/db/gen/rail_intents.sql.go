@@ -20,7 +20,7 @@ WITH due AS (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= $2::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= $2::timestamptz)
           )
-      AND (status = 'in_flight' OR expires_at IS NULL OR expires_at > $2::timestamptz)
+      AND (status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > $2::timestamptz)
     ORDER BY next_attempt_at
     LIMIT $3
     FOR UPDATE SKIP LOCKED
@@ -180,7 +180,7 @@ WHERE pi.id = $2
         pi.status IN ('pending', 'failed_retryable')
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
       )
-  AND (pi.status = 'in_flight' OR pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
+  AND (pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
 RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.custodian_id
 `
 

@@ -45,3 +45,8 @@ describes merchant order correlation and processor-dependent duplicate checking;
 its [Query API](https://docs.nmi.com/reference/query) does not establish a
 terminal-negative guarantee for a missing search result. The engine therefore
 uses absence as inconclusive evidence rather than assuming a provider guarantee.
+
+The multi-effect NMI upgrade/proration path is a separate follow-up under #990;
+its current cache-backed retry/compensation logic is not qualified by these
+intent and invoice changes. That workflow must retain separate durable receipts
+for successor creation, proration and old-subscription cancellation.

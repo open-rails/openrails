@@ -96,7 +96,7 @@ WITH due AS (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= sqlc.arg(now)::timestamptz)
           )
-      AND (status = 'in_flight' OR expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
+      AND (status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
@@ -127,7 +127,7 @@ WHERE pi.id = sqlc.arg(id)
         pi.status IN ('pending', 'failed_retryable')
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= sqlc.arg(now)::timestamptz)
       )
-  AND (pi.status = 'in_flight' OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
+  AND (pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
 RETURNING pi.*;
 
 -- Claims due unknown_needs_verify intents for the verifier. Status stays
