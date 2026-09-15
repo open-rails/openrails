@@ -317,6 +317,13 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	h.t.Helper()
 
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
+	return h.StartEmbeddedMerchant(currency, dbtest.TestMerchantID, dbtest.TestMerchantSlug)
+}
+
+// StartEmbeddedMerchant starts an independent embedded runtime for an existing
+// merchant. Construction fixes its authority before any client is created.
+func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug string) *Surface {
+	h.t.Helper()
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}}
 	rt, err := embed.New(h.ctx, embed.Options{
@@ -327,14 +334,14 @@ func (h *Harness) StartEmbeddedHost(currency string) *Surface {
 	// Bind the engine to the test merchant — what embed provisioning
 	// (EnsureMerchant/UpsertMerchantConfig) does on a real host. The in-process
 	// transport (#685) pins this merchant per request.
-	rt.Embedded().App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	rt.Embedded().App().Runtime.SetConfiguredMerchant(id)
 
 	mux := http.NewServeMux()
 	runtime := rt.Embedded().App().Runtime
 	routeOptions := httproutes.Options{
 		Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
-			merchantID:   dbtest.TestMerchantID,
-			merchantSlug: dbtest.TestMerchantSlug,
+			merchantID:   id,
+			merchantSlug: slug,
 		}}),
 	}
 	httproutes.RegisterServiceRoutes(

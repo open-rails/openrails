@@ -230,7 +230,7 @@ func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Con
 		return nil, err
 	}
 	merchantID := tid.UUID()
-	subjectByCustomerID := make(map[uuid.UUID]string, len(subjects))
+	subjectByCustomerID := make(map[uuid.UUID][]string, len(subjects))
 	customerIDs := make([]uuid.UUID, 0, len(subjects))
 	for _, subject := range subjects {
 		id, err := db.ResolveCustomerID(subject)
@@ -238,14 +238,12 @@ func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Con
 			return nil, err
 		}
 		if id != uuid.Nil {
-			subjectByCustomerID[id] = subject
-			customerIDs = append(customerIDs, id)
+			if len(subjectByCustomerID[id]) == 0 {
+				customerIDs = append(customerIDs, id)
+			}
+			subjectByCustomerID[id] = append(subjectByCustomerID[id], subject)
 		}
 	}
-	return s.listActiveRecordsByCustomerIDs(ctx, merchantID, subjectByCustomerID, customerIDs, at)
-}
-
-func (s *EntitlementService) listActiveRecordsByCustomerIDs(ctx context.Context, merchantID uuid.UUID, subjectByCustomerID map[uuid.UUID]string, customerIDs []uuid.UUID, at time.Time) (map[string][]models.Entitlement, error) {
 	if len(customerIDs) == 0 {
 		return map[string][]models.Entitlement{}, nil
 	}
@@ -278,8 +276,9 @@ func (s *EntitlementService) listActiveRecordsByCustomerIDs(ctx context.Context,
 			rr := models.EntitlementRevokeReason(*row.RevokeReason)
 			m.RevokeReason = &rr
 		}
-		subj := subjectByCustomerID[row.CustomerID]
-		out[subj] = append(out[subj], m)
+		for _, subject := range subjectByCustomerID[row.CustomerID] {
+			out[subject] = append(out[subject], m)
+		}
 	}
 	return out, nil
 }

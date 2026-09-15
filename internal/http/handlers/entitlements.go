@@ -195,6 +195,10 @@ func ServiceGetExternalSubjectEntitlements(r *httprequest.Request) {
 		if s == "" {
 			continue
 		}
+		if id, err := uuid.Parse(s); err != nil || id == uuid.Nil {
+			r.ErrorJSON(http.StatusBadRequest, "subjects must be nonzero UUIDs")
+			return
+		}
 		if _, dup := seen[s]; dup {
 			continue
 		}

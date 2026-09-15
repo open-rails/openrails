@@ -1789,6 +1789,8 @@ COMMENT ON COLUMN openrails.customers.issuer IS 'Audit/last-seen source issuer f
 ALTER TABLE ONLY openrails.customers
     ADD CONSTRAINT customers_pkey PRIMARY KEY (merchant_id, id);
 
+CREATE INDEX idx_customers_merchant ON openrails.customers USING btree (merchant_id);
+
 CREATE INDEX idx_customers_id_merchant ON openrails.customers USING btree (id, merchant_id);
 
 ALTER TABLE ONLY openrails.customers
@@ -3811,7 +3813,7 @@ CREATE INDEX ix_subscriptions_renewal_by_payment_method ON openrails.subscriptio
 
 CREATE UNIQUE INDEX uq_subscriptions_customer_product_lifecycle ON openrails.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status])) AND (deleted_at IS NULL));
 
-CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON openrails.subscriptions USING btree (customer_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON openrails.subscriptions USING btree (merchant_id, customer_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL) AND (deleted_at IS NULL));
 
 CREATE UNIQUE INDEX uq_subscriptions_merchant_psp_subscription_id ON openrails.subscriptions USING btree (merchant_id, rail, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
 
