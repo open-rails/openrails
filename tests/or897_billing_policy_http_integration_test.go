@@ -59,7 +59,7 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 		return w
 	}
 
-	// The retired key: refused, and the refusal names its replacement.
+	// Unknown settings fields are refused; there is no legacy-field parser.
 	res := call(http.MethodPut, "/v1/merchant/settings", map[string]any{
 		"trust_level_spend_limits": []map[string]any{{
 			"trust_level":    "gold",
@@ -67,8 +67,7 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 		}},
 	})
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
-	require.Contains(t, res.Body.String(), "billing_policies")
-	require.Contains(t, res.Body.String(), "billing_policy_bindings")
+	require.Contains(t, res.Body.String(), `"code":"invalid_param"`)
 
 	// A malformed policy is a client error from the shared normalizer.
 	res = call(http.MethodPut, "/v1/merchant/settings", map[string]any{

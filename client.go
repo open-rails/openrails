@@ -392,8 +392,17 @@ type MerchantProfileInput struct {
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile             *MerchantProfileInput        `json:"profile,omitempty"`
-	TrustLevelSchedules []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
+	Profile                    *MerchantProfileInput        `json:"profile,omitempty"`
+	AutoTopupSafety            *AutoTopupSafetyPolicy       `json:"auto_topup_safety,omitempty"`
+	InvoiceCollectionThreshold *int64                       `json:"collection_threshold,omitempty"`
+	InvoiceMonthlyFloor        *int64                       `json:"monthly_floor,omitempty"`
+	InvoiceBillingBoundary     string                       `json:"billing_period_boundary,omitempty"`
+	AlertEmail                 *string                      `json:"alert_email,omitempty"`
+	RepriceNoticeWindowDays    *int                         `json:"reprice_notice_window_days,omitempty"`
+	ArrearsGraceDays           *int                         `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor    *int64                       `json:"arrears_delinquency_floor,omitempty"`
+	CheckoutRouting            *[]CheckoutRoutingRule       `json:"checkout_routing,omitempty"`
+	TrustLevelSchedules        []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".

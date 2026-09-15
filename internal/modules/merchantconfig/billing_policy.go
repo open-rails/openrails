@@ -2,7 +2,9 @@ package merchantconfig
 
 import (
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -90,7 +92,7 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 		if len(p.SpendWindows) == 0 {
 			return models.BillingPolicy{}, fmt.Errorf("%s: kind window_spend_cap requires at least one spend_windows entry", label)
 		}
-		windows, err := normalizeBillingWindows(label, "spend_windows", p.SpendWindows)
+		windows, err := NormalizeBudgetWindows(label, "spend_windows", p.SpendWindows)
 		if err != nil {
 			return models.BillingPolicy{}, err
 		}
@@ -139,7 +141,7 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 
 	// Wasted-spend grace is orthogonal to the capped quantity, so it rides on
 	// either kind.
-	badSpend, err := normalizeBillingWindows(label, "bad_spend_windows", p.BadSpendWindows)
+	badSpend, err := NormalizeBudgetWindows(label, "bad_spend_windows", p.BadSpendWindows)
 	if err != nil {
 		return models.BillingPolicy{}, err
 	}
@@ -147,7 +149,8 @@ func NormalizeBillingPolicy(name string, p models.BillingPolicy) (models.Billing
 	return out, nil
 }
 
-func normalizeBillingWindows(label, field string, in []models.BudgetWindowPolicy) ([]models.BudgetWindowPolicy, error) {
+// NormalizeBudgetWindows validates the shared merchant money-window shape.
+func NormalizeBudgetWindows(label, field string, in []models.BudgetWindowPolicy) ([]models.BudgetWindowPolicy, error) {
 	if len(in) == 0 {
 		return nil, nil
 	}
@@ -162,8 +165,8 @@ func normalizeBillingWindows(label, field string, in []models.BudgetWindowPolicy
 			return nil, fmt.Errorf("%s: %s repeats key %q", label, field, key)
 		}
 		seen[key] = struct{}{}
-		if w.WindowSeconds <= 0 {
-			return nil, fmt.Errorf("%s: %s[%d].window_seconds must be positive", label, field, i)
+		if w.WindowSeconds <= 0 || w.WindowSeconds > math.MaxInt64/int64(time.Second) {
+			return nil, fmt.Errorf("%s: %s[%d].window_seconds must be positive and representable as a duration", label, field, i)
 		}
 		if w.Limit < 0 {
 			return nil, fmt.Errorf("%s: %s[%d].limit must be non-negative", label, field, i)

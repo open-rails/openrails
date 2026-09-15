@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -84,10 +83,6 @@ func wastedSvcEnvWithRedis(t *testing.T) (*billingservice.Service, *money.MoneyS
 		EntitlementService: entitlements.NewEntitlementService(dbi),
 		FXProvider:         fx.NewMockProvider(map[string]float64{"eur": 2}),
 		Clock:              clockwork.NewRealClock(),
-		// Production always wires this (build_runtime), and or#897 made the cache
-		// invalidate on a policy/binding write — a suite that ran without it would
-		// never exercise the path a rebinding actually takes.
-		AdmissionPolicyCache: admission.NewPolicyCache(0),
 	}
 	svc, err := billingservice.New(rt)
 	require.NoError(t, err)

@@ -4,17 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
@@ -374,111 +372,38 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"currency": currency, "credit_limit_amount": v})
 }
 
-// serviceMerchantConfigWindow is one amount window in the merchant configuration
-// request body.
-type serviceMerchantConfigWindow struct {
-	Key           string `json:"key"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Limit         int64  `json:"limit"`
-	Currency      string `json:"currency,omitempty"`
-}
-
-type serviceMerchantSettingsRequest struct {
-	AutoTopupSafety            *billingservice.AutoTopupSafetyPolicy `json:"auto_topup_safety,omitempty"`
-	Profile                    *serviceMerchantProfileConfiguration  `json:"profile,omitempty"`
-	InvoiceCollectionThreshold *int64                                `json:"collection_threshold,omitempty"`
-	InvoiceMonthlyFloor        *int64                                `json:"monthly_floor,omitempty"`
-	InvoiceBillingBoundary     string                                `json:"billing_period_boundary,omitempty"`
-	AlertEmail                 *string                               `json:"alert_email,omitempty"`
-	// RepriceNoticeWindowDays (#781): the minimum advance-notice window (in
-	// days) a subscription price INCREASE's effective_at must give existing
-	// subscribers. Unset ⇒ subscriptions.DefaultRepriceNoticeWindowDays (30).
-	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
-	// ArrearsGraceDays / ArrearsDelinquencyFloor (or#878): the delinquency
-	// policy. Grace unset ⇒ delinquency.DefaultGraceDays (14); the floor unset ⇒
-	// derived from monthly_floor.
-	ArrearsGraceDays        *int   `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor *int64 `json:"arrears_delinquency_floor,omitempty"`
-	// CheckoutRouting (or#288): the processor-routing policy. Omitted preserves
-	// the stored policy; present replaces it whole (an empty array clears it
-	// back to the built-in default order).
-	CheckoutRouting     *[]models.CheckoutRoutingRule       `json:"checkout_routing,omitempty"`
-	TrustLevelSchedules []serviceMerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
-	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
-	// policies, then the rungs that decide who gets which. Declared policies are
-	// applied before bindings so a binding can name one from the same document.
-	BillingPolicies                   []billingservice.BillingPolicyInput        `json:"billing_policies,omitempty"`
-	BillingPolicyBindings             []billingservice.BillingPolicyBindingInput `json:"billing_policy_bindings,omitempty"`
-	DelegatedInvokerWastedSpendLimits []serviceMerchantConfigWindow              `json:"delegated_invoker_wasted_spend_limits,omitempty"`
-
-	// RetiredTrustLevelSpendLimits keeps the retired `trust_level_spend_limits`
-	// key BOUND ONLY so a caller that still sends it is told what replaced it
-	// (or#897 hard cut). A silently-ignored spend cap is a cap nobody enforced.
-	RetiredTrustLevelSpendLimits []json.RawMessage `json:"trust_level_spend_limits,omitempty"`
-}
-
-type serviceMerchantTrustLevelSchedule struct {
-	Currency string                                  `json:"currency"`
-	Schedule []billingservice.TrustLevelScheduleRung `json:"schedule"`
-}
-
-type serviceMerchantProfileConfiguration struct {
-	DisplayName string `json:"display_name,omitempty"`
-	LogoURL     string `json:"logo_url,omitempty"`
-	FromEmail   string `json:"from_email,omitempty"`
-	SupportURL  string `json:"support_url,omitempty"`
-	SignupURL   string `json:"signup_url,omitempty"`
-}
-
-// ServiceGetMerchantSettings returns the merchant-owned policy-sync document.
+// ServiceGetMerchantSettings returns the complete declarative policy document.
 func ServiceGetMerchantSettings(r *httprequest.Request) {
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-	cfg, _, err := svc.GetMerchantConfiguration(r.Request.Context())
+	settings, err := svc.GetMerchantSettings(r.Request.Context())
 	if err != nil {
 		r.InternalError("get merchant settings failed", err)
 		return
 	}
-	policies, err := svc.ListBillingPolicies(r.Request.Context())
-	if err != nil {
-		r.InternalError("get merchant settings failed", err)
-		return
-	}
-	bindings, err := svc.ListBillingPolicyBindings(r.Request.Context())
-	if err != nil {
-		r.InternalError("get merchant settings failed", err)
-		return
-	}
-	r.SuccessJSON(serviceMerchantSettingsRequest{
-		Profile:                           merchantProfileResponsePtr(cfg.Profile),
-		AutoTopupSafety:                   cfg.AutoTopupSafety,
-		InvoiceCollectionThreshold:        cfg.InvoiceCollectionThreshold,
-		InvoiceMonthlyFloor:               cfg.InvoiceMonthlyFloor,
-		InvoiceBillingBoundary:            cfg.InvoiceBillingBoundary,
-		AlertEmail:                        cfg.AlertEmail,
-		RepriceNoticeWindowDays:           cfg.RepriceNoticeWindowDays,
-		ArrearsGraceDays:                  cfg.ArrearsGraceDays,
-		ArrearsDelinquencyFloor:           cfg.ArrearsDelinquencyFloor,
-		CheckoutRouting:                   cfg.CheckoutRouting,
-		BillingPolicies:                   policies,
-		BillingPolicyBindings:             bindings,
-		DelegatedInvokerWastedSpendLimits: serviceMerchantConfigWindows(cfg.DelegatedInvokerWastedSpendWindows),
-	})
+	r.SuccessJSON(settings)
 }
 
-// ServiceSetMerchantSettings installs the merchant-owned admission policy in
-// one document: profile, trust-level schedules, billing policies + bindings,
-// and delegated-invoker wasted-spend limits.
+// ServiceSetMerchantSettings atomically replaces the declarative policy document.
 func ServiceSetMerchantSettings(r *httprequest.Request) {
-	var req serviceMerchantSettingsRequest
-	if !r.BindJSON(&req) {
+	var settings *openrails.MerchantSettings
+	decoder := json.NewDecoder(r.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&settings); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			r.ErrorJSON(http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	if len(req.RetiredTrustLevelSpendLimits) > 0 {
-		r.ErrorJSON(http.StatusBadRequest, "trust_level_spend_limits was replaced by billing_policies + billing_policy_bindings (or#897): declare a named policy with kind outstanding_cap or window_spend_cap, then bind it to a tier or customer")
+	var extra any
+	if settings == nil || decoder.Decode(&extra) != io.EOF {
+		r.ErrorJSON(http.StatusBadRequest, "one settings document required")
 		return
 	}
 	svc, err := billingservice.New(r.State)
@@ -486,134 +411,13 @@ func ServiceSetMerchantSettings(r *httprequest.Request) {
 		r.InternalError("billing service unavailable", err)
 		return
 	}
-
-	// or#288: a malformed routing policy is a client error, not a server one.
-	// Run the SAME normalizer the service will run, so the caller gets the
-	// exact reason instead of a bare 500.
-	if _, err := merchantconfig.AutoTopupSafety(req.AutoTopupSafety); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	if req.CheckoutRouting != nil {
-		if _, err := merchantconfig.NormalizeCheckoutRouting(*req.CheckoutRouting); err != nil {
+	if err := svc.SetMerchantSettings(r.Request.Context(), *settings); err != nil {
+		if errors.Is(err, billingservice.ErrInvalidMerchantSettings) {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
-	}
-	// Same contract for billing policies: validate the WHOLE document through the
-	// shared normalizer before writing any of it, so a bad third policy cannot
-	// leave the first two installed.
-	for _, policy := range req.BillingPolicies {
-		if _, _, err := billingservice.ValidateBillingPolicy(policy); err != nil {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
-		}
-	}
-
-	windows := make([]abuse.WastedWindow, 0, len(req.DelegatedInvokerWastedSpendLimits))
-	for _, w := range req.DelegatedInvokerWastedSpendLimits {
-		windows = append(windows, abuse.WastedWindow{
-			Key:      w.Key,
-			Window:   time.Duration(w.WindowSeconds) * time.Second,
-			Limit:    w.Limit,
-			Currency: w.Currency,
-		})
-	}
-	if err := svc.SetMerchantConfiguration(r.Request.Context(), billingservice.MerchantConfiguration{
-		Profile:                            merchantProfileInput(req.Profile),
-		InvoiceCollectionThreshold:         req.InvoiceCollectionThreshold,
-		InvoiceMonthlyFloor:                req.InvoiceMonthlyFloor,
-		InvoiceBillingBoundary:             req.InvoiceBillingBoundary,
-		AlertEmail:                         req.AlertEmail,
-		RepriceNoticeWindowDays:            req.RepriceNoticeWindowDays,
-		AutoTopupSafety:                    req.AutoTopupSafety,
-		ArrearsGraceDays:                   req.ArrearsGraceDays,
-		ArrearsDelinquencyFloor:            req.ArrearsDelinquencyFloor,
-		CheckoutRouting:                    req.CheckoutRouting,
-		DelegatedInvokerWastedSpendWindows: windows,
-	}); err != nil {
 		r.InternalError("set merchant settings failed", err)
 		return
 	}
-
-	for _, schedule := range req.TrustLevelSchedules {
-		currency, ok := serviceRequiredCurrency(r, schedule.Currency)
-		if !ok {
-			return
-		}
-		if err := moneyutil.ValidateCurrency(currency); err != nil {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := svc.SetTrustLevelSchedule(r.Request.Context(), billingidentity.CustomerID{}, currency, schedule.Schedule); err != nil {
-			r.InternalError("set trust level schedule failed", err)
-			return
-		}
-	}
-	// Policies first: a binding in the same document may name one of them, and
-	// the bindings FK refuses a name that does not exist yet.
-	for _, policy := range req.BillingPolicies {
-		if err := svc.SetBillingPolicy(r.Request.Context(), policy); err != nil {
-			r.InternalError("set billing policy failed", err)
-			return
-		}
-	}
-	for _, binding := range req.BillingPolicyBindings {
-		if err := svc.BindBillingPolicy(r.Request.Context(), binding); err != nil {
-			if errors.Is(err, billingservice.ErrInvalidBillingPolicy) {
-				r.ErrorJSON(http.StatusBadRequest, err.Error())
-				return
-			}
-			r.InternalError("bind billing policy failed", err)
-			return
-		}
-	}
 	r.SuccessJSONMessage("ok")
-}
-
-func merchantProfileInput(in *serviceMerchantProfileConfiguration) *models.MerchantProfileConfiguration {
-	if in == nil {
-		return nil
-	}
-	return &models.MerchantProfileConfiguration{
-		DisplayName: strings.TrimSpace(in.DisplayName),
-		LogoURL:     strings.TrimSpace(in.LogoURL),
-		FromEmail:   strings.TrimSpace(in.FromEmail),
-		SupportURL:  strings.TrimSpace(in.SupportURL),
-		SignupURL:   strings.TrimSpace(in.SignupURL),
-	}
-}
-
-func merchantProfileResponsePtr(in *models.MerchantProfileConfiguration) *serviceMerchantProfileConfiguration {
-	if in == nil {
-		return nil
-	}
-	out := merchantProfileResponse(in)
-	return &out
-}
-
-func merchantProfileResponse(in *models.MerchantProfileConfiguration) serviceMerchantProfileConfiguration {
-	if in == nil {
-		return serviceMerchantProfileConfiguration{}
-	}
-	return serviceMerchantProfileConfiguration{
-		DisplayName: in.DisplayName,
-		LogoURL:     in.LogoURL,
-		FromEmail:   in.FromEmail,
-		SupportURL:  in.SupportURL,
-		SignupURL:   in.SignupURL,
-	}
-}
-
-func serviceMerchantConfigWindows(in []abuse.WastedWindow) []serviceMerchantConfigWindow {
-	out := make([]serviceMerchantConfigWindow, 0, len(in))
-	for _, w := range in {
-		out = append(out, serviceMerchantConfigWindow{
-			Key:           w.Key,
-			WindowSeconds: int64(w.Window / time.Second),
-			Limit:         w.Limit,
-			Currency:      w.Currency,
-		})
-	}
-	return out
 }

@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // SpendgatePolicyLoader builds a spendgate.Policy (the cap config the Redis admit
@@ -24,7 +23,6 @@ type SpendgatePolicyLoader struct {
 	policies *BillingPolicyStore
 	budgets  *InvokerSpendLimitStore
 	fx       fx.Provider
-	cache    *PolicyCache // optional; nil reads config from Postgres every load
 }
 
 // NewSpendgatePolicyLoader wires the loader. budgetScopes may be nil (then only
@@ -33,26 +31,9 @@ func NewSpendgatePolicyLoader(policies *BillingPolicyStore, budgetScopes *Invoke
 	return &SpendgatePolicyLoader{policies: policies, budgets: budgetScopes, fx: fxp}
 }
 
-// WithCache attaches the process-local policy-config cache (nil disables it; the
-// loader then resolves the binding from Postgres on every load).
-func (l *SpendgatePolicyLoader) WithCache(c *PolicyCache) *SpendgatePolicyLoader {
-	l.cache = c
-	return l
-}
-
-// ResolvePolicy returns the payer's bound billing policy, served from the cache
-// when warm. Split out from Load so the admitter can decide the ARREARS
-// question (does outstanding owed reduce headroom?) from the policy KIND before
-// it reads capacity.
+// ResolvePolicy reads the current binding and policy together from PostgreSQL.
 func (l *SpendgatePolicyLoader) ResolvePolicy(ctx context.Context, payer identity.CustomerID, trustLevel string) (ResolvedPolicy, error) {
-	// Cache key needs the merchant so a payer uuid can't alias across merchants.
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return ResolvedPolicy{}, err
-	}
-	return l.cache.ResolvedPolicy(tid.UUID().String(), payer.UUID().String(), trustLevel, func() (ResolvedPolicy, error) {
-		return l.policies.Resolve(ctx, payer, trustLevel)
-	})
+	return l.policies.Resolve(ctx, payer, trustLevel)
 }
 
 // Load turns an already-resolved policy plus the payer's delegated grants into
