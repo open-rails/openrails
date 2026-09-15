@@ -15,7 +15,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -318,7 +317,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		if rerr != nil {
 			return AdmitDecision{}, rerr
 		}
-		if measured+req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour {
+		if req.AccrualRateDeltaPerHour > resolved.AccrualRateCapPerHour || measured > resolved.AccrualRateCapPerHour-req.AccrualRateDeltaPerHour {
 			a.recordDenial(ctx, merchantID, req.CustomerID, DenyAccrualRateCap)
 			return AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: DenyAccrualRateCap}, nil
 		}
@@ -360,8 +359,12 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		}
 	}
 	a.recordDenial(ctx, merchantID, req.CustomerID, code)
+	seconds := int64(dec.RetryAfter / time.Second)
+	if dec.RetryAfter%time.Second > 0 {
+		seconds++
+	}
 	return AdmitDecision{BlockedBy: blocked, DenyCode: code, AvailableAmount: available,
-		RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}, nil
+		RetryAfterSeconds: seconds}, nil
 }
 
 // roleStrings maps the invoker's role UUIDs to the strings the spendgate role

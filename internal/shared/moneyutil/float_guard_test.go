@@ -122,8 +122,6 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/http/handlers/admin_findings_actions.go:paramAmountMicros":   "names float64/float32 only to REJECT them: this is the or#863 fix, the guard seeing its own refusal",
 		"internal/http/handlers/merchant_metrics.go:MerchantMetricsAsk":        "math.Ceil over a Retry-After DURATION in seconds, not an amount",
 		"internal/http/handlers/merchant_catalog_copilot.go:CatalogCopilotAsk": "math.Ceil over a Retry-After DURATION in seconds, not an amount",
-		"internal/modules/admission/spendgate/gate.go:toInt64":                 "decodes a Redis Lua reply — an allow flag and a window INDEX, never an amount",
-		"internal/modules/admission/admitter.go:Admit":                         "math.Ceil over a retry-after DURATION in seconds (or#822), not over an amount",
 		"pkg/service/types.go:SolanaToken":                                     "SolanaToken.Price is the token's USD RATE for display, not an amount",
 	}
 

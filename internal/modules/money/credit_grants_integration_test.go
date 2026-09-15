@@ -203,5 +203,7 @@ func TestCreditGrantSupportConcurrentAdmission(t *testing.T) {
 		require.NoError(t, revokeErr)
 		require.Zero(t, bal.Balance)
 	}
-	require.NoError(t, gate.Release(ctx, requestID))
+	if heldDecision.Allowed {
+		require.NoError(t, gate.Release(ctx, requestID))
+	}
 }

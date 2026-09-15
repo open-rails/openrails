@@ -112,9 +112,9 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	admitted, err := svc.Admit(a, AdmitInput{CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: "payer", Currency: old + "/tokens", EstimatedAmount: 25, SourceID: requestID, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed)
-	heldBalance, err := rt.MoneyService.GetBalanceForCustomer(a, payer, canonical)
+	heldBalance, err := svc.GetCreditAccount(a, payer, old+"/tokens")
 	require.NoError(t, err)
-	require.EqualValues(t, 25, heldBalance.HeldBalance)
+	require.EqualValues(t, 25, heldBalance.HeldAmount)
 	// Rename while old still aliases A: both names resolve the same registry UUID.
 	names[groupA] = newName
 	claims[newName] = groupA
@@ -154,9 +154,9 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 		_, err = svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 101})
 		require.ErrorIs(t, err, money.ErrInsufficientCredits)
 	}
-	heldBalance, err = rt.MoneyService.GetBalanceForCustomer(a, payer, canonical)
+	heldBalance, err = svc.GetCreditAccount(a, payer, newName+"/tokens")
 	require.NoError(t, err)
-	require.EqualValues(t, 25, heldBalance.HeldBalance)
+	require.EqualValues(t, 25, heldBalance.HeldAmount)
 	account, err = svc.GetCreditAccount(a, payer, newName+"/tokens")
 	require.NoError(t, err)
 	require.EqualValues(t, 100, account.BalanceAmount)

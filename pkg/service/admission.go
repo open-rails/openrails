@@ -401,7 +401,9 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 		return nil, err
 	}
 
-	usage, err := spendgate.New(s.rt.DB).WindowUsage(
+	gate := spendgate.New(s.rt.DB)
+	gate.SetClock(s.now)
+	usage, err := gate.WindowUsage(
 		ctx, payer.UUID(), currency, spendgate.Policy{Scopes: scopes}, req)
 	if err != nil {
 		return nil, err

@@ -4,6 +4,7 @@ package service_test
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -105,12 +106,27 @@ func TestAdmissionDeadlineRecoveryAndZeroCapture(t *testing.T) {
 }
 
 func TestZeroEstimateStillEnforcesProspectiveRateAndDelegation(t *testing.T) {
-	svc, _, _, _, payer, ctx := admissionWorkflow(t)
+	svc, ms, _, _, payer, ctx := admissionWorkflow(t)
 	name := "rate-" + uuid.NewString()
+	database := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	t.Cleanup(func() {
+		_, err := database.Qx(ctx).Exec(ctx, "DELETE FROM openrails.billing_policy_bindings WHERE merchant_id=$1 AND customer_id=$2", dbtest.TestMerchantID.UUID(), payer.UUID())
+		require.NoError(t, err)
+		_, err = database.Qx(ctx).Exec(ctx, "DELETE FROM openrails.billing_policies WHERE merchant_id=$1 AND name=$2", dbtest.TestMerchantID.UUID(), name)
+		require.NoError(t, err)
+	})
 	require.NoError(t, svc.SetBillingPolicy(ctx, billingservice.BillingPolicyInput{Name: name, Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000}))
 	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{CustomerID: payer.String(), PolicyName: name}))
 	in := billingservice.AdmitInput{CustomerID: payer, Invoker: "user", InvokerType: "payer", Currency: "USD", SourceID: uuid.NewString(), AccrualRateDeltaPerHour: 11_000_000}
 	result, err := svc.Admit(ctx, in)
+	require.NoError(t, err)
+	require.False(t, result.Allowed)
+	require.Equal(t, admission.DenyAccrualRateCap, result.DenyCode)
+	_, err = ms.RecordUsage(ctx, money.RecordUsageParams{Payer: &payer, Invoker: payer.String(), Currency: "USD", EventType: "compute", Amount: 1,
+		Key: money.MustIdempotencyKey(money.UsageOperation("compute"), "rate-test", uuid.NewString())})
+	require.NoError(t, err)
+	in.AccrualRateDeltaPerHour = math.MaxInt64
+	result, err = svc.Admit(ctx, in)
 	require.NoError(t, err)
 	require.False(t, result.Allowed)
 	require.Equal(t, admission.DenyAccrualRateCap, result.DenyCode)

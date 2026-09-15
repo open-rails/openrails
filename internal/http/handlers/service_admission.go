@@ -118,10 +118,6 @@ func serviceAdmitBatchVerdicts(
 ) []serviceAdmitVerdict {
 	out := make([]serviceAdmitVerdict, len(items))
 	for i, item := range items {
-		if id := strings.TrimSpace(item.RequestID); id == "" || len(id) > 255 {
-			out[i] = admitFailure(http.StatusBadRequest, "request_id must contain 1 to 255 bytes", "request_id")
-			continue
-		}
 		if item.EstimatedAmount < 0 {
 			out[i] = admitFailure(http.StatusBadRequest, "estimated_amount must be >= 0", "estimated_amount")
 			continue
@@ -129,6 +125,10 @@ func serviceAdmitBatchVerdicts(
 		payer, err := parseServiceCustomerID(item.CustomerID)
 		if err != nil || payer == nil {
 			out[i] = admitFailure(http.StatusBadRequest, "customer_id required", "customer_id")
+			continue
+		}
+		if id := strings.TrimSpace(item.RequestID); id == "" || len(id) > 255 {
+			out[i] = admitFailure(http.StatusBadRequest, "request_id must contain 1 to 255 bytes", "request_id")
 			continue
 		}
 		if !allows(*payer) {

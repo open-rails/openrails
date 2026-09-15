@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
@@ -317,9 +318,13 @@ func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) er
 }
 
 func fixedOffsetMs(prefix string, durMs int64) int64 {
+	if durMs <= 0 {
+		return 0
+	}
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(prefix))
-	return int64(h.Sum64() % uint64(durMs))
+	offset, _ := safecast.Convert[int64](h.Sum64() % uint64(durMs))
+	return offset
 }
 
 func windowPeriod(mid, payer uuid.UUID, currency string, w resolvedWindow, now time.Time) (string, time.Time, time.Time, error) {
