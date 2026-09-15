@@ -304,22 +304,13 @@ func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.OpenrailsLedgerTran
 //     and the returned row is the transfer that DID land. This is the
 //     applied-vs-replayed signal consumers were rebuilding claim tables to get.
 //
-// The sign-constraint check runs before the insert, so a replay of a transfer
-// that would now breach the floor still resolves as a replay rather than a
-// spurious insufficient-funds error: the money already moved once, legitimately.
+// The database checks account constraints and updates counters only after a
+// successful insert. A duplicate therefore replays even if the original
+// transfer depleted the balance; it never checks or moves the money again.
 func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.OpenrailsLedgerTransfer, applied bool, err error) {
 	// The coordinate is validated HERE, at the one insert every money movement
 	// funnels through, so no new spend path can post an unkeyed or ambiguous leg.
 	if err := t.Coord.Validate(); err != nil {
-		return gen.OpenrailsLedgerTransfer{}, false, err
-	}
-	// A replay must not be turned away by the floor: resolve it first.
-	if existing, found, gerr := l.transferAt(ctx, t); gerr != nil {
-		return gen.OpenrailsLedgerTransfer{}, false, gerr
-	} else if found {
-		return existing, false, nil
-	}
-	if err := l.checkDebitFloor(ctx, t.Debit, t.Amount, t.AllowDebitNegativeUpTo); err != nil {
 		return gen.OpenrailsLedgerTransfer{}, false, err
 	}
 	tr, err = l.q.InsertLedgerTransfer(ctx, gen.InsertLedgerTransferParams{
@@ -342,9 +333,8 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Openra
 	if err == nil {
 		return tr, true, nil
 	}
-	// Zero rows = ON CONFLICT DO NOTHING fired: a concurrent transaction
-	// committed this coordinate between the read above and this insert. The
-	// database, not the lock order, is what refused it.
+	// Zero rows = ON CONFLICT DO NOTHING fired. Read the committed receipt;
+	// the database, not the caller's lock order, enforces once-only posting.
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, found, gerr := l.transferAt(ctx, t)
 		if gerr != nil {
@@ -383,21 +373,6 @@ func (l *Ledger) transferAt(ctx context.Context, t Transfer) (gen.OpenrailsLedge
 		return gen.OpenrailsLedgerTransfer{}, false, nil
 	}
 	return gen.OpenrailsLedgerTransfer{}, false, fmt.Errorf("ledger: resolve transfer at %s: %w", t.Coord, err)
-}
-
-func (l *Ledger) checkDebitFloor(ctx context.Context, account uuid.UUID, amount, floor int64) error {
-	acc, err := l.q.GetLedgerAccountByID(ctx, gen.GetLedgerAccountByIDParams{MerchantID: l.merchant, ID: account})
-	if err != nil {
-		return fmt.Errorf("ledger: load debit account: %w", err)
-	}
-	if !acc.DebitsMustNotExceedCredits {
-		return nil
-	}
-	bal := acc.CreditsPosted - acc.DebitsPosted
-	if bal-amount < -floor {
-		return fmt.Errorf("%w (balance %d, amount %d, floor %d)", ErrInsufficientFunds, bal, amount, floor)
-	}
-	return nil
 }
 
 // Balance returns the account's maintained balance counter

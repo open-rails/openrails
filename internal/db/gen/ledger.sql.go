@@ -73,34 +73,6 @@ func (q *Queries) GetLedgerAccount(ctx context.Context, arg GetLedgerAccountPara
 	return i, err
 }
 
-const getLedgerAccountByID = `-- name: GetLedgerAccountByID :one
-SELECT id, merchant_id, customer_id, account_type, currency, debits_must_not_exceed_credits, credits_must_not_exceed_debits, credits_posted, debits_posted, created_at FROM openrails.ledger_accounts
-WHERE merchant_id = $1::uuid AND id = $2::uuid
-`
-
-type GetLedgerAccountByIDParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) GetLedgerAccountByID(ctx context.Context, arg GetLedgerAccountByIDParams) (OpenrailsLedgerAccount, error) {
-	row := q.db.QueryRow(ctx, getLedgerAccountByID, arg.MerchantID, arg.ID)
-	var i OpenrailsLedgerAccount
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.AccountType,
-		&i.Currency,
-		&i.DebitsMustNotExceedCredits,
-		&i.CreditsMustNotExceedDebits,
-		&i.CreditsPosted,
-		&i.DebitsPosted,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getLedgerSpendByCoords = `-- name: GetLedgerSpendByCoords :one
 SELECT id, merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type, allow_debit_negative_up_to, source, source_id, grant_id, customer_id, invoker_id, resource, invoice_id, created_at, operation FROM openrails.ledger_transfers
 WHERE merchant_id = $1::uuid

@@ -56,10 +56,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND source_id = sqlc.arg(source_id)::text
   AND grant_id IS NOT DISTINCT FROM sqlc.narg(grant_id)::uuid;
 
--- name: GetLedgerAccountByID :one
-SELECT * FROM openrails.ledger_accounts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
-
 -- LedgerAccountBalance: net credit (credits - debits) from maintained account
 -- counters. This is the Phase H O(1) replacement for summing ledger_transfers.
 -- name: LedgerAccountBalance :one
