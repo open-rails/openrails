@@ -4,6 +4,8 @@ package ledger_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -144,6 +146,67 @@ func TestLedger_RollbackAndRejectedInsertPreserveCounters(t *testing.T) {
 	require.False(t, applied)
 	mustBalance(t, ctx, l, balance, 1000)
 	mustBalance(t, ctx, l, revenue, 0)
+	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
+	requireLedgerNetZero(t, ctx, pool, merchantID, cur)
+}
+
+func TestLedger_ConcurrentTransfersWithAccountReferences(t *testing.T) {
+	l, pool, baseCtx, customer, merchantID, cur := testLedger(t)
+	ctx, cancel := context.WithTimeout(baseCtx, 10*time.Second)
+	defer cancel()
+	clearing, err := l.EnsureSystemAccount(ctx, ledger.RailClearing, cur)
+	require.NoError(t, err)
+	// Model another host-owned row referencing an account in the same database
+	// transaction. PostgreSQL's own FK trigger acquires the KEY SHARE lock.
+	references := pgx.Identifier{"openrails", "test_account_reference_" + strings.ReplaceAll(uuid.NewString(), "-", "")}.Sanitize()
+	owner := ledgerOwnerPool(t)
+	_, err = owner.Exec(ctx, fmt.Sprintf(`CREATE TABLE %s (
+		merchant_id uuid NOT NULL, account_id uuid NOT NULL,
+		FOREIGN KEY(merchant_id,account_id) REFERENCES openrails.ledger_accounts(merchant_id,id));
+		ALTER TABLE %s ENABLE ROW LEVEL SECURITY;
+		ALTER TABLE %s FORCE ROW LEVEL SECURITY;
+		CREATE POLICY merchant_isolation ON %s USING (merchant_id=NULLIF(current_setting('app.merchant_id',true),'')::uuid);
+		GRANT INSERT ON %s TO openrails_app`, references, references, references, references, references))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := owner.Exec(context.Background(), "DROP TABLE "+references)
+		require.NoError(t, err)
+	})
+	other := uuid.New()
+	_, err = gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: other, MerchantID: merchantID})
+	require.NoError(t, err)
+	var transactions []pgx.Tx
+	var transfers []ledger.Transfer
+	for _, payer := range []uuid.UUID{customer, other} {
+		balance, err := l.EnsureCustomerBalance(ctx, payer, cur)
+		require.NoError(t, err)
+		tx, err := pool.Begin(ctx)
+		require.NoError(t, err)
+		defer func() { _ = tx.Rollback(context.Background()) }()
+		_, err = tx.Exec(ctx, "INSERT INTO "+references+"(merchant_id,account_id) VALUES($1,$2)", merchantID, clearing)
+		require.NoError(t, err)
+		transactions = append(transactions, tx)
+		transfers = append(transfers, ledger.Transfer{
+			Debit: clearing, Credit: balance, Amount: 1000, Currency: cur,
+			Type: ledger.Deposit, Customer: &payer,
+			Coord: ledger.Coord{Operation: ledger.OpDeposit, Source: "concurrent-reference", SourceID: uuid.NewString()},
+		})
+	}
+	results := make(chan error, len(transactions))
+	for i, tx := range transactions {
+		go func() {
+			defer func() { _ = tx.Rollback(context.Background()) }()
+			_, _, err := ledger.New(gen.New(tx), merchantID).ApplyIdempotent(ctx, transfers[i])
+			if err == nil {
+				err = tx.Commit(ctx)
+			}
+			results <- err
+		}()
+	}
+	for range transactions {
+		require.NoError(t, <-results, "counter updates must coexist with account-reference locks")
+	}
+	mustBalance(t, ctx, l, clearing, -2000)
 	requireNoCounterDrift(t, ctx, pool, merchantID, cur)
 	requireLedgerNetZero(t, ctx, pool, merchantID, cur)
 }

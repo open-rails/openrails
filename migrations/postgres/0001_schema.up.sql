@@ -775,7 +775,9 @@ BEGIN
         WHERE merchant_id = NEW.merchant_id
           AND id IN (NEW.debit_account_id, NEW.credit_account_id)
         ORDER BY id
-        FOR UPDATE
+        -- Counters do not change account keys. FK checks may already hold
+        -- KEY SHARE locks; upgrading those to FOR UPDATE can deadlock peers.
+        FOR NO KEY UPDATE
     LOOP
         IF acc.id = NEW.debit_account_id THEN
             debit := acc;

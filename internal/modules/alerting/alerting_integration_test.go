@@ -101,13 +101,11 @@ func seedChargebackBase(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) (acctLa
 // (chargeback_count += 1). removeChargebacks deletes them (rate → 0).
 func addChargeback(t *testing.T, pool *pgxpool.Pool, mid, refPay uuid.UUID) {
 	t.Helper()
-	cust := uuid.New()
-	exec(t, pool, `INSERT INTO openrails.customers (id, merchant_id) VALUES ($1,$2)`, cust, mid)
 	now := time.Now().UTC()
 	exec(t, pool, `INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, refunded_payment_id, rail, psp_id, transaction_id, amount, list_amount, currency, status, reversal_kind, purchased_at, created_at)
-		SELECT $1,$2,$3, price_id, $4, 'nmi', psp_id, $5, -10000000, 10000000, 'USD', 'completed', 'chargeback', $6, $6
-		FROM openrails.payments WHERE id=$4`,
-		uuid.New(), mid, cust, refPay, "cb-"+uuid.NewString()[:8], now.AddDate(0, 0, -1))
+		SELECT $1,$2,customer_id, price_id, $3, 'nmi', psp_id, $4, -10000000, 10000000, currency, 'completed', 'chargeback', $5, $5
+		FROM openrails.payments WHERE id=$3 AND merchant_id=$2`,
+		uuid.New(), mid, refPay, "cb-"+uuid.NewString()[:8], now.AddDate(0, 0, -1))
 }
 
 func removeChargebacks(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
