@@ -68,20 +68,18 @@ func TestOr894_WasteOverageThenCaptureOfTheSameRequestChargesBoth(t *testing.T) 
 	require.True(t, admit.Allowed)
 
 	trx, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID: requestID, Amount: 900_000, CustomerID: pid.String(),
-		Currency: money.DefaultCurrency, Invoker: pid.String(),
+		RequestID: requestID, Amount: 900_000,
 	})
 	require.NoError(t, err)
-	require.Equal(t, int64(-900_000), trx.Amount,
-		"the capture must return ITS OWN transfer, never the waste transfer at the same (source, source_id)")
+	require.Equal(t, int64(900_000), trx.Amount,
+		"the capture receipt must contain its own actual amount")
 
 	require.Equal(t, int64(900_010), before-or894Balance(t, ms, ctx, payer),
 		"a rendered service must be charged even when a waste overage already posted at the same request id")
 
 	// The capture is still idempotent at its own coordinate.
 	_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID: requestID, Amount: 900_000, CustomerID: pid.String(),
-		Currency: money.DefaultCurrency, Invoker: pid.String(),
+		RequestID: requestID, Amount: 900_000,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(900_010), before-or894Balance(t, ms, ctx, payer))

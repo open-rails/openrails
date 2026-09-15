@@ -184,13 +184,10 @@ func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.
 	`, inv.ID).Scan(&failedAttempts))
 	require.Equal(t, 1, failedAttempts)
 
-	res, err := svc.AuthorizeAndHold(ctx, money.AuthorizeHoldInput{
-		Payer: payer, Invoker: "u", Currency: money.DefaultCurrency, EstimatedAmount: 1,
-		Key: money.MustIdempotencyKey(money.OpCapture, "usage", "blocked-after-decline"), ExpiresAt: time.Now().Add(time.Hour),
-	})
+	owed, err := svc.GetOutstandingOwed(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.False(t, res.Decision.Allowed)
-	require.Equal(t, money.DenyInsufficientCredit, res.Decision.DenyCode)
+	require.EqualValues(t, 500, owed, "declined collection leaves the debt consuming the credit line")
+
 }
 
 func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T) {

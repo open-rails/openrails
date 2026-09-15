@@ -2,7 +2,9 @@
 
 Implementation contract for issue989; replaces the Redis hold/pointer authority before v1.
 
-Each positive-cost request binds one immutable `(merchant_id, request_id)` operation to its payer, unit, estimate, original deadline and request terms. Terms record invoker/type, caller-supplied trust/roles, resource, source and prospective accrual rate. Normalize role ordering and unit spelling before comparing. A repeated key with different terms conflicts. An exact retry never extends a deadline or opens another reservation.
+Every request binds one immutable `(merchant_id, request_id)` operation to its payer, unit, estimate, original deadline and request terms. Terms record invoker/type, caller-supplied trust/roles, resource, source and prospective accrual rate. Normalize role ordering and unit spelling before comparing. A repeated key with different terms conflicts. An exact retry never extends a deadline or opens another reservation. Zero estimates still enforce delegation and prospective-rate policy; only zero estimates may omit a deadline.
+
+Replayed admission returns the original allowed decision and capacity receipt, plus `replayed=true` and current `state` (`open`, `expired`, `released`, `captured`). `allowed` alone is not permission to start new work after a terminal replay; state identifies a currently live reservation. Expiry is derived from the declared deadline, without a worker.
 
 Request reservations and hard spend windows use PostgreSQL under the existing payer money lock. Redis remains available for rate limits and abuse signals; loss of Redis cannot erase monetary reservations, alter request ownership or reset a hard spend window. There is no compatibility fallback from missing request state to caller-supplied capture coordinates.
 
@@ -17,7 +19,9 @@ Capture accounts to the original admission window, including a late capture afte
 
 Extension applies only to a still-open, unexpired request and moves its effective deadline later. The original requested deadline remains part of the immutable request identity. A late worker uses the original operation to record consumed work; it cannot manufacture a new authorization by replaying an expired request with different terms.
 
-Window identity includes merchant, payer, applicable scope/invoker, stable policy key and duration. Limits are not part of identity, so lowering a limit does not clear existing usage. Store the exact applicable window keys with admission; fixed-window boundaries remain staggered per payer. Indexed SQL reads sum open estimates and captured amounts in the bounded original window and exclude released requests. There are no mutable financial counter mirrors or repair workers.
+Window identity includes merchant, payer, applicable scope/invoker and stable policy key. Limits and duration are not part of identity, so changing them re-evaluates the relevant history without clearing it. Store the exact applicable window keys with admission; fixed-window boundaries remain staggered per payer. Indexed SQL reads sum open estimates and captured amounts in the bounded original window and exclude released requests. There are no mutable financial counter mirrors or repair workers.
+
+Capture returns one shared `CaptureReceipt` in Go and HTTP: request ID, original customer UUID/unit, nonnegative actual amount, optional real ledger-transfer ID, and replay status. A zero-actual receipt creates no ledger transfer. HTTP monetary amounts are decimal strings; Go fields remain `int64`.
 
 All spending paths use one held total: live request estimates plus open provider-operation authorizations. Each is counted once. Capture transitions its own request out of held state before posting the charge in the same transaction, preserving every other reservation. Provider-operation authorizations retain their distinct lifetime and settlement rules.
 

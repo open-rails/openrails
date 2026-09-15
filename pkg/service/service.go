@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -9,11 +10,11 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Service is the exported, in-process billing API.
@@ -70,15 +71,6 @@ type CaptureHoldRequest struct {
 	// participates — so ANY retry of the same request dedupes, unconditionally.
 	RequestID string
 	Amount    int64
-
-	// Fallback payer coordinates (#676). The admit-time request→payer pointer
-	// lives in Redis and can be lost (flush/failover/TTL overrun). When the
-	// pointer resolve misses AND CustomerID+Currency are supplied, capture
-	// proceeds against them — a rendered service is always chargeable. All
-	// ignored when the pointer is live.
-	CustomerID string
-	Currency   string
-	Invoker    string
 
 	// Usage analytics (#311): when EventType is set, the capture ALSO appends a
 	// openrails.usage_events row linked to the capture transaction (no second
@@ -337,88 +329,20 @@ func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID
 	}, nil
 }
 
-func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*CreditTransaction, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
+func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*openrails.CaptureReceipt, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
 	}
 	defer release()
-
 	req.RequestID = strings.TrimSpace(req.RequestID)
 	if req.RequestID == "" {
 		return nil, fmt.Errorf("request_id required")
 	}
-	if req.Amount <= 0 {
-		return nil, fmt.Errorf("amount must be > 0")
-	}
-	if s.rt == nil || s.rt.RedisClient == nil {
-		return nil, fmt.Errorf("capture unavailable: redis not configured")
-	}
-	mid, err := serviceMerchantID(ctx)
+	captured, err := s.moneyService().CaptureAdmission(ctx, req.RequestID, req.Amount)
 	if err != nil {
 		return nil, err
 	}
-	// Resolve the payer coords the admit-time hold was placed under (#513); on a
-	// miss (or Redis failure) fall back to caller-supplied coordinates (#676) so
-	// capture never depends on volatile state alone.
-	gate := spendgate.New(s.rt.RedisClient)
-	ref, ok, rerr := gate.Resolve(ctx, mid, req.RequestID)
-	if !ok || rerr != nil {
-		fbCustomer := strings.TrimSpace(req.CustomerID)
-		fbCurrency := strings.TrimSpace(req.Currency)
-		if fbCustomer == "" || fbCurrency == "" {
-			if rerr != nil {
-				return nil, rerr
-			}
-			return nil, fmt.Errorf("hold not found for request_id %q", req.RequestID)
-		}
-		fbCurrency, unitErr := s.resolveCurrency(ctx, fbCurrency)
-		if unitErr != nil {
-			return nil, unitErr
-		}
-		ref = spendgate.HoldRef{
-			Customer: fbCustomer,
-			Currency: fbCurrency,
-			Invoker:  strings.TrimSpace(req.Invoker),
-		}
-	}
-	payerID, err := uuid.Parse(ref.Customer)
-	if err != nil {
-		return nil, fmt.Errorf("invalid hold customer_id")
-	}
-	payer := identity.CustomerID(payerID)
-	// Durable money movement (#512 ledger), idempotent on
-	// (merchant, payer, currency, operation=capture, source="admit",
-	// source_id=request id) — every part engine-composed or caller-key (or#907).
-	// The source half is a CONSTANT on purpose: it used to be the admit-time
-	// source recovered from the Redis hold ref, which the first capture
-	// consumes, so a retry rebuilt it from a caller-echoed field and a blank
-	// echo landed at a DIFFERENT coordinate — a second debit. A coordinate that
-	// depends on nothing volatile is what makes capture idempotent on the
-	// caller's key unconditionally. The operation is what keeps a capture from
-	// aliasing a wasted-spend usage charge at the same request id (or#894).
-	captureKey, err := money.NewIdempotencyKey(money.OpCapture, captureSourceNamespace, req.RequestID)
-	if err != nil {
-		return nil, err
-	}
-	trx, err := s.moneyService().CaptureAuthorized(ctx, money.SpendParams{
-		Payer:    &payer,
-		Invoker:  ref.Invoker,
-		Currency: ref.Currency,
-		Amount:   req.Amount,
-		Key:      captureKey,
-	})
-	if err != nil {
-		return nil, err
-	}
-	// Free the Redis reservation (estimate-based: windows keep the estimate). The
-	// durable charge already landed, so a release failure only inflates `held`
-	// until its TTL/sweep — never a lost/double charge.
-	if cerr := gate.Capture(ctx, spendgate.CaptureInput{Merchant: mid, Customer: ref.Customer, Currency: ref.Currency, RequestID: req.RequestID}); cerr != nil {
-		log.Warnf("service capture: spendgate release failed after durable capture (request_id %s): %v", req.RequestID, cerr)
-	}
-	// #311: append an analytics usage_event linked to this capture (no second
-	// debit) so OpenRails is the source of truth for platform usage/revenue.
 	if strings.TrimSpace(req.EventType) != "" {
 		usageSource := strings.TrimSpace(req.Source)
 		if usageSource == "" {
@@ -428,49 +352,27 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*Cre
 		if sourceID == "" {
 			sourceID = req.RequestID
 		}
-		resource := strings.TrimSpace(req.Resource)
-		captureTxnID := trx.ID
-		if uerr := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			CustomerID:       trx.CustomerID,
-			Invoker:          trx.Invoker,
-			Currency:         trx.Currency,
-			EventType:        req.EventType,
-			Resource:         resource,
-			Amount:           req.Amount,
-			Dimensions:       req.Dimensions,
-			Metadata:         req.Metadata,
-			Source:           usageSource,
-			SourceID:         sourceID,
-			LedgerTransferID: &captureTxnID,
-		}); uerr != nil {
-			// Analytics is best-effort: a usage_event failure must NOT fail the
-			// capture (the money is already captured).
-			log.Warnf("service capture: usage_event insert failed (capture %s kept): %v", trx.ID, uerr)
+		if err := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
+			CustomerID: captured.CustomerID, Invoker: captured.Terms.Invoker, Currency: captured.Currency,
+			EventType: req.EventType, Resource: strings.TrimSpace(req.Resource), Amount: req.Amount,
+			Dimensions: req.Dimensions, Metadata: req.Metadata, Source: usageSource, SourceID: sourceID,
+			LedgerTransferID: captured.LedgerTransferID,
+		}); err != nil {
+			log.Warnf("capture usage event failed for request %s: %v", req.RequestID, err)
 		}
 	}
-	displayCurrency, displayErr := s.DisplayCurrency(ctx, trx.Currency)
-	if displayErr != nil {
-		return nil, displayErr
+	return captured.CaptureReceipt, nil
+}
+
+// AdmissionCustomer resolves ownership from the durable operation before route authorization.
+func (s *Service) AdmissionCustomer(ctx context.Context, requestID string) (identity.CustomerID, error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return identity.CustomerID{}, err
 	}
-	return &CreditTransaction{
-		ID:              trx.ID,
-		CustomerID:      trx.CustomerID,
-		Invoker:         trx.Invoker,
-		Currency:        displayCurrency,
-		Amount:          trx.Amount,
-		BalanceAfter:    trx.BalanceAfter,
-		TransactionType: trx.TransactionType,
-		Status:          trx.Status,
-		Authorized:      trx.Authorized,
-		Captured:        trx.Captured,
-		Source:          trx.Source,
-		SourceID:        trx.SourceID,
-		ExpiresAt:       trx.ExpiresAt,
-		Description:     trx.Description,
-		CreatedAt:       trx.CreatedAt,
-		UpdatedAt:       trx.UpdatedAt,
-		Replayed:        trx.Replayed,
-	}, nil
+	defer release()
+	row, err := spendgate.New(s.rt.DB).Get(ctx, requestID)
+	return identity.CustomerID(row.PayerID), err
 }
 
 // ServiceUsageRollupRow is one grouped spend bucket (dimension value, event
@@ -560,78 +462,41 @@ func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency s
 }
 
 func (s *Service) ReleaseHold(ctx context.Context, requestID string) error {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("request_id required")
 	}
-	if s.rt == nil || s.rt.RedisClient == nil {
-		return fmt.Errorf("release unavailable: redis not configured")
-	}
-	mid, err := serviceMerchantID(ctx)
-	if err != nil {
-		return err
-	}
-	gate := spendgate.New(s.rt.RedisClient)
-	ref, ok, err := gate.Resolve(ctx, mid, requestID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		// Already settled / never held / TTL-expired — idempotent no-op.
-		return nil
-	}
-	// Free the in-flight reservation AND the spend-cap window estimates (the request
-	// did not happen). Idempotent.
-	return gate.Release(ctx, spendgate.ReleaseInput{Merchant: mid, Customer: ref.Customer, Currency: ref.Currency, RequestID: requestID})
+	gate := spendgate.New(s.rt.DB)
+	gate.SetClock(s.now)
+	return gate.Release(ctx, strings.TrimSpace(requestID))
 }
 
-// ExtendHold re-declares the deadline of a live admission hold (xs-007 row
-// 33): the job that owns request_id is still running and will now finish by
-// expiresAt. Idempotent. ErrHoldNotFound when nothing live exists to extend.
 func (s *Service) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	if strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("request_id required")
 	}
 	if expiresAt.IsZero() {
 		return ErrHoldDeadlineRequired
 	}
-	if !expiresAt.After(s.now()) {
+	gate := spendgate.New(s.rt.DB)
+	gate.SetClock(s.now)
+	err = gate.Extend(ctx, strings.TrimSpace(requestID), expiresAt)
+	if errors.Is(err, spendgate.ErrExpired) {
 		return ErrHoldDeadlinePassed
 	}
-	if s.rt == nil || s.rt.RedisClient == nil {
-		return fmt.Errorf("extend unavailable: redis not configured")
-	}
-	mid, err := serviceMerchantID(ctx)
-	if err != nil {
-		return err
-	}
-	gate := spendgate.New(s.rt.RedisClient)
-	ref, ok, err := gate.Resolve(ctx, mid, requestID)
-	if err != nil {
-		return err
-	}
-	if !ok {
+	if errors.Is(err, spendgate.ErrNotFound) {
 		return ErrHoldNotFound
 	}
-	extended, err := gate.Extend(ctx, spendgate.ExtendInput{
-		Merchant: mid, Customer: ref.Customer, Currency: ref.Currency, RequestID: requestID, Until: expiresAt.UTC(),
-	})
-	if err != nil {
-		return err
-	}
-	if !extended {
-		return ErrHoldNotFound
-	}
-	return nil
-}
-
-func serviceMerchantID(ctx context.Context) (string, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return "", err
-	}
-	return mid.UUID().String(), nil
+	return err
 }
 
 func (s *Service) ListActiveEntitlements(ctx context.Context, userID string, at time.Time) ([]string, error) {

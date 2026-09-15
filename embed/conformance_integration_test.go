@@ -312,10 +312,12 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	require.True(t, ad1.Allowed, "%s admit-hold allowed", env.side)
 	r.HoldOK = ad1.Allowed
 
-	require.NoError(t, c.Capture(ctx, holdID, 8_000, &openrails.CaptureUsage{
+	receipt, err := c.Capture(ctx, holdID, 8_000, &openrails.CaptureUsage{
 		EventType: "invoke",
 		Resource:  env.resource,
-	}), "%s capture admission hold", env.side)
+	})
+	require.NoError(t, err, "%s capture admission hold", env.side)
+	require.EqualValues(t, 8_000, receipt.Amount)
 	r.Admit1 = observeAdmit(ad1)
 
 	// 3) Admit #2: an impossible estimate returns a deny verdict.

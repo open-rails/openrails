@@ -137,7 +137,6 @@ func TestOr891_ServiceRefusesMoneyWritesWithoutAKey(t *testing.T) {
 // first charge. That shape let a changed-amount retry keep the original number.
 func TestOr891_ServiceCaptureRefusesAChangedAmount(t *testing.T) {
 	svc, ms, rdb, payer, ctx := idemEnv(t, 10_000_000)
-	pid := payer.UUID()
 	reqID := uuid.NewString()
 
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
@@ -152,22 +151,19 @@ func TestOr891_ServiceCaptureRefusesAChangedAmount(t *testing.T) {
 
 	before := idemBalance(t, ms, ctx, payer)
 	_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID: reqID, Amount: 400, CustomerID: pid.String(),
-		Currency: money.DefaultCurrency, Invoker: "user:z",
+		RequestID: reqID, Amount: 400,
 	})
 	require.NoError(t, err)
 
 	_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID: reqID, Amount: 4_000, CustomerID: pid.String(),
-		Currency: money.DefaultCurrency, Invoker: "user:z",
+		RequestID: reqID, Amount: 4_000,
 	})
 	require.ErrorIs(t, err, money.ErrIdempotencyKeyReused,
 		"a changed-amount capture retry must be refused")
 
 	// The identical retry is still an idempotent replay.
 	_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID: reqID, Amount: 400, CustomerID: pid.String(),
-		Currency: money.DefaultCurrency, Invoker: "user:z",
+		RequestID: reqID, Amount: 400,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(400), before-idemBalance(t, ms, ctx, payer))

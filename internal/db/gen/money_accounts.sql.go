@@ -45,13 +45,7 @@ func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGrad
 const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    COALESCE((
-        SELECT SUM(oa.authorized_usd_micros)
-        FROM openrails.operation_authorizations oa
-        WHERE oa.merchant_id = a.merchant_id
-          AND oa.ledger_account_id = a.id
-          AND oa.state = 'open'
-    ), 0)::bigint AS held,
+    openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, $1::timestamptz)::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
@@ -68,14 +62,15 @@ LEFT JOIN openrails.ledger_accounts ar
  AND ar.customer_id = a.customer_id
  AND ar.currency = a.currency
  AND ar.account_type = 'arrears_liability'
-WHERE a.merchant_id = $1::uuid
-  AND a.customer_id = $2::uuid
-  AND a.currency = $3::text
+WHERE a.merchant_id = $2::uuid
+  AND a.customer_id = $3::uuid
+  AND a.currency = $4::text
   AND a.account_type = 'customer_balance'
 LIMIT 1
 `
 
 type GetAdmissionCapacityParams struct {
+	AsOf       time.Time
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
@@ -95,7 +90,12 @@ type GetAdmissionCapacityRow struct {
 // durable operation authorizations are financial reservations and therefore
 // travel in this Postgres snapshot.
 func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapacityParams) (GetAdmissionCapacityRow, error) {
-	row := q.db.QueryRow(ctx, getAdmissionCapacity, arg.MerchantID, arg.CustomerID, arg.Currency)
+	row := q.db.QueryRow(ctx, getAdmissionCapacity,
+		arg.AsOf,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
 	var i GetAdmissionCapacityRow
 	err := row.Scan(
 		&i.Balance,

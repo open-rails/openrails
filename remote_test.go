@@ -213,7 +213,8 @@ func TestRemoteValidationErrorParity(t *testing.T) {
 		{
 			name: "Capture empty request_id",
 			fn: func() error {
-				return client.Capture(ctx, "", 100, nil)
+				_, err := client.Capture(ctx, "", 100, nil)
+				return err
 			},
 		},
 		{

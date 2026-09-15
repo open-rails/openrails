@@ -23,14 +23,10 @@ const (
 	BillingModeArrears = "arrears"
 )
 
-// SpendDecision is the outcome of an account-capacity authorization
-// (AuthorizeAndHold): whether the estimated charge is permitted and, if denied,
-// the deny code. HardStop distinguishes a hard block from a warn-only breach.
-type SpendDecision struct {
-	Allowed  bool   `json:"allowed"`
-	HardStop bool   `json:"hard_stop"`
-	DenyCode string `json:"deny_code,omitempty"`
-}
+const (
+	DenyInsufficientBalance = "insufficient_balance"
+	DenyInsufficientCredit  = "insufficient_credit"
+)
 
 // DefaultAccountSettings returns the implicit policy for an payer that has no
 // explicit settings row: prepaid, 365-day default expiry. Used by

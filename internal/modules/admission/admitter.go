@@ -1,11 +1,8 @@
 // Package admission implements OpenRails service admission: the payer money
 // affordability + delegated spend-cap gate and the delegated wasted-spend cutoff.
 //
-// #513 hard cut: admission is ONE atomic Redis decision (internal/modules/admission/spendgate).
-// The admitter resolves the payer trust level, enforces the delegated wasted-spend
-// cutoff, loads the cached cap windows, reads the O(1) ledger balance, and runs
-// the single spendgate EVAL that checks affordability + every window and places
-// the in-flight hold. No Postgres locks, no per-request budget reservation rows.
+// Admission and settlement share durable SQL operations under the payer money lock.
+// Redis is used only by independent rate and abuse signals, never as financial truth.
 //
 // Delegated metering is PER-INVOKER (#563): a role/trust-level grant only selects
 // WHICH invokers a window applies to — it is never a pool shared across them. The
@@ -22,6 +19,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
@@ -131,7 +130,7 @@ func (a *Admitter) WithDenialRecorder(r *DenialRecorder) *Admitter {
 
 func (a *Admitter) recordDenial(ctx context.Context, merchantID string, customer identity.CustomerID, code string) {
 	if a.denials != nil {
-		a.denials.Record(ctx, merchantID, customer.UUID().String(), code, time.Now())
+		a.denials.Record(ctx, merchantID, customer.UUID().String(), code, a.gate.Now())
 	}
 }
 
@@ -171,27 +170,60 @@ type AdmitDecision struct {
 	// RetryAfterSeconds is when the blocking budget window next resets (0 unless
 	// a window was the binding gate). Hosts stamp it as the 429 Retry-After.
 	RetryAfterSeconds int64
+	HoldExpiresAt     *time.Time
+	Replayed          bool
+	State             string
 }
 
 // Admit resolves the trust level, enforces the delegated wasted-spend cutoff,
 // then runs the single spendgate EVAL (affordability + spend-cap windows + hold
 // placement).
 func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, error) {
+	if a == nil || a.money == nil || a.gate == nil || a.loader == nil {
+		return AdmitDecision{}, fmt.Errorf("admission service is not initialized")
+	}
+	var result AdmitDecision
+	err := a.money.WithLockedAdmissionCapacity(ctx, req.CustomerID, req.Currency, func(ctx context.Context, d *db.DB, capacity money.AdmissionCapacity) error {
+		bound := *a
+		bound.money = money.NewMoneyService(d, a.money.Clock())
+		bound.loader = NewSpendgatePolicyLoader(NewBillingPolicyStore(d), NewInvokerSpendLimitStore(d), a.loader.fx)
+		if a.rates != nil {
+			rates := *a.rates
+			rates.db = d
+			rates.now = a.gate.Now
+			bound.rates = &rates
+		}
+		var err error
+		result, err = bound.admitLocked(ctx, d.Gen(ctx), req, capacity)
+		return err
+	})
+	return result, err
+}
+
+func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitRequest, capacity money.AdmissionCapacity) (AdmitDecision, error) {
 	tid, err := merchant.Require(ctx) // #336: no default merchant
 	if err != nil {
 		return AdmitDecision{}, err
 	}
 	merchantID := tid.UUID().String()
 
-	// No money axis → nothing to gate (admission has no non-money axis post-#513).
-	if req.EstimatedAmount <= 0 {
-		return AdmitDecision{Allowed: true}, nil
+	if req.EstimatedAmount < 0 || req.AccrualRateDeltaPerHour < 0 {
+		return AdmitDecision{}, fmt.Errorf("admission amounts must be nonnegative")
 	}
-	// A hold is about to be placed: its lifetime is the owner's declared
-	// deadline, checked before any gate runs so a refusal costs nothing.
-	holdLifetime, err := holdTTL(req.ExpiresAt, time.Now())
+	terms := spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
+		Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour}
+	replay, err := a.gate.CheckIdentity(ctx, q, spendgate.AdmitInput{Customer: req.CustomerID.UUID(), Currency: req.Currency,
+		RequestID: req.SourceID, Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt, Terms: terms})
 	if err != nil {
+		var conflict *spendgate.Conflict
+		if errors.As(err, &conflict) {
+			return AdmitDecision{}, fmt.Errorf("%w: %w", money.ErrIdempotencyKeyReused, err)
+		}
 		return AdmitDecision{}, err
+	}
+	if replay != nil {
+		return AdmitDecision{Allowed: true, AvailableAmount: replay.AvailableAmount,
+			HoldExpiresAt: replay.ExpiresAt, Replayed: true, State: replay.State}, nil
 	}
 
 	// Trust level resolution: explicit > graduated (#298) > lowest default (#300).
@@ -292,70 +324,44 @@ func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, 
 		}
 	}
 
-	// The PostgreSQL customer row is the ONE cross-store capacity mutex. Keep it
-	// locked from this fresh durable-capacity read through the Redis reserve Lua.
-	// Durable operation authorization takes the same lock before reading Redis
-	// held, so neither reservation substrate can race the other with a stale
-	// snapshot. The only ordering is PG -> Redis.
-	var result AdmitDecision
-	denialCode := ""
-	err = a.money.WithLockedAdmissionCapacity(ctx, req.CustomerID, req.Currency, func(capacity money.AdmissionCapacity) error {
-		available, creditLine, outstanding := payerCapacity(capacity, resolved)
-
-		// or#897 outstanding cap: unpaid arrears have consumed the whole credit
-		// line, so nothing more may be spent on credit. A window_spend_cap payer
-		// never reaches this: its line does not move with debt.
-		if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
-			denialCode = DenyOutstandingCap
-			result = AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: denialCode}
-			return nil
-		}
-
-		dec, err := a.gate.Admit(ctx, spendgate.AdmitInput{
-			Merchant:       merchantID,
-			Customer:       req.CustomerID.UUID().String(),
-			Currency:       req.Currency,
-			RequestID:      req.SourceID,
-			Invoker:        req.Invoker,
-			Source:         req.Source,
-			Cost:           req.EstimatedAmount,
-			AccountBalance: available,
-			CreditLimit:    creditLine,
-			HoldTTL:        holdLifetime,
-			Policy:         policy,
-			Request:        sgReq,
-		})
-		if err != nil {
-			return err
-		}
-
-		switch {
-		case dec.Allowed:
-			held, err := a.gate.HeldAmount(ctx, merchantID, req.CustomerID.UUID().String(), req.Currency)
-			if err != nil {
-				return err
-			}
-			result = AdmitDecision{Allowed: true, AvailableAmount: available, HeldAmount: held}
-		case dec.BlockedBalance:
-			denialCode = money.DenyInsufficientBalance
-			if creditLine > 0 {
-				denialCode = money.DenyInsufficientCredit
-			}
-			result = AdmitDecision{Allowed: false, BlockedBy: "money", DenyCode: denialCode, AvailableAmount: available}
-		default: // window blocked
-			denialCode = DenyBudgetExceeded
-			result = AdmitDecision{Allowed: false, BlockedBy: "budget", DenyCode: denialCode, AvailableAmount: available,
-				RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}
-		}
-		return nil
-	})
+	available, creditLine, outstanding := payerCapacity(capacity, resolved)
+	input := spendgate.AdmitInput{
+		Customer: req.CustomerID.UUID(), Currency: req.Currency, RequestID: req.SourceID,
+		Cost: req.EstimatedAmount, ExpiresAt: req.ExpiresAt,
+		AccountBalance: available, CreditLimit: creditLine, Policy: policy, Request: sgReq,
+		Terms: spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
+			Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour},
+	}
+	dec, err := a.gate.Admit(ctx, q, input)
 	if err != nil {
+		var conflict *spendgate.Conflict
+		if errors.As(err, &conflict) {
+			return AdmitDecision{}, fmt.Errorf("%w: %w", money.ErrIdempotencyKeyReused, err)
+		}
+		if errors.Is(err, spendgate.ErrExpired) {
+			return AdmitDecision{}, ErrHoldDeadlinePassed
+		}
+		if errors.Is(err, spendgate.ErrDeadlineRequired) {
+			return AdmitDecision{}, ErrHoldDeadlineRequired
+		}
 		return AdmitDecision{}, err
 	}
-	if denialCode != "" {
-		a.recordDenial(ctx, merchantID, req.CustomerID, denialCode)
+	if dec.Allowed {
+		return AdmitDecision{Allowed: true, AvailableAmount: dec.AvailableAmount, HoldExpiresAt: dec.ExpiresAt, Replayed: dec.Replayed, State: dec.State}, nil
 	}
-	return result, nil
+	code, blocked := DenyBudgetExceeded, "budget"
+	if dec.BlockedBalance {
+		code, blocked = money.DenyInsufficientBalance, "money"
+		if creditLine > 0 {
+			code = money.DenyInsufficientCredit
+		}
+		if resolved.GatesOnOutstandingOwed() && creditLine == 0 && available <= 0 && outstanding > 0 {
+			code = DenyOutstandingCap
+		}
+	}
+	a.recordDenial(ctx, merchantID, req.CustomerID, code)
+	return AdmitDecision{BlockedBy: blocked, DenyCode: code, AvailableAmount: available,
+		RetryAfterSeconds: int64(math.Ceil(dec.RetryAfter.Seconds()))}, nil
 }
 
 // roleStrings maps the invoker's role UUIDs to the strings the spendgate role

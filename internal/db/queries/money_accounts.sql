@@ -30,13 +30,7 @@ ORDER BY currency;
 -- travel in this Postgres snapshot.
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
-    COALESCE((
-        SELECT SUM(oa.authorized_usd_micros)
-        FROM openrails.operation_authorizations oa
-        WHERE oa.merchant_id = a.merchant_id
-          AND oa.ledger_account_id = a.id
-          AND oa.state = 'open'
-    ), 0)::bigint AS held,
+    openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, sqlc.arg(as_of)::timestamptz)::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- or#897: the payer's OWN arrears account, so outstanding owed stays part of

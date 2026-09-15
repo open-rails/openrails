@@ -191,7 +191,7 @@ func TestOr930InvokerSpendWindowsSelfRead(t *testing.T) {
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
 	_, err = svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{
-		RequestID: requestID, Amount: 600, CustomerID: payerID.String(), Currency: currency, Invoker: invokerA,
+		RequestID: requestID, Amount: 600,
 	})
 	require.NoError(t, err)
 

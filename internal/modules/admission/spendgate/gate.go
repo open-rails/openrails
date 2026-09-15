@@ -1,465 +1,334 @@
 package spendgate
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"hash/fnv"
+	"math"
+	"slices"
 	"strings"
 	"time"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
-	"github.com/redis/go-redis/v9"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// payerBase is the hash-tagged Redis key prefix for one payer+currency. The
-// {merchant:customer} hash tag co-locates every key this payer's scripts touch
-// (held gauge, per-request hold record, window counters) on one Cluster
-// slot — required because the scripts are multi-key and construct/store window
-// keys in Lua.
-func payerBase(merchant, customer, currency string) string {
-	return fmt.Sprintf("sg:{%s:%s}:%s", merchant, customer, currency)
+var (
+	ErrNotFound         = errors.New("admission operation not found")
+	ErrExpired          = errors.New("admission deadline has passed")
+	ErrDeadlineRequired = errors.New("admission deadline is required")
+	ErrCaptured         = errors.New("admission operation is already captured")
+)
+
+type Conflict struct{ Field string }
+
+func (e *Conflict) Error() string { return "admission request id reused with changed " + e.Field }
+
+// Terms preserve caller-supplied dimensions; resolved policy never rewrites them.
+type Terms struct {
+	Invoker                 string   `json:"invoker"`
+	InvokerType             string   `json:"invoker_type"`
+	TrustLevel              string   `json:"trust_level"`
+	Roles                   []string `json:"roles"`
+	Resource                string   `json:"resource"`
+	Source                  string   `json:"source"`
+	AccrualRateDeltaPerHour int64    `json:"accrual_rate_delta_per_hour"`
 }
 
-// reqPtrKey maps a (merchant, request id) to the payer coords its hold lives
-// under, so capture/release — which arrive with only the request id (the wire the
-// consumers already use) — can resolve customer+currency server-side without a
-// contract change. Written on admit, deleted on capture/release, TTL'd to the hold.
-func reqPtrKey(merchant, requestID string) string {
-	return "sg:req:" + merchant + ":" + requestID
+func (t Terms) normalized() Terms {
+	t.Invoker = strings.TrimSpace(t.Invoker)
+	t.InvokerType = strings.TrimSpace(t.InvokerType)
+	t.TrustLevel = strings.TrimSpace(t.TrustLevel)
+	t.Resource = strings.TrimSpace(t.Resource)
+	t.Source = strings.TrimSpace(t.Source)
+	t.Roles = append([]string{}, t.Roles...)
+	slices.Sort(t.Roles)
+	t.Roles = slices.Compact(t.Roles)
+	return t
 }
 
-const reqPtrSep = "\x1f"
+func OriginalTerms(row gen.OpenrailsAdmissionOperation) (Terms, error) {
+	var terms Terms
+	if err := json.Unmarshal(row.Terms, &terms); err != nil {
+		return terms, fmt.Errorf("decode admission terms: %w", err)
+	}
+	return terms.normalized(), nil
+}
 
-// The per-request hold record stored at "<base>:hold:<reqID>" is a "|"-delimited
-// string: "<reservedCost>|<windowKey1>|<windowKey2>|...". The leading field is the
-// reserved estimate (freed from `held` at capture/release); the remaining fields
-// are the EXACT window counter keys this admit incremented, so release can
-// decrement precisely the buckets it hit (no policy reload, no roll ambiguity).
-// '|' never appears in a key (keys are scope/id/key/bucket joined by ':').
-//
-// "<base>:holds" is a SET indexing the live hold-record keys (same hash slot), so
-// the recompute path can re-derive `held` = Σ live hold costs without SCAN.
-
-// admitScript atomically, all-or-nothing:
-//  1. idempotent no-op if this request's hold record already exists (retry safety);
-//  2. affordability gate: accountBalance - held - cost >= floor (floor = -creditLimit;
-//     prepaid = 0). accountBalance is the caller's ledger snapshot; `held` is the
-//     shared in-flight reservation gauge;
-//  3. window gate: every applicable window can fit cost in its current bucket;
-//  4. iff all pass, RESERVE: held += cost, each window += cost (with a bucket TTL),
-//     and store the hold record (cost + window keys).
-//
-// Windows are PER-USER-STAGGERED by a deterministic phase `offset` derived from the
-// (customer-scoped) window key (passed in by the caller) — bucket =
-// floor((now-offset)/dur), boundaries at offset + k*dur. No stored anchor: the
-// phase is recomputable, so a Redis flush can't desync it and there is no
-// first-charge / anchor-TTL bookkeeping.
-//
-// KEYS: [1]=held [2]=hold:<reqID> [3]=holds index set. ARGV: [1]=cost [2]=floor
-// [3]=accountBalance [4]=holdTtlMs [5]=nowMs [6]=n, then per window
-// {prefix, durMs, limit, offsetMs}.
-// Returns {allowed(1/0), blocked}: blocked 0=ok, -1=affordability, i>0 = window i.
-var admitScript = redis.NewScript(`
-local cost  = tonumber(ARGV[1])
-local floor = tonumber(ARGV[2])
-local cbal  = tonumber(ARGV[3])
-local holdTtl = tonumber(ARGV[4])
-local now = tonumber(ARGV[5])
-local n = tonumber(ARGV[6])
-
-if redis.call('EXISTS', KEYS[2]) == 1 then
-  return {1, 0}
-end
-
-local held = tonumber(redis.call('GET', KEYS[1]) or '0')
-if cbal - held - cost < floor then
-  -- held may include holds whose records TTL-expired (abandoned admits, #676):
-  -- recompute held = sum of LIVE hold records from the index before denying.
-  local sum = 0
-  local members = redis.call('SMEMBERS', KEYS[3])
-  for _, m in ipairs(members) do
-    local rec = redis.call('GET', m)
-    if rec then
-      local sep = string.find(rec, '|', 1, true)
-      if sep then sum = sum + (tonumber(string.sub(rec, 1, sep-1)) or 0)
-      else sum = sum + (tonumber(rec) or 0) end
-    else
-      redis.call('SREM', KEYS[3], m)
-    end
-  end
-  if sum > 0 then redis.call('SET', KEYS[1], sum) else redis.call('DEL', KEYS[1]) end
-  held = sum
-  if cbal - held - cost < floor then
-    return {0, -1}
-  end
-end
-
--- check phase: no writes
-for i=1,n do
-  local b = 6 + (i-1)*4
-  local prefix = ARGV[b+1]
-  local dur    = tonumber(ARGV[b+2])
-  local limit  = tonumber(ARGV[b+3])
-  local offset = tonumber(ARGV[b+4])
-  local bucket = math.floor((now - offset) / dur)
-  local cntKey = prefix .. ':' .. string.format('%d', bucket)
-  local cur = tonumber(redis.call('GET', cntKey) or '0')
-  if cur + cost > limit then
-    return {0, i}
-  end
-end
-
--- reserve phase: all gates passed
-redis.call('INCRBY', KEYS[1], cost)
-local rec = tostring(cost)
-for i=1,n do
-  local b = 6 + (i-1)*4
-  local prefix = ARGV[b+1]
-  local dur    = tonumber(ARGV[b+2])
-  local offset = tonumber(ARGV[b+4])
-  local bucket = math.floor((now - offset) / dur)
-  local cntKey = prefix .. ':' .. string.format('%d', bucket)
-  local newv = redis.call('INCRBY', cntKey, cost)
-  if newv == cost then
-    redis.call('PEXPIRE', cntKey, (offset + (bucket+1)*dur - now) + 1000)
-  end
-  rec = rec .. '|' .. cntKey
-end
-if holdTtl > 0 then
-  redis.call('SET', KEYS[2], rec, 'PX', holdTtl)
-else
-  redis.call('SET', KEYS[2], rec)
-end
-redis.call('SADD', KEYS[3], KEYS[2])
-return {1, 0}
-`)
-
-// extendScript re-declares a live hold's lifetime (xs-007 row 33): the owner
-// has said its job will now run until a later deadline. A hold that is
-// already gone (settled or lapsed) is NOT resurrected — its reservation was
-// recomputed away, and re-reserving here would skip the affordability gate.
-// Returns 1 if extended, 0 if there was nothing live to extend. The request
-// pointer lives in another hash slot and is moved by a separate command, as
-// Capture/Release do.
-// KEYS: [1]=hold:<reqID>. ARGV: [1]=untilMs (0 = no expiry).
-var extendScript = redis.NewScript(`
-if redis.call('EXISTS', KEYS[1]) == 0 then
-  return 0
-end
-local untilMs = tonumber(ARGV[1])
-if untilMs > 0 then
-  redis.call('PEXPIREAT', KEYS[1], untilMs)
-else
-  redis.call('PERSIST', KEYS[1])
-end
-return 1
-`)
-
-// captureScript settles an admitted request that SUCCEEDED: free the reservation
-// from the `held` gauge (by the recorded estimate) and delete the hold record.
-// Windows are NOT touched — the spend happened, so its estimate stays counted
-// until the window resets (estimate-based model). The actual balance is deducted
-// by the caller against the durable #512 ledger, off this script. Idempotent: a
-// missing record (already settled / TTL-swept) is a no-op returning 0.
-//
-// KEYS: [1]=held [2]=hold:<reqID> [3]=holds index set.
-var captureScript = redis.NewScript(`
-local rec = redis.call('GET', KEYS[2])
-if not rec then return 0 end
-local sep = string.find(rec, '|', 1, true)
-local cost
-if sep then cost = tonumber(string.sub(rec, 1, sep-1)) else cost = tonumber(rec) end
-if redis.call('INCRBY', KEYS[1], -cost) < 0 then redis.call('SET', KEYS[1], '0') end
-redis.call('DEL', KEYS[2])
-redis.call('SREM', KEYS[3], KEYS[2])
-return 1
-`)
-
-// releaseScript backs out an admitted request that FAILED/was cancelled: free the
-// reservation from `held` AND from every window counter the admit recorded (the
-// request did not happen), then delete the hold record. Bills nothing. Idempotent.
-//
-// KEYS: [1]=held [2]=hold:<reqID> [3]=holds index set.
-var releaseScript = redis.NewScript(`
-local rec = redis.call('GET', KEYS[2])
-if not rec then return 0 end
-local cost = nil
-for tok in string.gmatch(rec, '([^|]+)') do
-  if cost == nil then
-    cost = tonumber(tok)
-    if redis.call('INCRBY', KEYS[1], -cost) < 0 then redis.call('SET', KEYS[1], '0') end
-  else
-    -- decrement only LIVE buckets: INCRBY on an expired bucket would recreate
-    -- it as a permanent negative key (#676)
-    if redis.call('EXISTS', tok) == 1 then redis.call('INCRBY', tok, -cost) end
-  end
-end
-redis.call('DEL', KEYS[2])
-redis.call('SREM', KEYS[3], KEYS[2])
-return 1
-`)
-
-// Gate is the Redis-backed admission primitive (#513), shared process-wide over
-// the same go-redis client the ratelimit.Limiter uses.
-//
-// The `held` gauge is incremented on admit and decremented on capture/release. A
-// crashed in-flight request whose hold record TTL-expires leaves `held` inflated
-// (over-reserved → mild under-admission) — self-healed lazily (#676): when the
-// affordability gate would deny, the admit script recomputes held = Σ live hold
-// records (via the "<base>:holds" index set) and re-checks, so an abandoned admit
-// blocks at most until the next denied admit after its hold TTL. That TTL is
-// the owner's declared deadline, never a default of this package (xs-007 row
-// 33): "abandoned" means the job said it would be done by then and was not
-// heard from — Extend is how a job that is still running says otherwise.
 type Gate struct {
-	rdb redis.Cmdable
+	db  *db.DB
 	now func() time.Time
 }
 
-// New builds a Gate over a Redis/Garnet client.
-func New(rdb redis.Cmdable) *Gate { return &Gate{rdb: rdb, now: time.Now} }
+func New(d *db.DB) *Gate { return &Gate{db: d, now: time.Now} }
+func (g *Gate) SetClock(now func() time.Time) {
+	if now != nil {
+		g.now = now
+	}
+}
+func (g *Gate) Now() time.Time { return g.now().UTC().Truncate(time.Microsecond) }
 
-// SetClock overrides the clock (tests).
-func (g *Gate) SetClock(now func() time.Time) { g.now = now }
-
-// Decision is the outcome of Admit.
 type Decision struct {
-	Allowed        bool
-	BlockedBalance bool    // true when affordability (balance/credit line) was the binding gate
-	BlockedWindow  *Window // the window that blocked, if any
-	// RetryAfter is the time until BlockedWindow's next fixed boundary — the
-	// earliest moment the same request could succeed. Zero unless a window blocked.
-	RetryAfter time.Duration
+	Allowed         bool
+	BlockedBalance  bool
+	BlockedWindow   *Window
+	RetryAfter      time.Duration
+	Replayed        bool
+	ExpiresAt       *time.Time
+	State           string
+	AvailableAmount int64
 }
-
-// AdmitInput is one admission request.
 type AdmitInput struct {
-	Merchant, Customer, Currency string
-	RequestID                    string // idempotency key (provider/host-four request id)
-	Invoker                      string // recorded so capture's durable ledger write carries attribution
-	Source                       string // admit-time source namespace (informational; NOT part of the capture coordinate since or#907)
-	Cost                         int64  // estimate, minor units
-	AccountBalance               int64  // caller's ledger balance snapshot for (payer,currency), minor units
-	CreditLimit                  int64  // arrears credit line (0 = prepaid); affordability floor = -CreditLimit
-	// HoldTTL is how long the hold lives unless settled: the OWNER'S declared
-	// deadline for the job it covers (xs-007 row 33), passed down by the
-	// Admitter — this primitive has no opinion of its own. <= 0 means the hold
-	// lives until captured or released.
-	HoldTTL time.Duration
-	Policy  Policy
-	Request Request
+	Customer  uuid.UUID
+	Currency  string
+	RequestID string
+	Cost      int64
+	ExpiresAt time.Time
+	Terms     Terms
+	// AccountBalance excludes all existing request/provider reservations.
+	AccountBalance int64
+	CreditLimit    int64
+	Policy         Policy
+	Request        Request
 }
 
-// HoldRef is the payer coordinates a request's hold was placed under, recovered
-// by Resolve so capture/release work from the request id alone. Source is the
-// admit-time namespace, kept in the record for diagnostics; since or#907 the
-// capture's durable coordinate never reads it (it is volatile — the first
-// capture consumes this record).
-type HoldRef struct {
-	Customer string
-	Currency string
-	Invoker  string
-	Source   string
-}
-
-// Admit runs the Redis-local atomic affordability + window check and reserves on
-// success in one round-trip. Financial callers must hold the PostgreSQL payer
-// money lock across their fresh capacity read and this call; Admitter does so.
-func (g *Gate) Admit(ctx context.Context, in AdmitInput) (Decision, error) {
-	now := g.now()
-	base := payerBase(in.Merchant, in.Customer, in.Currency)
-	wins := in.Policy.EffectiveWindows(in.Request)
-
-	holdTTL := in.HoldTTL
-	if holdTTL < 0 {
-		holdTTL = 0
-	}
-	keys := []string{base + ":held", base + ":hold:" + in.RequestID, base + ":holds"}
-	argv := make([]any, 0, 6+len(wins)*4)
-	argv = append(argv, in.Cost, -in.CreditLimit, in.AccountBalance, holdTTL.Milliseconds(), now.UnixMilli(), len(wins))
-	for _, w := range wins {
-		prefix := w.identity(base)
-		dur := w.durationMillis()
-		argv = append(argv, prefix, dur, w.Limit, fixedOffsetMs(prefix, dur))
-	}
-
-	raw, err := admitScript.Run(ctx, g.rdb, keys, argv...).Result()
+// Admit runs inside the transaction that owns the payer money lock.
+func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decision, error) {
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return Decision{}, err
 	}
-	vals, ok := raw.([]any)
-	if !ok || len(vals) < 2 {
-		return Decision{}, fmt.Errorf("spendgate: unexpected admit result %T", raw)
+	if in.Customer == uuid.Nil || strings.TrimSpace(in.RequestID) == "" || len(in.RequestID) > 255 {
+		return Decision{}, fmt.Errorf("payer and request_id (at most 255 bytes) are required")
 	}
-	dec := Decision{Allowed: toInt64(vals[0]) == 1}
-	switch blocked := toInt64(vals[1]); {
-	case blocked == -1:
-		dec.BlockedBalance = true
-	case blocked >= 1 && int(blocked) <= len(wins):
-		rw := wins[blocked-1]
-		w := rw.Window
-		dec.BlockedWindow = &w
-		dec.RetryAfter = untilBoundary(now, fixedOffsetMs(rw.identity(base), rw.durationMillis()), rw.durationMillis())
+	if in.Cost < 0 || in.CreditLimit < 0 || in.Terms.AccrualRateDeltaPerHour < 0 {
+		return Decision{}, fmt.Errorf("admission amounts must be nonnegative")
 	}
-	if dec.Allowed {
-		// Record the request→payer pointer so capture/release resolve coords from
-		// the request id alone. REQUIRED (#676): a failed write fails the admit
-		// (caller won't render an unsettleable request); the leaked reservation
-		// self-heals via the hold TTL + blocked-admit recompute.
-		ptr := strings.Join([]string{in.Customer, in.Currency, in.Invoker, in.Source}, reqPtrSep)
-		// go-redis: expiration 0 = no expiry, matching the record above.
-		if err := g.rdb.Set(ctx, reqPtrKey(in.Merchant, in.RequestID), ptr, holdTTL).Err(); err != nil {
-			return Decision{}, fmt.Errorf("spendgate: record admit pointer: %w", err)
+	in.Terms = in.Terms.normalized()
+	if row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID}); err == nil {
+		return g.replay(row, in)
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return Decision{}, err
+	}
+	now := g.Now()
+	expiry := deadline(in.ExpiresAt)
+	if in.Cost > 0 && expiry == nil {
+		return Decision{}, ErrDeadlineRequired
+	}
+	if expiry != nil && !expiry.After(now) {
+		return Decision{}, ErrExpired
+	}
+	capacity := in.AccountBalance
+	if capacity > math.MaxInt64-in.CreditLimit {
+		capacity = math.MaxInt64
+	} else {
+		capacity += in.CreditLimit
+	}
+	if in.Cost > capacity {
+		return Decision{BlockedBalance: true}, nil
+	}
+	windows := in.Policy.EffectiveWindows(in.Request)
+	keys := make([]string, 0, len(windows))
+	for _, w := range windows {
+		key, start, end, err := windowPeriod(mid.UUID(), in.Customer, in.Currency, w, now)
+		if err != nil {
+			return Decision{}, err
+		}
+		usage, err := q.AdmissionWindowUsage(ctx, gen.AdmissionWindowUsageParams{
+			MerchantID: mid.UUID(), PayerID: in.Customer, Currency: in.Currency,
+			WindowKey: key, WindowStart: start, WindowEnd: end, AsOf: now,
+		})
+		if err != nil {
+			return Decision{}, err
+		}
+		if in.Cost > w.Limit || usage.Used > w.Limit-in.Cost {
+			blocked := w.Window
+			return Decision{BlockedWindow: &blocked, RetryAfter: end.Sub(now)}, nil
+		}
+		keys = append(keys, key)
+	}
+	body, err := json.Marshal(in.Terms)
+	if err != nil {
+		return Decision{}, err
+	}
+	row, err := q.InsertAdmissionOperation(ctx, gen.InsertAdmissionOperationParams{
+		MerchantID: mid.UUID(), RequestID: in.RequestID, PayerID: in.Customer,
+		Currency: in.Currency, EstimatedAmount: in.Cost, Terms: body,
+		AvailableAmount:    capacity - in.Cost,
+		RequestedExpiresAt: expiry, AdmittedAt: now, WindowKeys: keys,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		row, err = q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID})
+		if err != nil {
+			return Decision{}, err
+		}
+		return g.replay(row, in)
+	}
+	if err != nil {
+		return Decision{}, err
+	}
+	return Decision{Allowed: true, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: row.AvailableAmount}, nil
+}
+
+// CheckIdentity refuses key reuse before current policy evaluation can mask a conflict.
+func (g *Gate) CheckIdentity(ctx context.Context, q *gen.Queries, in AdmitInput) (*Decision, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	decision, err := g.replay(row, in)
+	return &decision, err
+}
+
+func (g *Gate) replay(row gen.OpenrailsAdmissionOperation, in AdmitInput) (Decision, error) {
+	field := ""
+	switch {
+	case row.PayerID != in.Customer:
+		field = "payer"
+	case row.Currency != in.Currency:
+		field = "currency"
+	case row.EstimatedAmount != in.Cost:
+		field = "estimated_amount"
+	case !sameDeadline(row.RequestedExpiresAt, deadline(in.ExpiresAt)):
+		field = "expires_at"
+	default:
+		original, err := OriginalTerms(row)
+		if err != nil {
+			return Decision{}, err
+		}
+		a, err := json.Marshal(original)
+		if err != nil {
+			return Decision{}, err
+		}
+		b, err := json.Marshal(in.Terms.normalized())
+		if err != nil {
+			return Decision{}, err
+		}
+		if !bytes.Equal(a, b) {
+			field = "terms"
 		}
 	}
-	return dec, nil
+	if field != "" {
+		return Decision{}, &Conflict{Field: field}
+	}
+	state := row.State
+	if state == "open" && row.ExpiresAt != nil && !row.ExpiresAt.After(g.Now()) {
+		state = "expired"
+	}
+	return Decision{Allowed: true, Replayed: true, ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: row.AvailableAmount}, nil
 }
 
-// Resolve returns the payer coordinates a request's hold was placed under (via the
-// admit-time pointer). ok=false when no live pointer exists (never admitted, or
-// already settled / TTL-expired).
-func (g *Gate) Resolve(ctx context.Context, merchant, requestID string) (HoldRef, bool, error) {
-	v, e := g.rdb.Get(ctx, reqPtrKey(merchant, requestID)).Result()
-	if e == redis.Nil {
-		return HoldRef{}, false, nil
+func deadline(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
 	}
-	if e != nil {
-		return HoldRef{}, false, e
+	t = t.UTC().Truncate(time.Microsecond)
+	return &t
+}
+func sameDeadline(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
 	}
-	parts := strings.SplitN(v, reqPtrSep, 4)
-	if len(parts) < 2 {
-		return HoldRef{}, false, nil
-	}
-	ref := HoldRef{Customer: parts[0], Currency: parts[1]}
-	if len(parts) > 2 {
-		ref.Invoker = parts[2]
-	}
-	if len(parts) > 3 {
-		ref.Source = parts[3]
-	}
-	return ref, true, nil
+	return a.Equal(*b)
 }
 
-// CaptureInput settles an admitted request that succeeded. The window keys are
-// recovered from the hold record, so only the payer coords + request id are needed.
-type CaptureInput struct {
-	Merchant, Customer, Currency, RequestID string
+func (g *Gate) Get(ctx context.Context, requestID string) (gen.OpenrailsAdmissionOperation, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.OpenrailsAdmissionOperation{}, err
+	}
+	row, err := g.db.Gen(ctx).GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return row, ErrNotFound
+	}
+	return row, err
 }
 
-// Capture frees the request's `held` reservation and drops the hold record.
-// Windows keep the estimate (estimate-based model); the actual balance deduction +
-// durable #512 ledger write are the caller's job, off the hot path. Idempotent.
-func (g *Gate) Capture(ctx context.Context, in CaptureInput) error {
-	base := payerBase(in.Merchant, in.Customer, in.Currency)
-	keys := []string{base + ":held", base + ":hold:" + in.RequestID, base + ":holds"}
-	if err := captureScript.Run(ctx, g.rdb, keys).Err(); err != nil {
+// WithOperation locks payer before operation; original ownership is immutable.
+func (g *Gate) WithOperation(ctx context.Context, requestID string, fn func(context.Context, *db.DB, gen.OpenrailsAdmissionOperation) error) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
 		return err
 	}
-	g.rdb.Del(ctx, reqPtrKey(in.Merchant, in.RequestID))
-	return nil
+	return g.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: row.PayerID}); err != nil {
+			return err
+		}
+		row, err = q.LockAdmissionOperation(ctx, gen.LockAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: requestID})
+		if err != nil {
+			return err
+		}
+		return fn(ctx, g.db.NewWithPgxTx(tx), row)
+	})
 }
 
-// ExtendInput re-declares a live hold's deadline.
-type ExtendInput struct {
-	Merchant, Customer, Currency, RequestID string
-	// Until is the owner's new deadline; zero means the hold no longer expires.
-	Until time.Time
-}
-
-// Extend moves a live hold's expiry to in.Until. ok=false when there is no
-// live hold to extend (settled or already lapsed) — the owner must re-admit.
-func (g *Gate) Extend(ctx context.Context, in ExtendInput) (bool, error) {
-	base := payerBase(in.Merchant, in.Customer, in.Currency)
-	var untilMs int64
-	if !in.Until.IsZero() {
-		untilMs = in.Until.UnixMilli()
-	}
-	n, err := extendScript.Run(ctx, g.rdb, []string{base + ":hold:" + in.RequestID}, untilMs).Int64()
-	if err != nil {
-		return false, err
-	}
-	if n != 1 {
-		return false, nil
-	}
-	ptr := reqPtrKey(in.Merchant, in.RequestID)
-	if untilMs > 0 {
-		err = g.rdb.PExpireAt(ctx, ptr, in.Until).Err()
-	} else {
-		err = g.rdb.Persist(ctx, ptr).Err()
-	}
-	if err != nil {
-		return false, fmt.Errorf("spendgate: extend admit pointer: %w", err)
-	}
-	return true, nil
-}
-
-// ReleaseInput backs out an admitted-but-uncharged request (failure path).
-type ReleaseInput struct {
-	Merchant, Customer, Currency, RequestID string
-}
-
-// Release frees the reservation from `held` and from every window counter the
-// admit recorded (the request did not happen), without billing. Idempotent.
-func (g *Gate) Release(ctx context.Context, in ReleaseInput) error {
-	base := payerBase(in.Merchant, in.Customer, in.Currency)
-	keys := []string{base + ":held", base + ":hold:" + in.RequestID, base + ":holds"}
-	if err := releaseScript.Run(ctx, g.rdb, keys).Err(); err != nil {
+func (g *Gate) Release(ctx context.Context, requestID string) error {
+	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.OpenrailsAdmissionOperation) error {
+		if row.State == "captured" {
+			return ErrCaptured
+		}
+		if row.State == "released" {
+			return nil
+		}
+		_, err := d.Gen(ctx).ReleaseAdmissionOperation(ctx, gen.ReleaseAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AsOf: g.Now()})
 		return err
-	}
-	g.rdb.Del(ctx, reqPtrKey(in.Merchant, in.RequestID))
-	return nil
+	})
 }
 
-// HeldAmount returns the current shared in-flight reservation total for a
-// payer+currency (introspection / start-capacity display).
-func (g *Gate) HeldAmount(ctx context.Context, merchant, customer, currency string) (int64, error) {
-	n, err := g.rdb.Get(ctx, payerBase(merchant, customer, currency)+":held").Int64()
-	if err == redis.Nil {
-		return 0, nil
+func (g *Gate) Extend(ctx context.Context, requestID string, until time.Time) error {
+	if until.IsZero() || !until.After(g.Now()) {
+		return ErrExpired
 	}
-	if err != nil {
-		return 0, err
-	}
-	return n, nil
+	return g.WithOperation(ctx, requestID, func(ctx context.Context, d *db.DB, row gen.OpenrailsAdmissionOperation) error {
+		if row.State != "open" {
+			return ErrNotFound
+		}
+		if row.ExpiresAt != nil && !row.ExpiresAt.After(g.Now()) {
+			return ErrExpired
+		}
+		if row.ExpiresAt != nil && until.Before(*row.ExpiresAt) {
+			return fmt.Errorf("extension cannot shorten the deadline")
+		}
+		_, err := d.Gen(ctx).ExtendAdmissionOperation(ctx, gen.ExtendAdmissionOperationParams{MerchantID: row.MerchantID, RequestID: row.RequestID, AsOf: g.Now(), ExpiresAt: until.UTC()})
+		return err
+	})
 }
 
-// fixedOffsetMs is the deterministic per-window phase (in [0, durMs)) for a FIXED
-// window, derived from its customer-scoped key. Two payers' same-shaped windows
-// hash to different offsets, so their reset boundaries (offset + k*dur) are
-// staggered — spreading demand instead of every payer resetting at the same
-// instant — WITHOUT storing a per-user anchor (recomputable, flush-safe).
 func fixedOffsetMs(prefix string, durMs int64) int64 {
-	if durMs <= 0 {
-		return 0
-	}
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(prefix))
-	// durMs > 0 is guaranteed above, so the modulo result is in [0, durMs) and
-	// always fits a non-negative int64; safecast keeps the conversion checked.
-	off, _ := safecast.Convert[int64](h.Sum64() % uint64(durMs))
-	return off
+	return int64(h.Sum64() % uint64(durMs))
 }
 
-func toInt64(v any) int64 {
-	switch n := v.(type) {
-	case int64:
-		return n
-	case int:
-		return int64(n)
-	case float64:
-		return int64(n)
-	default:
-		return 0
+func windowPeriod(mid, payer uuid.UUID, currency string, w resolvedWindow, now time.Time) (string, time.Time, time.Time, error) {
+	if w.Duration < time.Millisecond || w.Limit < 0 {
+		return "", time.Time{}, time.Time{}, fmt.Errorf("invalid spend window")
 	}
-}
-
-// untilBoundary is the time from now to the next boundary of a fixed window with
-// phase offsetMs and period durMs (boundaries at offset + k*dur).
-func untilBoundary(now time.Time, offsetMs, durMs int64) time.Duration {
-	if durMs <= 0 {
-		return 0
-	}
-	nowMs := now.UnixMilli()
-	bucket := (nowMs - offsetMs) / durMs
-	return time.Duration(offsetMs+(bucket+1)*durMs-nowMs) * time.Millisecond
+	key := w.identity(fmt.Sprintf("%s/%s/%s", mid, payer, currency))
+	duration := w.Duration.Milliseconds()
+	offset := fixedOffsetMs(key, duration)
+	bucket := (now.UnixMilli() - offset) / duration
+	start := time.UnixMilli(offset + bucket*duration).UTC()
+	return key, start, start.Add(w.Duration), nil
 }

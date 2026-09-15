@@ -33,13 +33,6 @@ FROM openrails.operation_authorizations
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text;
 
--- name: SumOpenOperationAuthorizationMicros :one
-SELECT COALESCE(SUM(authorized_usd_micros), 0)::bigint AS authorized_usd_micros
-FROM openrails.operation_authorizations
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND ledger_account_id = sqlc.arg(ledger_account_id)::uuid
-  AND state = 'open';
-
 -- name: SettleOperationAuthorizationPassThroughProviderCost :one
 UPDATE openrails.operation_authorizations
 SET state = 'settled',

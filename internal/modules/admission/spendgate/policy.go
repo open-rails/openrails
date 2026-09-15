@@ -1,34 +1,10 @@
-// Package spendgate is the Redis-backed admission primitive for openrails #513:
-// ONE atomic Lua gate that checks a payer's affordability (settled balance minus
-// the shared in-flight hold gauge) and every applicable spend-cap window, places
-// a per-request hold, and frees it at capture/release — replacing the Postgres
-// budget_window_state / budget_inflight_holds locked-tx path AND the separate
-// Redis hold store.
-//
-// MODEL (decided 2026-06-17, Paul):
-//   - Affordability uses the #512 ledger account balance passed in by the caller;
-//     only the `held` reservation gauge and the window counters live in shared
-//     Redis. A stale/concurrent read can cause bounded over-admission, never
-//     ledger corruption (the durable truth is the #512 ledger).
-//   - Spend-cap windows are PER-USER-STAGGERED (#337): boundaries tick at
-//     offset + k*Duration forever, where offset is a deterministic phase derived
-//     from the customer-scoped window key (no stored anchor). Resets are staggered
-//     per payer so demand spreads instead of every payer resetting at once. There
-//     is ONE window model — no per-window cadence choice to configure.
-//   - Windows are ESTIMATE-BASED: a reserve counts the ESTIMATE; capture does NOT
-//     true the window up to actual (only the balance, caller-side, trues up).
-//     Release (failure) frees the estimate from the windows. Caps therefore run
-//     slightly conservative and self-heal at each window reset.
-//   - Delegated scopes are PER-INVOKER. A role or trust level selects which
-//     invokers a window applies to; it never creates a shared pool across those
-//     invokers. Only payer scope is aggregate across the whole payer account.
-//
-// Policy is read-mostly config; the Lua scripts + client live in gate.go.
+// Package spendgate evaluates durable SQL admission operations and spend windows.
 package spendgate
 
 import (
-	"fmt"
-	"strings"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"time"
 )
 
@@ -43,13 +19,13 @@ const (
 )
 
 // Window is one {scope, duration, limit} cap. Limit and all reserved amounts are
-// in the currency's minor units.
+// in the currency's native units.
 type Window struct {
 	Scope    Scope         `json:"scope"`
 	Duration time.Duration `json:"duration"`
 	Limit    int64         `json:"limit"`
 	// Key is a stable per-policy window identifier (e.g. "5h", "7d") so a window's
-	// Redis counter survives across reserves. Distinct windows under one scope MUST
+	// durable window identity survives across reserves. Distinct windows under one scope MUST
 	// have distinct keys.
 	Key string `json:"key"`
 }
@@ -82,7 +58,7 @@ type Request struct {
 }
 
 // resolvedWindow binds a Window to the concrete scope identity it was configured
-// for, so it maps to a stable Redis counter key.
+// for, so it maps to a stable durable window identity key.
 type resolvedWindow struct {
 	Window
 	scopeID string
@@ -128,32 +104,10 @@ func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 	return out
 }
 
-// identity is the stable Redis key prefix for this window under a payer base. The
-// Lua appends ":<bucket>" where bucket = floor((now-offset)/Duration) and offset is
-// the deterministic phase fixedOffsetMs(prefix, Duration) — no stored anchor. The
-// base is hash-tagged ({merchant:customer}) so every key the Lua touches co-locates
-// on one Cluster slot.
+// identity uses unambiguous components. Neither the limit nor duration changes
+// its history; a changed policy re-evaluates the appropriate bounded period.
 func (w resolvedWindow) identity(base string) string {
-	if w.Scope == ScopeRole {
-		return fmt.Sprintf("%s:w:%s:%s:%s:%s", base, w.Scope, scrub(w.scopeID), scrub(w.invoker), scrub(w.Key))
-	}
-	return fmt.Sprintf("%s:w:%s:%s:%s", base, w.Scope, scrub(w.scopeID), scrub(w.Key))
-}
-
-// durationMillis is the window length passed to the Lua.
-func (w resolvedWindow) durationMillis() int64 {
-	ms := w.Duration.Milliseconds()
-	if ms <= 0 {
-		ms = 1000
-	}
-	return ms
-}
-
-// scrub replaces the key separator so a scope id / window key can't break the
-// composite Redis key structure.
-func scrub(s string) string {
-	if s == "" {
-		return "-"
-	}
-	return strings.ReplaceAll(s, ":", "_")
+	b, _ := json.Marshal([]string{base, string(w.Scope), w.scopeID, w.invoker, w.Key})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }

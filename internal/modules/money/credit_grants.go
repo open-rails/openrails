@@ -117,11 +117,9 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 	return page, nil
 }
 
-// RevokeCreditGrant removes the whole unspent remainder under the existing
-// customer money lock. The reader must inspect live Redis admission holds while
-// that lock is held, matching admission's PG -> Redis ordering. Failure to read
-// holds fails closed. Repeating a completed revoke returns its original result.
-func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID, reason string, readAdmissionHeld func(context.Context, string) (int64, error)) (*CreditGrantRevocation, error) {
+// RevokeCreditGrant removes the unspent remainder under the payer money lock,
+// respecting the same durable reservation total as admission and spending.
+func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.CustomerID, grantID uuid.UUID, reason string) (*CreditGrantRevocation, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -131,9 +129,6 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 	reason = strings.TrimSpace(reason)
 	if reason == "" || utf8.RuneCountInString(reason) > 500 {
 		return nil, fmt.Errorf("reason is required (maximum 500 characters)")
-	}
-	if readAdmissionHeld == nil {
-		return nil, fmt.Errorf("live admission hold reader is required")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -172,18 +167,7 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, payer identity.Cus
 		if current.RemainingAmount > bal.Balance {
 			return ErrCreditGrantUnavailable
 		}
-		held, err := readAdmissionHeld(ctx, row.Currency)
-		if err != nil {
-			return fmt.Errorf("read live admission holds: %w", err)
-		}
-		if held < 0 {
-			return fmt.Errorf("negative admission holds")
-		}
 		available, err := subtractOperationCapacity(bal.Balance, bal.HeldBalance, "durable holds")
-		if err != nil {
-			return err
-		}
-		available, err = subtractOperationCapacity(available, held, "admission holds")
 		if err != nil {
 			return err
 		}

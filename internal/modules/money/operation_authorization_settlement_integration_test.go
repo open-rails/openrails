@@ -38,7 +38,7 @@ func TestPassThroughProviderCostSettlementLifecycle(t *testing.T) {
 		if bindErr != nil {
 			return nil, bindErr
 		}
-		auth, openErr := svc.OpenOperationAuthorizationInTx(boundCtx, txDB, in, func(context.Context) (int64, error) { return 0, nil })
+		auth, openErr := svc.OpenOperationAuthorizationInTx(boundCtx, txDB, in)
 		if openErr != nil {
 			return nil, openErr
 		}
