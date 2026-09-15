@@ -682,16 +682,22 @@ func excerptErrorBody(raw []byte) string {
 	return msg
 }
 
+type clientResponse struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
 // doRaw issues a single authed request and returns (response, body) for 2xx and
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
-func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*http.Response, []byte, error) {
+func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*clientResponse, error) {
 	var raw []byte
 	if body != nil {
 		var merr error
 		raw, merr = json.Marshal(body)
 		if merr != nil {
-			return nil, nil, fmt.Errorf("openrails: marshal request: %w", merr)
+			return nil, fmt.Errorf("openrails: marshal request: %w", merr)
 		}
 	}
 	// Enforce the per-call timeout via a context deadline so it holds even when
@@ -703,11 +709,11 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*htt
 		defer cancel()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	bearer, berr := c.bearer(ctx)
 	if berr != nil {
-		return nil, nil, berr
+		return nil, berr
 	}
 	var rdr io.Reader
 	if raw != nil {
@@ -715,7 +721,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*htt
 	}
 	req, rerr := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
 	if rerr != nil {
-		return nil, nil, fmt.Errorf("openrails: build request: %w", rerr)
+		return nil, fmt.Errorf("openrails: build request: %w", rerr)
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
@@ -724,39 +730,39 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*htt
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
+		return nil, fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	if len(out) > 1<<20 {
-		return nil, nil, fmt.Errorf("%w: response exceeds 1 MiB", ErrUnreachable)
+		return nil, fmt.Errorf("%w: response exceeds 1 MiB", ErrUnreachable)
 	}
-	return resp, out, nil
+	return &clientResponse{status: resp.StatusCode, header: resp.Header, body: out}, nil
 }
 
 // do issues a single authed request, mapping any non-2xx onto the canonical
 // StatusError. out may be nil when no body is expected.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	response, raw, err := c.doRaw(ctx, method, path, body)
+	response, err := c.doRaw(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		err := statusErrorFromBody(response.StatusCode, raw).(*StatusError)
+	if response.status < 200 || response.status >= 300 {
+		err := statusErrorFromBody(response.status, response.body).(*StatusError)
 		if err.RequestID == "" {
-			err.RequestID = response.Header.Get("X-Request-ID")
+			err.RequestID = response.header.Get("X-Request-ID")
 		}
-		err.RetryAfter = response.Header.Get("Retry-After")
+		err.RetryAfter = response.header.Get("Retry-After")
 		return err
 	}
 	if out != nil {
-		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder := json.NewDecoder(bytes.NewReader(response.body))
 		decoder.UseNumber()
 		if err := decoder.Decode(out); err != nil {
 			return fmt.Errorf("%w: decode response: %w", ErrUnreachable, err)
