@@ -117,7 +117,7 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 // `/v1/me/*`: CustomerScopeRequired confirms the :customer_id scope and rebinds
 // the acting payer to the customer's payable subject. Every route is gated by a
 // `customer:*` permission because the balance may be a SHARED resource.
-func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes, writeMW ...router.Middleware) {
+func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegatedMW router.Middleware, providerRoutes routesurface.ProviderRoutes) {
 	// PayerScopedRequired (or#930): the treasury surface acts ON a payer account,
 	// so an invoker-scoped principal — which spends a payer's money without being
 	// the payer — is refused here outright, ahead of the customer:* gates.
@@ -133,22 +133,20 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 		h(httphandlers.GetCustomerSpendDelegations),
 		middleware.RequirePermission(controlplane.PermCustomerSpendDelegationsRead),
 	)
-	putSpendDelegations := append([]router.Middleware{
-		middleware.RequirePermission(controlplane.PermCustomerSpendDelegationsUpdate),
-	}, writeMW...)
+	putSpendDelegations := middleware.RequirePermission(controlplane.PermCustomerSpendDelegationsUpdate)
 	group.Handle(http.MethodPut, "/:customer_id/spend-delegations",
 		h(httphandlers.PutCustomerSpendDelegations),
-		putSpendDelegations...,
+		putSpendDelegations,
 	)
 	group.Handle(http.MethodPut, "/:customer_id/spend-delegations:upsert",
 		h(httphandlers.PutCustomerSpendDelegation),
-		putSpendDelegations...,
+		putSpendDelegations,
 	)
 	// or#911: single-grant revocation. One addressed delegation dies; every
 	// sibling grant is untouched (a replace-all could clobber them).
 	group.Handle(http.MethodDelete, "/:customer_id/spend-delegations/:scope/:scope_key",
 		h(httphandlers.DeleteCustomerSpendDelegation),
-		putSpendDelegations...,
+		putSpendDelegations,
 	)
 
 	// Read the payer's money state. `status` is intentionally NOT mounted (it

@@ -393,44 +393,6 @@ func CustomerScopeRequired() router.Middleware {
 	}
 }
 
-// CustomerGroupEnsurer materializes the AuthKit customer permission-group; the
-// control plane implements it.
-type CustomerGroupEnsurer interface {
-	EnsureCustomerPermissionGroup(ctx context.Context, customerID, ownerSubject string) (string, error)
-}
-
-// EnsureCustomerPermissionGroup materializes the AuthKit customer group on the
-// first customer-owned write that manages spend delegation/credentials.
-func EnsureCustomerPermissionGroup(cp CustomerGroupEnsurer) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *request.Request) {
-			resolved, ok := DelegatedFromRequest(r)
-			if !ok || resolved == nil {
-				r.AbortJSON(http.StatusUnauthorized, "delegated principal required")
-				return
-			}
-			if cp == nil {
-				r.AbortJSON(http.StatusInternalServerError, "customer control plane unavailable")
-				return
-			}
-			if _, err := cp.EnsureCustomerPermissionGroup(r.Request.Context(), r.Param("customer_id"), resolved.DelegatedSubject); err != nil {
-				r.AbortJSON(http.StatusInternalServerError, "customer permission-group ensure failed")
-				return
-			}
-			next(r)
-		}
-	}
-}
-
-func requestBearerToken(r *request.Request) string {
-	h := strings.TrimSpace(r.Header("Authorization"))
-	const prefix = "Bearer "
-	if len(h) < len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
-		return ""
-	}
-	return strings.TrimSpace(h[len(prefix):])
-}
-
 func requestAuthorizationToken(r *http.Request) string {
 	fields := strings.Fields(r.Header.Get("Authorization"))
 	if len(fields) == 2 && (strings.EqualFold(fields[0], "Bearer") || strings.EqualFold(fields[0], "DPoP")) {

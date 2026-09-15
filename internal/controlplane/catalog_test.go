@@ -4,18 +4,6 @@ import (
 	"testing"
 )
 
-func TestGroups_CustomerExposesRemoteApplications(t *testing.T) {
-	for _, group := range Groups() {
-		if group.Name == CustomerType {
-			if !group.Capabilities.RemoteApplications {
-				t.Fatal("customer groups must expose remote_application registration")
-			}
-			return
-		}
-	}
-	t.Fatal("customer group persona missing")
-}
-
 // TestAdmissionCreatePermission_GateSemantics proves the admission hot-path gate:
 // an API key WITHOUT merchant:admissions:create fails the admission gate while
 // still passing customer writes. (The merchant owner's default grant is proven

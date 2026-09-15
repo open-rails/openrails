@@ -3,9 +3,7 @@
 package controlplane
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -320,49 +318,59 @@ func TestEnsureCustomerPermissionGroup_Idempotent(t *testing.T) {
 	require.Equal(t, groupID, again)
 }
 
-func TestGeneratedCustomerRemoteApplicationRoute_LazyCreatesGroup(t *testing.T) {
+func TestCustomerPortalRequiresExplicitCreationAndHasNoMachineCredentials(t *testing.T) {
 	ctx := context.Background()
 	pool := newBootstrapTestPool(t)
 	cp := newTestControlPlane(t, pool)
-
-	owner, err := cp.Core().CreateUser(ctx, "customer-remote-app-owner@example.test", "customerremoteappowner")
+	owner, err := cp.Core().CreateUser(ctx, "customer-portal@example.test", "customerportal")
 	require.NoError(t, err)
-	customerID := owner.ID
-
-	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerGroup(customerID))
-	require.ErrorIs(t, err, authkit.ErrGroupNotFound)
-
 	token, _, err := cp.Core().MintAccessToken(ctx, owner.ID, nil)
 	require.NoError(t, err)
-
 	mux := http.NewServeMux()
+	merchantKeys, merchantApps := false, false
 	for _, spec := range cp.RouteSpecs() {
 		mux.Handle(spec.Method+" "+spec.Path, spec.Handler)
+		if strings.HasPrefix(spec.Path, "/customer/") {
+			require.NotContains(t, spec.Path, "api-keys")
+			require.NotContains(t, spec.Path, "remote-applications")
+		}
+		if spec.Method == http.MethodPost && spec.Path == "/merchant/{instance_slug}/api-keys" {
+			merchantKeys = true
+		}
+		if spec.Method == http.MethodPost && spec.Path == "/merchant/{instance_slug}/remote-applications" {
+			merchantApps = true
+		}
 	}
-
-	body := map[string]any{
-		"slug":     "host-three-ci",
-		"issuer":   "https://host-three.example",
-		"jwks_uri": "https://host-three.example/.well-known/jwks.json",
-		"enabled":  true,
+	require.True(t, merchantKeys)
+	require.True(t, merchantApps)
+	request := func(method, path string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w.Code
 	}
-	raw, err := json.Marshal(body)
+	base := "/customer/" + owner.ID
+	for _, path := range []string{base + "/api-keys", base + "/remote-applications"} {
+		require.Equal(t, http.StatusNotFound, request(http.MethodPost, path))
+	}
+	require.NotEqual(t, http.StatusOK, request(http.MethodGet, base+"/members"))
+	_, err = cp.Core().ResolveGroupIDForSlug(ctx, CustomerGroup(owner.ID))
+	require.ErrorIs(t, err, authkit.ErrGroupNotFound, "ordinary requests cannot materialize portal membership")
+	group, err := cp.EnsureCustomerPermissionGroup(ctx, owner.ID, owner.ID)
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/customer/"+customerID+"/remote-applications", bytes.NewReader(raw))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-
-	groupID, err := cp.Core().ResolveGroupIDForSlug(ctx, CustomerGroup(customerID))
+	require.NotEmpty(t, group)
+	require.Equal(t, http.StatusOK, request(http.MethodGet, base+"/members"), "explicit SaaS portal membership retains generated group reads")
+	memberships, err := cp.Core().ListSubjectGroups(ctx, authkit.UserSubject(owner.ID))
 	require.NoError(t, err)
-	require.NotEmpty(t, groupID)
-	app, err := cp.Core().GetRemoteApplication(ctx, "https://host-three.example")
-	require.NoError(t, err)
-	require.Equal(t, groupID, app.PermissionGroupID)
-	require.Equal(t, "https://host-three.example", app.Issuer)
-	require.Equal(t, "host-three-ci", app.Slug)
+	found := false
+	for _, membership := range memberships {
+		if membership.Persona == CustomerType && membership.InstanceSlug == owner.ID {
+			found = true
+		}
+	}
+	require.True(t, found, "SaaS portal membership discovery remains supported")
 }
 
 func TestRootOperatorBoundary_ReachNotMerchantCapability(t *testing.T) {
