@@ -123,6 +123,9 @@ func (h *NMISaleIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRail
 }
 
 func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
+	}
 	if h.Sale == nil || h.Sale.PurchaseService == nil {
 		return intents.Parked("checkout sale service not wired")
 	}
@@ -139,16 +142,8 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
 
-	// Money mover: any re-execution verifies by reading before sending again.
-	if intent.Attempts > 1 {
-		txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, orderID)
-		if verr != nil {
-			return intents.Ambiguous("pre-send verification read failed: " + verr.Error())
-		}
-		if found {
-			return h.finalize(ctx, intent.MerchantID, p, orderID, txnID, true)
-		}
-	}
+	// A durable attempt may have crossed the provider boundary. A resumed
+	// non-idempotent operation can only reconcile, never infer permission to send.
 
 	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
 	if err != nil {
@@ -174,7 +169,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return intents.Parked("nmi provider writes blocked (mode=readonly)")
 		}
-		if nmi.IsTransportAmbiguous(err) {
+		if nmi.RequiresVerification(err) {
 			// The charge may have landed; the verifier resolves via reads.
 			return intents.Ambiguous("sale outcome unknown: " + err.Error())
 		}
@@ -206,14 +201,15 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 	return h.finalize(ctx, intent.MerchantID, p, orderID, saleResp.TransactionID, false)
 }
 
-// Verify resolves an ambiguous sale via the Query API: a successful sale for
-// the intent's order id means the charge landed (finalize registers it); a
-// clean read with no sale means no money moved and the executor may resend
-// with the SAME order id.
+// Verify reconciles a submitted operation from a captured receipt or a positive
+// provider match. An empty search is not proof that a charge never happened.
 func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
 	p, err := decodeNMISalePayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
+	}
+	if receipt := intents.EvidenceString(intent, "transaction_id"); receipt != "" {
+		return h.finalize(ctx, intent.MerchantID, p, nmiSaleIntentOrderID(intent.ID, p.E2ERunID), receipt, true)
 	}
 	client, err := h.Sale.nmiClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
 	if err != nil {
@@ -225,7 +221,7 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsR
 		return intents.Ambiguous("provider read failed: " + err.Error())
 	}
 	if !found {
-		return intents.Retryable("no successful sale found for order id; charge verified not executed")
+		return intents.Ambiguous("submitted sale has no exact provider receipt; no automatic resend")
 	}
 	return h.finalize(ctx, intent.MerchantID, p, orderID, txnID, true)
 }
@@ -259,7 +255,7 @@ func (h *NMISaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUI
 	if err != nil {
 		// The charge DID happen; keep resolving through the verifier until the
 		// purchase is registered — never charged-but-unrecorded.
-		return intents.Ambiguous("sale charged, but purchase registration failed: " + err.Error())
+		return intents.AmbiguousWithEvidence("sale charged, but purchase registration failed: "+err.Error(), map[string]any{"transaction_id": transactionID})
 	}
 	evidence := map[string]any{
 		nmiSaleEvidenceTransactionID: transactionID,

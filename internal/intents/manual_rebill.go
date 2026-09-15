@@ -125,6 +125,9 @@ func decodeManualRebillPayload(intent gen.OpenrailsRailIntent) (ManualRebillPayl
 // cancellation or a period advance all supersede; the dunning window itself
 // is the intent's expires_at, enforced by the executor's expiry sweep.
 func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (Relevance, error) {
+	if intent.Attempts > 1 || intent.Status == StatusUnknownNeedsVerify {
+		return StillRelevant(), nil
+	}
 	p, err := decodeManualRebillPayload(intent)
 	if err != nil {
 		return SupersededBy("unusable manual rebill intent: " + err.Error()), nil
@@ -157,6 +160,9 @@ func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 }
 
 func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
+	}
 	client, err := h.railClient(ctx, intent)
 	if err != nil {
 		// Unarmable (unconfigured, or declared-but-secretless — fail closed):
@@ -171,25 +177,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		return Terminal(err.Error())
 	}
 
-	// Money mover on a gateway without request idempotency: any re-execution
-	// (lease reclaim, retry after a clean failure) verifies by reading before
-	// sending another charge.
-	if intent.Attempts > 1 {
-		txnID, found, verr := h.findSuccessfulSale(ctx, client, p)
-		if verr != nil {
-			return Ambiguous("pre-send verification read failed: " + verr.Error())
-		}
-		if found {
-			if err := h.finalizeSuccess(ctx, intent.MerchantID, p, txnID); err != nil {
-				return Ambiguous("charge verified at provider, but local lifecycle repair failed: " + err.Error())
-			}
-			return Succeeded(map[string]any{"transaction_id": txnID, "verified_existing": true})
-		}
-	}
-
 	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
 	if err != nil {
-		return Retryable("load subscription: " + err.Error())
+		return Parked("load subscription before submission: " + err.Error())
 	}
 	pm := sub.PaymentMethod
 	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
@@ -262,6 +252,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 			}
 			responseCode = rebillResp.ResponseCode
 		}
+		if nmi.UncertainResponseCode(responseCode) {
+			return Ambiguous("rebill response requires verification: " + reason)
+		}
 		return TerminalWithEvidence(reason, map[string]any{
 			"declined":                         true,
 			"response_code":                    responseCode,
@@ -273,7 +266,7 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, rebillResp.TransactionID); err != nil {
 		// The charge DID happen; route through the verifier so the lifecycle
 		// repair is retried (its read re-finds the sale by order reference).
-		return Ambiguous("rebill charged, but local lifecycle update failed: " + err.Error())
+		return AmbiguousWithEvidence("rebill charged, but local lifecycle update failed: "+err.Error(), map[string]any{"transaction_id": rebillResp.TransactionID})
 	}
 	return Succeeded(map[string]any{
 		"transaction_id":                   rebillResp.TransactionID,
@@ -282,29 +275,30 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	})
 }
 
-// Verify resolves an ambiguous charge via the Query API: a successful sale
-// for the order reference means the period was charged (whenever that
-// happened) — finalize repairs the lifecycle and the intent succeeds; a clean
-// read with no successful sale means no money moved and the executor may
-// retry this attempt.
+// Verify reconciles the same submitted period from positive evidence only.
+// Empty search results retain uncertainty and never arm another charge.
 func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, cerr := h.railClient(ctx, intent)
-	if cerr != nil {
-		return Ambiguous("nmi client unavailable, cannot verify: " + cerr.Error())
-	}
 	p, err := decodeManualRebillPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	txnID, found, err := h.findSuccessfulSale(ctx, client, p)
+	txnID := EvidenceString(intent, "transaction_id")
+	found := txnID != ""
+	if !found {
+		client, cerr := h.railClient(ctx, intent)
+		if cerr != nil {
+			return Ambiguous("nmi client unavailable, cannot verify: " + cerr.Error())
+		}
+		txnID, found, err = h.findSuccessfulSale(ctx, client, p)
+	}
 	if err != nil {
 		return Ambiguous("provider read failed: " + err.Error())
 	}
 	if !found {
-		return Retryable("no successful sale found for order reference; charge verified not executed")
+		return Ambiguous("submitted rebill has no exact provider receipt; no automatic resend")
 	}
 	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, txnID); err != nil {
-		return Ambiguous("charge verified at provider, but local lifecycle repair failed: " + err.Error())
+		return AmbiguousWithEvidence("charge verified at provider, but local lifecycle repair failed: "+err.Error(), map[string]any{"transaction_id": txnID})
 	}
 	return Succeeded(map[string]any{"transaction_id": txnID, "verified_existing": true})
 }

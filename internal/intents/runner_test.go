@@ -122,10 +122,13 @@ func (f *fakeLedger) MarkFailedRetryable(_ context.Context, id uuid.UUID, next t
 	f.nextAt[id] = next
 	return nil
 }
-func (f *fakeLedger) MarkUnknown(_ context.Context, id uuid.UUID, next time.Time, reason string) error {
+func (f *fakeLedger) MarkUnknown(_ context.Context, id uuid.UUID, next time.Time, reason string, evidence map[string]any) error {
 	f.transition[id] = StatusUnknownNeedsVerify
 	f.reasons[id] = reason
 	f.nextAt[id] = next
+	if len(evidence) > 0 {
+		f.enqueued.ResultEvidence, _ = json.Marshal(evidence)
+	}
 	return nil
 }
 func (f *fakeLedger) MarkFailedTerminal(_ context.Context, id uuid.UUID, reason string, ev map[string]any) error {

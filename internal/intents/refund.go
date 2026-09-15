@@ -413,7 +413,7 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 		return Ambiguous("provider read failed: " + err.Error())
 	}
 	if !found {
-		return Retryable("refund not found at provider; verified not executed")
+		return Retryable("refund not visible; retry through provider-enforced idempotency key")
 	}
 	if strings.EqualFold(result.Status, "failed") || strings.EqualFold(result.Status, "canceled") {
 		return h.terminally(ctx, p, "stripe refund failed post-create: "+result.FailureReason, map[string]any{

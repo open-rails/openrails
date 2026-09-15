@@ -22,8 +22,8 @@ import (
 )
 
 // #828 invoice-consumer verifier suite: the collection_outcome_unknown park
-// is resolvable — settled charges apply, unexecuted ones release, residue has
-// an admin unpark — and the schedule/terminal semantics ride the ONE
+// is resolvable through positive receipts; empty reads preserve the attempt.
+// The schedule/terminal semantics ride the ONE
 // collection core.
 
 type fakeInvoiceVerifier struct {
@@ -139,39 +139,35 @@ func TestInvoiceVerify_ConfirmedChargeSettlesWithoutDoubleCharge(t *testing.T) {
 	require.Equal(t, 1, owedPaymentTransfers(t, pool, ctx, payer))
 }
 
-// TestInvoiceVerify_NotExecutedReleasesAndCollectsOnce: the provider read
-// finds no successful sale — no money moved — so the claim releases and the
-// schedule resumes; the next sweep collects exactly once.
-func TestInvoiceVerify_NotExecutedReleasesAndCollectsOnce(t *testing.T) {
+// An empty query preserves the original attempted receipt and prevents another
+// collection; a later positive receipt settles that same attempt exactly once.
+func TestInvoiceVerify_EmptySearchRetainsUnknownUntilReceipt(t *testing.T) {
 	svc, pool, payer, currency, ctx := moneyInEnv(t)
 	cleanupInvoices(t, pool, ctx, payer)
 	invoiceID, _ := seedUnknownParkedInvoice(t, svc, pool, payer, currency, ctx, string(models.RailNMI))
-
-	verifier := &fakeInvoiceVerifier{supported: true, settled: false}
+	before, total, err := svc.ListInvoicePaymentAttempts(ctx, payer, invoiceID, 20, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	verifier := &fakeInvoiceVerifier{supported: true}
 	stats, err := svc.ResolveUnknownInvoiceCollections(ctx, verifier)
 	require.NoError(t, err)
-	require.Equal(t, 1, stats.Released)
-
-	released, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
+	require.Equal(t, 1, stats.Skipped)
+	still, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
 	require.NoError(t, err)
-	// or#828: no charge ever landed and nothing declined, so the invoice is
-	// exactly where the clock left it. Claiming and parking an attempt never
-	// age an invoice — only a terminal outcome and MarkInvoicesPastDue do.
-	require.Equal(t, "open", released.Status)
-	require.Nil(t, released.LastCollectionFailureCode)
-	attempts, total, err := svc.ListInvoicePaymentAttempts(ctx, payer, invoiceID, 20, 0)
-	require.NoError(t, err)
-	require.Zero(t, total, "the unexecuted claimed attempt is released")
-	require.Empty(t, attempts)
-
+	require.Equal(t, "collection_outcome_unknown", *still.LastCollectionFailureCode)
 	charger := &fakeCharger{}
 	n, err := svc.ChargeOutstanding(ctx, charger, 0)
 	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	require.Len(t, charger.charges, 1)
-	paid, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
+	require.Zero(t, n)
+	require.Empty(t, charger.charges)
+	after, total, err := svc.ListInvoicePaymentAttempts(ctx, payer, invoiceID, 20, 0)
 	require.NoError(t, err)
-	require.Equal(t, "paid", paid.Status)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, before[0].ID, after[0].ID)
+	verifier.settled, verifier.txnID = true, "delayed-receipt"
+	stats, err = svc.ResolveUnknownInvoiceCollections(ctx, verifier)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Settled)
 	require.Equal(t, 1, owedPaymentTransfers(t, pool, ctx, payer))
 }
 
@@ -243,10 +239,9 @@ func TestInvoiceVerify_CrashMidClaimConverges(t *testing.T) {
 	require.Empty(t, again.charges, "converged invoice is never re-charged")
 }
 
-// TestInvoiceVerify_UnsupportedRailParksUntilAdminUnpark: rails without a
-// provider read stay parked (never auto-released blind); the admin unpark
-// surface releases residue by operator judgment.
-func TestInvoiceVerify_UnsupportedRailParksUntilAdminUnpark(t *testing.T) {
+// TestInvoiceVerify_UnsupportedRailPreservesUnknown: rails without a
+// provider read stay parked until exact receipt reconciliation.
+func TestInvoiceVerify_UnsupportedRailPreservesUnknown(t *testing.T) {
 	svc, pool, payer, currency, ctx := moneyInEnv(t)
 	cleanupInvoices(t, pool, ctx, payer)
 	invoiceID, _ := seedUnknownParkedInvoice(t, svc, pool, payer, currency, ctx, string(models.RailStripe))
@@ -265,17 +260,12 @@ func TestInvoiceVerify_UnsupportedRailParksUntilAdminUnpark(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, stats.Skipped)
 
-	require.Error(t, svc.UnparkInvoiceCollection(ctx, payer, uuid.New()), "unknown invoice id")
-	require.NoError(t, svc.UnparkInvoiceCollection(ctx, payer, invoiceID))
-	require.ErrorIs(t, svc.UnparkInvoiceCollection(ctx, payer, invoiceID), money.ErrInvoiceNotParkedUnknown)
-
 	charger := &fakeCharger{}
 	n, err := svc.ChargeOutstanding(ctx, charger, 0)
 	require.NoError(t, err)
-	require.Equal(t, 1, n)
-	paid, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
-	require.NoError(t, err)
-	require.Equal(t, "paid", paid.Status)
+	require.Zero(t, n)
+	require.Empty(t, charger.charges)
+
 }
 
 // TestInvoiceVerify_AmbiguityDoesNotAbortBatch: one ambiguous outcome no

@@ -137,6 +137,9 @@ func (h *NMISubscriptionCreateIntentHandler) CheckRelevance(context.Context, gen
 }
 
 func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
+	}
 	if h.Checkout == nil {
 		return intents.Parked("checkout service not wired")
 	}
@@ -152,13 +155,6 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		return intents.Parked("nmi client is read-only (mode=readonly)")
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-
-	// Money mover + remote-resource creator: re-executions verify first.
-	if intent.Attempts > 1 {
-		if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
-			return outcome
-		}
-	}
 
 	// NMI charges whole cents; the payload carries micros. Error (never round)
 	// on a sub-cent remainder — same policy as the one-time sale path. Terminal,
@@ -203,7 +199,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return intents.Parked("nmi provider writes blocked (mode=readonly)")
 		}
-		if nmi.IsTransportAmbiguous(err) {
+		if nmi.RequiresVerification(err) {
 			// The subscription may exist at NMI; the verifier re-finds it.
 			return intents.Ambiguous("subscription create outcome unknown: " + err.Error())
 		}
@@ -240,15 +236,15 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
+	if sub := intents.EvidenceString(intent, "provider_subscription_id"); sub != "" {
+		return h.finalize(ctx, intent.MerchantID, p, nmiSaleIntentOrderID(intent.ID, p.E2ERunID), sub, intents.EvidenceString(intent, "transaction_id"), true)
+	}
 	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
 	if err != nil {
 		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", nmiIntentClientName(p.PSP, intent.Rail)))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-	if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
-		return outcome
-	}
-	return intents.Retryable("no remote subscription or sale found for this intent; create verified not executed")
+	return h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID)
 }
 
 // verifyAtProvider answers "did THIS create land at NMI?" via reads:
@@ -259,30 +255,30 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 //     catch) or when its local row carries THIS intent's order id (finalize
 //     crashed midway; re-finalize).
 //
-// resolved=false means "verified not executed" — the caller may (re)send.
-func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) (intents.Outcome, bool) {
+// A missing match remains inconclusive; this function never authorizes a resend.
+func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) intents.Outcome {
 	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
-		return intents.Ambiguous("pre-send verification read failed: " + err.Error()), true
+		return intents.Ambiguous("pre-send verification read failed: " + err.Error())
 	}
 
 	candidates, err := findUnregisteredRemoteSubscriptions(ctx, h.Checkout.SubscriptionService, client, strings.ToLower(p.Provider), p.CustomerVaultID, p.PlanID, orderID)
 	if err != nil {
-		return intents.Ambiguous(err.Error()), true
+		return intents.Ambiguous(err.Error())
 	}
 
 	switch {
 	case len(candidates) == 1:
-		return h.finalize(ctx, merchantID, p, orderID, candidates[0], txnID, true), true
+		return h.finalize(ctx, merchantID, p, orderID, candidates[0], txnID, true)
 	case len(candidates) > 1:
 		return intents.Ambiguous(fmt.Sprintf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required",
-			len(candidates), p.CustomerVaultID, p.PlanID)), true
+			len(candidates), p.CustomerVaultID, p.PlanID))
 	case txnFound:
 		// Charged but no matching enrollment found: never resend (that would
 		// double-charge); keep verifying.
-		return intents.Ambiguous("successful sale found for order id but no matching remote subscription; keeping under verification"), true
+		return intents.Ambiguous("successful sale found for order id but no matching remote subscription; keeping under verification")
 	default:
-		return intents.Outcome{}, false
+		return intents.Ambiguous("submitted enrollment has no exact provider receipt; no automatic resend")
 	}
 }
 
@@ -364,7 +360,12 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // standard registration path (idempotent: existing rows are activated /
 // answered, not duplicated) and completes the request-level idempotency
 // record so client replays get the cached response.
-func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, orderID, providerSubscriptionID, transactionID string, verified bool) intents.Outcome {
+func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, orderID, providerSubscriptionID, transactionID string, verified bool) (outcome intents.Outcome) {
+	defer func() {
+		if outcome.Class == intents.OutcomeAmbiguous && providerSubscriptionID != "" {
+			outcome.Evidence = map[string]any{"provider_subscription_id": providerSubscriptionID, "transaction_id": transactionID}
+		}
+	}()
 	if strings.TrimSpace(providerSubscriptionID) == "" {
 		return intents.Ambiguous("remote subscription id unavailable; cannot register locally")
 	}

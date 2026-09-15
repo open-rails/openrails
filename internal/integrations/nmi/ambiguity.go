@@ -32,3 +32,24 @@ func IsTransportAmbiguous(err error) bool {
 	var t *TransportAmbiguousError
 	return errors.As(err, &t)
 }
+
+// UncertainResponseCode identifies processor communication/duplicate responses
+// that do not prove this operation was declined or never submitted.
+func UncertainResponseCode(code int) bool {
+	switch code {
+	case 420, 421, 430:
+		return true
+	default:
+		return false
+	}
+}
+
+// RequiresVerification includes both lost transport responses and parsed
+// responses whose outcome cannot safely authorize another non-idempotent send.
+func RequiresVerification(err error) bool {
+	if IsTransportAmbiguous(err) {
+		return true
+	}
+	var response *CustomerVaultError
+	return errors.As(err, &response) && UncertainResponseCode(response.ResponseCode)
+}

@@ -13,7 +13,8 @@
 
 -- Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 -- status:
---   pending              -> refresh schedule/payload (latest enqueue wins)
+--   pending, attempts=0  -> refresh schedule/payload (no possible submission)
+--   pending, attempts>0  -> preserve the original operation after reclaimed park
 --   superseded | expired -> REVIVE: the intent became relevant again (e.g. a
 --                           re-cancel after a resume superseded the delete);
 --                           attempts/failure state reset
@@ -36,35 +37,35 @@ INSERT INTO openrails.rail_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
         ELSE openrails.rail_intents.status
     END,
     next_attempt_at = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.next_attempt_at
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
         ELSE openrails.rail_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
         ELSE openrails.rail_intents.payload
     END,
     psp_id = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.psp_id
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
         ELSE openrails.rail_intents.psp_id
     END,
     origin = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
         ELSE openrails.rail_intents.origin
     END,
     origin_reason = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin_reason
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE openrails.rail_intents.origin_reason
     END,
     actor = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.actor
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE openrails.rail_intents.actor
     END,
     expires_at = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.expires_at
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE openrails.rail_intents.expires_at
     END,
     attempts = CASE
@@ -86,7 +87,8 @@ RETURNING *;
 -- next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
 -- (crashed executor; per-type semantics make the reclaim safe). Never claims
 -- past the relevance window — those rows are swept by
--- ExpireOverdueRailIntents.
+-- ExpireOverdueRailIntents. Abandoned in-flight attempts are still claimed
+-- after their deadline so possible submissions can be reconciled.
 -- name: ClaimDueRailIntents :many
 WITH due AS (
     SELECT id FROM openrails.rail_intents
@@ -94,7 +96,7 @@ WITH due AS (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= sqlc.arg(now)::timestamptz)
           )
-      AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
+      AND (status = 'in_flight' OR (status = 'pending' AND attempts > 0) OR expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
@@ -125,7 +127,7 @@ WHERE pi.id = sqlc.arg(id)
         pi.status IN ('pending', 'failed_retryable')
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= sqlc.arg(now)::timestamptz)
       )
-  AND (pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
+  AND (pi.status = 'in_flight' OR (pi.status = 'pending' AND pi.attempts > 0) OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
 RETURNING pi.*;
 
 -- Claims due unknown_needs_verify intents for the verifier. Status stays
@@ -190,6 +192,7 @@ WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 -- name: MarkRailIntentUnknown :execrows
 UPDATE openrails.rail_intents
 SET status = 'unknown_needs_verify',
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb),
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
@@ -242,7 +245,7 @@ SET status = 'superseded',
     updated_at = now()
 WHERE intent_type = sqlc.arg(intent_type)
   AND subscription_id = sqlc.arg(subscription_id)
-  AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify');
+  AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0));
 
 -- #679: destructive intents held by the volume breaker (an OPEN
 -- life.provider_intent.held_bulk finding for their merchant) never expire out
@@ -253,7 +256,7 @@ SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
     updated_at = now()
-WHERE pi.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= sqlc.arg(now)::timestamptz
   AND NOT (
