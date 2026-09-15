@@ -71,6 +71,9 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 			switch f.saleMode.Load().(string) {
 			case "decline":
 				fmt.Fprintf(w, `{"id":"%s","response":"2","response_code":"200","response_text":"DECLINED"}`, f.txnID)
+			case "hold-response":
+				f.charged.Store(true)
+				<-r.Context().Done()
 			case "timeout-after-accept":
 				f.charged.Store(true)
 				w.WriteHeader(http.StatusGatewayTimeout)
@@ -92,6 +95,12 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 			switch f.saleMode.Load().(string) {
 			case "decline":
 				fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=200")
+			case "processor-uncertain":
+				f.charged.Store(true)
+				fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=420")
+			case "hold-response":
+				f.charged.Store(true)
+				<-r.Context().Done()
 			case "timeout-after-accept":
 				f.charged.Store(true)
 				w.WriteHeader(http.StatusGatewayTimeout)
@@ -583,4 +592,54 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	expired, err := intents.NewStore(fx.db).Get(fx.ctx, queued.ID)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusExpired, expired.Status)
+}
+
+// A caller deadline can interrupt both the response and the local outcome write.
+// The original durable lease/attempt still prevents a resend after restart.
+func TestNMISaleIntent_DeadlineAfterAcceptanceReconcilesClaim(t *testing.T) {
+	fx := newSaleIntentFixture(t)
+	fx.gateway.saleMode.Store("hold-response")
+	fx.gateway.hidden.Store(true)
+	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "mobius")
+	key := NMISaleIdempotencyKey("deadline-" + uuid.NewString())
+	deadline, cancel := context.WithTimeout(fx.ctx, time.Second)
+	defer cancel()
+	_, err := fx.runner.EnqueueAndExecute(deadline, intents.EnqueueParams{MerchantID: dbtest.TestMerchantID.UUID(), Provider: "nmi", IntentType: TypeNMISale, PriceID: &fx.priceID, PspID: pspID, Payload: fx.payload, IdempotencyKey: key, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	require.True(t, fx.gateway.charged.Load())
+	var id uuid.UUID
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT id FROM openrails.rail_intents WHERE merchant_id=$1 AND idempotency_key=$2`, dbtest.TestMerchantID.UUID(), key).Scan(&id))
+	fx.advanceClock(5 * time.Minute)
+	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	pending, err := intents.NewStore(fx.db).Get(fx.ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	fx.gateway.hidden.Store(false)
+	fx.advanceClock(20 * time.Minute)
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	finished, err := intents.NewStore(fx.db).Get(fx.ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, finished.Status)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	require.Equal(t, 1, fx.paymentCount(t))
+}
+
+func TestNMISaleIntent_ProcessorCommunicationResponseRemainsUnknown(t *testing.T) {
+	fx := newSaleIntentFixture(t)
+	fx.gateway.saleMode.Store("processor-uncertain")
+	fx.gateway.hidden.Store(true)
+	row := fx.enqueueAndExecute(t, "processor-unknown-"+uuid.NewString())
+	require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+	fx.advanceClock(2 * time.Minute)
+	_, err := fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	row, err = intents.NewStore(fx.db).Get(fx.ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	require.Zero(t, fx.paymentCount(t))
 }

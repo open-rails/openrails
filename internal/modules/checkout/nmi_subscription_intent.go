@@ -199,7 +199,7 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return intents.Parked("nmi provider writes blocked (mode=readonly)")
 		}
-		if nmi.IsTransportAmbiguous(err) {
+		if nmi.RequiresVerification(err) {
 			// The subscription may exist at NMI; the verifier re-finds it.
 			return intents.Ambiguous("subscription create outcome unknown: " + err.Error())
 		}
@@ -244,10 +244,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", nmiIntentClientName(p.PSP, intent.Rail)))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-	if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
-		return outcome
-	}
-	return intents.Ambiguous("submitted enrollment has no exact provider receipt; no automatic resend")
+	return h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID)
 }
 
 // verifyAtProvider answers "did THIS create land at NMI?" via reads:
@@ -258,30 +255,30 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 //     catch) or when its local row carries THIS intent's order id (finalize
 //     crashed midway; re-finalize).
 //
-// resolved=false means the read is inconclusive; it never authorizes a resend.
-func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) (intents.Outcome, bool) {
+// A missing match remains inconclusive; this function never authorizes a resend.
+func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) intents.Outcome {
 	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
-		return intents.Ambiguous("pre-send verification read failed: " + err.Error()), true
+		return intents.Ambiguous("pre-send verification read failed: " + err.Error())
 	}
 
 	candidates, err := findUnregisteredRemoteSubscriptions(ctx, h.Checkout.SubscriptionService, client, strings.ToLower(p.Provider), p.CustomerVaultID, p.PlanID, orderID)
 	if err != nil {
-		return intents.Ambiguous(err.Error()), true
+		return intents.Ambiguous(err.Error())
 	}
 
 	switch {
 	case len(candidates) == 1:
-		return h.finalize(ctx, merchantID, p, orderID, candidates[0], txnID, true), true
+		return h.finalize(ctx, merchantID, p, orderID, candidates[0], txnID, true)
 	case len(candidates) > 1:
 		return intents.Ambiguous(fmt.Sprintf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required",
-			len(candidates), p.CustomerVaultID, p.PlanID)), true
+			len(candidates), p.CustomerVaultID, p.PlanID))
 	case txnFound:
 		// Charged but no matching enrollment found: never resend (that would
 		// double-charge); keep verifying.
-		return intents.Ambiguous("successful sale found for order id but no matching remote subscription; keeping under verification"), true
+		return intents.Ambiguous("successful sale found for order id but no matching remote subscription; keeping under verification")
 	default:
-		return intents.Outcome{}, false
+		return intents.Ambiguous("submitted enrollment has no exact provider receipt; no automatic resend")
 	}
 }
 

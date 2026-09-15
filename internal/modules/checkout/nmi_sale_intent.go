@@ -169,7 +169,7 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return intents.Parked("nmi provider writes blocked (mode=readonly)")
 		}
-		if nmi.IsTransportAmbiguous(err) {
+		if nmi.RequiresVerification(err) {
 			// The charge may have landed; the verifier resolves via reads.
 			return intents.Ambiguous("sale outcome unknown: " + err.Error())
 		}

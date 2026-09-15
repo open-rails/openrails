@@ -223,7 +223,7 @@ func TestInvoiceCollection_DelayedNMIReceiptNeverResubmits(t *testing.T) {
 		require.NoError(t, r.ParseForm())
 		if r.Form.Get("type") == "sale" {
 			sends.Add(1)
-			w.WriteHeader(http.StatusGatewayTimeout)
+			fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
 			return
 		}
 		if visible.Load() {

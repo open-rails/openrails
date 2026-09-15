@@ -59,7 +59,8 @@ const (
 	// OutcomeSucceeded: the mutation is effectively done.
 	OutcomeSucceeded OutcomeClass = iota
 	// OutcomeRetryable: the attempt failed CLEANLY (the mutation definitely
-	// did not happen); retry after the type's backoff.
+	// did not happen), or the provider enforces this operation's idempotency
+	// key; retry after the type's backoff. Empty search alone is neither.
 	OutcomeRetryable
 	// OutcomeAmbiguous: the attempt MAY have happened (transport error after
 	// the write was sent, local finalize failure...). Never blind-retried —

@@ -451,7 +451,7 @@ func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, merchantID uu
 	}
 	bt, err := h.Sale.btClient(cfg)
 	if err != nil {
-		return intents.Parked("custodian client build failed: " + err.Error())
+		return intents.Ambiguous("sale charged, but custodian client is unavailable: " + err.Error())
 	}
 	tokenIntent, err := bt.GetTokenIntent(ctx, p.TokenIntentID)
 	if err != nil && !basistheory.IsNotFound(err) {
@@ -471,7 +471,7 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, merch
 	}()
 	bt, err := h.Sale.btClient(cfg)
 	if err != nil {
-		return intents.Parked("custodian client build failed: " + err.Error())
+		return intents.Ambiguous("sale charged, but custodian client is unavailable: " + err.Error())
 	}
 
 	var token *basistheory.CardToken
@@ -489,7 +489,7 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, merch
 				}).Error("custodian sale: token intent expired before conversion; purchase recorded WITHOUT a stored instrument (re-collect card)")
 				token = nil
 			} else if errors.Is(err, basistheory.ErrProviderReadOnly) {
-				return intents.Parked("basistheory provider writes blocked (mode=readonly)")
+				return intents.Ambiguous("sale charged, but token conversion is blocked (mode=readonly)")
 			} else {
 				// The charge happened; keep resolving until conversion lands.
 				return intents.Ambiguous("sale charged, but token conversion failed: " + err.Error())

@@ -578,7 +578,7 @@ func (s *MoneyService) releaseInvoiceCollectionClaim(ctx context.Context, claim 
 }
 
 func isCollectionOutcomeAmbiguous(err error) bool {
-	return nmi.IsTransportAmbiguous(err) || basistheory.IsTransportAmbiguous(err)
+	return nmi.RequiresVerification(err) || basistheory.IsTransportAmbiguous(err)
 }
 
 func collectionCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {

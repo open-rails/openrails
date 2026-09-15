@@ -470,3 +470,52 @@ func TestPANFirewall(t *testing.T) {
 	req.PaymentToken = "1234567890123"
 	require.NoError(t, RejectPANShapedFields(req))
 }
+
+type postApprovalTransport struct {
+	base   http.RoundTripper
+	target string
+	after  func()
+}
+
+func (tr postApprovalTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	response, err := tr.base.RoundTrip(r)
+	if err == nil && r.URL.String() == tr.target && response.StatusCode == 200 {
+		tr.after()
+	}
+	return response, err
+}
+
+func TestCustodianSale_PostChargeReadonlyRetainsReceipt(t *testing.T) {
+	fx := newCustodianSaleFixture(t, false)
+	original := http.DefaultTransport
+	// The transport callback runs on the executing client goroutine after the
+	// real local provider accepted the charge, before the conversion client is built.
+	http.DefaultTransport = postApprovalTransport{base: original, target: fx.bt.srv.URL + "/proxy", after: func() { fx.svc.Config = &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly} }}
+	t.Cleanup(func() { http.DefaultTransport = original })
+	key := "post-charge-readonly-" + uuid.NewString()
+	row := fx.enqueueAndExecute(t, key)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, row.Status)
+	require.EqualValues(t, 1, row.Attempts)
+	require.Equal(t, fx.bt.txnID, intents.EvidenceString(row, "transaction_id"))
+	require.EqualValues(t, 1, fx.bt.proxyCalls.Load())
+	// Even while the gateway verification leg is unavailable, a resumed runner
+	// retains the exact receipt and never repeats the non-idempotent proxy send.
+	fx.runner.Clock = clockwork.NewFakeClockAt(time.Now().Add(2 * time.Minute))
+	_, err := fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	pending, err := intents.NewStore(fx.db).Get(fx.ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status)
+	require.Equal(t, fx.bt.txnID, intents.EvidenceString(pending, "transaction_id"))
+	fx.svc.Config = nil
+	fx.runner.Clock = clockwork.NewFakeClockAt(time.Now().Add(20 * time.Minute))
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	final, err := intents.NewStore(fx.db).Get(fx.ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, final.Status)
+	require.EqualValues(t, 1, fx.bt.proxyCalls.Load())
+	var payments int
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id=$1`, fx.bt.txnID).Scan(&payments))
+	require.Equal(t, 1, payments)
+}

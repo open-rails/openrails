@@ -252,6 +252,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 			}
 			responseCode = rebillResp.ResponseCode
 		}
+		if nmi.UncertainResponseCode(responseCode) {
+			return Ambiguous("rebill response requires verification: " + reason)
+		}
 		return TerminalWithEvidence(reason, map[string]any{
 			"declined":                         true,
 			"response_code":                    responseCode,

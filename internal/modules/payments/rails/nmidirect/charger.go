@@ -129,12 +129,7 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 // everything else parsed as a failure is a hard decline. Shared with the
 // custodian-proxied charges (#795): one decline taxonomy, two transports.
 func IsHardDecline(code int) bool {
-	switch code {
-	case 420, 421, 430:
-		return false
-	default:
-		return true
-	}
+	return !nmi.UncertainResponseCode(code)
 }
 
 // FailureCode extracts the verbatim rail failure code from a parsed NMI
