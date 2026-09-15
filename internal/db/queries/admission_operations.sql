@@ -35,9 +35,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payer_id = sqlc.arg(payer_id
   AND admitted_at >= sqlc.arg(window_start)::timestamptz AND admitted_at < sqlc.arg(window_end)::timestamptz
   AND window_keys @> ARRAY[sqlc.arg(window_key)::text];
 
+-- name: AdmissionCaptureTermsMatch :one
+SELECT capture_terms = sqlc.arg(capture_terms)::jsonb AS matches
+FROM openrails.admission_operations
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text;
+
 -- name: CaptureAdmissionOperation :one
 UPDATE openrails.admission_operations
-SET state = 'captured', captured_amount = sqlc.arg(amount)::bigint, captured_at = sqlc.arg(as_of)::timestamptz
+SET state = 'captured', capture_terms = sqlc.arg(capture_terms)::jsonb, captured_amount = sqlc.arg(amount)::bigint, captured_at = sqlc.arg(as_of)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND request_id = sqlc.arg(request_id)::text
   AND state <> 'captured'
 RETURNING *;

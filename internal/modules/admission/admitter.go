@@ -15,6 +15,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -96,7 +97,7 @@ func (a *Admitter) WithAccrualRateMeter(m *AccrualRateMeter) *Admitter {
 	return a
 }
 
-// NewAdmitter builds the admitter over the Redis gate + the Postgres→policy loader.
+// NewAdmitter builds admission over durable SQL reservations and merchant policy.
 func NewAdmitter(moneySvc *money.MoneyService, gate *spendgate.Gate, loader *SpendgatePolicyLoader) *Admitter {
 	return &Admitter{money: moneySvc, gate: gate, loader: loader}
 }
@@ -175,12 +176,16 @@ type AdmitDecision struct {
 }
 
 // Admit resolves the trust level, enforces the delegated wasted-spend cutoff,
-// then runs the single spendgate EVAL (affordability + spend-cap windows + hold
-// placement).
+// then checks affordability and spend windows and records the reservation in
+// one transaction under the payer money lock.
 func (a *Admitter) Admit(ctx context.Context, req AdmitRequest) (AdmitDecision, error) {
 	if a == nil || a.money == nil || a.gate == nil || a.loader == nil {
 		return AdmitDecision{}, fmt.Errorf("admission service is not initialized")
 	}
+	if err := spendgate.ValidateRequest(req.SourceID, req.EstimatedAmount, req.AccrualRateDeltaPerHour); err != nil {
+		return AdmitDecision{}, err
+	}
+	req.SourceID = strings.TrimSpace(req.SourceID)
 	var result AdmitDecision
 	err := a.money.WithLockedAdmissionCapacity(ctx, req.CustomerID, req.Currency, func(ctx context.Context, d *db.DB, capacity money.AdmissionCapacity) error {
 		bound := *a
@@ -206,9 +211,6 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	}
 	merchantID := tid.UUID().String()
 
-	if req.EstimatedAmount < 0 || req.AccrualRateDeltaPerHour < 0 {
-		return AdmitDecision{}, fmt.Errorf("admission amounts must be nonnegative")
-	}
 	terms := spendgate.Terms{Invoker: req.Invoker, InvokerType: req.InvokerType, TrustLevel: req.TrustLevel,
 		Roles: roleStrings(req.Roles), Resource: req.Resource, Source: req.Source, AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour}
 	replay, err := a.gate.CheckIdentity(ctx, q, spendgate.AdmitInput{Customer: req.CustomerID.UUID(), Currency: req.Currency,
@@ -283,7 +285,7 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 	// or#897: the merchant's bound billing policy is resolved FIRST, because its
 	// KIND decides whether prior debt reduces this payer's headroom at all. The
 	// merchant chose which policy binds to this payer; OpenRails measures and
-	// enforces it. Served from the process-local cache when warm.
+	// enforces it from the transaction's locked merchant settings snapshot.
 	resolved, err := a.loader.ResolvePolicy(ctx, req.CustomerID, trustLevel)
 	if err != nil {
 		return AdmitDecision{}, err

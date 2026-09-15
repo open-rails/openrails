@@ -12,6 +12,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const admissionCaptureTermsMatch = `-- name: AdmissionCaptureTermsMatch :one
+SELECT capture_terms = $1::jsonb AS matches
+FROM openrails.admission_operations
+WHERE merchant_id = $2::uuid AND request_id = $3::text
+`
+
+type AdmissionCaptureTermsMatchParams struct {
+	CaptureTerms []byte
+	MerchantID   uuid.UUID
+	RequestID    string
+}
+
+func (q *Queries) AdmissionCaptureTermsMatch(ctx context.Context, arg AdmissionCaptureTermsMatchParams) (bool, error) {
+	row := q.db.QueryRow(ctx, admissionCaptureTermsMatch, arg.CaptureTerms, arg.MerchantID, arg.RequestID)
+	var matches bool
+	err := row.Scan(&matches)
+	return matches, err
+}
+
 const admissionWindowUsage = `-- name: AdmissionWindowUsage :one
 SELECT
     COALESCE(SUM(CASE WHEN state = 'captured' THEN captured_amount ELSE estimated_amount END), 0)::bigint AS used,
@@ -56,21 +75,23 @@ func (q *Queries) AdmissionWindowUsage(ctx context.Context, arg AdmissionWindowU
 
 const captureAdmissionOperation = `-- name: CaptureAdmissionOperation :one
 UPDATE openrails.admission_operations
-SET state = 'captured', captured_amount = $1::bigint, captured_at = $2::timestamptz
-WHERE merchant_id = $3::uuid AND request_id = $4::text
+SET state = 'captured', capture_terms = $1::jsonb, captured_amount = $2::bigint, captured_at = $3::timestamptz
+WHERE merchant_id = $4::uuid AND request_id = $5::text
   AND state <> 'captured'
-RETURNING merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, captured_amount, captured_at, released_at
+RETURNING merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
 `
 
 type CaptureAdmissionOperationParams struct {
-	Amount     int64
-	AsOf       time.Time
-	MerchantID uuid.UUID
-	RequestID  string
+	CaptureTerms []byte
+	Amount       int64
+	AsOf         time.Time
+	MerchantID   uuid.UUID
+	RequestID    string
 }
 
 func (q *Queries) CaptureAdmissionOperation(ctx context.Context, arg CaptureAdmissionOperationParams) (OpenrailsAdmissionOperation, error) {
 	row := q.db.QueryRow(ctx, captureAdmissionOperation,
+		arg.CaptureTerms,
 		arg.Amount,
 		arg.AsOf,
 		arg.MerchantID,
@@ -90,6 +111,7 @@ func (q *Queries) CaptureAdmissionOperation(ctx context.Context, arg CaptureAdmi
 		&i.AdmittedAt,
 		&i.WindowKeys,
 		&i.State,
+		&i.CaptureTerms,
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,
@@ -125,7 +147,7 @@ func (q *Queries) ExtendAdmissionOperation(ctx context.Context, arg ExtendAdmiss
 }
 
 const getAdmissionOperation = `-- name: GetAdmissionOperation :one
-SELECT merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, captured_amount, captured_at, released_at FROM openrails.admission_operations
+SELECT merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM openrails.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
 `
 
@@ -150,6 +172,7 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 		&i.AdmittedAt,
 		&i.WindowKeys,
 		&i.State,
+		&i.CaptureTerms,
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,
@@ -192,7 +215,7 @@ INSERT INTO openrails.admission_operations (
     $9::timestamptz, $10::text[]
 )
 ON CONFLICT (merchant_id, request_id) DO NOTHING
-RETURNING merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, captured_amount, captured_at, released_at
+RETURNING merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at
 `
 
 type InsertAdmissionOperationParams struct {
@@ -235,6 +258,7 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 		&i.AdmittedAt,
 		&i.WindowKeys,
 		&i.State,
+		&i.CaptureTerms,
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,
@@ -243,7 +267,7 @@ func (q *Queries) InsertAdmissionOperation(ctx context.Context, arg InsertAdmiss
 }
 
 const lockAdmissionOperation = `-- name: LockAdmissionOperation :one
-SELECT merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, captured_amount, captured_at, released_at FROM openrails.admission_operations
+SELECT merchant_id, request_id, payer_id, currency, estimated_amount, available_amount, terms, requested_expires_at, expires_at, admitted_at, window_keys, state, capture_terms, captured_amount, captured_at, released_at FROM openrails.admission_operations
 WHERE merchant_id = $1::uuid AND request_id = $2::text
 FOR UPDATE
 `
@@ -269,6 +293,7 @@ func (q *Queries) LockAdmissionOperation(ctx context.Context, arg LockAdmissionO
 		&i.AdmittedAt,
 		&i.WindowKeys,
 		&i.State,
+		&i.CaptureTerms,
 		&i.CapturedAmount,
 		&i.CapturedAt,
 		&i.ReleasedAt,

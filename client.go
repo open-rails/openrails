@@ -313,7 +313,8 @@ func (r *AdmitResponse) Active() bool { return r != nil && r.Allowed && r.State 
 
 // CaptureUsage carries the analytics dimensions recorded alongside a capture so
 // OpenRails can serve per-resource/function/tier/invoker spend (#410). Nil = no
-// usage event (a plain capture).
+// usage event (a plain capture). Usage and the financial capture commit together.
+// The first capture fixes these terms; a changed retry returns ErrIdempotencyKeyReused.
 type CaptureUsage struct {
 	// EventType classifies the usage event (e.g. "inference", "storage"). Required
 	// for the event to be recorded; a blank EventType suppresses the usage event.

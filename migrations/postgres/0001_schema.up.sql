@@ -5092,6 +5092,7 @@ CREATE TABLE openrails.admission_operations (
     admitted_at timestamptz NOT NULL,
     window_keys text[] NOT NULL,
     state text NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'released', 'captured')),
+    capture_terms jsonb CHECK (jsonb_typeof(capture_terms) = 'object' AND octet_length(capture_terms::text) <= 65536),
     captured_amount bigint,
     captured_at timestamptz,
     released_at timestamptz,
@@ -5100,9 +5101,9 @@ CREATE TABLE openrails.admission_operations (
     CHECK (estimated_amount = 0 OR (requested_expires_at IS NOT NULL AND requested_expires_at > admitted_at)),
     CHECK (requested_expires_at IS NULL OR (expires_at IS NOT NULL AND expires_at >= requested_expires_at)),
     CHECK (
-        (state = 'open' AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NULL)
-        OR (state = 'released' AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NOT NULL)
-        OR (state = 'captured' AND captured_amount IS NOT NULL AND captured_amount >= 0 AND captured_at IS NOT NULL)
+        (state = 'open' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NULL)
+        OR (state = 'released' AND capture_terms IS NULL AND captured_amount IS NULL AND captured_at IS NULL AND released_at IS NOT NULL)
+        OR (state = 'captured' AND capture_terms IS NOT NULL AND captured_amount IS NOT NULL AND captured_amount >= 0 AND captured_at IS NOT NULL)
     )
 );
 CREATE INDEX admission_operations_held ON openrails.admission_operations (merchant_id, payer_id, currency, expires_at)
@@ -5117,7 +5118,7 @@ CREATE POLICY merchant_isolation ON openrails.admission_operations
     USING (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid)
     WITH CHECK (merchant_id = NULLIF(current_setting('app.merchant_id', true), '')::uuid);
 GRANT SELECT, INSERT ON openrails.admission_operations TO openrails_app;
-GRANT UPDATE (expires_at, state, captured_amount, captured_at, released_at) ON openrails.admission_operations TO openrails_app;
+GRANT UPDATE (expires_at, state, capture_terms, captured_amount, captured_at, released_at) ON openrails.admission_operations TO openrails_app;
 
 -- One derived financial hold total, shared by every spend and authorization path.
 CREATE FUNCTION openrails.financial_held_amount(merchant uuid, payer uuid, unit text, as_of timestamptz)

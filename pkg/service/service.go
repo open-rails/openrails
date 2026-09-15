@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
@@ -56,19 +55,9 @@ var ErrInsufficientCredits = money.ErrInsufficientCredits
 // (money.IdempotencyConflict: which field, committed vs retried).
 var ErrIdempotencyKeyReused = money.ErrIdempotencyKeyReused
 
-// captureSourceNamespace is the FIXED source half of every capture's ledger
-// coordinate (or#907). It matches Admit's default source namespace, so capture
-// coordinates written before or#907 for default-source admits are identical.
-// It is deliberately NOT the admit-time source: that lived in the Redis hold
-// ref the first capture consumes, and rebuilding it from a caller echo is what
-// made a blank echo a second debit.
-const captureSourceNamespace = "admit"
-
 type CaptureHoldRequest struct {
-	// RequestID is the caller's idempotency key for this capture (or#907): the
-	// admit's request id. The durable ledger coordinate is composed from it and
-	// engine constants alone — no volatile state and no caller-echoed field
-	// participates — so ANY retry of the same request dedupes, unconditionally.
+	// RequestID identifies the original admission. Amount and usage terms become
+	// immutable on the first successful capture; exact retries return its receipt.
 	RequestID string
 	Amount    int64
 
@@ -339,29 +328,10 @@ func (s *Service) CaptureHold(ctx context.Context, req CaptureHoldRequest) (*ope
 	if req.RequestID == "" {
 		return nil, fmt.Errorf("request_id required")
 	}
-	captured, err := s.moneyService().CaptureAdmission(ctx, req.RequestID, req.Amount)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(req.EventType) != "" {
-		usageSource := strings.TrimSpace(req.Source)
-		if usageSource == "" {
-			usageSource = captureSourceNamespace
-		}
-		sourceID := strings.TrimSpace(req.SourceID)
-		if sourceID == "" {
-			sourceID = req.RequestID
-		}
-		if err := s.moneyService().InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			CustomerID: captured.CustomerID, Invoker: captured.Terms.Invoker, Currency: captured.Currency,
-			EventType: req.EventType, Resource: strings.TrimSpace(req.Resource), Amount: req.Amount,
-			Dimensions: req.Dimensions, Metadata: req.Metadata, Source: usageSource, SourceID: sourceID,
-			LedgerTransferID: captured.LedgerTransferID,
-		}); err != nil {
-			log.Warnf("capture usage event failed for request %s: %v", req.RequestID, err)
-		}
-	}
-	return captured.CaptureReceipt, nil
+	return s.moneyService().CaptureAdmission(ctx, req.RequestID, req.Amount, &openrails.CaptureUsage{
+		EventType: req.EventType, Resource: req.Resource, Source: req.Source, SourceID: req.SourceID,
+		Dimensions: req.Dimensions, Metadata: req.Metadata,
+	})
 }
 
 // AdmissionCustomer resolves ownership from the durable operation before route authorization.

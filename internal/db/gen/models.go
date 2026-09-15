@@ -154,6 +154,7 @@ type OpenrailsAdmissionOperation struct {
 	AdmittedAt         time.Time
 	WindowKeys         []string
 	State              string
+	CaptureTerms       []byte
 	CapturedAmount     *int64
 	CapturedAt         *time.Time
 	ReleasedAt         *time.Time

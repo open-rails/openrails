@@ -6,17 +6,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/money"
+	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
 
-// TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension proves #311:
-// InsertCaptureUsageEvent appends a usage_event WITHOUT a second ledger debit
-// (distinct from RecordUsage, which debits), and ServiceUsageRollup returns
-// per-dimension-VALUE spend grouped by endpoint / tier. This is the data behind
-// the host-four platform /budget-usage surface (#410).
+// Real admission and capture append one usage event and debit once, including
+// exact retries, while resource and tier rollups retain the original attribution.
 func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
-	_, ms, payer, ctx := authzEnv(t)
+	svc, ms, payer, ctx := authzEnv(t)
 
 	pool := testPool(t)
 	t.Cleanup(func() {
@@ -41,26 +40,23 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 		{"beta", "fast", "r3", 4},
 	}
 	for _, e := range events {
-		require.NoError(t, ms.InsertCaptureUsageEvent(ctx, money.CaptureUsageEventParams{
-			CustomerID: payer.UUID(),
-			Invoker:    "user:a",
-			Currency:   money.DefaultCurrency,
-			EventType:  "owner/" + e.endpoint,
-			Amount:     e.amount,
-			Resource:   e.endpoint,
-			Metadata: map[string]any{
-				"function_name":     "gen",
-				"availability_tier": e.tier,
-			},
-			Source:   "invoke",
-			SourceID: e.src,
-		}))
+		e.src = uuid.NewString()
+		admit, err := svc.Admit(ctx, billingservice.AdmitInput{CustomerID: payer, Invoker: "user:a", InvokerType: "payer",
+			Currency: money.DefaultCurrency, EstimatedAmount: e.amount, SourceID: e.src, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
+		require.NoError(t, err)
+		require.True(t, admit.Allowed)
+		req := billingservice.CaptureHoldRequest{RequestID: e.src, Amount: e.amount, EventType: "owner/" + e.endpoint, Resource: e.endpoint,
+			Metadata: map[string]any{"function_name": "gen", "availability_tier": e.tier}, Source: "invoke", SourceID: e.src}
+		first, err := svc.CaptureHold(ctx, req)
+		require.NoError(t, err)
+		replay, err := svc.CaptureHold(ctx, req)
+		require.NoError(t, err)
+		first.Replayed = true
+		require.Equal(t, first, replay)
 	}
-
-	// No second debit: usage-event inserts must NOT move the ledger balance.
 	after, err := ms.GetBalanceForCustomer(ctx, payer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, before.Balance, after.Balance, "InsertCaptureUsageEvent must not debit the ledger")
+	require.Equal(t, before.Balance-12, after.Balance, "three captures debit once each, including usage and retries")
 
 	from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
 

@@ -32,6 +32,25 @@ type Conflict struct{ Field string }
 
 func (e *Conflict) Error() string { return "admission request id reused with changed " + e.Field }
 
+// ValidationError identifies a malformed command before any money lock or write.
+type ValidationError struct{ Param, Message string }
+
+func (e *ValidationError) Error() string { return e.Message }
+
+// ValidateRequest is shared by the HTTP boundary and transaction-owning callers.
+func ValidateRequest(requestID string, amount, prospectiveRate int64) error {
+	if id := strings.TrimSpace(requestID); id == "" || len(id) > 255 {
+		return &ValidationError{Param: "request_id", Message: "request_id must contain 1 to 255 bytes"}
+	}
+	if amount < 0 {
+		return &ValidationError{Param: "estimated_amount", Message: "estimated_amount must be nonnegative"}
+	}
+	if prospectiveRate < 0 {
+		return &ValidationError{Param: "accrual_rate_delta_per_hour", Message: "accrual_rate_delta_per_hour must be nonnegative"}
+	}
+	return nil
+}
+
 // Terms preserve caller-supplied dimensions; resolved policy never rewrites them.
 type Terms struct {
 	Invoker                 string   `json:"invoker"`
@@ -106,12 +125,16 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	if err != nil {
 		return Decision{}, err
 	}
-	if in.Customer == uuid.Nil || strings.TrimSpace(in.RequestID) == "" || len(in.RequestID) > 255 {
-		return Decision{}, fmt.Errorf("payer and request_id (at most 255 bytes) are required")
+	if in.Customer == uuid.Nil {
+		return Decision{}, &ValidationError{Param: "customer_id", Message: "customer_id required"}
 	}
-	if in.Cost < 0 || in.CreditLimit < 0 || in.Terms.AccrualRateDeltaPerHour < 0 {
-		return Decision{}, fmt.Errorf("admission amounts must be nonnegative")
+	if err := ValidateRequest(in.RequestID, in.Cost, in.Terms.AccrualRateDeltaPerHour); err != nil {
+		return Decision{}, err
 	}
+	if in.CreditLimit < 0 {
+		return Decision{}, &ValidationError{Param: "credit_limit", Message: "credit_limit must be nonnegative"}
+	}
+	in.RequestID = strings.TrimSpace(in.RequestID)
 	in.Terms = in.Terms.normalized()
 	if row, err := q.GetAdmissionOperation(ctx, gen.GetAdmissionOperationParams{MerchantID: mid.UUID(), RequestID: in.RequestID}); err == nil {
 		return g.replay(row, in)

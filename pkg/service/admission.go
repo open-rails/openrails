@@ -90,16 +90,16 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		return nil, fmt.Errorf("service not initialized")
 	}
 	if in.CustomerID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
+		return nil, &spendgate.ValidationError{Param: "customer_id", Message: "customer_id required"}
 	}
 	{
 		in.SourceID = strings.TrimSpace(in.SourceID)
-		if in.SourceID == "" {
-			return nil, fmt.Errorf("request_id required")
+		if err := spendgate.ValidateRequest(in.SourceID, in.EstimatedAmount, in.AccrualRateDeltaPerHour); err != nil {
+			return nil, err
 		}
 		in.InvokerType = strings.TrimSpace(in.InvokerType)
 		if in.InvokerType != string(identity.InvokerTypePayer) && in.InvokerType != string(identity.InvokerTypeDelegated) {
-			return nil, fmt.Errorf("invoker_type must be payer or delegated")
+			return nil, &spendgate.ValidationError{Param: "invoker_type", Message: "invoker_type must be payer or delegated"}
 		}
 	}
 	currency, err := s.resolveCurrency(ctx, in.Currency)

@@ -2,6 +2,8 @@
 
 Implementation contract for issue989; replaces the Redis hold/pointer authority before v1.
 
+Malformed request IDs (empty or over 255 UTF-8 bytes), negative estimates and negative prospective rates return structured 400 errors before account creation or money locking.
+
 Every request binds one immutable `(merchant_id, request_id)` operation to its payer, unit, estimate, original deadline and request terms. Terms record invoker/type, caller-supplied trust/roles, resource, source and prospective accrual rate. Normalize role ordering and unit spelling before comparing. A repeated key with different terms conflicts. An exact retry never extends a deadline or opens another reservation. Zero estimates still enforce delegation and prospective-rate policy; only zero estimates may omit a deadline.
 
 Replayed admission returns the original allowed decision and capacity receipt, plus `replayed=true` and current `state` (`open`, `expired`, `released`, `captured`). `allowed` alone is not permission to start new work after a terminal replay; state identifies a currently live reservation. Expiry is derived from the declared deadline, without a worker.
@@ -15,7 +17,7 @@ Request reservations and hard spend windows use PostgreSQL under the existing pa
 | Released | Zero | Zero |
 | Captured | Zero | Actual captured amount |
 
-Capture accounts to the original admission window, including a late capture after expiry or release. It updates actual usage atomically with the ledger charge, and subsequent admissions see that total. An actual charge above its estimate may consume the remaining window or create owed money; it is recorded rather than discarded. Captured money cannot be erased by release. Repeated captures must carry the same amount.
+Capture accounts to the original admission window, including a late capture after expiry or release. It updates actual usage atomically with the ledger charge, and subsequent admissions see that total. An actual charge above its estimate may consume the remaining window or create owed money; it is recorded rather than discarded. Captured money cannot be erased by release. The first capture fixes its amount and usage terms (event type, resource, source/id, dimensions and metadata). Exact retries recover the original receipt; changing or adding usage terms conflicts. If a usage event is requested, its insert shares the capture transaction, so any insert failure rolls back the ledger, state and window update. A usage identity already claimed by another request conflicts; it never silently drops the new usage evidence.
 
 Extension applies only to a still-open, unexpired request and moves its effective deadline later. The original requested deadline remains part of the immutable request identity. A late worker uses the original operation to record consumed work; it cannot manufacture a new authorization by replaying an expired request with different terms.
 
