@@ -62,7 +62,9 @@ func TestNamingPolicyForwarding(t *testing.T) {
 			require.NoError(t, err)
 			state, err := cp.Core().GroupNamingState(ctx, res.GroupID)
 			require.NoError(t, err)
-			require.Equal(t, want, state.Policy)
+			require.Equal(t, want.Enabled, state.Policy.Enabled)
+			require.Equal(t, want.FormerNameRetentionMode, state.Policy.FormerNameRetentionMode)
+			require.Equal(t, want.FormerNameRetention.Seconds(), state.Policy.FormerNameRetentionSeconds)
 			if want.FormerNameRetentionMode == authkit.FormerNamesImmediate {
 				require.Empty(t, state.Aliases)
 				_, _, err = cp.ResolveMerchantForGroup(ctx, original)
