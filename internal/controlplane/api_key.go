@@ -61,9 +61,8 @@ func (r *ResolvedServiceCredential) HasPermission(perm string) bool {
 // inside its resolved merchant. #569 (hard cut): merchant credentials are
 // merchant-wide — there is no "merchant key scoped to one customer" concept — so
 // a resolved merchant credential may act for any payable subject within its
-// merchant. (Customer-side delegation, bounded by budget windows, is a separate
-// customer-permission-group credential, enforced OpenRails-side, not an authkit
-// resource scope.)
+// merchant. Customer spend-delegation policy is a separate OpenRails budget
+// constraint checked during admission; it is not an AuthKit resource scope.
 func (r *ResolvedServiceCredential) AllowsCustomer(subject uuid.UUID) bool {
 	return r != nil && !r.MerchantID.IsZero() && subject != uuid.Nil
 }

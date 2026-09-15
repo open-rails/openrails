@@ -17,8 +17,8 @@ const ControlPlaneAuthPrefix = "/auth"
 // (ControlPlane.MountedRouteGroups — never nil, which would mount AuthKit's
 // default surface plus browser OIDC); JWKS is excluded (OpenRails does not
 // expose AuthKit's JWKS on this surface) and browser OIDC is in no mounted
-// group list. The lazy customer permission-group ensure rides
-// MountOptions.Wrap.
+// group list. Hosted merchant creation's directory attachment rides
+// MountOptions.Wrap; other requests never create portal groups.
 func (s *Server) registerControlPlaneAuthRoutes(mux *http.ServeMux) error {
 	cp := s.controlPlane
 	if cp == nil || cp.AuthService() == nil {

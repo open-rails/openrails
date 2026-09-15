@@ -15,9 +15,9 @@ import (
 //
 //   - RouteAuth: public AuthKit discovery plus login, refresh, logout, password reset.
 //   - RouteAccount: self-service account routes (me, sessions, password change).
-//   - RoutePermissionGroups: declared merchant/customer member, API-key, and
-//     remote-application management routes; AuthKit gates every route through
-//     the OpenRails permission-group authorizer.
+//   - RoutePermissionGroups: merchant membership/credentials and explicitly
+//     created customer portal membership; AuthKit applies the declared group
+//     authorizer. Customer groups expose no machine credentials.
 //
 // NOT mounted by default in locked-down mode:
 //   - RouteRegister (public user self-registration — disabled in self-hosted).
