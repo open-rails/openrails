@@ -243,6 +243,8 @@ func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer
 
 	svcReq := &checkout.CheckoutSessionCreateRequest{
 		PriceID:        req.PriceID,
+		SubscriptionID: req.SubscriptionID,
+		NewPriceID:     req.NewPriceID,
 		Mode:           req.Mode,
 		Metadata:       req.Metadata,
 		IdempotencyKey: req.IdempotencyKey,

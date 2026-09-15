@@ -28,12 +28,8 @@ func testRuntimeDB(t *testing.T) (*db.DB, string) {
 	return appDB, dsn
 }
 
-// TestEnsureMerchantsService_ArmingFailureOutsideDev proves the #748 posture:
-// a merchant-secret-store build failure is a boot ERROR outside development
-// (Merchants stays nil AND the caller gets a non-nil error to propagate,
-// exactly as river_register.go's addBillingWorkersToRegistry now does), while
-// development keeps the original warn-and-continue.
-func TestEnsureMerchantsService_ArmingFailureOutsideDev(t *testing.T) {
+// A declared backend outage fails initialization in every environment.
+func TestEnsureMerchantsService_ArmingFailure(t *testing.T) {
 	appDB, _ := testRuntimeDB(t)
 	ctx := context.Background()
 
@@ -50,20 +46,13 @@ func TestEnsureMerchantsService_ArmingFailureOutsideDev(t *testing.T) {
 		}
 	}
 
-	t.Run("outside development: fails boot, Merchants stays unarmed", func(t *testing.T) {
-		rt := &Runtime{DB: appDB, Config: failingConfig("production")}
-		err := rt.EnsureMerchantsService(ctx)
-		require.Error(t, err, "arming failure outside development must fail boot (#748)")
-		require.Contains(t, err.Error(), "outside development")
-		require.Nil(t, rt.Merchants)
-	})
-
-	t.Run("development: warns and continues, Merchants stays unarmed but boot succeeds", func(t *testing.T) {
-		rt := &Runtime{DB: appDB, Config: failingConfig("development")}
-		err := rt.EnsureMerchantsService(ctx)
-		require.NoError(t, err, "development keeps the original warn-and-continue")
-		require.Nil(t, rt.Merchants)
-	})
+	for _, env := range []string{"production", "development"} {
+		t.Run(env, func(t *testing.T) {
+			rt := &Runtime{DB: appDB, Config: failingConfig(env)}
+			require.Error(t, rt.EnsureMerchantsService(ctx))
+			require.Nil(t, rt.Merchants)
+		})
+	}
 }
 
 // TestReady_FullStackGreenAndNamesVaultOutage proves Runtime.Ready end to end

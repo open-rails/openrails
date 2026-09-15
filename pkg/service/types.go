@@ -7,6 +7,8 @@ package service
 import (
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 )
 
@@ -93,93 +95,27 @@ type RecurringInfo struct {
 // Selector is the exact value accepted by CheckoutPayment.Rail; PSPID is the
 // stable provider identity used for server-side method matching; Rail is the
 // canonical gateway and Mode is "one_off" or "subscription".
-type CheckoutRailOption struct {
-	Selector string
-	PSPID    string
-	Rail     string
-	Mode     string
-}
+type CheckoutRailOption = openrails.CheckoutRailOption
 
 // CheckoutCustomerIdentity is the host-resolved customer identity used by
 // checkout rails that require verified account attributes in addition to the
 // stable customer ID.
-type CheckoutCustomerIdentity struct {
-	ID            string
-	VerifiedEmail string
-	Username      string
-}
+type CheckoutCustomerIdentity = openrails.CheckoutCustomerIdentity
 
 // CreateCheckoutSessionRequest specifies checkout session creation parameters.
-type CreateCheckoutSessionRequest struct {
-	PriceID        string
-	Mode           string // "one_off" or "subscription" (optional, inferred from price)
-	Payment        CheckoutPayment
-	Metadata       map[string]string
-	IdempotencyKey string
-	SuccessURL     string // Required for Stripe hosted checkout
-	CancelURL      string // Required for Stripe hosted checkout
-}
+type CreateCheckoutSessionRequest = openrails.CreateCheckoutSessionRequest
 
 // CheckoutPayment specifies payment details for checkout.
-type CheckoutPayment struct {
-	Rail            string // "nmi", "ccbill", "solana", "stripe"
-	PaymentMethodID string // For returning customers with saved payment methods
-	PaymentToken    string // For new card tokenization (NMI Collect.js)
-
-	// Solana-specific
-	TokenSymbol string // e.g., "USDC", "SOL"
-	Flow        string // "transfer_request" or "transaction_request"
-	Wallet      string // Solana wallet address
-
-	// Billing details. CCBill requires the canonical name, postal code, and
-	// country; its verified email comes from CheckoutCustomerIdentity. Street,
-	// city, and state are optional. Stripe hosted Checkout collects its own.
-	Email      string
-	NameOnCard string // Canonical full name; first/last are legacy aliases.
-	FirstName  string
-	LastName   string
-	Address1   string
-	City       string
-	State      string
-	Zip        string
-	Country    string
-
-	// Card details (for display, from tokenization)
-	LastFour   string
-	CardType   string
-	ExpiryDate string
-}
+type CheckoutPayment = openrails.CheckoutPayment
 
 // CheckoutSession represents a checkout session.
-type CheckoutSession struct {
-	ID             string
-	Status         string // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
-	Mode           string // "subscription", "one_off"
-	PriceID        string
-	Amount         int64
-	Currency       string
-	PaymentStatus  string // "unpaid", "paid", "no_payment_required"
-	ClientSecret   *string
-	URL            *string // Redirect URL for CCBill/Stripe
-	SubscriptionID *string
-	PaymentID      *string
-	ExpiresAt      int64 // Unix epoch seconds
-	Created        int64 // Unix epoch seconds
-	Metadata       map[string]string
-	RailData       map[string]any // Rail-specific response data
-}
+type CheckoutSession = openrails.CheckoutSession
 
 // ConfirmCheckoutSessionRequest specifies checkout confirmation parameters.
-type ConfirmCheckoutSessionRequest struct {
-	Payment ConfirmPayment
-}
+type ConfirmCheckoutSessionRequest = openrails.ConfirmCheckoutSessionRequest
 
 // ConfirmPayment specifies payment confirmation details (primarily for Solana).
-type ConfirmPayment struct {
-	Rail      string // Must match session rail
-	Signature string // Solana transaction signature
-	Wallet    string // Solana wallet that signed
-}
+type ConfirmPayment = openrails.ConfirmPayment
 
 // -------------------------------- Billing Status --------------------------------
 
@@ -195,14 +131,7 @@ type BillingStatus struct {
 // (or#912). Entitlement and ProductKey are IMMUTABLE identifiers — hosts key
 // policy documents and token claims on Entitlement; DisplayName is mutable
 // and for display only.
-type EffectiveTier struct {
-	Group       string
-	Entitlement string
-	DisplayName string
-	TierRank    int
-	ProductID   string
-	ProductKey  string
-}
+type EffectiveTier = openrails.EffectiveTier
 
 // -------------------------------- Subscriptions --------------------------------
 

@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/merchants"
@@ -22,14 +20,8 @@ import (
 // MODE 1 (#723, merchant_source=manifest): the store is the runtime's
 // read-only provider manifest, alongside encrypted managed webhook URLs.
 //
-// Failure posture (#748, mirrors #667's encryption-posture gate): outside
-// development a failure to arm is a boot ERROR, not a loud degradation —
-// silently falling back to boot-config-only rails means webhooks 503 forever
-// behind a green /readyz, exactly the "degraded state that boots healthy"
-// #748 closes. Development keeps the original warn-and-continue so a
-// from-scratch dev boot with no Vault/master key still runs. Either way, the
-// armed/unarmed state (and, once armed, live backend reachability) is
-// surfaced by Runtime.Ready (#748) — never invisible after this returns.
+// A configured backend that cannot be initialized fails construction in every
+// environment; returning an unusable merchant service is not a fallback.
 func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	if r == nil || r.Merchants != nil || r.DB == nil || r.Config == nil {
 		return nil
@@ -68,15 +60,8 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 	return nil
 }
 
-// armingFailure applies the #667-style environment gate to a merchants-arming
-// failure: a boot error everywhere except development, where it warns and lets
-// the pull plane fall back to the boot-config rails plane only.
 func (r *Runtime) armingFailure(err error) error {
-	if r.Config.IsDev() {
-		log.WithError(err).Warn("merchants service failed to arm; provider pulls fall back to boot-config rails only (#699) — development only, refuses boot outside development (#748)")
-		return nil
-	}
-	return fmt.Errorf("merchants service failed to arm outside development (#748): %w", err)
+	return fmt.Errorf("initialize merchant services: %w", err)
 }
 
 // ArmMerchantsService installs the merchants service AND wires its store into

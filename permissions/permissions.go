@@ -21,13 +21,16 @@ const (
 	MerchantInvoicesRead           = "merchant:invoices:read"
 	MerchantInvoicesUpdate         = "merchant:invoices:update"
 	MerchantInvoicesCollect        = "merchant:invoices:collect"
-	MerchantPaymentsRead           = "merchant:payments:read"
-	MerchantPaymentsRefund         = "merchant:payments:refund"
-	MerchantSubscriptionsRead      = "merchant:subscriptions:read"
-	MerchantSubscriptionsUpdate    = "merchant:subscriptions:update"
-	MerchantAdmissionsCreate       = "merchant:admissions:create"
-	MerchantUsageRead              = "merchant:usage:read"
-	MerchantRepairAlertsRead       = "merchant:repair-alerts:read"
+	// MerchantCheckoutCreate permits merchant automation to purchase for a customer.
+	// It is owner-only by default and separate from customer-profile editing.
+	MerchantCheckoutCreate      = "merchant:checkout:create"
+	MerchantPaymentsRead        = "merchant:payments:read"
+	MerchantPaymentsRefund      = "merchant:payments:refund"
+	MerchantSubscriptionsRead   = "merchant:subscriptions:read"
+	MerchantSubscriptionsUpdate = "merchant:subscriptions:update"
+	MerchantAdmissionsCreate    = "merchant:admissions:create"
+	MerchantUsageRead           = "merchant:usage:read"
+	MerchantRepairAlertsRead    = "merchant:repair-alerts:read"
 	// MerchantMetricsRead gates the #733 analytics query surface
 	// (/merchant/metrics/query + /schema) and reading the #741 dashboard
 	// (a dashboard is a saved view over metrics).
