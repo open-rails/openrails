@@ -36,14 +36,9 @@ func (s *Server) registerSelfServiceRoutes(mux *http.ServeMux) {
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
 		s.runtime, delegatedMW, providerRoutes)
 
-	var ensurer middleware.CustomerGroupEnsurer
-	if s.controlPlane != nil {
-		ensurer = s.controlPlane
-	}
 	httproutes.RegisterCustomerTreasuryRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.CustomerRoutePrefix, s.runtime, s.recordBrowserRoute),
-		s.runtime, delegatedMW, providerRoutes,
-		middleware.EnsureCustomerPermissionGroup(ensurer))
+		s.runtime, delegatedMW, providerRoutes)
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("delegated self-service API routes registered on public handler")

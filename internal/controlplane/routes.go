@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"net/http"
-	"strings"
 
 	authhttp "github.com/open-rails/authkit/authhttp"
 )
@@ -59,7 +58,7 @@ func (c *ControlPlane) MountedRouteGroups() []authhttp.RouteGroup {
 }
 
 // RouteSpecs returns the concrete AuthKit route specs the control plane
-// serves (the posture's groups, lazy-customer-wrapped). The HTTP layer mounts
+// serves (the posture's groups). The HTTP layer mounts
 // this exact surface via authhttp.MountHandler (#250) with the same
 // MountedRouteGroups + WrapAuthRoute inputs; the route-surface test pins the
 // two against each other.
@@ -80,49 +79,11 @@ func (c *ControlPlane) RouteSpecs() []authhttp.RouteSpec {
 	return out
 }
 
-// WrapAuthRoute is the control plane's per-route mount decoration
-// (MountOptions.Wrap): declared customer group-management routes get the lazy
-// customer permission-group ensure; the generated merchant CREATION route
-// (ak#263, mounted only under WithMerchantCreation) gets the or#914 directory
-// row attach; everything else passes through.
+// WrapAuthRoute attaches the merchant directory row around explicit hosted
+// merchant creation. Ordinary auth/billing requests never create portal groups.
 func (c *ControlPlane) WrapAuthRoute(spec authhttp.RouteSpec, h http.Handler) http.Handler {
-	if c == nil || spec.Group != authhttp.RoutePermissionGroups {
-		return h
-	}
-	if c.merchantCreation != nil && spec.Method == http.MethodPost && spec.Path == "/"+string(MerchantType) {
+	if c != nil && spec.Group == authhttp.RoutePermissionGroups && c.merchantCreation != nil && spec.Method == http.MethodPost && spec.Path == "/"+string(MerchantType) {
 		return c.merchantCreationAttachHandler(h)
 	}
-	if !strings.HasPrefix(spec.Path, "/"+string(CustomerType)+"/{instance_slug}/") {
-		return h
-	}
-	return c.lazyCustomerGroupHandler(h)
-}
-
-func (c *ControlPlane) lazyCustomerGroupHandler(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if err := c.ensureLazyCustomerGroupForRequest(r); err != nil {
-			http.Error(w, "customer permission-group ensure failed", http.StatusInternalServerError)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func (c *ControlPlane) ensureLazyCustomerGroupForRequest(r *http.Request) error {
-	if c == nil || c.userVerifier == nil || r == nil {
-		return nil
-	}
-	instanceSlug := strings.TrimSpace(r.PathValue("instance_slug"))
-	if instanceSlug == "" {
-		return nil
-	}
-	claims, err := c.userVerifier.VerifyRequestLive(r)
-	if err != nil {
-		return nil
-	}
-	if strings.TrimSpace(claims.UserID) != instanceSlug {
-		return nil
-	}
-	_, err = c.EnsureCustomerPermissionGroup(r.Context(), instanceSlug, claims.UserID)
-	return err
+	return h
 }

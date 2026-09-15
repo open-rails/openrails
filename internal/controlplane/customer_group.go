@@ -9,8 +9,8 @@ import (
 	"github.com/open-rails/authkit"
 )
 
-// EnsureCustomerPermissionGroup lazily materializes the AuthKit customer group
-// for a payer that has started managing spend delegation or credentials.
+// EnsureCustomerPermissionGroup explicitly creates the hosted customer-portal
+// membership used by SaaS. Billing records and spend policies do not call this.
 func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, customerID, ownerSubject string) (string, error) {
 	core := c.Core()
 	if core == nil {

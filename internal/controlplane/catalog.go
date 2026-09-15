@@ -33,9 +33,9 @@ import (
 //
 //   - MerchantType — a merchant IS a top-level permission-group (child of root).
 //     Staff roles owner/support/viewer; holds `merchant:*`.
-//   - CustomerType — every payer is a `customer` group (child of root). Roles
-//     owner/member; holds `customer:*`. Universal: every customer can delegate
-//     the spending of its balance.
+//   - CustomerType — explicit hosted portal membership (child of root).
+//     Roles owner/member; holds customer:* for that group. Billing customer
+//     records and spend policies do not require an AuthKit customer group.
 //
 // Both are addressed by (type, resourceRef): the merchant slug for MerchantType,
 // the customer uuid string for CustomerType.
@@ -133,12 +133,11 @@ func Groups() []authcore.PersonaDef {
 			},
 		},
 		{
+			// Explicit hosted customer-portal membership only. Billing
+			// credentials are merchant-scoped; customer-owned machine keys
+			// and signing applications have no supported receiver path.
 			Name:   CustomerType,
 			Parent: authkit.RootPersona,
-			Capabilities: authcore.PersonaCapabilities{
-				APIKeys:            true,
-				RemoteApplications: true,
-			},
 			Roles: []authcore.RoleDef{
 				// owner (= customer:*) is auto-seeded.
 				{

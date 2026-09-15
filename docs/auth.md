@@ -96,3 +96,17 @@ Unverified token issuers never trigger arbitrary database or JWKS discovery.
 Cookie origins use canonical browser spelling: lowercase host, no wildcard,
 userinfo, path, query, fragment, or explicit default port. HTTPS is required;
 HTTP is allowed for explicit localhost/loopback development origins.
+
+## Customer portal membership
+
+Billing customer records and spend-delegation policies are merchant-scoped and
+do not create AuthKit customer groups as a side effect. Hosts such as
+OpenRails-SaaS explicitly call `EnsureCustomerPermissionGroup` when a user
+creates a portal account. `CustomerType`, `CustomerGroup`, and
+`CustomerGroupSlug` remain available for that membership and discovery flow.
+
+Customer groups do not issue API keys or register signing applications: those
+credentials have no supported customer-treasury authentication path. Their
+seven generated credential routes are absent. Merchant API keys and registered
+merchant applications remain supported. Existing generated customer member,
+role, invite and descriptor routes require an explicitly created group.

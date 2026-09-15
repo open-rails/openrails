@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/open-rails/authkit"
 
@@ -61,11 +60,6 @@ type ControlPlane struct {
 	// issuer/audience/keys the control plane signs with, plus a self-service
 	// permissions validator. See delegated.go.
 	delegatedVerifier *verify.Verifier
-	// userVerifier validates first-party AuthKit user access tokens for narrow
-	// OpenRails wrappers around AuthKit-generated routes. AuthKit still performs
-	// the authoritative route auth inside its handler; this verifier only lets
-	// OpenRails run pre-auth setup such as lazy customer-group creation.
-	userVerifier *verify.Verifier
 
 	// issuer is the control plane's token issuer (`iss`), stamped on minted tokens
 	// so they verify against delegatedVerifier.
@@ -535,22 +529,6 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 
 	authSvc.Verifier().WithLiveness(authClient)
 
-	// The verifier trusts exactly what coreCfg above declared (issuer,
-	// audiences, API-key prefix) — read the local values instead of an
-	// accessor so mint and verify cannot drift.
-	userVerifier := verify.NewVerifier(
-		verify.WithSkew(5*time.Second),
-		verify.WithAPIKeyPrefix(APIKeyPrefix),
-		verify.WithSSRFGuard(),
-	)
-	if err := userVerifier.AddIssuer(issuer, []string{billingauth.TokenAudience}, verify.IssuerOptions{
-		PublicKeys: authClient.PublicKeysByKID,
-		IsLocal:    true,
-	}); err != nil {
-		return nil, fmt.Errorf("controlplane: build user verifier: %w", err)
-	}
-	userVerifier.WithService(authClient).WithLiveness(authClient)
-
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts registered delegated tokens with the canonical
 	// `openrails` audience. Customer delegated self-service JWTs may be
@@ -578,7 +556,6 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		merchantCreationPattern: merchantCreationPattern,
 		pool:                    db.WrapPool(pool, cfg.DB.SchemaName()),
 		delegatedVerifier:       delegatedVerifier,
-		userVerifier:            userVerifier,
 		issuer:                  issuer,
 		delegatedAudiences:      []string{billingauth.TokenAudience},
 	}

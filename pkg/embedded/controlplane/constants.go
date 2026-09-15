@@ -26,8 +26,8 @@ func CustomerGroup(customerID string) authkit.GroupRef {
 
 // CustomerGroupSlug returns the AuthKit permission-group instance_slug for a
 // user's own customer group. By OpenRails convention (#567) that slug IS the
-// user's own id — EnsureCustomerPermissionGroup and the lazy customer-group
-// route wrapper both key off exactly this equality internally. Hosts walking a subject's ListSubjectGroups memberships use
+// user's own id. The host explicitly calls EnsureCustomerPermissionGroup when
+// creating its customer portal account. Hosts walking ListSubjectGroups use
 // this helper (instead of re-deriving the convention as
 // `g.InstanceSlug == userID`) to recognize a `CustomerType` membership as the
 // caller's own self-owned group, e.g.:
