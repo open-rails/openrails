@@ -92,3 +92,7 @@ its managed keys. After in-process application registration, call
 `ControlPlane.ReloadRemoteApplications` for immediate discovery. Out-of-process
 registration/key rotation converges through the bounded registry refresh.
 Unverified token issuers never trigger arbitrary database or JWKS discovery.
+
+Cookie origins use canonical browser spelling: lowercase host, no wildcard,
+userinfo, path, query, fragment, or explicit default port. HTTPS is required;
+HTTP is allowed for explicit localhost/loopback development origins.

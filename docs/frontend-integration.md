@@ -329,3 +329,7 @@ Handle in the frontend:
   challenge and send `X-Captcha-Token` until the challenge TTL expires.
 
 Full HTTP reference: [docs/api/endpoints.md](api/endpoints.md).
+
+Cookie origins use canonical browser spelling: lowercase host, no wildcard,
+userinfo, path, query, fragment, or explicit default port. HTTPS is required;
+HTTP is allowed for explicit localhost/loopback development origins.

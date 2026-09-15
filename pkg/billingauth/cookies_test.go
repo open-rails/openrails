@@ -59,8 +59,15 @@ func TestCookieAuthenticationBoundary(t *testing.T) {
 			}
 		})
 	}
-	for _, bad := range []string{"*", "https://merchant.example/", "https://user@merchant.example", "https://merchant.example?q=1", "https://merchant.example#part", "//merchant.example", "ftp://merchant.example"} {
+	for _, bad := range []string{"*", "https://merchant.example/", "https://user@merchant.example", "https://merchant.example?q=1", "https://merchant.example#part", "//merchant.example", "ftp://merchant.example", "https://*", "https://*.example", "https://:443", "https://EXAMPLE.com", "https://example.com:443", "https://example.com:0443", "http://example.com", "https://127.1", "https://2130706433", "https://0x7f000001", "https://[0:0::1]", "https://example.com?", "https://example.com#"} {
 		_, err := CookieAuthentication(bad)
 		require.Error(t, err, bad)
+	}
+}
+
+func TestCookieAuthenticationCanonicalOrigins(t *testing.T) {
+	for _, origin := range []string{"https://merchant.example", "https://merchant.example:8443", "https://[2001:db8::1]", "http://localhost:8080", "http://tenant.localhost:8080", "http://127.0.0.1:8080", "http://[::1]:8080"} {
+		_, err := CookieAuthentication(origin)
+		require.NoError(t, err, origin)
 	}
 }
