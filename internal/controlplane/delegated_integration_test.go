@@ -16,7 +16,10 @@ func TestDelegatedStoredAuthorityWorkflow(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	cp := newTestControlPlane(t, pool)
-	seed, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug})
+	owner, err := cp.Core().CreateUser(ctx, "delegation-owner@example.test", "delegation-owner")
+	require.NoError(t, err)
+	// Revoking the app must leave the merchant's human recovery owner intact.
+	seed, err := cp.Bootstrap(ctx, BootstrapOptions{BootstrapMerchantSlug: dbtest.TestMerchantSlug, InitialAdminUserID: owner.ID})
 	require.NoError(t, err)
 	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
 	require.NoError(t, err)
