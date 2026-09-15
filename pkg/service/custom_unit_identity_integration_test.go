@@ -163,7 +163,7 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	captured, err := svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 25, EventType: "render", Resource: "test-render"})
 	require.NoError(t, err)
 	require.Equal(t, canonical, captured.Currency)
-	replay, err := svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 25})
+	replay, err := svc.CaptureHold(a, CaptureHoldRequest{RequestID: requestID, Amount: 25, EventType: "render", Resource: "test-render"})
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
 	account, err = svc.GetCreditAccount(a, payer, newName+"/tokens")
