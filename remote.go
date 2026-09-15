@@ -153,39 +153,6 @@ func (c *remote) bearer(ctx context.Context) (string, error) {
 	return strings.TrimSpace(tok), nil
 }
 
-func admitRequestBody(req AdmitRequest) map[string]any {
-	body := map[string]any{
-		"customer_id":      req.CustomerID,
-		"estimated_amount": req.EstimatedAmount,
-		"request_id":       req.RequestID,
-	}
-	if req.Invoker != "" {
-		body["invoker"] = req.Invoker
-	}
-	if req.InvokerType != "" {
-		body["invoker_type"] = req.InvokerType
-	}
-	if trustLevel := strings.TrimSpace(req.TrustLevel); trustLevel != "" {
-		body["trust_level"] = trustLevel
-	}
-	if req.Resource != "" {
-		body["resource"] = req.Resource
-	}
-	if req.Currency != "" {
-		body["currency"] = req.Currency
-	}
-	if req.Source != "" {
-		body["source"] = req.Source
-	}
-	if req.ExpiresAt != nil {
-		body["expires_at"] = *req.ExpiresAt
-	}
-	if len(req.Roles) > 0 {
-		body["roles"] = req.Roles
-	}
-	return body
-}
-
 // DepositCredits implements Client (handler ServiceDepositCredits).
 func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	currency := normalizeCurrency(req.Currency)
@@ -419,14 +386,12 @@ func (c *remote) GetCreditLimit(ctx context.Context, customerID, currency string
 // itself answers 200 with positional per-item verdicts; batch-level validation
 // (empty / oversized) is the server's, so both transports reject identically.
 func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error) {
-	bodies := make([]map[string]any, 0, len(items))
-	for _, item := range items {
-		bodies = append(bodies, admitRequestBody(item))
-	}
 	var out struct {
 		Items []AdmitBatchVerdict `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admissions", map[string]any{"items": bodies}, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/admissions", struct {
+		Items []AdmitRequest `json:"items"`
+	}{Items: items}, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil

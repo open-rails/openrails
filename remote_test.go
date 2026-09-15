@@ -66,7 +66,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}
 
 	if _, err := client.AdmitBatch(context.Background(), []AdmitRequest{{
-		CustomerID: "cust_1", TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: "req_1",
+		CustomerID: "cust_1", TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: "req_1", AccrualRateDeltaPerHour: 42,
 	}}); err != nil {
 		t.Fatalf("AdmitBatch: %v", err)
 	}
@@ -77,6 +77,9 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	admitBody, _ := items[0].(map[string]any)
 	if admitBody["trust_level"] != "gold" {
 		t.Fatalf("expected trust_level on admission item, got %#v", admissionsBody)
+	}
+	if admitBody["accrual_rate_delta_per_hour"] != float64(42) {
+		t.Fatalf("prospective rate missing from admission: %#v", admitBody)
 	}
 
 	trustLevel, err := client.GetTrustLevel(context.Background(), "cust_1", "USD")
