@@ -33,7 +33,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 
 	suffix := uuid.NewString()[:8]
 	ownerID, otherID := uuid.New(), uuid.New()
-	subject := uuid.NewString()
+	subject := uuid.New()
 
 	superRaw, err := pgxpool.New(ctx, superDSN)
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 	// portal's "which merchants do I buy from" question.
 	for _, id := range []uuid.UUID{ownerID, otherID} {
 		_, err = super.Exec(ctx,
-			`INSERT INTO openrails.customers (merchant_id, subject) VALUES ($1::uuid, $2)`, id, subject)
+			`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1::uuid, $2)`, id, subject)
 		require.NoError(t, err)
 	}
 
@@ -126,7 +126,7 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 		}
 		require.ElementsMatch(t, []string{"or824-owner-" + suffix, "or824-other-" + suffix}, slugs)
 
-		empty, err := gen.New(appPool).ListMerchantsForCustomerSubject(ctx, uuid.NewString())
+		empty, err := gen.New(appPool).ListMerchantsForCustomerSubject(ctx, uuid.New())
 		require.NoError(t, err)
 		require.Empty(t, empty)
 	})

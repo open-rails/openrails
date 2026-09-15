@@ -459,8 +459,8 @@ func TestWorkerHealth_AlertFanoutReportsPartialFailure(t *testing.T) {
 	// RLS-enforcing B connection cannot see or update that conflicting row.
 	conflictingID := db.SystemCustomerID(merchantB.UUID())
 	_, err := super.Pool().Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		conflictingID, merchantA.UUID(), conflictingID.String(),
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		conflictingID, merchantA.UUID(),
 	)
 	require.NoError(t, err)
 

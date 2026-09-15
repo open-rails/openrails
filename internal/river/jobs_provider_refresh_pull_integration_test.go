@@ -174,12 +174,11 @@ func seedLocalCCBillSub(t *testing.T, dbi *db.DB, mid merchant.ID, pspID uuid.UU
 	ctx := merchant.WithID(context.Background(), mid)
 	require.NoError(t, dbi.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		cust, prod, price := uuid.New(), uuid.New(), uuid.New()
-		subject := cust.String()
 		exec := func(sql string, args ...any) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`, cust, mid.UUID(), subject)
+		exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, cust, mid.UUID())
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1, $2, $2, '{}'::jsonb, $3)`,
 			prod, "pull-cc-"+railSubID, mid.UUID())
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, merchant_id) VALUES ($1, $2, 5000000, 'USD', $3)`,

@@ -51,7 +51,7 @@ type ProductAccessGrant struct {
 	MerchantID uuid.UUID `json:"merchant_id"`
 
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// Join openrails.customers for issuer/subject.
+	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 	ProductID  uuid.UUID `json:"product_id"`
 

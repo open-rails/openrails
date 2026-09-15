@@ -41,42 +41,34 @@ SQL="\\set ON_ERROR_STOP on
 \\pset border 2
 
 \\echo '--- checkout_sessions ---'
-SELECT id, status, rail, price_id, transaction_id, subscription_id, payment_id, created_at
+SELECT merchant_id, id, status, rail, price_id, transaction_id, subscription_id, payment_id, created_at
 FROM openrails.checkout_sessions
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
-   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
-     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
-   ))
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- payment_methods ---'
-SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, created_at
+SELECT merchant_id, id, customer_id, rail, rail_customer_ref, rail_method_ref, created_at
 FROM openrails.payment_methods
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
-   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
-     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
-   ))
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- subscriptions ---'
-SELECT id, customer_id, status, rail, rail_subscription_id, price_id, created_at
+SELECT merchant_id, id, customer_id, status, rail, rail_subscription_id, price_id, created_at
 FROM openrails.subscriptions
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND gateway_response->>'e2e_run_id' = :'e2e_run_id')
-   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
-     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
-   ))
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY created_at DESC
 LIMIT 50;
 
 \\echo '--- payments ---'
-SELECT id, customer_id, rail, transaction_id, amount, currency, purchased_at
+SELECT merchant_id, id, customer_id, rail, transaction_id, amount, currency, purchased_at
 FROM openrails.payments
 WHERE (NULLIF(:'e2e_run_id', '') IS NOT NULL AND metadata->>'e2e_run_id' = :'e2e_run_id')
-   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id IN (
-     SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'
-   ))
+   OR (NULLIF(:'e2e_run_id', '') IS NULL AND customer_id = NULLIF(:'e2e_user_id', '')::uuid)
 ORDER BY purchased_at DESC
 LIMIT 50;
 "

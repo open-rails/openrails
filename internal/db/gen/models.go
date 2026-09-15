@@ -375,9 +375,7 @@ type OpenrailsCustomer struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
 	// Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.
-	Issuer *string
-	// Host/AuthKit stable UUID subject. Natural key is (merchant_id, subject); issuer does not participate.
-	Subject    *string
+	Issuer     *string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 }

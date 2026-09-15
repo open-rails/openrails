@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/authkit"
 
@@ -129,17 +130,20 @@ func SubjectHasVaultedPaymentMethod(ctx context.Context, a *app.App, vaultMercha
 	if vaultMerchant.IsZero() || subjectUserID == "" {
 		return false, errors.New("vault merchant and subject are required")
 	}
+	subjectID, err := uuid.Parse(subjectUserID)
+	if err != nil {
+		return false, fmt.Errorf("subject must be a UUID: %w", err)
+	}
 	var vaulted bool
-	err := cp.Pool().MerchantTx(ctx, vaultMerchant, func(ctx context.Context, tx pgx.Tx) error {
+	err = cp.Pool().MerchantTx(ctx, vaultMerchant, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
 			SELECT EXISTS (
 				SELECT 1
 				  FROM openrails.payment_methods pm
-				  JOIN openrails.customers c ON c.id = pm.customer_id
 				 WHERE pm.merchant_id = $1::uuid
-				   AND c.subject = $2
+				   AND pm.customer_id = $2::uuid
 				   AND pm.parked_at IS NULL)
-		`, vaultMerchant.String(), subjectUserID).Scan(&vaulted)
+		`, vaultMerchant.String(), subjectID).Scan(&vaulted)
 	})
 	return vaulted, err
 }

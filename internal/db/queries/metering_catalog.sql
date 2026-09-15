@@ -242,7 +242,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 
 -- name: ListUsageMeterOverrides :many
 SELECT card.customer_id,
-       COALESCE(customer.subject, '') AS subject,
+       card.customer_id::text AS subject,
        COALESCE((
            SELECT BTRIM(subscription.user_email)
            FROM openrails.subscriptions subscription
@@ -258,8 +258,6 @@ SELECT card.customer_id,
        card.created_at,
        card.updated_at
 FROM openrails.catalog_rate_cards card
-JOIN openrails.customers customer
-  ON customer.id = card.customer_id
 WHERE card.merchant_id = sqlc.arg(merchant_id)
   AND card.meter_key = sqlc.arg(meter_key)::text
   AND card.customer_id IS NOT NULL

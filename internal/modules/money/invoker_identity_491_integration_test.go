@@ -28,28 +28,19 @@ func TestInvokerIdentityAndPayerNaturalKey(t *testing.T) {
 		issuerB := "https://host-two.example"
 		subjAID := uuid.New()
 		subjBID := uuid.New()
-		subjA := subjAID.String()
-		subjB := subjBID.String()
 
-		a1, err := q.UpsertCustomerBySubject(ctx, gen.UpsertCustomerBySubjectParams{MerchantID: merchantID, Issuer: &issuerA, Subject: &subjAID})
+		a1, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{MerchantID: merchantID, Issuer: &issuerA, ID: subjAID})
 		require.NoError(t, err)
-		a2, err := q.UpsertCustomerBySubject(ctx, gen.UpsertCustomerBySubjectParams{MerchantID: merchantID, Issuer: &issuerB, Subject: &subjAID})
+		a2, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{MerchantID: merchantID, Issuer: &issuerB, ID: subjAID})
 		require.NoError(t, err)
 		require.Equal(t, a1, a2, "same (merchant,subject) must survive issuer changes")
 
-		b1, err := q.UpsertCustomerBySubject(ctx, gen.UpsertCustomerBySubjectParams{MerchantID: merchantID, Issuer: &issuerA, Subject: &subjBID})
+		b1, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{MerchantID: merchantID, Issuer: &issuerA, ID: subjBID})
 		require.NoError(t, err)
 		require.NotEqual(t, a1, b1, "distinct subjects -> distinct customers")
 
-		// External-subjects lookup resolves both, keyed by subject.
-		rows, err := q.LookupCustomerIDsBySubjects(ctx, gen.LookupCustomerIDsBySubjectsParams{MerchantID: merchantID, Subjects: []string{subjA, subjB}})
-		require.NoError(t, err)
-		got := map[string]uuid.UUID{}
-		for _, r := range rows {
-			require.NotNil(t, r.Subject)
-			got[*r.Subject] = r.ID
-		}
-		require.Equal(t, a1, got[subjA])
-		require.Equal(t, b1, got[subjB])
+		var issuer string
+		require.NoError(t, pool.QueryRow(ctx, "SELECT issuer FROM openrails.customers WHERE merchant_id=$1 AND id=$2", merchantID, subjAID).Scan(&issuer))
+		require.Equal(t, issuerB, issuer)
 	})
 }

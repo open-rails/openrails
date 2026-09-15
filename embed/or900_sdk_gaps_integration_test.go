@@ -47,9 +47,9 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 	newPayer := func() uuid.UUID {
 		id := uuid.New()
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
-			VALUES ($1, $2, 'or900', $3, now(), now())`,
-			id, dbtest.TestMerchantID.UUID(), id.String())
+			INSERT INTO openrails.customers (id, merchant_id, issuer, created_at, last_seen_at)
+			VALUES ($1, $2, 'or900', now(), now())`,
+			id, dbtest.TestMerchantID.UUID())
 		require.NoError(t, err)
 		return id
 	}

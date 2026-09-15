@@ -85,9 +85,7 @@ configuration, not customer activity, so listing them whole does not scale with
 records on file.
 
 **PERMANENT — capped by a caller-supplied list.**
-`LookupCustomerIDsBySubjects` is capped by `subjects[]`;
-`uq_customers_merchant_subject` is a *partial* unique index and the auditor
-deliberately refuses to credit partial indexes. `SnapshotPaymentCards` is capped
+`SnapshotPaymentCards` is capped
 by `transaction_ids[]` and index-backed by
 `idx_payments_merchant_rail_transaction`; a `UNIQUE(merchant_id, rail,
 transaction_id)` would make it provable.

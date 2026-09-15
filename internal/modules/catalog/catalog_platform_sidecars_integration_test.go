@@ -74,8 +74,8 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 
 	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-			customerA, tA.UUID(), customerA.String(),
+			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			customerA, tA.UUID(),
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,

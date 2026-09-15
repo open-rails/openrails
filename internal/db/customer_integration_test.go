@@ -64,8 +64,8 @@ func seedForeignCustomer(ctx context.Context, t *testing.T, pool gen.DBTX) (uuid
 		otherMerchantID, "cross-merchant-"+otherMerchantID.String()[:8])
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		customerID, otherMerchantID, customerID.String())
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		customerID, otherMerchantID)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.customers WHERE id = $1`, customerID)
@@ -74,12 +74,9 @@ func seedForeignCustomer(ctx context.Context, t *testing.T, pool gen.DBTX) (uuid
 	return otherMerchantID, customerID
 }
 
-// #889 family: customers.id is globally unique but customer rows are merchant
-// isolated, so an id already owned by another merchant must be REFUSED, never
-// re-pointed. On a privileged (RLS-bypassing) handle — bootstrap, import, the
-// dev owner connection — the upsert used to rewrite the other merchant's row
-// and hand the caller an id it does not own.
-func TestEnsureCustomerID_RefusesCrossMerchantClaim(t *testing.T) {
+// A privileged import can materialize the same subject in another merchant
+// without transferring or modifying the original customer identity.
+func TestEnsureCustomerID_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 	ctx := context.Background()
 	// The privileged handle IS the subject of this test: the guard has to hold
 	// where RLS does not. A bare SharedPGXPool is RLS-enforcing with no
@@ -90,20 +87,17 @@ func TestEnsureCustomerID_RefusesCrossMerchantClaim(t *testing.T) {
 	otherMerchantID, customerID := seedForeignCustomer(ctx, t, pool)
 
 	_, err := db.EnsureCustomerID(ctx, pool, dbtest.TestMerchantID.UUID(), customerID.String())
-	require.ErrorIs(t, err, db.ErrCustomerOwnedByAnotherMerchant)
+	require.NoError(t, err)
 
-	var ownerID uuid.UUID
+	var owners []uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT merchant_id FROM openrails.customers WHERE id = $1`, customerID,
-	).Scan(&ownerID))
-	require.Equal(t, otherMerchantID, ownerID, "the owning merchant must not change")
+		`SELECT array_agg(merchant_id) FROM openrails.customers WHERE id = $1`, customerID,
+	).Scan(&owners))
+	require.ElementsMatch(t, []uuid.UUID{otherMerchantID, dbtest.TestMerchantID.UUID()}, owners)
 }
 
-// EnsureCustomerRow is the FK-target materializer every commerce Create calls.
-// Its ON CONFLICT DO NOTHING used to make a cross-merchant id a SILENT success,
-// so the caller's row landed pointing at another merchant's customer (FK checks
-// bypass RLS).
-func TestEnsureCustomerRow_RefusesCrossMerchantClaim(t *testing.T) {
+// Commerce materialization creates an independent FK target for each merchant.
+func TestEnsureCustomerRow_SameSubjectHasIndependentMerchantRows(t *testing.T) {
 	ctx := context.Background()
 	// Privileged for the same reason as the sibling above: FK checks bypass RLS,
 	// so the silent-no-op corruption this guards is reachable precisely here.
@@ -113,13 +107,13 @@ func TestEnsureCustomerRow_RefusesCrossMerchantClaim(t *testing.T) {
 	otherMerchantID, customerID := seedForeignCustomer(ctx, t, pool)
 
 	err := db.EnsureCustomerRow(ctx, pool, dbtest.TestMerchantID.UUID(), customerID)
-	require.ErrorIs(t, err, db.ErrCustomerOwnedByAnotherMerchant)
+	require.NoError(t, err)
 
-	var ownerID uuid.UUID
+	var owners []uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT merchant_id FROM openrails.customers WHERE id = $1`, customerID,
-	).Scan(&ownerID))
-	require.Equal(t, otherMerchantID, ownerID)
+		`SELECT array_agg(merchant_id) FROM openrails.customers WHERE id = $1`, customerID,
+	).Scan(&owners))
+	require.ElementsMatch(t, []uuid.UUID{otherMerchantID, dbtest.TestMerchantID.UUID()}, owners)
 }
 
 // The same id under the SAME merchant stays a plain idempotent no-op.
@@ -147,10 +141,8 @@ func TestEnsureCustomerRow_RepeatIsIdempotent(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
-// A concurrent first-touch of the SAME customer under the same merchant must
-// converge, not be mistaken for a foreign owner: the insert sees nothing (the
-// other writer is uncommitted at snapshot time) and the locking re-read settles
-// it once that writer commits (#889).
+// The scoped unique key resolves concurrent first touches of one customer.
+// A waiting insert completes after the other transaction commits.
 func TestEnsureCustomerRow_ConcurrentFirstTouchConverges(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
@@ -170,8 +162,8 @@ func TestEnsureCustomerRow_ConcurrentFirstTouchConverges(t *testing.T) {
 	// turning a one-line assertion failure into a whole-package hang.
 	defer func() { _ = tx.Rollback(ctx) }()
 	_, err = tx.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		customerID, tenantID, customerID.String())
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		customerID, tenantID)
 	require.NoError(t, err)
 
 	committed := make(chan error, 1)

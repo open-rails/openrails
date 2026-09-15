@@ -58,7 +58,7 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 	for i := 0; i < n; i++ {
 		subID := uuid.New()
 		custID, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{
-			ID: uuid.New(), MerchantID: m.id, Subject: nil,
+			ID: uuid.New(), MerchantID: m.id,
 		})
 		require.NoError(t, err)
 		psid := fmt.Sprintf("psid-%s-%d", sfx, i)

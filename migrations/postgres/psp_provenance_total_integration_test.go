@@ -51,8 +51,8 @@ func newPSPFixture(t *testing.T) pspFixture {
 		f.pspB, f.merchant, "or893-b-"+uuid.NewString()[:8])
 
 	f.customer = uuid.New()
-	exec(`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		f.customer, f.merchant, uuid.NewString())
+	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		f.customer, f.merchant)
 	f.product, f.price = uuid.New(), uuid.New()
 	exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
 	      VALUES ($1, $2, $2, '{}'::jsonb, $3)`, f.product, "or893-p-"+uuid.NewString()[:8], f.merchant)
@@ -94,8 +94,8 @@ func (f pspFixture) newCustomer(t *testing.T) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
 	_, err := f.pool.Exec(context.Background(),
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		id, f.merchant, uuid.NewString())
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		id, f.merchant)
 	require.NoError(t, err)
 	return id
 }

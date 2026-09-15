@@ -349,8 +349,8 @@ func (fx *auFixture) seedInstrument(m *auMerchant, opts instrumentOpts) (uuid.UU
 	t.Helper()
 	customer, product := uuid.New(), uuid.New()
 	_, err := fx.super.Exec(fx.ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		customer, m.id, uuid.NewString())
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		customer, m.id)
 	require.NoError(t, err)
 	_, err = fx.super.Exec(fx.ctx,
 		`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,

@@ -43,8 +43,8 @@ func TestSearchCustomersScopedToMerchant(t *testing.T) {
 		{theirs, otherMerchantID},
 	} {
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-			row.id, row.merchant, row.id.String())
+			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			row.id, row.merchant)
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -279,13 +278,12 @@ func TestEnterpriseInvoicing_EnsureCustomerInvoiceProfileDoesNotOverwrite(t *tes
 	require.Equal(t, 1, createdCount)
 }
 
-func TestEnterpriseInvoicing_CustomerInvoiceProfileRejectsCrossMerchantPayer(t *testing.T) {
+func TestEnterpriseInvoicing_CustomerInvoiceProfileScopesSharedPayer(t *testing.T) {
 	svc, _, _, _, ctx := moneyInEnv(t)
 	foreignMerchantID := uuid.New()
 	foreignPayer := identity.CustomerIDFromString(uuid.NewString())
-	// The fixture is deliberately ANOTHER merchant's — the whole point is that the
-	// service refuses it — so seeding it is one of the few genuinely privileged
-	// cases. No merchant-pinned connection can write another merchant's rows.
+	// The same external subject already belongs to another merchant. Declaring
+	// this merchant's invoice profile must create a separate local relationship.
 	pool := dbtest.SharedSuperuserPGXPool(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customers WHERE id = $1", foreignPayer.UUID())
@@ -298,16 +296,19 @@ func TestEnterpriseInvoicing_CustomerInvoiceProfileRejectsCrossMerchantPayer(t *
 	)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx,
-		"INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)",
-		foreignPayer.UUID(), foreignMerchantID, foreignPayer.UUID().String(),
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		foreignPayer.UUID(), foreignMerchantID,
 	)
 	require.NoError(t, err)
 
 	profile := money.CustomerInvoiceProfile{CollectionMethod: money.CollectionChargeAutomatically}
 	created, err := svc.EnsureCustomerInvoiceProfile(ctx, foreignPayer, profile)
-	require.ErrorIs(t, err, db.ErrCustomerOwnedByAnotherMerchant)
-	require.False(t, created)
-	require.ErrorIs(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile), db.ErrCustomerOwnedByAnotherMerchant)
+	require.NoError(t, err)
+	require.True(t, created)
+	require.NoError(t, svc.SetCustomerInvoiceProfile(ctx, foreignPayer, profile))
+	var otherProfiles int
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM openrails.customer_invoice_profiles WHERE merchant_id=$1 AND customer_id=$2", foreignMerchantID, foreignPayer.UUID()).Scan(&otherProfiles))
+	require.Zero(t, otherProfiles)
 }
 
 // TestEnterpriseInvoicing_PastWindowFinalizeAttachesAccruals pins the #798

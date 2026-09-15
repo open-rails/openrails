@@ -152,7 +152,7 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		require.False(t, has)
 
 		customerID := seedScoped(t, vaultMerchant.String(),
-			`INSERT INTO openrails.customers (merchant_id, issuer, subject) VALUES ($1::uuid, 'test', $2) RETURNING id::text`,
+			`INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1::uuid, 'test', $2) RETURNING id::text`,
 			vaultMerchant.String(), subject)
 		pspID := seedScoped(t, vaultMerchant.String(),
 			`INSERT INTO openrails.psps (merchant_id, rail, environment, account_id, key) VALUES ($1::uuid, 'nmi', 'test', 'acct-`+sfx+`', 'vaultpsp') RETURNING id::text`,
@@ -203,7 +203,7 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		_ = young // stays at now(): under TTL
 		// "active" has a customer — ANY setup/usage disqualifies.
 		seedScoped(t, active.MerchantID.String(),
-			`INSERT INTO openrails.customers (merchant_id, issuer, subject) VALUES ($1::uuid, 'test', $2)`,
+			`INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1::uuid, 'test', $2)`,
 			active.MerchantID.String(), uuid.NewString())
 
 		noticeCount := func(merchantID string) int {
@@ -250,7 +250,7 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 
 		// "regains" shows activity -> its notice is withdrawn.
 		seedScoped(t, regains.MerchantID.String(),
-			`INSERT INTO openrails.customers (merchant_id, issuer, subject) VALUES ($1::uuid, 'test', $2)`,
+			`INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1::uuid, 'test', $2)`,
 			regains.MerchantID.String(), uuid.NewString())
 
 		// ARMED: neverUsed is deleted — group gone, slug RELEASED, row

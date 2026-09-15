@@ -227,8 +227,8 @@ INSERT INTO openrails.products (id, key, display_name, merchant_id)
 VALUES ($1, 'foreign-product', 'Foreign', $2)`, foreignProductID, foreignMerchantID)
 	require.NoError(t, err)
 	_, err = adminPool.Exec(ctx, `
-INSERT INTO openrails.customers (id, merchant_id, subject)
-VALUES ($1, $2, $3)`, foreignCustomerID, foreignMerchantID, foreignCustomerID.String())
+INSERT INTO openrails.customers (id, merchant_id)
+VALUES ($1, $2)`, foreignCustomerID, foreignMerchantID)
 	require.NoError(t, err)
 
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{

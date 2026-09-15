@@ -171,20 +171,20 @@ func TestAdminCustomersSearch(t *testing.T) {
 	pool := h.sharedPool() // super pool: cross-merchant fixture seeding bypasses RLS
 
 	seedCustomer := func(merchantID uuid.UUID, subject string) uuid.UUID {
-		id := uuid.New()
+		id := uuid.MustParse(subject)
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-			id, merchantID, subject)
+			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			id, merchantID)
 		require.NoError(t, err)
 		return id
 	}
 	// Merchant A: two customers, one with a subscription email.
-	aliceSubject := "alice-" + uuid.NewString()
+	aliceSubject := uuid.NewString()
 	alice := seedCustomer(uuid.UUID(dbtest.TestMerchantID), aliceSubject)
-	bobSubject := "bob-" + uuid.NewString()
+	bobSubject := uuid.NewString()
 	bob := seedCustomer(uuid.UUID(dbtest.TestMerchantID), bobSubject)
 	// Merchant B: a customer that must be invisible to A.
-	eveSubject := "eve-" + uuid.NewString()
+	eveSubject := uuid.NewString()
 	seedCustomer(uuid.UUID(b.MerchantID), eveSubject)
 
 	// A cancelled subscription carrying alice's email (email lives on

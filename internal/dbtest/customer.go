@@ -28,7 +28,7 @@ func EnsureCustomerIDPgx(ctx context.Context, t testing.TB, qx gen.DBTX, userID 
 	// No default merchant (#336): materialize the canonical test merchant first so
 	// the customers FK resolves, then pin the customer under it.
 	EnsureTestMerchant(ctx, t, qx)
-	return ensureCustomerUnder(ctx, t, qx, TestMerchantID.UUID(), uid, userID)
+	return ensureCustomerUnder(ctx, t, qx, TestMerchantID.UUID(), uid)
 }
 
 // EnsureCustomerIDPgxFor is EnsureCustomerIDPgx under an EXPLICIT merchant, for
@@ -42,15 +42,14 @@ func EnsureCustomerIDPgxFor(ctx context.Context, t testing.TB, qx gen.DBTX, merc
 	require.NotEmpty(t, userID, "test user id must be set")
 	uid, err := uuid.Parse(userID)
 	require.NoError(t, err, "test user id must be a UUID (#364): %q", userID)
-	return ensureCustomerUnder(ctx, t, qx, merchantID, uid, userID)
+	return ensureCustomerUnder(ctx, t, qx, merchantID, uid)
 }
 
-func ensureCustomerUnder(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID, uid uuid.UUID, subject string) uuid.UUID {
+func ensureCustomerUnder(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID, uid uuid.UUID) uuid.UUID {
 	t.Helper()
 	id, err := gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         uid,
 		MerchantID: merchantID,
-		Subject:    &subject,
 	})
 	require.NoError(t, err, "ensure customer")
 	return id

@@ -83,7 +83,7 @@ func ListAdminCustomers(r *httprequest.Request) {
 	for _, row := range rows {
 		items = append(items, adminCustomerSummary{
 			ID:         row.ID.String(),
-			Subject:    row.Subject,
+			Subject:    &row.Subject,
 			Email:      row.Email,
 			CreatedAt:  row.CreatedAt,
 			LastSeenAt: row.LastSeenAt,

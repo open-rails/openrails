@@ -53,8 +53,8 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 	boundPool := dbtest.SharedMerchantPool(t, uuid.UUID(boundID))
 	customerID := uuid.New()
 	_, err = boundPool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		customerID, uuid.UUID(boundID), customerID.String())
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		customerID, uuid.UUID(boundID))
 	require.NoError(t, err)
 
 	client, clientErr := rt.Client()

@@ -3,11 +3,9 @@ package controlplane
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -50,18 +48,11 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 	if issuer != "" {
 		issuerPtr = &issuer
 	}
-	id, err := q.UpsertCustomerBySubject(ctx, gen.UpsertCustomerBySubjectParams{
+	id, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		MerchantID: merchantID.UUID(),
 		Issuer:     issuerPtr,
-		Subject:    &subjectID,
+		ID:         subjectID,
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The guarded upsert matches no row when the subject is already a
-		// customer of a DIFFERENT merchant (#889). One AuthKit instance can
-		// serve several merchants, so refuse instead of handing back an id the
-		// merchant does not own.
-		return uuid.Nil, fmt.Errorf("%w: subject %s under merchant %s", db.ErrCustomerOwnedByAnotherMerchant, subjectID, merchantID)
-	}
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -82,8 +73,8 @@ type MerchantForSubject struct {
 
 // ListMerchantsForSubject returns the active merchants where subject has a
 // customer record, ordered by slug (openrails-saas #18). subject is the stable
-// AuthKit UUID subject (matched against customers.subject, as TouchCustomer
-// stores it). An empty subject yields no rows rather than an error.
+// AuthKit UUID subject (the merchant-scoped customer ID). An empty subject
+// yields no rows rather than an error.
 //
 // #824: this is a deliberately cross-merchant read — the hosted portal asks it
 // BEFORE a merchant is chosen — and it used to be a plain pool query commented
@@ -102,7 +93,11 @@ func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject stri
 	if c == nil || c.pool == nil {
 		return nil, errors.New("controlplane: pgx pool unavailable for merchant enumeration")
 	}
-	rows, err := gen.New(c.pool).ListMerchantsForCustomerSubject(ctx, subject)
+	subjectID, err := uuid.Parse(subject)
+	if err != nil {
+		return nil, ErrCustomerInvalid
+	}
+	rows, err := gen.New(c.pool).ListMerchantsForCustomerSubject(ctx, subjectID)
 	if err != nil {
 		return nil, err
 	}

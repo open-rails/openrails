@@ -334,7 +334,7 @@ func PutAdminInvoiceProfile(r *httprequest.Request) {
 }
 func writeInvoiceAdminError(r *httprequest.Request, err error) {
 	switch {
-	case db.IsNotFound(err), errors.Is(err, db.ErrCustomerOwnedByAnotherMerchant):
+	case db.IsNotFound(err):
 		r.ErrorJSON(http.StatusNotFound, "invoice or customer not found")
 	case errors.Is(err, money.ErrInvoiceActionNotAllowed), errors.Is(err, money.ErrInvoiceNotRetryable), errors.Is(err, money.ErrInvoiceRetryInProgress), errors.Is(err, money.ErrInvoiceRetryOutcomeUnknown), errors.Is(err, money.ErrInvoiceRetryIdempotencyConflict), errors.Is(err, money.ErrInvoicePaymentReferenceUsed), errors.Is(err, money.ErrInvoicePaymentExceedsDue):
 		r.ErrorJSON(http.StatusConflict, err.Error())

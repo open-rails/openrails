@@ -230,22 +230,17 @@ func (s *EntitlementService) ListActiveRecordsByExternalSubjects(ctx context.Con
 		return nil, err
 	}
 	merchantID := tid.UUID()
-	resolved, err := s.db.Gen(ctx).LookupCustomerIDsBySubjects(ctx, gen.LookupCustomerIDsBySubjectsParams{
-		MerchantID: merchantID,
-		Subjects:   subjects,
-	})
-	if err != nil {
-		return nil, err
-	}
-	subjectByCustomerID := make(map[uuid.UUID]string, len(resolved))
-	customerIDs := make([]uuid.UUID, 0, len(resolved))
-	for _, row := range resolved {
-		subj := ""
-		if row.Subject != nil {
-			subj = *row.Subject
+	subjectByCustomerID := make(map[uuid.UUID]string, len(subjects))
+	customerIDs := make([]uuid.UUID, 0, len(subjects))
+	for _, subject := range subjects {
+		id, err := db.ResolveCustomerID(subject)
+		if err != nil {
+			return nil, err
 		}
-		subjectByCustomerID[row.ID] = subj
-		customerIDs = append(customerIDs, row.ID)
+		if id != uuid.Nil {
+			subjectByCustomerID[id] = subject
+			customerIDs = append(customerIDs, id)
+		}
 	}
 	return s.listActiveRecordsByCustomerIDs(ctx, merchantID, subjectByCustomerID, customerIDs, at)
 }

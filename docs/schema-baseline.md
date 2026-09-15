@@ -1,31 +1,30 @@
-# Final pre-launch schema baseline
+# Fresh pre-v1 schema baseline
 
-The baseline contains the effective OpenRails schema through migration 0023,
-including immutable merchant bindings/retirement, UUID custom-credit units and
-unbound-only local name uniqueness. AuthKit and River retain independent migration
-histories. New OpenRails migrations begin at 0002.
+OpenRails installs one baseline, `0001_schema.up.sql`. AuthKit and River retain
+independent schemas and migration ownership. The owner has declared all pre-v1
+OpenRails data disposable: this release targets fresh databases, with no legacy
+upgrade or backfill path. Published tags remain immutable.
 
-The source chain was captured from PR348 revision `b84cf0a66` through the real
-standalone migrator on PostgreSQL18.6, then dumped with `--schema-only --no-owner`.
-The baseline groups each object's constraints, indexes, triggers, row security and
-grants beside it, preserving dependency order. Initial destructive-operation
-state is one disabled switch. No other application rows are seeded.
+Customer identity is `(merchant_id, id)`, where `id` is the stable subject UUID.
+The same person can hold separate balances, payment methods, subscriptions and
+invoices at different merchants. Issuer is last-seen audit metadata. There is no
+second stored subject string or global customer ownership claim.
 
-The migrated chain and fresh baseline contain the same schema objects and grants.
-The only dump difference is equivalent parentheses around an AND expression in
-`provider_billing_qualification_evidence_shape`; operands and checks are unchanged.
-Fresh migration, owned-schema teardown/reinstall, and the existing standalone and
-embedded orphan-ledger refusal tests verify the new installation boundary.
+Operational foreign keys carry merchant identity. References that bind a saved
+method, payment, grant or invoice to a payer also carry payer identity; invoice
+and ledger-movement relationships carry their unit where required. Nullable
+relationship deletion clears the reference alone, preserving merchant/payer
+identity. Immutable ledger attribution remains free of control-plane FKs so
+history does not cascade when operational rows are removed.
 
-A baseline rewrite is a fresh-database operation. Never clear a migration ledger
-on an existing schema to make it appear current. The standalone and embedded
-orphan-migration fences continue to refuse retained histories containing removed
-migration prefixes. They are not schema checksums: an old database recording only
-prefix1 cannot be distinguished by that fence, and must not be reused for this
-fresh-database cutover.
+The baseline includes the previously qualified Solana cancel/tier-change modes
+and successful-insert-only ledger counters. Duplicate operation attempts do not
+change counters or recheck an already consumed balance. The obsolete0002–0004
+files are folded into this fresh installation target.
 
-Validation uses disposable `openrails_or927_*` databases in the audit PostgreSQL
-instance. A read-only census found no OpenRails/billing schema in the15 retained
-AuthKit/host-app databases visible on this host. Other audit fixtures are retained for
-their owners; their histories must not be relabeled as the new baseline. No remote
-deployment or retained application database was reset by this change.
+Apply the baseline to a new database or explicitly disposable task-owned schema.
+Do not relabel an old migration ledger as current. Normal startup migration
+verification remains in place to reject mismatched artifacts. Tests use the
+actual migrator, PostgreSQL18 and the enforcing application role; schema checks
+cover customer keys, operational relationships and deliberate immutable-history
+exceptions, alongside shared-subject HTTP and embedded workflows.

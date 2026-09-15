@@ -110,8 +110,8 @@ func proveMerchantMeteringRouteToInvoice(
 	negotiatedCustomer := uuid.New()
 	for _, customerID := range []uuid.UUID{defaultCustomer, negotiatedCustomer} {
 		_, err := pool.Exec(ctx, `
-INSERT INTO openrails.customers (id, merchant_id, subject)
-VALUES ($1, $2, $3)`, customerID, merchantID, "metering-acceptance-"+customerID.String())
+INSERT INTO openrails.customers (id, merchant_id)
+VALUES ($1, $2)`, customerID, merchantID)
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {

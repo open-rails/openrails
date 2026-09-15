@@ -554,9 +554,9 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 		// The external subject is UUID-only (#364) and product-access grants FK the
 		// customer id, so this fixture pins customer.id == subject UUID.
 		_, err := pool.Exec(ctx, `
-			INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
-			VALUES ($1, $2, $3, $4, now(), now())`,
-			id, dbtest.TestMerchantID.UUID(), issuer, subject)
+			INSERT INTO openrails.customers (id, merchant_id, issuer, created_at, last_seen_at)
+			VALUES ($1, $2, $3, now(), now())`,
+			id, dbtest.TestMerchantID.UUID(), issuer)
 		require.NoError(t, err)
 		// One active entitlement row for the entitlements steps.
 		_, err = pool.Exec(ctx, `

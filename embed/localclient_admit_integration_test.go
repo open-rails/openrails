@@ -103,8 +103,8 @@ func seedCustomerForBoundMerchant(ctx context.Context, t *testing.T, boundID ope
 	pool := dbtest.SharedMerchantPool(t, uuid.UUID(boundID))
 	customerID := uuid.New()
 	_, err := pool.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		customerID, uuid.UUID(boundID), customerID.String())
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		customerID, uuid.UUID(boundID))
 	require.NoError(t, err, "seed customer under the bound merchant")
 	return customerID
 }
