@@ -20,27 +20,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// These tests exercise the SECURITY-CRITICAL delegated-access-token verification
-// decisions the browser-direct self-service surface depends on (issue #222
-// browser tier): canonical audience enforcement, AuthKit delegated profile +
-// no-`sub`
-// requirement, and the self permission gate. They build the
-// exact verifier configuration newDelegatedVerifier uses, so they pin the real
-// behavior without needing a database (the issuer -> OpenRails merchant mapping in
-// ResolveDelegated keys on the registered issuer, covered by the API key path + the
-// middleware tests).
+// Parser/profile refusals stay cheap. Successful stored-authority verification
+// is covered by the real PostgreSQL workflow in delegated_integration_test.go.
 
 const (
 	testDelegatedIssuer  = "https://openrails.test.example"
 	testDelegatedKID     = "test-kid-1"
 	canonicalAudience    = "openrails"
-	testDelegatedSubject = "end-user-42"
+	testDelegatedSubject = "019aaaab-0000-7000-8000-000000000042"
 	wrongAudience        = "host-four"
 )
 
-// newTestDelegatedVerifier builds a Verifier identical to newDelegatedVerifier's
-// configuration (issuer, openrails audience, local public key, NO permission
-// allowlist — #564), seeded with a freshly generated signing key.
+// newTestDelegatedVerifier deliberately has no authority backend, for refusal
+// and partially configured registry tests. Production installs the AuthKit core.
 func newTestDelegatedVerifier(t *testing.T) (*verify.Verifier, jwtkit.Signer) {
 	t.Helper()
 	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
@@ -131,15 +123,13 @@ func testJWKS(t *testing.T, signer *jwtkit.RSASigner) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-func TestDelegatedVerify_SucceedsWithoutPermissionsAndAudience(t *testing.T) {
+func TestDelegatedVerifyRequiresLiveAuthority(t *testing.T) {
 	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{})
-	cl, dp, err := v.VerifyDelegatedAccess(context.Background(), tok)
-	require.NoError(t, err)
-	require.Equal(t, "", cl.UserID, "delegated token must not carry a normal sub")
-	require.Equal(t, testDelegatedSubject, dp.DelegatedSubject)
-	require.Equal(t, testDelegatedIssuer, dp.Issuer, "the validated iss is the merchant issuer identity")
-	require.Empty(t, dp.Permissions)
+	for _, permissions := range [][]string{nil, {PermMerchantAdmissionsCreate}, {"root:*"}} {
+		tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{Permissions: permissions})
+		_, _, err := v.VerifyDelegatedAccess(context.Background(), tok)
+		require.Error(t, err, "a stored issuer requires the live authority backend")
+	}
 }
 
 func TestResolveDelegatedIgnoresBrowserOriginForAuthorization(t *testing.T) {
@@ -188,12 +178,9 @@ func TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS(t *testing.T) {
 
 	v, err := newDelegatedVerifier(&authcore.Client{}, "")
 	require.NoError(t, err)
-	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
-		Slug:    "host-one",
-		Issuer:  testDelegatedIssuer,
+	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, verify.IssuerOptions{
 		JWKSURI: jwks.URL + "/.well-known/jwks.json",
-		Enabled: true,
-	}}, []string{canonicalAudience}))
+	}))
 
 	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{})
 	_, _, err = v.VerifyDelegatedAccess(context.Background(), tok)
@@ -208,42 +195,6 @@ func TestDelegatedVerify_RejectsWrongAudience(t *testing.T) {
 	})
 	_, _, err := v.VerifyDelegatedAccess(context.Background(), tok)
 	require.Error(t, err, "a token whose aud does not include openrails must be rejected")
-}
-
-// #564: a delegated token can carry ANY permission the SIGNING remote-app holds —
-// including merchant:admissions:create, which the deleted #259 browser-safe allowlist
-// used to block. AuthKit bounds the claim to the signer's stored authority (the test
-// remote-app holds the full catalog), so an in-authority claim is carried.
-func TestDelegatedVerify_CarriesInAuthorityPermIncludingAdmit(t *testing.T) {
-	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{
-		Permissions: []string{PermMerchantAdmissionsCreate},
-	})
-	_, dp, err := v.VerifyDelegatedAccess(context.Background(), tok)
-	require.NoError(t, err, "admit is carriable on a delegated token when the signer holds it (#564)")
-	require.Contains(t, dp.Permissions, PermMerchantAdmissionsCreate)
-}
-
-// #567 (authkit v0.50.0 permission-group hard cut): the delegated `permissions`
-// bound against the signer's STORED authority no longer happens at this
-// verifier seam — the permission-group authority resolver is wired at the
-// core/enricher seam (see
-// authkit verify/verifier.go resolveRemoteApplicationSelf). A bare verifier
-// (no WithService enricher, as newTestDelegatedVerifier builds) therefore carries
-// the claim through verbatim; OpenRails' route gate is what bounds it via the
-// glob-aware HasPermission check on every credential type (#565). This test pins
-// the new contract: a foreign-persona claim verifies (it is not bounded here) and
-// is surfaced for the route gate to reject.
-func TestDelegatedVerify_CarriesClaimForRouteGateBound(t *testing.T) {
-	v, signer := newTestDelegatedVerifier(t)
-	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{
-		Permissions: []string{"root:*"},
-	})
-	_, dp, err := v.VerifyDelegatedAccess(context.Background(), tok)
-	require.NoError(t, err, "without a WithService enricher the verifier does not bound the claim (#567)")
-	require.Contains(t, dp.Permissions, "root:*")
-	// The OpenRails gate denies it: a foreign-persona glob covers no merchant perm.
-	require.False(t, (&ResolvedDelegated{Permissions: dp.Permissions}).HasPermission(PermMerchantAdmissionsCreate))
 }
 
 func TestDelegatedVerify_RejectsExpired(t *testing.T) {
