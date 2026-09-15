@@ -67,6 +67,18 @@ func TestUserAuthenticator_InProcess(t *testing.T) {
 	require.Equal(t, user.ID, uc.UserID)
 	require.NoError(t, uc.ValidateSubject())
 
+	// The hosted adapter observes both ban and deletion on an unexpired token.
+	reason := "hosted liveness test"
+	require.NoError(t, cp.Core().BanUser(ctx, user.ID, &reason, nil, user.ID))
+	_, err = authn.Authenticate(ctx, req)
+	require.Error(t, err)
+	require.NoError(t, cp.Core().UnbanUser(ctx, user.ID))
+	_, err = authn.Authenticate(ctx, req)
+	require.NoError(t, err)
+	require.NoError(t, cp.Core().HardDeleteUser(ctx, user.ID))
+	_, err = authn.Authenticate(ctx, req)
+	require.Error(t, err)
+
 	// Garbage credentials are rejected.
 	bad, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://saas.internal/api/v1/me", nil)
 	require.NoError(t, err)

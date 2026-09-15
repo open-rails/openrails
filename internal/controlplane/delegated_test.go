@@ -132,28 +132,6 @@ func TestDelegatedVerifyRequiresLiveAuthority(t *testing.T) {
 	}
 }
 
-func TestResolveDelegatedIgnoresBrowserOriginForAuthorization(t *testing.T) {
-	signer, err := jwtkit.NewRSASigner(2048, testDelegatedKID)
-	require.NoError(t, err)
-	jwks := testJWKS(t, signer)
-	defer jwks.Close()
-
-	v, err := newDelegatedVerifier(&authcore.Client{}, "")
-	require.NoError(t, err)
-	require.NoError(t, v.LoadRemoteApplications(context.Background(), delegatedRemoteAppSource{{
-		Slug:    "host-one",
-		Issuer:  testDelegatedIssuer,
-		JWKSURI: jwks.URL + "/.well-known/jwks.json",
-		Enabled: true,
-	}}, []string{canonicalAudience}))
-	cp := &ControlPlane{delegatedVerifier: v}
-	tok := mintDelegated(t, signer, authkit.DelegatedAccessParams{})
-
-	_, err = cp.ResolveDelegated(context.Background(), tok, "https://evil.example")
-	require.Error(t, err)
-	require.NotErrorIs(t, err, ErrDelegatedOriginNotAllowed)
-}
-
 // TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS pins BND4-2: newDelegatedVerifier
 // MUST install AuthKit's SSRF-guarding dialer, so a JWKS-mode merchant issuer whose
 // jwks_uri resolves to a private/loopback address cannot drive an outbound fetch from
@@ -176,7 +154,7 @@ func TestDelegatedVerifier_SSRFGuardBlocksLoopbackJWKS(t *testing.T) {
 	jwks := httptest.NewServer(mux) // binds to 127.0.0.1 — a private/reserved address
 	defer jwks.Close()
 
-	v, err := newDelegatedVerifier(&authcore.Client{}, "")
+	v, err := newDelegatedVerifier(&authcore.Client{}, "", nil)
 	require.NoError(t, err)
 	require.NoError(t, v.AddIssuer(testDelegatedIssuer, []string{canonicalAudience}, verify.IssuerOptions{
 		JWKSURI: jwks.URL + "/.well-known/jwks.json",

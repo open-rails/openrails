@@ -17,55 +17,45 @@ has exactly one PSP armed on it (ambiguous kinds 400, naming the armed keys). Om
 `payment.rail` entirely lets the merchant's routing policy pick — see
 [Letting the merchant route](#letting-the-merchant-route).
 
-### Auth: two shapes
+### Authentication
 
-| | Embedded | Standalone / SaaS |
-|---|---|---|
-| Base URL | your own server, under the mount prefix (`/billing/v1/...`) | the OpenRails origin (`https://openrails.example/v1/...`) |
-| Credential | your **normal session credential** — cookie/JWT, same as every other call | a short-lived **delegated token** minted by *your* backend |
-| Extra frontend work | none | one fetch-and-cache helper (below) |
+Embedded applications use their normal user credential through the host's
+AuthKit request verifier. Cookie-based hosts must explicitly wrap the billing
+mount with `billingauth.CookieAuthentication("https://merchant.example")`.
+The default mount strips ambient cookies. The wrapper admits unsafe cookie
+requests only from that exact configured origin, including bodyless POSTs;
+missing, opaque, cross-origin and sibling origins are refused. Do not wrap
+AuthKit's own auth routes, which own their refresh/CSRF cookie protocol.
 
-**Embedded**: there is no second token. The host verifies your session and hands
-OpenRails the identity in-process. Just `fetch("/billing/v1/me/status")` with your usual
-credentials.
+Standalone and SaaS browser clients use AuthKit v0.101.0 browser delegation:
 
-**Standalone**: your session token never leaves your trust domain
-([docs/auth.md](auth.md)). Instead, your backend exposes a token-exchange endpoint that
-swaps a logged-in session for a delegated JWT (`aud: ["openrails"]`,
-`delegated_sub: <your user id>`, TTL of minutes; the JOSE header MUST carry
-`typ: "delegated-access+jwt"` and a `kid` resolving in your registered JWKS — a token
-without that `typ` is rejected). The browser caches it and sends it as
-`Authorization: Bearer <token>` to OpenRails. A complete minting recipe is in
-[../examples/gated-premium-page/](../examples/gated-premium-page/):
+1. Create a non-extractable WebCrypto P-256 signing key in memory.
+2. Call the merchant issuer's `POST /delegated/token` using its normal local
+   `Authorization: Bearer` credential and a fresh ES256 `DPoP` proof. Include
+   `audiences: ["openrails"]` and the application's `requested_grant`. The
+   issuer's host authorizer determines the actual grant; the browser does not.
+3. Keep the returned `token_type: "DPoP"` token with that key. For every
+   OpenRails call use `Authorization: DPoP <token>` plus a newly signed `DPoP`
+   proof covering the token hash, HTTP method, externally visible URL without
+   query/fragment, issuance time, and unique nonce (`jti`).
+4. Clear both token and key on logout or account change. Refresh/remint before
+   expiry; a retry needs a fresh proof. Do not automatically repeat a financial
+   mutation without its documented durable operation key.
 
-```ts
-const OPENRAILS = "https://openrails.example";
-let cached: { token: string; exp: number } | null = null;
+Register the merchant's AuthKit signing application and its bounded grant in
+OpenRails. OpenRails uses its configured `api_url` for proof targets, never
+arbitrary Host/Forwarded headers. Hosts rewriting paths supply
+`AttachOptions.DPoPRequestURL` from trusted routing configuration. CORS allows
+credential-free preflight with `Authorization` and `DPoP`; direct resource
+requests use `credentials: "omit"`. CORS is not identity or authorization.
 
-async function delegatedToken(): Promise<string> {
-  if (cached && cached.exp - 30_000 > Date.now()) return cached.token;
-  // Your backend's exchange endpoint — authenticated with your normal session.
-  const res = await fetch("/api/billing-token", { credentials: "include" });
-  if (!res.ok) throw new Error("billing token exchange failed");
-  const { token, expires_in } = await res.json();
-  cached = { token, exp: Date.now() + expires_in * 1000 };
-  return token;
-}
+Native clients may use the certificate-bound delegated profile instead:
+`Authorization: Bearer` plus the actual TLS client certificate matching
+`cnf.x5t#S256`. A proxy header is not a client certificate. Unbound delegated
+JWTs and a DPoP token downgraded to Bearer are refused.
 
-export async function billing(path: string, init: RequestInit = {}) {
-  const call = async () =>
-    fetch(`${OPENRAILS}${path}`, {
-      ...init,
-      headers: { ...init.headers, Authorization: `Bearer ${await delegatedToken()}` },
-    });
-  let res = await call();
-  if (res.status === 401) {          // token expired mid-flight: re-mint, retry once
-    cached = null;
-    res = await call();
-  }
-  return res;
-}
-```
+See AuthKit's [browser delegation contract](https://github.com/open-rails/authkit/blob/v0.101.0/docs/browser-delegation.md)
+for exact mint/proof fields and shared replay-store requirements.
 
 ### The self-service surface: `/v1/me/*`
 
@@ -250,7 +240,7 @@ sequenceDiagram
     participant P as Payment rail
     B->>Y: GET /api/billing-token (session cookie)
     Y-->>B: delegated JWT (TTL ~5 min)
-    B->>O: POST /v1/me/checkout (Bearer delegated JWT)
+    B->>O: POST /v1/me/checkout (DPoP delegated JWT + proof)
     O-->>B: requires_action + redirect url
     B->>P: redirect — user pays on hosted page
     P-->>O: webhook: payment finalized
@@ -339,3 +329,7 @@ Handle in the frontend:
   challenge and send `X-Captcha-Token` until the challenge TTL expires.
 
 Full HTTP reference: [docs/api/endpoints.md](api/endpoints.md).
+
+Cookie origins use canonical browser spelling: lowercase host, no wildcard,
+userinfo, path, query, fragment, or explicit default port. HTTPS is required;
+HTTP is allowed for explicit localhost/loopback development origins.

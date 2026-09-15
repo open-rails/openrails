@@ -215,7 +215,7 @@ func NewVerifierAuthenticator(issuers []string, expectedAud string, opts ...Opti
 	}
 	o := applyOptions(opts)
 	return auth.NewAuthenticator(auth.AuthenticatorConfig{
-		Verifier:       auth.RequestVerifierFor(v),
+		Verifier:       v,
 		Admit:          auth.Admission(o.admit),
 		OmitTokenRoles: o.omitTokenRoles,
 	}), nil
@@ -258,7 +258,7 @@ func NewVerifierDelegatedAuthenticator(issuers []string, expectedAud string, mer
 	if err != nil {
 		return nil, err
 	}
-	return newDelegated(auth.RequestVerifierFor(v), merchantID, opts)
+	return newDelegated(v, merchantID, opts)
 }
 
 func newDelegated(v auth.RequestVerifier, merchantID string, opts []DelegatedOption) (billingauth.DelegatedAuthenticator, error) {

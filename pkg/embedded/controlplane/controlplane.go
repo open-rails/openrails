@@ -15,6 +15,7 @@ package controlplane
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"reflect"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -100,6 +101,10 @@ import (
 //     client the engine was wired with above (#210).
 //   - Languages / Documents: NOT forwarded — no host has asked for them yet.
 type AttachOptions struct {
+	// DPoPRequestURL returns the externally visible request URL when the host
+	// rewrites mounted billing paths. It must use trusted routing configuration.
+	DPoPRequestURL func(*http.Request) string
+
 	// Naming overrides config.Auth.Naming as one site policy input. Nil uses config.
 	Naming *authkit.NamingConfig
 	// NameAdmission is a side-effect-free host claim check; creation charges use MerchantCreation.Admission.
@@ -251,6 +256,9 @@ func AttachWithOptions(ctx context.Context, a *app.App, cfg *config.Config, inje
 	}
 	if opts.Frontend != (authcore.FrontendConfig{}) {
 		cpOpts = append(cpOpts, controlplane.WithFrontend(opts.Frontend))
+	}
+	if opts.DPoPRequestURL != nil {
+		cpOpts = append(cpOpts, controlplane.WithDPoPRequestURL(opts.DPoPRequestURL))
 	}
 	if opts.DirectPeerIP {
 		cpOpts = append(cpOpts, controlplane.WithDirectPeerIP())

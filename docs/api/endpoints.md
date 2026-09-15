@@ -30,9 +30,9 @@ List endpoints use a Stripe-like list envelope:
 | Caller class | Credential |
 |---|---|
 | Public (catalog, health, capabilities, solana pricing) | none |
-| Self-service `/v1/me/*`, customer treasury `/v1/customers/*` | `Authorization: Bearer <delegated JWT>` — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
+| Self-service `/v1/me/*`, customer treasury `/v1/customers/*` | `Authorization: DPoP <delegated JWT>` plus per-request `DPoP` proof (native: Bearer plus matching TLS client certificate) — short-lived token minted by the merchant's registered issuer with `delegated_sub` (embedded mode: the host's user bearer adapted to the same principal) |
 | Checkout `/v1/checkout` | any authenticated user bearer |
-| Merchant `/v1/merchant/*`, `/v1/import/*` | `Authorization: Bearer <API key (openrails_st_…) | service JWT | delegated JWT | user access token>` — every route is gated on a `merchant:*` permission, not on credential type |
+| Merchant `/v1/merchant/*`, `/v1/import/*` | `Authorization: Bearer <API key (openrails_st_…) | service JWT | user access token>` — every route is gated on a `merchant:*` permission, not on credential type |
 | Platform `/v1/platform/*` | human operator session checked against root-group grants (standalone only) |
 | Webhooks | provider signature / source-IP verification, no bearer |
 
@@ -40,17 +40,17 @@ Merchant permissions: API keys carry the permissions they were minted with;
 service JWTs (`token_use=service`, max 15-min lifetime, signed by a registered
 issuer) carry a self-asserted `permissions` claim scoped to the issuer's
 merchant; human sessions are checked against the user's merchant-group role.
-The required permission is listed per route below.
+The required permission is listed per route below. Delegated merchant requests
+use the same DPoP or native certificate profile as self-service requests.
 
 ### Idempotency-Key
 
-Any mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) may carry an optional
-`Idempotency-Key` header. Keys are scoped per merchant and cached 24h. Same key
-+ same method/path/body → the original response is replayed byte-for-byte with
-`Idempotent-Replayed: true`. Same key + different body → `409
-idempotency_key_reuse`. Key still in flight → `409 idempotency_in_progress`.
-5xx responses are never cached. This is a replay cache layered on top of each
-route's own dedup guards, never a replacement for them.
+Idempotency is an explicit operation contract, not a generic HTTP response
+cache. Send `Idempotency-Key` only on routes that document it (for example,
+checkout, invoice collection, and money operations). Those operations retain
+their own durable receipts and conflict rules. Every HTTP attempt authenticates,
+resolves its merchant, and authorizes against current authority. Credentials and
+admin responses are never replayed by global middleware.
 
 ## 1. Public routes
 

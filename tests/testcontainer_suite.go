@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 
@@ -54,7 +55,7 @@ type TestContainerSuite struct {
 	// App/Server are the real standalone graph (serverboot.NewServer — the
 	// cmd/openrails run-server composition root) with workers running.
 	App    *app.App
-	Server *server.Server
+	Server suiteHTTPServer
 	// Pool is the PRIVILEGED fixture pool over the shared DSN (raw-SQL helpers).
 	Pool        *pgxpool.Pool
 	RedisClient *redis.Client
@@ -160,7 +161,7 @@ func (suite *TestContainerSuite) boot() {
 	// merchant-owned rows go through suite.MerchantPool (pinned), not suite.Pool.
 	suite.surface = suite.harness.StartStandalone("usd", opts...)
 	suite.App = suite.surface.App()
-	suite.Server = suite.surface.Server()
+	suite.Server = suiteHTTPServer{Server: suite.surface.Server(), baseURL: suite.surface.BaseURL}
 	suite.Pool = suite.harness.Pool()
 	suite.RedisClient = suite.harness.Redis
 	suite.Config = suite.App.Config
@@ -266,12 +267,7 @@ func (a *suiteDelegatedUserAuthenticator) Authenticate(ctx context.Context, r *h
 	if cp == nil {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	header := strings.TrimSpace(r.Header.Get("Authorization"))
-	const prefix = "Bearer "
-	if len(header) <= len(prefix) || !strings.EqualFold(header[:len(prefix)], prefix) {
-		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
-	}
-	resolved, err := cp.ResolveDelegated(ctx, strings.TrimSpace(header[len(prefix):]), r.Header.Get("Origin"))
+	resolved, err := cp.ResolveDelegated(r)
 	if err != nil {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
@@ -602,4 +598,15 @@ func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	price, err := catalog.NewPriceService(suite.FixtureDB()).GetByID(suite.ctx, priceID)
 	require.NoError(suite.t, err, "Failed to get price by ID")
 	return price
+}
+
+// The legacy business-workflow suite invokes HTTP in process. Keep sender proof
+// at that test-client boundary; the server and protocol tests never synthesize it.
+type suiteHTTPServer struct {
+	*server.Server
+	baseURL string
+}
+
+func (s suiteHTTPServer) Handler() http.Handler {
+	return testauth.ClientHandler(s.baseURL, s.Server.Handler())
 }

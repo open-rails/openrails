@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-
-	server "github.com/open-rails/openrails/internal/http"
 )
 
 var (
@@ -45,7 +43,7 @@ func getSharedTestSuite(t *testing.T) *TestContainerSuite {
 }
 
 // setupTestServer returns the shared suite's real standalone server.
-func setupTestServer(t *testing.T) *server.Server {
+func setupTestServer(t *testing.T) suiteHTTPServer {
 	return getSharedTestSuite(t).Server
 }
 
@@ -74,7 +72,7 @@ func setupTestSuite(t *testing.T, opts ...TestSuiteOption) *TestContainerSuite {
 // setupTestServerWithAuth returns the shared server plus a REAL minted
 // delegated access token. The subject is a fixed UUID — payable identities are
 // UUID-only (#364) and the auth boundary rejects anything else.
-func setupTestServerWithAuth(t *testing.T) (*server.Server, string) {
+func setupTestServerWithAuth(t *testing.T) (suiteHTTPServer, string) {
 	suite := getSharedTestSuite(t)
 	token := suite.MintUserToken("b1111111-1111-4111-8111-111111111111", "test@openrails.openrails.com")
 	return suite.Server, token

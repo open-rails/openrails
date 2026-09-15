@@ -116,7 +116,7 @@ func (c *ControlPlane) ensureLazyCustomerGroupForRequest(r *http.Request) error 
 	if instanceSlug == "" {
 		return nil
 	}
-	claims, err := c.userVerifier.VerifyRequest(r)
+	claims, err := c.userVerifier.VerifyRequestLive(r)
 	if err != nil {
 		return nil
 	}

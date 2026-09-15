@@ -1,7 +1,6 @@
 package routes
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -37,7 +36,7 @@ type fakeDelegatedResolver struct {
 	err         error
 }
 
-func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string) (*controlplane.ResolvedDelegated, error) {
+func (f fakeDelegatedResolver) ResolveDelegated(*http.Request) (*controlplane.ResolvedDelegated, error) {
 	if f.err != nil {
 		return nil, f.err
 	}

@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/open-rails/openrails/internal/testauth"
 	"io"
 	"net/http"
 	"strings"
@@ -66,7 +67,7 @@ func requestJSONHost(t *testing.T, method, url, host, token string, body any) (i
 		req.Header.Set("Content-Type", "application/json")
 	}
 	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+		require.NoError(t, testauth.Authorize(req, token))
 	}
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)

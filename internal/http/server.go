@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
@@ -17,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
@@ -335,17 +335,6 @@ func (s *Server) trustedProxies() *iputil.TrustedProxies {
 	return s.runtime.TrustedProxies
 }
 
-// httpIdempotencyService returns the runtime's client-facing Idempotency-Key
-// replay store (#579), nil-safe against a Server built without New() (some
-// unit tests construct &Server{} directly and call wrapPublicHandler, e.g.
-// routes_self_test.go).
-func (s *Server) httpIdempotencyService() *replaycache.Store {
-	if s == nil || s.runtime == nil {
-		return nil
-	}
-	return s.runtime.HTTPIdempotency
-}
-
 // wrapPublicHandler applies the global middleware chain — the neutral analogue
 // (and successor, #670) of the old gin engine's global middleware, same order.
 func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
@@ -366,6 +355,7 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		// browser refuses cross-origin script access to those by default.
 		middleware.PermissiveCORSHTTP(s.browserTierRoutes.Match),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+		billingCredentialsHTTP,
 		// Resolve the merchant / billing namespace before authorization and before any
 		// merchant-owned DB access (issue #223). Resolved PER REQUEST off the Runtime
 		// (#744), never a value snapshotted here at construction time; zero when none
@@ -382,8 +372,6 @@ func (s *Server) wrapPublicHandler(mux *http.ServeMux) http.Handler {
 		// Best-effort auth so the rate limiter can key by user, not only IP.
 		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
 		middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies()),
-		// #579: client-facing Idempotency-Key replay (opt-in per request).
-		middleware.IdempotencyHTTP(s.httpIdempotencyService()),
 	)
 }
 
@@ -405,3 +393,16 @@ func (s *Server) hostMerchantResolver(ctx context.Context, host string) (merchan
 // the in-process pkg/service facade (Embedded.Service()) or this same public
 // surface. It is designed to be mounted at a path prefix via http.StripPrefix.
 func (s *Server) Handler() http.Handler { return s.publicHandler }
+
+// AuthKit owns its refresh/CSRF cookie protocol. Apply the billing credential
+// policy only to the billing surface, never to the mounted AuthKit transport.
+func billingCredentialsHTTP(next http.Handler) http.Handler {
+	billing := billingauth.ExplicitCredentials(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == ControlPlaneAuthPrefix || strings.HasPrefix(r.URL.Path, ControlPlaneAuthPrefix+"/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		billing.ServeHTTP(w, r)
+	})
+}

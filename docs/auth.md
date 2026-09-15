@@ -1,101 +1,98 @@
-# The auth model: one credential or two?
+# Authentication and request authority
 
-The rule across both deployment modes is: **one credential per trust domain.**
+OpenRails keeps billing identity merchant-scoped. A customer belongs to one
+merchant; a future SaaS consumer account may explicitly link separate merchant
+customer records. Shared wallets and cross-merchant account linking belong to
+OpenRails-SaaS, not the engine.
 
-- **Embedded:** your app and OpenRails are the same process — one trust domain. The frontend
-  uses its normal session credential for everything, including the mounted billing routes.
-  Your code verifies it and hands OpenRails the resulting identity through a Go interface
-  (`billingauth.Authenticator` / `DelegatedAuthenticator`). **One token.** OpenRails never
-  parses your credential at all.
-- **Standalone:** OpenRails is a separate system across a network boundary, and it always
-  runs its own AuthKit control plane — the in-process authority that issues and verifies
-  these credentials, holds the runtime merchant/issuer registry, and gates admin routes.
-  (There is no control-plane-less "verifier-only" standalone; private/self-hosted
-  registration is the only standalone mode in this repo. Public hosted registration
-  belongs in the private OpenRails SaaS layer.)
-  Identity claims that cross that boundary must be independently verifiable, so each caller
-  class gets a credential scoped to exactly what it may do:
-  - your **backend** uses an **API key** (`openrails_st_...`) or a first-party OIDC
-    service JWT — server-to-server, never sent to browsers;
-  - your **frontend** uses a short-lived **delegated access token** that *your own backend*
-    mints and signs — browser-direct, self-service-scoped.
+## Deployment boundaries
 
-## Why the browser holds two tokens in standalone mode
+| Surface | Embedded application | Standalone or SaaS server |
+| --- | --- | --- |
+| Go business client | In-process application authority | API key or registered service JWT |
+| Browser self-service | Host `DelegatedAuthenticator` maps the normal user credential to the bound merchant | Sender-bound delegated token from the merchant issuer |
+| User billing routes | Host `Authenticator` | Local AuthKit user credential |
+| Merchant operations | Host `Gate` | Verified credential plus current merchant permission |
+| Platform operations | Owned by the host | Local human operator plus current root permission |
 
-In standalone mode the browser does hold two tokens: its normal session token for your
-API, and a delegated token for OpenRails. **This is deliberate, not incidental.** The
-alternative — OpenRails accepting your webserver's session JWTs directly — was considered
-and rejected for four reasons:
+Embedded applications supply request-aware authenticators. AuthKit hosts use
+`pkg/embedded/authkit` with their existing verifier and live admission callback;
+remote JWKS verification cannot independently observe a remote user's ban.
+The normal local host-user adapter remains distinct from the wire delegated
+profile: a local user has `sub`, while a delegated caller has `delegated_sub`.
 
-1. **Your session tokens would leave your trust domain.** Every billing call would ship a
-   full-power webapp credential to another system. If that system (or its logs) is ever
-   compromised, the attacker holds tokens that unlock *your* API. A delegated token is
-   worthless anywhere except the OpenRails self-service surface — a fully compromised
-   OpenRails yields nothing replayable against you.
-2. **Every session leak would become a billing leak.** Session tokens pass through many
-   hands (browser extensions, analytics, your own microservices). Today none of those
-   exposures touch billing; with pass-through acceptance, all of them would.
-3. **Audience discipline.** A JWT recipient must reject tokens not addressed to it
-   (RFC 7519 `aud`). Accepting foreign-audience tokens is the classic confused-deputy
-   anti-pattern, and OpenRails fails closed on it: a token carrying a normal `sub` is
-   rejected on sight.
-4. **Least privilege.** Delegated tokens carry only the OpenRails audience, the acting
-   delegated subject, an optional narrow OpenRails permission set, and a short TTL.
-   Your session token can do everything your app allows; it should never be spendable
-   as a billing credential.
+The standalone control plane is mandatory and uses closed registration.
+OpenRails-SaaS explicitly enables hosted registration when attaching it. A
+merchant signing application maps to exactly one merchant permission group;
+its token cannot select another merchant by adding a claim or changing a URL.
+Identity/contact attributes do not confer authorization.
 
-The cost is small, because **your backend mints the delegated token itself** — with the
-same signing key it already uses for its own auth, if you like. "Getting a token for
-OpenRails" is one authenticated fetch to *your own* API, not a separate login or a
-round-trip to a foreign identity provider. Wrap it in a token-exchange endpoint plus a
-small frontend helper that fetches and auto-refreshes, and client code sees one system
-(this is the same shape as Stripe's ephemeral keys or Plaid's link tokens). The minting
-flow is in the README's standalone integration guide.
+## Browser and native delegation
 
-## Design parity between the modes
+The browser first authenticates to its merchant application. It then calls
+that issuer's AuthKit `POST /delegated/token`, using its local access credential
+and a non-extractable WebCrypto key. The host authorizer selects the grant.
+OpenRails accepts the resulting `Authorization: DPoP <token>` only with a fresh
+ES256 proof covering that token, HTTP method and external URL. Replay, wrong
+key/target/token, missing proof and a Bearer downgrade are refused. Native
+clients instead use a certificate-bound delegated Bearer token and its actual
+TLS client certificate. Unbound wire delegation is unsupported.
 
-The two modes have exact design parity: both translate *your* credential into a billing
-principal at the trust boundary. Embedded does the translation through an in-process
-interface (`billingauth.Authenticator` / `DelegatedAuthenticator`); standalone does the
-same translation as a signed wire artifact (the delegated token, verified against your
-registered JWKS). Same seam, two serializations.
+See [frontend integration](frontend-integration.md#authentication) for the
+mint/request contract. Receiver proof targets use the configured `api_url`;
+`AttachOptions.DPoPRequestURL` supplies trusted external URL mapping for hosts
+that rewrite paths. Arbitrary Host/Forwarded headers never define that target.
+Redis-backed AuthKit proof claims are shared across receiver replicas and must
+retain accepted claims for the full proof window. Storage errors fail closed
+with 503; a rejected proof receives the DPoP authentication challenge.
 
-| Surface | Embedded credential | Standalone credential |
-|---|---|---|
-| Backend / server-to-server | In-process call — no credential | Service token (`/v1/merchant/*`) |
-| Browser self-service | Your session credential, via `DelegatedAuthenticator` | Delegated token, minted by your backend (`/v1/me/*`) |
-| User billing routes | Your session credential, via `Authenticator` | AuthKit user JWT (AuthKit-backed deployments) |
-| Merchant/admin routes | Live `merchant:*` permissions, checked per request | Same (requires the control plane) |
+Delegated CORS permits credential-free browser requests and preflight with
+Authorization/DPoP headers. Origin is transport metadata, not identity or the
+signing application's authority.
 
-## Identity semantics
+## Cookies and local account admission
 
-- OpenRails treats the subject id (`UserContext.UserID` embedded, `delegated_sub`
-  standalone) as an opaque principal — it is your user id, and OpenRails keys billing
-  state to it verbatim. Identity attributes (email, username) are optional,
-  non-authoritative metadata for things like checkout prefill.
-- Admin authority is **live `merchant:*` permission in the caller's merchant group**,
-  evaluated per request against the control plane. OpenRails never interprets your role
-  names, and there is no role-string fallback.
-- Browser origin policy for delegated calls is configured on the AuthKit
-  `remote_application` issuer record, not in OpenRails runtime config.
+Billing HTTP mounts ignore ambient cookies by default. A cookie-based host
+must explicitly wrap its billing mount in
+`billingauth.CookieAuthentication("https://merchant.example")`. Every unsafe
+cookie request must carry that exact Origin, including bodyless POSTs. Missing,
+opaque, cross-origin and sibling origins are refused. Explicit Authorization
+never falls back to an attached cookie. AuthKit's own `/auth` transport keeps
+its separate session/refresh/CSRF cookie protocol and must not be wrapped by
+the billing cookie adapter.
 
-## Client IP and development keys
+Privileged local users pass AuthKit request verification and live account
+admission. Enrollment-only tokens remain restricted after enrollment completes;
+clients obtain a new normal token. Ban/deletion blocks an unexpired token even
+when the user's role remains. Session revocation is separate: an already
+issued access JWT can remain usable until its configured expiry. Account
+liveness does not imply a per-session access-token deny-list.
 
-AuthKit requires an explicit client-IP posture outside development. Configure
-OpenRails' top-level `trusted_proxies` with the actual proxy CIDRs, or set
-`auth.direct_peer_ip: true` (`AUTH_DIRECT_PEER_IP=true`) when client connections
-arrive directly. Where Cloudflare fronts the origin, list its egress ranges in
-`cloudflare_proxies` (`CLOUDFLARE_PROXIES`): only those peers may assert
-`CF-Connecting-IP`; generic proxy trust never honours it. Embedded
-`AttachOptions.TrustedProxies`, `CloudflareProxies` and `DirectPeerIP` forward
-the same choices; combining direct-peer and proxy declarations is an error.
-Development defaults to direct-peer when nothing is declared.
+Delegated verification consults the registered signing application's enabled
+state/grant and active merchant binding. Issuer disablement, grant removal or
+merchant retirement affects subsequent requests. OpenRails cannot see the
+issuer's end-user ban/session revocation independently: the issuer stops
+mint/refresh, and remaining delegated-token lifetime bounds that exposure.
 
-Development signing keys must persist to a writable `auth.keys_path`
-(`AUTHKIT_KEYS_PATH`) directory. Tests use their own temporary directories;
-production mounts its managed signing-key directory.
+Every HTTP attempt authenticates and authorizes again. Documented financial
+operations own durable idempotency receipts; there is no generic response
+replay cache. Inside one immutable request, repeated permission checks reuse
+verified identity and sender proof. Permission checks are not memoized.
 
-After in-process remote-application registration, call
-`ControlPlane.ReloadRemoteApplications` for immediate verification. Registrations
-made by another process converge through the bounded issuer-registry refresh.
-An arbitrary unverified token issuer does not trigger its own database lookup.
+## Operational configuration
+
+Configure `trusted_proxies` with actual proxy CIDRs or set
+`auth.direct_peer_ip: true` for direct client connections. Cloudflare-specific
+headers are trusted only from declared `cloudflare_proxies`; generic proxy
+trust does not confer that authority. Embedded `AttachOptions` forward the
+same settings. Direct-peer and proxy declarations are mutually exclusive.
+
+Development signing keys persist under `auth.keys_path`; production supplies
+its managed keys. After in-process application registration, call
+`ControlPlane.ReloadRemoteApplications` for immediate discovery. Out-of-process
+registration/key rotation converges through the bounded registry refresh.
+Unverified token issuers never trigger arbitrary database or JWKS discovery.
+
+Cookie origins use canonical browser spelling: lowercase host, no wildcard,
+userinfo, path, query, fragment, or explicit default port. HTTPS is required;
+HTTP is allowed for explicit localhost/loopback development origins.

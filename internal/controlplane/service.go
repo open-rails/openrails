@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
@@ -80,6 +81,7 @@ type ControlPlane struct {
 }
 
 type options struct {
+	dpopRequestURL               func(*http.Request) string
 	naming                       *authkit.NamingConfig
 	nameAdmission                func(context.Context, authkit.NameAdmissionRequest) error
 	hosted                       bool
@@ -531,6 +533,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}
 
+	authSvc.Verifier().WithLiveness(authClient)
+
 	// The verifier trusts exactly what coreCfg above declared (issuer,
 	// audiences, API-key prefix) — read the local values instead of an
 	// accessor so mint and verify cannot drift.
@@ -545,14 +549,14 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}); err != nil {
 		return nil, fmt.Errorf("controlplane: build user verifier: %w", err)
 	}
-	userVerifier.WithService(authClient)
+	userVerifier.WithService(authClient).WithLiveness(authClient)
 
 	// Build the browser-direct delegated-access-token verifier (#222 browser
 	// tier). It accepts registered delegated tokens with the canonical
 	// `openrails` audience. Customer delegated self-service JWTs may be
 	// permissionless; any supplied permissions are bounded by the signing remote
 	// application's stored authority in AuthKit.
-	delegatedVerifier, err := newDelegatedVerifier(authClient, APIKeyPrefix)
+	delegatedVerifier, err := newDelegatedVerifier(authClient, APIKeyPrefix, delegatedRequestURL(cfg.APIURL, options.dpopRequestURL))
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build delegated verifier: %w", err)
 	}
@@ -641,11 +645,11 @@ func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
 	if c == nil || c.authSvc == nil || c.authSvc.Verifier() == nil {
 		return nil
 	}
-	// Token-shaped verification, unchanged by or#918: this is the credential
-	// chain's JWT step for OpenRails' own routes, where a non-JWT bearer is an
-	// expected fallback to the next resolver (#845) rather than a rejection.
+	// Privileged routes need current account admission, not merely a valid
+	// unexpired signature. AuthKit also retains enrollment-only restrictions.
 	return auth.NewAuthenticator(auth.AuthenticatorConfig{
-		Verifier: auth.RequestVerifierFor(c.authSvc.Verifier()),
+		Verifier:       auth.RequestVerifierFunc(c.authSvc.Verifier().VerifyRequestLive),
+		OmitTokenRoles: true,
 	})
 }
 
@@ -678,4 +682,24 @@ func WithNaming(input authkit.NamingConfig) Option {
 }
 func WithNameAdmission(admit func(context.Context, authkit.NameAdmissionRequest) error) Option {
 	return func(options *options) { options.nameAdmission = admit }
+}
+
+// WithDPoPRequestURL maps rewritten HTTP paths to the externally visible URL.
+// Hosts must derive this from trusted routing configuration, never forwarded
+// headers supplied by an arbitrary client.
+func WithDPoPRequestURL(target func(*http.Request) string) Option {
+	return func(o *options) { o.dpopRequestURL = target }
+}
+
+func delegatedRequestURL(apiURL string, override func(*http.Request) string) func(*http.Request) string {
+	if override != nil {
+		return override
+	}
+	base := strings.TrimRight(strings.TrimSpace(apiURL), "/")
+	return func(r *http.Request) string {
+		if base == "" {
+			return ""
+		}
+		return base + r.URL.EscapedPath()
+	}
 }

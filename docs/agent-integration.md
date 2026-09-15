@@ -84,7 +84,6 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
 |---|---|
 | Full embedded guide | [embedded-integration.md](embedded-integration.md) |
 | Full standalone guide | [standalone-integration.md](standalone-integration.md) |
-| Runnable standalone example (entitlement gate + NMI checkout) | [../examples/gated-premium-page/](../examples/gated-premium-page/) |
 | Browser/UI work | [frontend-integration.md](frontend-integration.md) |
 | Why the auth model is shaped this way | [auth.md](auth.md) |
 | Per-rail credentials/webhooks/sandbox | [rails/nmi.md](rails/nmi.md), [rails/stripe.md](rails/stripe.md), [rails/ccbill.md](rails/ccbill.md), [rails/solana.md](rails/solana.md) |

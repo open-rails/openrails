@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit/verify"
+	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
@@ -64,7 +65,7 @@ func (p *DelegatedAuthenticator) AuthenticateDelegated(ctx context.Context, r *h
 	if p == nil || p.cfg.Verifier == nil || r == nil {
 		return nil, billingauth.ErrUnauthenticated
 	}
-	cl, err := p.cfg.Verifier.VerifyRequest(r)
+	cl, err := requestauth.Once(ctx, p, func() (verify.Claims, error) { return p.cfg.Verifier.VerifyRequest(r) })
 	if err != nil {
 		return nil, err
 	}

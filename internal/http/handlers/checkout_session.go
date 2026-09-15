@@ -97,7 +97,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			return
 		}
 	}
-	req.IdempotencyKey = middleware.IdempotencyKeyFromRequest(r.Request)
+	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
 	e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID"))
 	if e2eRunID != "" {
 		if req.Metadata == nil {

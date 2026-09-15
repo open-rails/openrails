@@ -124,20 +124,6 @@ jobs:
         # never compile these files.
         if: needs.changes.outputs.go == 'true'
         run: go vet -tags integration ./...
-      - name: Build examples
-        # Each example is its own module (replace => ../..), invisible to the
-        # root ./... patterns — build them explicitly so engine changes that
-        # break an example fail the same PR.
-        #
-        # The `if:` is a fix, not a speedup: without it this step ran on
-        # docs-only PRs, where checkout is skipped, so `examples/*/` matched
-        # nothing, `cd examples/*/` failed and the whole gate went red.
-        if: needs.changes.outputs.go == 'true'
-        run: |
-          for d in examples/*/; do
-            (cd "$d" && go build ./... && go vet ./...)
-          done
-
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
@@ -402,6 +388,36 @@ jobs:
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save
 
+  browser-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: changes
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: needs.changes.outputs.go == 'true'
+      - uses: ./.github/actions/go-env
+        if: needs.changes.outputs.go == 'true'
+        with:
+          variant: integration
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
+        if: needs.changes.outputs.go == 'true'
+        with:
+          package_json_file: tests/browser/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: needs.changes.outputs.go == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: tests/browser/pnpm-lock.yaml
+      - name: Install browser test dependencies
+        if: needs.changes.outputs.go == 'true'
+        run: |
+          pnpm --dir tests/browser install --frozen-lockfile
+          pnpm --dir tests/browser exec playwright install --with-deps chromium
+      - name: Real browser authentication contract
+        if: needs.changes.outputs.go == 'true'
+        run: go test -race -tags=integration,browser ./internal/integrationharness -run '^TestBrowserAuthenticationContract$' -count=1 -v
+
   # One stable name for branch protection to require, so changing the shard
   # count never means editing the ruleset. `always()` + an explicit result check
   # is load-bearing: without it a cancelled or skipped shard would let this pass.
@@ -422,7 +438,7 @@ jobs:
     name: Required CI
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [changes, build, unit, lint, sqlc, console, integration]
+    needs: [changes, build, unit, lint, sqlc, console, integration, browser-auth]
     if: always()
     steps:
       - name: Require every applicable validation job
@@ -431,7 +447,7 @@ jobs:
         run: |
           jq -e '
             . as $jobs |
-            (["changes", "build", "unit", "lint", "integration"] |
+            (["changes", "build", "unit", "lint", "integration", "browser-auth"] |
               all(.[]; $jobs[.].result == "success")) and
             (["sql", "console"] | all(.[];
               . as $area |

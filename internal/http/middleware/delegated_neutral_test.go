@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -9,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/request"
@@ -23,7 +23,7 @@ type fakeDelegatedResolver struct {
 	err      error
 }
 
-func (f fakeDelegatedResolver) ResolveDelegated(context.Context, string, string) (*controlplane.ResolvedDelegated, error) {
+func (f fakeDelegatedResolver) ResolveDelegated(*http.Request) (*controlplane.ResolvedDelegated, error) {
 	return f.resolved, f.err
 }
 
@@ -166,12 +166,12 @@ func TestDelegatedSelfRequired_DeniesCrossMerchant(t *testing.T) {
 	require.Contains(t, w.Body.String(), "delegated_merchant_unresolved")
 }
 
-func TestDelegatedSelfRequired_DeniesOriginMismatch(t *testing.T) {
-	resolver := fakeDelegatedResolver{err: controlplane.ErrDelegatedOriginNotAllowed}
+func TestDelegatedSelfRequired_DeniesMissingProof(t *testing.T) {
+	resolver := fakeDelegatedResolver{err: verify.ErrSenderProofRequired}
 	r := newDelegatedTestRouter(resolver, "")
 	w := doDelegatedRequest(r, true)
-	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Contains(t, w.Body.String(), "delegated_origin_not_allowed")
+	require.Equal(t, http.StatusUnauthorized, w.Code)
+	require.Contains(t, w.Body.String(), "sender_proof_required")
 }
 
 func TestDelegatedSelfRequired_DeniesMissingBearer(t *testing.T) {

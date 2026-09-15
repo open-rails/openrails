@@ -42,7 +42,6 @@ import (
 	"testing"
 	"time"
 
-	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -66,6 +65,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -446,6 +446,8 @@ func (h *Harness) StartStandaloneSuper(currency string, opts ...StandaloneOption
 func (h *Harness) startStandalone(currency, appDSN, name string, opts ...StandaloneOption) *Surface {
 	h.t.Helper()
 
+	srv := httptest.NewUnstartedServer(nil)
+	h.cleanup(srv.Close)
 	var sc standaloneConfig
 	for _, opt := range opts {
 		if opt != nil {
@@ -458,6 +460,7 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
 	cfg := &config.Config{
+		APIURL:                   "http://" + srv.Listener.Addr().String(),
 		Env:                      "dev",
 		TestMode:                 config.CredentialPostureSandbox,
 		CCBillWebhookIPAllowlist: []string{"127.0.0.1/32", "::1/128"},
@@ -547,8 +550,8 @@ func (h *Harness) startStandalone(currency, appDSN, name string, opts ...Standal
 
 	}
 
-	srv := httptest.NewServer(assembled.Server.Handler())
-	h.cleanup(srv.Close)
+	srv.Config.Handler = assembled.Server.Handler()
+	srv.Start()
 
 	return &Surface{
 		Name:     name,
@@ -844,33 +847,9 @@ func (di *DelegatedIssuer) Mint(subject, email, username string, permissions []s
 	return token
 }
 
-// mintDelegatedAccessToken signs a canonical delegated access token with the
-// TEST issuer's own signer. The authkit v0.78.0 restructure kept only the
-// service-key Client method public (the signer variant lives in authkit's
-// internal/authcore), so the harness mirrors the canonical claim shape here:
-// typ=delegated-access+jwt, delegated_sub/permissions/attributes, never `sub`.
+// mintDelegatedAccessToken uses AuthKit's actual minter and binds a sender key.
 func mintDelegatedAccessToken(ctx context.Context, signer jwtkit.Signer, p authkit.DelegatedAccessParams) (string, error) {
-	ttl := p.TTL
-	if ttl <= 0 {
-		ttl = 15 * time.Minute
-	}
-	now := time.Now()
-	claims := jwt.MapClaims{
-		"iss":           strings.TrimSpace(p.Issuer),
-		"iat":           now.Unix(),
-		"exp":           now.Add(ttl).Unix(),
-		"delegated_sub": strings.TrimSpace(p.DelegatedSubject),
-	}
-	if len(p.Audiences) > 0 {
-		claims["aud"] = p.Audiences
-	}
-	if len(p.Permissions) > 0 {
-		claims["permissions"] = p.Permissions
-	}
-	if len(p.Attributes) > 0 {
-		claims["attributes"] = p.Attributes
-	}
-	return jwtkit.SignWithType(ctx, signer, claims, jwtkit.DelegatedAccessTokenType, true)
+	return testauth.MintDelegated(ctx, signer, p)
 }
 
 // RegisterDelegatedCaller registers an AuthKit remote_application issuer for a

@@ -1,7 +1,9 @@
 package middleware
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -45,16 +48,25 @@ func SecurityHeadersHTTP() HTTPMiddleware {
 	}
 }
 
-// BodyLimitHTTP applies the global body-size cap uniformly, including to
-// webhook routes (the per-rail caps in internal/http/handlers/webhook.go bind
-// tighter than this backstop). MaxBytesReader only limits the body; signature
-// verification still reads the raw bytes up to the cap, so legitimate webhook
-// payloads are unaffected.
+// BodyLimitHTTP validates the complete bounded body before any route can
+// mutate state, including routes with optional or absent request bodies.
 func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if maxBytes > 0 && r.Body != nil {
-				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+				body := http.MaxBytesReader(w, r.Body, maxBytes)
+				raw, err := io.ReadAll(body)
+				_ = body.Close()
+				if err != nil {
+					var tooLarge *http.MaxBytesError
+					if errors.As(err, &tooLarge) {
+						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", "request body too large")
+					} else {
+						billingauth.WriteJSONError(w, http.StatusBadRequest, "invalid_request_body", "could not read request body")
+					}
+					return
+				}
+				r.Body = io.NopCloser(bytes.NewReader(raw))
 			}
 			next.ServeHTTP(w, r)
 		})
@@ -133,9 +145,9 @@ func AllRequests(*http.Request) bool { return true }
 // cookies, and a wildcard origin with credentials is invalid CORS besides.
 func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	const (
-		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
-		allowMethods  = "GET,POST,PUT,DELETE,OPTIONS"
-		exposeHeaders = "X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required"
+		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,DPoP,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
+		allowMethods  = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+		exposeHeaders = "WWW-Authenticate,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required"
 	)
 	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
 
