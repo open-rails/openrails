@@ -40,9 +40,6 @@ import (
 const (
 	DefaultTTL           = 5 * time.Minute
 	idempotencyKeyPrefix = "idemp:"
-	// HTTPReplayTTL is the replay window for the client-facing Idempotency-Key
-	// middleware (#579). 24h matches Stripe's documented window.
-	HTTPReplayTTL = 24 * time.Hour
 )
 
 type Status string

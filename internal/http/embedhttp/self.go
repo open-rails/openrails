@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/modules/replaycache"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -52,11 +51,9 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 	var captchaCfg *config.CaptchaConfig
 	var rdb *redis.Client
 	var resolver *iputil.TrustedProxies
-	var httpIdempotency *replaycache.Store
 	if rt != nil {
 		rdb = rt.RedisClient
 		resolver = rt.TrustedProxies
-		httpIdempotency = rt.HTTPIdempotency
 		if rt.Config != nil {
 			rateLimits = rt.Config.RateLimits
 			captchaCfg = rt.Config.Captcha
@@ -69,6 +66,7 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 		// static permissive `*` grant, no per-request source.
 		middleware.PermissiveCORSHTTP(middleware.AllRequests),
 		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+		middleware.HTTPMiddleware(billingauth.ExplicitCredentials),
 		// Resolved PER REQUEST off the Runtime (#744) — never a value snapshotted
 		// here at construction time, so a mount that races UpsertMerchantConfig's
 		// post-boot bind still resolves correctly on every request.
@@ -76,8 +74,6 @@ func NewSelfHandler(rt *app.Runtime, authn billingauth.DelegatedAuthenticator, p
 		// #734: a no-op when hostResolve is nil (no control plane attached).
 		middleware.ResolveMerchantFromHostHTTP(hostResolve),
 		middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, captcha.NewChallengeStore(rdb), resolver),
-		// #579: client-facing Idempotency-Key replay (opt-in per request).
-		middleware.IdempotencyHTTP(httpIdempotency),
 	)
 }
 

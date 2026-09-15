@@ -19,7 +19,12 @@ type stubVerifier struct {
 	err    error
 }
 
-func (s stubVerifier) Verify(context.Context, string) (verify.Claims, error) { return s.claims, s.err }
+func (s stubVerifier) VerifyRequest(r *http.Request) (verify.Claims, error) {
+	if bearerToken(r.Header.Get("Authorization")) == "" {
+		return verify.Claims{}, billingauth.ErrUnauthenticated
+	}
+	return s.claims, s.err
+}
 
 func delegatedReq(bearer string) *http.Request {
 	return delegatedReqPath("/billing/v1/me/balance", bearer)
@@ -58,7 +63,7 @@ func TestDelegatedAuthenticator_MapsClaimsOntoEnginePinnedPrincipal(t *testing.T
 		Username:      "user",
 	}}
 	a := NewDelegatedAuthenticator(DelegatedConfig{
-		Verifier:    RequestVerifierFor(v),
+		Verifier:    v,
 		MerchantID:  engineMerchantID,
 		Permissions: rolePermissions(func(roles []string) []string { return permissions.ForRoles(roles...) }),
 	})
@@ -79,7 +84,7 @@ func TestDelegatedAuthenticator_MapsClaimsOntoEnginePinnedPrincipal(t *testing.T
 func TestDelegatedAuthenticator_FailsClosed(t *testing.T) {
 	t.Parallel()
 
-	valid := RequestVerifierFor(stubVerifier{claims: verify.Claims{UserID: "u"}})
+	valid := stubVerifier{claims: verify.Claims{UserID: "u"}}
 
 	// No bearer at all.
 	a := NewDelegatedAuthenticator(DelegatedConfig{Verifier: valid, MerchantID: engineMerchantID})
@@ -89,7 +94,7 @@ func TestDelegatedAuthenticator_FailsClosed(t *testing.T) {
 	// Verifier rejects the token.
 	bad := errors.New("boom")
 	a = NewDelegatedAuthenticator(DelegatedConfig{
-		Verifier:   RequestVerifierFor(stubVerifier{err: bad}),
+		Verifier:   stubVerifier{err: bad},
 		MerchantID: engineMerchantID,
 	})
 	_, err = a.AuthenticateDelegated(t.Context(), delegatedReq("x.y.z"))
@@ -98,7 +103,7 @@ func TestDelegatedAuthenticator_FailsClosed(t *testing.T) {
 	// A verified token without a native user subject (e.g. a service
 	// credential) has no self to act as.
 	a = NewDelegatedAuthenticator(DelegatedConfig{
-		Verifier:   RequestVerifierFor(stubVerifier{claims: verify.Claims{UserID: "  "}}),
+		Verifier:   stubVerifier{claims: verify.Claims{UserID: "  "}},
 		MerchantID: engineMerchantID,
 	})
 	_, err = a.AuthenticateDelegated(t.Context(), delegatedReq("x.y.z"))
@@ -117,7 +122,7 @@ func TestDelegatedAuthenticator_FailsClosed(t *testing.T) {
 func TestDelegatedAuthenticator_AdmissionVetoPrecedesPermissionResolution(t *testing.T) {
 	t.Parallel()
 
-	v := RequestVerifierFor(stubVerifier{claims: verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d"}})
+	v := stubVerifier{claims: verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d"}}
 	resolved := 0
 	resolver := func(context.Context, *http.Request, verify.Claims) ([]string, error) {
 		resolved++
@@ -157,7 +162,7 @@ func TestDelegatedAuthenticator_PermissionResolverSeesTheRequest(t *testing.T) {
 
 	var lookups []string
 	a := NewDelegatedAuthenticator(DelegatedConfig{
-		Verifier:     RequestVerifierFor(stubVerifier{claims: verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d"}}),
+		Verifier:     stubVerifier{claims: verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d"}},
 		MerchantID:   engineMerchantID,
 		MerchantSlug: "acme",
 		Issuer:       "openrails:self",
@@ -190,7 +195,7 @@ func TestDelegatedAuthenticator_PermissionResolverSeesTheRequest(t *testing.T) {
 	// A resolver that errors fails the request closed rather than downgrading
 	// it to a grant-free principal.
 	boom := NewDelegatedAuthenticator(DelegatedConfig{
-		Verifier:   RequestVerifierFor(stubVerifier{claims: verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d"}}),
+		Verifier:   stubVerifier{claims: verify.Claims{UserID: "8b0f9f0e-9a4b-4a5f-9f3a-2f8f0a1b2c3d"}},
 		MerchantID: engineMerchantID,
 		Permissions: func(context.Context, *http.Request, verify.Claims) ([]string, error) {
 			return nil, errors.New("authority unreachable")
@@ -198,18 +203,4 @@ func TestDelegatedAuthenticator_PermissionResolverSeesTheRequest(t *testing.T) {
 	})
 	_, err = boom.AuthenticateDelegated(t.Context(), delegatedReq("x.y.z"))
 	require.ErrorIs(t, err, billingauth.ErrUnauthenticated)
-}
-
-// contextVerifier makes a cancelled request observable at the token boundary.
-type contextVerifier struct{}
-
-func (contextVerifier) Verify(ctx context.Context, _ string) (verify.Claims, error) {
-	return verify.Claims{}, ctx.Err()
-}
-func TestRequestVerifierPropagatesCancellation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	req := delegatedReq("token").WithContext(ctx)
-	_, err := RequestVerifierFor(contextVerifier{}).VerifyRequest(req)
-	require.ErrorIs(t, err, context.Canceled)
 }

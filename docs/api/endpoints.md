@@ -44,13 +44,12 @@ The required permission is listed per route below.
 
 ### Idempotency-Key
 
-Any mutating request (`POST`/`PUT`/`PATCH`/`DELETE`) may carry an optional
-`Idempotency-Key` header. Keys are scoped per merchant and cached 24h. Same key
-+ same method/path/body → the original response is replayed byte-for-byte with
-`Idempotent-Replayed: true`. Same key + different body → `409
-idempotency_key_reuse`. Key still in flight → `409 idempotency_in_progress`.
-5xx responses are never cached. This is a replay cache layered on top of each
-route's own dedup guards, never a replacement for them.
+Idempotency is an explicit operation contract, not a generic HTTP response
+cache. Send `Idempotency-Key` only on routes that document it (for example,
+checkout, invoice collection, and money operations). Those operations retain
+their own durable receipts and conflict rules. Every HTTP attempt authenticates,
+resolves its merchant, and authorizes against current authority. Credentials and
+admin responses are never replayed by global middleware.
 
 ## 1. Public routes
 

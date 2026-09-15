@@ -641,11 +641,11 @@ func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
 	if c == nil || c.authSvc == nil || c.authSvc.Verifier() == nil {
 		return nil
 	}
-	// Token-shaped verification, unchanged by or#918: this is the credential
-	// chain's JWT step for OpenRails' own routes, where a non-JWT bearer is an
-	// expected fallback to the next resolver (#845) rather than a rejection.
+	// Privileged routes need current account admission, not merely a valid
+	// unexpired signature. AuthKit also retains enrollment-only restrictions.
 	return auth.NewAuthenticator(auth.AuthenticatorConfig{
-		Verifier: auth.RequestVerifierFor(c.authSvc.Verifier()),
+		Verifier:       auth.RequestVerifierFunc(c.authSvc.Verifier().VerifyRequestLive),
+		OmitTokenRoles: true,
 	})
 }
 
