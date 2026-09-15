@@ -15,6 +15,7 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -243,6 +244,13 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 		h(httphandlers.ServiceGetInvokerCredits),
 		readMW...,
 	)
+
+	checkoutWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(permissions.MerchantCheckoutCreate)}, dbMW...)
+	group.Handle(http.MethodPost, "/checkout-sessions", h(httphandlers.ServiceCreateCheckoutSession), checkoutWriteMW...)
+	group.Handle(http.MethodGet, "/checkout-sessions/:id", h(httphandlers.ServiceGetCheckoutSession), readMW...)
+	group.Handle(http.MethodPost, "/checkout-sessions/:id/confirm", h(httphandlers.ServiceConfirmCheckoutSession), checkoutWriteMW...)
+	group.Handle(http.MethodGet, "/checkout-options", h(httphandlers.ServiceListCheckoutRailOptions), readMW...)
+	customers.Handle(http.MethodGet, "/effective-tier", h(httphandlers.ServiceResolveEffectiveTier), readMW...)
 
 	group.Handle(http.MethodPost, "/admissions", h(httphandlers.ServiceAdmitBatch), admissionMW...)
 	group.Handle(http.MethodGet, "/settings", h(httphandlers.ServiceGetMerchantSettings), settingsReadMW...)

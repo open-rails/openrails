@@ -691,7 +691,7 @@ type clientResponse struct {
 // doRaw issues a single authed request and returns (response, body) for 2xx and
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
-func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*clientResponse, error) {
+func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
 	var raw []byte
 	if body != nil {
 		var merr error
@@ -723,6 +723,9 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*cli
 	if rerr != nil {
 		return nil, fmt.Errorf("openrails: build request: %w", rerr)
 	}
+	for name, values := range headers {
+		req.Header[name] = append([]string(nil), values...)
+	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
 	if raw != nil {
@@ -749,7 +752,11 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*cli
 // do issues a single authed request, mapping any non-2xx onto the canonical
 // StatusError. out may be nil when no body is expected.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	response, err := c.doRaw(ctx, method, path, body)
+	return c.doWithHeaders(ctx, method, path, body, out, nil)
+}
+
+func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers http.Header) error {
+	response, err := c.doRaw(ctx, method, path, body, headers)
 	if err != nil {
 		return err
 	}

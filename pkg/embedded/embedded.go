@@ -132,6 +132,13 @@ func New(ctx context.Context, opts Options) (*Embedded, error) {
 		return nil, fmt.Errorf("bootstrap application: %w", err)
 	}
 
+	// Ordinary Client calls must have the same provider/secret graph as the
+	// standalone server; worker startup or mounting HTTP cannot be prerequisites.
+	if err := application.Runtime.EnsureMerchantsService(ctx); err != nil {
+		_ = application.Close(ctx)
+		return nil, fmt.Errorf("initialize merchant services: %w", err)
+	}
+
 	e := &Embedded{app: application, consoleAssets: opts.ConsoleAssets}
 	if opts.StripeTransport != nil {
 		stripeapi.SetBaseTransport(opts.StripeTransport)

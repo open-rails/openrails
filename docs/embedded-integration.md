@@ -15,7 +15,7 @@ network hop, no second credential. Concretely:
 - Its HTTP routes mount on **your** mux under a prefix you choose; your users call
   them with their normal session credential.
 - Your backend calls the engine through `rt.Client()` — the **same**
-  `openrails.Client` interface a standalone consumer gets from `openrails.NewRemote`.
+  `*openrails.Client` a standalone consumer gets from `openrails.NewRemote`.
   Parity is structural: one client implementation, one handler surface, joined by an
   in-process `http.RoundTripper` instead of a socket (enforced by a dual-mode
   conformance test).
@@ -392,12 +392,13 @@ via `embed.WithAdminConsole(sub)`; gate mounting on `admin_console.enabled`. See
 ### 7. Calling the engine
 
 ```go
-client := rt.Client()
+client, err := rt.Client()
+if err != nil { log.Fatal(err) }
 ctx = openrails.WithMerchant(ctx, mid) // per-call pin; must agree with the bound merchant
-if err := openrails.Verify(ctx, client); err != nil { log.Fatal(err) } // fail fast at boot
+if err := client.Verify(ctx); err != nil { log.Fatal(err) } // fail fast at boot
 ```
 
-The `openrails.Client` interface, grouped by job:
+The shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
@@ -423,11 +424,13 @@ Entitlement lookups address subjects by the ids your auth system already holds
 billing is an empty slice, never an error. Deny verdicts are `(Allowed=false, nil
 error)`.
 
-Extras: the embedded client always implements `embed.SingleAdmitter` (single `Admit`,
-no wire counterpart) — reach it via type assertion. `embed.WithCurrency` /
-`embed.WithRemoteOptions` tune the client (in-process calls have no default deadline;
-opt one back in with `openrails.WithTimeout`). `rt.Service()` is the escape hatch for
-engine-native types (`identity.CustomerID` etc.) instead of wire types.
+`Admit` is the batch-of-one convenience on the same client in every mode.
+`embed.WithCurrency` and `embed.WithRemoteOptions` configure the same call behavior
+as the remote constructor. Both modes default to a two-second call deadline;
+`openrails.WithTimeout(0)` explicitly delegates the deadline to the caller.
+
+Checkout creation/read/confirmation, checkout provider options and effective-tier
+resolution use the shared client too. See [the commerce client](api/commerce.md).
 
 Every `rt.Service()` method pins its own merchant-scoped connection, so a bare Go
 call reads the merchant's rows without ceremony — and one with no merchant on the
