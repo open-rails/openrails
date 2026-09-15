@@ -3,6 +3,7 @@
 package money_test
 
 import (
+	"database/sql"
 	"strconv"
 	"sync"
 	"testing"
@@ -174,7 +175,7 @@ func TestAutoTopupSafety_DisabledAndCrossCustomerNeverReserve(t *testing.T) {
 	require.Equal(t, "money_settings_auto_topup_payment_method_fk", constraint.ConstraintName)
 	in.CustomerID = other.UUID()
 	_, err = svc.ReserveAutoTopup(ctx, in)
-	require.ErrorIs(t, err, money.ErrAutoTopupSafety)
+	require.ErrorIs(t, err, sql.ErrNoRows, "the rejected settings write must not create an account")
 	var n int
 	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM openrails.auto_topup_episodes WHERE intent_id=$1", in.IntentID).Scan(&n))
 	require.Zero(t, n)
