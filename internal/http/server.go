@@ -258,14 +258,7 @@ func New(deps Dependencies) (*Server, error) {
 				SolanaCanSign: secretBackend.SolanaCanSign,
 				SecretWrite:   secretBackend.SecretWrite,
 			}
-			if deps.Runtime.CheckoutService != nil {
-				deps.Runtime.CheckoutService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.CheckoutService.SetPSPSecretResolver(tsvc)
-			}
-			if deps.Runtime.RailPaymentMethodService != nil {
-				deps.Runtime.RailPaymentMethodService.SetMerchantSecretStore(secretStore)
-				deps.Runtime.RailPaymentMethodService.SetPSPSecretResolver(tsvc)
-			}
+
 		}
 
 		if deps.Runtime != nil {
