@@ -15,6 +15,7 @@ type Catalog struct {
 	Indexed        map[string]bool       // "table.column" -> column is part of some index
 	UniqueKeys     map[string][][]string // table -> key column sets of each UNIQUE index
 	PrimaryKeys    map[string][]string   // table -> primary key columns
+	PartialIndexes map[string]bool       // index name -> a nontrivial predicate restricts membership
 	Columns        map[string][]string   // table -> its column names
 	Tables         map[string]struct{}   // every table in the openrails schema
 }
@@ -39,12 +40,26 @@ SELECT c.relname, array_agg(a.attname ORDER BY k.ord), i.indisprimary
  WHERE n.nspname = 'openrails' AND i.indisunique AND i.indpred IS NULL
  GROUP BY c.relname, i.indexrelid, i.indisprimary`
 
+const partialIndexesSQL = `
+SELECT idx.relname
+FROM pg_index i
+JOIN pg_class idx ON idx.oid=i.indexrelid
+JOIN pg_namespace ns ON ns.oid=idx.relnamespace
+WHERE ns.nspname='openrails' AND i.indpred IS NOT NULL
+  AND pg_get_expr(i.indpred,i.indrelid) <> 'true'
+  AND NOT EXISTS (
+    SELECT 1 FROM pg_attribute a
+    WHERE a.attrelid=i.indrelid AND a.attnotnull
+      AND pg_get_expr(i.indpred,i.indrelid)=format('(%I IS NOT NULL)',a.attname)
+  )`
+
 func LoadCatalog(ctx context.Context, conn *pgx.Conn) (*Catalog, error) {
 	cat := &Catalog{
 		MerchantScoped: map[string]bool{},
 		Indexed:        map[string]bool{},
 		UniqueKeys:     map[string][][]string{},
 		PrimaryKeys:    map[string][]string{},
+		PartialIndexes: map[string]bool{},
 		Columns:        map[string][]string{},
 		Tables:         map[string]struct{}{},
 	}
@@ -89,7 +104,22 @@ func LoadCatalog(ctx context.Context, conn *pgx.Conn) (*Catalog, error) {
 			cat.PrimaryKeys[table] = cols
 		}
 	}
-	return cat, urows.Err()
+	if err := urows.Err(); err != nil {
+		return nil, err
+	}
+	prows, err := conn.Query(ctx, partialIndexesSQL)
+	if err != nil {
+		return nil, err
+	}
+	defer prows.Close()
+	for prows.Next() {
+		var name string
+		if err := prows.Scan(&name); err != nil {
+			return nil, err
+		}
+		cat.PartialIndexes[name] = true
+	}
+	return cat, prows.Err()
 }
 
 // indexedAnywhere reports whether the column is index-backed on any of the
