@@ -191,3 +191,19 @@ func TestConcurrentAdmissionsPromiseCapacityOnce(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 60, bal.HeldBalance)
 }
+
+func TestConcurrentZeroAdmissionsOnColdPayer(t *testing.T) {
+	f := newFixture(t, 0)
+	f.policy = spendgate.Policy{}
+	var wg sync.WaitGroup
+	errors := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); _, err := f.admit(f.input(uuid.NewString(), 0)); errors <- err }()
+	}
+	wg.Wait()
+	close(errors)
+	for err := range errors {
+		require.NoError(t, err, "cold account creation must occur after the payer lock")
+	}
+}

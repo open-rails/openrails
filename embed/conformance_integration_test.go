@@ -364,9 +364,7 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 		r.RevenueDays = append(r.RevenueDays, d.Amount)
 	}
 
-	// 8) Release is idempotent (#513): releasing an unknown / TTL-expired / garbage
-	// request id is a no-op on BOTH transports (the hold reservation is gone, so there
-	// is nothing to free — never an error).
+	// Unknown operations have no receipt in either transport.
 	require.ErrorIs(t, c.Release(ctx, uuid.NewString()), openrails.ErrNotFound, "%s unknown operation has no receipt", env.side)
 	require.ErrorIs(t, c.Release(ctx, "not-a-uuid"), openrails.ErrNotFound, "%s unknown operation has no receipt", env.side)
 
@@ -604,10 +602,9 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	require.Equal(t, resEmbedded, resStandalone,
 		"embedded and standalone surfaces diverged — fix the adapter, never the assertion")
 
-	// Release is idempotent on BOTH real transports (#513): releasing an unknown
-	// request id is a no-op (the reservation is already gone), never an error.
-	require.NoError(t, embeddedClient.Release(ctx, uuid.NewString()))
-	require.NoError(t, standaloneClient.Release(ctx, uuid.NewString()))
+	// Neither transport fabricates a receipt for a request that was never admitted.
+	require.ErrorIs(t, embeddedClient.Release(ctx, uuid.NewString()), openrails.ErrNotFound)
+	require.ErrorIs(t, standaloneClient.Release(ctx, uuid.NewString()), openrails.ErrNotFound)
 
 	// Standalone real-auth contract: a bad bearer is rejected by the real
 	// service-credential gate -> 401 -> ErrUnauthorized.

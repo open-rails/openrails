@@ -290,7 +290,7 @@ type AdmitRequest struct {
 // AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
 // DenyCode when available. A successful money-bearing admit creates a request_id
-// keyed Redis hold. A deny is returned as (Allowed=false, nil error) on both
+// keyed SQL operation. A deny is returned as (Allowed=false, nil error) on both
 // transports even though HTTP maps it to 402/403/429.
 type AdmitResponse struct {
 	// Allowed preserves the original decision on replay. Use Active to decide
@@ -303,10 +303,8 @@ type AdmitResponse struct {
 	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
 	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
 	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
-	// Allowed is the original decision on replay. State, not Allowed alone,
-	// identifies a live reservation; terminal replay never authorizes new work.
-	Replayed bool   `json:"replayed"`
-	State    string `json:"state,omitempty"`
+	Replayed            bool       `json:"replayed"`
+	State               string     `json:"state,omitempty"`
 }
 
 // Active reports a currently open, originally allowed admission. A denied

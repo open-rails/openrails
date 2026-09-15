@@ -38,13 +38,7 @@ type ScopedWindows struct {
 	Windows []Window `json:"windows"`
 }
 
-// Policy is the full cached cap config for one payer+currency (all scopes). It is
-// read-mostly config loaded from Postgres — never read from Postgres on the hot
-// path. There is no invalidation signal: or#823 dropped the policy_version
-// column this comment used to claim one from, because nothing ever read it and
-// the cache-invalidation mechanism it described was never built. A cache that
-// needs invalidating must grow a real one (future #687's revision counter is the
-// obvious substrate) rather than point at a bigint nobody increments for it.
+// Policy is the transactionally loaded cap configuration for one payer and unit.
 type Policy struct {
 	Scopes []ScopedWindows `json:"scopes"`
 }
@@ -68,7 +62,7 @@ type resolvedWindow struct {
 // EffectiveWindows returns every window that applies to req under collect-all
 // semantics: all payer-scope windows, invoker-scope windows whose ScopeID matches
 // req.Invoker, role-scope windows for any of req.Roles, and trust-level-scope
-// windows for req.TrustLevel. Role windows include req.Invoker in their Redis
+// windows for req.TrustLevel. Role windows include req.Invoker in their durable
 // identity, so a role budget is independently metered for each concrete
 // delegated invoker holding the role. The gate DENIES if ANY returned window is
 // over its limit.

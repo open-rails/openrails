@@ -235,7 +235,7 @@ ORDER BY currency`, tenantID, payerID)
 	return out, nil
 }
 
-// AdmissionCapacity is the O(1) affordability snapshot consumed by the Redis
+// AdmissionCapacity is the affordability snapshot consumed by the SQL
 // service-admit gate.
 type AdmissionCapacity struct {
 	Balance     int64
@@ -278,11 +278,11 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 			return err
 		}
-		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
-			return err
-		}
 		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
 		if _, err := txSvc.lockBalance(ctx, q, payer, payerID.String(), cur); err != nil {
+			return err
+		}
+		if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
 			return err
 		}
 		row, err := q.GetAdmissionCapacity(ctx, gen.GetAdmissionCapacityParams{
