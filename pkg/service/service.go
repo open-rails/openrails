@@ -217,9 +217,8 @@ func NewDepositIdempotencyKey(source, sourceID string) (DepositIdempotencyKey, e
 // The deposit's structural key is the credit grant's (merchant, customer,
 // source_id), UNIQUE in the database (or#906 migration 0004). An identical
 // replay is answered with the EXISTING grant (Replayed=true); a replay whose
-// Amount differs from what the key committed is refused with
-// ErrIdempotencyKeyReused (amount only — currency/expiry/description drift is
-// tolerated, the or#891 posture everywhere).
+// amount, currency or expiry differs is refused with ErrIdempotencyKeyReused.
+// Diagnostic source/invoker/description changes retain the original receipt.
 type DepositCreditsRequest struct {
 	CustomerID  *identity.CustomerID
 	Invoker     string

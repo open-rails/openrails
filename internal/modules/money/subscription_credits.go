@@ -45,18 +45,6 @@ func (s *MoneyService) validateCreditGrantSpec(ctx context.Context, q *gen.Queri
 	return nil
 }
 
-// grantExpiry resolves a grant's deposit expiry: now + EffectiveExpiryHours, or
-// nil (never) when the spec declared no expiry (#857). A nil ends_at is what
-// keeps the lot out of the credit-expiry worker's predicate forever.
-func grantExpiry(now time.Time, spec models.CreditGrantSpec) *time.Time {
-	hours := spec.EffectiveExpiryHours()
-	if hours <= 0 {
-		return nil
-	}
-	t := now.Add(time.Duration(hours) * time.Hour)
-	return &t
-}
-
 // expiryLogValue renders a resolved lot expiry for logs. Every grant records the
 // instant it will be destroyed, or "never" — the decision is never left implicit
 // in the record (#857).
@@ -114,8 +102,6 @@ func (s *MoneyService) validateSubscriptionCreditGrant(params subscriptions.Subs
 }
 
 func (s *MoneyService) grantSubscriptionCreditsTx(ctx context.Context, q *gen.Queries, params subscriptions.SubscriptionCreditGrantParams) error {
-	now := s.now()
-
 	sub, err := q.GetSubscriptionByID(ctx, params.SubscriptionID)
 	if err != nil {
 		return err
@@ -160,15 +146,15 @@ func (s *MoneyService) grantSubscriptionCreditsTx(ctx context.Context, q *gen.Qu
 		// #491: source_id is the natural-key string (uuidv7 pk + UNIQUE natural key); no uuidv5.
 		grantID := grantKey
 
-		expiresAt := grantExpiry(now, spec)
-		if _, err := s.depositTx(ctx, q, DepositParams{
-			Invoker:   sub.CustomerID.String(),
-			Currency:  spec.UnitCode(),
-			Amount:    spec.Amount,
-			Source:    strings.TrimSpace(params.Source),
-			SourceID:  &grantID,
-			ExpiresAt: expiresAt,
-		}); err != nil {
+		deposit, err := s.depositTx(ctx, q, DepositParams{
+			Invoker:     sub.CustomerID.String(),
+			Currency:    spec.UnitCode(),
+			Amount:      spec.Amount,
+			Source:      strings.TrimSpace(params.Source),
+			SourceID:    &grantID,
+			expiryHours: spec.EffectiveExpiryHours(),
+		})
+		if err != nil {
 			return err
 		}
 
@@ -178,7 +164,7 @@ func (s *MoneyService) grantSubscriptionCreditsTx(ctx context.Context, q *gen.Qu
 			"grant_label":     label,
 			"unit":            spec.UnitCode(),
 			"amount":          spec.Amount,
-			"expires_at":      expiryLogValue(expiresAt),
+			"expires_at":      expiryLogValue(deposit.ExpiresAt),
 			"cadence":         cadence,
 			"grant_id":        grantID,
 		}).Info("subscription credit grant applied")
@@ -221,7 +207,6 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 	payer := params.Payer
 	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		now := s.now()
 		for label, spec := range params.Spec {
 			label = strings.TrimSpace(label)
 			if err := s.validateCreditGrantSpec(ctx, q, label, spec); err != nil {
@@ -237,16 +222,16 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 			grantKey := fmt.Sprintf("openrails:purchase_credit_grant:%s:%s", params.PaymentID, label)
 			// #491: source_id is the natural-key string (uuidv7 pk + UNIQUE natural key); no uuidv5.
 			grantID := grantKey
-			expiresAt := grantExpiry(now, spec)
-			if _, err := s.depositTx(ctx, q, DepositParams{
-				CustomerID: &payer,
-				Invoker:    payer.String(),
-				Currency:   spec.UnitCode(),
-				Amount:     spec.Amount,
-				Source:     strings.TrimSpace(params.Source),
-				SourceID:   &grantID,
-				ExpiresAt:  expiresAt,
-			}); err != nil {
+			deposit, err := s.depositTx(ctx, q, DepositParams{
+				CustomerID:  &payer,
+				Invoker:     payer.String(),
+				Currency:    spec.UnitCode(),
+				Amount:      spec.Amount,
+				Source:      strings.TrimSpace(params.Source),
+				SourceID:    &grantID,
+				expiryHours: spec.EffectiveExpiryHours(),
+			})
+			if err != nil {
 				return err
 			}
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -254,7 +239,7 @@ func (s *MoneyService) GrantPurchaseCredits(ctx context.Context, params GrantPur
 				"grant_label": label,
 				"unit":        spec.UnitCode(),
 				"amount":      spec.Amount,
-				"expires_at":  expiryLogValue(expiresAt),
+				"expires_at":  expiryLogValue(deposit.ExpiresAt),
 				"grant_id":    grantID,
 			}).Info("purchase credit grant applied")
 		}

@@ -205,8 +205,7 @@ func (s *MoneyService) FinalizeAutoTopupReceipt(ctx context.Context, in AutoTopu
 			sourceID := "topup:" + in.IntentID.String()
 			params := DepositParams{CustomerID: &payer, Invoker: payer.String(), Currency: in.Currency, Amount: ep.AmountNative, Source: "auto_topup", SourceID: &sourceID}
 			if st.DefaultCreditExpiryHours != nil && *st.DefaultCreditExpiryHours > 0 {
-				expiry := now.Add(time.Duration(*st.DefaultCreditExpiryHours) * time.Hour)
-				params.ExpiresAt = &expiry
+				params.expiryHours = int(*st.DefaultCreditExpiryHours)
 			}
 			if _, err := s.depositTx(ctx, q, params); err != nil {
 				return err

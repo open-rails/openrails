@@ -127,13 +127,13 @@ type IdempotencyConflict struct {
 	Source    string
 	SourceID  string
 	Field     string // the charging term that differs
-	Committed int64  // what the key already committed
-	Retried   int64  // what this retry asked for
+	Committed any    // what the key already committed
+	Retried   any    // what this retry asked for
 }
 
 func (e *IdempotencyConflict) Error() string {
 	return fmt.Sprintf(
-		"%s: %s replayed idempotency key (%s, %s) with %s=%d, but that key already committed %s=%d",
+		"%s: %s replayed idempotency key (%s, %s) with %s=%v, but that key already committed %s=%v",
 		ErrIdempotencyKeyReused, e.Operation, e.Source, e.SourceID, e.Field, e.Retried, e.Field, e.Committed,
 	)
 }
