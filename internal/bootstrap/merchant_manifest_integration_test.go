@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS openrails.billing_policy_bindings (
     updated_at timestamptz DEFAULT now() NOT NULL,
     CONSTRAINT billing_policy_bindings_rung_ck CHECK ((customer_id IS NULL) OR (tier IS NULL)),
     CONSTRAINT billing_policy_bindings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT,
-    CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id),
+    CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id),
     CONSTRAINT billing_policy_bindings_policy_fk FOREIGN KEY (merchant_id, policy_name) REFERENCES openrails.billing_policies(merchant_id, name) ON DELETE RESTRICT
 );
 CREATE INDEX IF NOT EXISTS idx_billing_policy_bindings_merchant_id ON openrails.billing_policy_bindings (merchant_id);
