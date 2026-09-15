@@ -201,7 +201,7 @@ func (h *Harness) MerchantDB(merchantID uuid.UUID) *db.DB {
 
 // Surface is a single running server: its base URL, the bearer token a client
 // must present (empty/trusting for the embedded host — any token works), and a
-// ready-to-use openrails.Client (NewRemote over real HTTP).
+// ready-to-use *openrails.Client (NewRemote over real HTTP).
 type Surface struct {
 	// Name is "embedded" or "standalone" (for assertion labels).
 	Name string
@@ -240,15 +240,19 @@ func (s *Surface) App() *app.App { return s.app }
 // in-process Handler().ServeHTTP tests that skip the network hop.
 func (s *Surface) Server() *server.Server { return s.server }
 
-// Client returns a fresh openrails.Client (NewRemote) for this surface, carrying
+// Client returns a fresh *openrails.Client (NewRemote) for this surface, carrying
 // its token + currency. opts append/override.
-func (s *Surface) Client(opts ...openrails.RemoteOption) openrails.Client {
+func (s *Surface) Client(opts ...openrails.RemoteOption) *openrails.Client {
 	base := []openrails.RemoteOption{
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return s.Token, nil }),
 		openrails.WithCurrency(s.currency),
 		openrails.WithTimeout(30 * time.Second),
 	}
-	return openrails.NewRemote(s.BaseURL, append(base, opts...)...)
+	client, err := openrails.NewRemote(s.BaseURL, append(base, opts...)...)
+	if err != nil {
+		panic(err)
+	}
+	return client
 }
 
 // New provisions the shared infrastructure: the migrated Postgres DSN (shared

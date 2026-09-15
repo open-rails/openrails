@@ -14,10 +14,9 @@ import (
 	"unicode/utf8"
 )
 
-// remote is the HTTP implementation of Client, ported from go-client/client.go
-// (#338). It talks to a standalone OpenRails over service-credential
-// authenticated /v1/merchant/* routes.
-type remote struct {
+// Client executes the same typed billing operations over an HTTP or in-process
+// transport. Applications may define narrow interfaces for the methods they use.
+type Client struct {
 	baseURL  string
 	currency string
 	client   *http.Client
@@ -27,14 +26,12 @@ type remote struct {
 	// mint failure errors the call so the problem surfaces instead of being
 	// masked.
 	tokenFn func(context.Context) (string, error)
-	// urlErr is the static base-URL validation result from NewRemote. The
-	// constructor stays no-error (mintless pattern): an invalid URL fails each
-	// call with this descriptive error instead.
-	urlErr error
+	// setupErr records invalid static options until construction validates them.
+	setupErr error
 }
 
 // RemoteOption configures NewRemote.
-type RemoteOption func(*remote)
+type RemoteOption func(*Client)
 
 // WithHTTPClient injects a transport (tests, custom TLS/conn pooling). When
 // unset a client bounded by the configured timeout is created. The per-call
@@ -42,20 +39,20 @@ type RemoteOption func(*remote)
 // REGARDLESS of the injected client, so a custom client that omits
 // http.Client.Timeout still cannot stall the hot path.
 func WithHTTPClient(hc *http.Client) RemoteOption {
-	return func(r *remote) { r.client = hc }
+	return func(r *Client) { r.client = hc }
 }
 
 // WithCurrency sets the client-level currency used by Balance and by requests
 // that leave their currency empty. Empty currency is rejected by service routes.
 func WithCurrency(currency string) RemoteOption {
-	return func(r *remote) { r.currency = strings.TrimSpace(currency) }
+	return func(r *Client) { r.currency = strings.TrimSpace(currency) }
 }
 
 // WithTokenProvider supplies the per-call Bearer minting function. REQUIRED for
 // any authenticated deployment: without it every call fails with a descriptive
 // error (the mintless tokenFn pattern from go-client, #411).
 func WithTokenProvider(fn func(context.Context) (string, error)) RemoteOption {
-	return func(r *remote) { r.tokenFn = fn }
+	return func(r *Client) { r.tokenFn = fn }
 }
 
 // WithAPIKey authenticates every call with a static OpenRails API key — sugar
@@ -64,12 +61,13 @@ func WithTokenProvider(fn func(context.Context) (string, error)) RemoteOption {
 // (the mintless tokenFn pattern).
 func WithAPIKey(key string) RemoteOption {
 	key = strings.TrimSpace(key)
-	return WithTokenProvider(func(context.Context) (string, error) {
+	return func(c *Client) {
 		if key == "" {
-			return "", fmt.Errorf("openrails: WithAPIKey configured with an empty key")
+			c.setupErr = fmt.Errorf("openrails: WithAPIKey requires a nonempty key")
+			return
 		}
-		return key, nil
-	})
+		c.tokenFn = func(context.Context) (string, error) { return key, nil }
+	}
 }
 
 // WithTimeout bounds EVERY hot-path call via a per-request context deadline
@@ -79,27 +77,34 @@ func WithAPIKey(key string) RemoteOption {
 // value disables the per-call deadline (rely on ctx / the client transport).
 // Defaults to 2s.
 func WithTimeout(d time.Duration) RemoteOption {
-	return func(r *remote) { r.timeout = d }
+	return func(r *Client) { r.timeout = d }
 }
 
-// NewRemote builds the HTTP-backed Client against a standalone OpenRails. The
-// constructor is I/O-free and never errors; a statically invalid base URL fails
-// every call with a descriptive error (see remote.urlErr).
-func NewRemote(baseURL string, opts ...RemoteOption) Client {
-	r := &remote{
+// NewRemote builds the client for standalone or SaaS HTTP. It validates static
+// configuration without I/O; Verify checks live credentials and reachability.
+func NewRemote(baseURL string, opts ...RemoteOption) (*Client, error) {
+	r := &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		timeout: 2 * time.Second,
 	}
-	r.urlErr = validateBaseURL(r.baseURL)
+	if err := validateBaseURL(r.baseURL); err != nil {
+		return nil, err
+	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(r)
 		}
 	}
-	if r.client == nil {
-		r.client = &http.Client{Timeout: r.timeout}
+	if r.setupErr != nil {
+		return nil, r.setupErr
 	}
-	return r
+	if r.tokenFn == nil {
+		return nil, fmt.Errorf("openrails: token provider is required")
+	}
+	if r.client == nil {
+		r.client = &http.Client{}
+	}
+	return r, nil
 }
 
 // validateBaseURL is the I/O-free static check on the configured base URL.
@@ -117,6 +122,9 @@ func validateBaseURL(baseURL string) error {
 	if u.Host == "" {
 		return fmt.Errorf("openrails: invalid base URL %q: missing host", baseURL)
 	}
+	if u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(baseURL, "#") {
+		return fmt.Errorf("openrails: base URL must not contain credentials, query or fragment")
+	}
 	return nil
 }
 
@@ -127,7 +135,7 @@ func validateBaseURL(baseURL string) error {
 // settings:read permission (any merchant-owner API key has it). Errors map to
 // the canonical sentinels: ErrUnauthorized (bad credential), ErrUnreachable
 // (transport/5xx), etc.
-func (c *remote) Verify(ctx context.Context) error {
+func (c *Client) Verify(ctx context.Context) error {
 	return c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, nil)
 }
 
@@ -139,7 +147,7 @@ func invalidErr(msg string) error {
 
 // bearer mints the credential for the next call. There is no fallback; a mint
 // failure or empty token errors the call so the issue surfaces.
-func (c *remote) bearer(ctx context.Context) (string, error) {
+func (c *Client) bearer(ctx context.Context) (string, error) {
 	if c.tokenFn == nil {
 		return "", fmt.Errorf("openrails: no token provider configured (WithTokenProvider)")
 	}
@@ -154,7 +162,7 @@ func (c *remote) bearer(ctx context.Context) (string, error) {
 }
 
 // DepositCredits implements Client (handler ServiceDepositCredits).
-func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
+func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error) {
 	currency := normalizeCurrency(req.Currency)
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
@@ -182,7 +190,7 @@ func (c *remote) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 
 // GetDeposit implements Client (handler ServiceGetDeposit, or#906). A key that
 // never committed returns an error matching ErrNotFound.
-func (c *remote) GetDeposit(ctx context.Context, customerID, sourceID string) (*CreditTransaction, error) {
+func (c *Client) GetDeposit(ctx context.Context, customerID, sourceID string) (*CreditTransaction, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("source_id", strings.TrimSpace(sourceID))
@@ -213,7 +221,7 @@ type captureBody struct {
 // the request id and engine constants alone, so any retry dedupes and a
 // changed-amount retry is refused with ErrIdempotencyKeyReused. A nil error
 // means OpenRails accepted the capture.
-func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error {
+func (c *Client) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("capture requires request_id")
 	}
@@ -237,7 +245,7 @@ func (c *remote) Capture(ctx context.Context, requestID string, capturedAmount i
 
 // Release implements Client (handler ServiceReleaseHold). Idempotent on the
 // request_id. Used when the work fails after a successful authorize/admit.
-func (c *remote) Release(ctx context.Context, requestID string) error {
+func (c *Client) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("release requires request_id")
 	}
@@ -246,7 +254,7 @@ func (c *remote) Release(ctx context.Context, requestID string) error {
 }
 
 // ExtendHold implements Client (handler ServiceExtendHold).
-func (c *remote) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
+func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("extend requires request_id")
 	}
@@ -259,7 +267,7 @@ func (c *remote) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 }
 
 // Balance implements Client (handler ServiceGetCreditsBalance).
-func (c *remote) Balance(ctx context.Context, customerID string) (*BalanceResponse, error) {
+func (c *Client) Balance(ctx context.Context, customerID string) (*BalanceResponse, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	if c.currency != "" {
@@ -273,7 +281,7 @@ func (c *remote) Balance(ctx context.Context, customerID string) (*BalanceRespon
 }
 
 // GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
-func (c *remote) GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error) {
+func (c *Client) GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
@@ -285,7 +293,7 @@ func (c *remote) GetCreditAccount(ctx context.Context, customerID, currency stri
 }
 
 // UsageRollup implements Client (handler ServiceUsageRollup).
-func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
+func (c *Client) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
 	var resp struct {
 		Rows []UsageRollupRow `json:"rows"`
 	}
@@ -303,7 +311,7 @@ func (c *remote) UsageRollup(ctx context.Context, customerID, currency string, f
 }
 
 // GetTrustLevel implements Client (handler ServiceGetTrustLevel, #477).
-func (c *remote) GetTrustLevel(ctx context.Context, customerID, currency string) (string, error) {
+func (c *Client) GetTrustLevel(ctx context.Context, customerID, currency string) (string, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", strings.TrimSpace(currency))
@@ -318,7 +326,7 @@ func (c *remote) GetTrustLevel(ctx context.Context, customerID, currency string)
 }
 
 // ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).
-func (c *remote) ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error) {
+func (c *Client) ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error) {
 	body := map[string]any{
 		"customer_id":  strings.TrimSpace(report.CustomerID),
 		"invoker":      report.Invoker,
@@ -337,7 +345,7 @@ func (c *remote) ReportWastedSpend(ctx context.Context, report WastedSpendReport
 }
 
 // RecordUsage implements Client (handler ServiceRecordUsage, #797).
-func (c *remote) RecordUsage(ctx context.Context, report UsageReport) error {
+func (c *Client) RecordUsage(ctx context.Context, report UsageReport) error {
 	currency := normalizeCurrency(report.Currency)
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
@@ -359,7 +367,7 @@ func (c *remote) RecordUsage(ctx context.Context, report UsageReport) error {
 }
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
-func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
+func (c *Client) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
 	body := map[string]any{
 		"customer_id":         strings.TrimSpace(customerID),
 		"currency":            normalizeCurrency(currency),
@@ -369,7 +377,7 @@ func (c *remote) SetCreditLimit(ctx context.Context, customerID, currency string
 }
 
 // GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
-func (c *remote) GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error) {
+func (c *Client) GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error) {
 	q := url.Values{}
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
@@ -382,10 +390,25 @@ func (c *remote) GetCreditLimit(ctx context.Context, customerID, currency string
 	return resp.CreditLimitAmount, nil
 }
 
+// Admit is the single-request form of AdmitBatch on every transport.
+func (c *Client) Admit(ctx context.Context, request AdmitRequest) (*AdmitResponse, error) {
+	verdicts, err := c.AdmitBatch(ctx, []AdmitRequest{request})
+	if err != nil {
+		return nil, err
+	}
+	if len(verdicts) != 1 {
+		return nil, fmt.Errorf("openrails: admission returned %d verdicts for one request", len(verdicts))
+	}
+	if verdicts[0].Result != nil {
+		return verdicts[0].Result, nil
+	}
+	return nil, NewStatusError(verdicts[0].Status, "", verdicts[0].Error)
+}
+
 // AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch
 // itself answers 200 with positional per-item verdicts; batch-level validation
 // (empty / oversized) is the server's, so both transports reject identically.
-func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error) {
+func (c *Client) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error) {
 	var out struct {
 		Items []AdmitBatchVerdict `json:"items"`
 	}
@@ -398,7 +421,7 @@ func (c *remote) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 }
 
 // GetMerchantSettings implements PolicySyncClient.
-func (c *remote) GetMerchantSettings(ctx context.Context) (*MerchantSettings, error) {
+func (c *Client) GetMerchantSettings(ctx context.Context) (*MerchantSettings, error) {
 	var out MerchantSettings
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, &out); err != nil {
 		return nil, err
@@ -407,14 +430,14 @@ func (c *remote) GetMerchantSettings(ctx context.Context) (*MerchantSettings, er
 }
 
 // SetMerchantSettings implements PolicySyncClient.
-func (c *remote) SetMerchantSettings(ctx context.Context, settings MerchantSettings) error {
+func (c *Client) SetMerchantSettings(ctx context.Context, settings MerchantSettings) error {
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil)
 }
 
 // SetCustomerSpendDelegations implements PolicySyncClient over the
 // machine-authenticated merchant surface. The /v1/customers counterpart is
 // reserved for a customer-owned delegated browser principal.
-func (c *remote) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
+func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")
 	}
@@ -423,7 +446,7 @@ func (c *remote) SetCustomerSpendDelegations(ctx context.Context, customerID str
 }
 
 // SetCustomerSpendDelegation atomically upserts one customer delegation.
-func (c *remote) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error {
+func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error {
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")
 	}
@@ -433,7 +456,7 @@ func (c *remote) SetCustomerSpendDelegation(ctx context.Context, customerID stri
 
 // DeleteCustomerSpendDelegation implements PolicySyncClient (handler
 // ServiceDeleteCustomerSpendDelegation): single-grant revocation (or#911).
-func (c *remote) DeleteCustomerSpendDelegation(ctx context.Context, customerID, scope, scopeKey string) error {
+func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID, scope, scopeKey string) error {
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")
 	}
@@ -448,7 +471,7 @@ func (c *remote) DeleteCustomerSpendDelegation(ctx context.Context, customerID, 
 
 // ListActiveEntitlements implements Client (handler
 // ServiceGetExternalSubjectEntitlements, entitlements.go).
-func (c *remote) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
+func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
 	body := map[string]any{
 		"subjects": subjects,
 	}
@@ -467,7 +490,7 @@ func (c *remote) ListActiveEntitlements(ctx context.Context, subjects []string, 
 
 // ListEntitlements implements Client as the single-subject form of
 // ListActiveEntitlements.
-func (c *remote) ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error) {
+func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
 		return nil, invalidErr("subject is required")
@@ -481,7 +504,7 @@ func (c *remote) ListEntitlements(ctx context.Context, subject string, at time.T
 
 // HasEntitlement implements Client by checking the single-subject entitlement
 // list returned from /v1/merchant/customers/entitlements:batch.
-func (c *remote) HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error) {
+func (c *Client) HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return false, invalidErr("entitlement is required")
@@ -501,7 +524,7 @@ func (c *remote) HasEntitlement(ctx context.Context, subject, entitlement string
 // ListCustomersWithEntitlement implements Client (handler
 // ServiceGetCustomersWithEntitlement). It walks the keyset-paginated reverse
 // route to completion.
-func (c *remote) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
+func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return nil, invalidErr("entitlement is required")
@@ -535,7 +558,7 @@ func (c *remote) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 }
 
 // ListProductAccess implements Client (handler ServiceGetUserProductAccess).
-func (c *remote) ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error) {
+func (c *Client) ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error) {
 	subject = strings.TrimSpace(subject)
 	if subject == "" {
 		return nil, invalidErr("subject is required")
@@ -552,7 +575,7 @@ func (c *remote) ListProductAccess(ctx context.Context, subject string) ([]Produ
 
 // HasProductAccess implements Client (handler ServiceGetUserProductAccess with
 // ?product_id=...).
-func (c *remote) HasProductAccess(ctx context.Context, subject, productID string) (bool, error) {
+func (c *Client) HasProductAccess(ctx context.Context, subject, productID string) (bool, error) {
 	subject = strings.TrimSpace(subject)
 	productID = strings.TrimSpace(productID)
 	switch {
@@ -570,7 +593,7 @@ func (c *remote) HasProductAccess(ctx context.Context, subject, productID string
 }
 
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
-func (c *remote) ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
+func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
 	body := map[string]any{
 		"resource": strings.TrimSpace(resource),
 		"currency": normalizeCurrency(currency),
@@ -679,10 +702,7 @@ func excerptErrorBody(raw []byte) string {
 // doRaw issues a single authed request and returns (status, body) for 2xx and
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
-func (c *remote) doRaw(ctx context.Context, method, path string, body any) (int, []byte, error) {
-	if c.urlErr != nil {
-		return 0, nil, c.urlErr
-	}
+func (c *Client) doRaw(ctx context.Context, method, path string, body any) (int, []byte, error) {
 	var raw []byte
 	if body != nil {
 		var merr error
@@ -718,19 +738,19 @@ func (c *remote) doRaw(ctx context.Context, method, path string, body any) (int,
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
+		return 0, nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: read response: %v", ErrUnreachable, err)
+		return 0, nil, fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
 	}
 	return resp.StatusCode, out, nil
 }
 
 // do issues a single authed request, mapping any non-2xx onto the canonical
 // StatusError. out may be nil when no body is expected.
-func (c *remote) do(ctx context.Context, method, path string, body, out any) error {
+func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	status, raw, err := c.doRaw(ctx, method, path, body)
 	if err != nil {
 		return err

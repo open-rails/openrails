@@ -22,13 +22,16 @@ func TestWithTimeoutEnforcedWithCustomClient(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewRemote(srv.URL,
+	c, cErr := NewRemote(srv.URL,
 		// Custom client with NO Timeout — the pre-fix code would block until the
 		// server responded (500ms) instead of honoring WithTimeout.
 		WithHTTPClient(&http.Client{}),
 		WithTimeout(50*time.Millisecond),
 		WithTokenProvider(func(context.Context) (string, error) { return "tok", nil }),
 	)
+	if cErr != nil {
+		t.Fatal(cErr)
+	}
 
 	start := time.Now()
 	_, err := c.Balance(context.Background(), "11111111-1111-1111-1111-111111111111")

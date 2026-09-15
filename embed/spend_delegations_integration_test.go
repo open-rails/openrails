@@ -35,7 +35,10 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
-	client := rt.Client()
+	client, clientErr := rt.Client()
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
 		{
 			Scope:    "invoker",

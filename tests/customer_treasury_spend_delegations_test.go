@@ -55,9 +55,12 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)))
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)
-	client := openrails.NewRemote(srv.URL, openrails.WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := openrails.NewRemote(srv.URL, openrails.WithTokenProvider(func(context.Context) (string, error) {
 		return "eyJ.service.jwt", nil
 	}))
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 
 	first := openrails.SpendDelegationInput{
 		Scope: "invoker", ScopeKey: "document-bound-invoker",

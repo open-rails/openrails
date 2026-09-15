@@ -129,77 +129,23 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 	return r, nil
 }
 
-// Client returns the unified openrails.Client over the in-process engine
-// (#685): the SAME client implementation NewRemote builds, wired to an
-// in-process transport that dispatches into the real neutral /v1/merchant
-// handler — real auth gate (context-attached host principal), real merchant
-// pinning, real RLS DB-conn middleware. No socket; one JSON round-trip per
-// call. Parity with a standalone deployment is structural (one implementation),
-// enforced by conformance_integration_test.go.
-//
-// Customer spend-delegation writes use localClient's direct service path; the
-// remote client uses equivalent merchant-machine routes. The returned Client
-// also always implements
-// SingleAdmitter (embedded-only single Admit, no wire counterpart) — reach it
-// via a type assertion.
-//
-// Built-in RemoteOptions (transport, token provider, currency, timeout) are
-// applied first; any host-supplied opts carrying WithRemoteOptions are applied
-// LAST, so a host can override any one of them (e.g. opt back into a deadline)
-// without embed re-exposing each knob individually.
-func (r *Runtime) Client(opts ...ClientOption) openrails.Client {
-	c := &localClient{svc: r.svc, rt: r.emb.App().Runtime}
-	for _, opt := range opts {
-		if opt != nil {
-			opt(c)
+// Client returns the same typed client as NewRemote over the in-process
+// operation transport. Options, validation and errors follow the same path.
+func (r *Runtime) Client(options ...ClientOption) (*openrails.Client, error) {
+	config := &clientOptions{}
+	for _, option := range options {
+		if option != nil {
+			option(config)
 		}
 	}
 	rt := r.emb.App().Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt) })
-	transport := &inprocessTransport{handler: r.handler, rt: rt}
-	builtins := []openrails.RemoteOption{
-		openrails.WithHTTPClient(&http.Client{Transport: transport}),
-		// The credential is the context-attached host principal; the bearer is a
-		// placeholder the in-process gate never consults.
+	defaults := []openrails.RemoteOption{
+		openrails.WithHTTPClient(&http.Client{Transport: &inprocessTransport{handler: r.handler, rt: rt}}),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }),
-		openrails.WithCurrency(c.currency),
-		// In-process calls have no network hop to bound: disable the remote's
-		// default 2s per-call context deadline so calls are bounded ONLY by the
-		// caller's own ctx (#767 — the deadline previously fired regardless of
-		// the injected http.Client, silently truncating every embedded call).
-		openrails.WithTimeout(0),
+		openrails.WithCurrency(config.currency),
 	}
-	remote := openrails.NewRemote(inprocessBaseURL, append(builtins, c.remoteOpts...)...)
-	return &unifiedClient{Client: remote, localClient: c}
-}
-
-// unifiedClient is the embedded SDK client (#685): the embedded
-// openrails.Client (the remote implementation over the in-process transport)
-// serves merchant-authority methods; *localClient keeps direct service
-// implementations for spend-delegation sync plus the embedded-only single-Admit
-// extra, which has no /v1/merchant wire counterpart.
-type unifiedClient struct {
-	openrails.Client
-	*localClient
-}
-
-// SetCustomerSpendDelegations uses the direct embedded service path. The remote
-// client uses the equivalent merchant-machine HTTP route. Explicit forwarding
-// resolves the embedding conflict.
-func (c *unifiedClient) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []openrails.SpendDelegationInput) error {
-	return c.localClient.SetCustomerSpendDelegations(ctx, customerID, delegations)
-}
-
-// SetCustomerSpendDelegation preserves singular-upsert semantics in both
-// embedded and standalone modes.
-func (c *unifiedClient) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation openrails.SpendDelegationInput) error {
-	return c.localClient.SetCustomerSpendDelegation(ctx, customerID, delegation)
-}
-
-// Verify is the authenticated readiness probe (see openrails.Verify), running
-// through the in-process transport + real auth gate.
-func (c *unifiedClient) Verify(ctx context.Context) error {
-	return openrails.Verify(ctx, c.Client)
+	return openrails.NewRemote(inprocessBaseURL, append(defaults, config.remoteOptions...)...)
 }
 
 // Service exposes the underlying pkg/service facade for host code that wants

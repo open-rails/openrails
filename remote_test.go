@@ -36,9 +36,12 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 
 	if err := client.SetMerchantSettings(context.Background(), MerchantSettings{
 		BillingPolicies: []BillingPolicyInput{{
@@ -108,9 +111,12 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 	err := client.SetCustomerSpendDelegation(context.Background(), " customer-1 ", SpendDelegationInput{
 		Scope: "invoker", ScopeKey: "issuer:subject:digest:entitlement",
 		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
@@ -140,9 +146,12 @@ func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T)
 	}))
 	defer srv.Close()
 
-	client := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 	err := client.SetCustomerSpendDelegations(context.Background(), " customer-1 ", []SpendDelegationInput{{
 		Scope: "invoker", ScopeKey: "invoker-1",
 		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
@@ -164,9 +173,12 @@ func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote(srv.URL, WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 	err := client.DeleteCustomerSpendDelegation(context.Background(), " customer-1 ", "invoker", "user:11111111-1111-1111-1111-111111111111")
 	if err != nil {
 		t.Fatalf("DeleteCustomerSpendDelegation: %v", err)
@@ -185,9 +197,12 @@ func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
 // No live server is required; validation fires before any HTTP call.
 func TestRemoteValidationErrorParity(t *testing.T) {
 	// Use an unreachable URL — none of the tested calls should reach the network.
-	client := NewRemote("http://127.0.0.1:0", WithTokenProvider(func(context.Context) (string, error) {
+	client, clientErr := NewRemote("http://127.0.0.1:0", WithTokenProvider(func(context.Context) (string, error) {
 		return "test-token", nil
 	}))
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 
 	ctx := context.Background()
 
@@ -288,7 +303,10 @@ func TestWithAPIKeyAndVerify(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := NewRemote(srv.URL, WithAPIKey(" sk-test "))
+	client, clientErr := NewRemote(srv.URL, WithAPIKey(" sk-test "))
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 	if err := Verify(context.Background(), client); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -300,25 +318,18 @@ func TestWithAPIKeyAndVerify(t *testing.T) {
 	}
 }
 
-// TestWithAPIKeyEmptyFailsPerCall: an empty key errors each call descriptively
-// (constructor stays no-error, the mintless tokenFn pattern).
-func TestWithAPIKeyEmptyFailsPerCall(t *testing.T) {
-	client := NewRemote("http://127.0.0.1:0", WithAPIKey(""))
-	err := Verify(context.Background(), client)
-	if err == nil || !strings.Contains(err.Error(), "WithAPIKey") {
-		t.Fatalf("expected descriptive empty-key error, got %v", err)
-	}
-}
-
-// TestNewRemoteInvalidBaseURL: static URL validation is I/O-free and surfaces
-// as a descriptive per-call error, never a constructor error.
-func TestNewRemoteInvalidBaseURL(t *testing.T) {
-	for _, base := range []string{"", "not a url", "ftp://example.com", "http://"} {
-		client := NewRemote(base, WithAPIKey("k"))
-		_, err := client.Balance(context.Background(), "11111111-1111-1111-1111-111111111111")
-		if err == nil || !strings.Contains(err.Error(), "base URL") {
-			t.Fatalf("base %q: expected descriptive base URL error, got %v", base, err)
+func TestNewRemoteRejectsInvalidConfiguration(t *testing.T) {
+	for _, base := range []string{"", "not a url", "ftp://example.com", "http://", "https://user:pass@example.com", "https://example.com?x=y", "https://example.com#fragment"} {
+		client, err := NewRemote(base, WithAPIKey("key"))
+		if err == nil || client != nil || !strings.Contains(err.Error(), "base URL") {
+			t.Fatalf("base %q: client=%v error=%v", base, client, err)
 		}
+	}
+	if client, err := NewRemote("https://example.com", WithAPIKey("")); err == nil || client != nil {
+		t.Fatal("empty API key accepted")
+	}
+	if client, err := NewRemote("https://example.com"); err == nil || client != nil {
+		t.Fatal("absent credential provider accepted")
 	}
 }
 

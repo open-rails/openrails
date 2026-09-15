@@ -54,11 +54,13 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 		return id
 	}
 
+	local, err := embedded.Runtime().Client(embed.WithCurrency(currency))
+	require.NoError(t, err)
 	transports := []struct {
 		name   string
-		client openrails.Client
+		client *openrails.Client
 	}{
-		{"in-process", embedded.Runtime().Client(embed.WithCurrency(currency))},
+		{"in-process", local},
 		{"remote", standalone.Client()},
 	}
 

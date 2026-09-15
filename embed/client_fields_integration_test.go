@@ -23,7 +23,10 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	host := h.StartEmbeddedHost("USD")
 	standalone := h.StartStandalone("USD")
-	local := host.Runtime().Client(embed.WithCurrency("USD"))
+	local, localErr := host.Runtime().Client(embed.WithCurrency("USD"))
+	if localErr != nil {
+		t.Fatal(localErr)
+	}
 	require.NoError(t, local.SetMerchantSettings(ctx, openrails.MerchantSettings{
 		BillingPolicies: []openrails.BillingPolicyInput{{
 			Name: "client_rate", Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000,
@@ -31,7 +34,7 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 		BillingPolicyBindings: []openrails.BillingPolicyBindingInput{{PolicyName: "client_rate"}},
 	}))
 
-	for name, client := range map[string]openrails.Client{"embedded": local, "remote": standalone.Client()} {
+	for name, client := range map[string]*openrails.Client{"embedded": local, "remote": standalone.Client()} {
 		t.Run(name, func(t *testing.T) {
 			payer := uuid.New()
 			_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.customers
@@ -56,7 +59,8 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 			require.NotNil(t, verdicts[0].Result)
 			require.False(t, verdicts[0].Result.Allowed)
 			require.Equal(t, "accrual_rate_cap_reached", verdicts[0].Result.DenyCode)
-			if single, ok := client.(embed.SingleAdmitter); ok {
+			{
+				single := client
 				verdict, err := single.Admit(ctx, req)
 				require.NoError(t, err)
 				require.False(t, verdict.Allowed)
