@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -61,6 +62,61 @@ func TestOr906_TheDatabaseRefusesADuplicateDepositGrant(t *testing.T) {
 	`, merchantID, customer, sourceID).Scan(&rows, &total))
 	require.Equal(t, 1, rows, "one key, one credit lot — enforced by the index alone")
 	require.Equal(t, int64(5_000), total)
+}
+
+func TestDepositReplayPreservesFinancialTermsAndReceipt(t *testing.T) {
+	svc, _, _, payer, currency, ctx := moneyInEnvWithDB(t)
+	clock := clockwork.NewFakeClockAt(time.Date(2040, 1, 1, 0, 0, 0, 0, time.UTC))
+	svc.SetClock(clock)
+	key, description := uuid.NewString(), "original credit"
+	expiry := clock.Now().Add(24 * time.Hour)
+	in := money.DepositParams{CustomerID: &payer, Invoker: "original-invoker", Currency: currency,
+		Amount: 1000000, Source: "original-source", SourceID: &key, ExpiresAt: &expiry, Description: &description}
+	first, err := svc.Deposit(ctx, in)
+	require.NoError(t, err)
+
+	for _, field := range []string{"amount", "currency", "expires_at", "permanent"} {
+		t.Run(field, func(t *testing.T) {
+			changed := in
+			expectedField := field
+			switch field {
+			case "amount":
+				changed.Amount++
+			case "currency":
+				changed.Currency = "EUR"
+			case "expires_at":
+				later := expiry.Add(time.Hour)
+				changed.ExpiresAt = &later
+			case "permanent":
+				changed.ExpiresAt = nil
+				expectedField = "expires_at"
+			}
+			_, err := svc.Deposit(ctx, changed)
+			require.ErrorIs(t, err, money.ErrIdempotencyKeyReused)
+			var conflict *money.IdempotencyConflict
+			require.ErrorAs(t, err, &conflict)
+			require.Equal(t, expectedField, conflict.Field)
+		})
+	}
+	clock.Advance(time.Hour)
+	retry := in
+	retry.Currency = " usd "
+	retry.Invoker, retry.Source = "replacement-invoker", "replacement-source"
+	replacementDescription := "replacement credit"
+	retry.Description = &replacementDescription
+	replayed, err := svc.Deposit(ctx, retry)
+	require.NoError(t, err)
+	first.Replayed = true
+	require.Equal(t, first, replayed, "diagnostic retry inputs cannot rewrite the original receipt")
+	read, err := svc.GetDepositBySourceID(ctx, payer, key)
+	require.NoError(t, err)
+	require.Equal(t, first, read, "key read and POST replay return one persisted receipt")
+	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
+	require.NoError(t, err)
+	require.Equal(t, in.Amount, bal.Balance)
+	eur, err := svc.GetBalanceForCustomer(ctx, payer, "EUR")
+	require.NoError(t, err)
+	require.Zero(t, eur.Balance)
 }
 
 // A deposit replay carrying a different amount is refused with the typed
