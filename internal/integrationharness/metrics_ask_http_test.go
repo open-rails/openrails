@@ -142,8 +142,8 @@ func TestMerchantMetricsAsk(t *testing.T) {
 	seedUsage := func(merchantID uuid.UUID, events int) {
 		customerID := uuid.New()
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-			customerID, merchantID, "ask-usage-"+uuid.NewString())
+			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			customerID, merchantID)
 		require.NoError(t, err)
 		for i := 0; i < events; i++ {
 			_, err = pool.Exec(ctx,

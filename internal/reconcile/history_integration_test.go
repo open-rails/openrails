@@ -82,7 +82,7 @@ func TestPGHistorySource(t *testing.T) {
 			require.NoError(t, err)
 		}
 		custB = uuid.New()
-		exec(`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1,$2,$3)`, custB, merchantB.UUID(), custB.String())
+		exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, custB, merchantB.UUID())
 		seed(ctx, merchantB.UUID(), prodB, priceB, "b")
 		pspB := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantB.UUID(), "nmi")
 		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source)

@@ -142,7 +142,7 @@ func TestTEN2_UnsetGUCYieldsZeroRowsAndNoError(t *testing.T) {
 		`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`, merchantID, slug)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.customers (merchant_id, subject) VALUES ($1, $2)`, merchantID, uuid.NewString())
+		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1, $2)`, merchantID, uuid.NewString())
 	require.NoError(t, err)
 
 	// No GUC on this connection.
@@ -182,7 +182,7 @@ func TestTEN2_CrossMerchantReadAndWriteBlocked(t *testing.T) {
 		require.NoError(t, err)
 	}
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.customers (merchant_id, subject) VALUES ($1, $2)`, b, uuid.NewString())
+		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
 	require.NoError(t, err)
 
 	tx, err := app.Begin(ctx)
@@ -197,7 +197,7 @@ func TestTEN2_CrossMerchantReadAndWriteBlocked(t *testing.T) {
 	require.EqualValues(t, 0, n, "merchant A read merchant B's customers")
 
 	_, err = tx.Exec(ctx,
-		`INSERT INTO openrails.customers (merchant_id, subject) VALUES ($1, $2)`, b, uuid.NewString())
+		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1, $2)`, b, uuid.NewString())
 	require.Error(t, err, "WITH CHECK must reject writing a row into another merchant's scope")
 }
 

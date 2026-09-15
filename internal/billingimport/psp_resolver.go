@@ -2,6 +2,7 @@ package billingimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -10,6 +11,10 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 )
+
+// ErrInvalidPSPReference is a declaration that cannot identify one of the
+// selected merchant's provider accounts. Storage/read failures are distinct.
+var ErrInvalidPSPReference = errors.New("invalid PSP reference")
 
 // pspResolver turns a declared PSPRef into a real openrails.psps id, against the
 // merchant's own catalog. or#893: an import that cannot attribute a row is
@@ -59,24 +64,24 @@ func (r *pspResolver) resolve(ref PSPRef, rail, subject string) (uuid.UUID, erro
 	}
 	if ref.IsZero() {
 		return uuid.Nil, fmt.Errorf(
-			"import billing: %s declares no PSP and the book set no default_psp — a provider row must state which account it came from (known PSPs: %s)",
-			subject, r.knownList())
+			"%w: %s declares no PSP and the book set no default_psp — a provider row must state which account it came from (known PSPs: %s)",
+			ErrInvalidPSPReference, subject, r.knownList())
 	}
 	if ref.ID != nil && *ref.ID != uuid.Nil {
 		p, ok := r.byID[*ref.ID]
 		if !ok {
-			return uuid.Nil, fmt.Errorf("import billing: %s names PSP %s, which this merchant does not own", subject, *ref.ID)
+			return uuid.Nil, fmt.Errorf("%w: %s names PSP %s, which this merchant does not own", ErrInvalidPSPReference, subject, *ref.ID)
 		}
 		if !railMatches(p.Rail, rail) {
-			return uuid.Nil, fmt.Errorf("import billing: %s is on rail %q but PSP %s is on rail %q", subject, rail, *ref.ID, p.Rail)
+			return uuid.Nil, fmt.Errorf("%w: %s is on rail %q but PSP %s is on rail %q", ErrInvalidPSPReference, subject, rail, *ref.ID, p.Rail)
 		}
 		return p.ID, nil
 	}
 	p, ok := r.byKey[pspKeyIndex(rail, ref.Key)]
 	if !ok {
 		return uuid.Nil, fmt.Errorf(
-			"import billing: %s names PSP key %q on rail %q, which this merchant does not own (known PSPs: %s)",
-			subject, ref.Key, rail, r.knownList())
+			"%w: %s names PSP key %q on rail %q, which this merchant does not own (known PSPs: %s)",
+			ErrInvalidPSPReference, subject, ref.Key, rail, r.knownList())
 	}
 	return p.ID, nil
 }

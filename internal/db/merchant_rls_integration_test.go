@@ -110,7 +110,7 @@ func seedTenantsAndEntitlements(t *testing.T, ctx context.Context, superDSN stri
 		_, err = pool.Exec(ctx, `
 			INSERT INTO openrails.customers (id, merchant_id)
 			VALUES ($1::uuid, $2::uuid)
-			ON CONFLICT (id) DO NOTHING
+			ON CONFLICT (merchant_id, id) DO NOTHING
 		`, tenantSubjectID.String(), id.String())
 		require.NoError(t, err)
 		// One entitlement row per merchant.

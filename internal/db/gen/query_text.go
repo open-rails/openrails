@@ -17,8 +17,7 @@ var QueryText = map[string]string{
 	// Subscriptions by customer (read-hot: access/billing).
 	"GetActiveSubscriptionByCustomerAt": getActiveSubscriptionByCustomerAt, // idx_subscriptions_customer_active_created (migration 042)
 
-	// Customer resolution + stored instruments.
-	"LookupCustomerIDsBySubjects":  lookupCustomerIDsBySubjects,  // uq_customers_merchant_subject
+	// Stored instruments.
 	"ListPaymentMethodsByCustomer": listPaymentMethodsByCustomer, // idx_payment_methods_customer
 
 	// Admission / ledger / credit-lot path (read-hot: service admit, spend).

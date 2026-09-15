@@ -64,8 +64,8 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		 VALUES ($1,$2,999,'USD',720,true,$3)`, priceID, productID, merchantID)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1,$2,$3)`,
-		customerID, merchantID, "or858-subject-"+suffix)
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		customerID, merchantID)
 	require.NoError(t, err)
 	pspID := dbtest.EnsureTestPSP(ctx, t, super, merchantID, "nmi")
 	_, err = super.Exec(ctx,
@@ -259,8 +259,8 @@ func TestMerchantPurgeRefusesWhenRetainedHistoryPinsRows(t *testing.T) {
 		productID, "or858p-"+suffix, "or858p-tier-"+suffix, merchantID)
 	require.NoError(t, err)
 	_, err = super.Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1,$2,$3)`,
-		customerID, merchantID, "or858p-subject-"+suffix)
+		`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+		customerID, merchantID)
 	require.NoError(t, err)
 	// The append-only grant that justifies the product's ownership.
 	_, err = super.Exec(ctx, `

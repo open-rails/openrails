@@ -19,7 +19,7 @@ sql="$(cat)"
 [[ "$sql" == *"FROM openrails.payment_methods"* ]]
 [[ "$sql" == *"FROM openrails.subscriptions"* ]]
 [[ "$sql" == *"FROM openrails.payments"* ]]
-[[ "$sql" == *"SELECT id FROM openrails.customers WHERE subject = :'e2e_user_id'"* ]]
+[[ "$sql" == *"customer_id = NULLIF(:'e2e_user_id', '')::uuid"* ]]
 [[ "$sql" == *"metadata->>'e2e_run_id' = :'e2e_run_id'"* ]]
 [[ "$sql" != *"FROM billing."* ]]
 [[ "$sql" != *"SELECT id, user_id"* ]]

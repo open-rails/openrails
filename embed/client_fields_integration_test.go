@@ -38,8 +38,8 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			payer := uuid.New()
 			_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.customers
-				(id,merchant_id,issuer,subject,created_at,last_seen_at)
-				VALUES ($1,$2,'client-fields',$3,now(),now())`, payer, dbtest.TestMerchantID.UUID(), payer.String())
+				(id, merchant_id, issuer, created_at, last_seen_at)
+				VALUES ($1, $2, 'client-fields', now(), now())`, payer, dbtest.TestMerchantID.UUID())
 			require.NoError(t, err)
 			id := openrails.CustomerID(payer)
 			_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{

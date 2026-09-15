@@ -16,7 +16,6 @@ const countSearchCustomers = `-- name: CountSearchCustomers :one
 SELECT count(*) FROM openrails.customers c
 WHERE c.merchant_id = $1
   AND ($2::text = ''
-   OR c.subject ILIKE $2 || '%'
    OR c.id::text ILIKE $2 || '%'
    OR EXISTS (
         SELECT 1 FROM openrails.subscriptions se
@@ -40,65 +39,47 @@ func (q *Queries) CountSearchCustomers(ctx context.Context, arg CountSearchCusto
 
 const ensureCustomer = `-- name: EnsureCustomer :one
 
-INSERT INTO openrails.customers (id, merchant_id, subject)
+INSERT INTO openrails.customers (id, merchant_id, issuer)
 VALUES ($1, $2, $3)
-ON CONFLICT (id) DO UPDATE SET
-  subject = EXCLUDED.subject,
+ON CONFLICT (merchant_id, id) DO UPDATE SET
+  issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
   last_seen_at = now()
-WHERE openrails.customers.merchant_id = EXCLUDED.merchant_id
 RETURNING id
 `
 
 type EnsureCustomerParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	Subject    *string
+	Issuer     *string
 }
 
-// openrails.customers: payable balance account (#491). A customer is a PURE
-// balance keyed by its UUID id (#364); the caller/merchant supplies the id.
-// Materialize (or refresh) the customers row for a payable UUID id under a
-// merchant. The caller supplies id (the payable UUID). ON CONFLICT refreshes
-// last_seen_at so concurrent first-touch is safe. The merchant_id guard makes a
-// foreign id return NO ROW instead of re-pointing another merchant's customer
-// (#889) — RLS already blocks it on enforcing roles, this holds for the
-// privileged ones (bootstrap, import, dev owner) too.
+// A payable identity is (merchant_id, id). The host supplies the stable UUID;
+// the same person can have independent billing relationships with merchants.
+// Refresh only the selected merchant's row. Issuer is audit metadata and does
+// not participate in identity; callers without an issuer preserve its value.
 func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID, arg.Subject)
+	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID, arg.Issuer)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
 }
 
-const ensureCustomerRow = `-- name: EnsureCustomerRow :one
-WITH inserted AS (
-  INSERT INTO openrails.customers (id, merchant_id, subject)
-  VALUES ($1, $2, $3)
-  ON CONFLICT (id) DO NOTHING
-  RETURNING id
-)
-SELECT id FROM inserted
-UNION ALL
-SELECT c.id FROM openrails.customers c
-WHERE c.id = $1 AND c.merchant_id = $2
-LIMIT 1
+const ensureCustomerRow = `-- name: EnsureCustomerRow :exec
+INSERT INTO openrails.customers (id, merchant_id)
+VALUES ($1, $2)
+ON CONFLICT (merchant_id, id) DO NOTHING
 `
 
 type EnsureCustomerRowParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	Subject    *string
 }
 
-// FK-target materialization before commerce inserts; no-op when present. It
-// RETURNS the id it materialized so a conflicting row owned by ANOTHER merchant
-// yields no row rather than a silent success (#889): FK checks bypass RLS, so a
-// silent no-op would let the caller's row attach to a foreign customer.
-func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, ensureCustomerRow, arg.ID, arg.MerchantID, arg.Subject)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+// FK-target materialization before commerce writes. The scoped primary key
+// resolves concurrent first touches without a read or cross-merchant claim.
+func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowParams) error {
+	_, err := q.db.Exec(ctx, ensureCustomerRow, arg.ID, arg.MerchantID)
+	return err
 }
 
 const getLatestCustomerEmail = `-- name: GetLatestCustomerEmail :one
@@ -135,7 +116,7 @@ FROM openrails.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
   AND m.id IN (
-      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject($1::text)
+      SELECT merchant_id FROM openrails.customer_merchant_ids_for_subject($1::uuid)
   )
 ORDER BY m.slug
 `
@@ -149,7 +130,7 @@ type ListMerchantsForCustomerSubjectRow struct {
 // #824: the hosted portal's "which merchants am I a customer of" directory
 // (openrails-saas #18). openrails.merchants is global/policy-free, so only the
 // customers half needs the SECURITY DEFINER cross-merchant reader (0016).
-func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject string) ([]ListMerchantsForCustomerSubjectRow, error) {
+func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject uuid.UUID) ([]ListMerchantsForCustomerSubjectRow, error) {
 	rows, err := q.db.Query(ctx, listMerchantsForCustomerSubject, subject)
 	if err != nil {
 		return nil, err
@@ -169,64 +150,8 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject s
 	return items, nil
 }
 
-const lockCustomerForMerchant = `-- name: LockCustomerForMerchant :one
-SELECT id FROM openrails.customers
-WHERE id = $1 AND merchant_id = $2
-FOR UPDATE
-`
-
-type LockCustomerForMerchantParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) LockCustomerForMerchant(ctx context.Context, arg LockCustomerForMerchantParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, lockCustomerForMerchant, arg.ID, arg.MerchantID)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
-const lookupCustomerIDsBySubjects = `-- name: LookupCustomerIDsBySubjects :many
-SELECT id, subject FROM openrails.customers
-WHERE merchant_id = $1
-  AND subject = ANY($2::text[])
-`
-
-type LookupCustomerIDsBySubjectsParams struct {
-	MerchantID uuid.UUID
-	Subjects   []string
-}
-
-type LookupCustomerIDsBySubjectsRow struct {
-	ID      uuid.UUID
-	Subject *string
-}
-
-// Resolve merchant-local stable host subjects to customer ids. Issuer is audit
-// metadata only and never participates in identity.
-func (q *Queries) LookupCustomerIDsBySubjects(ctx context.Context, arg LookupCustomerIDsBySubjectsParams) ([]LookupCustomerIDsBySubjectsRow, error) {
-	rows, err := q.db.Query(ctx, lookupCustomerIDsBySubjects, arg.MerchantID, arg.Subjects)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []LookupCustomerIDsBySubjectsRow
-	for rows.Next() {
-		var i LookupCustomerIDsBySubjectsRow
-		if err := rows.Scan(&i.ID, &i.Subject); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const searchCustomers = `-- name: SearchCustomers :many
-SELECT c.id, c.subject, c.created_at, c.last_seen_at,
+SELECT c.id, c.id::text AS subject, c.created_at, c.last_seen_at,
   (SELECT s.user_email FROM openrails.subscriptions s
      WHERE s.customer_id = c.id AND s.merchant_id = c.merchant_id
        AND s.deleted_at IS NULL
@@ -235,7 +160,6 @@ SELECT c.id, c.subject, c.created_at, c.last_seen_at,
 FROM openrails.customers c
 WHERE c.merchant_id = $1
   AND ($2::text = ''
-   OR c.subject ILIKE $2 || '%'
    OR c.id::text ILIKE $2 || '%'
    OR EXISTS (
         SELECT 1 FROM openrails.subscriptions se
@@ -256,7 +180,7 @@ type SearchCustomersParams struct {
 
 type SearchCustomersRow struct {
 	ID         uuid.UUID
-	Subject    *string
+	Subject    string
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	Email      *string
@@ -265,8 +189,8 @@ type SearchCustomersRow struct {
 // Merchant-scoped customer list/search (#740). merchant_id is an EXPLICIT
 // predicate (defense-in-depth doctrine, #227): RLS still pins the merchant on
 // enforcing roles, but a BYPASSRLS role (development's owner connection) must
-// never see another merchant's customers. q matches subject (external ref)
-// prefix, id prefix, or a subscription email substring; empty q lists
+// never see another merchant's customers. q matches the subject UUID
+// prefix or a subscription email substring; empty q lists
 // newest-touched first. email is the latest subscription email on file
 // (customers carry none themselves).
 func (q *Queries) SearchCustomers(ctx context.Context, arg SearchCustomersParams) ([]SearchCustomersRow, error) {
@@ -298,33 +222,4 @@ func (q *Queries) SearchCustomers(ctx context.Context, arg SearchCustomersParams
 		return nil, err
 	}
 	return items, nil
-}
-
-const upsertCustomerBySubject = `-- name: UpsertCustomerBySubject :one
-INSERT INTO openrails.customers (id, merchant_id, issuer, subject)
-VALUES ($1::uuid, $2, $3, $1)
-ON CONFLICT (id) DO UPDATE SET
-  subject = EXCLUDED.subject,
-  issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
-  last_seen_at = now()
-WHERE openrails.customers.merchant_id = EXCLUDED.merchant_id
-RETURNING id
-`
-
-type UpsertCustomerBySubjectParams struct {
-	Subject    *uuid.UUID
-	MerchantID uuid.UUID
-	Issuer     *string
-}
-
-// Customer identity is the merchant plus the host/AuthKit stable UUID subject.
-// The row id is that subject UUID; issuer is kept only as last-seen audit source.
-// The merchant_id guard refuses a subject already registered under a DIFFERENT
-// merchant (#889) — one AuthKit instance can serve several merchants, and the
-// unguarded upsert handed the second merchant an id owned by the first.
-func (q *Queries) UpsertCustomerBySubject(ctx context.Context, arg UpsertCustomerBySubjectParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, upsertCustomerBySubject, arg.Subject, arg.MerchantID, arg.Issuer)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
 }

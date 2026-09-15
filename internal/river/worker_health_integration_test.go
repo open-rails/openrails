@@ -5,10 +5,13 @@ package riverjobs
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/riverqueue/river"
 	riverpgxv5 "github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/riverqueue/river/rivertype"
@@ -455,14 +458,18 @@ func TestWorkerHealth_AlertFanoutReportsPartialFailure(t *testing.T) {
 	}
 	cleanupNewFanoutSystemCustomers(t, super, kind)
 
-	// Corrupt B's derived system-customer identity by assigning it to A. The
-	// RLS-enforcing B connection cannot see or update that conflicting row.
-	conflictingID := db.SystemCustomerID(merchantB.UUID())
-	_, err := super.Pool().Exec(ctx,
-		`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-		conflictingID, merchantA.UUID(), conflictingID.String(),
-	)
+	// A merchant-specific storage refusal must not erase successful deliveries
+	// to other merchants. Shared subject UUIDs are legal and cannot model this.
+	constraint := "test_worker_health_" + strings.ReplaceAll(suffix, "-", "")
+	_, err := super.Pool().Exec(ctx, fmt.Sprintf(
+		`ALTER TABLE openrails.notification_queue ADD CONSTRAINT %s CHECK (merchant_id <> '%s'::uuid) NOT VALID`,
+		pgx.Identifier{constraint}.Sanitize(), merchantB.String()))
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, err := super.Pool().Exec(context.Background(),
+			"ALTER TABLE openrails.notification_queue DROP CONSTRAINT "+pgx.Identifier{constraint}.Sanitize())
+		require.NoError(t, err)
+	})
 
 	monitor := &ProgressMonitor{DB: appDB}
 	row := gen.OpenrailsWorkerHealth{WorkerKind: kind, RegisteredAt: time.Now().Add(-time.Hour).UTC()}

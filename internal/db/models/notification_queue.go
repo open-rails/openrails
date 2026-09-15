@@ -75,7 +75,7 @@ const (
 type NotificationQueue struct {
 	ID uuid.UUID `json:"id"`
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
-	// Join openrails.customers for issuer/subject.
+	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
 	CustomerID uuid.UUID             `json:"customer_id,omitempty"`
 	EventType  NotificationEventType `json:"event_type"`
 	Data       map[string]any        `json:"data,omitempty"`

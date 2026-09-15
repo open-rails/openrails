@@ -1,6 +1,6 @@
--- OpenRails final pre-launch schema baseline (issue927).
--- Effective schema captured from the complete migration chain by pg_dump.
--- Objects retain their constraints, indexes, row security, triggers and grants.
+-- OpenRails fresh pre-v1 schema baseline (issues991/992).
+-- Customer identities and operational references are merchant scoped.
+-- Includes the qualified Solana lifecycle modes and successful-insert counters.
 -- AuthKit/River remain independently versioned. Retained migration ledgers are
 -- checked by the standalone and embedded orphan-migration fences.
 
@@ -373,7 +373,7 @@ COMMENT ON FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environ
 REVOKE ALL ON FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment text, p_account_id text) FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.custodian_owner_by_identity(p_kind text, p_environment text, p_account_id text) TO openrails_app;
 
-CREATE FUNCTION openrails.customer_merchant_ids_for_subject(p_subject text) RETURNS TABLE(merchant_id uuid)
+CREATE FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'openrails', 'pg_catalog'
     AS $$
@@ -382,14 +382,14 @@ BEGIN
     RETURN QUERY
     SELECT DISTINCT c.merchant_id
       FROM openrails.customers c
-     WHERE c.subject = p_subject;
+     WHERE c.id = p_subject;
 END;
 $$;
 
-COMMENT ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject text) IS 'Merchants where an AuthKit subject holds a customer record, across every merchant scope. For the hosted portal''s "your merchants" list, which runs before any merchant is chosen.';
+COMMENT ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) IS 'Merchants where an AuthKit subject holds a customer record, across every merchant scope. For the hosted portal''s "your merchants" list, which runs before any merchant is chosen.';
 
-REVOKE ALL ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject text) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject text) TO openrails_app;
+REVOKE ALL ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION openrails.customer_merchant_ids_for_subject(p_subject uuid) TO openrails_app;
 
 CREATE FUNCTION openrails.delinquency_work_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
@@ -775,7 +775,9 @@ BEGIN
         WHERE merchant_id = NEW.merchant_id
           AND id IN (NEW.debit_account_id, NEW.credit_account_id)
         ORDER BY id
-        FOR UPDATE
+        -- Counters do not change account keys. FK checks may already hold
+        -- KEY SHARE locks; upgrading those to FOR UPDATE can deadlock peers.
+        FOR NO KEY UPDATE
     LOOP
         IF acc.id = NEW.debit_account_id THEN
             debit := acc;
@@ -1144,6 +1146,9 @@ ALTER TABLE ONLY openrails.products
 ALTER TABLE ONLY openrails.products
     ADD CONSTRAINT products_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.products
+    ADD CONSTRAINT products_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_products_archived ON openrails.products USING btree (archived);
 
 CREATE INDEX idx_products_key ON openrails.products USING btree (key);
@@ -1196,13 +1201,13 @@ ALTER TABLE ONLY openrails.product_includes
 CREATE INDEX idx_product_includes_included_product ON openrails.product_includes USING btree (merchant_id, included_product_id);
 
 ALTER TABLE ONLY openrails.product_includes
-    ADD CONSTRAINT product_includes_included_product_fk FOREIGN KEY (included_product_id) REFERENCES openrails.products(id) ON DELETE CASCADE;
+    ADD CONSTRAINT product_includes_included_product_fk FOREIGN KEY (merchant_id, included_product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.product_includes
     ADD CONSTRAINT product_includes_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.product_includes
-    ADD CONSTRAINT product_includes_product_fk FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE CASCADE;
+    ADD CONSTRAINT product_includes_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.product_includes USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -1232,6 +1237,9 @@ COMMENT ON TABLE openrails.reconciliation_runs IS 'One row per manual reconcile 
 
 ALTER TABLE ONLY openrails.reconciliation_runs
     ADD CONSTRAINT reconciliation_runs_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY openrails.reconciliation_runs
+    ADD CONSTRAINT reconciliation_runs_merchant_id_id_key UNIQUE (merchant_id, id);
 
 CREATE INDEX idx_reconciliation_runs_merchant_id ON openrails.reconciliation_runs USING btree (merchant_id);
 
@@ -1560,7 +1568,7 @@ ALTER TABLE ONLY openrails.catalog_credit_purchase_prices
     ADD CONSTRAINT catalog_credit_purchase_prices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.catalog_credit_purchase_prices
-    ADD CONSTRAINT catalog_credit_purchase_prices_product_fk FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE CASCADE;
+    ADD CONSTRAINT catalog_credit_purchase_prices_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE openrails.catalog_credit_purchase_prices ENABLE ROW LEVEL SECURITY;
 
@@ -1770,7 +1778,6 @@ CREATE TABLE openrails.customers (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     issuer text,
-    subject text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     last_seen_at timestamp with time zone DEFAULT now() NOT NULL
 );
@@ -1781,19 +1788,12 @@ COMMENT ON TABLE openrails.customers IS 'OpenRails payable identity. Customer id
 
 COMMENT ON COLUMN openrails.customers.issuer IS 'Audit/last-seen source issuer for delegated/remote customer touches. Not part of customer identity.';
 
-COMMENT ON COLUMN openrails.customers.subject IS 'Host/AuthKit stable UUID subject. Natural key is (merchant_id, subject); issuer does not participate.';
-
 ALTER TABLE ONLY openrails.customers
-    ADD CONSTRAINT customers_merchant_id_id_key UNIQUE (merchant_id, id);
-
-ALTER TABLE ONLY openrails.customers
-    ADD CONSTRAINT customers_pkey PRIMARY KEY (id);
+    ADD CONSTRAINT customers_pkey PRIMARY KEY (merchant_id, id);
 
 CREATE INDEX idx_customers_merchant ON openrails.customers USING btree (merchant_id);
 
-CREATE INDEX idx_customers_subject ON openrails.customers USING btree (subject) WHERE (subject IS NOT NULL);
-
-CREATE UNIQUE INDEX uq_customers_merchant_subject ON openrails.customers USING btree (merchant_id, subject) WHERE (subject IS NOT NULL);
+CREATE INDEX idx_customers_id_merchant ON openrails.customers USING btree (id, merchant_id);
 
 ALTER TABLE ONLY openrails.customers
     ADD CONSTRAINT customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id);
@@ -2020,6 +2020,12 @@ COMMENT ON COLUMN openrails.invoices.billing_contacts IS '#798 billing contacts 
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.invoices
+    ADD CONSTRAINT invoices_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
+
+ALTER TABLE ONLY openrails.invoices
+    ADD CONSTRAINT invoices_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_invoices_customer ON openrails.invoices USING btree (customer_id, period_from DESC);
 
 CREATE INDEX ix_invoices_collection_due ON openrails.invoices USING btree (merchant_id, next_collection_attempt_at, due_at) WHERE ((status = ANY (ARRAY['open'::text, 'past_due'::text])) AND (amount_due > 0) AND (collection_method = 'charge_automatically'::text));
@@ -2033,7 +2039,7 @@ CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (merchant_id, c
 CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (merchant_id, customer_id, currency, period_from, period_to);
 
 ALTER TABLE ONLY openrails.invoices
-    ADD CONSTRAINT invoices_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT invoices_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2072,7 +2078,7 @@ ALTER TABLE ONLY openrails.invoker_spend_limits
     ADD CONSTRAINT invoker_spend_limits_uniq UNIQUE (merchant_id, customer_id, scope, scope_key);
 
 ALTER TABLE ONLY openrails.invoker_spend_limits
-    ADD CONSTRAINT invoker_spend_limits_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT invoker_spend_limits_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.invoker_spend_limits
     ADD CONSTRAINT invoker_spend_limits_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2116,6 +2122,9 @@ ALTER TABLE ONLY openrails.ledger_accounts
     ADD CONSTRAINT ledger_accounts_merchant_id_id_key UNIQUE (merchant_id, id);
 
 ALTER TABLE ONLY openrails.ledger_accounts
+    ADD CONSTRAINT ledger_accounts_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
+
+ALTER TABLE ONLY openrails.ledger_accounts
     ADD CONSTRAINT ledger_accounts_pkey PRIMARY KEY (id);
 
 CREATE INDEX idx_ledger_accounts_customer ON openrails.ledger_accounts USING btree (customer_id) WHERE (customer_id IS NOT NULL);
@@ -2127,7 +2136,7 @@ CREATE UNIQUE INDEX uq_ledger_accounts_customer ON openrails.ledger_accounts USI
 CREATE UNIQUE INDEX uq_ledger_accounts_system ON openrails.ledger_accounts USING btree (merchant_id, account_type, currency) WHERE (customer_id IS NULL);
 
 ALTER TABLE ONLY openrails.ledger_accounts
-    ADD CONSTRAINT ledger_accounts_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT ledger_accounts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.ledger_accounts
     ADD CONSTRAINT ledger_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2180,6 +2189,12 @@ COMMENT ON COLUMN openrails.ledger_transfers.operation IS 'or#894 engine-compose
 ALTER TABLE ONLY openrails.ledger_transfers
     ADD CONSTRAINT ledger_transfers_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.ledger_transfers
+    ADD CONSTRAINT ledger_transfers_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
+
+ALTER TABLE ONLY openrails.ledger_transfers
+    ADD CONSTRAINT ledger_transfers_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_ledger_transfers_credit ON openrails.ledger_transfers USING btree (credit_account_id);
 
 CREATE INDEX idx_ledger_transfers_customer ON openrails.ledger_transfers USING btree (merchant_id, customer_id, currency, created_at DESC) WHERE (customer_id IS NOT NULL);
@@ -2200,13 +2215,13 @@ COMMENT ON INDEX openrails.idx_ledger_transfers_operation_once IS 'or#892: the s
 
 CREATE INDEX idx_ledger_transfers_source ON openrails.ledger_transfers USING btree (merchant_id, source, source_id) WHERE (source IS NOT NULL);
 
-CREATE TRIGGER trg_ledger_transfers_apply_counters BEFORE INSERT ON openrails.ledger_transfers FOR EACH ROW EXECUTE FUNCTION openrails.ledger_transfers_apply_counters();
+CREATE TRIGGER trg_ledger_transfers_apply_counters AFTER INSERT ON openrails.ledger_transfers FOR EACH ROW EXECUTE FUNCTION openrails.ledger_transfers_apply_counters();
 
 ALTER TABLE ONLY openrails.ledger_transfers
-    ADD CONSTRAINT ledger_transfers_credit_fk FOREIGN KEY (credit_account_id) REFERENCES openrails.ledger_accounts(id);
+    ADD CONSTRAINT ledger_transfers_credit_fk FOREIGN KEY (merchant_id, credit_account_id) REFERENCES openrails.ledger_accounts(merchant_id, id);
 
 ALTER TABLE ONLY openrails.ledger_transfers
-    ADD CONSTRAINT ledger_transfers_debit_fk FOREIGN KEY (debit_account_id) REFERENCES openrails.ledger_accounts(id);
+    ADD CONSTRAINT ledger_transfers_debit_fk FOREIGN KEY (merchant_id, debit_account_id) REFERENCES openrails.ledger_accounts(merchant_id, id);
 
 ALTER TABLE ONLY openrails.ledger_transfers
     ADD CONSTRAINT ledger_transfers_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2450,7 +2465,7 @@ CREATE INDEX idx_notification_queue_undelivered ON openrails.notification_queue 
 CREATE INDEX ix_notification_queue_retention ON openrails.notification_queue USING btree (merchant_id, created_at);
 
 ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT notification_queue_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.notification_queue
     ADD CONSTRAINT notification_queue_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2508,6 +2523,9 @@ ALTER TABLE ONLY openrails.prices
     ADD CONSTRAINT prices_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY openrails.prices
+    ADD CONSTRAINT prices_merchant_id_id_key UNIQUE (merchant_id, id);
+
+ALTER TABLE ONLY openrails.prices
     ADD CONSTRAINT unique_prices_product_amount_window UNIQUE NULLS NOT DISTINCT (product_id, amount, currency, access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours);
 
 CREATE INDEX idx_prices_archived ON openrails.prices USING btree (archived);
@@ -2530,7 +2548,7 @@ ALTER TABLE ONLY openrails.prices
     ADD CONSTRAINT prices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.prices
-    ADD CONSTRAINT prices_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE POLICY merchant_isolation ON openrails.prices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -2562,7 +2580,7 @@ ALTER TABLE ONLY openrails.price_key_movements
     ADD CONSTRAINT price_key_movements_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.price_key_movements
-    ADD CONSTRAINT price_key_movements_price_fk FOREIGN KEY (price_id) REFERENCES openrails.prices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT price_key_movements_price_fk FOREIGN KEY (merchant_id, price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE POLICY merchant_isolation ON openrails.price_key_movements USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -2601,7 +2619,7 @@ CREATE INDEX idx_product_usage_limit_bindings_active ON openrails.product_usage_
 CREATE INDEX idx_product_usage_limit_bindings_grant ON openrails.product_usage_limit_bindings USING btree (merchant_id, grant_id, usage_limit_key);
 
 ALTER TABLE ONLY openrails.product_usage_limit_bindings
-    ADD CONSTRAINT product_usage_limit_bindings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT product_usage_limit_bindings_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.product_usage_limit_bindings
     ADD CONSTRAINT product_usage_limit_bindings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2636,7 +2654,7 @@ ALTER TABLE ONLY openrails.product_usage_limits
     ADD CONSTRAINT product_usage_limits_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.product_usage_limits
-    ADD CONSTRAINT product_usage_limits_product_fk FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE CASCADE;
+    ADD CONSTRAINT product_usage_limits_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.product_usage_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -2681,6 +2699,9 @@ COMMENT ON COLUMN openrails.psps.custodian_id IS 'or#880: the custodian holding 
 
 ALTER TABLE ONLY openrails.psps
     ADD CONSTRAINT psps_pkey PRIMARY KEY (id);
+
+ALTER TABLE ONLY openrails.psps
+    ADD CONSTRAINT psps_merchant_id_id_key UNIQUE (merchant_id, id);
 
 CREATE INDEX idx_psps_custodian ON openrails.psps USING btree (custodian_id) WHERE (custodian_id IS NOT NULL);
 
@@ -2733,13 +2754,13 @@ CREATE UNIQUE INDEX uq_rail_customer_accounts_customer_psp ON openrails.rail_cus
 CREATE UNIQUE INDEX uq_rail_customer_accounts_psp_account ON openrails.rail_customer_accounts USING btree (merchant_id, rail, psp_id, account_id);
 
 ALTER TABLE ONLY openrails.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT rail_customer_accounts_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.rail_customer_accounts
     ADD CONSTRAINT rail_customer_accounts_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.rail_customer_accounts
-    ADD CONSTRAINT rail_customer_accounts_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_customer_accounts_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.rail_customer_accounts USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -2810,6 +2831,9 @@ COMMENT ON COLUMN openrails.rail_intents.custodian_id IS 'or#893/or#795: the cus
 ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.rail_intents
+    ADD CONSTRAINT rail_intents_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_rail_intents_actor_created ON openrails.rail_intents USING btree (actor, created_at) WHERE (actor IS NOT NULL);
 
 CREATE INDEX idx_rail_intents_created ON openrails.rail_intents USING btree (created_at);
@@ -2836,13 +2860,13 @@ ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES openrails.custodians(id, merchant_id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.rail_intents
-    ADD CONSTRAINT rail_intents_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT rail_intents_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.rail_intents
-    ADD CONSTRAINT rail_intents_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id);
+    ADD CONSTRAINT rail_intents_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
 CREATE POLICY merchant_isolation ON openrails.rail_intents USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -2900,10 +2924,10 @@ ALTER TABLE ONLY openrails.rail_mutation_logs
     ADD CONSTRAINT rail_mutation_logs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_mutation_logs_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.rail_mutation_logs
-    ADD CONSTRAINT rail_mutation_logs_rail_intent_fk FOREIGN KEY (rail_intent_id) REFERENCES openrails.rail_intents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT rail_mutation_logs_rail_intent_fk FOREIGN KEY (merchant_id, rail_intent_id) REFERENCES openrails.rail_intents(merchant_id, id) ON DELETE SET NULL (rail_intent_id);
 
 CREATE POLICY merchant_isolation ON openrails.rail_mutation_logs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -2948,7 +2972,7 @@ ALTER TABLE ONLY openrails.rail_refresh_watermarks
     ADD CONSTRAINT rail_refresh_watermarks_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.rail_refresh_watermarks
-    ADD CONSTRAINT rail_refresh_watermarks_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id) ON DELETE CASCADE;
+    ADD CONSTRAINT rail_refresh_watermarks_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.rail_refresh_watermarks USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -3015,10 +3039,10 @@ CREATE INDEX idx_reconciliation_findings_requires_review ON openrails.reconcilia
 CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON openrails.reconciliation_findings USING btree (merchant_id, finding_type, subject_key);
 
 ALTER TABLE ONLY openrails.reconciliation_findings
-    ADD CONSTRAINT reconciliation_findings_first_seen_run_fk FOREIGN KEY (first_seen_run) REFERENCES openrails.reconciliation_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT reconciliation_findings_first_seen_run_fk FOREIGN KEY (merchant_id, first_seen_run) REFERENCES openrails.reconciliation_runs(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.reconciliation_findings
-    ADD CONSTRAINT reconciliation_findings_last_seen_run_fk FOREIGN KEY (last_seen_run) REFERENCES openrails.reconciliation_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT reconciliation_findings_last_seen_run_fk FOREIGN KEY (merchant_id, last_seen_run) REFERENCES openrails.reconciliation_runs(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.reconciliation_findings
     ADD CONSTRAINT reconciliation_findings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3058,6 +3082,9 @@ COMMENT ON COLUMN openrails.reprice_batches.fallback_policy IS '#813: operator''
 ALTER TABLE ONLY openrails.reprice_batches
     ADD CONSTRAINT reprice_batches_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.reprice_batches
+    ADD CONSTRAINT reprice_batches_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_reprice_batches_merchant ON openrails.reprice_batches USING btree (merchant_id, created_at DESC);
 
 CREATE INDEX idx_reprice_batches_price_key ON openrails.reprice_batches USING btree (merchant_id, price_key, created_at DESC) WHERE (price_key IS NOT NULL);
@@ -3066,10 +3093,10 @@ ALTER TABLE ONLY openrails.reprice_batches
     ADD CONSTRAINT reprice_batches_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.reprice_batches
-    ADD CONSTRAINT reprice_batches_source_price_fk FOREIGN KEY (source_price_id) REFERENCES openrails.prices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT reprice_batches_source_price_fk FOREIGN KEY (merchant_id, source_price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.reprice_batches
-    ADD CONSTRAINT reprice_batches_to_price_fk FOREIGN KEY (to_price_id) REFERENCES openrails.prices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT reprice_batches_to_price_fk FOREIGN KEY (merchant_id, to_price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE POLICY merchant_isolation ON openrails.reprice_batches USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -3108,7 +3135,7 @@ CREATE UNIQUE INDEX uq_tier_schedules_customer ON openrails.tier_schedules USING
 CREATE UNIQUE INDEX uq_tier_schedules_merchant_default ON openrails.tier_schedules USING btree (merchant_id, currency) WHERE (customer_id IS NULL);
 
 ALTER TABLE ONLY openrails.tier_schedules
-    ADD CONSTRAINT tier_schedules_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT tier_schedules_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.tier_schedules
     ADD CONSTRAINT tier_schedules_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3165,10 +3192,10 @@ CREATE INDEX ix_usage_events_payer_type_time ON openrails.usage_events USING btr
 CREATE UNIQUE INDEX uq_usage_events_idem ON openrails.usage_events USING btree (merchant_id, customer_id, currency, event_type, source, source_id);
 
 ALTER TABLE ONLY openrails.usage_events
-    ADD CONSTRAINT usage_events_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT usage_events_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.usage_events
-    ADD CONSTRAINT usage_events_ledger_transfer_fk FOREIGN KEY (ledger_transfer_id) REFERENCES openrails.ledger_transfers(id);
+    ADD CONSTRAINT usage_events_ledger_transfer_fk FOREIGN KEY (merchant_id, customer_id, currency, ledger_transfer_id) REFERENCES openrails.ledger_transfers(merchant_id, customer_id, currency, id);
 
 ALTER TABLE ONLY openrails.usage_events
     ADD CONSTRAINT usage_events_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3255,7 +3282,7 @@ CREATE UNIQUE INDEX uq_billing_policy_bindings_default ON openrails.billing_poli
 CREATE UNIQUE INDEX uq_billing_policy_bindings_tier ON openrails.billing_policy_bindings USING btree (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL));
 
 ALTER TABLE ONLY openrails.billing_policy_bindings
-    ADD CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT billing_policy_bindings_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.billing_policy_bindings
     ADD CONSTRAINT billing_policy_bindings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3303,7 +3330,7 @@ CREATE UNIQUE INDEX uq_catalog_rate_cards_payer_meter ON openrails.catalog_rate_
 CREATE UNIQUE INDEX uq_catalog_rate_cards_product_ordinal ON openrails.catalog_rate_cards USING btree (merchant_id, product_id, ordinal);
 
 ALTER TABLE ONLY openrails.catalog_rate_cards
-    ADD CONSTRAINT catalog_rate_cards_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE CASCADE;
+    ADD CONSTRAINT catalog_rate_cards_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.catalog_rate_cards
     ADD CONSTRAINT catalog_rate_cards_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3312,7 +3339,7 @@ ALTER TABLE ONLY openrails.catalog_rate_cards
     ADD CONSTRAINT catalog_rate_cards_meter_fk FOREIGN KEY (merchant_id, meter_key) REFERENCES openrails.catalog_meters(merchant_id, key) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.catalog_rate_cards
-    ADD CONSTRAINT catalog_rate_cards_product_fk FOREIGN KEY (product_id) REFERENCES openrails.products(id) ON DELETE CASCADE;
+    ADD CONSTRAINT catalog_rate_cards_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE openrails.catalog_rate_cards ENABLE ROW LEVEL SECURITY;
 
@@ -3353,7 +3380,7 @@ ALTER TABLE ONLY openrails.customer_delinquency
 CREATE INDEX ix_customer_delinquency_open ON openrails.customer_delinquency USING btree (merchant_id, customer_id, currency) WHERE (state <> 'current'::text);
 
 ALTER TABLE ONLY openrails.customer_delinquency
-    ADD CONSTRAINT customer_delinquency_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE CASCADE;
+    ADD CONSTRAINT customer_delinquency_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.customer_delinquency
     ADD CONSTRAINT customer_delinquency_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3417,7 +3444,7 @@ ALTER TABLE ONLY openrails.customer_minimum_spend
     ADD CONSTRAINT customer_minimum_spend_pkey PRIMARY KEY (merchant_id, customer_id, currency);
 
 ALTER TABLE ONLY openrails.customer_minimum_spend
-    ADD CONSTRAINT customer_minimum_spend_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE CASCADE;
+    ADD CONSTRAINT customer_minimum_spend_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.customer_minimum_spend
     ADD CONSTRAINT customer_minimum_spend_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3502,10 +3529,10 @@ CREATE INDEX ix_invoice_items_pending ON openrails.invoice_items USING btree (me
 CREATE UNIQUE INDEX uq_invoice_items_source ON openrails.invoice_items USING btree (merchant_id, customer_id, currency, source_type, source_id);
 
 ALTER TABLE ONLY openrails.invoice_items
-    ADD CONSTRAINT invoice_items_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT invoice_items_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.invoice_items
-    ADD CONSTRAINT invoice_items_invoice_fk FOREIGN KEY (invoice_id) REFERENCES openrails.invoices(id) ON DELETE SET NULL;
+    ADD CONSTRAINT invoice_items_invoice_fk FOREIGN KEY (merchant_id, customer_id, currency, invoice_id) REFERENCES openrails.invoices(merchant_id, customer_id, currency, id) ON DELETE SET NULL (invoice_id);
 
 ALTER TABLE ONLY openrails.invoice_items
     ADD CONSTRAINT invoice_items_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3585,6 +3612,12 @@ COMMENT ON COLUMN openrails.payment_methods.account_updater_checked_at IS 'or#79
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.payment_methods
+    ADD CONSTRAINT payment_methods_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
+
+ALTER TABLE ONLY openrails.payment_methods
+    ADD CONSTRAINT payment_methods_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_payment_methods_custodian_method_ref ON openrails.payment_methods USING btree (custodian, rail_method_ref) WHERE (custodian <> 'psp'::text);
 
 CREATE INDEX idx_payment_methods_custodian_network_token ON openrails.payment_methods USING btree (custodian, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id <> ''::text));
@@ -3606,13 +3639,13 @@ CREATE INDEX payment_methods_fingerprint_idx ON openrails.payment_methods USING 
 CREATE UNIQUE INDEX uq_payment_methods_psp_instrument ON openrails.payment_methods USING btree (merchant_id, psp_id, rail_customer_ref, rail_method_ref);
 
 ALTER TABLE ONLY openrails.payment_methods
-    ADD CONSTRAINT payment_methods_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT payment_methods_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.payment_methods
-    ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id);
+    ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
 CREATE POLICY merchant_isolation ON openrails.payment_methods USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -3670,7 +3703,7 @@ ALTER TABLE ONLY openrails.custody_migrations
     ADD CONSTRAINT custody_migrations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.custody_migrations
-    ADD CONSTRAINT custody_migrations_payment_method_fk FOREIGN KEY (payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE CASCADE;
+    ADD CONSTRAINT custody_migrations_payment_method_fk FOREIGN KEY (merchant_id, payment_method_id) REFERENCES openrails.payment_methods(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE openrails.custody_migrations ENABLE ROW LEVEL SECURITY;
 
@@ -3737,6 +3770,12 @@ COMMENT ON COLUMN openrails.subscriptions.deleted_at IS 'or#858 soft delete: set
 ALTER TABLE ONLY openrails.subscriptions
     ADD CONSTRAINT subscriptions_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.subscriptions
+    ADD CONSTRAINT subscriptions_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
+
+ALTER TABLE ONLY openrails.subscriptions
+    ADD CONSTRAINT subscriptions_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_subscriptions_customer ON openrails.subscriptions USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 
 CREATE INDEX idx_subscriptions_customer_active_created ON openrails.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active'::openrails.subscription_status);
@@ -3779,7 +3818,7 @@ CREATE INDEX ix_subscriptions_renewal_by_payment_method ON openrails.subscriptio
 
 CREATE UNIQUE INDEX uq_subscriptions_customer_product_lifecycle ON openrails.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status])) AND (deleted_at IS NULL));
 
-CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON openrails.subscriptions USING btree (customer_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON openrails.subscriptions USING btree (merchant_id, customer_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL) AND (deleted_at IS NULL));
 
 CREATE UNIQUE INDEX uq_subscriptions_merchant_psp_subscription_id ON openrails.subscriptions USING btree (merchant_id, rail, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
 
@@ -3788,31 +3827,31 @@ CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF produ
 CREATE TRIGGER trg_subscriptions_status_transition AFTER INSERT OR UPDATE OF status ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.subscriptions_record_status_transition();
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT subscriptions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT subscriptions_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.subscriptions
     ADD CONSTRAINT subscriptions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_payment_method_id_fkey FOREIGN KEY (payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE SET NULL;
+    ADD CONSTRAINT subscriptions_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES openrails.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (payment_method_id);
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id);
+    ADD CONSTRAINT subscriptions_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES openrails.prices(merchant_id, id);
 
 ALTER TABLE ONLY openrails.subscriptions
     ADD CONSTRAINT subscriptions_price_product_merchant_fkey FOREIGN KEY (price_id, product_id, merchant_id) REFERENCES openrails.prices(id, product_id, merchant_id);
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_product_id_fkey FOREIGN KEY (product_id) REFERENCES openrails.products(id);
+    ADD CONSTRAINT subscriptions_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id);
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id);
+    ADD CONSTRAINT subscriptions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (scheduled_price_id) REFERENCES openrails.prices(id);
+    ADD CONSTRAINT subscriptions_scheduled_price_id_fkey FOREIGN KEY (merchant_id, scheduled_price_id) REFERENCES openrails.prices(merchant_id, id);
 
 CREATE POLICY merchant_isolation ON openrails.subscriptions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -3847,13 +3886,13 @@ ALTER TABLE ONLY openrails.imported_dunning_history
 CREATE INDEX idx_imported_dunning_history_merchant_occurred ON openrails.imported_dunning_history USING btree (merchant_id, occurred_at);
 
 ALTER TABLE ONLY openrails.imported_dunning_history
-    ADD CONSTRAINT imported_dunning_history_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE SET NULL;
+    ADD CONSTRAINT imported_dunning_history_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE SET NULL (customer_id);
 
 ALTER TABLE ONLY openrails.imported_dunning_history
     ADD CONSTRAINT imported_dunning_history_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.imported_dunning_history
-    ADD CONSTRAINT imported_dunning_history_subscription_fk FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE SET NULL;
+    ADD CONSTRAINT imported_dunning_history_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, id) ON DELETE SET NULL (subscription_id);
 
 ALTER TABLE openrails.imported_dunning_history ENABLE ROW LEVEL SECURITY;
 
@@ -3906,22 +3945,22 @@ CREATE UNIQUE INDEX uq_invoice_payments_ledger_transfer ON openrails.invoice_pay
 CREATE UNIQUE INDEX ux_invoice_payments_attempt_key ON openrails.invoice_payments USING btree (merchant_id, invoice_id, idempotency_key) WHERE (idempotency_key IS NOT NULL);
 
 ALTER TABLE ONLY openrails.invoice_payments
-    ADD CONSTRAINT invoice_payments_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT invoice_payments_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.invoice_payments
-    ADD CONSTRAINT invoice_payments_invoice_fk FOREIGN KEY (invoice_id) REFERENCES openrails.invoices(id) ON DELETE CASCADE;
+    ADD CONSTRAINT invoice_payments_invoice_fk FOREIGN KEY (merchant_id, customer_id, currency, invoice_id) REFERENCES openrails.invoices(merchant_id, customer_id, currency, id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.invoice_payments
-    ADD CONSTRAINT invoice_payments_ledger_transfer_fk FOREIGN KEY (ledger_transfer_id) REFERENCES openrails.ledger_transfers(id);
+    ADD CONSTRAINT invoice_payments_ledger_transfer_fk FOREIGN KEY (merchant_id, customer_id, currency, ledger_transfer_id) REFERENCES openrails.ledger_transfers(merchant_id, customer_id, currency, id);
 
 ALTER TABLE ONLY openrails.invoice_payments
     ADD CONSTRAINT invoice_payments_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.invoice_payments
-    ADD CONSTRAINT invoice_payments_payment_method_id_fkey FOREIGN KEY (payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE SET NULL;
+    ADD CONSTRAINT invoice_payments_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES openrails.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (payment_method_id);
 
 ALTER TABLE ONLY openrails.invoice_payments
-    ADD CONSTRAINT invoice_payments_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id);
+    ADD CONSTRAINT invoice_payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
 ALTER TABLE openrails.invoice_payments ENABLE ROW LEVEL SECURITY;
 
@@ -3972,13 +4011,13 @@ ALTER TABLE ONLY openrails.money_settings
     ADD CONSTRAINT money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency);
 
 ALTER TABLE ONLY openrails.money_settings
-    ADD CONSTRAINT money_settings_auto_topup_payment_method_fk FOREIGN KEY (auto_topup_payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE SET NULL;
+    ADD CONSTRAINT money_settings_auto_topup_payment_method_fk FOREIGN KEY (merchant_id, customer_id, auto_topup_payment_method_id) REFERENCES openrails.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (auto_topup_payment_method_id);
 
 ALTER TABLE ONLY openrails.money_settings
-    ADD CONSTRAINT money_settings_collection_payment_method_id_fkey FOREIGN KEY (collection_payment_method_id) REFERENCES openrails.payment_methods(id) ON DELETE SET NULL;
+    ADD CONSTRAINT money_settings_collection_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, collection_payment_method_id) REFERENCES openrails.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (collection_payment_method_id);
 
 ALTER TABLE ONLY openrails.money_settings
-    ADD CONSTRAINT money_settings_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT money_settings_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.money_settings
     ADD CONSTRAINT money_settings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -4023,13 +4062,13 @@ CREATE INDEX idx_payment_method_notices_customer ON openrails.payment_method_not
 CREATE INDEX idx_payment_method_notices_due ON openrails.payment_method_notices USING btree (next_notice_at) WHERE ((resolved_at IS NULL) AND (next_notice_at IS NOT NULL));
 
 ALTER TABLE ONLY openrails.payment_method_notices
-    ADD CONSTRAINT payment_method_notices_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id) ON DELETE CASCADE;
+    ADD CONSTRAINT payment_method_notices_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.payment_method_notices
     ADD CONSTRAINT payment_method_notices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.payment_method_notices
-    ADD CONSTRAINT payment_method_notices_subscription_fk FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT payment_method_notices_subscription_fk FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, customer_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.payment_method_notices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -4074,7 +4113,7 @@ ALTER TABLE ONLY openrails.solana_subscriptions
     ADD CONSTRAINT solana_subscriptions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.solana_subscriptions
-    ADD CONSTRAINT solana_subscriptions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT solana_subscriptions_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.solana_subscriptions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -4130,19 +4169,19 @@ CREATE INDEX idx_subscription_reprices_subscription ON openrails.subscription_re
 CREATE UNIQUE INDEX uq_subscription_reprices_one_scheduled ON openrails.subscription_reprices USING btree (subscription_id) WHERE (status = 'scheduled'::text);
 
 ALTER TABLE ONLY openrails.subscription_reprices
-    ADD CONSTRAINT subscription_reprices_batch_fk FOREIGN KEY (reprice_batch_id) REFERENCES openrails.reprice_batches(id) ON DELETE SET NULL;
+    ADD CONSTRAINT subscription_reprices_batch_fk FOREIGN KEY (merchant_id, reprice_batch_id) REFERENCES openrails.reprice_batches(merchant_id, id) ON DELETE SET NULL (reprice_batch_id);
 
 ALTER TABLE ONLY openrails.subscription_reprices
-    ADD CONSTRAINT subscription_reprices_from_price_fk FOREIGN KEY (from_price_id) REFERENCES openrails.prices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT subscription_reprices_from_price_fk FOREIGN KEY (merchant_id, from_price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.subscription_reprices
     ADD CONSTRAINT subscription_reprices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.subscription_reprices
-    ADD CONSTRAINT subscription_reprices_subscription_fk FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT subscription_reprices_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.subscription_reprices
-    ADD CONSTRAINT subscription_reprices_to_price_fk FOREIGN KEY (to_price_id) REFERENCES openrails.prices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT subscription_reprices_to_price_fk FOREIGN KEY (merchant_id, to_price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT;
 
 CREATE POLICY merchant_isolation ON openrails.subscription_reprices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -4178,7 +4217,7 @@ ALTER TABLE ONLY openrails.subscription_status_transitions
     ADD CONSTRAINT sst_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.subscription_status_transitions
-    ADD CONSTRAINT sst_subscription_fk FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE CASCADE;
+    ADD CONSTRAINT sst_subscription_fk FOREIGN KEY (merchant_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.subscription_status_transitions USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -4253,6 +4292,15 @@ COMMENT ON COLUMN openrails.payments.money_movement IS 'or#827 rail|none — pos
 ALTER TABLE ONLY openrails.payments
     ADD CONSTRAINT payments_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.payments
+    ADD CONSTRAINT payments_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
+
+ALTER TABLE ONLY openrails.payments
+    ADD CONSTRAINT payments_merchant_payer_currency_id_key UNIQUE (merchant_id, customer_id, currency, id);
+
+ALTER TABLE ONLY openrails.payments
+    ADD CONSTRAINT payments_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_payments_customer ON openrails.payments USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 
 CREATE INDEX idx_payments_destructive_run ON openrails.payments USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
@@ -4288,25 +4336,25 @@ CREATE UNIQUE INDEX uq_payments_merchant_psp_transaction ON openrails.payments U
 CREATE TRIGGER payments_enqueue_settlement_event AFTER INSERT OR UPDATE OF status ON openrails.payments FOR EACH ROW EXECUTE FUNCTION openrails.enqueue_payment_settlement_event();
 
 ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT payments_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT payments_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.payments
     ADD CONSTRAINT payments_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id);
+    ADD CONSTRAINT payments_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES openrails.prices(merchant_id, id);
 
 ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id);
+    ADD CONSTRAINT payments_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
 ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_refunded_payment_id_fkey FOREIGN KEY (refunded_payment_id) REFERENCES openrails.payments(id);
+    ADD CONSTRAINT payments_refunded_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, refunded_payment_id) REFERENCES openrails.payments(merchant_id, customer_id, currency, id);
 
 ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id) ON DELETE SET NULL;
+    ADD CONSTRAINT payments_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, customer_id, id) ON DELETE SET NULL (subscription_id);
 
 CREATE POLICY merchant_isolation ON openrails.payments USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -4345,7 +4393,7 @@ ALTER TABLE ONLY openrails.payment_settlement_events
     ADD CONSTRAINT payment_settlement_events_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY openrails.payment_settlement_events
-    ADD CONSTRAINT payment_settlement_events_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id) ON DELETE CASCADE;
+    ADD CONSTRAINT payment_settlement_events_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES openrails.payments(merchant_id, id) ON DELETE CASCADE;
 
 CREATE POLICY merchant_isolation ON openrails.payment_settlement_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
@@ -4378,7 +4426,7 @@ CREATE TABLE openrails.checkout_sessions (
     destructive_run_id uuid,
     routing_reason jsonb,
     CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
-    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text])))
+    CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text])))
 );
 
 ALTER TABLE ONLY openrails.checkout_sessions FORCE ROW LEVEL SECURITY;
@@ -4413,25 +4461,25 @@ CREATE UNIQUE INDEX uq_checkout_sessions_merchant_psp_reference ON openrails.che
 CREATE UNIQUE INDEX uq_checkout_sessions_merchant_psp_transaction ON openrails.checkout_sessions USING btree (merchant_id, rail, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL));
 
 ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT checkout_sessions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT checkout_sessions_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.checkout_sessions
     ADD CONSTRAINT checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES openrails.payments(id);
+    ADD CONSTRAINT checkout_sessions_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES openrails.payments(merchant_id, customer_id, id);
 
 ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_price_id_fkey FOREIGN KEY (price_id) REFERENCES openrails.prices(id);
+    ADD CONSTRAINT checkout_sessions_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES openrails.prices(merchant_id, id);
 
 ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_psp_fk FOREIGN KEY (psp_id) REFERENCES openrails.psps(id);
+    ADD CONSTRAINT checkout_sessions_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
 
 ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (subscription_id) REFERENCES openrails.subscriptions(id);
+    ADD CONSTRAINT checkout_sessions_subscription_id_fkey FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, customer_id, id);
 
 ALTER TABLE openrails.checkout_sessions ENABLE ROW LEVEL SECURITY;
 
@@ -4481,6 +4529,12 @@ COMMENT ON CONSTRAINT grants_termination_no_window ON openrails.grants IS 'Only 
 ALTER TABLE ONLY openrails.grants
     ADD CONSTRAINT grants_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY openrails.grants
+    ADD CONSTRAINT grants_merchant_payer_id_key UNIQUE (merchant_id, customer_id, id);
+
+ALTER TABLE ONLY openrails.grants
+    ADD CONSTRAINT grants_merchant_id_id_key UNIQUE (merchant_id, id);
+
 CREATE INDEX idx_grants_credit_customer_currency ON openrails.grants USING btree (merchant_id, customer_id, currency, starts_at, ends_at) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text));
 
 CREATE INDEX idx_grants_credit_expiry ON openrails.grants USING btree (merchant_id, ends_at) WHERE ((kind = 'credit'::text) AND (event = 'grant'::text) AND (ends_at IS NOT NULL));
@@ -4508,19 +4562,19 @@ COMMENT ON INDEX openrails.uq_grants_credit_deposit_once IS 'LED-17 (or#906): a 
 CREATE UNIQUE INDEX uq_grants_termination ON openrails.grants USING btree (supersedes_id) WHERE ((supersedes_id IS NOT NULL) AND (event = ANY (ARRAY['revoke'::text, 'expire'::text, 'supersede'::text])));
 
 ALTER TABLE ONLY openrails.grants
-    ADD CONSTRAINT grants_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT grants_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.grants
     ADD CONSTRAINT grants_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.grants
-    ADD CONSTRAINT grants_payment_fk FOREIGN KEY (payment_id) REFERENCES openrails.payments(id);
+    ADD CONSTRAINT grants_payment_fk FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES openrails.payments(merchant_id, customer_id, id);
 
 ALTER TABLE ONLY openrails.grants
-    ADD CONSTRAINT grants_product_fk FOREIGN KEY (product_id) REFERENCES openrails.products(id);
+    ADD CONSTRAINT grants_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id);
 
 ALTER TABLE ONLY openrails.grants
-    ADD CONSTRAINT grants_supersedes_fk FOREIGN KEY (supersedes_id) REFERENCES openrails.grants(id);
+    ADD CONSTRAINT grants_supersedes_fk FOREIGN KEY (merchant_id, customer_id, supersedes_id) REFERENCES openrails.grants(merchant_id, customer_id, id);
 
 ALTER TABLE openrails.grants ENABLE ROW LEVEL SECURITY;
 
@@ -4585,13 +4639,13 @@ CREATE INDEX idx_entitlements_subscription_source_live ON openrails.entitlements
 CREATE UNIQUE INDEX uq_entitlements_customer_active ON openrails.entitlements USING btree (merchant_id, customer_id, entitlement) WHERE ((customer_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL) AND (end_at IS NULL));
 
 ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_customer_fk FOREIGN KEY (customer_id) REFERENCES openrails.customers(id);
+    ADD CONSTRAINT entitlements_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_destructive_run_fk FOREIGN KEY (destructive_run_id) REFERENCES openrails.destructive_runs(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT entitlements_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_grant_fk FOREIGN KEY (grant_id) REFERENCES openrails.grants(id);
+    ADD CONSTRAINT entitlements_grant_fk FOREIGN KEY (merchant_id, customer_id, grant_id) REFERENCES openrails.grants(merchant_id, customer_id, id);
 
 ALTER TABLE ONLY openrails.entitlements
     ADD CONSTRAINT entitlements_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -4757,7 +4811,7 @@ CREATE INDEX idx_operation_authorizations_open_capacity ON openrails.operation_a
 CREATE INDEX idx_operation_authorizations_payer ON openrails.operation_authorizations USING btree (merchant_id, payer_id, created_at DESC);
 
 ALTER TABLE ONLY openrails.operation_authorizations
-    ADD CONSTRAINT operation_authorizations_ledger_account_fk FOREIGN KEY (merchant_id, ledger_account_id) REFERENCES openrails.ledger_accounts(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT operation_authorizations_ledger_account_fk FOREIGN KEY (merchant_id, payer_id, ledger_account_id) REFERENCES openrails.ledger_accounts(merchant_id, customer_id, id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.operation_authorizations
     ADD CONSTRAINT operation_authorizations_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;

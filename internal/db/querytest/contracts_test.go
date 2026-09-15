@@ -24,7 +24,6 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	merchantID := dbtest.TestMerchantID.UUID()
 	customerID := uuid.New()
-	customerSubject := customerID.String()
 	productID := uuid.New()
 	priceID := uuid.New()
 	subscriptionID := uuid.New()
@@ -44,16 +43,8 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 	_, err = q.EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         customerID,
 		MerchantID: merchantID,
-		Subject:    &customerSubject,
 	})
 	require.NoError(t, err)
-	customers, err := q.LookupCustomerIDsBySubjects(ctx, gen.LookupCustomerIDsBySubjectsParams{
-		MerchantID: merchantID,
-		Subjects:   []string{customerSubject},
-	})
-	require.NoError(t, err)
-	require.Len(t, customers, 1)
-	require.Equal(t, customerID, customers[0].ID)
 
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:               productID,

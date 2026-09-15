@@ -40,8 +40,8 @@ func seedRepriceSubscription(t *testing.T, ctx context.Context, h *Harness, prod
 	pool := h.Pool()
 	var customerID uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
-		`INSERT INTO openrails.customers (merchant_id, subject) VALUES ($1,$2) RETURNING id`,
-		dbtest.TestMerchantID.UUID(), "wizard-customer-"+uuid.NewString()).Scan(&customerID))
+		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,
+		dbtest.TestMerchantID.UUID(), uuid.NewString()).Scan(&customerID))
 
 	now := time.Now().UTC()
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")

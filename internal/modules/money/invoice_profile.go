@@ -11,7 +11,6 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -104,13 +103,10 @@ func (s *MoneyService) writeCustomerInvoiceProfile(ctx context.Context, payer id
 		if err := ensureCustomer(ctx, q, tid.UUID(), payer.UUID()); err != nil {
 			return err
 		}
-		_, err := q.LockCustomerForMerchant(ctx, gen.LockCustomerForMerchantParams{
+		_, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{
 			ID: payer.UUID(), MerchantID: tid.UUID(),
 		})
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("%w: invoice profile payer %s", db.ErrCustomerOwnedByAnotherMerchant, payer)
-			}
 			return fmt.Errorf("lock invoice profile payer: %w", err)
 		}
 		if insertOnly {

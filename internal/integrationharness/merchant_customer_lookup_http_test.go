@@ -26,9 +26,9 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 	subjectID := uuid.New()
 	subject := subjectID.String()
 	_, err := pool.Exec(ctx, `
-		INSERT INTO openrails.customers (id, merchant_id, issuer, subject, created_at, last_seen_at)
-		VALUES ($1, $2, 'lookup-test', $3, now(), now())`,
-		subjectID, dbtest.TestMerchantID.UUID(), subject)
+		INSERT INTO openrails.customers (id, merchant_id, issuer, created_at, last_seen_at)
+		VALUES ($1, $2, 'lookup-test', now(), now())`,
+		subjectID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 
 	_, err = pool.Exec(ctx, `
@@ -53,11 +53,12 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	batch, err := client.ListActiveEntitlements(ctx, []string{subject, "ghost-" + subject}, time.Time{})
+	ghost := uuid.NewString()
+	batch, err := client.ListActiveEntitlements(ctx, []string{subject, ghost}, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, batch[subject], 1)
 	require.Equal(t, "premium", batch[subject][0].Entitlement)
-	require.Empty(t, batch["ghost-"+subject])
+	require.Empty(t, batch[ghost])
 
 	single, err := client.ListEntitlements(ctx, subject, time.Time{})
 	require.NoError(t, err)

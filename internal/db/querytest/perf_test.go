@@ -38,7 +38,6 @@ const (
 // perfSeed carries the ids the cases bind as query args.
 type perfSeed struct {
 	HotCustomerID uuid.UUID // a normal (non-fat) customer near the top of the range
-	HotSubjects   []string  // a few customer subjects, for the by-subject batch lookup
 	FatCustomerID uuid.UUID // the whale: many entitlements / subs / grants / usage / instruments
 	FatSubID      uuid.UUID // the fat subscription: many completed charges
 }
@@ -84,13 +83,6 @@ func TestQueryPerformance(t *testing.T) {
 			SQL:           gen.QueryText["GetActiveSubscriptionByCustomerAt"],
 			Args:          []any{seed.FatCustomerID, now},
 			ForbidSeqScan: []string{"subscriptions"}, ForbidSort: true,
-		},
-		{
-			// Resolve host subjects -> customer ids via uq_customers_merchant_subject.
-			Name: "customers_by_subject", MaxExecutionMS: 75, MaxSharedReadBlocks: 64,
-			SQL:           gen.QueryText["LookupCustomerIDsBySubjects"],
-			Args:          []any{merchantID, seed.HotSubjects},
-			ForbidSeqScan: []string{"customers"},
 		},
 		{
 			// Stored instruments for the fat customer (ORDER BY created_at DESC, no LIMIT).
@@ -304,11 +296,11 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 	hotCustomerID := perfCustomerUUID(hotIdx)
 	fatSubID := perfSubUUID(fatIdx) // customer 0's base subscription accrues the fat charges
 
-	// customers: id, merchant_id, subject (subject = the row id string).
+	// The external subject UUID is scoped by merchant.
 	copyRows(ctx, t, pool, "customers",
-		[]string{"id", "merchant_id", "subject"}, scale, func(i int) []any {
+		[]string{"id", "merchant_id"}, scale, func(i int) []any {
 			id := perfCustomerUUID(i)
-			return []any{id, merchantID, id.String()}
+			return []any{id, merchantID}
 		})
 
 	// entitlements: one active "perf-feature" per customer.
@@ -415,12 +407,7 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 		require.NoError(t, err)
 	}
 
-	subjects := []string{
-		perfCustomerUUID(1).String(),
-		perfCustomerUUID(scale / 2).String(),
-		hotCustomerID.String(),
-	}
-	return perfSeed{HotCustomerID: hotCustomerID, HotSubjects: subjects, FatCustomerID: fatCustomerID, FatSubID: fatSubID}
+	return perfSeed{HotCustomerID: hotCustomerID, FatCustomerID: fatCustomerID, FatSubID: fatSubID}
 }
 
 // copyRows bulk-inserts n rows into openrails.<table> via CopyFrom.

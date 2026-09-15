@@ -202,7 +202,7 @@ WHERE merchant_id = $1 AND meter_key = $2 AND customer_id IS NULL`, merchantID, 
 	}), money.ErrDefaultRateCardRequired)
 }
 
-func TestUsageMeterCatalogRejectsForeignReferences(t *testing.T) {
+func TestUsageMeterCatalogScopesProductsAndSharedPayers(t *testing.T) {
 	svc, pool, payer, currency, ctx := moneyInEnv(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	meterKey := "or805-scope-" + uuid.NewString()[:8]
@@ -227,8 +227,8 @@ INSERT INTO openrails.products (id, key, display_name, merchant_id)
 VALUES ($1, 'foreign-product', 'Foreign', $2)`, foreignProductID, foreignMerchantID)
 	require.NoError(t, err)
 	_, err = adminPool.Exec(ctx, `
-INSERT INTO openrails.customers (id, merchant_id, subject)
-VALUES ($1, $2, $3)`, foreignCustomerID, foreignMerchantID, foreignCustomerID.String())
+INSERT INTO openrails.customers (id, merchant_id)
+VALUES ($1, $2)`, foreignCustomerID, foreignMerchantID)
 	require.NoError(t, err)
 
 	require.NoError(t, svc.EnsureUsageMeter(ctx, money.UsageMeterSpec{
@@ -263,11 +263,14 @@ VALUES ($1, $2, 'Local', $3)`, localProductID, "or805-local-"+uuid.NewString()[:
 	}))
 
 	foreignPayer := identity.CustomerIDFromString(foreignCustomerID.String())
-	require.Error(t, svc.SetUsageRateCard(ctx, money.UsageRateCardInput{
+	require.NoError(t, svc.SetUsageRateCard(ctx, money.UsageRateCardInput{
 		Payer:    &foreignPayer,
 		MeterKey: meterKey,
 		Price:    price,
 	}))
+	var foreignOverrides int
+	require.NoError(t, adminPool.QueryRow(ctx, "SELECT count(*) FROM openrails.catalog_rate_cards WHERE merchant_id=$1 AND customer_id=$2", foreignMerchantID, foreignCustomerID).Scan(&foreignOverrides))
+	require.Zero(t, foreignOverrides)
 
 	mismatched := price
 	mismatched.Currency = "EUR"

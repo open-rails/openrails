@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/billingimport"
-	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -51,13 +50,11 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 	})
 	if err != nil {
 		msg := err.Error()
-		// A book naming a customer that belongs to another merchant is an
-		// unusable book, not a server fault (#889).
-		if errors.Is(err, db.ErrCustomerOwnedByAnotherMerchant) {
+		if errors.Is(err, billingimport.ErrInvalidPSPReference) {
 			r.APIError(&api.APIError{
 				HTTPStatus: http.StatusBadRequest,
 				Type:       api.ErrorTypeInvalidRequest,
-				Code:       "customer_owned_by_another_merchant",
+				Code:       "invalid_psp_reference",
 				Message:    msg,
 			})
 			return

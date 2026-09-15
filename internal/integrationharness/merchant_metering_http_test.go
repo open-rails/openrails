@@ -126,8 +126,8 @@ func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
 
 	customerID := uuid.New()
 	_, err := h.MerchantPool(dbtest.TestMerchantID.UUID()).Exec(ctx, `
-INSERT INTO openrails.customers (id, merchant_id, subject)
-VALUES ($1, $2, $3)`, customerID, dbtest.TestMerchantID.UUID(), "metering-customer-"+suffix)
+INSERT INTO openrails.customers (id, merchant_id)
+VALUES ($1, $2)`, customerID, dbtest.TestMerchantID.UUID())
 	require.NoError(t, err)
 	overrideURL := surface.BaseURL + "/v1/merchant/customers/" + customerID.String() +
 		"/rate-overrides/" + created.Key

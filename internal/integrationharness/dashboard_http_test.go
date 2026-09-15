@@ -114,8 +114,8 @@ func TestMerchantDashboard(t *testing.T) {
 		// Seed one metered usage event for merchant B (super pool bypasses RLS).
 		customerID := uuid.New()
 		_, err := pool.Exec(ctx,
-			`INSERT INTO openrails.customers (id, merchant_id, subject) VALUES ($1, $2, $3)`,
-			customerID, uuid.UUID(b.MerchantID), "dash-usage-"+uuid.NewString())
+			`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`,
+			customerID, uuid.UUID(b.MerchantID))
 		require.NoError(t, err)
 		_, err = pool.Exec(ctx,
 			`INSERT INTO openrails.usage_events (merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id)
