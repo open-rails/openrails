@@ -87,6 +87,9 @@ func NewIssuerVerifier(issuers []string, expectedAudience string) (Verifier, err
 		}
 		if err := v.AddIssuer(issuer, audiences, verify.IssuerOptions{
 			JWKSURI: issuer + "/.well-known/jwks.json",
+			// This explicit host allowlist owns the user namespace consumed by
+			// the bridge. Stored merchant/application issuers never enter it.
+			IsLocal: true,
 		}); err != nil {
 			return nil, fmt.Errorf("add auth issuer %q: %w", issuer, err)
 		}
