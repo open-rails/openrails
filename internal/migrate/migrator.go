@@ -55,7 +55,7 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("authkit: create pgx pool: %w", err)
 	}
 	defer authPool.Close()
-	if _, err := authkitmigrate.New(authPool, &authkitmigrate.Config{}).Migrate(ctx); err != nil {
+	if err := authkitmigrate.New(authPool, &authkitmigrate.Config{}).Migrate(ctx); err != nil {
 		return fmt.Errorf("authkit: apply migrations: %w", err)
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
