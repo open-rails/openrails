@@ -231,16 +231,22 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.Mercha
 		if err != nil {
 			return err
 		}
-		schedules, err := q.ListDefaultTrustLevelSchedules(ctx, mid.UUID())
-		if err != nil {
-			return err
-		}
-		for _, row := range schedules {
-			schedule := openrails.MerchantTrustLevelSchedule{Currency: row.Currency}
-			if err := json.Unmarshal(row.Rungs, &schedule.Schedule); err != nil {
+		for after := ""; ; {
+			schedules, err := q.ListDefaultTrustLevelSchedules(ctx, gen.ListDefaultTrustLevelSchedulesParams{MerchantID: mid.UUID(), AfterCurrency: after})
+			if err != nil {
 				return err
 			}
-			out.TrustLevelSchedules = append(out.TrustLevelSchedules, schedule)
+			for _, row := range schedules {
+				schedule := openrails.MerchantTrustLevelSchedule{Currency: row.Currency}
+				if err := json.Unmarshal(row.Rungs, &schedule.Schedule); err != nil {
+					return err
+				}
+				out.TrustLevelSchedules = append(out.TrustLevelSchedules, schedule)
+				after = row.Currency
+			}
+			if len(schedules) < 100 {
+				break
+			}
 		}
 		return nil
 	})

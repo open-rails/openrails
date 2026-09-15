@@ -78,16 +78,22 @@ func (q *Queries) FindRemovedCustomerPolicies(ctx context.Context, arg FindRemov
 
 const listDefaultTrustLevelSchedules = `-- name: ListDefaultTrustLevelSchedules :many
 SELECT currency, rungs FROM openrails.tier_schedules
-WHERE merchant_id = $1 AND customer_id IS NULL ORDER BY currency
+WHERE merchant_id = $1 AND customer_id IS NULL
+AND currency > $2::text ORDER BY currency LIMIT 100
 `
+
+type ListDefaultTrustLevelSchedulesParams struct {
+	MerchantID    uuid.UUID
+	AfterCurrency string
+}
 
 type ListDefaultTrustLevelSchedulesRow struct {
 	Currency string
 	Rungs    []byte
 }
 
-func (q *Queries) ListDefaultTrustLevelSchedules(ctx context.Context, merchantID uuid.UUID) ([]ListDefaultTrustLevelSchedulesRow, error) {
-	rows, err := q.db.Query(ctx, listDefaultTrustLevelSchedules, merchantID)
+func (q *Queries) ListDefaultTrustLevelSchedules(ctx context.Context, arg ListDefaultTrustLevelSchedulesParams) ([]ListDefaultTrustLevelSchedulesRow, error) {
+	rows, err := q.db.Query(ctx, listDefaultTrustLevelSchedules, arg.MerchantID, arg.AfterCurrency)
 	if err != nil {
 		return nil, err
 	}
