@@ -219,16 +219,17 @@ func (c *localClient) Admit(ctx context.Context, req openrails.AdmitRequest) (*o
 func admitInputFromSDK(req openrails.AdmitRequest, payer identity.CustomerID) billingservice.AdmitInput {
 	trustLevel := strings.TrimSpace(req.TrustLevel)
 	in := billingservice.AdmitInput{
-		CustomerID:      payer,
-		Invoker:         strings.TrimSpace(req.Invoker),
-		InvokerType:     req.InvokerType,
-		TrustLevel:      trustLevel,
-		Resource:        req.Resource,
-		Currency:        req.Currency,
-		EstimatedAmount: req.EstimatedAmount,
-		Source:          req.Source,
-		SourceID:        req.RequestID,
-		Roles:           req.Roles,
+		CustomerID:              payer,
+		Invoker:                 strings.TrimSpace(req.Invoker),
+		InvokerType:             req.InvokerType,
+		TrustLevel:              trustLevel,
+		Resource:                req.Resource,
+		Currency:                req.Currency,
+		EstimatedAmount:         req.EstimatedAmount,
+		AccrualRateDeltaPerHour: req.AccrualRateDeltaPerHour,
+		Source:                  req.Source,
+		SourceID:                req.RequestID,
+		Roles:                   req.Roles,
 	}
 	if req.ExpiresAt != nil {
 		in.ExpiresAtUnix = *req.ExpiresAt
@@ -295,7 +296,8 @@ func (c *localClient) SetCustomerSpendDelegation(ctx context.Context, customerID
 func spendDelegationInput(d openrails.SpendDelegationInput) billingservice.InvokerSpendLimitInput {
 	out := billingservice.InvokerSpendLimitInput{
 		Scope: d.Scope, ScopeKey: d.ScopeKey,
-		Windows: make([]billingservice.SpendLimitWindowInput, 0, len(d.Windows)),
+		Provenance: d.Provenance,
+		Windows:    make([]billingservice.SpendLimitWindowInput, 0, len(d.Windows)),
 	}
 	for _, w := range d.Windows {
 		out.Windows = append(out.Windows, billingservice.SpendLimitWindowInput{
