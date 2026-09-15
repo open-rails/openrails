@@ -39,7 +39,12 @@ func TestIndexAvailabilityProbeRejectsMissingPredicateIndex(t *testing.T) {
 	}
 	for _, indexed := range []bool{false, true} {
 		if indexed {
-			if _, err := conn.Exec(ctx, "RESET ROLE; CREATE INDEX ON openrails.audit_index_probe(needle)"); err != nil {
+			// A one-row table makes a normal sequential scan cheaper. That cost
+			// choice must not conceal the useful index from an availability probe.
+			if _, err := conn.Exec(ctx, `RESET ROLE;
+				CREATE INDEX ON openrails.audit_index_probe(needle);
+				INSERT INTO openrails.audit_index_probe(id,needle) VALUES(1,'present');
+				ANALYZE openrails.audit_index_probe;`); err != nil {
 				t.Fatal(err)
 			}
 		}
