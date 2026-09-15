@@ -540,8 +540,8 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 		verify.WithSSRFGuard(),
 	)
 	if err := userVerifier.AddIssuer(issuer, []string{billingauth.TokenAudience}, verify.IssuerOptions{
-		RawKeys: authClient.PublicKeysByKID(),
-		IsLocal: true,
+		PublicKeys: authClient.PublicKeysByKID,
+		IsLocal:    true,
 	}); err != nil {
 		return nil, fmt.Errorf("controlplane: build user verifier: %w", err)
 	}
