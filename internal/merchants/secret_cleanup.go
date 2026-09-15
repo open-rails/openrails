@@ -93,6 +93,8 @@ func clearMerchantSecretCache(store MerchantSecretStore, id merchant.ID) {
 }
 
 func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id merchant.ID, plan SecretCleanupPlan) (int64, error) {
+	clearMerchantSecretCache(store, id)
+	defer clearMerchantSecretCache(store, id)
 	store = mutableSecretView(store)
 	target, ok := baseSecretStore(store).(secretCleanupTarget)
 	if !ok {
@@ -105,8 +107,6 @@ func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id merchant.
 	if backend != plan.Backend || root != plan.Root {
 		return 0, fmt.Errorf("external secret cleanup backend/root no longer matches the captured target")
 	}
-	clearMerchantSecretCache(store, id)
-	defer clearMerchantSecretCache(store, id)
 	names, err := store.List(ctx, id)
 	if err != nil {
 		return 0, fmt.Errorf("list external secrets for cleanup: %w", err)

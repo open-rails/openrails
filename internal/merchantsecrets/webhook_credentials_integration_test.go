@@ -22,6 +22,7 @@ func TestWebhookCredentialsRequireEncryption(t *testing.T) {
 		var backend *Store
 		var err error
 		if manifestMode {
+			cfg.Env = "production"
 			cfg.MerchantSource = config.MerchantSourceManifest
 			backend, err = BuildManifest(ctx, cfg, merchants.NewManifestSecretStore(), pool)
 		} else {

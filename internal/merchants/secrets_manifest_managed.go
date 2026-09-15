@@ -40,6 +40,8 @@ func (s *manifestManagedSecretStore) GetAtLeastVersion(ctx context.Context, id m
 	if isAlertWebhookSecret(name) {
 		return ReadSecretRef(ctx, s.managed, id, SecretRef{Name: name, MinVersion: version})
 	}
+	// Manifest providers are the latest boot-seeded authority and have no
+	// durable rotation watermark or read cache; preserve their existing contract.
 	return s.Get(ctx, id, name)
 }
 func (s *manifestManagedSecretStore) Put(ctx context.Context, id merchant.ID, name, value string) (Secret, error) {
@@ -79,8 +81,21 @@ func (s *manifestManagedSecretStore) List(ctx context.Context, id merchant.ID) (
 // Their source remains the host-owned manifest; only managed URL secrets can be
 // deleted by the runtime. List also filters unrelated names in that backend.
 func mutableSecretView(store MerchantSecretStore) MerchantSecretStore {
-	if combined, ok := store.(*manifestManagedSecretStore); ok {
-		return &manifestManagedSecretStore{managed: combined.managed}
+	original := store
+	for {
+		switch wrapped := store.(type) {
+		case *manifestManagedSecretStore:
+			return &manifestManagedSecretStore{managed: wrapped.managed}
+		case *lifecycleSecretStore:
+			store = wrapped.MerchantSecretStore
+		case *cachedSecretStore:
+			store = wrapped.inner
+		case *encryptedSecretStore:
+			store = wrapped.inner
+		case *writeRestrictedSecretStore:
+			store = wrapped.inner
+		default:
+			return original
+		}
 	}
-	return store
 }

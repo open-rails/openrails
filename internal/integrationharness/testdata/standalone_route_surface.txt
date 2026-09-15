@@ -222,3 +222,4 @@ PUT /v1/merchant/dashboard
 PUT /v1/merchant/payment-providers/{provider}
 PUT /v1/merchant/settings
 PUT /v1/merchant/subscriptions/{id}/payment-method
+PUT /v1/merchant/webhooks/{id}/url

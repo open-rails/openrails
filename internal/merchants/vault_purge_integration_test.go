@@ -307,6 +307,11 @@ func TestManifestManagedWebhookPurge(t *testing.T) {
 			names, err = composed.Secrets.List(ctx, f.id)
 			require.NoError(t, err)
 			require.NotContains(t, names, foreignName)
+			// Exercise the actual runtime service with additional transparent wrappers,
+			// so cleanup must retain namespace filtering through their nesting.
+			composed.Secrets = merchants.NewLifecycleSecretStore(f.database, merchants.NewCachedSecretStore(composed.Secrets, time.Minute))
+			_, err = composed.Secrets.Get(ctx, f.id, name)
+			require.NoError(t, err)
 			svc, err := merchants.NewService(f.pool, composed.Secrets, "test")
 			require.NoError(t, err)
 			svc.WithDestructivePolicy(purgeAllowed{})

@@ -532,6 +532,9 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		return err
 	}
 
+	// The DB transaction bypasses store.Delete; evict local copies only after
+	// it commits, including caches nested around manifest-managed stores.
+	clearMerchantSecretCache(s.secrets, id)
 	if cleanupPlan != nil {
 		return s.RetrySecretCleanup(ctx, id, runID)
 	}
