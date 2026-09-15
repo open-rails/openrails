@@ -368,7 +368,7 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	// request id is a no-op on BOTH transports (the hold reservation is gone, so there
 	// is nothing to free — never an error).
 	require.ErrorIs(t, c.Release(ctx, uuid.NewString()), openrails.ErrNotFound, "%s unknown operation has no receipt", env.side)
-	require.NoError(t, c.Release(ctx, "not-a-uuid"), "%s release garbage id is idempotent", env.side)
+	require.ErrorIs(t, c.Release(ctx, "not-a-uuid"), openrails.ErrNotFound, "%s unknown operation has no receipt", env.side)
 
 	_, err = c.DepositCredits(ctx, openrails.DepositCreditsRequest{
 		CustomerID: &pid,
