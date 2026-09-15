@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -133,13 +132,10 @@ type Runtime struct {
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
 	WebhookHealth *webhookhealth.Recorder
-	// AdmissionPolicyCache is the process-local long-TTL cache of the or#897
-	// billing-policy RESOLUTION (which named policy binds to a payer at a tier).
-	// nil = resolve the binding from Postgres on every admit.
-	AdmissionPolicyCache *admission.PolicyCache
-	MoneyCharger         money.Charger
-	RailCustomerService  *payments.RailCustomerService
-	Merchants            *merchants.Service
+
+	MoneyCharger        money.Charger
+	RailCustomerService *payments.RailCustomerService
+	Merchants           *merchants.Service
 	// MerchantGroupResolver is the or#914 rename-forwarding seam an attached
 	// control plane installs (slug -> merchant group id + current slug,
 	// tombstone-following). ArmMerchantsService applies it to any merchants

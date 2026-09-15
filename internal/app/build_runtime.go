@@ -30,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/internal/modules/abuse"
-	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -295,9 +294,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		// #746: one proxy-aware client-IP resolver, built once from config;
 		// empty yields a resolver that trusts nothing. Cloudflare peers (ak#298)
 		// are trusted for X-Forwarded-For here exactly as AuthKit trusts them.
-		TrustedProxies:       iputil.ParseTrustedProxies(append(append([]string(nil), cfg.TrustedProxies...), cfg.CloudflareProxies...)),
-		AdmissionPolicyCache: admission.NewPolicyCache(0), // #513: default long TTL (config)
-		RailConfigs:          railConfigs,
+		TrustedProxies: iputil.ParseTrustedProxies(append(append([]string(nil), cfg.TrustedProxies...), cfg.CloudflareProxies...)),
+		RailConfigs:    railConfigs,
 
 		SubscriptionService:      serviceInstances.SubscriptionService,
 		ProductService:           serviceInstances.ProductService,

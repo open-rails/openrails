@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -117,7 +118,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 		admission.NewBillingPolicyStore(s.rt.DB),
 		admission.NewInvokerSpendLimitStore(s.rt.DB),
 		s.rt.FXProvider,
-	).WithCache(s.rt.AdmissionPolicyCache)
+	)
 	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
 	if err != nil {
 		return nil, err
@@ -193,12 +194,7 @@ func startCapacity(accountCapacity, activeHeld int64) int64 {
 // spend per WindowSeconds. The single window shape in this package — used by
 // budget-scope policies (#473) and by billing-policy spend/bad-spend windows
 // (or#897).
-type SpendLimitWindowInput struct {
-	Key           string `json:"key"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Limit         int64  `json:"limit"`
-	Currency      string `json:"currency,omitempty"`
-}
+type SpendLimitWindowInput = openrails.BudgetWindowInput
 
 // InvokerSpendLimitInput configures one hierarchical budget-scope policy (#473).
 // Scope is "subject" | "role" | "invoker" | "invoker_tier"; ScopeKey is the
@@ -406,7 +402,7 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 		admission.NewBillingPolicyStore(s.rt.DB),
 		admission.NewInvokerSpendLimitStore(s.rt.DB),
 		s.rt.FXProvider,
-	).WithCache(s.rt.AdmissionPolicyCache)
+	)
 	scopes, _, err := loader.LoadDelegatedWindows(ctx, payer, trustLevel, currency, req)
 	if err != nil {
 		return nil, err
@@ -539,48 +535,12 @@ func (s *Service) ReplaceInvokerSpendLimits(ctx context.Context, payer identity.
 // BillingPolicyInput declares one named billing policy (or#897). Window entries
 // carry the same {key, window_seconds, limit, currency} shape everywhere in this
 // package — SpendLimitWindowInput.
-type BillingPolicyInput struct {
-	Name string `json:"name"`
-	// Kind: outstanding_cap (cap unpaid arrears) or window_spend_cap (cap new
-	// spend per window). accrual_rate_cap is refused until or#897 PR 3.
-	Kind string `json:"kind"`
-	// OutstandingCapAmount (micros, kind=outstanding_cap) is the credit line on
-	// unpaid arrears. Zero defers to the payer's own arrears credit limit.
-	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
-	// SpendWindows (kind=window_spend_cap) are the rolling NEW-spend ceilings.
-	SpendWindows []SpendLimitWindowInput `json:"spend_windows,omitempty"`
-	// AccrualRateCapPerHour (kind=accrual_rate_cap) is the ceiling on the payer's
-	// measured accrual rate, in micros PER HOUR. AccrualRateWindowSeconds is the
-	// lookback the measurement smooths over (default 3600); it changes the
-	// smoothing, never the unit.
-	AccrualRateCapPerHour    int64 `json:"accrual_rate_cap_per_hour,omitempty"`
-	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
-	// CollectionThresholdAmount (micros) is when this payer's accrued arrears is
-	// invoiced; DelinquencyGraceDays / DelinquencyAmountFloor are its delinquency
-	// policy. Each overrides the merchant-wide invoice setting for payers bound
-	// here; nil defers to it. All three ride on any kind.
-	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
-	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
-	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty"`
-	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
-	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
-	// stays merchant-wide. Declaring it here fails with that reason.
-	CollectionCycleBoundary string `json:"collection_cycle_boundary,omitempty"`
-	// BadSpendWindows are the #497 per-PAYER direct-credential wasted-spend grace
-	// windows: at most Limit of host-reported wasted spend is forgiven per window;
-	// direct-payer overage is charged. Allowed on either kind.
-	BadSpendWindows []SpendLimitWindowInput `json:"bad_spend_windows,omitempty"`
-	PolicyCurrency  string                  `json:"policy_currency,omitempty"`
-}
+type BillingPolicyInput = openrails.BillingPolicyInput
 
 // BillingPolicyBindingInput points one rung at a policy name (or#897). Set
 // CustomerID for the per-customer rung, Tier for the per-tier rung, neither for
 // the merchant default — never both.
-type BillingPolicyBindingInput struct {
-	PolicyName string `json:"policy"`
-	CustomerID string `json:"customer_id,omitempty"`
-	Tier       string `json:"tier,omitempty"`
-}
+type BillingPolicyBindingInput = openrails.BillingPolicyBindingInput
 
 // DefaultInvokerWastedWindows is the flat delegated-invoker wasted-spend default:
 // invokers aren't trusted (an account mints unlimited invokers), so the
@@ -695,24 +655,33 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 	if err != nil {
 		return err
 	}
+	cfg, err = applyMerchantConfiguration(cfg, in)
+	if err != nil {
+		return err
+	}
+
+	return merchantconfig.NewStore(s.rt.DB).Upsert(ctx, cfg)
+}
+
+func applyMerchantConfiguration(cfg models.MerchantConfiguration, in MerchantConfiguration) (models.MerchantConfiguration, error) {
 	if in.Profile != nil {
 		cfg.Profile = *in.Profile
 	}
 	if in.InvoiceCollectionThreshold != nil {
 		if *in.InvoiceCollectionThreshold < 0 {
-			return fmt.Errorf("collection_threshold must be >= 0")
+			return cfg, fmt.Errorf("collection_threshold must be >= 0")
 		}
 		cfg.InvoiceCollectionThreshold = in.InvoiceCollectionThreshold
 	}
 	if in.InvoiceMonthlyFloor != nil {
 		if *in.InvoiceMonthlyFloor < 0 {
-			return fmt.Errorf("monthly_floor must be >= 0")
+			return cfg, fmt.Errorf("monthly_floor must be >= 0")
 		}
 		cfg.InvoiceMonthlyFloor = in.InvoiceMonthlyFloor
 	}
 	if in.InvoiceBillingBoundary != "" {
 		if money.NormalizeInvoiceBoundary(in.InvoiceBillingBoundary) == "" {
-			return fmt.Errorf("invalid billing_period_boundary %q", in.InvoiceBillingBoundary)
+			return cfg, fmt.Errorf("invalid billing_period_boundary %q", in.InvoiceBillingBoundary)
 		}
 		cfg.InvoiceBillingBoundary = in.InvoiceBillingBoundary
 	}
@@ -721,32 +690,32 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 	}
 	if in.AutoTopupSafety != nil {
 		if _, err := merchantconfig.AutoTopupSafety(in.AutoTopupSafety); err != nil {
-			return err
+			return cfg, err
 		}
 		cfg.AutoTopupSafety = in.AutoTopupSafety
 	}
 	if in.RepriceNoticeWindowDays != nil {
 		if *in.RepriceNoticeWindowDays < 0 {
-			return fmt.Errorf("reprice_notice_window_days must be >= 0")
+			return cfg, fmt.Errorf("reprice_notice_window_days must be >= 0")
 		}
 		cfg.RepriceNoticeWindowDays = in.RepriceNoticeWindowDays
 	}
 	if in.ArrearsGraceDays != nil {
 		if *in.ArrearsGraceDays < 0 {
-			return fmt.Errorf("arrears_grace_days must be >= 0")
+			return cfg, fmt.Errorf("arrears_grace_days must be >= 0")
 		}
 		cfg.ArrearsGraceDays = in.ArrearsGraceDays
 	}
 	if in.ArrearsDelinquencyFloor != nil {
 		if *in.ArrearsDelinquencyFloor < 0 {
-			return fmt.Errorf("arrears_delinquency_floor must be >= 0")
+			return cfg, fmt.Errorf("arrears_delinquency_floor must be >= 0")
 		}
 		cfg.ArrearsDelinquencyFloor = in.ArrearsDelinquencyFloor
 	}
 	if in.CheckoutRouting != nil {
 		routing, err := merchantconfig.NormalizeCheckoutRouting(*in.CheckoutRouting)
 		if err != nil {
-			return err
+			return cfg, err
 		}
 		cfg.CheckoutRouting = routing
 	}
@@ -762,7 +731,7 @@ func (s *Service) SetMerchantConfiguration(ctx context.Context, in MerchantConfi
 			Currency:      w.Currency,
 		})
 	}
-	return merchantconfig.NewStore(s.rt.DB).Upsert(ctx, cfg)
+	return cfg, nil
 }
 
 // invokerWastedSpendPolicy resolves the merchant-configured flat delegated
@@ -1195,7 +1164,6 @@ func (s *Service) SetBillingPolicy(ctx context.Context, in BillingPolicyInput) e
 	if err := admission.NewBillingPolicyStore(s.rt.DB).UpsertPolicy(ctx, name, body); err != nil {
 		return err
 	}
-	s.invalidateAdmissionPolicyCache(ctx)
 	return nil
 }
 
@@ -1228,7 +1196,6 @@ func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBinding
 	if err := admission.NewBillingPolicyStore(s.rt.DB).BindPolicy(ctx, payer, tier, name); err != nil {
 		return err
 	}
-	s.invalidateAdmissionPolicyCache(ctx)
 	return nil
 }
 
@@ -1300,25 +1267,10 @@ func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]BillingPolic
 	return out, nil
 }
 
-// invalidateAdmissionPolicyCache retires this process's cached resolutions for
-// the merchant after a policy or binding write, so a tightened cap takes effect
-// on the next admit instead of at the end of the TTL.
-func (s *Service) invalidateAdmissionPolicyCache(ctx context.Context) {
-	if s.rt.AdmissionPolicyCache == nil {
-		return
-	}
-	if tid, err := merchant.Require(ctx); err == nil {
-		s.rt.AdmissionPolicyCache.InvalidateMerchant(tid.UUID().String())
-	}
-}
-
 // TrustLevelScheduleRung is one rung of a persisted same-currency trust-level
 // ladder (#476): a payer reaches TrustLevel once its cumulative paid spend in
 // the schedule currency is at least MinCumulativePaidAmount.
-type TrustLevelScheduleRung struct {
-	TrustLevel              string `json:"trust_level"`
-	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
-}
+type TrustLevelScheduleRung = openrails.TrustLevelScheduleRung
 
 // SetTrustLevelSchedule persists the merchant's trust-level SCHEDULE (#476): the
 // host declares the same-currency ladder ONCE and OpenRails then AUTO-maintains
