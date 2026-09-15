@@ -431,9 +431,17 @@ func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttem
 	}))
 }
 
-func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {
+func (s *Store) MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error {
+	var raw []byte
+	if len(evidence) > 0 {
+		var err error
+		raw, err = json.Marshal(evidence)
+		if err != nil {
+			return fmt.Errorf("marshal provider receipt: %w", err)
+		}
+	}
 	return one(s.db.Gen(ctx).MarkRailIntentUnknown(ctx, gen.MarkRailIntentUnknownParams{
-		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason,
+		ID: id, NextAttemptAt: nextAttemptAt.UTC(), Reason: &reason, ResultEvidence: raw,
 	}))
 }
 

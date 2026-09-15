@@ -294,19 +294,8 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
 
-	// Money mover: re-executions verify at the gateway before sending again.
-	if intent.Attempts > 1 && !h.Sale.DisableGatewayVerify {
-		client, cerr := h.gatewayQueryClient(cfg)
-		if cerr != nil {
-			return intents.Ambiguous("gateway verify client unavailable: " + cerr.Error())
-		}
-		txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, orderID)
-		if verr != nil {
-			return intents.Ambiguous("pre-send verification read failed: " + verr.Error())
-		}
-		if found {
-			return h.finalize(ctx, intent.MerchantID, cfg, p, orderID, txnID, true)
-		}
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
 	}
 
 	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
@@ -330,7 +319,7 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 		if basistheory.IsNotFound(err) {
 			return intents.Terminal("bt token intent not found (intents expire after 24h; re-collect the card)")
 		}
-		return intents.Retryable("bt token intent read failed: " + err.Error())
+		return intents.Parked("bt token intent read failed before submission: " + err.Error())
 	}
 	priorRef, _ := h.priorAnchor(ctx, intent.MerchantID, tokenIntent.Fingerprint)
 
@@ -355,7 +344,7 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 		}
 		if pe, ok := basistheory.IsBTProxyError(err); ok {
 			if pe.Status == 429 {
-				return intents.Retryable("bt proxy rate limited: " + err.Error())
+				return intents.Parked("bt proxy rate limited before forwarding: " + err.Error())
 			}
 			// Pre-forward BT failure (auth/expression/config): operator-shaped,
 			// NEVER a decline.
@@ -364,7 +353,7 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 		var vaultErr *nmi.CustomerVaultError
 		if errors.As(err, &vaultErr) {
 			// Transient gateway condition (420/421/430) — retry via the ledger.
-			return intents.Retryable("gateway transient: " + err.Error())
+			return intents.Ambiguous("gateway response requires verification: " + err.Error())
 		}
 		return intents.Terminal("sale request rejected: " + err.Error())
 	}
@@ -407,6 +396,9 @@ func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.Open
 	if err != nil {
 		return intents.Ambiguous("custodian checkout not armed; cannot verify")
 	}
+	if receipt := intents.EvidenceString(intent, "transaction_id"); receipt != "" {
+		return h.finalize(ctx, intent.MerchantID, cfg, p, nmiSaleIntentOrderID(intent.ID, p.E2ERunID), receipt, true)
+	}
 	if h.Sale.DisableGatewayVerify {
 		return intents.Ambiguous("gateway verify disabled; manual resolution required")
 	}
@@ -420,7 +412,7 @@ func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.Open
 		return intents.Ambiguous("provider read failed: " + err.Error())
 	}
 	if !found {
-		return intents.Retryable("no successful sale found for order id; charge verified not executed")
+		return intents.Ambiguous("submitted sale has no exact provider receipt; no automatic resend")
 	}
 	return h.finalize(ctx, intent.MerchantID, cfg, p, orderID, txnID, true)
 }
@@ -447,7 +439,12 @@ func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID
 
 // finalize is the verified-existing leg (no fresh charge result): the charge
 // landed at the gateway; conversion may still be pending.
-func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, cfg *custodialPSP, p CustodianSalePayload, orderID, transactionID string, _ bool) intents.Outcome {
+func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, cfg *custodialPSP, p CustodianSalePayload, orderID, transactionID string, _ bool) (outcome intents.Outcome) {
+	defer func() {
+		if outcome.Class == intents.OutcomeAmbiguous && transactionID != "" {
+			outcome.Evidence = map[string]any{"transaction_id": transactionID}
+		}
+	}()
 	res := charge.Result{
 		TransactionID: transactionID,
 		TokenType:     charge.TokenTypePANViaProxy,
@@ -467,7 +464,12 @@ func (h *CustodianSaleIntentHandler) finalize(ctx context.Context, merchantID uu
 // finalizeApproved converts the intent to a durable token, writes/reuses the
 // instrument row, persists the stored-credential anchor write-once, provisions
 // an NT when armed (never load-bearing), and registers the purchase.
-func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, merchantID uuid.UUID, cfg *custodialPSP, p CustodianSalePayload, orderID string, res charge.Result, tokenIntent *basistheory.TokenIntent) intents.Outcome {
+func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, merchantID uuid.UUID, cfg *custodialPSP, p CustodianSalePayload, orderID string, res charge.Result, tokenIntent *basistheory.TokenIntent) (outcome intents.Outcome) {
+	defer func() {
+		if outcome.Class == intents.OutcomeAmbiguous && res.TransactionID != "" {
+			outcome.Evidence = map[string]any{"transaction_id": res.TransactionID}
+		}
+	}()
 	bt, err := h.Sale.btClient(cfg)
 	if err != nil {
 		return intents.Parked("custodian client build failed: " + err.Error())

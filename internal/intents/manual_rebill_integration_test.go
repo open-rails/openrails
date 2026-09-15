@@ -258,6 +258,19 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	require.Equal(t, StatusUnknownNeedsVerify, row.Status, "a possibly-sent charge must verify, never blind-retry")
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status), "no lifecycle change while unresolved")
 
+	// A successful empty search is inconclusive and cannot re-arm execution.
+	fake.charged.Store(false)
+	_, err = fx.db.Pool().Exec(context.Background(), "UPDATE openrails.rail_intents SET next_attempt_at=now() WHERE id=$1", row.ID)
+	require.NoError(t, err)
+	_, err = fx.rebillRunner(client, fullModeConfig()).RunVerifyOnce(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
+	resumed := row
+	resumed.Attempts = 2
+	outcome := fx.rebillRunner(client, fullModeConfig()).Registry.Lookup(TypeManualRebill).Execute(context.Background(), resumed)
+	require.Equal(t, OutcomeAmbiguous, outcome.Class)
+	require.EqualValues(t, 1, fake.saleCalls.Load())
+
 	// The charge actually landed at NMI.
 	fake.charged.Store(true)
 	_, err = fx.db.Pool().Exec(context.Background(),

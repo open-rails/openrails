@@ -41,13 +41,15 @@ import (
 // searched order id. saleForm records the last classic sale's full form for
 // stored-credential wire assertions.
 type fakeNMISaleGateway struct {
-	saleCalls  atomic.Int64
-	queryCalls atomic.Int64
-	saleMode   atomic.Value // "approve" | "decline" | "ambiguous500"
-	charged    atomic.Bool
-	lastOrder  atomic.Value // string: order id of the last sale attempt
-	saleForm   atomic.Value // url.Values: last classic sale form
-	txnID      string
+	saleCalls   atomic.Int64
+	queryCalls  atomic.Int64
+	saleMode    atomic.Value // "approve" | "decline" | "ambiguous500"
+	charged     atomic.Bool
+	hidden      atomic.Bool
+	unavailable atomic.Bool
+	lastOrder   atomic.Value // string: order id of the last sale attempt
+	saleForm    atomic.Value // url.Values: last classic sale form
+	txnID       string
 }
 
 func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
@@ -69,8 +71,10 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 			switch f.saleMode.Load().(string) {
 			case "decline":
 				fmt.Fprintf(w, `{"id":"%s","response":"2","response_code":"200","response_text":"DECLINED"}`, f.txnID)
+			case "timeout-after-accept":
+				f.charged.Store(true)
+				w.WriteHeader(http.StatusGatewayTimeout)
 			case "ambiguous500":
-				// The charge LANDED but the response was lost (5xx).
 				f.charged.Store(true)
 				w.WriteHeader(http.StatusBadGateway)
 			default:
@@ -88,8 +92,10 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 			switch f.saleMode.Load().(string) {
 			case "decline":
 				fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=200")
+			case "timeout-after-accept":
+				f.charged.Store(true)
+				w.WriteHeader(http.StatusGatewayTimeout)
 			case "ambiguous500":
-				// The charge LANDED but the response was lost (5xx).
 				f.charged.Store(true)
 				w.WriteHeader(http.StatusBadGateway)
 			default:
@@ -101,7 +107,11 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 		// classic query.php transaction search
 		f.queryCalls.Add(1)
 		orderID := r.Form.Get("order_id")
-		if f.charged.Load() {
+		if f.unavailable.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		if f.charged.Load() && !f.hidden.Load() {
 			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, f.txnID, orderID)
 			return
 		}
@@ -308,6 +318,7 @@ func TestNMISaleIntent_PurchaseCreditFailureRetriesWithoutRecharging(t *testing.
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.Equal(t, 1, fx.paymentCount(t), "the provider charge remains durably recorded for retry")
 
+	fx.gateway.unavailable.Store(true) // captured receipt must survive unavailable search
 	fx.advanceClock(2 * time.Minute)
 	_, err = fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
@@ -459,40 +470,71 @@ func TestNMISaleIntent_ChargedButRegistrationFails_VerifierRepairs(t *testing.T)
 	require.Equal(t, 1, fx.paymentCount(t))
 }
 
-// Provider outage: the attempt is ambiguous (nothing parseable came back),
-// verification says "not executed" → the executor re-sends with the ORIGINAL
-// intent-derived order id once the provider is healthy.
-func TestNMISaleIntent_ProviderOutageRetriesWithOriginalOrderID(t *testing.T) {
+// A timeout response after acceptance plus delayed Query visibility never
+// becomes permission to charge again, including restart, expiry and re-enqueue.
+func TestNMISaleIntent_DelayedReceiptNeverResubmits(t *testing.T) {
 	fx := newSaleIntentFixture(t)
-	// A 5xx where the charge did NOT land: the query API keeps answering
-	// "no sale" (charged is reset right after the attempt below).
-	fx.gateway.saleMode.Store("ambiguous500")
-	key := "sale-key-" + uuid.NewString()[:8]
-
+	fx.gateway.saleMode.Store("timeout-after-accept")
+	fx.gateway.hidden.Store(true)
+	key := "sale-delayed-" + uuid.NewString()[:8]
 	intent := fx.enqueueAndExecute(t, key)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status)
-	firstOrder := fx.gateway.lastOrder.Load().(string)
-	// The outage 5xx did not actually charge in this scenario:
-	fx.gateway.charged.Store(false)
-
-	// Verify: clean read, no sale found → verified not executed → retryable.
+	require.True(t, fx.gateway.charged.Load())
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET expires_at=now()-interval '1 minute',next_attempt_at=now() WHERE id=$1`, intent.ID)
+	require.NoError(t, err)
+	// New runner/store objects simulate process restart over the same durable row.
+	restart := *fx.runner
+	restart.Store = intents.NewStore(fx.db)
+	fx.runner = &restart
 	fx.advanceClock(2 * time.Minute)
-	_, err := fx.runner.RunVerifyOnce(fx.ctx)
+	stats, err := fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
-	mid, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
+	require.Equal(t, 1, stats.Unknown)
+	stats, err = fx.runner.RunExecuteOnce(fx.ctx)
 	require.NoError(t, err)
-	require.Equal(t, intents.StatusFailedRetryable, mid.Status)
+	require.Zero(t, stats.Claimed)
+	replay := fx.enqueueAndExecute(t, key)
+	require.Equal(t, intent.ID, replay.ID)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, replay.Status)
+	require.EqualValues(t, 1, replay.Attempts)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.Equal(t, 0, fx.paymentCount(t))
-
-	// Provider recovers; the scheduled executor re-sends under the SAME order id.
-	fx.gateway.saleMode.Store("approve")
-	fx.advanceClock(10 * time.Minute)
-	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	// Even direct reclaim of the resumed handler is verification-only.
+	resumed := replay
+	resumed.Attempts = 2
+	outcome := fx.runner.Registry.Lookup(TypeNMISale).Execute(fx.ctx, resumed)
+	require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	fx.gateway.hidden.Store(false)
+	fx.advanceClock(20 * time.Minute)
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
 	final, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusSucceeded, final.Status)
-	require.EqualValues(t, 2, fx.gateway.saleCalls.Load())
-	require.Equal(t, firstOrder, fx.gateway.lastOrder.Load().(string), "retry reuses the ORIGINAL intent-derived order id")
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	require.Equal(t, 1, fx.paymentCount(t))
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, fx.paymentCount(t))
+}
+
+func TestNMISaleIntent_ProvenPreSendParkCanResume(t *testing.T) {
+	fx := newSaleIntentFixture(t)
+	handler := fx.runner.Registry.Lookup(TypeNMISale).(*NMISaleIntentHandler)
+	resolve := handler.Sale.ResolveNMIClient
+	handler.Sale.ResolveNMIClient = func(context.Context, string) (*nmi.NMIClient, error) {
+		return nil, errors.New("temporarily unavailable before any request")
+	}
+	key := "sale-park-" + uuid.NewString()[:8]
+	parked := fx.enqueueAndExecute(t, key)
+	require.Equal(t, intents.StatusPending, parked.Status)
+	require.Zero(t, parked.Attempts)
+	require.Zero(t, fx.gateway.saleCalls.Load())
+	handler.Sale.ResolveNMIClient = resolve
+	resumed := fx.enqueueAndExecute(t, key)
+	require.Equal(t, intents.StatusSucceeded, resumed.Status)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.Equal(t, 1, fx.paymentCount(t))
 }

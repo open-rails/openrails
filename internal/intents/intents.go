@@ -22,6 +22,7 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -101,7 +102,14 @@ func Succeeded(evidence map[string]any) Outcome {
 }
 func Retryable(reason string) Outcome { return Outcome{Class: OutcomeRetryable, Reason: reason} }
 func Ambiguous(reason string) Outcome { return Outcome{Class: OutcomeAmbiguous, Reason: reason} }
-func Terminal(reason string) Outcome  { return Outcome{Class: OutcomeTerminal, Reason: reason} }
+
+// AmbiguousWithEvidence retains an exact provider receipt while local effects
+// remain incomplete. The verifier can resume it without depending on search lag.
+func AmbiguousWithEvidence(reason string, evidence map[string]any) Outcome {
+	return Outcome{Class: OutcomeAmbiguous, Reason: reason, Evidence: evidence}
+}
+
+func Terminal(reason string) Outcome { return Outcome{Class: OutcomeTerminal, Reason: reason} }
 
 // TerminalWithEvidence is Terminal plus structured forensics persisted as
 // result_evidence (e.g. a gateway decline's response code, which the dunning
@@ -186,4 +194,15 @@ func (r *Registry) Types() []string {
 		out = append(out, t)
 	}
 	return out
+}
+
+// EvidenceString reads a captured operation receipt from durable intent state.
+func EvidenceString(intent gen.OpenrailsRailIntent, key string) string {
+	var evidence map[string]json.RawMessage
+	if json.Unmarshal(intent.ResultEvidence, &evidence) != nil {
+		return ""
+	}
+	var value string
+	_ = json.Unmarshal(evidence[key], &value)
+	return value
 }

@@ -4,8 +4,10 @@ package money_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -203,4 +205,60 @@ func TestChargeOutstanding_DeclaredAccountMissingSecret_FailsClosed(t *testing.T
 	require.Error(t, err, "a declared account with a missing secret must fail the charge closed")
 	require.Contains(t, err.Error(), "missing")
 	require.Empty(t, boot.charges, "fail-closed must never fall back to the boot-plane adapter")
+}
+
+// Actual NMI Direct Post acceptance with a lost response, then an empty Query
+// result and eventual receipt, must settle one local invoice without a resend.
+func TestInvoiceCollection_DelayedNMIReceiptNeverResubmits(t *testing.T) {
+	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
+	cleanupInvoices(t, pool, ctx, payer)
+	msvc := merchantsServiceForTest(t, dbi)
+	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), "gw-delayed-"+uuid.NewString()[:8], map[string]string{"security_key": "synthetic-key"})
+	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
+	invoiceID := seedArrearsInvoice(t, svc, ctx, payer, method)
+	var sends atomic.Int32
+	var visible atomic.Bool
+	transaction := "invoice-delayed-" + uuid.NewString()
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.NoError(t, r.ParseForm())
+		if r.Form.Get("type") == "sale" {
+			sends.Add(1)
+			w.WriteHeader(http.StatusGatewayTimeout)
+			return
+		}
+		if visible.Load() {
+			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, transaction, r.Form.Get("order_id"))
+			return
+		}
+		fmt.Fprint(w, `<nm_response></nm_response>`)
+	}))
+	t.Cleanup(gateway.Close)
+	plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: dbi, MerchantsFn: func() *merchants.Service { return msvc }, Endpoints: money.CollectionEndpoints{NMIDirectPostURL: gateway.URL, NMIQueryURL: gateway.URL}}
+	charger := money.NewScopedCharger(dbi, nil)
+	charger.SetAdapterResolver(plane)
+	_, err := svc.ChargeOutstanding(ctx, charger, 0)
+	require.ErrorIs(t, err, money.ErrInvoiceRetryOutcomeUnknown)
+	require.EqualValues(t, 1, sends.Load())
+	_, err = pool.Exec(ctx, "UPDATE openrails.invoices SET updated_at=updated_at-interval '30 minutes' WHERE id=$1", invoiceID)
+	require.NoError(t, err)
+	restarted := money.NewMoneyService(dbi)
+	stats, err := restarted.ResolveUnknownInvoiceCollections(ctx, plane)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Skipped)
+	_, err = restarted.ChargeOutstanding(ctx, charger, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, sends.Load())
+	visible.Store(true)
+	stats, err = restarted.ResolveUnknownInvoiceCollections(ctx, plane)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Settled)
+	invoice, err := restarted.GetInvoiceByID(ctx, payer, invoiceID)
+	require.NoError(t, err)
+	require.Equal(t, "paid", invoice.Status)
+	_, err = restarted.ResolveUnknownInvoiceCollections(ctx, plane)
+	require.NoError(t, err)
+	_, err = restarted.ChargeOutstanding(ctx, charger, 0)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, sends.Load())
+	require.Equal(t, 1, owedPaymentTransfers(t, pool, ctx, payer))
 }

@@ -86,7 +86,8 @@ RETURNING *;
 -- next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
 -- (crashed executor; per-type semantics make the reclaim safe). Never claims
 -- past the relevance window — those rows are swept by
--- ExpireOverdueRailIntents.
+-- ExpireOverdueRailIntents. Abandoned in-flight attempts are still claimed
+-- after their deadline so possible submissions can be reconciled.
 -- name: ClaimDueRailIntents :many
 WITH due AS (
     SELECT id FROM openrails.rail_intents
@@ -94,7 +95,7 @@ WITH due AS (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= sqlc.arg(now)::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= sqlc.arg(now)::timestamptz)
           )
-      AND (expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
+      AND (status = 'in_flight' OR expires_at IS NULL OR expires_at > sqlc.arg(now)::timestamptz)
     ORDER BY next_attempt_at
     LIMIT sqlc.arg(batch_size)
     FOR UPDATE SKIP LOCKED
@@ -125,7 +126,7 @@ WHERE pi.id = sqlc.arg(id)
         pi.status IN ('pending', 'failed_retryable')
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= sqlc.arg(now)::timestamptz)
       )
-  AND (pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
+  AND (pi.status = 'in_flight' OR pi.expires_at IS NULL OR pi.expires_at > sqlc.arg(now)::timestamptz)
 RETURNING pi.*;
 
 -- Claims due unknown_needs_verify intents for the verifier. Status stays
@@ -190,6 +191,7 @@ WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
 -- name: MarkRailIntentUnknown :execrows
 UPDATE openrails.rail_intents
 SET status = 'unknown_needs_verify',
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb),
     next_attempt_at = sqlc.arg(next_attempt_at)::timestamptz,
     last_failure_reason = sqlc.arg(reason),
     claimed_until = NULL,
@@ -242,7 +244,7 @@ SET status = 'superseded',
     updated_at = now()
 WHERE intent_type = sqlc.arg(intent_type)
   AND subscription_id = sqlc.arg(subscription_id)
-  AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify');
+  AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0));
 
 -- #679: destructive intents held by the volume breaker (an OPEN
 -- life.provider_intent.held_bulk finding for their merchant) never expire out
@@ -253,7 +255,7 @@ SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
     updated_at = now()
-WHERE pi.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= sqlc.arg(now)::timestamptz
   AND NOT (

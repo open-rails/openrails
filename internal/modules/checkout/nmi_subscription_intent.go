@@ -153,11 +153,8 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
 
-	// Money mover + remote-resource creator: re-executions verify first.
 	if intent.Attempts > 1 {
-		if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
-			return outcome
-		}
+		return h.Verify(ctx, intent)
 	}
 
 	// NMI charges whole cents; the payload carries micros. Error (never round)
@@ -240,6 +237,9 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
+	if sub := intents.EvidenceString(intent, "provider_subscription_id"); sub != "" {
+		return h.finalize(ctx, intent.MerchantID, p, nmiSaleIntentOrderID(intent.ID, p.E2ERunID), sub, intents.EvidenceString(intent, "transaction_id"), true)
+	}
 	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
 	if err != nil {
 		return intents.Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", nmiIntentClientName(p.PSP, intent.Rail)))
@@ -248,7 +248,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 	if outcome, resolved := h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID); resolved {
 		return outcome
 	}
-	return intents.Retryable("no remote subscription or sale found for this intent; create verified not executed")
+	return intents.Ambiguous("submitted enrollment has no exact provider receipt; no automatic resend")
 }
 
 // verifyAtProvider answers "did THIS create land at NMI?" via reads:
@@ -259,7 +259,7 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 //     catch) or when its local row carries THIS intent's order id (finalize
 //     crashed midway; re-finalize).
 //
-// resolved=false means "verified not executed" — the caller may (re)send.
+// resolved=false means the read is inconclusive; it never authorizes a resend.
 func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) (intents.Outcome, bool) {
 	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
@@ -364,7 +364,12 @@ func subscriptionMetadataString(raw json.RawMessage, key string) string {
 // standard registration path (idempotent: existing rows are activated /
 // answered, not duplicated) and completes the request-level idempotency
 // record so client replays get the cached response.
-func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, orderID, providerSubscriptionID, transactionID string, verified bool) intents.Outcome {
+func (h *NMISubscriptionCreateIntentHandler) finalize(ctx context.Context, merchantID uuid.UUID, p NMISubscriptionCreatePayload, orderID, providerSubscriptionID, transactionID string, verified bool) (outcome intents.Outcome) {
+	defer func() {
+		if outcome.Class == intents.OutcomeAmbiguous && providerSubscriptionID != "" {
+			outcome.Evidence = map[string]any{"provider_subscription_id": providerSubscriptionID, "transaction_id": transactionID}
+		}
+	}()
 	if strings.TrimSpace(providerSubscriptionID) == "" {
 		return intents.Ambiguous("remote subscription id unavailable; cannot register locally")
 	}

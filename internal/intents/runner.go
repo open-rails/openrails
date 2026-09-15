@@ -27,7 +27,7 @@ type ledger interface {
 	PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error
 	PruneTerminalPayload(ctx context.Context, id uuid.UUID) error
 	MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
-	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
+	MarkUnknown(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string, evidence map[string]any) error
 	MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason string, evidence map[string]any) error
 	Park(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error
 	MarkSuperseded(ctx context.Context, id uuid.UUID, reason string) error
@@ -317,7 +317,7 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 		handler := r.Registry.Lookup(intent.IntentType)
 		if handler == nil {
 			// Leave it unknown; push the next look out.
-			if err := r.Store.MarkUnknown(ctx, intent.ID, r.now().Add(ParkRetryInterval), "no handler registered for intent type "+intent.IntentType); err != nil {
+			if err := r.Store.MarkUnknown(ctx, intent.ID, r.now().Add(ParkRetryInterval), "no handler registered for intent type "+intent.IntentType, nil); err != nil {
 				logEntry.WithError(err).Error("intent verifier: mark unknown failed")
 			}
 			stats.Unknown++
@@ -418,7 +418,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		if verifying {
 			delay = handler.Backoff(intent.Attempts)
 		}
-		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(delay), outcome.Reason)
+		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(delay), outcome.Reason, outcome.Evidence)
 		stats.Unknown++
 		logEntry.WithField("reason", outcome.Reason).Warn("intent outcome ambiguous; verifier will resolve via provider reads")
 	case OutcomeTerminal:
@@ -434,14 +434,14 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 		if verifying {
 			// A verifier cannot park (reads are never blocked); treat as
 			// still-unknown so the intent is not lost.
-			err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason)
+			err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), outcome.Reason, outcome.Evidence)
 			stats.Unknown++
 		} else {
 			r.park(ctx, logEntry, stats, intent.ID, now, outcome.Reason)
 			return
 		}
 	default:
-		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), "unrecognized outcome class")
+		err = r.Store.MarkUnknown(ctx, intent.ID, now.Add(ParkRetryInterval), "unrecognized outcome class", nil)
 		stats.Unknown++
 	}
 	if err != nil {

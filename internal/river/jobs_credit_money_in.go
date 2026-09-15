@@ -220,7 +220,7 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 			} else if stats.Examined > 0 {
 				logger.WithFields(log.Fields{
 					"examined": stats.Examined, "settled": stats.Settled,
-					"released": stats.Released, "skipped": stats.Skipped,
+					"skipped": stats.Skipped,
 				}).Info("invoice unknown-outcome resolution pass complete")
 			}
 		}

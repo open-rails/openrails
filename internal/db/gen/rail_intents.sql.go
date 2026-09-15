@@ -20,7 +20,7 @@ WITH due AS (
             (status IN ('pending', 'failed_retryable') AND next_attempt_at <= $2::timestamptz)
             OR (status = 'in_flight' AND claimed_until IS NOT NULL AND claimed_until <= $2::timestamptz)
           )
-      AND (expires_at IS NULL OR expires_at > $2::timestamptz)
+      AND (status = 'in_flight' OR expires_at IS NULL OR expires_at > $2::timestamptz)
     ORDER BY next_attempt_at
     LIMIT $3
     FOR UPDATE SKIP LOCKED
@@ -48,7 +48,8 @@ type ClaimDueRailIntentsParams struct {
 // next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
 // (crashed executor; per-type semantics make the reclaim safe). Never claims
 // past the relevance window — those rows are swept by
-// ExpireOverdueRailIntents.
+// ExpireOverdueRailIntents. Abandoned in-flight attempts are still claimed
+// after their deadline so possible submissions can be reconciled.
 func (q *Queries) ClaimDueRailIntents(ctx context.Context, arg ClaimDueRailIntentsParams) ([]OpenrailsRailIntent, error) {
 	rows, err := q.db.Query(ctx, claimDueRailIntents, arg.LeaseUntil, arg.Now, arg.BatchSize)
 	if err != nil {
@@ -179,7 +180,7 @@ WHERE pi.id = $2
         pi.status IN ('pending', 'failed_retryable')
         OR (pi.status = 'in_flight' AND pi.claimed_until IS NOT NULL AND pi.claimed_until <= $3::timestamptz)
       )
-  AND (pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
+  AND (pi.status = 'in_flight' OR pi.expires_at IS NULL OR pi.expires_at > $3::timestamptz)
 RETURNING pi.id, pi.merchant_id, pi.rail, pi.intent_type, pi.subscription_id, pi.payment_id, pi.price_id, pi.payload, pi.idempotency_key, pi.status, pi.attempts, pi.next_attempt_at, pi.claimed_until, pi.origin, pi.origin_reason, pi.actor, pi.last_failure_reason, pi.expires_at, pi.result_evidence, pi.created_at, pi.executed_at, pi.updated_at, pi.psp_id, pi.destructive_run_id, pi.custodian_id
 `
 
@@ -533,7 +534,7 @@ SET status = 'expired',
     last_failure_reason = 'relevance window elapsed before execution',
     claimed_until = NULL,
     updated_at = now()
-WHERE pi.status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+WHERE (pi.status = 'failed_retryable' OR (pi.status = 'pending' AND pi.attempts = 0))
   AND pi.expires_at IS NOT NULL
   AND pi.expires_at <= $1::timestamptz
   AND NOT (
@@ -963,23 +964,30 @@ func (q *Queries) MarkRailIntentSuperseded(ctx context.Context, arg MarkRailInte
 const markRailIntentUnknown = `-- name: MarkRailIntentUnknown :execrows
 UPDATE openrails.rail_intents
 SET status = 'unknown_needs_verify',
-    next_attempt_at = $1::timestamptz,
-    last_failure_reason = $2,
+    result_evidence = COALESCE(result_evidence, '{}'::jsonb) || COALESCE($1::jsonb, '{}'::jsonb),
+    next_attempt_at = $2::timestamptz,
+    last_failure_reason = $3,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = $3 AND status IN ('in_flight', 'unknown_needs_verify')
+WHERE id = $4 AND status IN ('in_flight', 'unknown_needs_verify')
 `
 
 type MarkRailIntentUnknownParams struct {
-	NextAttemptAt time.Time
-	Reason        *string
-	ID            uuid.UUID
+	ResultEvidence []byte
+	NextAttemptAt  time.Time
+	Reason         *string
+	ID             uuid.UUID
 }
 
 // Ambiguous outcome (or a verify that stayed inconclusive): park for the
 // verifier, scheduled at next_attempt_at.
 func (q *Queries) MarkRailIntentUnknown(ctx context.Context, arg MarkRailIntentUnknownParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markRailIntentUnknown, arg.NextAttemptAt, arg.Reason, arg.ID)
+	result, err := q.db.Exec(ctx, markRailIntentUnknown,
+		arg.ResultEvidence,
+		arg.NextAttemptAt,
+		arg.Reason,
+		arg.ID,
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -1052,7 +1060,7 @@ SET status = 'superseded',
     updated_at = now()
 WHERE intent_type = $2
   AND subscription_id = $3
-  AND status IN ('pending', 'failed_retryable', 'unknown_needs_verify')
+  AND (status = 'failed_retryable' OR (status = 'pending' AND attempts = 0))
 `
 
 type SupersedeRailIntentsBySubjectParams struct {
