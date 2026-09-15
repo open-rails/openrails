@@ -42,19 +42,17 @@ func (n planNode) walk(fn func(planNode)) {
 // the unprivileged openrails_app role with the merchant GUC set, so RLS
 // predicates appear in the plan.
 //
-// Statistics are deliberately left ALONE. Inflating pg_class.reltuples/relpages
-// does not work — estimate_rel_size takes the page count from the physical
-// file, so an empty table yields density × 0 = 0 rows, and a non-zero relpages
-// additionally disables the "empty table ⇒ assume 10 pages" fallback; every
-// plan collapses to a 0-cost Seq Scan. That default 10-page estimate is already
-// the signal we want: a query with a usable index plans as an Index Scan, one
-// without plans as Seq Scan + Filter. Measured on all 526 queries — forcing the
-// issue with enable_seqscan=off changes nothing.
+// This probes index availability, not production plan cost. Empty-table row
+// width estimates can favor a sequential EXISTS scan despite a usable index.
+// Discourage that choice without fabricating statistics; planFindings still
+// rejects a forced sequential scan or an index scan with only a residual filter.
+// Actual workload performance is covered by the populated query/perf harness.
 func PrepareSession(ctx context.Context, conn *pgx.Conn) error {
 	stmts := []string{
 		`SET ROLE openrails_app`,
 		`SELECT set_config('app.merchant_id', '` + AuditMerchantID + `', false)`,
 		`SET search_path = openrails, public`,
+		`SET enable_seqscan = off`,
 	}
 	for _, s := range stmts {
 		if _, err := conn.Exec(ctx, s); err != nil {

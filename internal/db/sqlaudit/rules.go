@@ -20,7 +20,8 @@ const (
 	// Under a merchant-scoped pool RLS saves it; a worker pool that bypasses
 	// RLS rewrites the deployment.
 	RuleUnscopedWrite = "unscoped-write"
-	// RuleSeqScan: the planner had no usable index for any predicate.
+	// RuleSeqScan: no index condition serves a predicate. A full index scan
+	// with a residual filter is no better than a sequential scan for this rule.
 	RuleSeqScan = "seq-scan"
 	// RuleUnplannable: EXPLAIN or the parser could not analyse the query. Never
 	// silently skipped — it fails like any other finding.
@@ -117,7 +118,11 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 	seen := map[string]bool{}
 	var out []Finding
 	plan.walk(func(n planNode) {
-		if n.NodeType != "Seq Scan" || n.RelationName == "" || seen[n.RelationName] {
+		// A partial index already serves a predicate through its membership:
+		// PostgreSQL selects it only when the query implies that predicate.
+		fullScan := n.NodeType == "Seq Scan" ||
+			((n.NodeType == "Index Scan" || n.NodeType == "Index Only Scan") && n.IndexCond == "" && n.Filter != "" && !cat.PartialIndexes[n.IndexName])
+		if !fullScan || n.RelationName == "" || seen[n.RelationName] {
 			return
 		}
 		if !cat.MerchantScoped[n.RelationName] {
@@ -126,7 +131,7 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 		seen[n.RelationName] = true
 		out = append(out, Finding{
 			Query: q.Name, File: q.File, Rule: RuleSeqScan,
-			Detail: fmt.Sprintf("full scan of %s: no index serves any predicate (filter: %s)",
+			Detail: fmt.Sprintf("full scan of %s: no index condition serves a predicate (filter: %s)",
 				n.RelationName, compact(n.Filter)),
 		})
 	})

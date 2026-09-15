@@ -5,7 +5,7 @@ correctness check:
 
 | gate | what it proves | allowlist |
 |---|---|---|
-| `internal/db/sqlaudit` | every query is bounded and index-backed | `AUDIT_ALLOWLIST.txt` |
+| `internal/db/sqlaudit` | query scope, declared bounds and index availability | `AUDIT_ALLOWLIST.txt` |
 | `scripts/sql-lint.sh` | no hand-written SQL outside `internal/db/gen` | `LINT_ALLOWLIST.txt` |
 | `scripts/migration-lint.sh` | new migrations are lock-safe (squawk) | `.squawk.toml` + inline `squawk-ignore` |
 
@@ -18,29 +18,31 @@ fails the build as stale — fixing a query deletes its line.
 
 `sqlc vet` PREPAREs each query, which proves it is valid SQL and nothing more.
 The auditor connects to the same throwaway vet DB, EXPLAINs every query, walks
-the plan in Go and applies four rules. Two facts make that meaningful on a
+the plan in Go and applies five rules. Two facts make that meaningful on a
 database built from `migrations/` with zero rows:
 
 **`EXPLAIN (GENERIC_PLAN, FORMAT JSON)`** (PG16+) plans a parameterized
-statement without values, so no parameters are fabricated. All 526 queries plan;
-none are skipped. It must be sent over the **raw simple-query protocol**
+statement without values, so no parameters are fabricated. Every generated query
+is enumerated; unplannable statements require an explicit reviewed exception. It must be sent over the **raw simple-query protocol**
 (`conn.PgConn().Exec`): pgx's extended protocol binds the query's own `$n` as
 parameters of the EXPLAIN ("expected N arguments, got 0"), and
 `QueryExecModeSimpleProtocol` interpolates them client-side ("insufficient
 arguments"). Because that is raw text, the auditor first proves via pg_query_go
 that the statement is exactly one statement.
 
-**Statistics are left alone — deliberately.** Inflating
-`pg_class.reltuples/relpages` does *not* work and actively backfires:
-`estimate_rel_size` takes the page count from the **physical file**, so an empty
-table yields `density × 0 = 0` rows, and a non-zero `relpages` simultaneously
-disables the "empty table ⇒ assume 10 pages" fallback. Measured here: every plan
-collapsed to `cost=0.00` Seq Scans. Postgres's default 10-page estimate already
-discriminates correctly — a query with a usable index plans as an Index Scan,
-one without as Seq Scan + Filter. Forcing it with `enable_seqscan = off` was
-measured across all 526 queries and changed *nothing*, so it is not used.
-Nothing here judges cost.
+**Index availability is distinct from cost on an empty table.** The audit keeps
+real schema/statistics and sets `enable_seqscan=off` on its own connection.
+PostgreSQL may otherwise choose an `EXISTS` sequential scan after a row-width
+change even though a usable index exists. A forced sequential scan, or a full
+index scan with only a residual filter, still fails. A partial index can serve
+its predicate through membership; tautological `WHERE true` and a single
+`IS NOT NULL` on a non-null column do not count. A real-database regression
+proves an unrelated primary/partial index does not hide a missing predicate
+index, and adding the useful index clears the finding.
 
+This is an availability probe, not a production cost benchmark. The populated
+`internal/db/querytest` performance suite retains normal planner settings and
+checks actual execution time and buffer work.
 The session runs as **`openrails_app` with `app.merchant_id` set**, so RLS
 predicates appear in the plan exactly as production sees them — which is also
 how the auditor verifies the RLS `merchant_id` predicate is index-backed.
@@ -66,7 +68,8 @@ portable. `unindexed-filter` is openrails-only: host-four has no RLS.
   one merchant's entire table still grows with records on file.
 - **`unscoped-write`** — `UPDATE`/`DELETE` pinning neither `merchant_id` nor a
   key, and not fed by a `LIMIT`ed claim CTE.
-- **`seq-scan`** — planner-proven: no usable index exists.
+- **`seq-scan`** — the availability probe still needs a full heap/index scan
+  without an index condition or a restricting partial-index predicate.
 - **`unplannable`** — the parser or EXPLAIN could not analyse the query. Fails
   like any other finding; nothing is ever silently skipped.
 - **`unindexed-filter`** — the query looks something up by `col = $n`, the scan
