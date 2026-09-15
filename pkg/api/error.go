@@ -3,6 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
+
+	"github.com/open-rails/openrails"
 )
 
 // Error types matching Stripe's error taxonomy
@@ -24,17 +26,19 @@ const (
 // Common error codes
 const (
 	// Request validation errors
-	CodeInvalidParam     = "invalid_param"
-	CodeResourceNotFound = "resource_not_found"
-	CodeResourceConflict = "resource_conflict"
+	CodeInvalidParam         = "invalid_param"
+	CodeResourceNotFound     = "resource_not_found"
+	CodeResourceConflict     = "resource_conflict"
+	CodeIdempotencyKeyReused = "idempotency_key_reused"
 
 	// Authentication/authorization errors
 	CodeAuthRequired         = "authentication_required"
 	CodeResourceAccessDenied = "resource_access_denied"
 
 	// Payment/card errors
-	CodeInsufficientFunds = "insufficient_funds"
-	CodePaymentFailed     = "payment_failed"
+	CodeInsufficientFunds   = "insufficient_funds"
+	CodeInsufficientCredits = "insufficient_credits"
+	CodePaymentFailed       = "payment_failed"
 
 	// Rate limiting
 	CodeRateLimitExceeded = "rate_limit_exceeded"
@@ -45,14 +49,7 @@ const (
 )
 
 // ErrorDetails contains the detailed error information (nested under "error" key)
-type ErrorDetails struct {
-	Type      string         `json:"type"`                 // Error type category
-	Code      string         `json:"code"`                 // Machine-readable error code
-	Message   string         `json:"message"`              // Human-readable message
-	RequestID string         `json:"request_id,omitempty"` // Correlates the response with server-side logs.
-	Param     *string        `json:"param,omitempty"`      // Parameter that caused the error (if applicable)
-	Metadata  map[string]any `json:"metadata,omitempty"`   // Machine-readable context for actionable errors.
-}
+type ErrorDetails = openrails.ErrorDetails
 
 // ErrorResponse is the top-level error response wrapper
 type ErrorResponse struct {

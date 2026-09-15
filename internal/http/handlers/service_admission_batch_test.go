@@ -77,11 +77,11 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 
 	// Item 4: backend error -> per-item 500, NOT a batch failure.
 	require.Equal(t, http.StatusInternalServerError, out[4].Status)
-	require.Equal(t, "admission check failed", out[4].Error)
+	require.Equal(t, "admission check failed", out[4].Error.Message)
 
 	// Item 5: token merchant-subject scope denied -> per-item 403.
 	require.Equal(t, http.StatusForbidden, out[5].Status)
-	require.Equal(t, "service_credential_customer_scope_denied", out[5].Error)
+	require.Equal(t, "service_credential_customer_scope_denied", out[5].Error.Message)
 
 	// Item 6: negative estimate -> per-item 400.
 	require.Equal(t, http.StatusBadRequest, out[6].Status)
@@ -119,7 +119,7 @@ func TestServiceAdmitBatchVerdicts_LogsTheCause(t *testing.T) {
 	)
 
 	require.Equal(t, http.StatusInternalServerError, out[0].Status)
-	require.Equal(t, "admission check failed", out[0].Error, "the wire string stays stable and non-leaky")
+	require.Equal(t, "admission check failed", out[0].Error.Message, "the wire string stays stable and non-leaky")
 
 	logged := buf.String()
 	require.Contains(t, logged, "admission check failed")

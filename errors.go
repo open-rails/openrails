@@ -4,28 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 )
 
-// Sentinel errors shared by BOTH transports (#338). The contract is
-// bidirectional and structural:
-//
-//   - the REMOTE client maps HTTP status codes + error-code payloads onto these
-//     sentinels (see remote.go statusError);
-//   - the EMBEDDED client (openrails/embed) maps pkg/service errors onto the
-//     SAME sentinels by transcribing the exact status mapping the HTTP handlers
-//     perform (internal/http/handlers/service_*.go are the authoritative map).
-//
-// errors.Is therefore behaves identically whether the engine is in-process or
-// behind HTTP. Every sentinel is carried by a *StatusError, so callers can also
-// recover the HTTP-ish status code and detail message on either transport.
+// Sentinel errors classify the shared client response by status and machine code.
 var (
-	// ErrUnreachable wraps transport/timeout failures AND 5xx responses on the
-	// REMOTE transport only — the caller's fail-policy (FailOpen vs FailClosed,
-	// #248) keys off it. The embedded transport never produces ErrUnreachable
-	// (there is no wire to lose); an embedded engine fault is ErrInternal only.
-	// A clean deny (allowed=false) is NOT an ErrUnreachable and is always
-	// honored regardless of policy.
+	// ErrUnreachable marks transport failures and server failures. It never proves
+	// that a write did not commit; retry with the same operation identity.
 	ErrUnreachable = errors.New("openrails: unreachable")
 
 	// ErrInvalid is a malformed/rejected request (HTTP 400 family).
@@ -55,18 +39,23 @@ var (
 	ErrIdempotencyKeyReused = errors.New("idempotency_key_reused")
 )
 
-// StatusError is the concrete error both transports return for any non-OK
-// engine outcome. Status is the HTTP status the standalone server returns for
-// this failure (the embedded transport reports the SAME code by transcribing
-// the handler mapping); Code/Message carry the wire error payload.
-//
-// errors.Is(err, <sentinel>) works through StatusError on both transports.
-type StatusError struct {
-	Status  int
-	Code    string
-	Message string
+// ErrorDetails is the canonical HTTP error payload. Metadata numbers decode as
+// json.Number so identifiers and monetary values retain their exact precision.
+type ErrorDetails struct {
+	Type      string         `json:"type"`
+	Code      string         `json:"code"`
+	Message   string         `json:"message"`
+	RequestID string         `json:"request_id,omitempty"`
+	Param     *string        `json:"param,omitempty"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
+}
 
-	sentinels []error
+// StatusError preserves the full server error and relevant response headers.
+// Human messages are diagnostic; classification uses only Status and Code.
+type StatusError struct {
+	Status int
+	ErrorDetails
+	RetryAfter string
 }
 
 func (e *StatusError) Error() string {
@@ -80,74 +69,28 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("openrails: status=%d %s", e.Status, msg)
 }
 
-// Unwrap exposes the mapped sentinels so errors.Is matches them.
-func (e *StatusError) Unwrap() []error { return e.sentinels }
-
-// NewStatusError builds the canonical cross-transport error for an HTTP-ish
-// status + error payload. Both the remote client (from a real HTTP response)
-// and the embedded adapter (from the handler-transcribed mapping) construct
-// errors through here, which is what keeps errors.Is identical across
-// transports.
-func NewStatusError(status int, code, message string) *StatusError {
-	return newStatusError(status, code, message)
-}
-
-func newStatusError(status int, code, message string, extra ...error) *StatusError {
-	e := &StatusError{Status: status, Code: code, Message: message}
-
-	// Code/message-specific sentinels first: the handlers signal these as
-	// payload strings ("insufficient_credits" on 402 — see
-	// internal/http/handlers/service_credits.go).
-	switch {
-	case signals(code, message, "insufficient_credits"):
-		e.sentinels = append(e.sentinels, ErrInsufficientCredits)
-	case signals(code, message, "idempotency_key_reused"):
-		e.sentinels = append(e.sentinels, ErrIdempotencyKeyReused)
+// Is classifies this response without inspecting its human message.
+func (e *StatusError) Is(target error) bool {
+	switch target {
+	case ErrInsufficientCredits:
+		return e.Code == "insufficient_credits"
+	case ErrIdempotencyKeyReused:
+		return e.Code == "idempotency_key_reused"
+	case ErrUnauthorized:
+		return e.Status == http.StatusUnauthorized
+	case ErrDenied:
+		return e.Status == http.StatusForbidden || e.Status == http.StatusTooManyRequests
+	case ErrNotFound:
+		return e.Status == http.StatusNotFound
+	case ErrConflict:
+		return e.Status == http.StatusConflict
+	case ErrInternal, ErrUnreachable:
+		return e.Status >= 500
+	case ErrInvalid:
+		return e.Status >= 400 && e.Status < 500 && e.Status != http.StatusUnauthorized &&
+			e.Status != http.StatusPaymentRequired && e.Status != http.StatusForbidden &&
+			e.Status != http.StatusTooManyRequests && e.Status != http.StatusNotFound && e.Status != http.StatusConflict
+	default:
+		return false
 	}
-
-	// Status-class sentinel.
-	switch {
-	case status == http.StatusUnauthorized:
-		e.sentinels = append(e.sentinels, ErrUnauthorized)
-	case status == http.StatusPaymentRequired:
-		if !errorsContain(e.sentinels, ErrInsufficientCredits) {
-			e.sentinels = append(e.sentinels, ErrInsufficientCredits)
-		}
-	case status == http.StatusForbidden, status == http.StatusTooManyRequests:
-		e.sentinels = append(e.sentinels, ErrDenied)
-	case status == http.StatusNotFound:
-		e.sentinels = append(e.sentinels, ErrNotFound)
-	case status == http.StatusConflict:
-		e.sentinels = append(e.sentinels, ErrConflict)
-	case status >= 500:
-		e.sentinels = append(e.sentinels, ErrInternal)
-	default: // 400 and any other 4xx
-		e.sentinels = append(e.sentinels, ErrInvalid)
-	}
-
-	e.sentinels = append(e.sentinels, extra...)
-	return e
-}
-
-// signals reports whether the wire payload names `want`. The standalone error
-// envelope's "code" is a coarse api.Code* class (invalid_param,
-// resource_conflict, ...), so the discriminating string is normally the
-// MESSAGE. A message may carry detail after the token
-// ("idempotency_key_reused: spend replayed key (…) with amount=…"), which is
-// worth keeping on the wire, so the token is matched as a prefix too.
-func signals(code, message, want string) bool {
-	if strings.TrimSpace(code) == want {
-		return true
-	}
-	msg := strings.TrimSpace(message)
-	return msg == want || strings.HasPrefix(msg, want+":")
-}
-
-func errorsContain(errs []error, target error) bool {
-	for _, e := range errs {
-		if errors.Is(e, target) {
-			return true
-		}
-	}
-	return false
 }

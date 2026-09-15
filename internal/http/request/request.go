@@ -121,12 +121,16 @@ func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) 
 
 func (r *Request) AbortJSON(code int, msg string) {
 	logrus.Error(msg)
-	r.t.AbortJSON(code, api.SimpleErrorResponse(code, msg))
+	response := api.SimpleErrorResponse(code, msg)
+	response.Error.RequestID = r.RequestID()
+	r.t.AbortJSON(code, response)
 }
 
 func (r *Request) ErrorJSON(code int, msg string) {
 	logrus.Error(msg)
-	r.t.WriteJSON(code, api.SimpleErrorResponse(code, msg))
+	response := api.SimpleErrorResponse(code, msg)
+	response.Error.RequestID = r.RequestID()
+	r.t.WriteJSON(code, response)
 }
 
 // InternalError answers 500 with a STABLE, non-leaky msg and logs the cause
@@ -140,7 +144,9 @@ func (r *Request) ErrorJSON(code int, msg string) {
 func (r *Request) InternalError(msg string, cause error) {
 	requestID := r.RequestID()
 	logrus.WithError(cause).WithField("request_id", requestID).Error(msg)
-	r.t.WriteJSON(http.StatusInternalServerError, api.SimpleErrorResponse(http.StatusInternalServerError, msg))
+	response := api.SimpleErrorResponse(http.StatusInternalServerError, msg)
+	response.Error.RequestID = requestID
+	r.t.WriteJSON(http.StatusInternalServerError, response)
 }
 
 func (r *Request) APIError(err *api.APIError) {

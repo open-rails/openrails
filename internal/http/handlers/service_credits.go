@@ -11,23 +11,17 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/api"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
-// serviceIdempotencyConflict answers a reused-idempotency-key refusal with 409
-// and the money layer's own detail message ("idempotency_key_reused: <op>
-// replayed key (…) with amount=… but that key already committed amount=…").
-// That is the ONE wire shape both SDK transports map back to
-// openrails.ErrIdempotencyKeyReused (errors.go), and pkg/service re-exports the
-// engine-side twin. It is a CALLER bug — the retry changed the charging terms —
-// so it must never be answered 500, which is indistinguishable from an engine
-// fault and invites a retry that will refuse again.
+// serviceIdempotencyConflict preserves the typed money refusal on the wire.
 func serviceIdempotencyConflict(r *httprequest.Request, err error) bool {
 	if !errors.Is(err, billingservice.ErrIdempotencyKeyReused) {
 		return false
 	}
-	r.ErrorJSON(http.StatusConflict, err.Error())
+	r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, api.CodeIdempotencyKeyReused, err.Error()))
 	return true
 }
 
@@ -612,7 +606,7 @@ func ServiceCaptureHold(r *httprequest.Request) {
 		SourceID:   req.SourceID,
 	})
 	if err == billingservice.ErrInsufficientCredits {
-		r.ErrorJSON(http.StatusPaymentRequired, "insufficient_credits")
+		r.APIError(api.NewAPIError(http.StatusPaymentRequired, api.ErrorTypeCard, api.CodeInsufficientCredits, "Insufficient credits"))
 		return
 	}
 	if err != nil {
