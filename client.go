@@ -614,7 +614,7 @@ type ProductAccessCheck struct {
 // admission decision when one was reached.
 type AdmitBatchVerdict struct {
 	Status int            `json:"status"`
-	Error  string         `json:"error,omitempty"`
+	Error  *ErrorDetails  `json:"error,omitempty"`
 	Result *AdmitResponse `json:"result,omitempty"`
 }
 

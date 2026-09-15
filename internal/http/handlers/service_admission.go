@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/api"
 	billingidentity "github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -92,8 +93,16 @@ type serviceAdmitBatchRequest struct {
 // decision when one was reached.
 type serviceAdmitVerdict struct {
 	Status int                         `json:"status"`
-	Error  string                      `json:"error,omitempty"`
+	Error  *api.ErrorDetails           `json:"error,omitempty"`
 	Result *billingservice.AdmitResult `json:"result,omitempty"`
+}
+
+func admitFailure(status int, message, param string) serviceAdmitVerdict {
+	details := api.SimpleErrorResponse(status, message).Error
+	if param != "" {
+		details.Param = &param
+	}
+	return serviceAdmitVerdict{Status: status, Error: &details}
 }
 
 // serviceAdmitBatchVerdicts runs the per-item admission loop with FULL per-item
@@ -112,25 +121,25 @@ func serviceAdmitBatchVerdicts(
 	out := make([]serviceAdmitVerdict, len(items))
 	for i, item := range items {
 		if item.EstimatedAmount < 0 {
-			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "estimated_amount must be >= 0"}
+			out[i] = admitFailure(http.StatusBadRequest, "estimated_amount must be >= 0", "estimated_amount")
 			continue
 		}
 		payer, err := parseServiceCustomerID(item.CustomerID)
 		if err != nil || payer == nil {
-			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "customer_id required"}
+			out[i] = admitFailure(http.StatusBadRequest, "customer_id required", "customer_id")
 			continue
 		}
 		if !allows(*payer) {
-			out[i] = serviceAdmitVerdict{Status: http.StatusForbidden, Error: "service_credential_customer_scope_denied"}
+			out[i] = admitFailure(http.StatusForbidden, "service_credential_customer_scope_denied", "")
 			continue
 		}
 		res, err := admit(ctx, admitInputFromRequest(item, *payer))
 		switch {
 		case errors.Is(err, billingservice.ErrHoldDeadlineRequired):
-			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "expires_at required when estimated_amount places a hold"}
+			out[i] = admitFailure(http.StatusBadRequest, "expires_at required when estimated_amount places a hold", "expires_at")
 			continue
 		case errors.Is(err, billingservice.ErrHoldDeadlinePassed):
-			out[i] = serviceAdmitVerdict{Status: http.StatusBadRequest, Error: "expires_at already passed"}
+			out[i] = admitFailure(http.StatusBadRequest, "expires_at already passed", "expires_at")
 			continue
 		}
 		if err != nil {
@@ -144,7 +153,7 @@ func serviceAdmitBatchVerdicts(
 				"request_id":  item.RequestID,
 				"source":      item.Source,
 			}).Error("admission check failed")
-			out[i] = serviceAdmitVerdict{Status: http.StatusInternalServerError, Error: "admission check failed"}
+			out[i] = admitFailure(http.StatusInternalServerError, "admission check failed", "")
 			continue
 		}
 		out[i] = serviceAdmitVerdict{Status: admitVerdictStatus(res), Result: res}
@@ -185,6 +194,11 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 		func(ts billingidentity.CustomerID) bool { return serviceCustomerScopeAllows(r, ts) },
 		svc.Admit,
 	)
+	for i := range verdicts {
+		if verdicts[i].Error != nil {
+			verdicts[i].Error.RequestID = r.RequestID()
+		}
+	}
 	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
 }
 

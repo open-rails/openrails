@@ -114,13 +114,29 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 			var se *openrails.StatusError
 			require.ErrorAs(t, err, &se)
 			require.Equal(t, http.StatusConflict, se.Status, "a reused key is a conflict, not a 500")
-			require.Contains(t, se.Message, "idempotency_key_reused")
+			require.Equal(t, "idempotency_key_reused", se.Code)
+			require.Equal(t, "invalid_request_error", se.Type)
+			require.NotEmpty(t, se.RequestID)
 			require.Contains(t, se.Message, "90000", "the detail names what the retry asked for")
 			require.Contains(t, se.Message, "50000", "and what the key already committed")
 
 			// Replaying it UNCHANGED is still fine — the refusal is about the
 			// changed terms, not about retrying.
 			require.NoError(t, tr.client.RecordUsage(ctx, usage), "an unchanged retry is still idempotent")
+
+			_, err = tr.client.Admit(ctx, openrails.AdmitRequest{CustomerID: "invalid", Currency: currency})
+			require.ErrorAs(t, err, &se)
+			require.Equal(t, http.StatusBadRequest, se.Status)
+			require.Equal(t, "invalid_param", se.Code)
+			require.Equal(t, "customer_id", *se.Param)
+			require.NotEmpty(t, se.RequestID)
+
+			canceled, cancel := context.WithCancel(ctx)
+			cancel()
+			_, err = tr.client.GetMerchantSettings(canceled)
+			require.ErrorIs(t, err, context.Canceled)
+			require.ErrorIs(t, err, openrails.ErrUnreachable)
+
 		})
 	}
 }

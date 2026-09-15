@@ -231,7 +231,10 @@ type obsBatchVerdict struct {
 func observeBatchVerdicts(verdicts []openrails.AdmitBatchVerdict) []obsBatchVerdict {
 	out := make([]obsBatchVerdict, 0, len(verdicts))
 	for _, v := range verdicts {
-		o := obsBatchVerdict{Status: v.Status, Error: v.Error, HasResult: v.Result != nil}
+		o := obsBatchVerdict{Status: v.Status, HasResult: v.Result != nil}
+		if v.Error != nil {
+			o.Error = v.Error.Code
+		}
 		if v.Result != nil {
 			o.Result = observeAdmit(v.Result)
 		}
@@ -249,7 +252,7 @@ func admitOne(ctx context.Context, c openrails.AdmissionClient, req openrails.Ad
 		return nil, fmt.Errorf("expected one admission verdict, got %d", len(verdicts))
 	}
 	if verdicts[0].Result == nil {
-		return nil, fmt.Errorf("admission failed with status %d: %s", verdicts[0].Status, verdicts[0].Error)
+		return nil, fmt.Errorf("admission failed with status %d: %s", verdicts[0].Status, verdicts[0].Error.Message)
 	}
 	return verdicts[0].Result, nil
 }

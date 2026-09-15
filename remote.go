@@ -142,7 +142,7 @@ func (c *Client) Verify(ctx context.Context) error {
 // invalidErr builds the canonical client-side "bad request" error so errors.Is
 // matches ErrInvalid identically to the embedded transport (#338).
 func invalidErr(msg string) error {
-	return NewStatusError(http.StatusBadRequest, "", msg)
+	return &StatusError{Status: http.StatusBadRequest, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "invalid_param", Message: msg}}
 }
 
 // bearer mints the credential for the next call. There is no fallback; a mint
@@ -402,7 +402,10 @@ func (c *Client) Admit(ctx context.Context, request AdmitRequest) (*AdmitRespons
 	if verdicts[0].Result != nil {
 		return verdicts[0].Result, nil
 	}
-	return nil, NewStatusError(verdicts[0].Status, "", verdicts[0].Error)
+	if verdicts[0].Error != nil {
+		return nil, &StatusError{Status: verdicts[0].Status, ErrorDetails: *verdicts[0].Error}
+	}
+	return nil, fmt.Errorf("openrails: admission returned neither a decision nor an error")
 }
 
 // AdmitBatch implements Client (handler ServiceAdmitBatch, #335). The batch
@@ -620,41 +623,21 @@ func customerIDString(payer *CustomerID) string {
 	return payer.UUID().String()
 }
 
-// errorEnvelope is THE OpenRails error response (pkg/api.ErrorResponse):
-// {"error":{"type","code","message"}}. or#893 deleted the second, top-level
-// {code,message} shape this used to also accept — one representation, and a
-// body that isn't this one is a foreign payload, not a dialect.
-type errorEnvelope struct {
-	Error *struct {
-		Type    string `json:"type"`
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	} `json:"error"`
-}
-
-// statusErrorFromBody maps a non-2xx response onto the canonical StatusError
-// (errors.go), the remote half of the bidirectional error contract.
+// statusErrorFromBody decodes the one canonical error envelope. Foreign proxy
+// responses retain a bounded diagnostic excerpt but never gain a machine code.
 func statusErrorFromBody(status int, raw []byte) error {
-	var code, message string
-	var env errorEnvelope
-	if err := json.Unmarshal(raw, &env); err == nil && env.Error != nil {
-		code, message = env.Error.Code, env.Error.Message
+	var envelope struct {
+		Error *ErrorDetails `json:"error"`
 	}
-	if code == "" && message == "" {
-		// No recognized error envelope: the body is an opaque/foreign payload
-		// (a proxy's HTML error page, an upstream stack trace, etc.). Surface a
-		// short, single-line excerpt rather than dumping the whole body into the
-		// error string — an unbounded body can be large, contain newlines/control
-		// characters, or echo internal detail into the caller's logs.
-		message = excerptErrorBody(raw)
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&envelope); err == nil && envelope.Error != nil {
+		var extra any
+		if decoder.Decode(&extra) == io.EOF {
+			return &StatusError{Status: status, ErrorDetails: *envelope.Error}
+		}
 	}
-	if status >= 500 {
-		// 5xx is server-side fault: also unreachable for fail-policy purposes
-		// (matches go-client behavior; the embedded transport maps the same
-		// failures to ErrInternal only — there is no wire to lose in-process).
-		return newStatusError(status, code, message, ErrUnreachable)
-	}
-	return newStatusError(status, code, message)
+	return &StatusError{Status: status, ErrorDetails: ErrorDetails{Message: excerptErrorBody(raw)}}
 }
 
 // maxErrorMessageBytes bounds the excerpt taken from an unrecognized (non-
@@ -699,16 +682,22 @@ func excerptErrorBody(raw []byte) string {
 	return msg
 }
 
-// doRaw issues a single authed request and returns (status, body) for 2xx and
+type clientResponse struct {
+	status int
+	header http.Header
+	body   []byte
+}
+
+// doRaw issues a single authed request and returns (response, body) for 2xx and
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
-func (c *Client) doRaw(ctx context.Context, method, path string, body any) (int, []byte, error) {
+func (c *Client) doRaw(ctx context.Context, method, path string, body any) (*clientResponse, error) {
 	var raw []byte
 	if body != nil {
 		var merr error
 		raw, merr = json.Marshal(body)
 		if merr != nil {
-			return 0, nil, fmt.Errorf("openrails: marshal request: %w", merr)
+			return nil, fmt.Errorf("openrails: marshal request: %w", merr)
 		}
 	}
 	// Enforce the per-call timeout via a context deadline so it holds even when
@@ -719,9 +708,12 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (int,
 		ctx, cancel = context.WithTimeout(ctx, c.timeout)
 		defer cancel()
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+	}
 	bearer, berr := c.bearer(ctx)
 	if berr != nil {
-		return 0, nil, berr
+		return nil, berr
 	}
 	var rdr io.Reader
 	if raw != nil {
@@ -729,7 +721,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (int,
 	}
 	req, rerr := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
 	if rerr != nil {
-		return 0, nil, fmt.Errorf("openrails: build request: %w", rerr)
+		return nil, fmt.Errorf("openrails: build request: %w", rerr)
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
@@ -738,29 +730,46 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any) (int,
 	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	out, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
+		return nil, fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
 	}
-	return resp.StatusCode, out, nil
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+	}
+	if len(out) > 1<<20 {
+		return nil, fmt.Errorf("%w: response exceeds 1 MiB", ErrUnreachable)
+	}
+	return &clientResponse{status: resp.StatusCode, header: resp.Header, body: out}, nil
 }
 
 // do issues a single authed request, mapping any non-2xx onto the canonical
 // StatusError. out may be nil when no body is expected.
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
-	status, raw, err := c.doRaw(ctx, method, path, body)
+	response, err := c.doRaw(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
-	if status < 200 || status >= 300 {
-		return statusErrorFromBody(status, raw)
+	if response.status < 200 || response.status >= 300 {
+		err := statusErrorFromBody(response.status, response.body).(*StatusError)
+		if err.RequestID == "" {
+			err.RequestID = response.header.Get("X-Request-ID")
+		}
+		err.RetryAfter = response.header.Get("Retry-After")
+		return err
 	}
 	if out != nil {
-		if err := json.Unmarshal(raw, out); err != nil {
-			return fmt.Errorf("openrails: decode response: %w", err)
+		decoder := json.NewDecoder(bytes.NewReader(response.body))
+		decoder.UseNumber()
+		if err := decoder.Decode(out); err != nil {
+			return fmt.Errorf("%w: decode response: %w", ErrUnreachable, err)
+		}
+		var extra any
+		if err := decoder.Decode(&extra); err != io.EOF {
+			return fmt.Errorf("%w: response must contain one JSON value", ErrUnreachable)
 		}
 	}
 	return nil
