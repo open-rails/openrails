@@ -31,6 +31,8 @@ func baseSecretStore(store MerchantSecretStore) MerchantSecretStore {
 		switch s := store.(type) {
 		case *lifecycleSecretStore:
 			store = s.MerchantSecretStore
+		case *manifestManagedSecretStore:
+			store = s.managed
 		case *cachedSecretStore:
 			store = s.inner
 		case *encryptedSecretStore:
@@ -44,6 +46,7 @@ func baseSecretStore(store MerchantSecretStore) MerchantSecretStore {
 }
 
 func captureSecretCleanup(ctx context.Context, store MerchantSecretStore, id merchant.ID) (*SecretCleanupPlan, error) {
+	store = mutableSecretView(store)
 	if store == nil {
 		return nil, nil
 	}
@@ -71,6 +74,8 @@ func clearMerchantSecretCache(store MerchantSecretStore, id merchant.ID) {
 	switch s := store.(type) {
 	case *lifecycleSecretStore:
 		clearMerchantSecretCache(s.MerchantSecretStore, id)
+	case *manifestManagedSecretStore:
+		clearMerchantSecretCache(s.managed, id)
 	case *cachedSecretStore:
 		s.mu.Lock()
 		for key := range s.entries {
@@ -88,6 +93,7 @@ func clearMerchantSecretCache(store MerchantSecretStore, id merchant.ID) {
 }
 
 func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id merchant.ID, plan SecretCleanupPlan) (int64, error) {
+	store = mutableSecretView(store)
 	target, ok := baseSecretStore(store).(secretCleanupTarget)
 	if !ok {
 		return 0, fmt.Errorf("captured external secret backend is not configured")

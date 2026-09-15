@@ -47,3 +47,11 @@ func (s *lifecycleSecretStore) Put(ctx context.Context, id merchant.ID, name, va
 	})
 	return result, err
 }
+
+// Preserve the cache's rotation floor through the lifecycle decorator.
+func (s *lifecycleSecretStore) GetAtLeastVersion(ctx context.Context, id merchant.ID, name string, minVersion int) (Secret, error) {
+	if versioned, ok := s.MerchantSecretStore.(VersionedSecretReader); ok {
+		return versioned.GetAtLeastVersion(ctx, id, name, minVersion)
+	}
+	return s.MerchantSecretStore.Get(ctx, id, name)
+}

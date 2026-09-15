@@ -128,6 +128,12 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 	if cfg.IsManifestMerchantSource() {
 		return nil, fmt.Errorf("merchant_source=manifest constructs no merchant-secret store (#723): credentials live in memory from the boot manifest; use BuildManifest over Runtime.ManifestSecrets")
 	}
+	return buildManaged(ctx, cfg, pool)
+}
+
+// buildManaged constructs the existing persistent secret backend. Manifest
+// deployments use it only for the explicitly routed alert-webhook namespace.
+func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, error) {
 	backend := cfg.SecretStoreBackend()
 
 	// Open a Vault connection whenever Vault is configured, then probe what the
@@ -263,6 +269,7 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 	if !enc.Enabled() {
 		store = merchants.NewWriteRestrictedSecretStore(store, map[string]string{
 			merchants.SolanaPrivateKeyWritePattern(): "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
+			merchants.AlertWebhookURLWritePattern():  "ENCRYPTION_MASTER_KEY is required before storing DB-backed webhook credentials",
 		})
 	}
 	return merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL), nil
@@ -275,22 +282,20 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 // memory store can hold+serve a manifest-declared keypair, and a Vault
 // connection adds transit. SecretWrite stays true so the provider-config write
 // routes MOUNT and serve the pointed 405 mode rejection instead of a bare 404.
-func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.ManifestSecretStore) (*Store, error) {
-	if store == nil {
-		return nil, fmt.Errorf("build manifest secret plane: store is required")
+func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.ManifestSecretStore, pool *db.Pool) (*Store, error) {
+	if store == nil || pool == nil {
+		return nil, fmt.Errorf("build manifest secret plane: manifest and database are required")
 	}
-	transitStore, err := BuildTransit(ctx, cfg)
+	backend, err := buildManaged(ctx, cfg, pool)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{
-		Secrets:       store,
-		SolanaTransit: transitStore.SolanaTransit,
-		SolanaCanSign: true,
-		SecretWrite:   true,
-		VaultAuth:     transitStore.VaultAuth,
-		vclient:       transitStore.vclient,
-	}, nil
+	backend.Secrets = merchants.NewManifestManagedSecretStore(store, backend.Secrets)
+	// Manifest provider keys remain available and immutable, while operator
+	// webhook destinations are persisted only through the managed backend.
+	backend.SolanaCanSign = true
+	backend.SecretWrite = true
+	return backend, nil
 }
 
 // BuildTransit opens the Vault Transit signing client when Vault is enabled

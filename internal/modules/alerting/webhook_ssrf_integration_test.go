@@ -23,7 +23,7 @@ func TestCreateWebhookRejectsInternalDestinations(t *testing.T) {
 	pool, appDB := rlsSetup(t)
 	mid := uuid.New()
 	seedMerchant(t, pool, mid)
-	svc := newService(appDB, nil) // loopback-allowing policy; link-local still blocked
+	svc := newService(t, appDB, nil) // loopback-allowing policy; link-local still blocked
 
 	inConn(t, appDB, mid, func(ctx context.Context) {
 		for _, target := range []string{
@@ -47,7 +47,7 @@ func TestWebhookDeliveryDoesNotFollowRedirectIntoLinkLocal(t *testing.T) {
 	pool, appDB := rlsSetup(t)
 	mid := uuid.New()
 	seedMerchant(t, pool, mid)
-	svc := newService(appDB, nil)
+	svc := newService(t, appDB, nil)
 
 	var hits int32
 	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

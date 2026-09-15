@@ -197,6 +197,32 @@ func CreateMerchantWebhook(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, hook)
 }
 
+// RotateMerchantWebhookURL changes a credential without changing rule references.
+func RotateMerchantWebhookURL(r *httprequest.Request) {
+	svc, ok := alertService(r)
+	if !ok {
+		return
+	}
+	id, ok := alertPathID(r)
+	if !ok {
+		return
+	}
+	var in alerting.RotateWebhookURLInput
+	if !r.BindJSON(&in) {
+		return
+	}
+	hook, err := svc.RotateWebhookURL(r.Request.Context(), id, in)
+	if errors.Is(err, alerting.ErrWebhookRotationConflict) {
+		r.ErrorJSON(http.StatusConflict, err.Error())
+		return
+	}
+	if err != nil {
+		handleAlertWriteError(r, err, "webhook not found")
+		return
+	}
+	r.JSON(http.StatusOK, hook)
+}
+
 // DeleteMerchantWebhook handles DELETE /v1/merchant/webhooks/{id}.
 func DeleteMerchantWebhook(r *httprequest.Request) {
 	svc, ok := alertService(r)

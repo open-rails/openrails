@@ -74,14 +74,15 @@ type Rule struct {
 
 // Webhook is the API/domain view of a merchant_webhooks row.
 type Webhook struct {
-	ID         uuid.UUID     `json:"id"`
-	MerchantID uuid.UUID     `json:"merchant_id"`
-	Name       string        `json:"name"`
-	URL        string        `json:"url"`
-	Format     WebhookFormat `json:"format"`
-	Enabled    bool          `json:"enabled"`
-	CreatedAt  time.Time     `json:"created_at"`
-	UpdatedAt  time.Time     `json:"updated_at"`
+	ID              uuid.UUID `json:"id"`
+	MerchantID      uuid.UUID `json:"merchant_id"`
+	Name            string    `json:"name"`
+	DestinationHost string    `json:"destination_host"`
+	secretVersion   int
+	Format          WebhookFormat `json:"format"`
+	Enabled         bool          `json:"enabled"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
 }
 
 // Notification is the API/domain view of a merchant_notifications row.
@@ -122,6 +123,12 @@ type CreateWebhookInput struct {
 	URL     string        `json:"url"`
 	Format  WebhookFormat `json:"format"`
 	Enabled *bool         `json:"enabled"`
+}
+
+// RotateWebhookURLInput replaces a destination credential without changing the
+// webhook id or the rules referring to it. URL is write-only.
+type RotateWebhookURLInput struct {
+	URL string `json:"url"`
 }
 
 // Alert is the payload delivered to every channel: the metric value, threshold,

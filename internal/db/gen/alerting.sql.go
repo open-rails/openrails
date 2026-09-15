@@ -152,17 +152,19 @@ func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerc
 
 const createMerchantWebhook = `-- name: CreateMerchantWebhook :one
 
-INSERT INTO openrails.merchant_webhooks (merchant_id, name, url, format, enabled)
-VALUES ($5::uuid, $1, $2, $3, $4)
-RETURNING id, merchant_id, name, url, format, enabled, created_at, updated_at
+INSERT INTO openrails.merchant_webhooks (id, merchant_id, name, destination_host, secret_version, format, enabled)
+VALUES ($1::uuid, $2::uuid, $3, $4, $5::integer, $6, $7)
+RETURNING id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at
 `
 
 type CreateMerchantWebhookParams struct {
-	Name       string
-	Url        string
-	Format     string
-	Enabled    bool
-	MerchantID uuid.UUID
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	Name            string
+	DestinationHost string
+	SecretVersion   int32
+	Format          string
+	Enabled         bool
 }
 
 // ============================================================================
@@ -170,18 +172,21 @@ type CreateMerchantWebhookParams struct {
 // ============================================================================
 func (q *Queries) CreateMerchantWebhook(ctx context.Context, arg CreateMerchantWebhookParams) (OpenrailsMerchantWebhook, error) {
 	row := q.db.QueryRow(ctx, createMerchantWebhook,
+		arg.ID,
+		arg.MerchantID,
 		arg.Name,
-		arg.Url,
+		arg.DestinationHost,
+		arg.SecretVersion,
 		arg.Format,
 		arg.Enabled,
-		arg.MerchantID,
 	)
 	var i OpenrailsMerchantWebhook
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
 		&i.Name,
-		&i.Url,
+		&i.DestinationHost,
+		&i.SecretVersion,
 		&i.Format,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -241,7 +246,7 @@ func (q *Queries) GetAlertRule(ctx context.Context, id uuid.UUID) (OpenrailsAler
 }
 
 const getMerchantWebhook = `-- name: GetMerchantWebhook :one
-SELECT id, merchant_id, name, url, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks WHERE id = $1
+SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks WHERE id = $1
 `
 
 func (q *Queries) GetMerchantWebhook(ctx context.Context, id uuid.UUID) (OpenrailsMerchantWebhook, error) {
@@ -251,7 +256,8 @@ func (q *Queries) GetMerchantWebhook(ctx context.Context, id uuid.UUID) (Openrai
 		&i.ID,
 		&i.MerchantID,
 		&i.Name,
-		&i.Url,
+		&i.DestinationHost,
+		&i.SecretVersion,
 		&i.Format,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -414,7 +420,7 @@ func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchan
 }
 
 const listMerchantWebhooks = `-- name: ListMerchantWebhooks :many
-SELECT id, merchant_id, name, url, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks ORDER BY created_at DESC, id
+SELECT id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at FROM openrails.merchant_webhooks ORDER BY created_at DESC, id
 `
 
 func (q *Queries) ListMerchantWebhooks(ctx context.Context) ([]OpenrailsMerchantWebhook, error) {
@@ -430,7 +436,8 @@ func (q *Queries) ListMerchantWebhooks(ctx context.Context) ([]OpenrailsMerchant
 			&i.ID,
 			&i.MerchantID,
 			&i.Name,
-			&i.Url,
+			&i.DestinationHost,
+			&i.SecretVersion,
 			&i.Format,
 			&i.Enabled,
 			&i.CreatedAt,
@@ -514,6 +521,39 @@ func (q *Queries) MarkMerchantNotificationRead(ctx context.Context, id uuid.UUID
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const rotateMerchantWebhookURL = `-- name: RotateMerchantWebhookURL :one
+UPDATE openrails.merchant_webhooks
+   SET destination_host = $1,
+       secret_version = $2::integer,
+       updated_at = current_timestamp
+ WHERE id = $3::uuid
+   AND secret_version <= $2::integer
+RETURNING id, merchant_id, name, destination_host, secret_version, format, enabled, created_at, updated_at
+`
+
+type RotateMerchantWebhookURLParams struct {
+	DestinationHost string
+	SecretVersion   int32
+	ID              uuid.UUID
+}
+
+func (q *Queries) RotateMerchantWebhookURL(ctx context.Context, arg RotateMerchantWebhookURLParams) (OpenrailsMerchantWebhook, error) {
+	row := q.db.QueryRow(ctx, rotateMerchantWebhookURL, arg.DestinationHost, arg.SecretVersion, arg.ID)
+	var i OpenrailsMerchantWebhook
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Name,
+		&i.DestinationHost,
+		&i.SecretVersion,
+		&i.Format,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const touchAlertRuleEvaluated = `-- name: TouchAlertRuleEvaluated :exec

@@ -16,8 +16,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/internal/shared/httpx"
@@ -113,9 +115,13 @@ func removeChargebacks(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 	exec(t, pool, `DELETE FROM openrails.payments WHERE merchant_id=$1 AND reversal_kind='chargeback'`, mid)
 }
 
-func newService(appDB *db.DB, email alerting.EmailSender) *alerting.Service {
+func newService(t *testing.T, appDB *db.DB, email alerting.EmailSender) *alerting.Service {
+	t.Helper()
+	backend, err := merchantsecrets.Build(context.Background(), &config.Config{Env: "dev", MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, Encryption: &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}}, appDB.DataPool())
+	require.NoError(t, err)
 	return alerting.NewService(alerting.Deps{
 		DB:      appDB,
+		Secrets: backend.Secrets,
 		Metrics: metrics.NewService(appDB),
 		Email:   email,
 		// #SEC-21: the sinks under test are loopback httptest servers; the
@@ -195,7 +201,7 @@ func TestRuleCRUDAndRLSIsolation(t *testing.T) {
 	mA, mB := uuid.New(), uuid.New()
 	seedMerchant(t, pool, mA)
 	seedMerchant(t, pool, mB)
-	svc := newService(appDB, nil)
+	svc := newService(t, appDB, nil)
 
 	var ruleA alerting.Rule
 	inConn(t, appDB, mA, func(ctx context.Context) {
@@ -241,7 +247,7 @@ func TestCreateRuleValidation(t *testing.T) {
 	pool, appDB := rlsSetup(t)
 	mA := uuid.New()
 	seedMerchant(t, pool, mA)
-	svc := newService(appDB, nil)
+	svc := newService(t, appDB, nil)
 
 	inConn(t, appDB, mA, func(ctx context.Context) {
 		// unknown template
@@ -270,7 +276,7 @@ func TestEvaluatorEdgeTrigger(t *testing.T) {
 	mid := uuid.New()
 	seedMerchant(t, pool, mid)
 	_, payID := seedChargebackBase(t, pool, mid)
-	svc := newService(appDB, nil)
+	svc := newService(t, appDB, nil)
 
 	// A rule that fires when chargeback rate >= 0.1 (in_app only, no email/webhook).
 	inConn(t, appDB, mid, func(ctx context.Context) {
@@ -338,7 +344,7 @@ func TestTestFireChannelsAndShaping(t *testing.T) {
 	discord := newWebhookRecorder(t, 0)
 	slack := newWebhookRecorder(t, 0)
 	email := &fakeEmail{enabled: true}
-	svc := newService(appDB, email)
+	svc := newService(t, appDB, email)
 
 	var results []alerting.DeliveryResult
 	inConn(t, appDB, mid, func(ctx context.Context) {
@@ -394,7 +400,7 @@ func TestWebhookRetry(t *testing.T) {
 	pool, appDB := rlsSetup(t)
 	mid := uuid.New()
 	seedMerchant(t, pool, mid)
-	svc := newService(appDB, nil)
+	svc := newService(t, appDB, nil)
 
 	recovering := newWebhookRecorder(t, 2) // fail twice, then 200
 	failing := newWebhookRecorder(t, 99)   // always fail
@@ -436,7 +442,7 @@ func TestEmailFailSoft(t *testing.T) {
 	// Case 1: alert_email configured but NO sender → fail-soft skip.
 	exec(t, pool, `INSERT INTO openrails.merchant_configurations (merchant_id, config, created_at, updated_at) VALUES ($1, $2, now(), now())`,
 		mid, []byte(`{"alert_email":"ops@example.com"}`))
-	svcNoSender := newService(appDB, nil)
+	svcNoSender := newService(t, appDB, nil)
 	var res1 []alerting.DeliveryResult
 	inConn(t, appDB, mid, func(ctx context.Context) {
 		rule, err := svcNoSender.CreateRule(ctx, alerting.CreateRuleInput{
@@ -454,7 +460,7 @@ func TestEmailFailSoft(t *testing.T) {
 
 	// Case 2: sender present but NO alert_email → fail-soft skip.
 	exec(t, pool, `UPDATE openrails.merchant_configurations SET config = '{}'::jsonb WHERE merchant_id = $1`, mid)
-	svcSender := newService(appDB, &fakeEmail{enabled: true})
+	svcSender := newService(t, appDB, &fakeEmail{enabled: true})
 	var res2 []alerting.DeliveryResult
 	inConn(t, appDB, mid, func(ctx context.Context) {
 		rule, err := svcSender.CreateRule(ctx, alerting.CreateRuleInput{
@@ -474,7 +480,7 @@ func TestNotificationsBell(t *testing.T) {
 	pool, appDB := rlsSetup(t)
 	mid := uuid.New()
 	seedMerchant(t, pool, mid)
-	svc := newService(appDB, nil)
+	svc := newService(t, appDB, nil)
 
 	// Two test-fires produce two in_app notifications.
 	inConn(t, appDB, mid, func(ctx context.Context) {
@@ -536,7 +542,7 @@ func TestArmedMerchantSelection(t *testing.T) {
 	disabledOnly := uuid.New()
 	seedMerchant(t, pool, armed)
 	seedMerchant(t, pool, disabledOnly)
-	svc := newService(appDB, nil)
+	svc := newService(t, appDB, nil)
 
 	inConn(t, appDB, armed, func(ctx context.Context) {
 		_, err := svc.CreateRule(ctx, alerting.CreateRuleInput{

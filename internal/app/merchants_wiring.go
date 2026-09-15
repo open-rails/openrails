@@ -40,7 +40,11 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 		if r.ManifestSecrets == nil {
 			return r.armingFailure(fmt.Errorf("merchant_source=manifest but the manifest secret plane is missing (#723)"))
 		}
-		store = r.ManifestSecrets
+		backend, err := merchantsecrets.BuildManifest(ctx, r.Config, r.ManifestSecrets, r.DB.DataPool())
+		if err != nil {
+			return r.armingFailure(err)
+		}
+		store, ping = backend.Secrets, backend.Ping
 	} else {
 		backend, err := merchantsecrets.Build(ctx, r.Config, r.DB.DataPool())
 		if err != nil {
@@ -89,6 +93,9 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service, store merchants.Me
 		svc.WithGroupSlugResolver(r.MerchantGroupResolver).WithGroupIDResolver(r.MerchantGroupCanonicalResolver).WithGroupSearchResolver(r.MerchantGroupSearchResolver)
 	}
 	r.Merchants = svc
+	if r.AlertService != nil {
+		r.AlertService.SetMerchantSecretStore(svc.Secrets())
+	}
 	if r.CheckoutService != nil {
 		r.CheckoutService.SetMerchantSecretStore(store)
 		r.CheckoutService.SetPSPSecretResolver(svc)

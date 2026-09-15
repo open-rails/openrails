@@ -104,7 +104,7 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 			return merchant.ID{}, fmt.Errorf("openrails embed: merchant_source=manifest requires the runtime manifest secret plane (#723)")
 		}
 		req.SecretStore = a.Runtime.ManifestSecrets.Seeder()
-		backend, err := merchantsecrets.BuildManifest(ctx, conf, a.Runtime.ManifestSecrets)
+		backend, err := merchantsecrets.BuildManifest(ctx, conf, a.Runtime.ManifestSecrets, database.DataPool())
 		if err != nil {
 			return merchant.ID{}, fmt.Errorf("openrails embed: %w", err)
 		}
