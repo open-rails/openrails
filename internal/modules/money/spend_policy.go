@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -173,6 +174,11 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	// #474 invariant: money_accounts (billing settings) are external-currency-only.
 	if err := RequireBillingCurrency(cur.Currency); err != nil {
 		return nil, err
+	}
+	if cur.AutoTopupAmount != nil {
+		if _, err := moneyutil.NativeToRailMinorExact(cur.Currency, *cur.AutoTopupAmount); err != nil {
+			return nil, fmt.Errorf("auto_topup_amount must be exactly representable at rail precision: %w", err)
+		}
 	}
 	cur.UpdatedAt = now
 	if cur.CreatedAt.IsZero() {

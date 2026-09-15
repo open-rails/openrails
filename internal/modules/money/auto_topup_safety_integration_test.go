@@ -225,7 +225,7 @@ func TestAutoTopupSafety_CurrenciesAndMerchantReadsStayIsolated(t *testing.T) {
 	_, err := svc.ReserveAutoTopup(ctx, first)
 	require.NoError(t, err)
 	enabled := true
-	amount := int64(100)
+	amount := int64(10000) // one whole JPY in the native 4-decimal scale
 	_, err = svc.UpsertAccountSettings(ctx, payer, "JPY", money.AccountSettingsInput{AutoTopupEnabled: &enabled, AutoTopupAmount: &amount, AutoTopupPaymentMethod: &pm})
 	require.NoError(t, err)
 	second := first

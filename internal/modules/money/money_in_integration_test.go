@@ -4,6 +4,7 @@ package money_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
@@ -205,44 +206,14 @@ func seedRailCustomer(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pay
 	})
 }
 
-// --- #240 expiry default ---
-
-func TestDeposit_DefaultExpiry_NoSettingsRow(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
-	_, err := svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000,
-		Source: "purchase", ApplyAccountExpiryDefault: true,
-	})
-	require.NoError(t, err)
-	exp := latestBlockExpiry(t, pool, ctx, payer.UUID())
-	require.NotNil(t, exp, "default 365d expiry should be applied")
-	days := exp.Sub(time.Now().UTC()).Hours() / 24
-	require.InDelta(t, 365, days, 1.5)
-}
-
-func TestDeposit_NoFlag_Permanent(t *testing.T) {
+func TestDepositWithoutExpiryIsPermanent(t *testing.T) {
 	svc, pool, payer, _, ctx := moneyInEnv(t)
 	_, err := svc.Deposit(ctx, money.DepositParams{
 		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000, Source: "grant",
 	})
 	require.NoError(t, err)
 	exp := latestBlockExpiry(t, pool, ctx, payer.UUID())
-	require.Nil(t, exp, "no flag, no explicit expiry -> permanent")
-}
-
-func TestDeposit_ConfiguredExpiryHours(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
-	hours := 30 * 24
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{DefaultCreditExpiryHours: &hours})
-	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{
-		CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1000,
-		Source: "purchase", ApplyAccountExpiryDefault: true,
-	})
-	require.NoError(t, err)
-	exp := latestBlockExpiry(t, pool, ctx, payer.UUID())
-	require.NotNil(t, exp)
-	require.InDelta(t, 30, exp.Sub(time.Now().UTC()).Hours()/24, 1.5)
+	require.Nil(t, exp, "no explicit expiry means permanent")
 }
 
 // --- #239/#674 auto-top-up (write-through topup_charge intents) ---
@@ -356,6 +327,50 @@ func TestAutoTopupIntent_ChargesAndDeposits(t *testing.T) {
 	// Re-run within cooldown: not even a candidate.
 	require.Empty(t, h.runOnce(t, ctx, time.Hour))
 	require.Len(t, h.ch.charges, 1)
+}
+
+func TestAutoTopupRequiresExactRailAmount(t *testing.T) {
+	for _, tc := range []struct {
+		currency string
+		amount   int64
+		minor    moneyutil.Cents
+	}{{"USD", 1000000, 100}, {"EUR", 1000000, 100}, {"JPY", 10000, 1}} {
+		t.Run(tc.currency, func(t *testing.T) {
+			svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
+			pm := seedPaymentMethod(t, pool, ctx, payer, "stripe")
+			enabled, threshold := true, tc.amount
+			_, err := svc.UpsertAccountSettings(ctx, payer, tc.currency, money.AccountSettingsInput{
+				AutoTopupEnabled: &enabled, AutoTopupAmount: &tc.amount, AutoTopupPaymentMethod: &pm, LowBalanceThreshold: &threshold,
+			})
+			require.NoError(t, err)
+			fractional := tc.amount + 1
+			_, err = svc.UpsertAccountSettings(ctx, payer, tc.currency, money.AccountSettingsInput{AutoTopupAmount: &fractional})
+			require.ErrorContains(t, err, "auto_topup_amount")
+			settings, err := svc.GetAccountSettings(ctx, payer, tc.currency)
+			require.NoError(t, err)
+			require.Equal(t, tc.amount, *settings.AutoTopupAmount, "invalid settings must roll back")
+
+			charger := &fakeCharger{}
+			h := newTopupHarness(t, dbi, svc, nil, charger)
+			done := h.runOnce(t, ctx, time.Hour)
+			require.Len(t, done, 1)
+			require.Equal(t, intents.StatusSucceeded, done[0].Status)
+			require.Len(t, charger.charges, 1)
+			require.Equal(t, tc.minor, charger.charges[0].AmountCents)
+			balance, err := svc.GetBalanceForCustomer(ctx, payer, tc.currency)
+			require.NoError(t, err)
+			require.Equal(t, tc.amount, balance.Balance, "full charged amount is credited")
+
+			// A malformed queued operation cannot bypass settings validation at submission.
+			payload, err := json.Marshal(intents.TopupChargePayload{CustomerID: payer.UUID(), Currency: tc.currency,
+				AmountNative: fractional, PaymentMethodID: pm, EpisodeAnchor: "genesis"})
+			require.NoError(t, err)
+			handler := intents.NewTopupChargeHandler(nil, charger, nil, nil)
+			outcome := handler.Execute(ctx, gen.OpenrailsRailIntent{Payload: payload})
+			require.Equal(t, intents.OutcomeTerminal, outcome.Class)
+			require.Len(t, charger.charges, 1, "invalid amount must be refused before any provider call")
+		})
+	}
 }
 
 func TestAutoTopupIntent_Declined(t *testing.T) {

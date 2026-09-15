@@ -50,7 +50,14 @@ const (
 // Spec is the product spec snapshot captured on a grant at issuance, so derive-2
 // is a pure function of the grant (exact + historical replay).
 type Spec struct {
-	Entitlements []string `json:"entitlements,omitempty"`
+	Entitlements []string           `json:"entitlements,omitempty"`
+	Deposit      *DepositProvenance `json:"deposit,omitempty"`
+}
+
+// DepositProvenance is recorded once with a credit deposit, never supplied by a replay.
+type DepositProvenance struct {
+	Source  string `json:"source"`
+	Invoker string `json:"invoker"`
 }
 
 // Ledger is the append-only grant ledger for one merchant. It composes a #512

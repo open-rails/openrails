@@ -108,7 +108,7 @@ func (h *TopupChargeHandler) Execute(ctx context.Context, intent gen.OpenrailsRa
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	chargeMinor, err := moneyutil.NativeToRailMinor(p.Currency, p.AmountNative)
+	chargeMinor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountNative)
 	if err != nil {
 		return Terminal("top-up amount not representable in rail minor units: " + err.Error())
 	}

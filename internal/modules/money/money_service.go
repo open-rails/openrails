@@ -2,6 +2,7 @@ package money
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -459,26 +460,11 @@ func (s *MoneyService) GetDepositBySourceID(ctx context.Context, payer identity.
 		if err != nil {
 			return err
 		}
-		sid := g.SourceID
-		out = &models.MoneyTransaction{
-			ID:              g.ID,
-			MerchantID:      g.MerchantID,
-			CustomerID:      g.CustomerID,
-			Currency:        normalizeUnit(derefStrOr(g.Currency, "")),
-			Amount:          derefInt(g.Amount),
-			TransactionType: "deposit",
-			Status:          "posted",
-			Source:          g.SourceType,
-			SourceID:        &sid,
-			ExpiresAt:       g.EndsAt,
-			Description:     g.Reason,
-			CreatedAt:       g.CreatedAt,
-			UpdatedAt:       g.CreatedAt,
-			// The lookup exists to answer a caller that lost the POST's answer:
-			// the movement described here landed EARLIER, matching what a replay
-			// POST at this key would report (LED-15 vocabulary).
-			Replayed: true,
+		out, err = creditGrantTxn(g)
+		if err != nil {
+			return err
 		}
+		out.Replayed = true
 		return nil
 	})
 	return out, err
@@ -489,20 +475,16 @@ type DepositParams struct {
 	// nil, the payer is the invoker (Invoker)'s own account/personal merchant-subject UUID for the
 	// self-hosted / single-merchant personal case; it is never a synthesized
 	// stand-in, and a non-UUID Invoker with no explicit payer is rejected.
-	CustomerID *identity.CustomerID
-	Invoker    string
-	Currency   string
-	Amount     int64
-	Source     string
-	SourceID   *string // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
-	ExpiresAt  *time.Time
-	// ApplyAccountExpiryDefault, when true and ExpiresAt is nil, sets the deposit's
-	// expiry to now + the payer's money_accounts.default_credit_expiry_hours
-	// (issue #240). Purchase/top-up paths set this so bought funds expire (default
-	// 365d); permanent grants (subscriptions, admin) leave it false. No-op when no
-	// settings default is configured.
-	ApplyAccountExpiryDefault bool
-	Description               *string
+	CustomerID  *identity.CustomerID
+	Invoker     string
+	Currency    string
+	Amount      int64
+	Source      string
+	SourceID    *string    // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
+	ExpiresAt   *time.Time // nil is permanent; expiry is an immutable operation term
+	Description *string
+	// Internal fulfillment terms: duration is anchored to the first grant, including on replay.
+	expiryHours int
 }
 
 func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*models.MoneyTransaction, error) {
@@ -511,18 +493,6 @@ func (s *MoneyService) Deposit(ctx context.Context, params DepositParams) (*mode
 	}
 	if params.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
-	}
-
-	// Apply the per-account default expiry (issue #240) when requested and the
-	// caller did not set an explicit expiry.
-	if params.ExpiresAt == nil && params.ApplyAccountExpiryDefault {
-		if payer, oerr := resolveCustomer(params.CustomerID, params.Invoker); oerr == nil {
-			if settings, serr := s.GetAccountSettings(ctx, payer, params.Currency); serr == nil &&
-				settings.DefaultCreditExpiryHours != nil && *settings.DefaultCreditExpiryHours > 0 {
-				exp := s.now().Add(time.Duration(*settings.DefaultCreditExpiryHours) * time.Hour)
-				params.ExpiresAt = &exp
-			}
-		}
 	}
 
 	var trx *models.MoneyTransaction
@@ -562,6 +532,10 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 // deposits serialize per customer.
 func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params DepositParams) (*models.MoneyTransaction, error) {
 	now := s.now()
+	expiresAt, err := params.expiryAt(now)
+	if err != nil {
+		return nil, err
+	}
 	cur := normalizeUnit(params.Currency)
 	if _, _, err := resolveUnit(ctx, q, cur); err != nil {
 		return nil, err
@@ -580,12 +554,6 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	if err != nil {
 		return nil, err
 	}
-	// Guard against int64 overflow: a deposit that would wrap the derived balance
-	// past MaxInt64 is rejected rather than corrupting the ledger.
-	if bal.Balance > math.MaxInt64-params.Amount {
-		return nil, fmt.Errorf("deposit would overflow balance")
-	}
-
 	// Idempotency: (merchant, payer, source_id) is the deposit key. A credit grant
 	// already carrying this source_id means the deposit happened — return it.
 	if params.SourceID != nil && strings.TrimSpace(*params.SourceID) != "" {
@@ -593,23 +561,28 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 			MerchantID: tenantID, CustomerID: payerID, SourceID: *params.SourceID,
 		})
 		if gerr == nil {
-			// or#906: a replay whose amount differs from what the key already
-			// committed is a caller bug, refused — never answered with the
-			// original amount as a "success" (or#891 doctrine; the committed
-			// amount is durable on the grant, no fingerprint column needed).
-			// Amount only, deliberately: currency/expiry/description drift is
-			// tolerated everywhere else (or#891 compares nothing but amount)
-			// and the same posture holds here.
 			if committed := derefInt(existing.Amount); committed != params.Amount {
 				return nil, &IdempotencyConflict{
 					Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
 					Field: "amount", Committed: committed, Retried: params.Amount,
 				}
 			}
-			// or#892: the deposit's structural key is the credit grant's
-			// (merchant, customer, source_id). A hit means this deposit already
-			// credited; say so instead of letting the caller assume it moved money.
-			replayed := s.creditGrantTxn(existing, params)
+			if committed := derefStr(existing.Currency); committed != cur {
+				return nil, &IdempotencyConflict{Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
+					Field: "currency", Committed: committed, Retried: cur}
+			}
+			retryExpiry, err := params.expiryAt(existing.StartsAt)
+			if err != nil {
+				return nil, err
+			}
+			if !sameDepositExpiry(existing.EndsAt, retryExpiry) {
+				return nil, &IdempotencyConflict{Operation: string(OpDeposit), Source: params.Source, SourceID: *params.SourceID,
+					Field: "expires_at", Committed: existing.EndsAt, Retried: retryExpiry}
+			}
+			replayed, err := creditGrantTxn(existing)
+			if err != nil {
+				return nil, err
+			}
 			replayed.Replayed = true
 			return replayed, nil
 		}
@@ -617,13 +590,18 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 			return nil, gerr
 		}
 	}
+	// A replay does not add balance, so only a new deposit needs the overflow guard.
+	if bal.Balance > math.MaxInt64-params.Amount {
+		return nil, fmt.Errorf("deposit would overflow balance")
+	}
 
 	gl := s.grantLedger(q, tenantID)
 	g, err := gl.Grant(ctx, grants.GrantInput{
 		Customer: payerID, Kind: grants.Credit,
 		Source: grants.SourceType(depositSourceType(params.Source)), SourceID: derefStr(params.SourceID),
-		Amount: &params.Amount, Currency: &cur, StartsAt: now, EndsAt: params.ExpiresAt,
+		Amount: &params.Amount, Currency: &cur, StartsAt: now, EndsAt: expiresAt,
 		Reason: params.Description,
+		Spec:   &grants.Spec{Deposit: &grants.DepositProvenance{Source: params.Source, Invoker: params.Invoker}},
 	})
 	if err != nil {
 		return nil, err
@@ -645,37 +623,60 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 		return nil, err
 	}
 
-	return s.creditGrantTxn(g, params), nil
+	return creditGrantTxn(g)
+}
+
+func (p DepositParams) expiryAt(start time.Time) (*time.Time, error) {
+	expiry := p.ExpiresAt
+	if p.expiryHours > 0 {
+		if expiry != nil || int64(p.expiryHours) > math.MaxInt64/int64(time.Hour) {
+			return nil, fmt.Errorf("invalid relative deposit expiry")
+		}
+		t := start.Add(time.Duration(p.expiryHours) * time.Hour)
+		expiry = &t
+	}
+	if expiry == nil {
+		return nil, nil
+	}
+	t := expiry.UTC().Truncate(time.Microsecond)
+	return &t, nil
+}
+
+func sameDepositExpiry(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 // creditGrantTxn synthesizes the public MoneyTransaction DTO for a deposit from
 // its backing credit grant (the lot). The single-entry money_transactions row is
 // gone (#512 hard cut); this DTO is derived, not stored.
-func (s *MoneyService) creditGrantTxn(g gen.OpenrailsGrant, params DepositParams) *models.MoneyTransaction {
+func creditGrantTxn(g gen.OpenrailsGrant) (*models.MoneyTransaction, error) {
+	var spec grants.Spec
+	if err := json.Unmarshal(g.SpecSnapshot, &spec); err != nil {
+		return nil, fmt.Errorf("decode deposit provenance: %w", err)
+	}
+	if spec.Deposit == nil {
+		return nil, fmt.Errorf("deposit grant %s has no recorded provenance", g.ID)
+	}
 	sid := g.SourceID
 	return &models.MoneyTransaction{
 		ID:              g.ID,
 		MerchantID:      g.MerchantID,
 		CustomerID:      g.CustomerID,
-		Currency:        normalizeUnit(derefStrOr(g.Currency, params.Currency)),
-		Invoker:         params.Invoker,
+		Currency:        derefStr(g.Currency),
+		Invoker:         spec.Deposit.Invoker,
 		Amount:          derefInt(g.Amount),
 		TransactionType: "deposit",
 		Status:          "posted",
-		Source:          params.Source,
+		Source:          spec.Deposit.Source,
 		SourceID:        &sid,
 		ExpiresAt:       g.EndsAt,
-		Description:     params.Description,
+		Description:     g.Reason,
 		CreatedAt:       g.CreatedAt,
 		UpdatedAt:       g.CreatedAt,
-	}
-}
-
-func derefStrOr(s *string, fallback string) string {
-	if s == nil || *s == "" {
-		return fallback
-	}
-	return *s
+	}, nil
 }
 
 type WithdrawParams struct {

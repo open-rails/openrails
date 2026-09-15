@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -443,4 +444,26 @@ func TestGrantPurchaseCredits_OnlyOnceCadence(t *testing.T) {
 	bal, err := moneySvc.GetBalance(ctx, tenantSubjectID.String(), money.DefaultCurrency)
 	require.NoError(t, err)
 	require.Equal(t, int64(10), bal.Balance)
+}
+
+func TestPurchaseCreditExpiryIsAnchoredAcrossReplay(t *testing.T) {
+	svc, _, _, payer, _, ctx := moneyInEnvWithDB(t)
+	clock := clockwork.NewFakeClockAt(time.Date(2040, 1, 1, 0, 0, 0, 0, time.UTC))
+	svc.SetClock(clock)
+	hours := 24
+	params := money.GrantPurchaseCreditsParams{Payer: payer, PaymentID: uuid.New(), Source: "purchase",
+		Spec: models.CreditsSpec{"credit": {Unit: "USD", Amount: 100, ExpiryHours: &hours}}}
+	require.NoError(t, svc.GrantPurchaseCredits(ctx, params))
+	sourceID := fmt.Sprintf("openrails:purchase_credit_grant:%s:credit", params.PaymentID)
+	first, err := svc.GetDepositBySourceID(ctx, payer, sourceID)
+	require.NoError(t, err)
+	require.Equal(t, clock.Now().Add(24*time.Hour), first.ExpiresAt.UTC())
+	clock.Advance(48 * time.Hour)
+	require.NoError(t, svc.GrantPurchaseCredits(ctx, params), "retry after expiry must not mint or extend credits")
+	replayed, err := svc.GetDepositBySourceID(ctx, payer, sourceID)
+	require.NoError(t, err)
+	require.Equal(t, first, replayed)
+	hours = 48
+	require.ErrorIs(t, svc.GrantPurchaseCredits(ctx, params), money.ErrIdempotencyKeyReused,
+		"a changed duration is a changed financial term, not a retry")
 }
