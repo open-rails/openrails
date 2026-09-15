@@ -69,6 +69,12 @@ func TestOr892_TheDatabaseRefusesADuplicateCoordinate(t *testing.T) {
 	`, merchantID, sourceID).Scan(&rows, &moved))
 	require.Equal(t, 1, rows, "one coordinate, one row — enforced by the index alone")
 	require.Equal(t, int64(5_000), moved)
+	posted, err := l.Balance(ctx, balance)
+	require.NoError(t, err)
+	require.Equal(t, moved, posted, "a discarded insert must not increment account counters")
+	posted, err = l.Balance(ctx, clearing)
+	require.NoError(t, err)
+	require.Equal(t, -moved, posted)
 }
 
 // ApplyIdempotent turns that refusal into a usable answer rather than an error:
