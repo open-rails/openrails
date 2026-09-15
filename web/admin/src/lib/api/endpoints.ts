@@ -752,6 +752,12 @@ export const listWebhooks = (signal?: AbortSignal) =>
 export const createWebhook = (body: WebhookRequest) =>
   api<MerchantWebhook>("/merchant/webhooks", { method: "POST", body })
 
+export const rotateWebhookURL = (id: string, url: string) =>
+  api<MerchantWebhook>(`/merchant/webhooks/${id}/url`, {
+    method: "PUT",
+    body: { url },
+  })
+
 export const deleteWebhook = (id: string) =>
   api<{ deleted: boolean; id: string }>(`/merchant/webhooks/${id}`, {
     method: "DELETE",

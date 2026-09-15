@@ -1045,12 +1045,13 @@ function WebhookRow({ webhook }: { webhook: MerchantWebhook }) {
       </TableCell>
       <TableCell
         className="max-w-[22rem] truncate py-3 text-xs text-muted-foreground"
-        title={webhook.url}
+        title={webhook.destination_host}
       >
-        {webhook.url}
+        {webhook.destination_host}
       </TableCell>
       <TableCell className="py-3 text-right">
         <div className="flex justify-end gap-1">
+          <WebhookDialog webhook={webhook} />
           <Button
             variant="ghost"
             size="icon"
@@ -1084,27 +1085,36 @@ function WebhookRow({ webhook }: { webhook: MerchantWebhook }) {
   )
 }
 
-function WebhookDialog() {
+function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
   const addWebhook = useMutation(adminMutations.createWebhook(queryClient))
+  const rotateWebhook = useMutation(
+    adminMutations.rotateWebhookURL(queryClient)
+  )
   const form = useForm({
     defaultValues: {
-      name: "",
+      name: webhook?.name ?? "",
       url: "",
-      format: "generic" as WebhookFormat,
+      format: webhook?.format ?? ("generic" as WebhookFormat),
     },
     onSubmit: async ({ value }) => {
       try {
-        await addWebhook.mutateAsync({
-          name: value.name.trim(),
-          url: value.url.trim(),
-          format: value.format,
-        })
-        toast.success("Webhook added")
+        if (webhook)
+          await rotateWebhook.mutateAsync({
+            id: webhook.id,
+            url: value.url.trim(),
+          })
+        else
+          await addWebhook.mutateAsync({
+            name: value.name.trim(),
+            url: value.url.trim(),
+            format: value.format,
+          })
+        toast.success(webhook ? "Webhook URL replaced" : "Webhook added")
         handleOpen(false)
       } catch (err) {
-        toastApiError(err, "Add webhook")
+        toastApiError(err, webhook ? "Replace webhook URL" : "Add webhook")
       }
     },
   })
@@ -1119,16 +1129,22 @@ function WebhookDialog() {
       <DialogTrigger
         render={
           <Button size="sm" variant="outline">
-            <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add webhook
+            {!webhook && <HugeiconsIcon icon={Add01Icon} className="size-4" />}{" "}
+            {webhook ? "Replace URL" : "Add webhook"}
           </Button>
         }
       />
       <DialogContent className={DIALOG_FORM}>
         <DialogHeader>
-          <DialogTitle>Add webhook</DialogTitle>
+          <DialogTitle>
+            {webhook
+              ? `Replace URL for ${webhook.name || webhook.destination_host}`
+              : "Add webhook"}
+          </DialogTitle>
           <DialogDescription>
-            Paste the webhook address from a Discord or Slack channel, no bot
-            needed, or any address of your own that can receive alerts.
+            {webhook
+              ? "Paste a replacement URL. Existing alert rules keep their connection."
+              : "Paste a webhook address from Discord, Slack, or your own alert receiver."}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -1144,7 +1160,7 @@ function WebhookDialog() {
               name="name"
               validators={{
                 onChange: ({ value }) =>
-                  value.trim() ? undefined : "Enter a webhook name",
+                  webhook || value.trim() ? undefined : "Enter a webhook name",
               }}
             >
               {(field) => (
@@ -1152,6 +1168,7 @@ function WebhookDialog() {
                   <Label htmlFor="wh-name">Name</Label>
                   <Input
                     id="wh-name"
+                    disabled={Boolean(webhook)}
                     placeholder="e.g. #billing-alerts"
                     value={field.state.value}
                     onBlur={field.handleBlur}
@@ -1167,6 +1184,7 @@ function WebhookDialog() {
                 <div className="grid gap-1.5">
                   <Label htmlFor="wh-format">Format</Label>
                   <Select
+                    disabled={Boolean(webhook)}
                     value={field.state.value}
                     onValueChange={(value) =>
                       field.handleChange(value as WebhookFormat)
@@ -1233,10 +1251,17 @@ function WebhookDialog() {
                 <Button
                   type="submit"
                   disabled={
-                    !name.trim() || !url.trim() || !canSubmit || isSubmitting
+                    (!webhook && !name.trim()) ||
+                    !url.trim() ||
+                    !canSubmit ||
+                    isSubmitting
                   }
                 >
-                  {isSubmitting ? "Adding…" : "Add webhook"}
+                  {isSubmitting
+                    ? "Saving…"
+                    : webhook
+                      ? "Replace URL"
+                      : "Add webhook"}
                 </Button>
               )}
             </form.Subscribe>

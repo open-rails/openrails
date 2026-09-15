@@ -134,11 +134,12 @@ func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m Merc
 	// freshly seeded in-memory plane right away — no standalone server or worker
 	// registration ever needs to run first.
 	if conf.IsManifestMerchantSource() && a.Runtime.Merchants == nil {
-		svc, err := merchants.NewService(database.DataPool(), a.Runtime.ManifestSecrets, config.ExpectedProviderEnvironment(conf.IsTestMode()))
+		svc, err := merchants.NewService(database.DataPool(), secretBackend.Secrets, config.ExpectedProviderEnvironment(conf.IsTestMode()))
 		if err != nil {
 			return merchant.ID{}, fmt.Errorf("openrails embed: build merchants service: %w", err)
 		}
-		a.Runtime.ArmMerchantsService(svc, a.Runtime.ManifestSecrets)
+		a.Runtime.ArmMerchantsService(svc, secretBackend.Secrets)
+		a.Runtime.MerchantSecretPing = secretBackend.Ping
 	}
 	if conf.IsManifestMerchantSource() {
 		a.Runtime.ArmSolanaRecurringServices(secretBackend.Secrets, secretBackend.SolanaTransit)

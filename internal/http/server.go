@@ -216,9 +216,9 @@ func New(deps Dependencies) (*Server, error) {
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
 	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*
 	// control-plane DB) and permission-group provisioner. MODE 1 (#723,
-	// merchant_source=manifest) serves the runtime's in-memory manifest plane —
-	// no DB/Vault store exists; the write routes stay mounted and 405 with the
-	// manifest_driven code. MODE 2 builds the declared persistent backend.
+	// merchant_source=manifest) serves read-only provider credentials from the
+	// manifest and operator webhook URLs from managed encrypted storage. Provider
+	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
 	{
 		var secretBackend *merchantsecrets.Store
 		if deps.Config.IsManifestMerchantSource() {

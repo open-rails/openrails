@@ -20,7 +20,7 @@ import (
 // can arm per merchant from the merchant-secrets store the manifest seeds.
 //
 // MODE 1 (#723, merchant_source=manifest): the store is the runtime's
-// in-memory manifest plane — no DB/Vault store is ever constructed.
+// read-only provider manifest, alongside encrypted managed webhook URLs.
 //
 // Failure posture (#748, mirrors #667's encryption-posture gate): outside
 // development a failure to arm is a boot ERROR, not a loud degradation —
