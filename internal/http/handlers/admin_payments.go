@@ -18,7 +18,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/intents"
@@ -83,7 +82,7 @@ func AdminRefundPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	idempotencyKey := strings.TrimSpace(middleware.IdempotencyKeyFromRequest(r.Request))
+	idempotencyKey := strings.TrimSpace(strings.TrimSpace(r.Header("Idempotency-Key")))
 	if idempotencyKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, adminRefundIdempotencyHeader+" is required")
 		return

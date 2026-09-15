@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"errors"
+	"github.com/open-rails/authkit/verify"
 	"net/http"
 	"strings"
 
@@ -73,7 +74,7 @@ type ServiceCredentialResolver interface {
 // DelegatedResolver validates a browser-direct delegated access token and
 // resolves its merchant + acting user (#259/#555).
 type DelegatedResolver interface {
-	ResolveDelegated(ctx context.Context, token string, origin string) (*controlplane.ResolvedDelegated, error)
+	ResolveDelegated(r *http.Request) (*controlplane.ResolvedDelegated, error)
 }
 
 type serviceJWTResolver interface {
@@ -347,6 +348,9 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 			if err != nil {
 				var ge billingauth.GateError
 				if errors.As(err, &ge) {
+					if ge.Message == "sender_proof_required" {
+						r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
+					}
 					r.AbortJSON(ge.Status, ge.Message)
 				} else {
 					r.AbortJSON(http.StatusInternalServerError, "authorization unavailable")
@@ -414,9 +418,15 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 		return billingauth.Principal{MerchantID: resolved.MerchantID, Permissions: resolved.Permissions}, nil
 	}
 	if g.DelegatedResolver != nil && req != nil {
-		if token := bearerToken(req.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
-			resolved, err := g.DelegatedResolver.ResolveDelegated(ctx, token, req.Header.Get("Origin"))
+		if token := authorizationToken(req.Header.Get("Authorization")); controlplane.LooksLikeJWT(token) {
+			resolved, err := g.DelegatedResolver.ResolveDelegated(req)
 			if err != nil {
+				if errors.Is(err, controlplane.ErrDelegatedUnavailable) {
+					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusServiceUnavailable, Message: "delegated_verification_unavailable"}
+				}
+				if errors.Is(err, verify.ErrSenderProofRequired) {
+					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "sender_proof_required"}
+				}
 				if g.Authenticator == nil || !errors.Is(err, controlplane.ErrDelegatedInvalid) {
 					return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "delegated_token_invalid"}
 				}
@@ -926,4 +936,12 @@ func registerMerchantInvoiceRoutes(rr router.Router, opts Options, dbMW ...route
 	profileWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
 	rr.Handle(http.MethodGet, "/customers/:customer_id/invoice-profile", h(httphandlers.GetAdminInvoiceProfile(opts.Gate)), profileRead...)
 	rr.Handle(http.MethodPut, "/customers/:customer_id/invoice-profile", h(httphandlers.PutAdminInvoiceProfile), profileWrite...)
+}
+
+func authorizationToken(header string) string {
+	fields := strings.Fields(header)
+	if len(fields) == 2 && (strings.EqualFold(fields[0], "Bearer") || strings.EqualFold(fields[0], "DPoP")) {
+		return fields[1]
+	}
+	return ""
 }

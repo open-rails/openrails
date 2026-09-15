@@ -56,3 +56,19 @@ func TestBodyLimitHTTPAllowsWithinLimit(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
+
+func TestBodyLimitRefusesBeforeOptionalBodyMutation(t *testing.T) {
+	for _, knownLength := range []bool{false, true} {
+		calls := 0
+		h := BodyLimitHTTP(8)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(http.StatusNoContent) }))
+		req := httptest.NewRequest(http.MethodPost, "/v1/action", strings.NewReader(`{}         `))
+		if !knownLength {
+			req.ContentLength = -1
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusRequestEntityTooLarge || calls != 0 {
+			t.Fatalf("knownLength=%v status=%d mutations=%d", knownLength, rec.Code, calls)
+		}
+	}
+}

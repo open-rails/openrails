@@ -20,7 +20,7 @@ type stubVerifier struct {
 }
 
 func (s stubVerifier) VerifyRequest(r *http.Request) (verify.Claims, error) {
-	if bearerToken(r.Header.Get("Authorization")) == "" {
+	if r.Header.Get("Authorization") == "" {
 		return verify.Claims{}, billingauth.ErrUnauthenticated
 	}
 	return s.claims, s.err

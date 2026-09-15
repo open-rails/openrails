@@ -4,6 +4,8 @@ package integrationharness
 
 import (
 	"context"
+	"github.com/open-rails/openrails/internal/testauth"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +66,7 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 	// Unknown token issuers cannot cause a per-issuer DB lookup. Registration
 	// made in another process becomes visible through the bounded snapshot.
 	require.Eventually(t, func() bool {
-		res, err := cp.ResolveDelegated(ctx, tokenA, "")
+		res, err := cp.ResolveDelegated(testauth.Request(ctx, http.MethodGet, surface.BaseURL+"/v1/me/status", tokenA))
 		return err == nil && res.MerchantSlug == dbtest.TestMerchantSlug
 	}, 15*time.Second, 100*time.Millisecond, "out-of-band registration must converge without restarting or reloading manually")
 
@@ -98,7 +100,7 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 		TTL:              time.Hour,
 	})
 	require.NoError(t, err)
-	_, err = cp.ResolveDelegated(ctx, oldToken, "")
+	_, err = cp.ResolveDelegated(testauth.Request(ctx, http.MethodGet, surface.BaseURL+"/v1/me/status", oldToken))
 	require.NoError(t, err, "pre-rotation baseline")
 
 	// Rotate out of band: same slug + issuer identity, NEW static key, no reload.
@@ -124,7 +126,7 @@ func TestDelegatedIssuerOutOfBandRegistrationNoRestart(t *testing.T) {
 	// Each failed verification (stale key) kicks the async TTL refresh; the
 	// rotated key must verify well within the window, no restart.
 	require.Eventually(t, func() bool {
-		_, err := cp.ResolveDelegated(ctx, rotatedToken, "")
+		_, err := cp.ResolveDelegated(testauth.Request(ctx, http.MethodGet, surface.BaseURL+"/v1/me/status", rotatedToken))
 		return err == nil
 	}, 15*time.Second, 100*time.Millisecond, "rotated out-of-band key must verify within the issuer-registry TTL")
 }

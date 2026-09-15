@@ -361,7 +361,6 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses delegated tokens.
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 - [HTTP API reference](docs/api/endpoints.md) — every route, grouped by caller class.
-- [Example: gated premium page](examples/gated-premium-page/) — a runnable standalone demo: public page, entitlement-gated `/premium`, delegated tokens, NMI tokenized-vault checkout.
 
 **Payment rails** — per-rail setup: credentials, the manifest entry, webhooks, sandbox testing:
 

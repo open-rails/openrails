@@ -3,6 +3,7 @@ package billingauth
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/internal/requestauth"
 	"net/http"
 	"net/url"
 	"strings"
@@ -18,7 +19,7 @@ type cookieAdmissionKey struct{}
 // Explicit Authorization requests never fall back to cookie credentials.
 func CookieAuthentication(origin string) (func(http.Handler) http.Handler, error) {
 	u, err := url.Parse(origin)
-	if err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || u.Opaque != "" {
+	if err != nil || u.Scheme != "https" && u.Scheme != "http" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(origin, "#") || u.Opaque != "" {
 		return nil, fmt.Errorf("cookie authentication requires an absolute origin without a path")
 	}
 	return func(next http.Handler) http.Handler {
@@ -45,6 +46,7 @@ func CookieAuthentication(origin string) (func(http.Handler) http.Handler, error
 // billing-adjacent routes to preserve the same credential selection.
 func ExplicitCredentials(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r = requestauth.Begin(r)
 		admitted, _ := r.Context().Value(cookieAdmissionKey{}).(bool)
 		if r.Header.Get("Cookie") != "" && (!admitted || strings.TrimSpace(r.Header.Get("Authorization")) != "") {
 			r = r.Clone(r.Context())

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/stretchr/testify/require"
 
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
@@ -57,10 +58,62 @@ func TestHTTPRetriesRecheckAuthority(t *testing.T) {
 
 	keyID, _, ok := authkit.ParseAPIKey(controlplane.APIKeyPrefix, owner)
 	require.True(t, ok)
-	revoked, err := core.RevokeAPIKey(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), keyID)
+	keys, err := core.ListAPIKeys(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug))
+	require.NoError(t, err)
+	var tokenID string
+	for _, key := range keys {
+		if key.KeyID == keyID {
+			tokenID = key.ID
+		}
+	}
+	require.NotEmpty(t, tokenID)
+	revoked, err := core.RevokeAPIKey(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), tokenID)
 	require.NoError(t, err)
 	require.True(t, revoked)
 	status2, body2, headers2 := doPost(key, bodyJSON)
 	require.Equal(t, http.StatusUnauthorized, status2, "revoked credential: %s", body2)
 	require.Empty(t, headers2.Get("Idempotent-Replayed"))
+}
+
+func TestHTTPRetriesRecheckMerchantSelector(t *testing.T) {
+	ctx := context.Background()
+	h := New(t, ctx)
+	surface := h.StartStandalone("usd")
+	cp := embcp.Get(surface.App())
+	core := cp.Core()
+	otherSlug := "replay-b-" + uuid.NewString()[:8]
+	surface.ProvisionOwnedMerchant(otherSlug)
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	actorID, _ := makeUser(t, core, "selector"+suffix)
+	for _, slug := range []string{dbtest.TestMerchantSlug, otherSlug} {
+		require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(slug), authkit.UserSubject(actorID), controlplane.MerchantRoleOwner))
+	}
+	token, _, err := core.MintAccessToken(ctx, actorID, nil)
+	require.NoError(t, err)
+	invitee, email := makeUser(t, core, "selected"+suffix)
+	key := uuid.NewString()
+	for _, slug := range []string{dbtest.TestMerchantSlug, otherSlug} {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, surface.BaseURL+"/v1/merchant/team/invites", strings.NewReader(`{"email":"`+email+`","role":"viewer"}`))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", key)
+		req.Header.Set(billingauth.MerchantSelectorHeader, slug)
+		resp, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		raw, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		require.NoError(t, err)
+		require.Equal(t, http.StatusCreated, resp.StatusCode, string(raw))
+		require.Empty(t, resp.Header.Get("Idempotent-Replayed"))
+	}
+	groups, err := core.ListSubjectGroups(ctx, authkit.UserSubject(invitee))
+	require.NoError(t, err)
+	var memberships []string
+	for _, group := range groups {
+		if group.Persona == controlplane.MerchantType {
+			memberships = append(memberships, group.InstanceSlug)
+		}
+	}
+	require.ElementsMatch(t, []string{dbtest.TestMerchantSlug, otherSlug}, memberships)
 }

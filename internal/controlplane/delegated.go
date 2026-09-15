@@ -1,15 +1,18 @@
 package controlplane
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
+	"github.com/open-rails/authkit/dpop"
+	authcore "github.com/open-rails/authkit/embedded"
+	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/verify"
 
+	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -144,11 +147,9 @@ var ErrDelegatedNotConfigured = errors.New("controlplane: delegated access verif
 // internal verifier detail to the response.
 var ErrDelegatedInvalid = errors.New("controlplane: invalid delegated access token")
 
-// ErrDelegatedOriginNotAllowed indicates a delegated browser request failed the
-// defense-in-depth Origin check against the verified issuer's AuthKit
-// remote_application. This is not API authorization: Origin is a browser header
-// and can be spoofed by non-browser clients.
-var ErrDelegatedOriginNotAllowed = errors.New("controlplane: delegated origin not allowed")
+// ErrDelegatedUnavailable means sender-proof replay protection could not be
+// consulted. A caller must fail closed without treating it as invalid credentials.
+var ErrDelegatedUnavailable = errors.New("controlplane: delegated verification unavailable")
 
 // DelegatedVerifier returns the control plane's delegated-access-token verifier.
 // Exposed for the middleware and tests.
@@ -169,7 +170,7 @@ func (c *ControlPlane) DelegatedVerifier() *verify.Verifier {
 // (AddIssuer with JWKS-URL fetching), so at runtime the verifier trusts every
 // registered+enabled merchant issuer — and ONLY those. OpenRails signs no delegated
 // tokens itself; there is no self-issuer.
-func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*verify.Verifier, error) {
+func newDelegatedVerifier(coreSvc *authcore.Client, tokenPrefix string, requestURL func(*http.Request) string) (*verify.Verifier, error) {
 	if coreSvc == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
@@ -188,6 +189,7 @@ func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*verify.V
 	// control-plane host to cloud metadata / internal services. AuthKit's own server
 	// always installs it; a verify-only embedder must opt in explicitly.
 	v := verify.NewVerifier(
+		verify.WithDPoP(coreSvc.ClaimDPoPProof, requestURL),
 		verify.WithAPIKeyPrefix(tokenPrefix),
 		verify.WithSSRFGuard(),
 	)
@@ -210,22 +212,30 @@ func newDelegatedVerifier(coreSvc authkit.Client, tokenPrefix string) (*verify.V
 //   - authkit.ErrAccessTokenExpired for an expired token,
 //   - ErrDelegatedIssuerUnknown when a federated token's issuer is not
 //     registered+enabled for an active merchant (cross-merchant / unmapped),
-//   - ErrDelegatedOriginNotAllowed when the optional browser Origin
-//     defense-in-depth check fails for the verified issuer,
 //   - ErrDelegatedInvalid for any other rejection (bad signature/audience/type,
 //     normal-sub token, forbidden permission, forbidden merchant claim).
-func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origin string) (*ResolvedDelegated, error) {
+func (c *ControlPlane) ResolveDelegated(r *http.Request) (*ResolvedDelegated, error) {
 	if c == nil || c.delegatedVerifier == nil {
 		return nil, ErrDelegatedNotConfigured
 	}
-	token = strings.TrimSpace(token)
-	if token == "" {
+	if r == nil {
 		return nil, ErrDelegatedInvalid
 	}
+	ctx := r.Context()
 	c.refreshIssuerRegistryIfStale()
 
-	cl, principal, err := c.delegatedVerifier.VerifyDelegatedAccess(ctx, token)
+	verified, err := requestauth.Once(ctx, c.delegatedVerifier, func() (delegatedClaims, error) {
+		cl, principal, err := c.delegatedVerifier.VerifyDelegatedAccessRequest(r)
+		return delegatedClaims{cl, principal}, err
+	})
+	cl, principal := verified.claims, verified.principal
 	if err != nil {
+		if errors.Is(err, dpop.ErrReplayUnavailable) {
+			return nil, ErrDelegatedUnavailable
+		}
+		if errors.Is(err, verify.ErrSenderProofRequired) {
+			return nil, verify.ErrSenderProofRequired
+		}
 		// Preserve expiry so the middleware can return a precise reason; map
 		// everything else to a sanitized invalid error (never leak verifier
 		// internals or distinguish bad-signature from wrong-audience to clients).
@@ -245,13 +255,17 @@ func (c *ControlPlane) ResolveDelegated(ctx context.Context, token string, origi
 		// A normal `sub` is present: this is NOT a delegated access token.
 		return nil, ErrDelegatedInvalid
 	}
+	// Wire delegation always has a sender binding. Trusted in-process user
+	// adapters are a separate interface and do not weaken this HTTP contract.
+	if principal.ConfirmationCertificateSHA256 == nil && principal.ConfirmationJWKThumbprintSHA256 == nil {
+		return nil, verify.ErrSenderProofRequired
+	}
 	subject := strings.TrimSpace(principal.DelegatedSubject)
 	if subject == "" {
 		return nil, ErrDelegatedInvalid
 	}
 
 	issuer := strings.TrimSpace(principal.Issuer)
-	_ = origin // Browser Origin is transport policy, handled by CORS, not token authorization.
 
 	// FEDERATED merchant-signed token (issue #259): the merchant is pinned from the
 	// VALIDATED `iss` via the issuer registry. Because `issuer` is globally unique,
@@ -312,4 +326,9 @@ func delegatedBoolAttribute(attrs map[string]json.RawMessage, key string) bool {
 		return false
 	}
 	return value
+}
+
+type delegatedClaims struct {
+	claims    verify.Claims
+	principal verify.DelegatedPrincipal
 }

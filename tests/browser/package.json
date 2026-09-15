@@ -1,0 +1,7 @@
+{
+  "name": "openrails-browser-contracts",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.0.0",
+  "devDependencies": { "playwright": "1.60.0" }
+}

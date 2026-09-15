@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"

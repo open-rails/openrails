@@ -3,7 +3,6 @@
 package tests
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -31,7 +30,7 @@ type testDelegatedResolver struct {
 
 const merchantDelegatedTestToken = "aaa.bbb.ccc"
 
-func (r testDelegatedResolver) ResolveDelegated(context.Context, string, string) (*controlplane.ResolvedDelegated, error) {
+func (r testDelegatedResolver) ResolveDelegated(*http.Request) (*controlplane.ResolvedDelegated, error) {
 	return &controlplane.ResolvedDelegated{
 		MerchantID:       dbtest.TestMerchantID,
 		Merchant:         dbtest.TestMerchantSlug,

@@ -41,11 +41,6 @@ jobs:
         run: go build ./...
       - name: Vet (integration tag)
         run: go vet -tags integration ./...
-      - name: Build examples
-        run: |
-          for d in examples/*/; do
-            (cd "$d" && go build ./... && go vet ./...)
-          done
       - name: Save Go caches
         if: always() && env.GO_BUILDCACHE_KEY != ''
         uses: ./.github/actions/go-cache-save

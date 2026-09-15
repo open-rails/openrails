@@ -2,11 +2,11 @@ package handlers
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -25,7 +25,7 @@ func AdminChangeTier(r *httprequest.Request) {
 		return
 	}
 
-	req.IdempotencyKey = middleware.IdempotencyKeyFromRequest(r.Request)
+	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
 	resp, err := r.State.CheckoutService.TierChange(r.Request.Context(), req, customer)
 	if err != nil {
 		logAdminTierChange(r, req, nil, err)

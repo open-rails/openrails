@@ -40,7 +40,8 @@ func (g DelegatedGate) Authorize(ctx context.Context, r *http.Request, permissio
 		return Principal{}, GateError{Status: http.StatusUnauthorized, Message: "delegated_principal_invalid"}
 	}
 	return Principal{
-		MerchantID: mid,
+		MerchantID:  mid,
+		Permissions: append([]string(nil), principal.Permissions...),
 		UserContext: UserContext{
 			UserID:        principal.SubjectID,
 			Email:         principal.Email,

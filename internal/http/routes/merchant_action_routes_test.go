@@ -25,7 +25,7 @@ type fakeMerchantDelegatedResolver struct {
 	err      error
 }
 
-func (f fakeMerchantDelegatedResolver) ResolveDelegated(_ context.Context, _, _ string) (*controlplane.ResolvedDelegated, error) {
+func (f fakeMerchantDelegatedResolver) ResolveDelegated(_ *http.Request) (*controlplane.ResolvedDelegated, error) {
 	return f.resolved, f.err
 }
 

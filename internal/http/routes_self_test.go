@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -49,17 +50,17 @@ func TestRegisterSelfServiceRoutes_MountedWithHostDelegatedAuthenticatorOnly(t *
 	}()
 }
 
-type originRejectingDelegatedResolver struct {
+type proofRejectingDelegatedResolver struct {
 	origin string
 }
 
-func (r *originRejectingDelegatedResolver) ResolveDelegated(_ context.Context, _ string, origin string) (*controlplane.ResolvedDelegated, error) {
-	r.origin = origin
-	return nil, controlplane.ErrDelegatedOriginNotAllowed
+func (r *proofRejectingDelegatedResolver) ResolveDelegated(req *http.Request) (*controlplane.ResolvedDelegated, error) {
+	r.origin = req.Header.Get("Origin")
+	return nil, verify.ErrSenderProofRequired
 }
 
-func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *testing.T) {
-	resolver := &originRejectingDelegatedResolver{}
+func TestRegisterSelfServiceRoutes_HTTPServerRequiresSenderProof(t *testing.T) {
+	resolver := &proofRejectingDelegatedResolver{}
 	srv := &Server{
 		cfg:               &config.Config{},
 		delegatedResolver: resolver,
@@ -81,10 +82,7 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	require.NoError(t, err)
 	defer preflightResp.Body.Close()
 	require.Equal(t, http.StatusNoContent, preflightResp.StatusCode)
-	// #765: /v1/me is browser tier — the static permissive policy grants `*`
-	// regardless of Origin, but never credentials. The delegated-origin check
-	// below is a SEPARATE application-layer rule (AuthKit remote_application
-	// trust), unrelated to this browser CORS grant.
+	// Preflight is credential-free; the resource still requires sender proof.
 	require.Equal(t, "*", preflightResp.Header.Get("Access-Control-Allow-Origin"))
 	require.Empty(t, preflightResp.Header.Get("Access-Control-Allow-Credentials"))
 
@@ -96,9 +94,9 @@ func TestRegisterSelfServiceRoutes_HTTPServerRejectsDelegatedOriginMismatch(t *t
 	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	require.Equal(t, "https://evil.example", resolver.origin)
-	require.Contains(t, responseBody(t, resp), "delegated_origin_not_allowed")
+	require.Contains(t, responseBody(t, resp), "sender_proof_required")
 }
 
 // TestWrapPublicHandlerPermissiveCORSOnlyOnBrowserTier proves the #765 static

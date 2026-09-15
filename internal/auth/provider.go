@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/authkit/verify"
+	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	log "github.com/sirupsen/logrus"
 )
@@ -53,7 +54,12 @@ func (p *Authenticator) Authenticate(ctx context.Context, r *http.Request) (bill
 	if p == nil || p.cfg.Verifier == nil || r == nil {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	}
-	cl, err := p.cfg.Verifier.VerifyRequest(r)
+	// AuthKit DPoP authenticates delegated subjects, never a local user. Leave
+	// its single-use proof for the delegated route's verifier.
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Authorization"))), "dpop ") {
+		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
+	}
+	cl, err := requestauth.Once(ctx, p, func() (verify.Claims, error) { return p.cfg.Verifier.VerifyRequest(r) })
 	if err != nil {
 		return billingauth.UserContext{}, err
 	}
@@ -76,24 +82,6 @@ func admit(ctx context.Context, r *http.Request, cl verify.Claims, a Admission) 
 		return billingauth.ErrUnauthenticated
 	}
 	return nil
-}
-
-// looksLikeJWT mirrors controlplane.LooksLikeJWT (three dot-separated
-// segments) without importing the control plane.
-func looksLikeJWT(token string) bool {
-	return strings.Count(strings.TrimSpace(token), ".") == 2
-}
-
-func bearerToken(header string) string {
-	header = strings.TrimSpace(header)
-	if header == "" {
-		return ""
-	}
-	const prefix = "Bearer "
-	if !strings.HasPrefix(strings.ToLower(header), strings.ToLower(prefix)) {
-		return ""
-	}
-	return strings.TrimSpace(header[len(prefix):])
 }
 
 func userContextFromClaims(cl verify.Claims, omitRoles bool) billingauth.UserContext {

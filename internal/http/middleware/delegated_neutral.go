@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/verify"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/controlplane"
@@ -81,7 +82,7 @@ func (p *Principal) Can(ctx context.Context, perm string) bool {
 // against live AuthKit + merchant-directory state. The control plane implements
 // it; tests can inject a fake.
 type DelegatedResolver interface {
-	ResolveDelegated(ctx context.Context, token string, origin string) (*controlplane.ResolvedDelegated, error)
+	ResolveDelegated(r *http.Request) (*controlplane.ResolvedDelegated, error)
 }
 
 // DelegatedFromRequest returns the resolved delegated token attached to the
@@ -123,12 +124,12 @@ func DelegatedSelfRequired(resolver DelegatedResolver) router.Middleware {
 				r.AbortJSON(http.StatusInternalServerError, "delegated authentication not configured")
 				return
 			}
-			token := requestBearerToken(r)
+			token := requestAuthorizationToken(r.Request)
 			if token == "" {
 				r.AbortJSON(http.StatusUnauthorized, "delegated bearer token required")
 				return
 			}
-			resolved, err := resolver.ResolveDelegated(r.Request.Context(), token, r.Header("Origin"))
+			resolved, err := resolver.ResolveDelegated(r.Request)
 			if err != nil {
 				switch {
 				case errors.Is(err, authkit.ErrAccessTokenExpired):
@@ -138,8 +139,11 @@ func DelegatedSelfRequired(resolver DelegatedResolver) router.Middleware {
 				case errors.Is(err, controlplane.ErrServiceCredentialMerchantUnresolved),
 					errors.Is(err, controlplane.ErrDelegatedIssuerUnknown):
 					r.AbortJSON(http.StatusForbidden, "delegated_merchant_unresolved")
-				case errors.Is(err, controlplane.ErrDelegatedOriginNotAllowed):
-					r.AbortJSON(http.StatusForbidden, "delegated_origin_not_allowed")
+				case errors.Is(err, verify.ErrSenderProofRequired):
+					r.SetHeader("WWW-Authenticate", `DPoP error="invalid_dpop_proof", algs="ES256"`)
+					r.AbortJSON(http.StatusUnauthorized, "sender_proof_required")
+				case errors.Is(err, controlplane.ErrDelegatedUnavailable):
+					r.AbortJSON(http.StatusServiceUnavailable, "delegated_verification_unavailable")
 				case errors.Is(err, controlplane.ErrDelegatedNotConfigured):
 					r.AbortJSON(http.StatusInternalServerError, "delegated authentication not configured")
 				default:
@@ -425,4 +429,12 @@ func requestBearerToken(r *request.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(h[len(prefix):])
+}
+
+func requestAuthorizationToken(r *http.Request) string {
+	fields := strings.Fields(r.Header.Get("Authorization"))
+	if len(fields) == 2 && (strings.EqualFold(fields[0], "Bearer") || strings.EqualFold(fields[0], "DPoP")) {
+		return fields[1]
+	}
+	return ""
 }
