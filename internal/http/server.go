@@ -216,16 +216,16 @@ func New(deps Dependencies) (*Server, error) {
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
 	// reuses the control plane's pgx pool (the OpenRails-owned openrails.*
 	// control-plane DB) and permission-group provisioner. MODE 1 (#723,
-	// merchant_source=manifest) serves the runtime's in-memory manifest plane —
-	// no DB/Vault store exists; the write routes stay mounted and 405 with the
-	// manifest_driven code. MODE 2 builds the declared persistent backend.
+	// merchant_source=manifest) serves read-only provider credentials from the
+	// manifest and operator webhook URLs from managed encrypted storage. Provider
+	// write routes retain their manifest_driven 405. MODE 2 uses managed storage.
 	{
 		var secretBackend *merchantsecrets.Store
 		if deps.Config.IsManifestMerchantSource() {
 			if deps.Runtime == nil || deps.Runtime.ManifestSecrets == nil {
 				return nil, fmt.Errorf("merchant_source=manifest requires the runtime manifest secret plane (#723)")
 			}
-			b, err := merchantsecrets.BuildManifest(context.Background(), deps.Config, deps.Runtime.ManifestSecrets)
+			b, err := merchantsecrets.BuildManifest(context.Background(), deps.Config, deps.Runtime.ManifestSecrets, deps.ControlPlane.Pool())
 			if err != nil {
 				return nil, err
 			}
@@ -249,7 +249,7 @@ func New(deps Dependencies) (*Server, error) {
 		tsvc.WithGroupSlugResolver(deps.ControlPlane.MerchantGroupSlugResolver()).WithGroupIDResolver(deps.ControlPlane.MerchantGroupIDResolver()).WithGroupSearchResolver(deps.ControlPlane.MerchantGroupSearchResolver())
 		s.merchants = tsvc
 		if deps.Runtime != nil {
-			deps.Runtime.Merchants = tsvc
+			deps.Runtime.ArmMerchantsService(tsvc, secretStore)
 			// #748: live-reachability probe for /readyz (nil-safe no-op for the
 			// manifest plane / DB-backed store — only a Vault-backed store checks).
 			deps.Runtime.MerchantSecretPing = secretBackend.Ping

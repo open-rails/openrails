@@ -819,7 +819,7 @@ export interface AlertRule {
 export interface MerchantWebhook {
   id: string
   name: string
-  url: string
+  destination_host: string
   format: WebhookFormat
   enabled: boolean
   created_at: string

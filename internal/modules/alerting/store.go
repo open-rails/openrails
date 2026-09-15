@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -17,7 +18,8 @@ import (
 // resolve to the request/eval merchant's pinned connection (RLS); the armed-
 // merchant scan runs cross-merchant on the base pool.
 type store struct {
-	db *db.DB
+	db      *db.DB
+	secrets merchants.MerchantSecretStore
 }
 
 func newStore(database *db.DB) *store { return &store{db: database} }
@@ -158,14 +160,22 @@ func derefMerchantIDs(rows []*uuid.UUID) []uuid.UUID {
 
 // --- webhooks ----------------------------------------------------------------
 
-func (s *store) createWebhook(ctx context.Context, name, url string, format WebhookFormat, enabled bool) (Webhook, error) {
+func (s *store) createWebhook(ctx context.Context, id uuid.UUID, name, host string, version int32, format WebhookFormat, enabled bool) (Webhook, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return Webhook{}, err
 	}
 	row, err := s.db.Gen(ctx).CreateMerchantWebhook(ctx, gen.CreateMerchantWebhookParams{
-		MerchantID: mid.UUID(), Name: name, Url: url, Format: string(format), Enabled: enabled,
+		ID: id, MerchantID: mid.UUID(), Name: name, DestinationHost: host, SecretVersion: version, Format: string(format), Enabled: enabled,
 	})
+	if err != nil {
+		return Webhook{}, err
+	}
+	return webhookFromRow(row), nil
+}
+
+func (s *store) rotateWebhookURL(ctx context.Context, id uuid.UUID, host string, version int32) (Webhook, error) {
+	row, err := s.db.Gen(ctx).RotateMerchantWebhookURL(ctx, gen.RotateMerchantWebhookURLParams{ID: id, DestinationHost: host, SecretVersion: version})
 	if err != nil {
 		return Webhook{}, err
 	}
@@ -362,7 +372,7 @@ func rulesFromRows(rows []gen.OpenrailsAlertRule) ([]Rule, error) {
 
 func webhookFromRow(row gen.OpenrailsMerchantWebhook) Webhook {
 	return Webhook{
-		ID: row.ID, MerchantID: row.MerchantID, Name: row.Name, URL: row.Url,
+		ID: row.ID, MerchantID: row.MerchantID, Name: row.Name, DestinationHost: row.DestinationHost, secretVersion: int(row.SecretVersion),
 		Format: WebhookFormat(row.Format), Enabled: row.Enabled,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}

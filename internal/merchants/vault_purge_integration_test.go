@@ -271,3 +271,63 @@ func TestVaultCleanupCannotRunBeforeDatabaseCommit(t *testing.T) {
 		require.NotEqual(t, f.id.UUID(), *row.MerchantID)
 	}
 }
+
+func TestManifestManagedWebhookPurge(t *testing.T) {
+	for _, backend := range []string{config.SecretBackendDB, config.SecretBackendVault} {
+		t.Run(backend, func(t *testing.T) {
+			f := newVaultPurgeFixture(t)
+			ctx := context.Background()
+			cfg := *f.cfg
+			cfg.SecretBackend = backend
+			cfg.MerchantSource = config.MerchantSourceManifest
+			cfg.Encryption = &config.EncryptionConfig{MasterKey: "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8="}
+			manifest := merchants.NewManifestSecretStore()
+			providerName, err := merchants.PSPSecretName("stripe", "test", "acct_manifest", "secret_key")
+			require.NoError(t, err)
+			_, err = manifest.Seeder().Put(ctx, f.id, providerName, "manifest-provider-secret")
+			require.NoError(t, err)
+			composed, err := merchantsecrets.BuildManifest(ctx, &cfg, manifest, f.pool)
+			require.NoError(t, err)
+			name := merchants.AlertWebhookURLSecretName(uuid.New())
+			_, err = composed.Secrets.Put(ctx, f.id, name, "https://hooks.example/path-credential?key=query-credential")
+			require.NoError(t, err)
+			_, err = composed.Secrets.Put(ctx, f.id, providerName, "forbidden-provider-write")
+			require.ErrorIs(t, err, merchants.ErrManifestSecretsReadOnly)
+			require.ErrorIs(t, composed.Secrets.Delete(ctx, f.id, providerName), merchants.ErrManifestSecretsReadOnly)
+			names, err := composed.Secrets.List(ctx, f.id)
+			require.NoError(t, err)
+			require.ElementsMatch(t, []string{providerName, name}, names)
+			// A persisted provider with no manifest entry must not become a fallback.
+			foreignName, err := merchants.PSPSecretName("stripe", "test", "unrelated", "secret_key")
+			require.NoError(t, err)
+			_, err = f.store.Secrets.Put(ctx, f.id, foreignName, "unrelated-managed-provider")
+			require.NoError(t, err)
+			_, err = composed.Secrets.Get(ctx, f.id, foreignName)
+			require.ErrorIs(t, err, merchants.ErrSecretNotFound)
+			names, err = composed.Secrets.List(ctx, f.id)
+			require.NoError(t, err)
+			require.NotContains(t, names, foreignName)
+			// Exercise the actual runtime service with additional transparent wrappers,
+			// so cleanup must retain namespace filtering through their nesting.
+			composed.Secrets = merchants.NewLifecycleSecretStore(f.database, merchants.NewCachedSecretStore(composed.Secrets, time.Minute))
+			_, err = composed.Secrets.Get(ctx, f.id, name)
+			require.NoError(t, err)
+			svc, err := merchants.NewService(f.pool, composed.Secrets, "test")
+			require.NoError(t, err)
+			svc.WithDestructivePolicy(purgeAllowed{})
+			inventory, err := svc.TakePurgeInventory(ctx, f.id)
+			require.NoError(t, err)
+			require.NoError(t, svc.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, Actor: "test"}))
+			_, err = composed.Secrets.Get(ctx, f.id, name)
+			require.ErrorIs(t, err, merchants.ErrSecretNotFound)
+			provider, err := manifest.Get(ctx, f.id, providerName)
+			require.NoError(t, err)
+			require.Equal(t, "manifest-provider-secret", provider.Value)
+			if backend == config.SecretBackendVault {
+				// The scoped cleanup does not touch unrelated managed provider names.
+				_, err = f.store.Secrets.Get(ctx, f.id, foreignName)
+				require.NoError(t, err)
+			}
+		})
+	}
+}

@@ -76,8 +76,17 @@ SELECT merchant_id FROM openrails.armed_alert_merchant_ids();
 -- ============================================================================
 
 -- name: CreateMerchantWebhook :one
-INSERT INTO openrails.merchant_webhooks (merchant_id, name, url, format, enabled)
-VALUES (sqlc.arg(merchant_id)::uuid, $1, $2, $3, $4)
+INSERT INTO openrails.merchant_webhooks (id, merchant_id, name, destination_host, secret_version, format, enabled)
+VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(name), sqlc.arg(destination_host), sqlc.arg(secret_version)::integer, sqlc.arg(format), sqlc.arg(enabled))
+RETURNING *;
+
+-- name: RotateMerchantWebhookURL :one
+UPDATE openrails.merchant_webhooks
+   SET destination_host = sqlc.arg(destination_host),
+       secret_version = sqlc.arg(secret_version)::integer,
+       updated_at = current_timestamp
+ WHERE id = sqlc.arg(id)::uuid
+   AND secret_version <= sqlc.arg(secret_version)::integer
 RETURNING *;
 
 -- name: GetMerchantWebhook :one

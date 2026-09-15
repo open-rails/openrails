@@ -60,6 +60,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   createPrice: vi.fn(),
   createProduct: vi.fn(),
   createWebhook: vi.fn(),
+  rotateWebhookURL: vi.fn(),
   deactivatePrice: vi.fn(),
   deactivateProduct: vi.fn(),
   deleteCustomerUsageRateOverride: vi.fn(),

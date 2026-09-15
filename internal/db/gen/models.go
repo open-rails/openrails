@@ -838,14 +838,15 @@ type OpenrailsMerchantSecret struct {
 
 // #736 operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.
 type OpenrailsMerchantWebhook struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Name       string
-	Url        string
-	Format     string
-	Enabled    bool
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID              uuid.UUID
+	MerchantID      uuid.UUID
+	Name            string
+	DestinationHost string
+	SecretVersion   int32
+	Format          string
+	Enabled         bool
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // #672 per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once.

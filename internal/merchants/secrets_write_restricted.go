@@ -3,6 +3,7 @@ package merchants
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"path"
 	"strings"
 
@@ -84,4 +85,14 @@ func (s *writeRestrictedSecretStore) Delete(ctx context.Context, merchantID merc
 
 func (s *writeRestrictedSecretStore) List(ctx context.Context, merchantID merchant.ID) ([]string, error) {
 	return s.inner.List(ctx, merchantID)
+}
+
+// AlertWebhookURLSecretName names the complete credential-bearing destination,
+// including userinfo, path and query, in the merchant's existing secret store.
+func AlertWebhookURLSecretName(id uuid.UUID) string {
+	return "alert_webhooks/" + id.String() + "/url"
+}
+
+func AlertWebhookURLWritePattern() string {
+	return strings.Replace(AlertWebhookURLSecretName(uuid.Nil), uuid.Nil.String(), "*", 1)
 }

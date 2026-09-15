@@ -19,6 +19,7 @@ import {
   createPrice,
   createProduct,
   createWebhook,
+  rotateWebhookURL,
   deactivatePrice,
   deactivateProduct,
   deleteAlertRule,
@@ -892,6 +893,16 @@ export const adminMutations = {
     mutationOptions({
       mutationKey: [...queryKeys.alerts(), "webhooks", "create"],
       mutationFn: (webhook: WebhookRequest) => createWebhook(webhook),
+      onSuccess: invalidateExactOnSuccess(queryClient, [
+        ...queryKeys.alerts(),
+        "webhooks",
+      ]),
+    }),
+  rotateWebhookURL: (queryClient: QueryClient) =>
+    mutationOptions({
+      mutationKey: [...queryKeys.alerts(), "webhooks", "rotate"],
+      mutationFn: ({ id, url }: { id: string; url: string }) =>
+        rotateWebhookURL(id, url),
       onSuccess: invalidateExactOnSuccess(queryClient, [
         ...queryKeys.alerts(),
         "webhooks",

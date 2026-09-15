@@ -843,6 +843,7 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	webhooks.Handle(http.MethodGet, "", h(httphandlers.ListMerchantWebhooks), metricsRead...)
 	webhooks.Handle(http.MethodPost, "", h(httphandlers.CreateMerchantWebhook), settingsWrite...)
 	webhooks.Handle(http.MethodDelete, "/:id", h(httphandlers.DeleteMerchantWebhook), settingsWrite...)
+	webhooks.Handle(http.MethodPut, "/:id/url", h(httphandlers.RotateMerchantWebhookURL), settingsWrite...)
 
 	notifications := rr.Group("/notifications")
 	notifications.Handle(http.MethodGet, "", h(httphandlers.ListMerchantNotifications), metricsRead...)

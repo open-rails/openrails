@@ -122,12 +122,17 @@ func Build(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, erro
 	if pool == nil {
 		return nil, fmt.Errorf("build merchant secret store: db pool is required")
 	}
-	// MODE 1 (#723): no persistent merchant-secret store exists. Callers must
-	// serve the runtime's in-memory manifest plane via BuildManifest instead —
-	// constructing a DB/Vault store here would run silently empty.
+	// Provider credentials in manifest deployments must stay in the manifest.
+	// BuildManifest supplies the narrow managed webhook namespace beside it.
 	if cfg.IsManifestMerchantSource() {
-		return nil, fmt.Errorf("merchant_source=manifest constructs no merchant-secret store (#723): credentials live in memory from the boot manifest; use BuildManifest over Runtime.ManifestSecrets")
+		return nil, fmt.Errorf("merchant_source=manifest requires BuildManifest so provider credentials remain in the manifest")
 	}
+	return buildManaged(ctx, cfg, pool)
+}
+
+// buildManaged constructs the existing persistent secret backend. Manifest
+// deployments use it only for the explicitly routed alert-webhook namespace.
+func buildManaged(ctx context.Context, cfg *config.Config, pool *db.Pool) (*Store, error) {
 	backend := cfg.SecretStoreBackend()
 
 	// Open a Vault connection whenever Vault is configured, then probe what the
@@ -251,8 +256,10 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 	if err != nil {
 		return nil, fmt.Errorf("build merchant encryptor: %w", err)
 	}
-	if err := enforceEncryptionPosture(enc.Enabled(), cfg.RequiresSecretEncryption()); err != nil {
-		return nil, err
+	if !cfg.IsManifestMerchantSource() {
+		if err := enforceEncryptionPosture(enc.Enabled(), cfg.RequiresSecretEncryption()); err != nil {
+			return nil, err
+		}
 	}
 	store, err := merchants.NewEncryptedSecretStore(dbStore, enc)
 	if err != nil {
@@ -263,34 +270,31 @@ func buildDBSecretStore(cfg *config.Config, pool *db.Pool) (merchants.MerchantSe
 	if !enc.Enabled() {
 		store = merchants.NewWriteRestrictedSecretStore(store, map[string]string{
 			merchants.SolanaPrivateKeyWritePattern(): "ENCRYPTION_MASTER_KEY is required before storing DB-backed Solana private keys",
+			merchants.AlertWebhookURLWritePattern():  "ENCRYPTION_MASTER_KEY is required before storing DB-backed webhook credentials",
 		})
 	}
 	return merchants.NewCachedSecretStore(store, merchants.DefaultSecretCacheTTL), nil
 }
 
-// BuildManifest returns the MODE-1 (#723) store view: the runtime store is the
-// in-memory manifest plane (read-only; the manifest IS the store), and Vault —
-// when enabled — serves Transit signing ONLY (KV is never consulted; #661's
-// independence of KV vs Transit carries over). SolanaCanSign is true: the
-// memory store can hold+serve a manifest-declared keypair, and a Vault
-// connection adds transit. SecretWrite stays true so the provider-config write
-// routes MOUNT and serve the pointed 405 mode rejection instead of a bare 404.
-func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.ManifestSecretStore) (*Store, error) {
-	if store == nil {
-		return nil, fmt.Errorf("build manifest secret plane: store is required")
+// BuildManifest combines immutable manifest provider credentials with the
+// operator-owned alert-webhook namespace in the configured managed backend.
+// Provider writes still receive the manifest-mode refusal; managed URL writes
+// require encryption or Vault. A missing DB encryption key leaves the optional
+// webhook feature disabled without requiring provider credentials in the DB.
+func BuildManifest(ctx context.Context, cfg *config.Config, store *merchants.ManifestSecretStore, pool *db.Pool) (*Store, error) {
+	if store == nil || pool == nil {
+		return nil, fmt.Errorf("build manifest secret plane: manifest and database are required")
 	}
-	transitStore, err := BuildTransit(ctx, cfg)
+	backend, err := buildManaged(ctx, cfg, pool)
 	if err != nil {
 		return nil, err
 	}
-	return &Store{
-		Secrets:       store,
-		SolanaTransit: transitStore.SolanaTransit,
-		SolanaCanSign: true,
-		SecretWrite:   true,
-		VaultAuth:     transitStore.VaultAuth,
-		vclient:       transitStore.vclient,
-	}, nil
+	backend.Secrets = merchants.NewManifestManagedSecretStore(store, backend.Secrets)
+	// Manifest provider keys remain available and immutable, while operator
+	// webhook destinations are persisted only through the managed backend.
+	backend.SolanaCanSign = true
+	backend.SecretWrite = true
+	return backend, nil
 }
 
 // BuildTransit opens the Vault Transit signing client when Vault is enabled
