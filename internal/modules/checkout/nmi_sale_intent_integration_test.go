@@ -538,3 +538,49 @@ func TestNMISaleIntent_ProvenPreSendParkCanResume(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 	require.Equal(t, 1, fx.paymentCount(t))
 }
+
+func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T) {
+	fx := newSaleIntentFixture(t)
+	fx.gateway.saleMode.Store("ambiguous500")
+	fx.gateway.hidden.Store(true)
+	row := fx.enqueueAndExecute(t, "sale-lease-"+uuid.NewString()[:8])
+	_, err := fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET status='in_flight',claimed_until=now()-interval '1 minute',expires_at=now()-interval '1 minute' WHERE id=$1`, row.ID)
+	require.NoError(t, err)
+	fx.advanceClock(2 * time.Minute)
+	stats, err := fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	require.Equal(t, 1, stats.Unknown)
+	recovered, err := intents.NewStore(fx.db).Get(fx.ctx, row.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, recovered.Status)
+	require.EqualValues(t, 2, recovered.Attempts)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	// A later pre-send gate can park a reclaimed attempt, but that does not
+	// make its original payload mutable or restore expiry/revival semantics.
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET status='pending' WHERE id=$1`, row.ID)
+	require.NoError(t, err)
+	changed := fx.payload
+	changed.AmountMicros += 1_000_000
+	existing, err := intents.NewStore(fx.db).Enqueue(fx.ctx, intents.EnqueueParams{MerchantID: row.MerchantID, Provider: row.Rail, IntentType: row.IntentType, PspID: *row.PspID, PriceID: row.PriceID, Payload: changed, IdempotencyKey: row.IdempotencyKey, NextAttemptAt: time.Now(), Origin: intents.OriginUser})
+	require.NoError(t, err)
+	require.JSONEq(t, string(row.Payload), string(existing.Payload))
+	require.EqualValues(t, 2, existing.Attempts)
+	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	existing, err = intents.NewStore(fx.db).Get(fx.ctx, row.ID)
+	require.NoError(t, err)
+	require.NotEqual(t, intents.StatusExpired, existing.Status)
+
+	// A queued operation with a proven pre-send park still expires normally.
+	handler := fx.runner.Registry.Lookup(TypeNMISale).(*NMISaleIntentHandler)
+	handler.Sale.ResolveNMIClient = func(context.Context, string) (*nmi.NMIClient, error) { return nil, errors.New("not armed") }
+	queued := fx.enqueueAndExecute(t, "sale-queued-"+uuid.NewString()[:8])
+	require.Zero(t, queued.Attempts)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.rail_intents SET expires_at=now()-interval '1 minute' WHERE id=$1`, queued.ID)
+	require.NoError(t, err)
+	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	expired, err := intents.NewStore(fx.db).Get(fx.ctx, queued.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusExpired, expired.Status)
+}

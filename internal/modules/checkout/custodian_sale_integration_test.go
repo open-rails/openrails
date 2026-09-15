@@ -356,6 +356,12 @@ func TestCustodianSale_AmbiguousNeverDeclines(t *testing.T) {
 
 	intent := fx.enqueueAndExecute(t, "vc-key-"+uuid.NewString()[:8])
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status)
+	resumed := intent
+	resumed.Attempts = 2
+	outcome := fx.runner.Registry.Lookup(TypeCustodianSale).Execute(fx.ctx, resumed)
+	require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
+	require.EqualValues(t, 1, fx.bt.proxyCalls.Load(), "disabled verification never permits another forwarded sale")
+
 	var n int
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
 		"SELECT count(*) FROM openrails.payments WHERE rail='nmi' AND price_id=$1", fx.priceID).Scan(&n))

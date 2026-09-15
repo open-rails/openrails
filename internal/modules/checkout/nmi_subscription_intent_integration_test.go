@@ -261,8 +261,23 @@ func TestNMISubscriptionIntent_OrphanedRemoteCreateIsRepaired(t *testing.T) {
 	_, ok := fx.localSub(t)
 	require.False(t, ok, "nothing registered yet")
 
+	fx.gateway.subExists.Store(false)
+	fx.gateway.charged.Store(false)
 	fx.runner.Clock = clockwork.NewFakeClockAt(time.Now().UTC().Add(2 * time.Minute))
 	_, err := fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	pending, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status)
+	resumed := pending
+	resumed.Attempts = 2
+	outcome := fx.runner.Registry.Lookup(TypeNMISubscriptionCreate).Execute(fx.ctx, resumed)
+	require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	fx.gateway.subExists.Store(true)
+	fx.gateway.charged.Store(true)
+	fx.runner.Clock = clockwork.NewFakeClockAt(time.Now().UTC().Add(20 * time.Minute))
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
 
 	final, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)

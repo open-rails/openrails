@@ -123,6 +123,9 @@ func (h *NMISaleIntentHandler) CheckRelevance(context.Context, gen.OpenrailsRail
 }
 
 func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
+	}
 	if h.Sale == nil || h.Sale.PurchaseService == nil {
 		return intents.Parked("checkout sale service not wired")
 	}
@@ -141,9 +144,6 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, intent gen.Openrails
 
 	// A durable attempt may have crossed the provider boundary. A resumed
 	// non-idempotent operation can only reconcile, never infer permission to send.
-	if intent.Attempts > 1 {
-		return h.Verify(ctx, intent)
-	}
 
 	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
 	if err != nil {

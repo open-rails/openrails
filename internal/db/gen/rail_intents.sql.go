@@ -395,35 +395,35 @@ INSERT INTO openrails.rail_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN 'pending'
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
         ELSE openrails.rail_intents.status
     END,
     next_attempt_at = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.next_attempt_at
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
         ELSE openrails.rail_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.payload
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
         ELSE openrails.rail_intents.payload
     END,
     psp_id = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.psp_id
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
         ELSE openrails.rail_intents.psp_id
     END,
     origin = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
         ELSE openrails.rail_intents.origin
     END,
     origin_reason = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.origin_reason
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE openrails.rail_intents.origin_reason
     END,
     actor = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.actor
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE openrails.rail_intents.actor
     END,
     expires_at = CASE
-        WHEN openrails.rail_intents.status IN ('pending', 'superseded', 'expired') THEN EXCLUDED.expires_at
+        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE openrails.rail_intents.expires_at
     END,
     attempts = CASE
@@ -470,7 +470,8 @@ type EnqueueRailIntentParams struct {
 // Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 // status:
 //
-//	pending              -> refresh schedule/payload (latest enqueue wins)
+//	pending, attempts=0  -> refresh schedule/payload (no possible submission)
+//	pending, attempts>0  -> preserve the original operation after reclaimed park
 //	superseded | expired -> REVIVE: the intent became relevant again (e.g. a
 //	                        re-cancel after a resume superseded the delete);
 //	                        attempts/failure state reset

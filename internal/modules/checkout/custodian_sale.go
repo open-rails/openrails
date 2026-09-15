@@ -281,6 +281,9 @@ func (h *CustodianSaleIntentHandler) gatewayQueryClient(cfg *custodialPSP) (*nmi
 }
 
 func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
+	}
 	if h.Sale == nil || h.Sale.PurchaseService == nil {
 		return intents.Parked("custodian checkout service not wired")
 	}
@@ -293,10 +296,6 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 		return intents.Parked(fmt.Sprintf("custodian checkout not armed: %v", err))
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-
-	if intent.Attempts > 1 {
-		return h.Verify(ctx, intent)
-	}
 
 	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
 	if err != nil {

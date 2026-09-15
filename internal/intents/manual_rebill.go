@@ -160,6 +160,9 @@ func (h *ManualRebillHandler) CheckRelevance(ctx context.Context, intent gen.Ope
 }
 
 func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
+	}
 	client, err := h.railClient(ctx, intent)
 	if err != nil {
 		// Unarmable (unconfigured, or declared-but-secretless — fail closed):
@@ -172,10 +175,6 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	p, err := decodeManualRebillPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
-	}
-
-	if intent.Attempts > 1 {
-		return h.Verify(ctx, intent)
 	}
 
 	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
@@ -276,10 +275,6 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 // Verify reconciles the same submitted period from positive evidence only.
 // Empty search results retain uncertainty and never arm another charge.
 func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
-	client, cerr := h.railClient(ctx, intent)
-	if cerr != nil {
-		return Ambiguous("nmi client unavailable, cannot verify: " + cerr.Error())
-	}
 	p, err := decodeManualRebillPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
@@ -287,6 +282,10 @@ func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 	txnID := EvidenceString(intent, "transaction_id")
 	found := txnID != ""
 	if !found {
+		client, cerr := h.railClient(ctx, intent)
+		if cerr != nil {
+			return Ambiguous("nmi client unavailable, cannot verify: " + cerr.Error())
+		}
 		txnID, found, err = h.findSuccessfulSale(ctx, client, p)
 	}
 	if err != nil {

@@ -137,6 +137,9 @@ func (h *NMISubscriptionCreateIntentHandler) CheckRelevance(context.Context, gen
 }
 
 func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) intents.Outcome {
+	if intent.Attempts > 1 {
+		return h.Verify(ctx, intent)
+	}
 	if h.Checkout == nil {
 		return intents.Parked("checkout service not wired")
 	}
@@ -152,10 +155,6 @@ func (h *NMISubscriptionCreateIntentHandler) Execute(ctx context.Context, intent
 		return intents.Parked("nmi client is read-only (mode=readonly)")
 	}
 	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
-
-	if intent.Attempts > 1 {
-		return h.Verify(ctx, intent)
-	}
 
 	// NMI charges whole cents; the payload carries micros. Error (never round)
 	// on a sub-cent remainder — same policy as the one-time sale path. Terminal,

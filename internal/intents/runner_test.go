@@ -126,6 +126,9 @@ func (f *fakeLedger) MarkUnknown(_ context.Context, id uuid.UUID, next time.Time
 	f.transition[id] = StatusUnknownNeedsVerify
 	f.reasons[id] = reason
 	f.nextAt[id] = next
+	if len(evidence) > 0 {
+		f.enqueued.ResultEvidence, _ = json.Marshal(evidence)
+	}
 	return nil
 }
 func (f *fakeLedger) MarkFailedTerminal(_ context.Context, id uuid.UUID, reason string, ev map[string]any) error {
