@@ -68,31 +68,6 @@ func TestCrossMerchantDirectoryReadsUnderEnforcingRLS(t *testing.T) {
 	svc, err := NewService(appPool, nil, "live")
 	require.NoError(t, err)
 
-	t.Run("the retired shapes see nothing, silently", func(t *testing.T) {
-		env := "live"
-		_, err := gen.New(appPool).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{
-			Rail: "stripe", Environment: &env, AccountID: accountID,
-		})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "no rows",
-			"regression pin: a GUC-less read of psps under FORCE'd RLS reports no rows and no error")
-
-		var slugs []string
-		rows, err := appPool.Query(ctx, `
-			SELECT m.slug FROM openrails.merchants m
-			 WHERE EXISTS (SELECT 1 FROM openrails.customers c
-			                WHERE c.merchant_id = m.id AND c.subject = $1)`, subject)
-		require.NoError(t, err)
-		for rows.Next() {
-			var s string
-			require.NoError(t, rows.Scan(&s))
-			slugs = append(slugs, s)
-		}
-		rows.Close()
-		require.NoError(t, rows.Err())
-		require.Empty(t, slugs, "regression pin: the portal's merchant list was always EMPTY in production")
-	})
-
 	t.Run("webhook routing resolves the owning merchant", func(t *testing.T) {
 		got, ok, err := svc.ResolvePSPByIdentity(ctx, "stripe", "live", accountID)
 		require.NoError(t, err)

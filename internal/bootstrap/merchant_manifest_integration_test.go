@@ -102,9 +102,9 @@ CREATE POLICY merchant_isolation ON openrails.psps
 -- #824: the subject-first directory function targets customers; this harness
 -- replays that function from the baseline, so the table must exist.
 CREATE TABLE IF NOT EXISTS openrails.customers (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    id uuid NOT NULL,
     merchant_id uuid NOT NULL,
-    subject text
+    PRIMARY KEY (merchant_id, id)
 );
 
 -- or#897: the billing-policy registry the manifest loader now installs.
