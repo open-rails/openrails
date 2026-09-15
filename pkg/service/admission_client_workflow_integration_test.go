@@ -25,7 +25,10 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 	otherMerchant := standalone.ProvisionOwnedMerchant("admission-other-" + uuid.NewString())
 	otherClient, err := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey(otherMerchant.APIKey), openrails.WithTimeout(30*time.Second))
 	require.NoError(t, err)
-	clients := map[string]*openrails.Client{"embedded": embeddedClient, "remote": standalone.Client()}
+	remoteMerchant := standalone.ProvisionOwnedMerchant("admission-remote-" + uuid.NewString())
+	remoteClient, err := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey(remoteMerchant.APIKey), openrails.WithTimeout(30*time.Second))
+	require.NoError(t, err)
+	clients := map[string]*openrails.Client{"embedded": embeddedClient, "remote": remoteClient}
 	for name, client := range clients {
 		t.Run(name, func(t *testing.T) {
 			payer := openrails.CustomerID(uuid.New())
@@ -33,7 +36,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			require.NoError(t, err)
 			deadline := time.Now().Add(time.Hour).Unix()
 			in := openrails.AdmitRequest{CustomerID: payer.String(), Invoker: "original", InvokerType: openrails.InvokerTypePayer,
-				Currency: "USD", EstimatedAmount: 200, RequestID: uuid.NewString(), ExpiresAt: &deadline}
+				Currency: "USD", EstimatedAmount: 200, RequestID: ".", ExpiresAt: &deadline}
 			admit := func(in openrails.AdmitRequest) openrails.AdmitBatchVerdict {
 				t.Helper()
 				out, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{in})
@@ -63,6 +66,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			require.True(t, first.Allowed())
 			require.Equal(t, "open", first.Result.State)
 			require.False(t, first.Result.Replayed)
+			require.NoError(t, client.ExtendHold(ctx, in.RequestID, time.Now().Add(2*time.Hour)))
 			_, err = otherClient.Capture(ctx, in.RequestID, 1, nil)
 			require.ErrorIs(t, err, openrails.ErrNotFound, "another merchant cannot resolve original request ownership")
 			require.ErrorIs(t, otherClient.Release(ctx, in.RequestID), openrails.ErrNotFound)
@@ -122,7 +126,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 
 			// A different request cannot claim an existing usage event. The unique
 			// insert fails after the ledger write, proving the entire capture rolls back.
-			in.RequestID = uuid.NewString()
+			in.RequestID = ".."
 			in.EstimatedAmount = 100
 			require.True(t, admit(in).Allowed())
 			_, err = client.Capture(ctx, in.RequestID, 50, &usage)
@@ -132,12 +136,14 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			require.EqualValues(t, 500, balance.BalanceAmount)
 			require.EqualValues(t, 100, balance.HeldAmount)
 			require.True(t, admit(in).Allowed(), "failed usage insert leaves the original operation open")
+			require.NoError(t, client.ExtendHold(ctx, in.RequestID, time.Now().Add(2*time.Hour)))
+			require.NoError(t, client.Release(ctx, in.RequestID))
 			usage.SourceID = in.RequestID
 			settled, err := client.Capture(ctx, in.RequestID, 50, &usage)
 			require.NoError(t, err)
 			require.False(t, settled.Replayed)
 
-			in.RequestID = uuid.NewString()
+			in.RequestID = "path/%?#雪"
 			in.EstimatedAmount = 0
 			in.ExpiresAt = nil
 			require.True(t, admit(in).Allowed())
