@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
@@ -167,7 +168,10 @@ func TestAutoTopupSafety_DisabledAndCrossCustomerNeverReserve(t *testing.T) {
 	enabled := true
 	amount := in.Amount
 	_, err = svc.UpsertAccountSettings(ctx, other, currency, money.AccountSettingsInput{AutoTopupEnabled: &enabled, AutoTopupAmount: &amount, AutoTopupPaymentMethod: &pm})
-	require.NoError(t, err)
+	var constraint *pgconn.PgError
+	require.ErrorAs(t, err, &constraint)
+	require.Equal(t, "23503", constraint.Code)
+	require.Equal(t, "money_settings_auto_topup_payment_method_fk", constraint.ConstraintName)
 	in.CustomerID = other.UUID()
 	_, err = svc.ReserveAutoTopup(ctx, in)
 	require.ErrorIs(t, err, money.ErrAutoTopupSafety)

@@ -53,11 +53,12 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	batch, err := client.ListActiveEntitlements(ctx, []string{subject, "ghost-" + subject}, time.Time{})
+	ghost := uuid.NewString()
+	batch, err := client.ListActiveEntitlements(ctx, []string{subject, ghost}, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, batch[subject], 1)
 	require.Equal(t, "premium", batch[subject][0].Entitlement)
-	require.Empty(t, batch["ghost-"+subject])
+	require.Empty(t, batch[ghost])
 
 	single, err := client.ListEntitlements(ctx, subject, time.Time{})
 	require.NoError(t, err)

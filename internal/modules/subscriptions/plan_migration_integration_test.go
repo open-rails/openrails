@@ -186,7 +186,7 @@ func (f *planMigrationFixture) createSubscriptionOnRail(t *testing.T, ctx contex
 	t.Helper()
 	var productID uuid.UUID
 	require.NoError(t, f.pool.QueryRow(ctx, `SELECT product_id FROM openrails.prices WHERE id = $1`, priceID).Scan(&productID))
-	subject := "planmig-customer-" + uuid.NewString()
+	subject := uuid.NewString()
 	var customerID uuid.UUID
 	require.NoError(t, f.pool.QueryRow(ctx,
 		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1,$2) RETURNING id`,

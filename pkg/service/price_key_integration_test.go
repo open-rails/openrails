@@ -184,6 +184,6 @@ func seedCustomerPK(t *testing.T, ctx context.Context, pool *pgxpool.Pool, merch
 	var id uuid.UUID
 	require.NoError(t, pool.QueryRow(ctx,
 		`INSERT INTO openrails.customers (merchant_id, id) VALUES ($1, $2) RETURNING id`,
-		merchantID, "price-key-test-"+uuid.NewString()).Scan(&id))
+		merchantID, uuid.NewString()).Scan(&id))
 	return id
 }

@@ -406,8 +406,9 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	// in one call (dupes deduped), an entry per requested subject, plus the
 	// empty-subjects / over-cap validation errors (#555: merchant from the
 	// credential, no issuer).
+	ghost := uuid.NewString()
 	ents, err := c.ListActiveEntitlements(ctx,
-		[]string{env.subject, " " + env.subject, "ghost-" + env.subject}, time.Time{})
+		[]string{env.subject, " " + env.subject, ghost}, time.Time{})
 	require.NoError(t, err, "%s entitlements", env.side)
 	r.Entitlements = observeEntitlements(ents[env.subject], env.payer)
 	singleEnts, err := c.ListEntitlements(ctx, env.subject, time.Time{})
@@ -419,14 +420,14 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	hasMissingEntitlement, err := c.HasEntitlement(ctx, env.subject, "missing", time.Time{})
 	require.NoError(t, err, "%s has missing entitlement", env.side)
 	r.HasMissingEntitlement = hasMissingEntitlement
-	ghostRecs, ghostPresent := ents["ghost-"+env.subject]
+	ghostRecs, ghostPresent := ents[ghost]
 	r.EntitlementsUnknownEmpty = ghostPresent && len(ghostRecs) == 0
 	r.EntitlementsKeyCount = len(ents)
 	_, err = c.ListActiveEntitlements(ctx, []string{" ", ""}, time.Time{})
 	r.ErrEntitlementsNoSubjects = observeErr(t, env.side+" entitlements empty subjects", err)
 	overCap := make([]string, 501)
 	for i := range overCap {
-		overCap[i] = fmt.Sprintf("s-%d", i)
+		overCap[i] = uuid.NewString()
 	}
 	_, err = c.ListActiveEntitlements(ctx, overCap, time.Time{})
 	r.ErrEntitlementsOverCap = observeErr(t, env.side+" entitlements over cap", err)

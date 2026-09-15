@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -49,6 +50,15 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 	})
 	if err != nil {
 		msg := err.Error()
+		if errors.Is(err, billingimport.ErrInvalidPSPReference) {
+			r.APIError(&api.APIError{
+				HTTPStatus: http.StatusBadRequest,
+				Type:       api.ErrorTypeInvalidRequest,
+				Code:       "invalid_psp_reference",
+				Message:    msg,
+			})
+			return
+		}
 		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") {
 			r.ErrorJSON(http.StatusBadRequest, msg)
 			return

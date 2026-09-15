@@ -148,11 +148,11 @@ func TestBillingImportHTTP(t *testing.T) {
 
 	t.Run("wrong-merchant credential cannot bind the book", func(t *testing.T) {
 		b := surface.ProvisionOwnedMerchant("bimp" + sfx)
-		// B posts A's book: its customer uuids are A's customers, so the book is
-		// refused at the door (#889) — nothing lands under A OR B.
+		// Customer UUIDs can be shared, but B cannot bind A's PSP account.
+		// That attribution failure rolls back the entire import.
 		status, body := requestJSON(t, http.MethodPost, importURL, b.APIKey, book)
 		require.Equalf(t, http.StatusBadRequest, status, "wrong merchant import: %s", string(body))
-		require.Contains(t, string(body), "owned by another merchant")
+		require.Contains(t, string(body), "invalid_psp_reference")
 		var n int
 		require.NoError(t, pool.QueryRow(ctx,
 			`SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1`, b.MerchantID.UUID()).Scan(&n))
