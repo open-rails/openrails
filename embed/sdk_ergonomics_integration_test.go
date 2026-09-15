@@ -19,46 +19,50 @@ import (
 // the real service-credential middleware end-to-end, and Verify is a true
 // authenticated readiness probe — good key OK, bad key ErrUnauthorized,
 // unreachable host ErrUnreachable, statically invalid URL a descriptive
-// per-call error (the no-error constructor stays I/O-free).
+// construction error without I/O.
 func TestSDKErgonomics_WithAPIKeyAndVerify(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
 	standalone := h.StartStandalone(money.DefaultCurrency)
 
 	// Good key: resolved by the real API-key gate -> AuthKit core chain.
-	good := openrails.NewRemote(standalone.BaseURL,
+	good, goodErr := openrails.NewRemote(standalone.BaseURL,
 		openrails.WithAPIKey(standalone.Token),
 		openrails.WithTimeout(30*time.Second),
 	)
+	if goodErr != nil {
+		t.Fatal(goodErr)
+	}
 	require.NoError(t, openrails.Verify(ctx, good), "Verify with a real minted API key")
 	settings, err := good.GetMerchantSettings(ctx)
 	require.NoError(t, err, "authenticated call wired via WithAPIKey")
 	require.NotNil(t, settings)
 
 	// Bad key: rejected by the real service-credential middleware -> 401.
-	bad := openrails.NewRemote(standalone.BaseURL,
+	bad, badErr := openrails.NewRemote(standalone.BaseURL,
 		openrails.WithAPIKey("openrails_st_wrong_token"),
 		openrails.WithTimeout(30*time.Second),
 	)
+	if badErr != nil {
+		t.Fatal(badErr)
+	}
 	require.ErrorIs(t, openrails.Verify(ctx, bad), openrails.ErrUnauthorized)
 
 	// Unreachable host: the fail-policy sentinel.
-	unreachable := openrails.NewRemote("http://127.0.0.1:1",
+	unreachable, unreachableErr := openrails.NewRemote("http://127.0.0.1:1",
 		openrails.WithAPIKey("whatever"),
 		openrails.WithTimeout(2*time.Second),
 	)
+	if unreachableErr != nil {
+		t.Fatal(unreachableErr)
+	}
 	require.ErrorIs(t, openrails.Verify(ctx, unreachable), openrails.ErrUnreachable)
 
-	// Statically invalid URL: constructor never errors; every call fails with a
-	// descriptive error instead (mintless-tokenFn pattern).
-	invalid := openrails.NewRemote("not a url", openrails.WithAPIKey("whatever"))
-	err = openrails.Verify(ctx, invalid)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "base URL")
-
-	// Empty key: descriptive per-call error naming the option.
-	empty := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey("  "))
-	err = openrails.Verify(ctx, empty)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "WithAPIKey")
+	// Static invalid configuration fails before any operation or I/O.
+	invalid, err := openrails.NewRemote("not a url", openrails.WithAPIKey("whatever"))
+	require.ErrorContains(t, err, "base URL")
+	require.Nil(t, invalid)
+	empty, err := openrails.NewRemote(standalone.BaseURL, openrails.WithAPIKey("  "))
+	require.ErrorContains(t, err, "WithAPIKey")
+	require.Nil(t, empty)
 }

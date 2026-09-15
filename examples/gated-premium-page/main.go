@@ -48,7 +48,7 @@ type config struct {
 
 type app struct {
 	cfg    config
-	client openrails.Client
+	client *openrails.Client
 	signer jwtkit.Signer
 }
 
@@ -85,11 +85,14 @@ func main() {
 
 	// Backend SDK client: API key auth, short per-call deadline, fail fast at
 	// boot (docs/standalone-integration.md "Backend integration").
-	client := openrails.NewRemote(cfg.baseURL,
+	client, err := openrails.NewRemote(cfg.baseURL,
 		openrails.WithAPIKey(cfg.apiKey),
 		openrails.WithCurrency("usd"),
 		openrails.WithTimeout(5*time.Second),
 	)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if err := openrails.Verify(context.Background(), client); err != nil {
 		log.Fatalf("openrails unreachable or bad OPENRAILS_API_KEY: %v", err)
 	}

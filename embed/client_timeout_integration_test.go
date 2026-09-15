@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
-// TestInProcessClientHasNoHiddenTimeout proves #767: an in-process SDK call
+// TestInProcessClientHonorsExplicitUnlimitedTimeout proves #767: an in-process SDK call
 // through Runtime.Client is bounded ONLY by the caller's ctx, not a hidden 2s
 // per-request deadline. Before the fix, Runtime.Client built the in-process
 // remote without openrails.WithTimeout(0), so every call inherited remote.go's
@@ -27,7 +27,7 @@ import (
 // for ~3s. A generous (10s) caller ctx must let the call block on the real
 // lock and still succeed — which is impossible if a hidden 2s deadline fires
 // first.
-func TestInProcessClientHasNoHiddenTimeout(t *testing.T) {
+func TestInProcessClientHonorsExplicitUnlimitedTimeout(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 
@@ -50,7 +50,10 @@ func TestInProcessClientHasNoHiddenTimeout(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
-	c := rt.Client()
+	c, cErr := rt.Client(WithRemoteOptions(openrails.WithTimeout(0)))
+	if cErr != nil {
+		t.Fatal(cErr)
+	}
 
 	// Seed the merchant_configurations row so the competing FOR UPDATE below
 	// has a row to lock, and so the timed call below is an UPDATE (which needs

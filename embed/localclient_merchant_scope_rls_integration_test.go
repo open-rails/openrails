@@ -57,11 +57,13 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 		customerID, uuid.UUID(boundID), customerID.String())
 	require.NoError(t, err)
 
-	client := rt.Client()
+	client, clientErr := rt.Client()
+	if clientErr != nil {
+		t.Fatal(clientErr)
+	}
 
 	t.Run("single Admit returns a VERDICT, not a 42501", func(t *testing.T) {
-		admitter, ok := client.(embed.SingleAdmitter)
-		require.True(t, ok, "Runtime.Client() must implement embed.SingleAdmitter")
+		admitter := client
 
 		resp, err := admitter.Admit(ctx, openrails.AdmitRequest{
 			CustomerID:      customerID.String(),

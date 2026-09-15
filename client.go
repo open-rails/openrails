@@ -1,5 +1,5 @@
 // Package openrails is the canonical OpenRails SDK surface (#338): ONE Go
-// interface (Client) with two constructors —
+// client implementation with two constructors —
 //
 //   - NewRemote(baseURL, opts...) talks to a standalone OpenRails over its
 //     service-credential-authenticated /v1/merchant/* routes (this file + remote.go,
@@ -174,33 +174,12 @@ type CustomerLookupClient interface {
 	HasProductAccess(ctx context.Context, subject, productID string) (bool, error)
 }
 
-// Client is the complete SDK surface. New hot-path callers should depend on the
-// smaller interfaces above.
-type Client interface {
-	AdmissionClient
-	UsageReportClient
-	PolicySyncClient
-	AdminFundingClient
-	CustomerLookupClient
-}
-
-// Verifier is implemented by clients that support an authenticated readiness
-// probe (both constructors' clients do). Kept OUT of Client so existing
-// third-party implementations of the interface keep compiling.
-type Verifier interface {
-	// Verify checks reachability AND credential validity via one cheap
-	// authenticated call (the db.Ping pattern). Call it from main for
-	// fail-fast-at-boot; constructors stay I/O-free.
-	Verify(ctx context.Context) error
-}
-
-// Verify runs the client's authenticated readiness probe (see Verifier).
-func Verify(ctx context.Context, c Client) error {
-	v, ok := c.(Verifier)
-	if !ok {
-		return fmt.Errorf("openrails: client does not support Verify")
+// Verify checks a client's authenticated readiness. Prefer client.Verify directly.
+func Verify(ctx context.Context, c *Client) error {
+	if c == nil {
+		return fmt.Errorf("openrails: client is nil")
 	}
-	return v.Verify(ctx)
+	return c.Verify(ctx)
 }
 
 // SelfIssuer is the issuer keying customers rows for self-service
@@ -217,13 +196,12 @@ func (id CustomerID) String() string  { return uuid.UUID(id).String() }
 func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
-// promotions, money-in settlement). Amount is in the currency's internal
-// precision.
+// promotions, money-in settlement). Amount is in the currency's native integer unit.
 type DepositCreditsRequest struct {
 	CustomerID *CustomerID
 	Invoker    string
 	Currency   string
-	// Amount is the deposit size in the currency's internal precision (e.g. cents for USD).
+	// Amount is the deposit size in the currency's internal precision (micros for USD).
 	Amount int64
 	// Source identifies the system of record for this deposit (e.g. "stripe", "manual").
 	Source string
@@ -240,7 +218,7 @@ type DepositCreditsRequest struct {
 	// same SourceID under a different Source is still the same deposit, so a
 	// retry that relabels its source cannot double-credit. An IDENTICAL replay
 	// is answered with the EXISTING grant (Replayed=true); a replay whose
-	// Amount differs is refused with ErrIdempotencyKeyReused (HTTP 409).
+	// amount, unit or expiry differs is refused with ErrIdempotencyKeyReused (HTTP 409).
 	SourceID    string
 	ExpiresAt   *time.Time
 	Description string
@@ -370,7 +348,7 @@ type BalanceResponse struct {
 
 // CreditAccount is the OpenRails service balance/policy snapshot for one
 // customer + currency pair. All amounts are in the currency's internal
-// precision (e.g. cents for USD).
+// precision (micros for USD).
 type CreditAccount struct {
 	CustomerID  string `json:"customer_id"`
 	Currency    string `json:"currency"`

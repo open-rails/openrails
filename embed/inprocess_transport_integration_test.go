@@ -75,7 +75,10 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 
 	// 4) End-to-end through the unified client: the transport injects the
 	// principal, the real gate authorizes, the handler answers.
-	c := rt.Client()
+	c, cErr := rt.Client()
+	if cErr != nil {
+		t.Fatal(cErr)
+	}
 	_, err = c.GetMerchantSettings(ctx)
 	require.NoError(t, err, "unified client through in-process transport")
 	require.NoError(t, openrails.Verify(ctx, c), "Verify through in-process transport")

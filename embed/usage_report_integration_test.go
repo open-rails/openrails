@@ -31,7 +31,10 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	standalone := h.StartStandalone(currency)
 	pool := h.Pool()
 
-	embeddedClient := embedded.Runtime().Client(embed.WithCurrency(currency))
+	embeddedClient, embeddedClientErr := embedded.Runtime().Client(embed.WithCurrency(currency))
+	if embeddedClientErr != nil {
+		t.Fatal(embeddedClientErr)
+	}
 	standaloneClient := standalone.Client()
 
 	merchantID := dbtest.TestMerchantID.UUID()

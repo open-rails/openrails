@@ -271,7 +271,7 @@ type scriptEnv struct {
 
 // runScript executes the identical operation sequence through one client and
 // returns the normalized observations.
-func runScript(t *testing.T, ctx context.Context, c openrails.Client, env scriptEnv) scriptResult {
+func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scriptEnv) scriptResult {
 	t.Helper()
 	var r scriptResult
 	payerID := env.payer.String()
@@ -537,7 +537,10 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	// #685: the embedded side is the UNIFIED client — Runtime.Client() over the
 	// in-process transport, traversing the real gate via the context-attached
 	// host principal (not the retired localClient transcriptions).
-	embeddedClient := embedded.Runtime().Client(embed.WithCurrency(currency))
+	embeddedClient, embeddedClientErr := embedded.Runtime().Client(embed.WithCurrency(currency))
+	if embeddedClientErr != nil {
+		t.Fatal(embeddedClientErr)
+	}
 	standaloneClient := standalone.Client()
 
 	const issuer = "conformance"
