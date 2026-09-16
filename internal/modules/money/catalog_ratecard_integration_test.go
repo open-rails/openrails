@@ -179,14 +179,3 @@ VALUES ($1, $2, 1, $3, 'in_arrears', '{
 	require.NoError(t, err)
 	require.Equal(t, int64(893_000), inv.AmountDue) // 100h * $0.00893; cell.included must NOT zero it
 }
-
-// input_min/input_max are SPEND bounds in micros. A credits-entry quote must
-// bound the computed charge, not compare the raw credit count to a micros bound.
-
-// or#823 money-boundary pin: the ONE rounding knob a credit purchase actually
-// reads is per_unit.round, carried in the offer's `price` jsonb. Two offers
-// differing in nothing else must quote different micros for the same credits,
-// at the exact values below — otherwise the mode is decorative and the doctrine
-// that a declared knob is read has no proof. (The retired top-level
-// catalog_credit_purchase_prices.round column is dropped in 0002; it was never
-// selected here.)

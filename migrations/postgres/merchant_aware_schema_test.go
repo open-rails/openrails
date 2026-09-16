@@ -785,8 +785,7 @@ CREATE UNIQUE INDEX uq_widgets_code ON openrails.widgets USING btree (merchant_i
 // currency column must carry the shape CHECK, so a new table cannot re-open
 // the drift that made a dev DB's payments.currency 100% lowercase.
 //
-// The CHECK constrains SHAPE (built-in uppercase code or an immutable
-// custom-credit UUID); MEMBERSHIP stays in the Go registry, which is
+// The CHECK constrains SHAPE (uppercase registry code); MEMBERSHIP stays in the Go registry, which is
 // where per-currency scale lives and where it can change without a migration.
 func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 	schema := loadAllSchema(t)
@@ -828,7 +827,7 @@ func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 	for _, tbl := range withCurrency {
 		if !strings.Contains(schema, tbl+"_currency_shape") {
 			t.Errorf("table %q declares a currency column with no %s_currency_shape CHECK (GAP-6): "+
-				"shape (uppercase built-in code or immutable custom-credit UUID) is a DATABASE fact", tbl, tbl)
+				"shape (uppercase registry code) is a DATABASE fact", tbl, tbl)
 		}
 	}
 
