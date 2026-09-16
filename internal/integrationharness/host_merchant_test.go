@@ -152,7 +152,7 @@ func TestHostMerchantVsIssuerMismatchHTTP(t *testing.T) {
 		"customer_id": payer,
 		"invoker":     "host-mismatch-invoker",
 		"currency":    "usd",
-		"amount":      1000,
+		"amount":      "1000",
 		"source":      "host-mismatch-test",
 		"source_id":   uuid.NewString(),
 	})

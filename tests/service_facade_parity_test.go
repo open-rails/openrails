@@ -197,8 +197,8 @@ func TestServiceFacade_CreditsAndEntitlements_ParityWithServiceHTTP(t *testing.T
 	require.Equal(t, http.StatusOK, wJWTBalance.Code)
 	var balanceResp struct {
 		CustomerID    string `json:"customer_id"`
-		BalanceAmount int64  `json:"balance_amount"`
-		HeldAmount    int64  `json:"held_amount"`
+		BalanceAmount int64  `json:"balance_amount,string"`
+		HeldAmount    int64  `json:"held_amount,string"`
 	}
 	require.NoError(t, json.Unmarshal(wJWTBalance.Body.Bytes(), &balanceResp))
 	require.Equal(t, tenantSubjectID.String(), balanceResp.CustomerID)
