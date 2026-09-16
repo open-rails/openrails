@@ -41,8 +41,10 @@ func successfulAction(txn v5Transaction, actionType string, amount moneyutil.Cen
 }
 
 // ConfirmApprovedSale reads one transaction by its exact id and requires an
-// approved sale of exactly amount on the customer vault.
-func (c *NMIClient) ConfirmApprovedSale(ctx context.Context, transactionID, customerVaultID string, amount moneyutil.Cents) error {
+// approved sale of exactly amount, in currency, on the customer vault. It
+// does not establish which operation the sale belongs to: callers bind the
+// transaction to their order reference separately.
+func (c *NMIClient) ConfirmApprovedSale(ctx context.Context, transactionID, customerVaultID string, amount moneyutil.Cents, currency string) error {
 	txn, found, err := c.GetPayment(ctx, transactionID)
 	if err != nil {
 		return err
@@ -54,6 +56,8 @@ func (c *NMIClient) ConfirmApprovedSale(ctx context.Context, transactionID, cust
 		return receiptMismatch("transaction %s is not approved", transactionID)
 	case strings.TrimSpace(customerVaultID) == "" || strings.TrimSpace(txn.CustomerVaultID) != strings.TrimSpace(customerVaultID):
 		return receiptMismatch("transaction %s is not on the operation's customer vault", transactionID)
+	case strings.TrimSpace(currency) == "" || !strings.EqualFold(strings.TrimSpace(txn.Currency), strings.TrimSpace(currency)):
+		return receiptMismatch("transaction %s is not in %s", transactionID, currency)
 	case !successfulAction(txn, "sale", amount):
 		return receiptMismatch("transaction %s has no successful sale of %d cents", transactionID, amount)
 	}
