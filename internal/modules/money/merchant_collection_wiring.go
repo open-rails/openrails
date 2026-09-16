@@ -207,10 +207,10 @@ func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Co
 }
 
 // ConfirmCollectionReceipt reads the exact provider object an operator named.
-// NMI: the transaction must be an approved sale of the frozen amount on the
-// instrument's vault (a custodian-held instrument has no vault, so it must
-// instead be the successful sale the Query API returns for the operation's
-// order reference). Stripe: the invoice must carry the operation key and be
+// NMI: the transaction must be the successful sale the Query API returns for
+// the operation's own order reference (identity), and for a vaulted
+// instrument also an approved sale of the frozen amount and currency on that
+// vault (exact read). Stripe: the invoice must carry the operation key and be
 // paid for the frozen amount.
 func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.Context, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
 	providerReference = strings.TrimSpace(providerReference)
@@ -238,12 +238,6 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 	if !ok {
 		return CollectionVerifyResult{}, fmt.Errorf("rail %q has no armed provider read", method.Rail)
 	}
-	if vault := strings.TrimSpace(method.RailCustomerRef); vault != "" {
-		if err := client.ConfirmApprovedSale(ctx, providerReference, vault, expect.Amount); err != nil {
-			return CollectionVerifyResult{}, err
-		}
-		return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: providerReference}, nil
-	}
 	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, expect.OperationKey)
 	if err != nil {
 		return CollectionVerifyResult{}, err
@@ -251,12 +245,19 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 	if !found || strings.TrimSpace(txnID) != providerReference {
 		return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, expect.OperationKey)
 	}
+	if vault := strings.TrimSpace(method.RailCustomerRef); vault != "" {
+		if err := client.ConfirmApprovedSale(ctx, providerReference, vault, expect.Amount, expect.Currency); err != nil {
+			return CollectionVerifyResult{}, err
+		}
+	}
 	return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txnID}, nil
 }
 
 // ConfirmCollectionNotExecuted refuses provider-confirmed non-execution while
 // the provider shows a successful charge for the operation, or when it
-// cannot say.
+// cannot say. For Stripe it also makes the non-execution definitive: every
+// invoice item, draft and open invoice stamped with the operation key is
+// deleted or voided so no later invoice can sweep them; a paid one refuses.
 func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) error {
 	if normalizeRail(method.Rail) == string(models.RailStripe) {
 		service, err := b.stripeServiceFor(ctx, method)
@@ -267,14 +268,7 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 		if err != nil {
 			return err
 		}
-		receipt, found, err := service.FindCollectionInvoiceByKey(ctx, customerID, expect.OperationKey)
-		if err != nil {
-			return err
-		}
-		if found && strings.EqualFold(receipt.Status, "paid") {
-			return fmt.Errorf("stripe invoice %s is paid for this operation", receipt.InvoiceID)
-		}
-		return nil
+		return service.CleanupCollection(ctx, customerID, expect.OperationKey)
 	}
 	res, err := b.VerifyCollectionCharge(ctx, method, expect.OperationKey)
 	if err != nil {
