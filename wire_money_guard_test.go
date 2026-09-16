@@ -22,7 +22,7 @@ var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "pkg/embedded/controlp
 
 // pendingNumericMoney lists monetary integers still encoded as JSON numbers.
 // Every entry is a known #983 gap or a type that never reaches the HTTP wire;
-// the guard fails when an entry is converted or disappears so this stays exact.
+// the guard fails when a listed field becomes a decimal string.
 var pendingNumericMoney = map[string]string{
 	"catalog.go:CatalogPrice.TrialUnitAmount trial_unit_amount":                                                                                      pendingCatalogPrice,
 	"catalog.go:CatalogPrice.UnitAmount unit_amount":                                                                                                 pendingCatalogPrice,
@@ -119,41 +119,38 @@ const (
 )
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {
-	found := map[string]bool{}
-	var violations []string
+	var violations, converted []string
 	for _, dir := range wireDTODirs {
-		for _, field := range numericMoneyFields(t, dir) {
-			found[field] = true
-			if _, pending := pendingNumericMoney[field]; !pending {
+		for field, exact := range moneyFields(t, dir) {
+			_, pending := pendingNumericMoney[field]
+			switch {
+			case !exact && !pending:
 				violations = append(violations, field)
+			case exact && pending:
+				converted = append(converted, field)
 			}
 		}
 	}
 	sort.Strings(violations)
+	sort.Strings(converted)
 	if len(violations) > 0 {
 		t.Fatalf("monetary integers must use the json \",string\" option (docs/money-wire.md):\n%s", strings.Join(violations, "\n"))
 	}
-	var stale []string
-	for field := range pendingNumericMoney {
-		if !found[field] {
-			stale = append(stale, field)
-		}
-	}
-	sort.Strings(stale)
-	if len(stale) > 0 {
-		t.Fatalf("remove converted or deleted entries from pendingNumericMoney:\n%s", strings.Join(stale, "\n"))
+	if len(converted) > 0 {
+		t.Fatalf("remove converted entries from pendingNumericMoney:\n%s", strings.Join(converted, "\n"))
 	}
 }
 
-// numericMoneyFields returns "dir/file.go:Type.Field json_name" for every
-// int64/uint64 struct field whose JSON name is monetary and lacks ",string".
-func numericMoneyFields(t *testing.T, dir string) []string {
+// moneyFields maps "dir/file.go:Type.Field json_name" to whether each
+// int64/uint64 struct field with a monetary JSON name uses ",string". Entries
+// for types deleted elsewhere simply stop matching.
+func moneyFields(t *testing.T, dir string) map[string]bool {
 	t.Helper()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
+	out := map[string]bool{}
 	fset := token.NewFileSet()
 	for _, entry := range entries {
 		name := entry.Name()
@@ -182,11 +179,11 @@ func numericMoneyFields(t *testing.T, dir string) []string {
 						t.Fatal(err)
 					}
 					parts := strings.Split(reflect.StructTag(tag).Get("json"), ",")
-					if parts[0] == "" || parts[0] == "-" || !moneyJSONName.MatchString(parts[0]) || hasOption(parts[1:], "string") {
+					if parts[0] == "" || parts[0] == "-" || !moneyJSONName.MatchString(parts[0]) {
 						continue
 					}
 					for _, ident := range field.Names {
-						out = append(out, filepath.ToSlash(path)+":"+owner+"."+ident.Name+" "+parts[0])
+						out[filepath.ToSlash(path)+":"+owner+"."+ident.Name+" "+parts[0]] = hasOption(parts[1:], "string")
 					}
 				}
 			}
