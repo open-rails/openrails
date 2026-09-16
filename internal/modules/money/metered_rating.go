@@ -235,6 +235,7 @@ WHERE ue.merchant_id = $1
   AND ue.customer_id = $2
   AND ue.currency = $3
   AND ue.event_type = $4
+  AND ue.pricing_authority = 'catalog'
   AND ue.occurred_at >= $5::timestamptz
   AND ue.occurred_at < $6::timestamptz
   AND NOT EXISTS (
@@ -321,6 +322,7 @@ WHERE ue.merchant_id = $1
   AND ue.customer_id = $2
   AND ue.currency = $3
   AND ue.event_type = $4
+  AND ue.pricing_authority = 'catalog'
   AND ue.occurred_at >= $5::timestamptz
   AND ue.occurred_at < $6::timestamptz
   AND NOT EXISTS (

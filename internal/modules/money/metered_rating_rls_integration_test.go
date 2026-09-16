@@ -64,8 +64,8 @@ VALUES ($1, $2, 1, $3, 'in_arrears', '{"model":"per_unit","currency":"USD","per_
 	require.NoError(t, err)
 	occurred := time.Now().UTC()
 	_, err = superPool.Exec(ctx, `
-INSERT INTO openrails.usage_events (merchant_id, customer_id, invoker_id, currency, event_type, dimensions, amount, source, source_id, occurred_at)
-VALUES ($1, $2, $3, 'USD', $4, '{"seconds": 7200}'::jsonb, 0, 'rls-826', $5, $6)`,
+INSERT INTO openrails.usage_events (merchant_id, customer_id, invoker_id, currency, event_type, dimensions, amount, source, source_id, pricing_authority, occurred_at)
+VALUES ($1, $2, $3, 'USD', $4, '{"seconds": 7200}'::jsonb, 0, 'rls-826', $5, 'catalog', $6)`,
 		merchantID, payer.UUID(), payer.UUID().String(), eventType, uuid.NewString(), occurred)
 	require.NoError(t, err)
 

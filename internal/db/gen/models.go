@@ -1531,6 +1531,8 @@ type OpenrailsUsageEvent struct {
 	Source           string
 	SourceID         string
 	LedgerTransferID *uuid.UUID
+	// host = amount is final host-priced settlement and must not be catalog-rated; catalog = amount is a metered input for catalog rating. Capture writes host, including zero-cost captures; RecordUsage writes host for positive amounts and catalog for zero-cost meter inputs.
+	PricingAuthority string
 	Metadata         []byte
 	OccurredAt       time.Time
 	CreatedAt        time.Time

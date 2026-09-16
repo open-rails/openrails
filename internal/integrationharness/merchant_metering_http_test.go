@@ -151,9 +151,9 @@ VALUES ($1, $2)`, customerID, dbtest.TestMerchantID.UUID())
 	_, err = h.MerchantPool(dbtest.TestMerchantID.UUID()).Exec(ctx, `
 INSERT INTO openrails.usage_events
     (merchant_id, customer_id, invoker_id, currency, resource, event_type,
-     amount, source, source_id, occurred_at)
+     amount, source, source_id, pricing_authority, occurred_at)
 VALUES ($1, $2, 'metering-test', 'USD', 'api', 'api.request',
-        0, 'test', $3, $4)`,
+        0, 'test', $3, 'catalog', $4)`,
 		dbtest.TestMerchantID.UUID(),
 		customerID,
 		uuid.NewString(),

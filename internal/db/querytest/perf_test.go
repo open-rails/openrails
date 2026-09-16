@@ -371,19 +371,19 @@ func seedPerfData(ctx context.Context, t *testing.T, pool *pgxpool.Pool, merchan
 
 	// usage_events: one per customer (distinct idem tuple via source_id).
 	copyRows(ctx, t, pool, "usage_events",
-		[]string{"id", "merchant_id", "customer_id", "invoker_id", "currency", "event_type", "amount", "source", "source_id", "occurred_at", "created_at"},
+		[]string{"id", "merchant_id", "customer_id", "invoker_id", "currency", "event_type", "amount", "source", "source_id", "pricing_authority", "occurred_at", "created_at"},
 		scale, func(i int) []any {
-			return []any{perfUsageUUID(i), merchantID, perfCustomerUUID(i), "perf", perfCurrency, "api_call", int64(7), "perf", fmt.Sprintf("u-%012d", i), now.Add(-2 * time.Hour), now}
+			return []any{perfUsageUUID(i), merchantID, perfCustomerUUID(i), "perf", perfCurrency, "api_call", int64(7), "perf", fmt.Sprintf("u-%012d", i), "host", now.Add(-2 * time.Hour), now}
 		})
 	// fat customer: many usage events across a couple event types (rollup fan-out).
 	copyRows(ctx, t, pool, "usage_events",
-		[]string{"id", "merchant_id", "customer_id", "invoker_id", "currency", "event_type", "amount", "source", "source_id", "occurred_at", "created_at"},
+		[]string{"id", "merchant_id", "customer_id", "invoker_id", "currency", "event_type", "amount", "source", "source_id", "pricing_authority", "occurred_at", "created_at"},
 		perfFatUsage, func(j int) []any {
 			et := "api_call"
 			if j%2 == 1 {
 				et = "storage"
 			}
-			return []any{perfUsageUUID(scale + j), merchantID, fatCustomerID, "perf", perfCurrency, et, int64(3), "perf", fmt.Sprintf("uf-%012d", j), now.Add(-time.Duration(j) * time.Minute), now}
+			return []any{perfUsageUUID(scale + j), merchantID, fatCustomerID, "perf", perfCurrency, et, int64(3), "perf", fmt.Sprintf("uf-%012d", j), "host", now.Add(-time.Duration(j) * time.Minute), now}
 		})
 
 	// payment_methods: one stored instrument per customer.

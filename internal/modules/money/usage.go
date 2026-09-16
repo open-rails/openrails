@@ -110,6 +110,16 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			if gerr != nil {
 				return gerr
 			}
+			pricingAuthority := "catalog"
+			if params.Amount > 0 {
+				pricingAuthority = "host"
+			}
+			if ev.PricingAuthority != pricingAuthority {
+				return &IdempotencyConflict{
+					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
+					Field: "pricing_authority", Committed: ev.PricingAuthority, Retried: pricingAuthority,
+				}
+			}
 			if ev.Amount != params.Amount {
 				return &IdempotencyConflict{
 					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
@@ -153,6 +163,11 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		if params.OccurredAt.IsZero() {
 			occurred = now
 		}
+		pricingAuthority := "catalog"
+		if params.Amount > 0 {
+			pricingAuthority = "host"
+		}
+
 		ev = &models.UsageEvent{
 			ID:               uuidutil.NewV7(),
 			MerchantID:       tenantID,
@@ -165,6 +180,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Source:           params.Key.Source(),
 			SourceID:         params.Key.SourceID(),
 			LedgerTransferID: debitID,
+			PricingAuthority: pricingAuthority,
 			Metadata:         params.Metadata,
 			OccurredAt:       occurred,
 			CreatedAt:        now,
@@ -190,6 +206,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Source:           ev.Source,
 			SourceID:         ev.SourceID,
 			LedgerTransferID: ev.LedgerTransferID,
+			PricingAuthority: pricingAuthority,
 			Metadata:         meta,
 			OccurredAt:       ev.OccurredAt,
 			CreatedAt:        ev.CreatedAt,

@@ -193,8 +193,8 @@ func seed(t *testing.T) (*pgxpool.Pool, *metrics.Service, context.Context, conte
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[1], txp+"lot2", 10_000_000, d(t, 2026, 6, 15))
 	exec(ctx, t, pool, lot, uuid.New(), mA, c[2], txp+"lot3", 30_000_000, d(t, 2026, 5, 20))
 
-	ue := `INSERT INTO openrails.usage_events (id, merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, occurred_at)
-		VALUES ($1, $2, $3, 'user:test', 'USD', $4, $5, $6, 'metrics-test', $7, $8)`
+	ue := `INSERT INTO openrails.usage_events (id, merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, pricing_authority, occurred_at)
+		VALUES ($1, $2, $3, 'user:test', 'USD', $4, $5, $6, 'metrics-test', $7, 'host', $8)`
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 5_000_000, txp+"u1", d(t, 2026, 6, 5))
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[1], "api", "gpt", 3_000_000, txp+"u2", d(t, 2026, 6, 18))
 	exec(ctx, t, pool, ue, uuid.New(), mA, c[2], "img", "flux", 2_000_000, txp+"u3", d(t, 2026, 6, 10))

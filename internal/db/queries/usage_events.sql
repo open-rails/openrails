@@ -1,12 +1,13 @@
 -- openrails.usage_events: append-only metered usage (#289), idempotent on
 -- (tenant, payer, event_type, source, source_id).
 
+-- pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
 -- name: InsertUsageEvent :exec
 INSERT INTO openrails.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
-    ledger_transfer_id, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, $12, $13, $14);
+    ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at
+) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, sqlc.arg(pricing_authority), $12, $13, $14);
 
 -- name: GetUsageEventByCoords :one
 SELECT * FROM openrails.usage_events

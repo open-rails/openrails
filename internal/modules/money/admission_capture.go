@@ -102,7 +102,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 			err = d.Gen(ctx).InsertUsageEvent(ctx, gen.InsertUsageEventParams{
 				ID: uuidutil.NewV7(), MerchantID: row.MerchantID, CustomerID: row.PayerID,
 				InvokerID: terms.Invoker, Currency: row.Currency, Resource: nilIfEmpty(u.Resource),
-				EventType: u.EventType, Dimensions: dimensions, Metadata: metadata, Amount: amount,
+				EventType: u.EventType, Dimensions: dimensions, Metadata: metadata, Amount: amount, PricingAuthority: "host",
 				Source: u.Source, SourceID: u.SourceID, LedgerTransferID: receipt.LedgerTransferID,
 				OccurredAt: now, CreatedAt: now,
 			})
