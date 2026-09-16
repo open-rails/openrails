@@ -28,13 +28,59 @@ func (q *Queries) CompleteMerchantGroupRelease(ctx context.Context, arg Complete
 	return err
 }
 
-const deleteMerchantRetirementWarning = `-- name: DeleteMerchantRetirementWarning :exec
-DELETE FROM openrails.merchant_dormancy_notices WHERE merchant_id=$1::uuid
+const listMerchantRetirementCandidates = `-- name: ListMerchantRetirementCandidates :many
+SELECT id,slug,created_at,permission_group_id::text AS group_id FROM openrails.merchants
+WHERE deleted_at IS NULL AND status='active' AND permission_group_id IS NOT NULL
+AND created_at < $1::timestamptz
+AND NOT (slug = ANY($2::text[]))
+AND (created_at,id) > ($3::timestamptz,$4::uuid)
+ORDER BY created_at,id LIMIT $5::bigint
 `
 
-func (q *Queries) DeleteMerchantRetirementWarning(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMerchantRetirementWarning, merchantID)
-	return err
+type ListMerchantRetirementCandidatesParams struct {
+	CreatedBefore  time.Time
+	ReservedSlugs  []string
+	AfterCreatedAt time.Time
+	AfterID        uuid.UUID
+	PageLimit      int64
+}
+
+type ListMerchantRetirementCandidatesRow struct {
+	ID        uuid.UUID
+	Slug      string
+	CreatedAt time.Time
+	GroupID   string
+}
+
+func (q *Queries) ListMerchantRetirementCandidates(ctx context.Context, arg ListMerchantRetirementCandidatesParams) ([]ListMerchantRetirementCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listMerchantRetirementCandidates,
+		arg.CreatedBefore,
+		arg.ReservedSlugs,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListMerchantRetirementCandidatesRow
+	for rows.Next() {
+		var i ListMerchantRetirementCandidatesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.CreatedAt,
+			&i.GroupID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPendingMerchantGroupReleases = `-- name: ListPendingMerchantGroupReleases :many
@@ -69,32 +115,21 @@ func (q *Queries) ListPendingMerchantGroupReleases(ctx context.Context, batchLim
 }
 
 const lockMerchantRetirementState = `-- name: LockMerchantRetirementState :one
-SELECT coalesce(deleted_at IS NULL AND status='active' AND permission_group_id=$1::text,false)::boolean AS live
-FROM openrails.merchants WHERE id=$2::uuid FOR UPDATE
+SELECT slug,permission_group_id,coalesce(deleted_at IS NULL AND status='active',false)::boolean AS live
+FROM openrails.merchants WHERE id=$1::uuid FOR UPDATE
 `
 
-type LockMerchantRetirementStateParams struct {
-	GroupID string
-	ID      uuid.UUID
+type LockMerchantRetirementStateRow struct {
+	Slug              string
+	PermissionGroupID *string
+	Live              bool
 }
 
-func (q *Queries) LockMerchantRetirementState(ctx context.Context, arg LockMerchantRetirementStateParams) (bool, error) {
-	row := q.db.QueryRow(ctx, lockMerchantRetirementState, arg.GroupID, arg.ID)
-	var live bool
-	err := row.Scan(&live)
-	return live, err
-}
-
-const lockMerchantRetirementWarning = `-- name: LockMerchantRetirementWarning :one
-SELECT first_warned_at FROM openrails.merchant_dormancy_notices
-WHERE merchant_id=$1::uuid FOR UPDATE
-`
-
-func (q *Queries) LockMerchantRetirementWarning(ctx context.Context, merchantID uuid.UUID) (time.Time, error) {
-	row := q.db.QueryRow(ctx, lockMerchantRetirementWarning, merchantID)
-	var first_warned_at time.Time
-	err := row.Scan(&first_warned_at)
-	return first_warned_at, err
+func (q *Queries) LockMerchantRetirementState(ctx context.Context, id uuid.UUID) (LockMerchantRetirementStateRow, error) {
+	row := q.db.QueryRow(ctx, lockMerchantRetirementState, id)
+	var i LockMerchantRetirementStateRow
+	err := row.Scan(&i.Slug, &i.PermissionGroupID, &i.Live)
+	return i, err
 }
 
 const markMerchantRetired = `-- name: MarkMerchantRetired :exec
@@ -113,17 +148,35 @@ func (q *Queries) MarkMerchantRetired(ctx context.Context, arg MarkMerchantRetir
 	return err
 }
 
-const merchantHasBillingActivity = `-- name: MerchantHasBillingActivity :one
-SELECT coalesce((EXISTS (SELECT 1 FROM openrails.psps             WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.payments         WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.subscriptions    WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.customers        WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.products         WHERE merchant_id = $1::uuid)
-	    OR EXISTS (SELECT 1 FROM openrails.ledger_transfers WHERE merchant_id = $1::uuid)), false)::boolean AS used
+const merchantHasActivity = `-- name: MerchantHasActivity :one
+SELECT coalesce((EXISTS (SELECT 1 FROM openrails.customers WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.payments WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.subscriptions WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.ledger_accounts WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.psps WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.custodians WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.merchant_secrets WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.webhook_events WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.rail_intents WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.host_outbox WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.merchant_webhooks WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.products WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.catalog_meters WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.catalog_rate_cards WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.billing_policies WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.custom_credit_types WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.catalog_usage_limits WHERE merchant_id = $1::uuid)
+	OR EXISTS (SELECT 1 FROM openrails.catalog_credit_balances WHERE merchant_id = $1::uuid)), false)::boolean AS used
 `
 
-func (q *Queries) MerchantHasBillingActivity(ctx context.Context, merchantID uuid.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, merchantHasBillingActivity, merchantID)
+// Retirement blockers: obligations, money history
+// (including tombstones), provider connections, integrations and catalog.
+// Every table here references openrails.merchants, so the retirement row lock
+// serializes concurrent inserts. Tables reached through a NOT NULL foreign key
+// from one of these are implied; the rest are classified in
+// internal/merchants/retirement_activity_integration_test.go.
+func (q *Queries) MerchantHasActivity(ctx context.Context, merchantID uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, merchantHasActivity, merchantID)
 	var used bool
 	err := row.Scan(&used)
 	return used, err

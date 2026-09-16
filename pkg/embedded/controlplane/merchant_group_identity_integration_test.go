@@ -11,10 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/stretchr/testify/require"
@@ -260,11 +258,8 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		name := "retire-" + sfx
 		original, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: name, OwnerUserID: user.ID})
 		require.NoError(t, err)
-		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET created_at=now()-interval '3 days' WHERE id=$1`, original.MerchantID.UUID())
-		require.NoError(t, err)
 		dir, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
 		require.NoError(t, err)
-		cfg := merchants.DormancySweepConfig{TTL: 24 * time.Hour, WarningLead: time.Hour, Armed: true}
 		failed := true
 		release := func(ctx context.Context, groupID string) error {
 			require.Equal(t, original.GroupID, groupID, "release must use captured UUID")
@@ -274,16 +269,10 @@ func TestMerchantGroupIdentity(t *testing.T) {
 			}
 			return nil
 		}
-		_, err = dir.SweepDormant(ctx, cfg, release)
-		require.NoError(t, err)
-		require.NoError(t, db.WrapPool(pool, "openrails").MerchantTx(ctx, original.MerchantID, func(ctx context.Context, tx pgx.Tx) error {
-			tag, err := tx.Exec(ctx, `UPDATE openrails.merchant_dormancy_notices SET first_warned_at=now()-interval '2 hours' WHERE merchant_id=$1`, original.MerchantID.UUID())
-			require.EqualValues(t, 1, tag.RowsAffected())
-			return err
-		}))
-		outcome, err := dir.SweepDormant(ctx, cfg, release)
+		outcome, err := dir.RetireUnused(ctx, original.MerchantID, original.GroupID, nil, release)
+		require.ErrorIs(t, err, merchants.ErrGroupReleasePending)
 		require.ErrorContains(t, err, "crash after group commit")
-		require.Zero(t, outcome.Deleted)
+		require.True(t, outcome.Retired, "the tombstone commits before external release")
 		_, err = pool.Exec(ctx, `UPDATE openrails.merchants SET deleted_at=NULL,status='active' WHERE id=$1`, original.MerchantID.UUID())
 		require.ErrorContains(t, err, "cannot be restored")
 		fresh, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: name, OwnerUserID: user.ID})
@@ -292,11 +281,16 @@ func TestMerchantGroupIdentity(t *testing.T) {
 		failed = false
 		restarted, err := merchants.NewDirectoryService(db.WrapPool(pool, "openrails"))
 		require.NoError(t, err)
-		outcome, err = restarted.SweepDormant(ctx, cfg, release)
+		completed, err := restarted.CompletePendingGroupReleases(ctx, 500, release)
 		require.NoError(t, err)
-		require.Equal(t, 1, outcome.Deleted)
+		require.GreaterOrEqual(t, completed, 1)
 		_, err = cp.Core().GroupInstanceByID(ctx, fresh.GroupID)
 		require.NoError(t, err, "retry must not delete reclaimed name")
+		completed, err = restarted.CompletePendingGroupReleases(ctx, 500, func(context.Context, string) error {
+			return errors.New("completed releases are not retried")
+		})
+		require.NoError(t, err)
+		require.Zero(t, completed)
 	})
 
 	t.Run("released names are claimable again; tombstoned directory rows do not pin them", func(t *testing.T) {

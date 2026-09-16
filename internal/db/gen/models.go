@@ -729,15 +729,6 @@ type OpenrailsMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
-// or#914 dormant-merchant sweeper warning ledger: never-used merchants currently on deletion notice. first_warned_at + the sweep's warning lead gates deletion (DeleteGroup ReleaseSlug + directory soft-delete); the row is withdrawn on activity. Accessed only inside MerchantTx beside the activity probe.
-type OpenrailsMerchantDormancyNotice struct {
-	MerchantID    uuid.UUID
-	Slug          string
-	FirstWarnedAt time.Time
-	LastWarnedAt  time.Time
-	WarnCount     int64
-}
-
 // or#858: the manifest of what a merchant purge is ABOUT TO DESTROY — per-table row counts, merchant secret NAMES, and the explicit list of what is not captured. It is NOT a backup and restores nothing; the only restore path is Postgres PITR (docs/backup-and-recovery.md). Merchant deletion is gated on a matching inventory so the operator has seen the blast radius, not so the data can come back. Was merchant_exports (#225), a name that promised a restore point that never existed.
 type OpenrailsMerchantPurgeInventory struct {
 	ID         uuid.UUID

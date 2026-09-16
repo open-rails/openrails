@@ -4298,30 +4298,6 @@ CREATE POLICY merchant_isolation ON openrails.entitlements USING ((merchant_id =
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlements TO openrails_app;
 
 
-CREATE TABLE openrails.merchant_dormancy_notices (
-    merchant_id uuid NOT NULL,
-    slug text NOT NULL,
-    first_warned_at timestamp with time zone DEFAULT now() NOT NULL,
-    last_warned_at timestamp with time zone DEFAULT now() NOT NULL,
-    warn_count bigint DEFAULT 1 NOT NULL
-);
-
-ALTER TABLE ONLY openrails.merchant_dormancy_notices FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.merchant_dormancy_notices IS 'or#914 dormant-merchant sweeper warning ledger: never-used merchants currently on deletion notice. first_warned_at + the sweep''s warning lead gates deletion (DeleteGroup ReleaseSlug + directory soft-delete); the row is withdrawn on activity. Accessed only inside MerchantTx beside the activity probe.';
-
-ALTER TABLE ONLY openrails.merchant_dormancy_notices
-    ADD CONSTRAINT merchant_dormancy_notices_pkey PRIMARY KEY (merchant_id);
-
-ALTER TABLE ONLY openrails.merchant_dormancy_notices
-    ADD CONSTRAINT merchant_dormancy_notices_merchant_fkey FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
-
-ALTER TABLE openrails.merchant_dormancy_notices ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_dormancy_notices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_dormancy_notices TO openrails_app;
-
 CREATE TABLE openrails.operation_authorizations (
     operation_id text NOT NULL,
     merchant_id uuid NOT NULL,

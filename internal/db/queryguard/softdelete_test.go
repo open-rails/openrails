@@ -43,8 +43,8 @@ var policedTables = map[string]string{
 // allow lists queries that legitimately see soft-deleted rows. Every entry is a
 // deliberate decision with a reason; adding one is the review point.
 var allow = map[string]string{
-	"HasSettledPayment":          "historical positive rail-payment proof survives archival and event retention; a tombstone must not grant another first-payment trial",
-	"MerchantHasBillingActivity": "retirement is only for never-used merchants; historical and soft-deleted payments/subscriptions must disqualify them",
+	"HasSettledPayment":   "historical positive rail-payment proof survives archival and event retention; a tombstone must not grant another first-payment trial",
+	"MerchantHasActivity": "retirement is only for never-used merchants; historical and soft-deleted payments/subscriptions must disqualify them",
 	// The prune's own reversal path: it exists to find stamped rows.
 	"RestoreSubscriptionsByDestructiveRun":    "the rollback — its whole job is to find soft-deleted rows",
 	"RestorePaymentsByDestructiveRun":         "the rollback",
