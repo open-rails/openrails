@@ -68,7 +68,6 @@ import (
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -327,17 +326,17 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}}
 	rt, err := embed.New(h.ctx, embed.Options{
-		Options: embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()},
+		Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(h.t, err, "embed.New")
 	h.cleanup(func() { _ = rt.Close(context.Background()) })
 	// Bind the engine to the test merchant — what embed provisioning
 	// (EnsureMerchant/UpsertMerchantConfig) does on a real host. The in-process
 	// transport (#685) pins this merchant per request.
-	rt.Embedded().App().Runtime.SetConfiguredMerchant(id)
+	app.HostGraph(rt).Runtime.SetConfiguredMerchant(id)
 
 	mux := http.NewServeMux()
-	runtime := rt.Embedded().App().Runtime
+	runtime := app.HostGraph(rt).Runtime
 	routeOptions := httproutes.Options{
 		Gate: httproutes.NewGate(httproutes.GateOptions{ServiceCredentialResolver: trustingResolver{
 			merchantID:   id,

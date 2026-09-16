@@ -15,12 +15,13 @@ import (
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -77,7 +78,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	catalogFor := func(name, display string) []byte {
 		return []byte("version: 1\ncatalogs:\n  - merchant: " + name + "\n    products:\n      - key: owner_product\n        display_name: " + display + "\n")
 	}
-	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
+	require.NoError(t, hosttools.PushMerchantCatalog(ctx, hosttools.CatalogPushOptions{
 		Config: cfg, PGXPool: pool, NameAuthority: authority, Manifest: catalogFor(old, "Original catalog"), Insert: true, Overwrite: true, Prune: true,
 	}))
 	_, err = core.CreatePermissionGroup(ctx, authkit.CreatePermissionGroupRequest{Persona: "merchant", InstanceSlug: old, OwnerSubjectID: ownerB.ID})
@@ -126,30 +127,30 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	}
 	// The alias initially selected A's catalog; after reclaim, the same external
 	// name selects B. UUID-scoped import still writes only to captured A.
-	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
+	require.NoError(t, hosttools.PushMerchantCatalog(ctx, hosttools.CatalogPushOptions{
 		Config: cfg, PGXPool: pool, NameAuthority: authority, Manifest: catalogFor(old, "New owner catalog"), Insert: true, Overwrite: true, Prune: true,
 	}))
 	var originalCatalog, reclaimedCatalog bytes.Buffer
-	require.NoError(t, embedded.DumpMerchantCatalog(ctx, embedded.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: newName, Out: &originalCatalog}))
-	require.NoError(t, embedded.DumpMerchantCatalog(ctx, embedded.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: old, Out: &reclaimedCatalog}))
+	require.NoError(t, hosttools.DumpMerchantCatalog(ctx, hosttools.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: newName, Out: &originalCatalog}))
+	require.NoError(t, hosttools.DumpMerchantCatalog(ctx, hosttools.CatalogDumpOptions{Config: cfg, PGXPool: pool, NameAuthority: authority, Merchant: old, Out: &reclaimedCatalog}))
 	require.Contains(t, originalCatalog.String(), "Original catalog")
 	require.NotContains(t, originalCatalog.String(), "New owner catalog")
 	require.Contains(t, originalCatalog.String(), "merchant: "+newName)
 	require.Contains(t, reclaimedCatalog.String(), "New owner catalog")
 	require.NotContains(t, reclaimedCatalog.String(), "Original catalog")
 	importedCustomer := uuid.New()
-	_, err = embedded.ImportBilling(ctx, embedded.BillingImportOptions{PGXPool: pool, MerchantID: first.ID,
-		Book: embedded.DeclaredBilling{AsOf: time.Now().UTC(), Customers: []embedded.DeclaredCustomer{{Customer: importedCustomer}}},
+	_, err = billingimport.Import(ctx, billingimport.Options{PGXPool: pool, MerchantID: first.ID,
+		Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(), Customers: []billingimport.DeclaredCustomer{{Customer: importedCustomer}}},
 	})
 	require.NoError(t, err)
 	var importedOwner uuid.UUID
 	require.NoError(t, admin.QueryRow(ctx, `SELECT merchant_id FROM openrails.customers WHERE id=$1`, importedCustomer).Scan(&importedOwner))
 	require.Equal(t, first.ID.UUID(), importedOwner)
-	resolved, canonical, err := embedded.ResolveMerchantName(ctx, embedded.MerchantNameOptions{PGXPool: pool, Name: old, NameAuthority: authority})
+	resolved, canonical, err := hosttools.ResolveMerchantName(ctx, hosttools.MerchantNameOptions{PGXPool: pool, Name: old, NameAuthority: authority})
 	require.NoError(t, err)
 	require.Equal(t, second.ID, resolved)
 	require.Equal(t, old, canonical)
-	_, _, err = embedded.ResolveMerchantName(ctx, embedded.MerchantNameOptions{PGXPool: pool, Name: old})
+	_, _, err = hosttools.ResolveMerchantName(ctx, hosttools.MerchantNameOptions{PGXPool: pool, Name: old})
 	require.Error(t, err, "a local-only directory cannot choose either bound projection")
 	host, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: old})
 	require.NoError(t, err)
@@ -158,7 +159,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	hostAgain, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: old})
 	require.NoError(t, err)
 	require.Equal(t, host, hostAgain)
-	resolved, _, err = embedded.ResolveMerchantName(ctx, embedded.MerchantNameOptions{PGXPool: pool, Name: old})
+	resolved, _, err = hosttools.ResolveMerchantName(ctx, hosttools.MerchantNameOptions{PGXPool: pool, Name: old})
 	require.NoError(t, err)
 	require.Equal(t, host, resolved)
 	found, err := directory.SearchMerchants(ctx, old, 50)

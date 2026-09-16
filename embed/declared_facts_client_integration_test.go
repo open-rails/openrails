@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -20,7 +22,6 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // fakeMintReader serves an initialized SPL mint at a fixed decimals count so
@@ -52,13 +53,13 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 	owned := remote.ProvisionOwnedMerchant("facts-" + uuid.NewString()[:8])
 	mid := owned.MerchantID
 	integrationharness.SeedPSPs(ctx, t, remote.App().Runtime, mid, rails)
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
-	runtime.Embedded().App().Runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(fakeMintReader{decimals: 6})
+	app.HostGraph(runtime).Runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(fakeMintReader{decimals: 6})
 	local, err := runtime.Client(openrails.WithMerchantID(mid))
 	require.NoError(t, err)
 	standalone := remote.Client(openrails.WithTokenProvider(func(context.Context) (string, error) { return owned.APIKey, nil }))

@@ -9,10 +9,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +53,8 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	})
 
 	// Arrears so rated usage becomes an open receivable.
-	svc := embedded.Runtime().Service()
+	svc, err := service.New(app.HostGraph(embedded.Runtime()).Runtime)
+	require.NoError(t, err)
 	mode := money.BillingModeArrears
 	require.NoError(t, svc.SetCreditAccountSettings(dbtest.WithTestMerchant(ctx), payer, currency,
 		money.AccountSettingsInput{BillingMode: &mode}))

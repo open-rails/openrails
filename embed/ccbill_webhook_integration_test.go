@@ -13,14 +13,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -78,7 +80,7 @@ catalogs:
                 flex_id: %q
                 form_name: %q
 `, slug, slug, ccbillWebhookTestPriceMicros, flexID, formName))
-	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
+	require.NoError(t, hosttools.PushMerchantCatalog(ctx, hosttools.CatalogPushOptions{
 		Config:   cfg,
 		Manifest: raw,
 		Insert:   true, Overwrite: true, Prune: true,
@@ -213,7 +215,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("94%04d-0001", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
@@ -241,7 +243,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetCustomer, embed.RouteSetWebhooks},
 		Authenticator:          userAuthn,
 		DelegatedAuthenticator: delegated,
@@ -288,19 +290,19 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	ccbillAccount := fmt.Sprintf("95%04d-0002", nano%10_000)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceAPI)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// API mode: bare identity bind; rail truth arrives over the HTTP API.
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
-	require.NoError(t, rt.Embedded().App().Runtime.EnsureMerchantsService(ctx))
+	require.NoError(t, app.HostGraph(rt).Runtime.EnsureMerchantsService(ctx))
 	cleanupCCBillWebhookMerchant(t, id)
 
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders, embed.RouteSetCatalog},
 		Gate:           allowAllGate{id: id},
-		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
+		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
 	})
 	require.NoError(t, err)
 	adminServer := httptest.NewServer(handler)
@@ -344,7 +346,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	seedProfileUser(t, ctx, dsn, username)
 
 	// Webhook-only mount (the ingestion surface a MODE-2 host exposes).
-	webhookHandler, err := rt.Handler(embedded.MountOptions{
+	webhookHandler, err := rt.Handler(embed.MountOptions{
 		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
 	})
 	require.NoError(t, err)
@@ -373,7 +375,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 	slug := fmt.Sprintf("mwhoff%d", nano)
 
 	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// Merchant exists but declares NO rail accounts at all.
@@ -386,9 +388,9 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 
 	// Force the webhook route mounted (the armed-account derivation would
 	// drop it) so the DISPATCHER's fail-closed rejection is what answers.
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetWebhooks},
-		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
+		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
 	})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)

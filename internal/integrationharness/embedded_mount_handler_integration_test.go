@@ -20,7 +20,6 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
@@ -43,22 +42,20 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	})
 
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{
-			Config: &config.Config{
-				Env:      "dev",
-				TestMode: config.CredentialPostureSandbox,
-				DB:       &config.DBConfig{URL: h.DSN},
-			},
-			Redis: h.Redis,
-			River: embedded.RiverManagedByOpenRails(),
+		Config: &config.Config{
+			Env:      "dev",
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: h.DSN},
 		},
+		Redis: h.Redis,
+		River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		MountPrefix:            "/api/openrails",
-		RouteSets:              []embedded.RouteSet{embedded.RouteSetMerchantAPI, embedded.RouteSetCustomer},
+		RouteSets:              []embed.RouteSet{embed.RouteSetMerchantAPI, embed.RouteSetCustomer},
 		Gate:                   httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),
 		DelegatedAuthenticator: authn,
 	})
