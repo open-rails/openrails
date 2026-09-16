@@ -304,6 +304,33 @@ func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context,
 	return result.RowsAffected(), nil
 }
 
+const claimReconciliationFindingNotification = `-- name: ClaimReconciliationFindingNotification :execrows
+UPDATE openrails.reconciliation_findings
+SET notified_at = $1::timestamptz,
+    notified_severity = $2::text
+WHERE id = $3::uuid
+  AND status = 'requires_review'
+  AND severity = $2::text
+  AND (notified_at IS NULL OR
+       array_position(ARRAY['critical','high','medium','low'], severity) <
+       COALESCE(array_position(ARRAY['critical','high','medium','low'], notified_severity), 5))
+`
+
+type ClaimReconciliationFindingNotificationParams struct {
+	NotifiedAt time.Time
+	Severity   string
+	ID         uuid.UUID
+}
+
+// Claim one open episode/escalation in the same transaction as its notification.
+func (q *Queries) ClaimReconciliationFindingNotification(ctx context.Context, arg ClaimReconciliationFindingNotificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimReconciliationFindingNotification, arg.NotifiedAt, arg.Severity, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countErrorEpisodeTotals = `-- name: CountErrorEpisodeTotals :one
 SELECT fl.total::bigint            AS freeloader_total,
        fl.open_count::bigint       AS freeloader_open,

@@ -6,6 +6,9 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/db/gen"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/reconcile"
 )
@@ -60,8 +63,36 @@ func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord
 			}
 		}
 	}
-	s.deliverer.dispatchFinding(ctx, channels, alert)
-	return s.store.markFindingNotified(ctx, rec.ID, s.now(), string(rec.Severity))
+	// The durable console notification and episode claim commit together. A
+	// failed insert rolls the claim back; concurrent/stale callers cannot send
+	// duplicate hooks. External deliveries are best-effort after this commit.
+	claimed := false
+	if err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		st := newStore(s.db.NewWithPgxTx(tx))
+		n, err := st.db.Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{
+			ID: rec.ID, NotifiedAt: alert.FiredAt, Severity: string(rec.Severity),
+		})
+		if err != nil || n == 0 {
+			return err
+		}
+		_, err = st.createNotification(ctx, Notification{
+			Severity: alert.Severity, Title: alertTitle(alert), Body: alert.Summary,
+			Link: alert.DashboardLink, Data: alert,
+		})
+		claimed = err == nil
+		return err
+	}); err != nil {
+		return fmt.Errorf("persist finding notification: %w", err)
+	}
+	if !claimed {
+		return nil
+	}
+	for _, result := range s.deliverer.dispatchFinding(ctx, channels, alert) {
+		if !result.OK {
+			log.WithContext(ctx).WithFields(log.Fields{"finding_id": rec.ID, "channel": result.Channel}).Warn("finding notification retained in console; external delivery failed")
+		}
+	}
+	return nil
 }
 
 // findingAlertSeverity maps a reconcile finding severity onto the coarser

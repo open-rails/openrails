@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
@@ -68,8 +69,6 @@ func (d *deliverer) dispatchChannels(ctx context.Context, channels []ChannelRef,
 	results := make([]DeliveryResult, 0, len(channels))
 	for _, ch := range channels {
 		switch ch.Type {
-		case ChannelInApp:
-			results = append(results, d.deliverInApp(ctx, alert))
 		case ChannelEmail:
 			results = append(results, d.deliverEmail(ctx, alert))
 		case ChannelWebhook:
@@ -79,20 +78,6 @@ func (d *deliverer) dispatchChannels(ctx context.Context, channels []ChannelRef,
 		}
 	}
 	return results
-}
-
-func (d *deliverer) deliverInApp(ctx context.Context, alert Alert) DeliveryResult {
-	_, err := d.store.createNotification(ctx, Notification{
-		Severity: alert.Severity,
-		Title:    alertTitle(alert),
-		Body:     alert.Summary,
-		Link:     alert.DashboardLink,
-		Data:     alert,
-	})
-	if err != nil {
-		return DeliveryResult{Channel: string(ChannelInApp), OK: false, Detail: err.Error()}
-	}
-	return DeliveryResult{Channel: string(ChannelInApp), OK: true}
 }
 
 func (d *deliverer) deliverEmail(ctx context.Context, alert Alert) DeliveryResult {
@@ -246,12 +231,12 @@ func alertTitle(alert Alert) string {
 	return fmt.Sprintf("[%s] %s", strings.ToUpper(string(alert.Severity)), alert.Title)
 }
 
-func renderEmail(alert Alert) (html, plain string) {
-	html = fmt.Sprintf(`<h2>%s</h2><p>%s</p>`, alertTitle(alert), alert.Summary)
+func renderEmail(alert Alert) (htmlBody, plain string) {
+	htmlBody = fmt.Sprintf(`<h2>%s</h2><p>%s</p>`, html.EscapeString(alertTitle(alert)), html.EscapeString(alert.Summary))
 	plain = alertTitle(alert) + "\n\n" + alert.Summary
 	if alert.DashboardLink != "" {
-		html += fmt.Sprintf(`<p><a href="%s">Open dashboard</a></p>`, alert.DashboardLink)
+		htmlBody += fmt.Sprintf(`<p><a href="%s">Open dashboard</a></p>`, html.EscapeString(alert.DashboardLink))
 		plain += "\nDashboard: " + alert.DashboardLink
 	}
-	return html, plain
+	return htmlBody, plain
 }

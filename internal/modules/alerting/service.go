@@ -75,13 +75,13 @@ func (s *Service) SetMerchantSecretStore(secrets merchants.MerchantSecretStore) 
 
 func (s *Service) now() time.Time { return s.clock.Now().UTC() }
 
-// defaultChannels is the severity-based default routing. warning → in_app;
-// critical → in_app + email (webhook is added by referencing a configured sink).
+// defaultChannels selects external email delivery after the console notification
+// is durable. Enabled webhooks are added by the finding notification path.
 func defaultChannels(sev Severity) []ChannelRef {
 	if sev == SeverityCritical {
-		return []ChannelRef{{Type: ChannelInApp}, {Type: ChannelEmail}}
+		return []ChannelRef{{Type: ChannelEmail}}
 	}
-	return []ChannelRef{{Type: ChannelInApp}}
+	return nil
 }
 
 // --- webhook CRUD ------------------------------------------------------------

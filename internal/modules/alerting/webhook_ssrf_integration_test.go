@@ -60,7 +60,12 @@ func TestWebhookDeliveryDoesNotFollowRedirectIntoLinkLocal(t *testing.T) {
 	inConn(t, appDB, mid, func(ctx context.Context) {
 		_, err := svc.CreateWebhook(ctx, alerting.CreateWebhookInput{Name: "redirector", URL: redirector.URL})
 		require.NoError(t, err)
-		require.NoError(t, svc.NotifyFinding(ctx, reconcile.FindingRecord{ID: uuid.New(), Status: reconcile.FindingStatusRequiresReview, Severity: reconcile.SeverityMedium}))
+		store := &reconcile.PGStore{DB: appDB}
+		run, err := store.CreateRun(ctx, reconcile.ModeAdvisory, []reconcile.Provider{reconcile.ProviderNMI}, nil, nil)
+		require.NoError(t, err)
+		rec, err := store.UpsertFinding(ctx, run, reconcile.Finding{Provider: reconcile.ProviderNMI, Type: reconcile.FindingChargebackActiveSub, SubjectKey: uuid.NewString(), Severity: reconcile.SeverityMedium, Status: reconcile.FindingStatusRequiresReview})
+		require.NoError(t, err)
+		require.NoError(t, svc.NotifyFinding(ctx, rec))
 	})
 
 	require.Positive(t, atomic.LoadInt32(&hits), "the origin was contacted; the redirect target was not")

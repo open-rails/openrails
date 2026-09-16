@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -118,18 +117,6 @@ func (s *store) markNotificationRead(ctx context.Context, id uuid.UUID) (int64, 
 
 func (s *store) unreadCount(ctx context.Context) (int64, error) {
 	return s.db.Gen(ctx).CountUnreadMerchantNotifications(ctx)
-}
-
-// --- #787 reconciliation-findings notifications -----------------------------
-
-// markFindingNotified stamps the finding's dedupe linkage after a successful
-// (or attempted, for best-effort notification delivery)
-// notification push.
-func (s *store) markFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity string) error {
-	_, err := s.db.Gen(ctx).MarkReconciliationFindingNotified(ctx, gen.MarkReconciliationFindingNotifiedParams{
-		ID: id, NotifiedAt: at, Severity: severity,
-	})
-	return err
 }
 
 // --- row mapping -------------------------------------------------------------

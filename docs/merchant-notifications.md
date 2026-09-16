@@ -6,7 +6,11 @@ console. Medium, high and critical findings also use enabled outbound webhook
 destinations; high and critical findings additionally use the merchant's alert
 email address. Re-observation of the same open finding does not notify again
 unless its severity increases. Resolving a finding clears that episode's
-notification linkage.
+notification linkage. The episode claim and console notification commit in one
+transaction; failed persistence leaves the finding eligible for retry. External
+delivery follows the commit with bounded retries and is best-effort. A process
+interruption after commit can lose external delivery; the console notification
+remains durable, and repeated reconcile passes do not resend successful hooks.
 
 Webhook destinations remain merchant-scoped, encrypted, write-only credentials.
 The settings page supports adding, rotating and deleting destinations. Rotation

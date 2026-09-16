@@ -25,13 +25,12 @@ func (s Severity) valid() bool { return s == SeverityWarning || s == SeverityCri
 type ChannelType string
 
 const (
-	ChannelInApp   ChannelType = "in_app"
 	ChannelEmail   ChannelType = "email"
 	ChannelWebhook ChannelType = "webhook"
 )
 
 // ChannelRef identifies a notification destination. A webhook ref names
-// a merchant_webhooks row; in_app/email carry no ref.
+// a merchant_webhooks row; email carries no reference.
 type ChannelRef struct {
 	Type      ChannelType `json:"type"`
 	WebhookID *uuid.UUID  `json:"webhook_id,omitempty"`
@@ -98,8 +97,7 @@ type Alert struct {
 	FiredAt       time.Time `json:"fired_at"`
 }
 
-// DeliveryResult records the outcome of one channel delivery (recorded, and
-// returned by test-fire).
+// DeliveryResult records the outcome of one external delivery.
 type DeliveryResult struct {
 	Channel  string `json:"channel"`
 	OK       bool   `json:"ok"`

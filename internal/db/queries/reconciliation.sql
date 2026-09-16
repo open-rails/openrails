@@ -98,6 +98,18 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
+-- name: ClaimReconciliationFindingNotification :execrows
+-- Claim one open episode/escalation in the same transaction as its notification.
+UPDATE openrails.reconciliation_findings
+SET notified_at = sqlc.arg(notified_at)::timestamptz,
+    notified_severity = sqlc.arg(severity)::text
+WHERE id = sqlc.arg(id)::uuid
+  AND status = 'requires_review'
+  AND severity = sqlc.arg(severity)::text
+  AND (notified_at IS NULL OR
+       array_position(ARRAY['critical','high','medium','low'], severity) <
+       COALESCE(array_position(ARRAY['critical','high','medium','low'], notified_severity), 5));
+
 -- name: MarkReconciliationFindingNotified :execrows
 -- #787: dedupe linkage for the immediate notify path — set once a finding
 -- pushes an operator notification, cleared by every resolution statement below

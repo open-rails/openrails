@@ -100,3 +100,48 @@ func TestFindingNotifyDedupeEscalateResolve(t *testing.T) {
 	notify(t, resolved)
 	require.Equal(t, int64(2), unreadCount(t), "a resolved finding must never notify")
 }
+
+func TestFindingNotificationPersistenceFailureAndConcurrentRetry(t *testing.T) {
+	pool, appDB := rlsSetup(t)
+	mid := uuid.New()
+	seedMerchant(t, pool, mid)
+	svc := newService(t, appDB, nil)
+	sink := newWebhookRecorder(t, 0)
+	store := &reconcile.PGStore{DB: appDB}
+	var rec reconcile.FindingRecord
+	inConn(t, appDB, mid, func(ctx context.Context) {
+		_, err := svc.CreateWebhook(ctx, alerting.CreateWebhookInput{Name: "retained", URL: sink.server.URL})
+		require.NoError(t, err)
+		run, err := store.CreateRun(ctx, reconcile.ModeAdvisory, []reconcile.Provider{reconcile.ProviderNMI}, nil, nil)
+		require.NoError(t, err)
+		rec, err = store.UpsertFinding(ctx, run, reconcile.Finding{Provider: reconcile.ProviderNMI, Type: reconcile.FindingChargebackActiveSub, SubjectKey: uuid.NewString(), Severity: reconcile.SeverityMedium, Status: reconcile.FindingStatusRequiresReview})
+		require.NoError(t, err)
+	})
+	// An insertion failure must roll back the episode claim before any webhook
+	// receives a delivery. The trigger affects only this test's merchant.
+	exec(t, pool, `CREATE FUNCTION openrails.reject_test_notification() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.merchant_id = TG_ARGV[0]::uuid THEN RAISE EXCEPTION 'injected notification failure'; END IF; RETURN NEW; END $$`)
+	exec(t, pool, `CREATE TRIGGER reject_test_notification BEFORE INSERT ON openrails.merchant_notifications FOR EACH ROW EXECUTE FUNCTION openrails.reject_test_notification('`+mid.String()+`')`)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS reject_test_notification ON openrails.merchant_notifications; DROP FUNCTION IF EXISTS openrails.reject_test_notification()`)
+	})
+	inConn(t, appDB, mid, func(ctx context.Context) {
+		require.ErrorContains(t, svc.NotifyFinding(ctx, rec), "persist finding notification")
+		current, err := store.GetFinding(ctx, rec.ID)
+		require.NoError(t, err)
+		require.Nil(t, current.NotifiedAt)
+	})
+	require.Zero(t, sink.callCount())
+	require.Zero(t, countNotifications(t, pool, mid))
+	exec(t, pool, `DROP TRIGGER reject_test_notification ON openrails.merchant_notifications; DROP FUNCTION openrails.reject_test_notification()`)
+	results := make(chan error, 8)
+	for range 8 {
+		go func() {
+			results <- appDB.RunInMerchantConn(mctx(mid), func(ctx context.Context) error { return svc.NotifyFinding(ctx, rec) })
+		}()
+	}
+	for range 8 {
+		require.NoError(t, <-results)
+	}
+	require.Equal(t, 1, countNotifications(t, pool, mid))
+	require.Equal(t, 1, sink.callCount(), "concurrent stale observations must not repeat the external delivery")
+}
