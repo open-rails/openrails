@@ -73,9 +73,9 @@ type PaymentFilter struct {
 
 // GetPayment reads one payment with its refunds.
 func (c *Client) GetPayment(ctx context.Context, id string) (*Payment, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil, invalidErr("payment id is required")
+	id, err := requireID("payment id", id)
+	if err != nil {
+		return nil, err
 	}
 	var out Payment
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/payments/"+url.PathEscape(id), nil, &out); err != nil {
