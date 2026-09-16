@@ -63,30 +63,9 @@ type DriftField = openrails.DriftField
 // denormalized onto price rows and managed implicitly by price-level
 // operations. There is no product-level provider field, no product-level
 // verify/reconcile, no product-level reconcile route.
-type CatalogProduct struct {
-	ID               uuid.UUID       `json:"id"`
-	Key              string          `json:"key"`
-	DisplayName      string          `json:"display_name"`
-	Description      string          `json:"description"`
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	TierGroup        *string         `json:"tier_group,omitempty"`
-	TierRank         int             `json:"tier_rank"`
-	Archived         bool            `json:"archived"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
-}
+type CatalogProduct = openrails.CatalogProduct
 
-type CreateProductRequest struct {
-	Key              string          `json:"key"`
-	DisplayName      string          `json:"display_name"`
-	Description      string          `json:"description"`
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	TierGroup        *string         `json:"tier_group,omitempty"`
-	TierRank         int             `json:"tier_rank,omitempty"`
-	// Archived creates the product retired. Supports migrating historical
-	// plans that already have subscribers (no purchasable gap).
-	Archived bool `json:"archived,omitempty"`
-}
+type CreateProductRequest = openrails.CreateProductRequest
 
 func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
@@ -143,23 +122,7 @@ var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
 // change only with their Set flag: true plus nil sets SQL NULL, true plus an empty
 // map sets an empty definition, and false omits the field regardless of its value.
 // Same-field concurrent patches use last-committed-write wins.
-type UpdateProductRequest struct {
-	DisplayName      *string         `json:"display_name,omitempty"`
-	Description      *string         `json:"description,omitempty"`
-	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	SetEntitlements  bool            `json:"set_entitlements,omitempty"`
-	TierGroup        *string         `json:"tier_group,omitempty"`
-	SetTierGroup     bool            `json:"set_tier_group,omitempty"`
-	TierRank         *int            `json:"tier_rank,omitempty"`
-	// Archived sets the lifecycle flag. archived propagates to Stripe as
-	// active=false; unarchived as active=true.
-	Archived *bool `json:"archived,omitempty"`
-	// SkipRailSync, when true, suppresses any propagation of this update to
-	// configured external rails (Stripe etc.). The DB row is updated as usual.
-	// Use sparingly — drift introduced this way will appear as sync_status="drifted"
-	// on subsequent ?verify=true reads or reconcile actions.
-	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
-}
+type UpdateProductRequest = openrails.UpdateProductRequest
 
 func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req UpdateProductRequest) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
