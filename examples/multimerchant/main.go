@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -34,14 +33,13 @@ func run(ctx context.Context, getenv func(string) string) error {
 		return errors.New("OPENRAILS_DATABASE_URL and OPENRAILS_MERCHANT_IDS are required")
 	}
 	runtime, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{
-			Config: &config.Config{
-				Env: "development", TestMode: config.CredentialPostureSandbox,
-				MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB,
-				DB: &config.DBConfig{URL: dsn},
-			},
-			River: embedded.RiverManagedByOpenRails(),
+		Config: &config.Config{
+			Env: "development", TestMode: config.CredentialPostureSandbox,
+			MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB,
+			DB: &config.DBConfig{URL: dsn},
 		},
+		River: embed.RiverManagedByOpenRails(),
+
 		RunWorkers: true,
 	})
 	if err != nil {

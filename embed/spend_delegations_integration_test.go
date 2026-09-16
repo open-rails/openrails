@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // Regression: the transcribed SetCustomerSpendDelegations bypasses the
@@ -30,10 +29,10 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "b6b6b6b6-0000-4000-8000-000000000042")
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := New(ctx, Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	rt.app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	client, clientErr := rt.Client()
 	if clientErr != nil {
@@ -62,7 +61,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 		// non-monetary units, and the singular upsert must preserve that contract.
 		Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 123}},
 	}))
-	stored, err := rt.Service().InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
+	stored, err := rt.svc.InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
 	require.NoError(t, err)
 	require.Len(t, stored, 2, "single embedded upsert must preserve unrelated rows")
 	limits := map[string]int64{}
@@ -87,7 +86,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	require.ErrorAs(t, err, &embeddedStatus)
 	require.Equal(t, 400, embeddedStatus.Status)
 	require.Contains(t, err.Error(), "duplicate delegation for role")
-	stored, err = rt.Service().InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
+	stored, err = rt.svc.InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
 	require.NoError(t, err)
 	require.Len(t, stored, 2, "rejected embedded duplicate document must not mutate policy")
 
