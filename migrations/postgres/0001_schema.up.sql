@@ -392,27 +392,6 @@ COMMENT ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now tim
 REVOKE ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.due_dunning_merchant_ids(p_rails text[], p_now timestamp with time zone, p_limit integer) TO openrails_app;
 
-CREATE FUNCTION openrails.due_payment_method_notice_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'openrails', 'pg_catalog'
-    AS $$
-BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
-    RETURN QUERY
-    SELECT DISTINCT n.merchant_id
-      FROM openrails.payment_method_notices n
-     WHERE n.resolved_at IS NULL
-       AND n.next_notice_at IS NOT NULL
-       AND n.next_notice_at <= p_now
-     LIMIT p_limit;
-END;
-$$;
-
-COMMENT ON FUNCTION openrails.due_payment_method_notice_merchant_ids(p_now timestamp with time zone, p_limit integer) IS 'Merchants with a due or#870 bucket-2 notice rung — the fan-out list for PaymentMethodNoticeWorker. Ids only; every rung is sent per-merchant under RunInMerchantScope.';
-
-REVOKE ALL ON FUNCTION openrails.due_payment_method_notice_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.due_payment_method_notice_merchant_ids(p_now timestamp with time zone, p_limit integer) TO openrails_app;
-
 CREATE FUNCTION openrails.due_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) RETURNS TABLE(merchant_id uuid)
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'openrails', 'pg_catalog'
@@ -3848,54 +3827,6 @@ CREATE POLICY merchant_isolation ON openrails.money_settings USING ((merchant_id
 ALTER TABLE openrails.money_settings ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.money_settings TO openrails_app;
-
-CREATE TABLE openrails.payment_method_notices (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    subscription_id uuid NOT NULL,
-    rail text NOT NULL,
-    failure_code text,
-    parked_at timestamp with time zone NOT NULL,
-    rungs_sent bigint DEFAULT 1 NOT NULL,
-    next_notice_at timestamp with time zone,
-    resolved_at timestamp with time zone,
-    resolution text,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT chk_payment_method_notices_open_has_next CHECK (((resolved_at IS NOT NULL) OR (next_notice_at IS NOT NULL))),
-    CONSTRAINT chk_payment_method_notices_resolved CHECK (((resolved_at IS NULL) = (resolution IS NULL))),
-    CONSTRAINT chk_payment_method_notices_rungs_sent CHECK ((rungs_sent >= 1))
-);
-
-ALTER TABLE ONLY openrails.payment_method_notices FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.payment_method_notices IS 'or#870 bucket 2: one open row per subscription parked awaiting a payment-method fix, driving the notification ladder. Sends notices only — no path from this table cancels a subscription or touches a stored payment method.';
-
-ALTER TABLE ONLY openrails.payment_method_notices
-    ADD CONSTRAINT payment_method_notices_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY openrails.payment_method_notices
-    ADD CONSTRAINT uq_payment_method_notices_subscription UNIQUE (merchant_id, subscription_id);
-
-CREATE INDEX idx_payment_method_notices_customer ON openrails.payment_method_notices USING btree (merchant_id, customer_id);
-
-CREATE INDEX idx_payment_method_notices_due ON openrails.payment_method_notices USING btree (next_notice_at) WHERE ((resolved_at IS NULL) AND (next_notice_at IS NOT NULL));
-
-ALTER TABLE ONLY openrails.payment_method_notices
-    ADD CONSTRAINT payment_method_notices_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY openrails.payment_method_notices
-    ADD CONSTRAINT payment_method_notices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE ONLY openrails.payment_method_notices
-    ADD CONSTRAINT payment_method_notices_subscription_fk FOREIGN KEY (merchant_id, customer_id, subscription_id) REFERENCES openrails.subscriptions(merchant_id, customer_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.payment_method_notices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.payment_method_notices ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_method_notices TO openrails_app;
 
 CREATE TABLE openrails.solana_subscriptions (
     id uuid DEFAULT uuidv7() NOT NULL,

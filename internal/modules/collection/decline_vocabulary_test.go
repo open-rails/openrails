@@ -176,43 +176,6 @@ func TestFailureActionCarriesCoverage(t *testing.T) {
 	}
 }
 
-// TestPaymentMethodNoticeLadder pins the rung schedule and the two properties
-// that make it safe: it always terminates, and it terminates by running out —
-// never by deciding anything about the subscription.
-func TestPaymentMethodNoticeLadder(t *testing.T) {
-	parked := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-
-	if got := PaymentMethodNoticeRungs(); got != 3 {
-		t.Fatalf("ladder has %d rungs, want 3 (immediate, +3d, +10d)", got)
-	}
-
-	// Rung 1 is sent inline by the failure flow, so the ladder asks for rung 2
-	// at +3d and rung 3 at +10d — both anchored to the PARK, not to each other.
-	for _, c := range []struct {
-		rungsSent int
-		want      time.Time
-		ok        bool
-	}{
-		{1, parked.Add(3 * 24 * time.Hour), true},
-		{2, parked.Add(10 * 24 * time.Hour), true},
-		{3, time.Time{}, false}, // spent
-		{0, time.Time{}, false}, // a ladder is opened WITH its first rung sent
-	} {
-		got, ok := NextPaymentMethodNoticeAt(c.rungsSent, parked)
-		if ok != c.ok || (ok && !got.Equal(c.want)) {
-			t.Errorf("NextPaymentMethodNoticeAt(%d) = (%v, %v), want (%v, %v)", c.rungsSent, got, ok, c.want, c.ok)
-		}
-	}
-
-	// Only the last rung says it is the last one.
-	if IsFinalPaymentMethodNotice(1) {
-		t.Error("rung 2 of 3 must not be announced as final")
-	}
-	if !IsFinalPaymentMethodNotice(2) {
-		t.Error("rung 3 of 3 is the final notice")
-	}
-}
-
 // assertVocabularyPinned compares a table to its pin in both directions, so a
 // removed row fails as loudly as an added one.
 func assertVocabularyPinned(t *testing.T, rail string, want map[string]DeclineOutcome, got map[string]DeclineOutcome) {

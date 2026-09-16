@@ -2284,7 +2284,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// or#870 notification ladder. One rung per outcome, so a customer is
+		// Immediate notification for each outcome, so a customer is
 		// never silent-treated through a whole dunning cycle and then suddenly
 		// cancelled:
 		//   bucket 1, still trying  -> payment_method_failed ("we'll keep trying")
@@ -2300,16 +2300,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			eventType = models.NotificationPaymentMethodUpdateRequired
 			data = map[string]any{
 				"failure_code": normalize.FromPtr(params.FailureCode),
-				"rung":         1,
-				"final":        collection.IsFinalPaymentMethodNotice(1),
 			}
-			// or#870: open the LADDER with this rung counted. Bucket 2 stops
-			// charging, which removes the only clock the customer was on — so
-			// the follow-up rungs have to be durable work, not a hope that some
-			// other event fires. Same transaction as the notification: a ladder
-			// without its first rung, or a rung without its ladder, is exactly
-			// the silence this is here to prevent.
-			openPaymentMethodNoticeLadder(ctx, tx, subscription, params.FailureCode, now)
 		case subscription.Status == models.StatusCancelled:
 			eventType = models.NotificationPremiumEnded
 			endReason := PremiumEndReasonExpired

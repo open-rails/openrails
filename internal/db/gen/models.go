@@ -992,23 +992,6 @@ type OpenrailsPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 }
 
-// or#870 bucket 2: one open row per subscription parked awaiting a payment-method fix, driving the notification ladder. Sends notices only — no path from this table cancels a subscription or touches a stored payment method.
-type OpenrailsPaymentMethodNotice struct {
-	ID             uuid.UUID
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	SubscriptionID uuid.UUID
-	Rail           string
-	FailureCode    *string
-	ParkedAt       time.Time
-	RungsSent      int64
-	NextNoticeAt   *time.Time
-	ResolvedAt     *time.Time
-	Resolution     *string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
 // Durable host-consumption queue for real successful payments; consumers ack after idempotent processing.
 type OpenrailsPaymentSettlementEvent struct {
 	ID          uuid.UUID
