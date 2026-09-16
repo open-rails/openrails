@@ -193,13 +193,13 @@ func (e *env) state(t *testing.T) delinquency.Snapshot {
 	return rows[0]
 }
 
-func (e *env) events(t *testing.T) []gen.OpenrailsHostOutbox {
+func (e *env) events(t *testing.T) []gen.ListHostEventsRow {
 	t.Helper()
 	rows, err := e.dbi.Gen(e.ctx).ListHostEvents(e.ctx, gen.ListHostEventsParams{
 		MerchantID: e.merchant.UUID(), RowLimit: 50,
 	})
 	require.NoError(t, err)
-	out := make([]gen.OpenrailsHostOutbox, 0, len(rows))
+	out := make([]gen.ListHostEventsRow, 0, len(rows))
 	for _, r := range rows {
 		if r.EventType != "payment.settled" && r.SubjectID == e.payer.UUID() {
 			out = append(out, r)
