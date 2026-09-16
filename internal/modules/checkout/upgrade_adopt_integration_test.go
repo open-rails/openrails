@@ -309,18 +309,20 @@ func TestUpgradeAmbiguousCreateLanded_AdoptsInline(t *testing.T) {
 	require.Equal(t, models.StatusActive, local.Status)
 	require.Equal(t, fx.newPrice.ID, local.PriceID)
 
-	// The old subscription is cancelled locally and deleted remotely (step 5).
+	// The old subscription is cancelled locally and marked for the durable
+	// verify-then-delete intent. This fixture does not run the intent worker,
+	// so no direct provider delete is allowed in the request path.
 	old, oerr := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, fx.existingSub.ID)
 	require.NoError(t, oerr)
 	require.Equal(t, models.StatusCancelled, old.Status)
-	require.EqualValues(t, 1, fx.gateway.subDeletes.Load(), "old NMI subscription cancelled")
+	require.NotNil(t, old.DeletionScheduledAt)
+	require.Zero(t, fx.gateway.subDeletes.Load(), "predecessor delete is owned by the durable intent")
 }
 
-// Ambiguous successor create that did NOT land: the request surfaces
-// ErrCheckoutProcessing (never a decline); the retry under the SAME
-// content-derived key verifies the roster (empty ⇒ safe), re-creates under the
-// SAME order id, and completes. Exactly one live remote subscription.
-func TestUpgradeAmbiguousCreateLost_RetryRecreatesSameOrderID(t *testing.T) {
+// Ambiguous successor create with no immediate roster match: the request
+// surfaces ErrCheckoutProcessing and a retry never re-sends the create. An
+// empty provider search is not proof that the first write was unsent.
+func TestUpgradeAmbiguousCreateUnresolved_NeverRecreates(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("ambiguousLost")
 
@@ -336,16 +338,13 @@ func TestUpgradeAmbiguousCreateLost_RetryRecreatesSameOrderID(t *testing.T) {
 	require.NoError(t, oerr)
 	require.Equal(t, models.StatusActive, old.Status)
 
-	// Provider recovers; the retry (same idempotency key ⇒ retryAfterFailure)
-	// scans the roster first, then re-creates under the ORIGINAL order id.
+	// Provider search remains empty. The retry (same idempotency key) must stay
+	// in processing until an operator/provider reconciliation supplies a
+	// positive receipt; it must not issue a second remote create.
 	fx.gateway.createMode.Store("approve")
-	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
-	require.NoError(t, err)
-	require.Equal(t, "success", resp.Status)
-	require.EqualValues(t, 2, fx.gateway.createCalls.Load())
-	require.Equal(t, firstOrder, fx.gateway.lastOrder.Load().(string), "retry reuses the content-derived order id")
-
-	local, lerr := fx.svc.SubscriptionService.GetByRailSubscriptionID(fx.ctx, "nmi", fx.gateway.subID)
-	require.NoError(t, lerr)
-	require.Equal(t, models.StatusActive, local.Status)
+	_, err = fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
+	require.Error(t, err)
+	require.ErrorIs(t, err, ErrCheckoutProcessing)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "must not resend an unresolved provider write")
+	require.Equal(t, firstOrder, fx.gateway.lastOrder.Load().(string), "the immutable order identity is retained")
 }

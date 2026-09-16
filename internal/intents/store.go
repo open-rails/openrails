@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -423,6 +424,39 @@ func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[strin
 		    AND merchant_id = $3
 		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`, id, b, mid.UUID())
 	return err
+}
+
+// RecordProgressIfAbsent writes one write-ahead progress marker atomically.
+// It is intentionally narrower than RecordProgress: a provider step's
+// "started" marker must never be overwritten by a racing executor or by a
+// retry with a different operation identity. The returned boolean is false
+// when the key already exists (the caller must reconcile that step instead of
+// sending another provider request).
+func (s *Store) RecordProgressIfAbsent(ctx context.Context, id uuid.UUID, key string, value any) (bool, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false, fmt.Errorf("intents: progress key is required")
+	}
+	b, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("intents: marshal progress value: %w", err)
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return false, fmt.Errorf("intents: record progress: %w", err)
+	}
+	result, err := s.db.Qx(ctx).Exec(ctx,
+		`UPDATE openrails.rail_intents
+		    SET result_evidence = coalesce(result_evidence, '{}'::jsonb) || jsonb_build_object($2::text, $3::jsonb),
+		        updated_at = now()
+		  WHERE id = $1
+		    AND merchant_id = $4
+		    AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')
+		    AND NOT (coalesce(result_evidence, '{}'::jsonb) ? $2::text)`, id, key, b, mid.UUID())
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() == 1, nil
 }
 
 func (s *Store) MarkFailedRetryable(ctx context.Context, id uuid.UUID, nextAttemptAt time.Time, reason string) error {

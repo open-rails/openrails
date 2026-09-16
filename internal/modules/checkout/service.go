@@ -1663,10 +1663,16 @@ func (s *CheckoutService) processUpgrade(
 		case IdempotencyStatusPending:
 			return nil, errors.New("upgrade already in progress, please wait")
 		case IdempotencyStatusFailed:
-			// Fall through and re-run: the proration order id is content-derived
-			// (stable across retries), so a charge landed by the failed attempt
-			// is re-found by the pre-charge verify below (#674).
-			retryAfterFailure = true
+			// A failed request may have crossed either NMI write boundary. The
+			// request-level idempotency row is not proof that a provider write was
+			// unsent, so never restart the upgrade from a fresh provider call.
+			// Reconciliation below may adopt already-recorded receipts; an empty
+			// provider search remains processing and requires operator/provider
+			// reconciliation before another write is permitted.
+			// Only an explicitly processing failure means an earlier provider
+			// boundary was crossed. Validation/configuration failures are known
+			// clean and remain retryable by the caller.
+			retryAfterFailure = strings.Contains(strings.TrimSpace(idempRec.Error), ErrCheckoutProcessing.Error())
 		}
 	}
 
@@ -1797,6 +1803,13 @@ func (s *CheckoutService) processUpgrade(
 	}
 
 	if resp == nil {
+		if retryAfterFailure {
+			// We already attempted this immutable successor order. An empty
+			// roster cannot prove that NMI did not create it, therefore a
+			// second AddRecurringSubscription is forbidden.
+			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+			return nil, ErrCheckoutProcessing
+		}
 		params := nmi.RecurringPaymentData{
 			CardUserData: nmi.CardUserData{
 				FirstName: ResolveCheckoutFirstName(req, user),
@@ -1833,6 +1846,10 @@ func (s *CheckoutService) processUpgrade(
 			// subscription abandoned as failed (#674 tail).
 			adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, railCustomerRef, nmiPlanID, successorOrderID)
 			if aerr != nil || !ok {
+				// An empty roster is inconclusive. The create could have been
+				// accepted while its response was lost; do not issue a second
+				// subscription create. Leave the durable request in processing for
+				// provider reconciliation.
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 				return nil, ErrCheckoutProcessing
 			}
@@ -1876,7 +1893,6 @@ func (s *CheckoutService) processUpgrade(
 			// A previous attempt failed; its charge may have landed. Verify by
 			// the order id BEFORE sending another sale (#674).
 			if txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, prorationOrderID); verr != nil {
-				rollbackNewSubscription()
 				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 				return nil, ErrCheckoutProcessing
 			} else if found {
@@ -1884,6 +1900,13 @@ func (s *CheckoutService) processUpgrade(
 			}
 		}
 		if prorationTransactionID == "" {
+			if retryAfterFailure {
+				// A previous RunSale may have crossed the gateway boundary. An
+				// empty order search is not proof of non-execution; never charge
+				// again under the same request without a positive reconciliation.
+				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+				return nil, ErrCheckoutProcessing
+			}
 			saleResp, err := client.RunSale(ctx, nmi.SaleParams{
 				CustomerVaultID:  railCustomerRef,
 				BillingID:        railMethodRef,
@@ -1905,7 +1928,6 @@ func (s *CheckoutService) processUpgrade(
 				if verr == nil && found {
 					prorationTransactionID = txnID
 				} else {
-					rollbackNewSubscription()
 					_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
 					return nil, ErrCheckoutProcessing
 				}
@@ -1987,18 +2009,27 @@ func (s *CheckoutService) processUpgrade(
 	cancelType := models.CancelType("upgrade")
 	existingSub.Status = models.StatusCancelled
 	existingSub.CancelledAt = &now
+	// Keep the deferred-delete marker until the durable NMI delete intent
+	// verifies the predecessor is absent. A tier swap must never issue a
+	// best-effort direct cancellation after the local commit.
+	existingSub.DeletionScheduledAt = &now
 	existingSub.CancelType = &cancelType
 	existingSub.CancelFeedback = nil
 	existingSub.ClearRetrySchedule()
 	if err := s.SubscriptionService.ReplaceForTierChange(ctx, existingSub, newSubscription); err != nil {
 		saveErr := fmt.Errorf("failed to save upgraded subscription: %w", err)
-		// Post-charge DB failure: the user was charged the proration and a new
-		// subscription is live at NMI, but we cannot persist it locally. Compensate
-		// by refunding the proration and cancelling the new NMI subscription so the
-		// rail state matches the (unchanged) local state.
-		s.compensateFailedUpgrade(ctx, provider, prorationTransactionID, newSubscriptionID, resp.SubscriptionID, user.ID, &existingSub.ID, rollbackNewSubscription, saveErr)
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, saveErr)
-		return nil, saveErr
+		// Post-charge DB failure leaves both provider effects possible. Refunds
+		// and cancellation are not safe compensation: either can race a delayed
+		// provider write and create a second inconsistent outcome. Keep the
+		// request failed/processing so reconciliation can finish the local swap
+		// from the immutable provider receipts without another provider mutation.
+		log.WithError(saveErr).WithFields(log.Fields{
+			"user_id": user.ID, "subscription_id": newSubscriptionID,
+			"rail_subscription_id": resp.SubscriptionID, "transaction_id": prorationTransactionID,
+			"event": "upgrade_reconciliation_required",
+		}).Error("upgrade local swap failed after provider effects; reconciliation required")
+		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
+		return nil, ErrCheckoutProcessing
 	}
 
 	// Step 4: Update entitlements immediately (grant new tier entitlements)
@@ -2038,16 +2069,24 @@ func (s *CheckoutService) processUpgrade(
 		}
 	}
 
-	// Step 5: Cancel the old subscription at NMI now that local state is durably
-	// consistent. Best-effort: if this fails the old subscription would keep
-	// billing, so flag it for operator repair rather than silently dropping it.
-	if err := s.cancelNMISubscription(ctx, existingSub, provider); err != nil {
-		log.WithError(err).WithFields(log.Fields{
-			"subscription_id":      existingSub.ID,
-			"rail_subscription_id": existingSub.RailSubscriptionID,
-			"rail":                 provider,
-			"event":                "upgrade_old_subscription_cancel_failed",
-		}).Error("failed to cancel old NMI subscription after upgrade; manual intervention required to stop duplicate billing")
+	// Step 5: enqueue the predecessor cancellation only after the local swap
+	// commits. The existing verify-then-delete intent owns provider retries and
+	// keeps DeletionScheduledAt until it has observed the predecessor absent.
+	if s.Intents != nil {
+		if _, err := merchant.Require(ctx); err == nil {
+			_, err = s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
+				MerchantID: existingSub.MerchantID,
+				Provider:   provider, IntentType: intents.TypeNMIDeleteSubscription,
+				SubscriptionID: &existingSub.ID, PspID: existingSub.PspID,
+				Payload:        intents.NMIDeletePayload{UserID: user.ID, RailSubscriptionID: existingSub.RailSubscriptionID},
+				IdempotencyKey: intents.NMIDeleteIdempotencyKey(existingSub.ID),
+				NextAttemptAt:  now, Origin: intents.OriginUser,
+				OriginReason: "cancel predecessor after durable tier upgrade",
+			})
+			if err != nil {
+				log.WithError(err).WithFields(log.Fields{"subscription_id": existingSub.ID, "rail": provider, "event": "upgrade_old_subscription_delete_enqueue_failed"}).Error("predecessor cancellation intent enqueue failed; reconciliation required")
+			}
+		}
 	}
 
 	// Mark idempotency request as complete
@@ -2099,53 +2138,6 @@ func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, cli
 		return &nmi.AddSubscriptionResponse{SubscriptionID: candidates[0]}, true, nil
 	default:
 		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match payment method %s plan %s; operator attention required", len(candidates), railCustomerRef, planID)
-	}
-}
-
-// compensateFailedUpgrade rolls back rail-side state after a post-charge DB
-// failure during an NMI tier upgrade: it refunds the proration charge and cancels
-// the newly created NMI subscription so the rail matches the unchanged local
-// state. Each step is best-effort; any failure is logged at error level with a
-// structured event so operators can finish the repair manually.
-func (s *CheckoutService) compensateFailedUpgrade(
-	ctx context.Context,
-	provider string,
-	prorationTransactionID string,
-	newSubscriptionID uuid.UUID,
-	newRailSubscriptionID string,
-	userID string,
-	oldSubscriptionID *uuid.UUID,
-	rollbackNewSubscription func(),
-	cause error,
-) {
-	logEntry := log.WithError(cause).WithFields(log.Fields{
-		"user_id":                  userID,
-		"new_subscription_id":      newSubscriptionID,
-		"new_rail_subscription_id": newRailSubscriptionID,
-		"proration_transaction_id": prorationTransactionID,
-		"rail":                     provider,
-		"event":                    "upgrade_compensation",
-	})
-	if oldSubscriptionID != nil {
-		logEntry = logEntry.WithField("old_subscription_id", *oldSubscriptionID)
-	}
-	logEntry.Warn("compensating failed NMI upgrade after post-charge DB error")
-
-	// Refund the proration charge.
-	if prorationTransactionID != "" {
-		client, cerr := s.resolveNMIClient(ctx, provider)
-		if cerr != nil || client == nil {
-			logEntry.Error("manual intervention required: NMI client unavailable to refund proration")
-		} else if _, err := client.Refund(ctx, nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
-			logEntry.WithError(err).Error("manual intervention required: failed to refund proration during upgrade compensation")
-		} else {
-			logEntry.Warn("refunded proration during upgrade compensation")
-		}
-	}
-
-	// Cancel the newly created NMI subscription.
-	if rollbackNewSubscription != nil {
-		rollbackNewSubscription()
 	}
 }
 
