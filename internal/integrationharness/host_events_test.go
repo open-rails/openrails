@@ -147,6 +147,11 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	settled, err = remote.HasSettledPayment(ctx, openrails.CustomerID(payer), price)
 	require.NoError(t, err)
 	require.True(t, settled, "a refund cannot recreate first-payment eligibility")
+	_, err = pool.Exec(ctx, `UPDATE openrails.payments SET deleted_at=now() WHERE id=$1`, payment)
+	require.NoError(t, err)
+	settled, err = local.HasSettledPayment(ctx, openrails.CustomerID(payer), price)
+	require.NoError(t, err)
+	require.True(t, settled, "archiving a real payment must not grant another first-payment trial")
 	for _, test := range []struct {
 		status, movement string
 		amount           int64

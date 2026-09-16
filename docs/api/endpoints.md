@@ -506,6 +506,12 @@ webhook namespace uses the configured encrypted DB/Vault backend.
 
 ## Host event consumption
 
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/v1/merchant/host-events` | `merchant:host-events:read` | Bounded typed pending host events |
+| POST | `/v1/merchant/host-events/{id}/acknowledge` | `merchant:host-events:acknowledge` | Idempotent acknowledgment after host processing |
+| GET | `/v1/merchant/customers/{customer_id}/payment-settlement-status` | `merchant:payments:read` | Historical positive rail payment for `price_id` |
+
 `GET /v1/merchant/host-events` and `POST /v1/merchant/host-events/{id}/acknowledge`
 are shared by standalone HTTP and the embedded Go `Client`. They require
 `merchant:host-events:read` and `merchant:host-events:acknowledge`, respectively.

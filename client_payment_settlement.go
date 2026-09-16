@@ -9,7 +9,7 @@ import (
 
 // HasSettledPayment reports whether this merchant's customer has ever completed
 // a positive rail payment for the given price. Refunding that payment does not
-// erase the historical fact. This reads the authoritative payment record and
+// erase the historical fact, nor does archiving it. This reads the payment record and
 // remains true after its acknowledged host event is pruned.
 func (c *Client) HasSettledPayment(ctx context.Context, customerID CustomerID, priceID uuid.UUID) (bool, error) {
 	var out struct {
