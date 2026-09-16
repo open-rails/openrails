@@ -36,15 +36,20 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices (id,merchant_id,product_id,amount,currency) VALUES ($1,$2,$3,7000000,'USD')`, price, a.MerchantID.UUID(), product)
 	require.NoError(t, err)
 	psp := dbtest.EnsureTestPSP(ctx, t, pool, a.MerchantID.UUID(), "nmi")
+	// This earlier event commits after the later payment has been consumed.
+	// A persisted UUID high-water mark would be unsafe for this stream.
+	lifecycleID := uuid.Must(uuid.NewV7())
+	lifecycleTx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = lifecycleTx.Rollback(ctx) }()
+	_, err = lifecycleTx.Exec(ctx, `INSERT INTO openrails.host_outbox
+		(id,merchant_id,event_type,subject_type,subject_id,currency,data,dedupe_key)
+		VALUES ($1,$2,'delinquency.entered','customer',$3,'USD','{"from_state":"grace","to_state":"delinquent","overdue_amount":12000000}', $4)`, lifecycleID, a.MerchantID.UUID(), payer, uuid.NewString())
+	require.NoError(t, err)
 	settledAt := time.Now().UTC().Truncate(time.Microsecond)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.payments
 		(id,merchant_id,customer_id,price_id,rail,transaction_id,amount,list_amount,currency,status,money_movement,psp_id,purchased_at)
 		VALUES ($1,$2,$3,$4,'nmi',$5,7000000,7000000,'USD','completed','rail',$6,$7)`, payment, a.MerchantID.UUID(), payer, price, uuid.NewString(), psp, settledAt)
-	require.NoError(t, err)
-	lifecycleID := uuid.New()
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.host_outbox
-		(id,merchant_id,event_type,subject_type,subject_id,currency,data,dedupe_key)
-		VALUES ($1,$2,'delinquency.entered','customer',$3,'USD','{"from_state":"grace","to_state":"delinquent","overdue_amount":12000000}', $4)`, lifecycleID, a.MerchantID.UUID(), payer, uuid.NewString())
 	require.NoError(t, err)
 	// A failed consumer retains the same event for replay through either transport.
 	options := openrails.HostEventListOptions{Type: openrails.HostEventPaymentSettled, Limit: 1}
@@ -79,6 +84,10 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	pending, err := remote.ListHostEvents(ctx, options)
 	require.NoError(t, err)
 	require.Empty(t, pending)
+	beforeCommit, err := local.ListHostEvents(ctx, openrails.HostEventListOptions{})
+	require.NoError(t, err)
+	require.Empty(t, beforeCommit)
+	require.NoError(t, lifecycleTx.Commit(ctx))
 	options.IncludeAcknowledged, options.PaymentID = true, payment
 	history, err := local.ListHostEvents(ctx, options)
 	require.NoError(t, err)
