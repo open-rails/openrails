@@ -93,6 +93,20 @@ type InvoiceContactDTO struct {
 	Email string `json:"email"`
 }
 
+// Invoice operation refusals carry these StatusError.Code values.
+const (
+	CodeInvoiceActionNotAllowed         = "invoice_action_not_allowed"
+	CodeInvoiceNotRetryable             = "invoice_not_retryable"
+	CodeInvoiceRetryInProgress          = "invoice_retry_in_progress"
+	CodeInvoiceRetryOutcomeUnknown      = "invoice_retry_outcome_unknown"
+	CodeInvoiceRetryIdempotencyConflict = "invoice_retry_idempotency_conflict"
+	CodeInvoicePaymentReferenceUsed     = "invoice_payment_reference_used"
+	CodeInvoicePaymentExceedsDue        = "invoice_payment_exceeds_due"
+	CodeInvoicePaymentInvalid           = "invoice_payment_invalid"
+	CodeCollectionPaymentMethodRequired = "collection_payment_method_required"
+	CodeCollectionPaymentMethodInvalid  = "collection_payment_method_invalid"
+)
+
 type InvoiceProfileDTO struct {
 	NetTermsDays     int                 `json:"net_terms_days"`
 	CollectionMethod string              `json:"collection_method"`

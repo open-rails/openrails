@@ -244,6 +244,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/checkout-sessions/{id}` | `merchant:customer-settings:read` | Read a checkout owned by query customer_id |
 | POST | `/v1/merchant/checkout-sessions/{id}/confirm` | `merchant:checkout:create` | Confirm the checkout for the supplied customer_id |
 | GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for query price_id; no provider request |
+| GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs and their public browser values for the credential's merchant |
 | GET | `/v1/merchant/customers/{customer_id}/effective-tier` | `merchant:customer-settings:read` | Active tier for query group; null when none |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (unix seconds): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
 | POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }`. Idempotent on the path `{id}` unconditionally (or#907); an identical retry answers `Replayed: true`, a changed amount is refused 409 `idempotency_key_reused` |

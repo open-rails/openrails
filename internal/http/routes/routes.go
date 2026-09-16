@@ -250,6 +250,7 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group.Handle(http.MethodGet, "/checkout-sessions/:id", h(httphandlers.ServiceGetCheckoutSession), readMW...)
 	group.Handle(http.MethodPost, "/checkout-sessions/:id/confirm", h(httphandlers.ServiceConfirmCheckoutSession), checkoutWriteMW...)
 	group.Handle(http.MethodGet, "/checkout-options", h(httphandlers.ServiceListCheckoutRailOptions), readMW...)
+	group.Handle(http.MethodGet, "/checkout-config", h(httphandlers.ServiceGetCheckoutConfig), readMW...)
 	customers.Handle(http.MethodGet, "/effective-tier", h(httphandlers.ServiceResolveEffectiveTier), readMW...)
 
 	group.Handle(http.MethodPost, "/admissions", h(httphandlers.ServiceAdmitBatch), admissionMW...)

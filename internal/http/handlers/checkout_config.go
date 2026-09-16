@@ -32,24 +32,10 @@ const checkoutConfigMaxAge = "public, max-age=60"
 // mechanism (#734) that already governs every public route, applied by the
 // server's middleware chain before the handler runs.
 func GetCheckoutConfig(r *httprequest.Request) {
-	mid, ok := merchant.FromContext(r.Request.Context())
-	if !ok || mid.IsZero() {
-		r.ErrorJSON(http.StatusNotFound, "no merchant for this host")
+	body, ok := checkoutConfig(r)
+	if !ok {
 		return
 	}
-	if r.State == nil || r.State.Merchants == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "merchant configuration unavailable")
-		return
-	}
-
-	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
-	psps, err := r.State.Merchants.PublicCheckoutPSPs(r.Request.Context(), mid, env)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to load checkout configuration")
-		return
-	}
-
-	body := merchants.PublicCheckoutConfig{Object: "checkout_config", PSPs: psps}
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to encode checkout configuration")
@@ -65,4 +51,31 @@ func GetCheckoutConfig(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", checkoutConfigMaxAge)
 	r.SetHeader("ETag", `"`+hex.EncodeToString(sum[:])+`"`)
 	r.SuccessJSON(body)
+}
+
+// ServiceGetCheckoutConfig serves the same document to the shared client for
+// the credential's merchant, without public cache headers.
+func ServiceGetCheckoutConfig(r *httprequest.Request) {
+	if body, ok := checkoutConfig(r); ok {
+		r.SuccessJSON(body)
+	}
+}
+
+func checkoutConfig(r *httprequest.Request) (merchants.PublicCheckoutConfig, bool) {
+	mid, ok := merchant.FromContext(r.Request.Context())
+	if !ok || mid.IsZero() {
+		r.ErrorJSON(http.StatusNotFound, "no merchant for this host")
+		return merchants.PublicCheckoutConfig{}, false
+	}
+	if r.State == nil || r.State.Merchants == nil {
+		r.ErrorJSON(http.StatusServiceUnavailable, "merchant configuration unavailable")
+		return merchants.PublicCheckoutConfig{}, false
+	}
+	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
+	psps, err := r.State.Merchants.PublicCheckoutPSPs(r.Request.Context(), mid, env)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load checkout configuration")
+		return merchants.PublicCheckoutConfig{}, false
+	}
+	return merchants.PublicCheckoutConfig{Object: "checkout_config", PSPs: psps}, true
 }
