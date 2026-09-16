@@ -7,7 +7,7 @@ error falls back to a per-process in-memory counter for that check. One net/http
 (`RateLimitHTTP`, `internal/http/middleware/ratelimit_neutral.go`) serves both surfaces —
 embedded `/billing/v1/...` paths are normalized to `/v1/...` before classification.
 
-**On by default** (#742): standalone `config.Load` and `embedded.New` both seed the curated
+**On by default** (#742): standalone `config.Load` and `embed.New` both seed the curated
 defaults below whenever `rate_limits`/`captcha` are left nil. To opt out (your own gateway fronts
 billing), set `rate_limits_disabled: true` (env `RATE_LIMITS_DISABLED`) — the middleware becomes
 a pure passthrough. Host-facing summaries: [frontend-integration.md](frontend-integration.md),

@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -34,18 +33,18 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	rdb, _ := dbtest.SharedRedisClient(t)
-	rt, err := New(ctx, Options{Options: embedded.Options{
+	rt, err := New(ctx, Options{
 		Config: &config.Config{
 			Env:      "dev",
 			TestMode: config.CredentialPostureLive,
 			DB:       &config.DBConfig{URL: dsn},
 		},
 		Redis: rdb,
-		River: embedded.RiverManagedByOpenRails(),
-	}})
+		River: RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	rt.app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	merchantPool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	payerID := dbtest.EnsureCustomerIDPgx(ctx, t, merchantPool, uuid.NewString())
@@ -53,7 +52,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	merchantCtx := merchant.WithID(ctx, dbtest.TestMerchantID)
 	depositKey, err := service.NewDepositIdempotencyKey("th-005-test", uuid.NewString())
 	require.NoError(t, err)
-	_, err = rt.Service().DepositCredits(merchantCtx, service.DepositCreditsRequest{
+	_, err = rt.svc.DepositCredits(merchantCtx, service.DepositCreditsRequest{
 		CustomerID: &payer,
 		Invoker:    payerID.String(),
 		Currency:   "USD",
@@ -77,7 +76,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, openrails.OperationAuthorizationOpen, opened.State)
 	require.False(t, opened.Replayed)
-	capacity, err := rt.Service().GetCreditAccount(merchantCtx, payer, "USD")
+	capacity, err := rt.svc.GetCreditAccount(merchantCtx, payer, "USD")
 	require.NoError(t, err)
 	require.Equal(t, int64(6_000), capacity.HeldAmount)
 	require.Equal(t, int64(4_000), capacity.AvailableAmount,
@@ -120,7 +119,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.Equal(t, openrails.OperationAuthorizationReleased, released.State)
 	require.False(t, released.Replayed)
 	require.NotNil(t, released.ReleasedAt)
-	capacity, err = rt.Service().GetCreditAccount(merchantCtx, payer, "USD")
+	capacity, err = rt.svc.GetCreditAccount(merchantCtx, payer, "USD")
 	require.NoError(t, err)
 	require.Equal(t, int64(0), capacity.HeldAmount)
 	require.Equal(t, int64(10_000), capacity.AvailableAmount)
@@ -193,7 +192,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 		p := identity.CustomerID(id)
 		key, keyErr := service.NewDepositIdempotencyKey("th-005-race", uuid.NewString())
 		require.NoError(t, keyErr)
-		_, depositErr := rt.Service().DepositCredits(merchantCtx, service.DepositCreditsRequest{
+		_, depositErr := rt.svc.DepositCredits(merchantCtx, service.DepositCreditsRequest{
 			CustomerID: &p, Invoker: id.String(), Currency: "USD", Amount: amount, Key: key,
 		})
 		require.NoError(t, depositErr)
@@ -213,9 +212,9 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 		err      error
 	}
 	lockedAdmission := func(p identity.CustomerID, requestID string, cost int64, entered chan<- struct{}, release <-chan struct{}) admissionResult {
-		gate := spendgate.New(rt.emb.App().Runtime.DB)
+		gate := spendgate.New(rt.app.Runtime.DB)
 		var decision spendgate.Decision
-		err := rt.emb.App().Runtime.MoneyService.WithLockedAdmissionCapacity(merchantCtx, p, "USD", func(merchantCtx context.Context, txDB *db.DB, capacity money.AdmissionCapacity) error {
+		err := rt.app.Runtime.MoneyService.WithLockedAdmissionCapacity(merchantCtx, p, "USD", func(merchantCtx context.Context, txDB *db.DB, capacity money.AdmissionCapacity) error {
 			var gateErr error
 			decision, gateErr = gate.Admit(merchantCtx, txDB.Gen(merchantCtx), spendgate.AdmitInput{
 				Customer: p.UUID(), Currency: "USD",
@@ -234,7 +233,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	}
 
 	authFirstPayer := fundPayer(10_000)
-	authFirstTx, err := rt.emb.App().Runtime.DB.Pool().Begin(ctx)
+	authFirstTx, err := rt.app.Runtime.DB.Pool().Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = authFirstTx.Rollback(context.Background()) })
 	_, err = rt.HostTransactions().OpenOperationAuthorization(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
@@ -292,10 +291,10 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.Equal(t, int64(1), tag.RowsAffected())
 	require.NoError(t, admin.Close(ctx))
 	arrears := money.BillingModeArrears
-	require.NoError(t, rt.Service().SetCreditAccountSettings(merchantCtx, overflowPayer, "USD", money.AccountSettingsInput{
+	require.NoError(t, rt.svc.SetCreditAccountSettings(merchantCtx, overflowPayer, "USD", money.AccountSettingsInput{
 		BillingMode: &arrears,
 	}))
-	require.NoError(t, rt.Service().SetCreditLimit(merchantCtx, overflowPayer, "USD", 1))
+	require.NoError(t, rt.svc.SetCreditLimit(merchantCtx, overflowPayer, "USD", 1))
 	overflowRequest := newAuthorization(overflowPayer, 1)
 	_, err = openOperationAuthorizationInCommittedTx(ctx, rt, overflowRequest)
 	require.ErrorContains(t, err, "capacity overflow")
@@ -321,7 +320,7 @@ func requirePayerLockWait(t *testing.T, ctx context.Context, dsn string) {
 }
 
 func openOperationAuthorizationInCommittedTx(ctx context.Context, rt *Runtime, request openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
-	tx, err := rt.emb.App().Runtime.DB.Pool().Begin(ctx)
+	tx, err := rt.app.Runtime.DB.Pool().Begin(ctx)
 	if err != nil {
 		return nil, err
 	}

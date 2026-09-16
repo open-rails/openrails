@@ -9,12 +9,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
+	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	orauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
 	"github.com/stretchr/testify/require"
 )
 
