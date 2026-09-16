@@ -759,11 +759,14 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error) error {
 	expectedMerchant := c.merchantID
-	if pinned, ok := merchant.FromContext(ctx); ok {
-		if !expectedMerchant.IsZero() && expectedMerchant != pinned {
-			return &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
-				Type: "invalid_request_error", Code: "resource_conflict", Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant),
-			}}
+	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
+		// A merchant on the caller's context is never a selection. Against a
+		// bound client it must agree with the construction-time binding
+		// (#772); an unbound remote client forwards it as the assertion the
+		// server verifies against the credential's authority.
+		if !expectedMerchant.IsZero() && pinned != expectedMerchant {
+			return &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "resource_conflict",
+				Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant)}}
 		}
 		expectedMerchant = pinned
 	}
