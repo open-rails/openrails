@@ -87,5 +87,9 @@ func (c *Client) ListHostEvents(ctx context.Context, options HostEventListOption
 // AcknowledgeHostEvent is idempotent. Call only after the host's idempotent
 // processing has committed; an unacknowledged event is redelivered.
 func (c *Client) AcknowledgeHostEvent(ctx context.Context, id uuid.UUID) error {
-	return c.do(ctx, http.MethodPost, "/v1/merchant/host-events/"+id.String()+"/acknowledge", nil, nil)
+	event, err := requireUUID("event_id", id)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodPost, "/v1/merchant/host-events/"+event+"/acknowledge", nil, nil)
 }

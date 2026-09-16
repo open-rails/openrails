@@ -273,7 +273,7 @@ func TestProviderObligationClientIsIdenticalEmbeddedAndStandalone(t *testing.T) 
 		"account after open: balance=10000 held=6000 available=4000 owed=0",
 		"get: state=open replayed=false authorized=6000 terminal=false",
 		"get missing: status=404 code=operation_authorization_not_found param= invalid=false not_found=true conflict=false insufficient=false",
-		"get dot segment: local invalid=true not_found=false conflict=false insufficient=false",
+		"get dot segment: status=400 code=invalid_param param= invalid=true not_found=false conflict=false insufficient=false",
 		"release: state=released replayed=false authorized=6000 terminal=true",
 		"release replay: state=released replayed=true authorized=6000 terminal=true",
 		"release changed reference: status=409 code=operation_authorization_conflict param=release_reference invalid=false not_found=false conflict=true insufficient=false",

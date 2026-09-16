@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"net/url"
 	"strconv"
 
 	"github.com/google/uuid"
@@ -38,15 +37,23 @@ func (c *Client) CreateProduct(ctx context.Context, request CreateProductRequest
 	return &out, nil
 }
 func (c *Client) GetProduct(ctx context.Context, id uuid.UUID) (*CatalogProduct, error) {
+	product, err := requireUUID("product_id", id)
+	if err != nil {
+		return nil, err
+	}
 	var out CatalogProduct
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/"+id.String(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/"+product, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 func (c *Client) GetProductByKey(ctx context.Context, key string) (*CatalogProduct, error) {
+	key, err := pathID("key", key)
+	if err != nil {
+		return nil, err
+	}
 	var out CatalogProduct
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+url.PathEscape(key), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products/by-key/"+key, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -62,8 +69,12 @@ func (c *Client) ListProducts(ctx context.Context, filter ProductFilter) (*Catal
 	return &out, nil
 }
 func (c *Client) UpdateProduct(ctx context.Context, id uuid.UUID, request UpdateProductRequest) (*CatalogProduct, error) {
+	product, err := requireUUID("product_id", id)
+	if err != nil {
+		return nil, err
+	}
 	var out CatalogProduct
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/products/"+id.String(), request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/products/"+product, request, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -76,15 +87,23 @@ func (c *Client) CreatePrice(ctx context.Context, request CreatePriceRequest) (*
 	return &out, nil
 }
 func (c *Client) GetPrice(ctx context.Context, id uuid.UUID) (*CatalogPrice, error) {
+	price, err := requireUUID("price_id", id)
+	if err != nil {
+		return nil, err
+	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/"+id.String(), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/"+price, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 func (c *Client) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, error) {
+	key, err := pathID("key", key)
+	if err != nil {
+		return nil, err
+	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/by-key/"+url.PathEscape(key), nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/prices/by-key/"+key, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -104,8 +123,12 @@ func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPa
 	return &out, nil
 }
 func (c *Client) UpdatePrice(ctx context.Context, id uuid.UUID, request UpdatePriceRequest) (*CatalogPrice, error) {
+	price, err := requireUUID("price_id", id)
+	if err != nil {
+		return nil, err
+	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/prices/"+id.String(), request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/merchant/catalog/prices/"+price, request, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -114,8 +137,16 @@ func (c *Client) UpdatePrice(ctx context.Context, id uuid.UUID, request UpdatePr
 // SetPriceKey moves a price onto key in place. A live price already holding
 // key is archived first.
 func (c *Client) SetPriceKey(ctx context.Context, id uuid.UUID, key string) (*CatalogPrice, error) {
+	price, err := requireUUID("price_id", id)
+	if err != nil {
+		return nil, err
+	}
+	key, err = requireID("key", key)
+	if err != nil {
+		return nil, err
+	}
 	var out CatalogPrice
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/prices/"+id.String()+"/key", struct {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/prices/"+price+"/key", struct {
 		Key string `json:"key"`
 	}{Key: key}, &out); err != nil {
 		return nil, err

@@ -5,17 +5,20 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // These commands commit in OpenRails-owned transactions in every deployment.
 // They cannot join a host database transaction; an embedding host that must
 // commit its provider obligation atomically uses embed.HostTransactions.
 
-// providerOperationPath refuses ids that cannot name a path segment. The
-// server-side validation refuses the same ids with the same class.
+// providerOperationPath refuses ids that cannot name a path segment with the
+// same invalid_param refusal the server-side validation returns. Operation ids
+// are exact canonical host strings: surrounding whitespace is refused, not
+// trimmed, as validateOperationID does.
 func providerOperationPath(operationID string) (string, error) {
-	if operationID == "" || operationID == "." || operationID == ".." {
-		return "", fmt.Errorf("%w: operation_id %q is not a valid operation id", ErrInvalid, operationID)
+	if trimmed := strings.TrimSpace(operationID); trimmed == "" || trimmed != operationID || operationID == "." || operationID == ".." {
+		return "", invalidErr(fmt.Sprintf("operation_id %q is not a valid operation id", operationID))
 	}
 	return "/v1/merchant/provider-operations/" + url.PathEscape(operationID), nil
 }

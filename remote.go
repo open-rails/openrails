@@ -13,6 +13,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -161,6 +163,35 @@ func invalidErr(msg string) error {
 	return &StatusError{Status: http.StatusBadRequest, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "invalid_param", Message: msg}}
 }
 
+// requireID trims a caller-supplied identifier and refuses a blank one with
+// the server's invalid_param refusal before any I/O, so embedded and remote
+// callers observe the same error. Dot segments name nothing and would be
+// rewritten by path cleaning.
+func requireID(field, value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "." || value == ".." {
+		return "", invalidErr(field + " is required")
+	}
+	return value, nil
+}
+
+// pathID is requireID escaped as one URL path segment.
+func pathID(field, value string) (string, error) {
+	value, err := requireID(field, value)
+	if err != nil {
+		return "", err
+	}
+	return url.PathEscape(value), nil
+}
+
+// requireUUID is requireID for a typed identifier: the zero UUID names nothing.
+func requireUUID(field string, id uuid.UUID) (string, error) {
+	if id == uuid.Nil {
+		return "", invalidErr(field + " is required")
+	}
+	return id.String(), nil
+}
+
 // bearer mints the credential for the next call. There is no fallback; a mint
 // failure or empty token errors the call so the issue surfaces.
 func (c *Client) bearer(ctx context.Context) (string, error) {
@@ -194,9 +225,17 @@ func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 // GetDeposit implements Client (handler ServiceGetDeposit, or#906). A key that
 // never committed returns an error matching ErrNotFound.
 func (c *Client) GetDeposit(ctx context.Context, customerID, sourceID string) (*CreditTransaction, error) {
+	customerID, err := requireID("customer_id", customerID)
+	if err != nil {
+		return nil, err
+	}
+	sourceID, err = requireID("source_id", sourceID)
+	if err != nil {
+		return nil, err
+	}
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
-	q.Set("source_id", strings.TrimSpace(sourceID))
+	q.Set("customer_id", customerID)
+	q.Set("source_id", sourceID)
 	var out CreditTransaction
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/deposit?"+q.Encode(), nil, &out); err != nil {
 		return nil, err
@@ -208,7 +247,7 @@ func (c *Client) GetDeposit(ctx context.Context, customerID, sourceID string) (*
 // receipt; changed amount or usage terms return ErrIdempotencyKeyReused.
 func (c *Client) Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) (*CaptureReceipt, error) {
 	if strings.TrimSpace(requestID) == "" {
-		return nil, invalidErr("capture requires request_id")
+		return nil, invalidErr("request_id is required")
 	}
 	body := CaptureRequest{Amount: &capturedAmount}
 	if usage != nil {
@@ -236,7 +275,7 @@ func admissionActionPath(requestID, action string) string {
 // request_id. Used when the work fails after a successful authorize/admit.
 func (c *Client) Release(ctx context.Context, requestID string) error {
 	if strings.TrimSpace(requestID) == "" {
-		return invalidErr("release requires request_id")
+		return invalidErr("request_id is required")
 	}
 	path := admissionActionPath(requestID, "release")
 	return c.do(ctx, http.MethodPost, path, nil, nil)
@@ -245,10 +284,10 @@ func (c *Client) Release(ctx context.Context, requestID string) error {
 // ExtendHold implements Client (handler ServiceExtendHold).
 func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
 	if strings.TrimSpace(requestID) == "" {
-		return invalidErr("extend requires request_id")
+		return invalidErr("request_id is required")
 	}
 	if expiresAt.IsZero() {
-		return invalidErr("extend requires expires_at")
+		return invalidErr("expires_at is required")
 	}
 	path := admissionActionPath(requestID, "extend")
 	body := map[string]any{"expires_at": expiresAt.Unix()}
@@ -257,8 +296,12 @@ func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 
 // Balance implements Client (handler ServiceGetCreditsBalance).
 func (c *Client) Balance(ctx context.Context, customerID string) (*BalanceResponse, error) {
+	customerID, err := requireID("customer_id", customerID)
+	if err != nil {
+		return nil, err
+	}
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
+	q.Set("customer_id", customerID)
 	if c.currency != "" {
 		q.Set("currency", c.currency)
 	}
@@ -271,8 +314,12 @@ func (c *Client) Balance(ctx context.Context, customerID string) (*BalanceRespon
 
 // GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
 func (c *Client) GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error) {
+	customerID, err := requireID("customer_id", customerID)
+	if err != nil {
+		return nil, err
+	}
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
+	q.Set("customer_id", customerID)
 	q.Set("currency", normalizeCurrency(currency))
 	var out CreditAccount
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/balance?"+q.Encode(), nil, &out); err != nil {
@@ -283,6 +330,10 @@ func (c *Client) GetCreditAccount(ctx context.Context, customerID, currency stri
 
 // UsageRollup implements Client (handler ServiceUsageRollup).
 func (c *Client) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
+	customerID, err := requireID("customer_id", customerID)
+	if err != nil {
+		return nil, err
+	}
 	var resp struct {
 		Rows []UsageRollupRow `json:"rows"`
 	}
@@ -301,8 +352,12 @@ func (c *Client) UsageRollup(ctx context.Context, customerID, currency string, f
 
 // GetTrustLevel implements Client (handler ServiceGetTrustLevel, #477).
 func (c *Client) GetTrustLevel(ctx context.Context, customerID, currency string) (string, error) {
+	customerID, err := requireID("customer_id", customerID)
+	if err != nil {
+		return "", err
+	}
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
+	q.Set("customer_id", customerID)
 	q.Set("currency", strings.TrimSpace(currency))
 	var resp struct {
 		Currency   string `json:"currency"`
@@ -339,14 +394,22 @@ func (c *Client) RecordUsage(ctx context.Context, report UsageReport) error {
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
 func (c *Client) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
-	body := CreditLimitRequest{CustomerID: strings.TrimSpace(customerID), Currency: normalizeCurrency(currency), CreditLimitAmount: creditLimit}
+	customerID, err := requireID("customer_id", customerID)
+	if err != nil {
+		return err
+	}
+	body := CreditLimitRequest{CustomerID: customerID, Currency: normalizeCurrency(currency), CreditLimitAmount: creditLimit}
 	return c.do(ctx, http.MethodPut, "/v1/merchant/credit-limit", body, nil)
 }
 
 // GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
 func (c *Client) GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error) {
+	customerID, err := requireID("customer_id", customerID)
+	if err != nil {
+		return 0, err
+	}
 	q := url.Values{}
-	q.Set("customer_id", strings.TrimSpace(customerID))
+	q.Set("customer_id", customerID)
 	q.Set("currency", normalizeCurrency(currency))
 	var resp struct {
 		CreditLimitAmount int64 `json:"credit_limit_amount,string"`
