@@ -70,7 +70,7 @@ const (
 	notHTTPPendingCharges   = "not HTTP: no route serves pending charges"
 	notHTTPReconcileReport  = "not HTTP: CLI/job reconcile report"
 	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
-	notHTTPInternalRow      = "not HTTP: internal rows converted by pkg/service"
+	notHTTPInternalRow      = "not HTTP: internal rows converted by internal/service"
 	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
 	notHTTPIntentPayload    = "not HTTP: frozen rail_intents payload; the pinned provider wire is asserted separately"
 )
