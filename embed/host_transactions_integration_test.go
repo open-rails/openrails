@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrationharness"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TestHostTransactionsCommitAndRollBackWithHostRows proves the embedded
@@ -266,7 +267,7 @@ func TestHostTransactionsCommitAndRollBackWithHostRows(t *testing.T) {
 			var unscoped *db.ErrUnscopedMerchantWork
 			require.True(t, errors.As(err, &unscoped), "got %v", err)
 		})
-		_, err := hostTx.GetOperationAuthorization(openrails.WithMerchant(ctx, openrails.MerchantID(uuid.New())), nil, a.OperationID)
+		_, err := hostTx.GetOperationAuthorization(merchant.WithID(ctx, merchant.ID(uuid.New())), nil, a.OperationID)
 		require.ErrorIs(t, err, openrails.ErrConflict)
 	})
 }
