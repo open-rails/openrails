@@ -24,7 +24,7 @@ func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	remote := h.StartStandalone("USD")
 	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
-		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, DB: &config.DBConfig{URL: h.DSN}},
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
 	}})
 	require.NoError(t, err)
