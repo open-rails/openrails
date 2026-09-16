@@ -72,7 +72,7 @@ export interface CopilotAskResponse {
 }
 
 // askCatalogCopilot: free-form catalog question -> LLM-run catalog/pricing
-// lookups + an answer, plus any drafts the model proposed. 501 when
+// lookups + an answer, plus any drafts the model proposed. Not mounted when
 // llm.catalog_copilot_enabled / the LLM key are not configured.
 export const askCatalogCopilot = (question: string) =>
   api<CopilotAskResponse>("/merchant/catalog/ask", {

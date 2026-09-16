@@ -19,7 +19,7 @@ import (
 	"github.com/open-rails/openrails/pkg/catalog"
 )
 
-// #779 catalog copilot: fail-closed consent gating (501 + config.json flags),
+// #779 catalog copilot: fail-closed consent gating (absent route + config.json flags),
 // Q&A tool-loop execution against REAL catalog/subscription data (counts
 // match the DB, not canned numbers), Phase 2 drafting producing a VALID
 // wizard payload with direction defaults applied, a constraint-violating
@@ -70,17 +70,17 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 
-	t.Run("keyless fails closed naming both knobs", func(t *testing.T) {
+	t.Run("keyless deployments do not advertise the route", func(t *testing.T) {
 		surface := h.StartStandalone("usd")
 		token := surface.MintAPIKey(dbtest.TestMerchantSlug, "copilot-keyless-"+uuid.NewString(),
 			[]string{controlplane.PermMerchantCatalogRead})
-		status, body := askCopilotOnce(t, surface.BaseURL, token, "what do we sell?")
-		require.Equal(t, http.StatusNotImplemented, status)
-		require.Contains(t, string(body), "LLM_API_KEY")
-		require.Contains(t, string(body), "LLM_CATALOG_COPILOT_ENABLED")
+		status, _ := askCopilotOnce(t, surface.BaseURL, token, "what do we sell?")
+		require.Equal(t, http.StatusNotFound, status, "an unconfigured capability is an absent route, never a 501")
+		status, _ = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/copilot/confirm", token, map[string]string{})
+		require.Equal(t, http.StatusNotFound, status)
 	})
 
-	t.Run("key without consent fails closed naming the flag", func(t *testing.T) {
+	t.Run("key without consent does not advertise the route", func(t *testing.T) {
 		surface := h.StartStandalone("usd",
 			WithConsoleAssets(fixtureConsoleAssets()),
 			WithConfig(func(cfg *config.Config) {
@@ -89,9 +89,8 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 			}))
 		token := surface.MintAPIKey(dbtest.TestMerchantSlug, "copilot-noconsent-"+uuid.NewString(),
 			[]string{controlplane.PermMerchantCatalogRead})
-		status, body := askCopilotOnce(t, surface.BaseURL, token, "what do we sell?")
-		require.Equal(t, http.StatusNotImplemented, status)
-		require.Contains(t, string(body), "LLM_CATALOG_COPILOT_ENABLED")
+		status, _ := askCopilotOnce(t, surface.BaseURL, token, "what do we sell?")
+		require.Equal(t, http.StatusNotFound, status)
 
 		status, cfgBody, _ := getRaw(t, surface.BaseURL+"/admin/config.json")
 		require.Equal(t, http.StatusOK, status)

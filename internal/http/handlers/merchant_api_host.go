@@ -25,7 +25,7 @@ func apiHostMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
 		return merchant.ID{}, false
 	}
 	if r.State == nil || r.State.Merchants == nil {
-		r.ErrorJSON(http.StatusNotImplemented, "merchant directory service is not armed on this deployment")
+		r.ErrorJSON(http.StatusServiceUnavailable, "merchant directory service unavailable")
 		return merchant.ID{}, false
 	}
 	return mid, true

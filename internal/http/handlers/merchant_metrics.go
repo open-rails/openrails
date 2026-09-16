@@ -52,23 +52,13 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 // question answered by an LLM that runs compiler-validated metrics queries as
 // tools on the caller's RLS-pinned merchant context. UNLIKE widget generation
 // (#741, schema-only), the model sees aggregate query RESULTS — so this is
-// gated on the separate llm.ask_enabled consent (fail-closed 501) and
+// registered only with the separate llm.ask_enabled consent and
 // rate-limited per merchant. The response carries the model's answer plus the
 // VERBATIM result of every executed query as evidence.
 func MerchantMetricsAsk(r *httprequest.Request) {
 	svc := r.State.DashboardService
-	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "dashboard service not configured")
-		return
-	}
 	if !svc.AskConfigured() {
-		if !svc.NLConfigured() {
-			r.ErrorJSON(http.StatusNotImplemented,
-				"metrics Q&A is not configured on this deployment: set llm.api_key (env LLM_API_KEY) AND llm.ask_enabled (env LLM_ASK_ENABLED=true) — see docs/admin-console.md")
-			return
-		}
-		r.ErrorJSON(http.StatusNotImplemented,
-			"metrics Q&A is disabled: unlike widget generation, /ask sends aggregate query RESULTS to the LLM provider — set llm.ask_enabled (env LLM_ASK_ENABLED=true) to consent; see docs/admin-console.md")
+		r.ErrorJSON(http.StatusServiceUnavailable, "metrics Q&A unavailable")
 		return
 	}
 	var body struct {

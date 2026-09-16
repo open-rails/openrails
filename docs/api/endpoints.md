@@ -456,7 +456,7 @@ manifest-guarded like catalog writes).
 | PATCH | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Change a member's role |
 | DELETE | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Remove a member |
 
-On deployments without a control plane these routes stay mounted but answer 501.
+On deployments without a control plane these routes are not registered (404), like every other capability the deployment cannot serve: the LLM routes (`/dashboard/widgets/generate`, `/metrics/ask`, `/catalog/ask`, `/catalog/copilot/confirm`) exist only with `llm.api_key` and the matching consent, and `/api-host` only when the merchant directory is armed. `GET /v1/capabilities` and `/admin/config.json` advertise what is mounted.
 
 ### Platform operator (`/v1/platform`, standalone only)
 
