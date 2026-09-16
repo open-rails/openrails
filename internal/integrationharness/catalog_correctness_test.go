@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/pkg/merchant"
 	service "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
@@ -26,7 +27,9 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
-	token := surface.MintAPIKey(dbtest.TestMerchantSlug, "patch-"+uuid.NewString(), []string{
+	owned := surface.ProvisionOwnedMerchant("catalog" + uuid.NewString()[:8])
+	ctx = merchant.WithID(ctx, owned.MerchantID)
+	token := surface.MintAPIKey(owned.MerchantSlug, "patch-"+uuid.NewString(), []string{
 		controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate,
 	})
 	svc, err := service.New(surface.App().Runtime)
@@ -68,7 +71,7 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 				}
 				return nil
 			}
-			tx, err := h.MerchantPool(dbtest.TestMerchantID.UUID()).Begin(ctx)
+			tx, err := h.MerchantPool(owned.MerchantID.UUID()).Begin(ctx)
 			require.NoError(t, err)
 			defer tx.Rollback(ctx)
 			_, err = tx.Exec(ctx, `SELECT id FROM openrails.products WHERE id=$1 FOR UPDATE`, p.ID)
@@ -114,7 +117,7 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 			require.Nil(t, got.TierGroup)
 			require.Empty(t, got.EntitlementsSpec)
 			var cleared bool
-			require.NoError(t, h.MerchantPool(dbtest.TestMerchantID.UUID()).QueryRow(ctx,
+			require.NoError(t, h.MerchantPool(owned.MerchantID.UUID()).QueryRow(ctx,
 				`SELECT description IS NULL AND tier_group IS NULL AND entitlements_spec IS NULL FROM openrails.products WHERE id=$1`, p.ID).Scan(&cleared))
 			require.True(t, cleared)
 		})
@@ -125,11 +128,13 @@ func TestCatalogTierRegroupConflictsThroughPublicSurface(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
+	owned := surface.ProvisionOwnedMerchant("catalog" + uuid.NewString()[:8])
+	ctx = merchant.WithID(ctx, owned.MerchantID)
 	svc, err := service.New(surface.App().Runtime)
 	require.NoError(t, err)
-	token := surface.MintAPIKey(dbtest.TestMerchantSlug, "regroup-"+uuid.NewString(), []string{controlplane.PermMerchantCatalogUpdate})
-	pool := h.MerchantPool(dbtest.TestMerchantID.UUID())
-	mid := dbtest.TestMerchantID.UUID()
+	token := surface.MintAPIKey(owned.MerchantSlug, "regroup-"+uuid.NewString(), []string{controlplane.PermMerchantCatalogUpdate})
+	pool := h.MerchantPool(owned.MerchantID.UUID())
+	mid := owned.MerchantID.UUID()
 	psp := dbtest.EnsureTestPSP(ctx, t, pool, mid, "stripe")
 	for _, status := range []string{"active", "pending", "past_due", "unknown"} {
 		t.Run(status, func(t *testing.T) {

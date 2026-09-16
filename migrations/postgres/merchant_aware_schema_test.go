@@ -604,6 +604,8 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 		"uq_payment_methods_tenant_user_vault",
 		"uq_subscriptions_tenant_user_product_lifecycle",
 		"uq_entitlements_tenant_active",
+		"uq_entitlements_customer_active",
+		"entitlements_customer_no_overlap",
 		"uq_rail_customers_tenant_user_rail",
 		" user_id text",
 	} {
@@ -614,13 +616,12 @@ func TestConsolidatedSchemaUsesCustomerUniques(t *testing.T) {
 	for _, want := range []string{
 		"uq_payment_methods_psp_instrument",
 		"uq_subscriptions_customer_product_lifecycle",
-		"uq_entitlements_customer_active",
+		"uq_entitlements_grant_feature",
 		// A payment's provider identity is unique per PSP, with a separate
 		// partial index for the off-rail rows that carry no PSP.
 		"uq_payments_merchant_psp_transaction",
 		"uq_payments_merchant_offrail_transaction",
 		"uq_rail_customer_accounts_customer_psp",
-		"entitlements_customer_no_overlap",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("001 schema missing final customer invariant %q", want)

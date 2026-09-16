@@ -643,11 +643,8 @@ func (s *EntitlementService) ExtendActiveBySubscription(ctx context.Context, sub
 // It only updates rows whose end_at is NULL or before endAt, and will never shorten a window.
 func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time, now time.Time) error {
 	return s.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		// Fetch all subscription entitlements that would be extended, then shift any following
-		// scheduled windows forward by the same delta (per user+entitlement) to avoid overlaps.
-		//
-		// This keeps the entitlement timeline gapless for the affected entitlement key and avoids
-		// double-access from overlapping scheduled windows.
+		// Preserve the purchased duration of following scheduled windows when
+		// the subscription's finite period extends.
 		q := gen.New(tx)
 		rows, err := q.ListExtendableSubscriptionEntitlements(ctx, gen.ListExtendableSubscriptionEntitlementsParams{
 			SourceID: subscriptionID,
@@ -680,11 +677,7 @@ func (s *EntitlementService) extendActiveBySubscription(ctx context.Context, sub
 				return err
 			}
 
-			// Shift the following windows forward FIRST to open the gap. Extending
-			// the subscription row to newEnd before shifting would transiently
-			// overlap the next (not-yet-shifted) window, and entitlements_no_overlap
-			// is an IMMEDIATE (non-deferrable) exclusion constraint checked per
-			// statement — so it must never be violated mid-transaction.
+			// Shift following scheduled windows by the same extension.
 			delta := newEnd.Sub(oldEnd)
 			if err := ShiftEntitlementTimeline(ctx, tx, ent.CustomerID.String(), ent.Entitlement, oldEnd, delta, now, []uuid.UUID{ent.ID}); err != nil {
 				return err

@@ -69,6 +69,9 @@ func TestConverge_DeriveGrantEffectMismatch_GrantDirection(t *testing.T) {
 		exec(`INSERT INTO openrails.entitlements (id, merchant_id, customer_id, entitlement, start_at, end_at, source_id, source_type, grant_id)
 		      VALUES ($1,$2,$3,$4,$5,$6,$7,'subscription',$8)`,
 			uuid.New(), merchantID, customer, feature, now.Add(-40*24*time.Hour), oldEnd, subID, g.ID)
+		// Independent standing access must not hide this subscription's missing period.
+		exec(`INSERT INTO openrails.entitlements(id,merchant_id,customer_id,entitlement,start_at,source_id,source_type)
+            VALUES($1,$2,$3,$4,$5,$6,'admin')`, uuid.New(), merchantID, customer, feature, now.Add(-24*time.Hour), uuid.New())
 		return nil
 	}))
 

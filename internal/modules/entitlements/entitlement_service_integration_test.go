@@ -101,6 +101,16 @@ func TestPushNewEntitlement_NewPaidPeriodAfterSourceRevocation(t *testing.T) {
 	first, err := svc.PushNewEntitlement(ctx, req)
 	require.NoError(t, err)
 	require.Nil(t, first.EndAt)
+	// A separate paid source must not prevent cancelled access from reopening.
+	require.NoError(t, svc.BoundSubscriptionAccess(ctx, sub, end))
+	otherEnd, otherSource := end.Add(time.Hour), uuid.New()
+	_, err = svc.PushNewEntitlement(ctx, PushNewEntitlementParams{UserID: user, Entitlement: req.Entitlement,
+		NotBefore: &now, EndAt: &otherEnd, SourceType: models.EntitlementSourceOneOff, SourceID: otherSource})
+	require.NoError(t, err)
+	require.NoError(t, svc.ResumeSubscriptionAccess(ctx, sub))
+	reopened, err := svc.GetByID(ctx, first.ID)
+	require.NoError(t, err)
+	require.Nil(t, reopened.EndAt)
 	require.NoError(t, svc.RevokeSourcesForSubscription(ctx, user, sub, models.EntitlementRevokeRefund, models.EntitlementSourceSubscription))
 	replay, err := svc.PushNewEntitlement(ctx, req)
 	require.NoError(t, err)

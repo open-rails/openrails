@@ -721,10 +721,8 @@ WHERE id = sqlc.arg(id)
 -- this period (no subscription-sourced window — live OR revoked — overlapping
 -- it; a recorded revoke is a recorded decision, never re-granted, spec §6).
 -- Excludes no-grant subs (owned by derive.subscription.missing) so the two
--- checks never double-fire. #695 absent-by-overlap: a LIVE window of ANY source
--- overlapping the running period also counts as projected — derive-2 would
--- deliberately project NO window over it (the repair records provenance only),
--- so detection must mirror the repair's no-op or the finding re-fires forever.
+-- checks never double-fire. Another source's overlapping access does not
+-- satisfy this subscription's missing projection.
 -- Returns the missing features as a spec blob so the repair
 -- (grants.DeriveSubscriptionGrant) derives ONLY those. customer_id
 -- nullable: NULL = merchant-wide sweep.
@@ -746,14 +744,7 @@ CROSS JOIN LATERAL (
           AND e.start_at < s.current_period_ends_at
           AND (e.end_at IS NULL OR e.end_at > COALESCE(s.current_period_starts_at, s.started_at))
     )
-    AND NOT EXISTS (
-        SELECT 1 FROM openrails.entitlements eo
-        WHERE eo.merchant_id = s.merchant_id
-          AND eo.customer_id = s.customer_id
-          AND eo.entitlement = feat
-          AND eo.revoked_at IS NULL AND eo.deleted_at IS NULL
-          AND eo.period && tstzrange(COALESCE(s.current_period_starts_at, s.started_at), s.current_period_ends_at, '[)')
-    )
+
 ) missing
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR s.customer_id = sqlc.narg(customer_id)::uuid)

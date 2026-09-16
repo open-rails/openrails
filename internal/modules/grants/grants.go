@@ -651,11 +651,9 @@ func (l *Ledger) AdminGrantExists(ctx context.Context, sourceID string) (bool, e
 // (source_type=admin) + materializes its entitlement window(s) — derive-1 for the
 // access FACT that has no payment/subscription behind it (#636). The host (e.g. the
 // host-one legacy migrate) hands over the comp instead of writing entitlements.
-// Idempotent by sourceID. end nil = indefinite. The grant is ALWAYS recorded
-// (#695 provenance); a feature whose window overlaps an existing live window gets
-// NO window (derive-2's absent-by-overlap no-op). Returns the number of feature-
-// windows materialized (0 = every feature's window absent-by-overlap, i.e.
-// blocked) and whether the source was already imported (idempotent skip — no write).
+// Idempotent by sourceID; end nil means indefinite. Returns the number of
+// source-owned feature windows materialized and whether the source was already
+// imported (an idempotent skip with no write).
 func (l *Ledger) GrantAdmin(ctx context.Context, customer uuid.UUID, sourceID string, feats []string, start time.Time, end *time.Time) (created int, alreadyExists bool, err error) {
 	exists, err := l.AdminGrantExists(ctx, sourceID)
 	if err != nil {

@@ -154,8 +154,8 @@ func TestConverge_DeriveEntitlementUnjustified(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		exec(`INSERT INTO openrails.products (id, key, display_name, tier_group, entitlements_spec, merchant_id)
-		      VALUES ($1,$2,$2,$3,'{}'::jsonb,$4)`, productID, "orph-prod-"+suffix, "orph-tier-"+suffix, merchantID)
+		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id)
+		      VALUES ($1,$2,$2,'{}'::jsonb,$3)`, productID, "orph-prod-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 		      VALUES ($1,$2,9990000,'USD',720,true,$3)`, priceID, productID, merchantID)
 		pspID := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantID, "nmi")

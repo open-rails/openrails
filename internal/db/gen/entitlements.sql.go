@@ -956,16 +956,6 @@ WHERE ent.deleted_at IS NULL
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
       AND e.end_at IS NOT NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM openrails.entitlements o
-          WHERE o.merchant_id = e.merchant_id
-            AND o.customer_id = e.customer_id
-            AND o.entitlement = e.entitlement
-            AND o.id <> e.id
-            AND o.revoked_at IS NULL
-            AND o.deleted_at IS NULL
-            AND o.period && tstzrange(e.start_at, 'infinity'::timestamptz, '[)')
-      )
     ORDER BY e.customer_id, e.entitlement, e.end_at DESC
 )
 `
@@ -978,9 +968,8 @@ type ResumeEntitlementsBySubscriptionParams struct {
 // #691 resume: re-open the LATEST live window per (customer, entitlement) of a
 // resumed auto-renew subscription (end_at = NULL), undoing an advance-written
 // cancel closure. This also repairs the historical split-commit case after the
-// bounded window has elapsed. Only the latest window per timeline (older bounded
-// windows are history), and only when no other live window would overlap [start, infinity)
-// — the GIST no-overlap constraint stays intact.
+// bounded window has elapsed. Older bounded windows remain historical. Other
+// sources may overlap and cannot prevent this source from resuming.
 func (q *Queries) ResumeEntitlementsBySubscription(ctx context.Context, arg ResumeEntitlementsBySubscriptionParams) error {
 	_, err := q.db.Exec(ctx, resumeEntitlementsBySubscription, arg.SourceID, arg.Now)
 	return err
