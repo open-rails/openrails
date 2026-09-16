@@ -63,7 +63,7 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	// Case 1: customer omitted -> /v1/me is not mounted, capabilities.customer=false.
-	h1, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	h1, err := rt.Handler(embedded.MountOptions{
 		MountPrefix:    "/billing",
 		RouteSets:      []embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetWebhooks},
 		Authenticator:  authn,
@@ -87,7 +87,7 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	require.False(t, caps1.Routes["webhooks"])
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
-	h2, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	h2, err := rt.Handler(embedded.MountOptions{
 		MountPrefix:            "/billing",
 		RouteSets:              []embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetCustomer, embedded.RouteSetWebhooks},
 		Authenticator:          authn,

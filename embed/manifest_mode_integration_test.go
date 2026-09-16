@@ -351,7 +351,7 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetCatalog, embed.RouteSetPaymentProviders},
 		Gate:           allowAllGate{id: id},
 		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
@@ -437,7 +437,7 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		}
 	})
 
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders},
 		Gate:           allowAllGate{id: id},
 		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
@@ -610,7 +610,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	authn := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: uuid.NewString()}, nil
 	})
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
 		DelegatedAuthenticator: authn,
 	})
@@ -665,7 +665,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	// (validateAuthBoundary only requires them for checkout/customer/merchant-admin
 	// route sets) — and ProviderRoutes is left nil, so MountHandler must derive it
 	// via ProviderRoutesForRuntime.
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
 	})
 	require.NoError(t, err)

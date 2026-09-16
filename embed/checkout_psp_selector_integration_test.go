@@ -64,7 +64,7 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 	authn := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: uuid.NewString()}, nil
 	})
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
 		DelegatedAuthenticator: authn,
 	})

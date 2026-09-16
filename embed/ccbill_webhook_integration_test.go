@@ -241,7 +241,7 @@ func TestManifestMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetCustomer, embed.RouteSetWebhooks},
 		Authenticator:          userAuthn,
 		DelegatedAuthenticator: delegated,
@@ -297,7 +297,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	require.NoError(t, rt.Embedded().App().Runtime.EnsureMerchantsService(ctx))
 	cleanupCCBillWebhookMerchant(t, id)
 
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders, embed.RouteSetCatalog},
 		Gate:           allowAllGate{id: id},
 		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
@@ -344,7 +344,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	seedProfileUser(t, ctx, dsn, username)
 
 	// Webhook-only mount (the ingestion surface a MODE-2 host exposes).
-	webhookHandler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	webhookHandler, err := rt.Handler(embedded.MountOptions{
 		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
 	})
 	require.NoError(t, err)
@@ -386,7 +386,7 @@ func TestCCBillWebhookUnarmedRailFailsClosed(t *testing.T) {
 
 	// Force the webhook route mounted (the armed-account derivation would
 	// drop it) so the DISPATCHER's fail-closed rejection is what answers.
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetWebhooks},
 		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
 	})

@@ -148,8 +148,8 @@ func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, 
 // engine-native types (identity.CustomerID etc.) instead of wire types.
 func (r *Runtime) Service() *service.Service { return r.svc }
 
-// Embedded exposes the underlying pkg/embedded app for advanced wiring
-// (control plane attach, river client injection, embedded.MountHandler).
+// Embedded exposes the engine for control-plane wiring that still takes the
+// application graph. Mounting, readiness and River checks are Runtime methods.
 func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
 
 // ActiveRouteSets returns the route groups of the most recently mounted HTTP
