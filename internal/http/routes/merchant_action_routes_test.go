@@ -256,6 +256,11 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantRepairAlertsRead,
 		},
 	}
+	tests = append(tests, struct{ name, method, path, perm string }{
+		name: "merchant payment method deletion", method: http.MethodDelete,
+		path: "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/payment-methods/22222222-2222-2222-2222-222222222222",
+		perm: controlplane.PermMerchantCustomerSettingsUpdate,
+	})
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			checker.perm = ""
@@ -280,7 +285,6 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 		{method: http.MethodPost, path: "/billing/v1/merchant/catalog/drift/reconcile-all"},
 		{method: http.MethodGet, path: "/billing/v1/merchant/merchant-configuration"},
 		{method: http.MethodPut, path: "/billing/v1/merchant/merchant-configuration"},
-		{method: http.MethodDelete, path: "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111/payment-methods/22222222-2222-2222-2222-222222222222"},
 	} {
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))

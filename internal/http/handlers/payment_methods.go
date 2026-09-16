@@ -500,6 +500,27 @@ func paymentMethodCharges(r *httprequest.Request, methods []*models.PaymentMetho
 }
 
 func DeletePaymentMethod(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil {
+		log.Error("User not found in request context")
+		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
+		return
+	}
+
+	deletePaymentMethodForCustomer(r, user.ID)
+}
+
+// AdminDeletePaymentMethod uses the same ownership and durable provider path as
+// self-service, after merchant permission and customer scope have been checked.
+func AdminDeletePaymentMethod(r *httprequest.Request) {
+	customer, ok := commerceCustomer(r, r.Param("customer_id"))
+	if !ok {
+		return
+	}
+	deletePaymentMethodForCustomer(r, customer.String())
+}
+
+func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
 	path := new(paymentMethodURI)
 	if !r.BindURI(path) {
 		return
@@ -512,26 +533,19 @@ func DeletePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	user := r.GetUser()
-	if user == nil {
-		log.Error("User not found in request context")
-		r.ErrorJSON(http.StatusUnauthorized, "Authentication required")
-		return
-	}
-
-	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, user.ID)
+	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, customerID)
 	if err != nil {
 		switch {
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
-			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Payment method not found for deletion")
+			log.WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Warn("Payment method not found for deletion")
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied):
-			log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Warn("Unauthorized payment method deletion attempt")
+			log.WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Warn("Unauthorized payment method deletion attempt")
 			r.ErrorJSON(http.StatusForbidden, "Access denied - you don't own this payment method")
 			return
 		default:
-			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID}).Error("Failed to validate payment method ownership")
+			log.WithError(err).WithFields(log.Fields{"payment_method_id": id, "user_id": customerID}).Error("Failed to validate payment method ownership")
 			r.ErrorJSON(http.StatusInternalServerError, "Failed to validate payment method")
 			return
 		}
@@ -539,11 +553,11 @@ func DeletePaymentMethod(r *httprequest.Request) {
 
 	err = r.State.RailPaymentMethodService.DeletePaymentMethod(r.Request.Context(), paymentMethod)
 	if err != nil {
-		respondPaymentMethodDeleteError(r, paymentMethod, user.ID, err)
+		respondPaymentMethodDeleteError(r, paymentMethod, customerID, err)
 		return
 	}
 
-	log.WithFields(log.Fields{"payment_method_id": id, "user_id": user.ID, "rail": paymentMethod.Rail}).Info("Payment method successfully deleted")
+	log.WithFields(log.Fields{"payment_method_id": id, "user_id": customerID, "rail": paymentMethod.Rail}).Info("Payment method successfully deleted")
 	r.Status(http.StatusNoContent)
 }
 

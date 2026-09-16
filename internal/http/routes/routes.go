@@ -710,6 +710,7 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	customers := rr.Group("/customers/:customer_id")
 	customers.Handle(http.MethodGet, "", h(httphandlers.GetAdminUserBillingProfile), customerRead...)
 	customers.Handle(http.MethodGet, "/payment-methods", h(httphandlers.GetAdminUserPaymentMethods), customerRead...)
+	customers.Handle(http.MethodDelete, "/payment-methods/:id", h(httphandlers.AdminDeletePaymentMethod), revokeWrite...)
 	customers.Handle(http.MethodGet, "/payments", h(httphandlers.GetAdminUserPayments), payRead...)
 	customers.Handle(http.MethodPost, "/payments/off-channel", h(httphandlers.AdminCreateOffChannelPayment), offChannelWrite...)
 	customers.Handle(http.MethodPost, "/entitlements", h(httphandlers.GrantAdminEntitlement), grantWrite...)

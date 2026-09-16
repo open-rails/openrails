@@ -2,6 +2,7 @@ package openrails
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -77,4 +78,23 @@ func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, opti
 		return nil, err
 	}
 	return &out, nil
+}
+
+// PaymentMethodDeletion distinguishes completed deletion from a durable
+// operation awaiting provider reconciliation. Pending is never reported deleted.
+type PaymentMethodDeletion struct{ Pending bool }
+
+func (c *Client) DeletePaymentMethod(ctx context.Context, customerID, methodID string) (*PaymentMethodDeletion, error) {
+	response, err := c.doResponse(ctx, http.MethodDelete, "/v1/merchant/customers/"+url.PathEscape(customerID)+"/payment-methods/"+url.PathEscape(methodID), nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	switch response.status {
+	case http.StatusNoContent:
+		return &PaymentMethodDeletion{}, nil
+	case http.StatusAccepted:
+		return &PaymentMethodDeletion{Pending: true}, nil
+	default:
+		return nil, fmt.Errorf("%w: unexpected payment deletion status %d", ErrUnreachable, response.status)
+	}
 }

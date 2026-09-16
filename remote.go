@@ -755,16 +755,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 }
 
 func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, out any, headers http.Header) error {
-	response, err := c.doRaw(ctx, method, path, body, headers)
+	response, err := c.doResponse(ctx, method, path, body, headers)
 	if err != nil {
-		return err
-	}
-	if response.status < 200 || response.status >= 300 {
-		err := statusErrorFromBody(response.status, response.body).(*StatusError)
-		if err.RequestID == "" {
-			err.RequestID = response.header.Get("X-Request-ID")
-		}
-		err.RetryAfter = response.header.Get("Retry-After")
 		return err
 	}
 	if out != nil {
@@ -779,4 +771,22 @@ func (c *Client) doWithHeaders(ctx context.Context, method, path string, body, o
 		}
 	}
 	return nil
+}
+
+// doResponse preserves the complete typed error contract for operations whose
+// successful status distinguishes durable acceptance from final completion.
+func (c *Client) doResponse(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
+	response, err := c.doRaw(ctx, method, path, body, headers)
+	if err != nil {
+		return nil, err
+	}
+	if response.status < 200 || response.status >= 300 {
+		failure := statusErrorFromBody(response.status, response.body).(*StatusError)
+		if failure.RequestID == "" {
+			failure.RequestID = response.header.Get("X-Request-ID")
+		}
+		failure.RetryAfter = response.header.Get("Retry-After")
+		return nil, failure
+	}
+	return response, nil
 }

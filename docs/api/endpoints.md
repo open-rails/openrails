@@ -282,6 +282,7 @@ for those routes.
 | GET | `/v1/merchant/customers` | `merchant:customer-settings:read` | Customer list/search |
 | GET | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:read` | Full billing profile: trust, balances, entitlements, subscriptions of every status (newest 100, with `status`), history, redacted payment-method metadata. Sections degrade independently: a failed collection-defaults read logs and returns the methods without `collection_default_currencies` instead of failing the profile |
 | GET | `/v1/merchant/customers/{customer_id}/payment-methods` | `merchant:customer-settings:read` | Redacted saved-method metadata (admins can never create/update/delete customer methods) |
+| DELETE | `/v1/merchant/customers/{customer_id}/payment-methods/{id}` | `merchant:customer-settings:update` | Shared customer ownership and provider deletion; 204 completed or 202 pending reconciliation |
 | GET | `/v1/merchant/customers/{customer_id}/payments` | `merchant:payments:read` | One customer's payment history |
 | GET | `/v1/merchant/customers/{customer_id}/credits` | `merchant:customer-settings:read` | Credit-grant lots, including remaining and expired amounts |
 | DELETE | `/v1/merchant/customers/{customer_id}/credits/{grant_id}` | `merchant:credits:revoke` | Revoke the unspent remainder of one credit grant |
