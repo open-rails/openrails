@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/app"
 	corecp "github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -71,6 +72,9 @@ var (
 	ErrEmailUnverified              = operator.ErrEmailUnverified
 	ErrVaultedPaymentMethodRequired = operator.ErrVaultedPaymentMethodRequired
 	ErrMerchantGroupReleasePending  = operator.ErrMerchantGroupReleasePending
+	// ErrPaymentProviderNotFound is GetPaymentProviderConfig's answer when the
+	// merchant has no active account on the rail; match it with errors.Is.
+	ErrPaymentProviderNotFound = merchants.ErrPaymentProviderNotFound
 )
 
 // MerchantGroup and CustomerGroup name the AuthKit persona groups.

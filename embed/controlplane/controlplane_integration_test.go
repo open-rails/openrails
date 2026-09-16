@@ -160,6 +160,9 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, members, 1)
 	require.Equal(t, created.MerchantID, members[0].ID)
+	_, err = cp.GetPaymentProviderConfig(ctx, created.MerchantID, "stripe", "test")
+	require.ErrorIs(t, err, controlplane.ErrPaymentProviderNotFound, "an unconfigured rail is a typed refusal")
+	require.ErrorIs(t, cp.SetMerchantDisplayName(ctx, merchant.ID(uuid.New()), "Missing"), controlplane.ErrMerchantNotFound)
 	_, err = cp.UpsertPaymentProviderConfig(ctx, created.MerchantID, "ccbill", controlplane.UpsertPaymentProviderConfigRequest{
 		AccountID: "999983-0000", Credentials: map[string]string{"salt": "handle-fixture"}})
 	require.NoError(t, err)
