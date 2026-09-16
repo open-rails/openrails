@@ -130,11 +130,11 @@ func TestOr930InvokerSpendWindowsSelfRead(t *testing.T) {
 	grant := map[string]any{"delegations": []map[string]any{
 		{
 			"scope": "invoker", "scope_key": invokerA,
-			"windows": []map[string]any{{"key": "day", "window_seconds": windowSeconds, "limit": 1000, "currency": currency}},
+			"windows": []map[string]any{{"key": "day", "window_seconds": windowSeconds, "limit": "1000", "currency": currency}},
 		},
 		{
 			"scope": "invoker", "scope_key": invokerB,
-			"windows": []map[string]any{{"key": "day", "window_seconds": windowSeconds, "limit": 250, "currency": currency}},
+			"windows": []map[string]any{{"key": "day", "window_seconds": windowSeconds, "limit": "250", "currency": currency}},
 		},
 	}}
 	resp := requestCustomerTreasuryJSON(t, treasurySrv, http.MethodPut,

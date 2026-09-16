@@ -63,7 +63,7 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 	res := call(http.MethodPut, "/v1/merchant/settings", map[string]any{
 		"trust_level_spend_limits": []map[string]any{{
 			"trust_level":    "gold",
-			"budget_windows": []map[string]any{{"key": "hourly", "window_seconds": 3600, "limit": 10_000}},
+			"budget_windows": []map[string]any{{"key": "hourly", "window_seconds": 3600, "limit": "10000"}},
 		}},
 	})
 	require.Equal(t, http.StatusBadRequest, res.Code, res.Body.String())
@@ -84,13 +84,13 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 	// The replacement keys install, and the GET reads them back.
 	res = call(http.MethodPut, "/v1/merchant/settings", map[string]any{
 		"billing_policies": []map[string]any{
-			{"name": "api_line", "kind": "outstanding_cap", "outstanding_cap_amount": 200_000_000},
+			{"name": "api_line", "kind": "outstanding_cap", "outstanding_cap_amount": "200000000"},
 			{"name": "cloud_monthly", "kind": "window_spend_cap", "spend_windows": []map[string]any{
-				{"key": "monthly", "window_seconds": 30 * 24 * 3600, "limit": 2_000_000_000},
+				{"key": "monthly", "window_seconds": 30 * 24 * 3600, "limit": "2000000000"},
 			}},
 			{"name": "cloud_quota", "kind": "accrual_rate_cap",
-				"accrual_rate_cap_per_hour": 10_000_000, "accrual_rate_window_seconds": 900,
-				"collection_threshold_amount": 50_000_000, "delinquency_grace_days": 7},
+				"accrual_rate_cap_per_hour": "10000000", "accrual_rate_window_seconds": 900,
+				"collection_threshold_amount": "50000000", "delinquency_grace_days": 7},
 		},
 		"billing_policy_bindings": []map[string]any{
 			{"policy": "api_line"},
@@ -105,14 +105,14 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 		BillingPolicies []struct {
 			Name                 string `json:"name"`
 			Kind                 string `json:"kind"`
-			OutstandingCapAmount int64  `json:"outstanding_cap_amount"`
+			OutstandingCapAmount int64  `json:"outstanding_cap_amount,string"`
 			SpendWindows         []struct {
 				Key   string `json:"key"`
 				Limit int64  `json:"limit"`
 			} `json:"spend_windows"`
-			AccrualRateCapPerHour     int64  `json:"accrual_rate_cap_per_hour"`
+			AccrualRateCapPerHour     int64  `json:"accrual_rate_cap_per_hour,string"`
 			AccrualRateWindowSeconds  int64  `json:"accrual_rate_window_seconds"`
-			CollectionThresholdAmount *int64 `json:"collection_threshold_amount"`
+			CollectionThresholdAmount *int64 `json:"collection_threshold_amount,string"`
 			DelinquencyGraceDays      *int   `json:"delinquency_grace_days"`
 		} `json:"billing_policies"`
 		BillingPolicyBindings []struct {

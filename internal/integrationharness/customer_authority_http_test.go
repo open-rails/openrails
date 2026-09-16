@@ -41,7 +41,7 @@ func TestCustomerTreasuryWritesDoNotCreatePortalAuthority(t *testing.T) {
 	require.NoError(t, err)
 	path := surface.BaseURL + "/v1/customers/" + user.ID + "/spend-delegations"
 	delegate := "worker-" + uuid.NewString()
-	document := map[string]any{"delegations": []map[string]any{{"scope": "invoker", "scope_key": delegate, "windows": []map[string]any{{"key": "day", "window_seconds": 86400, "limit": 10, "currency": "USD"}}}}}
+	document := map[string]any{"delegations": []map[string]any{{"scope": "invoker", "scope_key": delegate, "windows": []map[string]any{{"key": "day", "window_seconds": 86400, "limit": "10", "currency": "USD"}}}}}
 	status, raw := requestJSON(t, http.MethodPut, path, token, document)
 	require.Equal(t, 200, status, string(raw))
 	status, raw = requestJSON(t, http.MethodGet, path, token, nil)

@@ -2,13 +2,14 @@ package openrails
 
 import (
 	"encoding/json"
-	"github.com/google/uuid"
 	"math"
 	"os"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestCreditTransactionWireContract(t *testing.T) {
@@ -112,6 +113,33 @@ func TestAdmissionAndUsageMoneyWire(t *testing.T) {
 					t.Fatalf("unsafe monetary number %s: %s", name, raw)
 				}
 			}
+		}
+	}
+}
+
+func TestPolicyMoneyAndUsageSummaryAreExact(t *testing.T) {
+	max := int64(math.MaxInt64)
+	for _, value := range []any{
+		BudgetWindowInput{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"},
+		BillingPolicyInput{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
+		MerchantSettings{InvoiceCollectionThreshold: &max, InvoiceMonthlyFloor: &max, ArrearsDelinquencyFloor: &max},
+		CreditLimitRequest{CustomerID: uuid.NewString(), Currency: "USD", CreditLimitAmount: max},
+		UsageRollupRow{Key: "api", EventCount: 1, TotalAmount: max, Currency: "USD"},
+		ResourceRevenueResponse{Currency: "USD", RevenueAmount: max, Daily: []ResourceRevenueDailyRow{{Date: "2026-09-16", Currency: "USD", Amount: max}}},
+	} {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := reflect.New(reflect.TypeOf(value))
+		if err := json.Unmarshal(raw, target.Interface()); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(value, target.Elem().Interface()) {
+			t.Fatalf("monetary contract lost precision: %s", raw)
+		}
+		if !strings.Contains(string(raw), `"9223372036854775807"`) {
+			t.Fatalf("browser cannot preserve money exactly: %s", raw)
 		}
 	}
 }

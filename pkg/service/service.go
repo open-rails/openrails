@@ -325,12 +325,7 @@ func (s *Service) AdmissionCustomer(ctx context.Context, requestID string) (iden
 
 // ServiceUsageRollupRow is one grouped spend bucket (dimension value, event
 // count, summed host-priced amount).
-type ServiceUsageRollupRow struct {
-	Key         string `json:"key"`
-	Currency    string `json:"currency"`
-	EventCount  int64  `json:"event_count"`
-	TotalAmount int64  `json:"total_amount"`
-}
+type ServiceUsageRollupRow = openrails.UsageRollupRow
 
 // ServiceUsageRollupRequest selects a payer + window + grouping dimension.
 type ServiceUsageRollupRequest struct {
@@ -374,11 +369,7 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 }
 
 // ResourceRevenueDailyRow is one day's revenue in internal units for an endpoint.
-type ResourceRevenueDailyRow struct {
-	Date     string `json:"date"`
-	Currency string `json:"currency"`
-	Amount   int64  `json:"amount"`
-}
+type ResourceRevenueDailyRow = openrails.ResourceRevenueDailyRow
 
 // ResourceRevenueDaily returns per-day revenue for a resource (typed
 // attribution column) across all payers in the merchant over [from, to) — powers
