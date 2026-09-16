@@ -19,8 +19,9 @@ import (
 )
 
 type Snapshot struct {
-	API     map[string][]string `json:"go_api"`
-	Sources map[string]string   `json:"boundary_sources_sha256"`
+	API     map[string][]string          `json:"go_api"`
+	Imports map[string]map[string]string `json:"declaring_file_imports"`
+	Sources map[string]string            `json:"boundary_sources_sha256"`
 }
 
 // Capture uses the Go AST rather than grep so receiver types, aliases, generic
@@ -28,7 +29,7 @@ type Snapshot struct {
 // supplement the route/wire workflow fixtures for dynamic response maps and
 // authorization code; they are review gates, not behavioral equivalence proof.
 func Capture(root string) ([]byte, error) {
-	out := Snapshot{API: map[string][]string{}, Sources: map[string]string{}}
+	out := Snapshot{API: map[string][]string{}, Imports: map[string]map[string]string{}, Sources: map[string]string{}}
 	dirs := []string{".", "embed", "config", "permissions"}
 	err := filepath.WalkDir(filepath.Join(root, "pkg"), func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -73,6 +74,11 @@ func Capture(root string) ([]byte, error) {
 				}
 				imports[name] = path
 			}
+			rel, err := filepath.Rel(root, file)
+			if err != nil {
+				return nil, err
+			}
+			out.Imports[filepath.ToSlash(rel)] = imports
 			for _, decl := range parsed.Decls {
 				switch d := decl.(type) {
 				case *ast.FuncDecl:
@@ -83,7 +89,7 @@ func Capture(root string) ([]byte, error) {
 						continue
 					}
 					d.Body = nil
-					declarations = append(declarations, renderWithImports(fs, d, imports))
+					declarations = append(declarations, render(fs, d))
 				case *ast.GenDecl:
 					if d.Tok == token.IMPORT {
 						continue
@@ -96,7 +102,7 @@ func Capture(root string) ([]byte, error) {
 							}
 						}
 						if exported {
-							declarations = append(declarations, renderWithImports(fs, d, imports))
+							declarations = append(declarations, render(fs, d))
 						}
 						continue
 					}
@@ -122,11 +128,11 @@ func Capture(root string) ([]byte, error) {
 								}
 								shape.Fields.List = fields
 							}
-							declarations = append(declarations, "type "+renderWithImports(fs, s, imports))
+							declarations = append(declarations, "type "+render(fs, s))
 						case *ast.ValueSpec:
 							for _, name := range s.Names {
 								if ast.IsExported(name.Name) {
-									declarations = append(declarations, d.Tok.String()+" "+renderWithImports(fs, s, imports))
+									declarations = append(declarations, d.Tok.String()+" "+render(fs, s))
 									break
 								}
 							}
@@ -202,16 +208,4 @@ func render(fs *token.FileSet, node ast.Node) string {
 		panic(fmt.Sprintf("format parsed contract: %v", err))
 	}
 	return out.String()
-}
-
-func renderWithImports(fs *token.FileSet, node ast.Node, imports map[string]string) string {
-	// Retain exact import paths, including implicit package names that differ
-	// from the path (pgx/v5, go-redis/v9). An AST-only scanner must not guess a
-	// package's declared name and miss a changed public referenced type.
-	names := make([]string, 0, len(imports))
-	for name, path := range imports {
-		names = append(names, name+"="+path)
-	}
-	sort.Strings(names)
-	return render(fs, node) + " [imports: " + strings.Join(names, ", ") + "]"
 }
