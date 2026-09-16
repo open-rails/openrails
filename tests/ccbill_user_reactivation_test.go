@@ -168,7 +168,7 @@ func TestCCBillChargeback_DedupesDuplicateDelivery(t *testing.T) {
 	require.Eventually(t, func() bool {
 		var count int
 		err := suite.Pool.QueryRow(ctx,
-			"SELECT COUNT(*) FROM openrails.notification_queue WHERE customer_id = $1 AND event_type = $2",
+			"SELECT COUNT(*) FROM openrails.notifications WHERE customer_id = $1 AND event_type = $2",
 			suite.ensureCustomer(ctx, userID), string(models.NotificationPremiumEnded)).Scan(&count)
 		if err != nil {
 			return false

@@ -807,7 +807,7 @@ const accessEndedLookback = 30 * 24 * time.Hour
 
 // notifyPass — NOTIFY plane (#789): whatever plane closed a customer's LAST
 // entitlement window (dunning, reconcile-driven cancel, grant lapse), the
-// customer is told exactly once. The pass only CREATES notification_queue rows
+// customer is told exactly once. The pass only CREATES notifications rows
 // (emailed_at NULL); delivery belongs to the notification email sweep — the
 // converge engine carries no EmailService. Dedupe: any premium_ended row at or
 // after the close means a transition site already told them.

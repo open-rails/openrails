@@ -152,7 +152,7 @@ type CleanupResult struct {
 //   - merchants come from migration 0056's indexed work queue: only those
 //     holding a row past one of THIS config's cutoffs, capped at
 //     cleanupMerchantBatch;
-//   - a durable cursor (openrails.worker_sweep_cursors) makes the next pass
+//   - a durable cursor (openrails.worker_state) makes the next pass
 //     resume after the last merchant handled, so a capped pass cannot re-serve
 //     the same head forever and starve the tail. Draining the queue clears the
 //     cursor and the ring starts over;
@@ -276,7 +276,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,
 		"payment_settlements":       result.PaymentSettlements,
-		"host_lifecycle_events":     result.HostLifecycleEvents,
+		"lifecycle_events":          result.HostLifecycleEvents,
 	})
 
 	if cleanupErr != nil {

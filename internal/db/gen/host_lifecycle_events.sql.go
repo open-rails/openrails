@@ -12,33 +12,12 @@ import (
 	"github.com/google/uuid"
 )
 
-const acknowledgeHostLifecycleEvent = `-- name: AcknowledgeHostLifecycleEvent :execrows
-UPDATE openrails.host_lifecycle_events
-SET delivered_at = COALESCE(delivered_at, $1::timestamptz)
-WHERE merchant_id = $2
-  AND id = $3
-`
-
-type AcknowledgeHostLifecycleEventParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) AcknowledgeHostLifecycleEvent(ctx context.Context, arg AcknowledgeHostLifecycleEventParams) (int64, error) {
-	result, err := q.db.Exec(ctx, acknowledgeHostLifecycleEvent, arg.Now, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteDeliveredHostLifecycleEventsBefore = `-- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
-DELETE FROM openrails.host_lifecycle_events
+DELETE FROM openrails.host_outbox
 WHERE ctid IN (
-    SELECT hle.ctid FROM openrails.host_lifecycle_events hle
+    SELECT hle.ctid FROM openrails.host_outbox hle
     WHERE hle.merchant_id = $1::uuid
-      AND hle.delivered_at IS NOT NULL
+      AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
       AND hle.delivered_at < $2::timestamptz
     LIMIT $3::int
 )
@@ -61,7 +40,7 @@ func (q *Queries) DeleteDeliveredHostLifecycleEventsBefore(ctx context.Context, 
 
 const enqueueHostLifecycleEvent = `-- name: EnqueueHostLifecycleEvent :execrows
 
-INSERT INTO openrails.host_lifecycle_events
+INSERT INTO openrails.host_outbox
     (merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data, dedupe_key)
 VALUES (
     $1, $2::text, $3::text,
@@ -81,10 +60,10 @@ type EnqueueHostLifecycleEventParams struct {
 	DedupeKey   string
 }
 
-// or#878 durable host-consumption feed. Same guarantees as
-// payment_settlement_events (0005/0010): merchant-scoped, explicitly acked,
+// or#878 delinquency writes to host_outbox: merchant-scoped, explicitly acked,
 // pruned after delivery. A missed cut-off signal is a revenue leak and a missed
 // restore signal is an outage, so neither may be a fire-and-forget webhook.
+// Hosts read and acknowledge through host_events.sql.
 // Idempotent on the transition's dedupe key: re-announcing a transition is a
 // no-op, never a second instruction to the host.
 func (q *Queries) EnqueueHostLifecycleEvent(ctx context.Context, arg EnqueueHostLifecycleEventParams) (int64, error) {
@@ -102,58 +81,4 @@ func (q *Queries) EnqueueHostLifecycleEvent(ctx context.Context, arg EnqueueHost
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const listPendingHostLifecycleEvents = `-- name: ListPendingHostLifecycleEvents :many
-SELECT id, merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data
-FROM openrails.host_lifecycle_events
-WHERE merchant_id = $1
-  AND delivered_at IS NULL
-ORDER BY id
-LIMIT $2
-`
-
-type ListPendingHostLifecycleEventsParams struct {
-	MerchantID uuid.UUID
-	RowLimit   int64
-}
-
-type ListPendingHostLifecycleEventsRow struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	EventType   string
-	SubjectType string
-	SubjectID   uuid.UUID
-	Currency    string
-	OccurredAt  time.Time
-	Data        []byte
-}
-
-func (q *Queries) ListPendingHostLifecycleEvents(ctx context.Context, arg ListPendingHostLifecycleEventsParams) ([]ListPendingHostLifecycleEventsRow, error) {
-	rows, err := q.db.Query(ctx, listPendingHostLifecycleEvents, arg.MerchantID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPendingHostLifecycleEventsRow
-	for rows.Next() {
-		var i ListPendingHostLifecycleEventsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.EventType,
-			&i.SubjectType,
-			&i.SubjectID,
-			&i.Currency,
-			&i.OccurredAt,
-			&i.Data,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }

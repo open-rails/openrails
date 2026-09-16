@@ -196,12 +196,19 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	settingsWriteMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
 	usageReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantUsageRead)}, dbMW...)
 
+	hostEventReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantHostEventsRead)}, dbMW...)
+	hostEventAckMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantHostEventsAcknowledge)}, dbMW...)
+	group.Handle(http.MethodGet, "/host-events", h(httphandlers.ServiceListHostEvents), hostEventReadMW...)
+	group.Handle(http.MethodPost, "/host-events/:id/acknowledge", h(httphandlers.ServiceAcknowledgeHostEvent), hostEventAckMW...)
+
 	group.Handle(http.MethodPost, "/customers/entitlements:batch",
 		h(httphandlers.ServiceGetExternalSubjectEntitlements),
 		readMW...,
 	)
 
 	customers := group.Group("/customers/:customer_id")
+	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
+	customers.Handle(http.MethodGet, "/payment-settlement-status", h(httphandlers.ServicePaymentSettlementStatus), paymentReadMW...)
 	customers.Handle(http.MethodGet, "/entitlements",
 		h(httphandlers.ServiceGetCustomerEntitlements),
 		readMW...,

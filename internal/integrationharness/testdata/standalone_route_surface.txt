@@ -80,6 +80,7 @@ GET /v1/merchant/customers/{customer_id}/effective-tier
 GET /v1/merchant/customers/{customer_id}/entitlements
 GET /v1/merchant/customers/{customer_id}/invoice-profile
 GET /v1/merchant/customers/{customer_id}/payment-methods
+GET /v1/merchant/customers/{customer_id}/payment-settlement-status
 GET /v1/merchant/customers/{customer_id}/payments
 GET /v1/merchant/customers/{customer_id}/rate-overrides
 GET /v1/merchant/dashboard
@@ -87,6 +88,7 @@ GET /v1/merchant/delinquency
 GET /v1/merchant/entitlements/{entitlement}/customers
 GET /v1/merchant/findings
 GET /v1/merchant/findings/{id}
+GET /v1/merchant/host-events
 GET /v1/merchant/invoices
 GET /v1/merchant/invoices/{id}
 GET /v1/merchant/invoices/{id}/payments
@@ -171,6 +173,7 @@ POST /v1/merchant/customers/{customer_id}/payments/off-channel
 POST /v1/merchant/customers/{customer_id}/product-access
 POST /v1/merchant/dashboard/widgets/generate
 POST /v1/merchant/findings/{id}/resolve
+POST /v1/merchant/host-events/{id}/acknowledge
 POST /v1/merchant/invoices/{id}/payments
 POST /v1/merchant/invoices/{id}/retry-collection
 POST /v1/merchant/invoices/{id}/uncollectible

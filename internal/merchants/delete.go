@@ -35,7 +35,7 @@ const DestructiveRunKindMerchantPurge = "merchant_purge"
 // below (#334: each table has a STATIC generated count/purge query — no runtime
 // SQL assembly). existingMerchantTables preserves this order.
 var merchantOwnedTables = []string{
-	"notification_queue", "catalog_drift_events",
+	"notifications", "catalog_drift_events",
 	"rail_mutation_logs", "rail_intents",
 	"checkout_sessions", "entitlements", "payments", "subscriptions",
 	"money_settings", "payment_methods", "rail_customer_accounts",
@@ -64,7 +64,7 @@ func countMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.CountMerchantRowsEntitlements(ctx, id)
 	case "payments":
 		return q.CountMerchantRowsPayments(ctx, id)
-	case "notification_queue":
+	case "notifications":
 		return q.CountMerchantRowsNotificationQueue(ctx, id)
 	case "rail_customer_accounts":
 		return q.CountMerchantRowsRailCustomers(ctx, id)
@@ -98,7 +98,7 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 		return q.PurgeMerchantRowsEntitlements(ctx, id)
 	case "payments":
 		return q.PurgeMerchantRowsPayments(ctx, id)
-	case "notification_queue":
+	case "notifications":
 		return q.PurgeMerchantRowsNotificationQueue(ctx, id)
 	case "rail_customer_accounts":
 		return q.PurgeMerchantRowsRailCustomers(ctx, id)

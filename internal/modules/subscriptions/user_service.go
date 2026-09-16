@@ -493,8 +493,7 @@ func (s *UserSubscriptionService) MarkNotificationRead(ctx context.Context, user
 		return ErrNotificationAccessDenied
 	}
 
-	notification.MarkAsSeen() // Mark as seen (new boolean field)
-	return s.NotificationService.Update(ctx, notification)
+	return s.NotificationService.MarkAsSeen(ctx, notificationID, notification.CustomerID)
 }
 
 // CancelUserSubscription cancels a user's subscription

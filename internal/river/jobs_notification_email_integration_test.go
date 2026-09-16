@@ -30,14 +30,14 @@ func TestNotificationEmailSweep_NoEmailServiceLeavesRowsUndelivered(t *testing.T
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgx(ctx, t, dbi.Qx(ctx), uuid.NewString())
 		_, err := dbi.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.notification_queue (id, merchant_id, customer_id, event_type, data)
+			`INSERT INTO openrails.notifications (id, merchant_id, customer_id, event_type, data)
 			 VALUES ($1,$2,$3,'premium_ended','{"reason":"access_ended","source":"converge_notify"}'::jsonb)`,
 			notifID, merchantID, customer)
 		return err
 	}))
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE id=$1`, notifID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE id=$1`, notifID)
 			return nil
 		})
 	})
@@ -51,7 +51,7 @@ func TestNotificationEmailSweep_NoEmailServiceLeavesRowsUndelivered(t *testing.T
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		var emailedAt *time.Time
 		require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-			`SELECT emailed_at FROM openrails.notification_queue WHERE id=$1`, notifID).Scan(&emailedAt))
+			`SELECT emailed_at FROM openrails.notifications WHERE id=$1`, notifID).Scan(&emailedAt))
 		require.Nil(t, emailedAt, "no email service ⇒ row stays undelivered for a later sweep")
 		return nil
 	}))

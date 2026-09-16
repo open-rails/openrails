@@ -152,7 +152,7 @@ func requireStoredMethodsIntact(t *testing.T, pool *pgxpool.Pool, ctx context.Co
 func notificationEventTypes(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID) []string {
 	t.Helper()
 	rows, err := pool.Query(ctx,
-		`SELECT event_type FROM openrails.notification_queue WHERE customer_id = $1 ORDER BY created_at, id`,
+		`SELECT event_type FROM openrails.notifications WHERE customer_id = $1 ORDER BY created_at, id`,
 		payer.UUID())
 	require.NoError(t, err)
 	defer rows.Close()
@@ -170,7 +170,7 @@ func notificationData(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pay
 	t.Helper()
 	var data map[string]any
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT data FROM openrails.notification_queue
+		`SELECT data FROM openrails.notifications
 		 WHERE customer_id = $1 AND event_type = $2 ORDER BY created_at DESC, id DESC LIMIT 1`,
 		payer.UUID(), eventType).Scan(&data))
 	return data
@@ -178,7 +178,7 @@ func notificationData(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pay
 
 func cleanupNotifications(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID) {
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", payer.UUID())
 	})
 }
 

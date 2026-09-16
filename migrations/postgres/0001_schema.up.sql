@@ -456,9 +456,10 @@ BEGIN
        AND NEW.money_movement = 'rail'
        AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status)
     THEN
-        INSERT INTO openrails.payment_settlement_events (merchant_id, payment_id, amount, currency, settled_at)
-        VALUES (NEW.merchant_id, NEW.id, NEW.amount, NEW.currency, COALESCE(NEW.purchased_at, NEW.created_at, now()))
-        ON CONFLICT (payment_id) DO NOTHING;
+        INSERT INTO openrails.host_outbox (merchant_id, event_type, subject_type, subject_id, payment_id, amount, currency, occurred_at, dedupe_key)
+        VALUES (NEW.merchant_id, 'payment.settled', 'payment', NEW.id, NEW.id, NEW.amount, NEW.currency,
+                COALESCE(NEW.purchased_at, NEW.created_at, now()), 'payment:' || NEW.id::text)
+        ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
     END IF;
     RETURN NEW;
 END;
@@ -875,10 +876,10 @@ BEGIN
               ORDER BY 1 LIMIT p_limit)
             UNION
             (SELECT DISTINCT nq.merchant_id AS mid
-               FROM openrails.notification_queue nq
+               FROM openrails.notifications nq
               WHERE (p_after IS NULL OR nq.merchant_id > p_after)
                 AND (nq.created_at < p_notification_cutoff
-                     OR (nq.seen AND nq.created_at < p_notification_seen_cutoff))
+                     OR (nq.read_at IS NOT NULL AND nq.created_at < p_notification_seen_cutoff))
               ORDER BY 1 LIMIT p_limit)
             UNION
             (SELECT DISTINCT we.merchant_id AS mid
@@ -888,16 +889,16 @@ BEGIN
               ORDER BY 1 LIMIT p_limit)
             UNION
             (SELECT DISTINCT pse.merchant_id AS mid
-               FROM openrails.payment_settlement_events pse
+               FROM openrails.host_outbox pse
               WHERE (p_after IS NULL OR pse.merchant_id > p_after)
-                AND pse.delivered_at IS NOT NULL
+                AND pse.event_type = 'payment.settled' AND pse.delivered_at IS NOT NULL
                 AND pse.delivered_at < p_settlement_cutoff
               ORDER BY 1 LIMIT p_limit)
             UNION
             (SELECT DISTINCT hle.merchant_id AS mid
-               FROM openrails.host_lifecycle_events hle
+               FROM openrails.host_outbox hle
               WHERE (p_after IS NULL OR hle.merchant_id > p_after)
-                AND hle.delivered_at IS NOT NULL
+                AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
                 AND hle.delivered_at < p_lifecycle_cutoff
               ORDER BY 1 LIMIT p_limit)
            ) q
@@ -1296,8 +1297,10 @@ ALTER TABLE openrails.webhook_health_daily ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.webhook_health_daily TO openrails_app;
 
-CREATE TABLE openrails.worker_health (
+CREATE TABLE openrails.worker_state (
     worker_kind text NOT NULL,
+    cursor_merchant_id uuid,
+    cursor_updated_at timestamp with time zone,
     registered_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     expected_period_seconds bigint,
     last_success_at timestamp with time zone,
@@ -1308,35 +1311,21 @@ CREATE TABLE openrails.worker_health (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-COMMENT ON TABLE openrails.worker_health IS '#689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table. RLS-exempt by design: process health per worker kind, not tenant data.';
+COMMENT ON TABLE openrails.worker_state IS 'RLS-exempt by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.';
 
-COMMENT ON COLUMN openrails.worker_health.registered_at IS 'First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.';
+COMMENT ON COLUMN openrails.worker_state.registered_at IS 'First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.';
 
-COMMENT ON COLUMN openrails.worker_health.expected_period_seconds IS 'Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).';
+COMMENT ON COLUMN openrails.worker_state.expected_period_seconds IS 'Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).';
 
-COMMENT ON COLUMN openrails.worker_health.last_error IS 'Most recent work error, truncated by the writer.';
+COMMENT ON COLUMN openrails.worker_state.last_error IS 'Most recent work error, truncated by the writer.';
 
-COMMENT ON COLUMN openrails.worker_health.last_alerted_at IS 'When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).';
+COMMENT ON COLUMN openrails.worker_state.last_alerted_at IS 'When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).';
 
-ALTER TABLE ONLY openrails.worker_health
-    ADD CONSTRAINT worker_health_pkey PRIMARY KEY (worker_kind);
+ALTER TABLE ONLY openrails.worker_state
+    ADD CONSTRAINT worker_state_pkey PRIMARY KEY (worker_kind);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_health TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_state TO openrails_app;
 
-CREATE TABLE openrails.worker_sweep_cursors (
-    worker_kind text NOT NULL,
-    cursor_merchant_id uuid,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-COMMENT ON TABLE openrails.worker_sweep_cursors IS 'RLS-exempt by design: or#837 resume point for capped fan-out sweeps — the last merchant id a bounded pass handled. A cap without a cursor re-serves the same head every tick and starves the tail; a cursor without a cap is the unbounded enumeration this replaced. Operator-global process state, no tenant data (see worker_health).';
-
-COMMENT ON COLUMN openrails.worker_sweep_cursors.cursor_merchant_id IS 'Exclusive lower bound for the next pass. NULL = the previous pass drained its work queue, so the next one starts from the beginning.';
-
-ALTER TABLE ONLY openrails.worker_sweep_cursors
-    ADD CONSTRAINT worker_sweep_cursors_pkey PRIMARY KEY (worker_kind);
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_sweep_cursors TO openrails_app;
 
 CREATE TABLE openrails.admission_denials_hourly (
     merchant_id uuid NOT NULL,
@@ -1784,46 +1773,55 @@ GRANT UPDATE(status) ON TABLE openrails.destructive_runs TO openrails_app;
 
 GRANT UPDATE(note) ON TABLE openrails.destructive_runs TO openrails_app;
 
-CREATE TABLE openrails.host_lifecycle_events (
+CREATE TABLE openrails.host_outbox (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     event_type text NOT NULL,
     subject_type text NOT NULL,
+    payment_id uuid,
+    amount bigint,
     subject_id uuid NOT NULL,
     currency text NOT NULL,
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     data jsonb DEFAULT '{}'::jsonb NOT NULL,
     delivered_at timestamp with time zone,
     dedupe_key text NOT NULL,
-    CONSTRAINT host_lifecycle_events_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
-    CONSTRAINT host_lifecycle_events_subject_chk CHECK ((subject_type = 'customer'::text))
+    CONSTRAINT host_outbox_currency_shape CHECK (((currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT host_outbox_payload CHECK (
+        (event_type = 'payment.settled' AND subject_type = 'payment' AND payment_id IS NOT NULL
+         AND subject_id = payment_id AND amount IS NOT NULL AND amount > 0 AND data = '{}'::jsonb)
+        OR (event_type IN ('delinquency.grace', 'delinquency.entered', 'delinquency.cleared')
+            AND subject_type = 'customer' AND payment_id IS NULL AND amount IS NULL)
+    )
 );
 
-ALTER TABLE ONLY openrails.host_lifecycle_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.host_outbox FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE openrails.host_lifecycle_events IS 'or#878 durable host-consumption queue for lifecycle signals the embedding host must act on — today only arrears delinquency transitions (delinquency.grace / delinquency.entered / delinquency.cleared). Consumers ack after idempotent processing; delivered rows are pruned. OpenRails emits the signal and never performs the shutoff: it does not know what the host is running.';
+COMMENT ON TABLE openrails.host_outbox IS 'Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state.';
 
-COMMENT ON COLUMN openrails.host_lifecycle_events.currency IS 'The transition''s currency. NOT NULL (CUR-1): every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.';
+COMMENT ON COLUMN openrails.host_outbox.currency IS 'The transition''s currency. NOT NULL (CUR-1): every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.';
 
-COMMENT ON COLUMN openrails.host_lifecycle_events.dedupe_key IS 'Deterministic per transition (delinquency:<customer>:<currency>:<transition_seq>) so a re-run collapses instead of instructing a second shutoff.';
+COMMENT ON COLUMN openrails.host_outbox.dedupe_key IS 'Deterministic per transition (delinquency:<customer>:<currency>:<transition_seq>) so a re-run collapses instead of instructing a second shutoff.';
 
-ALTER TABLE ONLY openrails.host_lifecycle_events
-    ADD CONSTRAINT host_lifecycle_events_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY openrails.host_outbox
+    ADD CONSTRAINT host_outbox_pkey PRIMARY KEY (id);
 
-CREATE INDEX ix_host_lifecycle_events_delivered ON openrails.host_lifecycle_events USING btree (merchant_id, delivered_at) WHERE (delivered_at IS NOT NULL);
+CREATE INDEX ix_host_outbox_delivered ON openrails.host_outbox USING btree (merchant_id, delivered_at) WHERE (delivered_at IS NOT NULL);
 
-CREATE INDEX ix_host_lifecycle_events_pending ON openrails.host_lifecycle_events USING btree (merchant_id, id) WHERE (delivered_at IS NULL);
+CREATE INDEX ix_host_outbox_pending ON openrails.host_outbox USING btree (merchant_id, event_type, id) WHERE (delivered_at IS NULL);
 
-CREATE UNIQUE INDEX uq_host_lifecycle_events_dedupe ON openrails.host_lifecycle_events USING btree (merchant_id, dedupe_key);
+CREATE UNIQUE INDEX uq_host_outbox_dedupe ON openrails.host_outbox USING btree (merchant_id, dedupe_key);
 
-ALTER TABLE ONLY openrails.host_lifecycle_events
-    ADD CONSTRAINT host_lifecycle_events_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
+ALTER TABLE ONLY openrails.host_outbox
+    ADD CONSTRAINT host_outbox_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
 
-ALTER TABLE openrails.host_lifecycle_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.host_outbox ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY merchant_isolation ON openrails.host_lifecycle_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.host_outbox USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.host_lifecycle_events TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.host_outbox TO openrails_app;
+
+CREATE UNIQUE INDEX uq_host_outbox_payment ON openrails.host_outbox (merchant_id, payment_id) WHERE payment_id IS NOT NULL;
 
 CREATE TABLE openrails.invoices (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2181,36 +2179,6 @@ CREATE POLICY merchant_isolation ON openrails.merchant_destructive_policy USING 
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_destructive_policy TO openrails_app;
 
-CREATE TABLE openrails.merchant_notifications (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    severity text DEFAULT 'warning'::text NOT NULL,
-    title text NOT NULL,
-    body text DEFAULT ''::text NOT NULL,
-    link text DEFAULT ''::text NOT NULL,
-    data jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    read_at timestamp with time zone
-);
-
-ALTER TABLE ONLY openrails.merchant_notifications FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.merchant_notifications IS 'Immediate merchant-operator notifications (console bell).';
-
-ALTER TABLE ONLY openrails.merchant_notifications
-    ADD CONSTRAINT merchant_notifications_pkey PRIMARY KEY (id);
-
-CREATE INDEX merchant_notifications_bell_idx ON openrails.merchant_notifications USING btree (merchant_id, read_at, created_at DESC);
-
-ALTER TABLE ONLY openrails.merchant_notifications
-    ADD CONSTRAINT merchant_notifications_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_notifications USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.merchant_notifications ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_notifications TO openrails_app;
-
 CREATE TABLE openrails.merchant_purge_inventories (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2297,51 +2265,60 @@ ALTER TABLE openrails.merchant_webhooks ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_webhooks TO openrails_app;
 
-CREATE TABLE openrails.notification_queue (
+CREATE TABLE openrails.notifications (
     id uuid DEFAULT uuidv7() NOT NULL,
     event_type text NOT NULL,
     data jsonb NOT NULL,
-    seen boolean DEFAULT false NOT NULL,
+    recipient_kind text DEFAULT 'customer' NOT NULL,
+    read_at timestamp with time zone,
+    severity text DEFAULT '' NOT NULL,
+    title text DEFAULT '' NOT NULL,
+    body text DEFAULT '' NOT NULL,
+    link text DEFAULT '' NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    emailed_at timestamp with time zone
+    customer_id uuid,
+    emailed_at timestamp with time zone,
+    CONSTRAINT notifications_recipient CHECK (
+        (recipient_kind = 'customer' AND customer_id IS NOT NULL AND severity = '' AND title = '' AND body = '' AND link = '')
+        OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND emailed_at IS NULL AND title <> '')
+    )
 );
 
-ALTER TABLE ONLY openrails.notification_queue FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.notifications FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE openrails.notification_queue IS 'Queue for user notifications related to billing and subscriptions';
+COMMENT ON TABLE openrails.notifications IS 'Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.';
 
-COMMENT ON COLUMN openrails.notification_queue.emailed_at IS '#789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).';
+COMMENT ON COLUMN openrails.notifications.emailed_at IS '#789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).';
 
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY openrails.notifications
+    ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
 
-CREATE INDEX idx_notification_queue_created_at ON openrails.notification_queue USING btree (created_at);
+CREATE INDEX idx_notifications_created_at ON openrails.notifications USING btree (created_at);
 
-CREATE INDEX idx_notification_queue_customer ON openrails.notification_queue USING btree (customer_id) WHERE (customer_id IS NOT NULL);
+CREATE INDEX idx_notifications_customer ON openrails.notifications USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 
-CREATE INDEX idx_notification_queue_event_type ON openrails.notification_queue USING btree (event_type);
+CREATE INDEX idx_notifications_event_type ON openrails.notifications USING btree (event_type);
 
-CREATE INDEX idx_notification_queue_merchant_id ON openrails.notification_queue USING btree (merchant_id);
+CREATE INDEX idx_notifications_merchant_id ON openrails.notifications USING btree (merchant_id);
 
-CREATE INDEX idx_notification_queue_seen ON openrails.notification_queue USING btree (seen);
+CREATE INDEX notifications_inbox_idx ON openrails.notifications USING btree (merchant_id, recipient_kind, customer_id, read_at, created_at DESC);
 
-CREATE INDEX idx_notification_queue_undelivered ON openrails.notification_queue USING btree (merchant_id, created_at, id) WHERE (emailed_at IS NULL);
+CREATE INDEX idx_notifications_undelivered ON openrails.notifications USING btree (merchant_id, created_at, id) WHERE (recipient_kind = 'customer' AND emailed_at IS NULL);
 
-CREATE INDEX ix_notification_queue_retention ON openrails.notification_queue USING btree (merchant_id, created_at);
+CREATE INDEX ix_notifications_retention ON openrails.notifications USING btree (merchant_id, created_at);
 
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
+ALTER TABLE ONLY openrails.notifications
+    ADD CONSTRAINT notifications_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY openrails.notifications
+    ADD CONSTRAINT notifications_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.notification_queue USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.notifications USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-ALTER TABLE openrails.notification_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.notifications ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notification_queue TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notifications TO openrails_app;
 
 CREATE TABLE openrails.prices (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3195,11 +3172,11 @@ CREATE TABLE openrails.customer_delinquency (
 
 ALTER TABLE ONLY openrails.customer_delinquency FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE openrails.customer_delinquency IS 'or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant''s declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_lifecycle_events signal; the operator owns the shutoff.';
+COMMENT ON TABLE openrails.customer_delinquency IS 'or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant''s declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.';
 
 COMMENT ON COLUMN openrails.customer_delinquency.overdue_since IS 'The oldest overdue due_at behind this state — the clock the grace window is measured on, not the moment we noticed.';
 
-COMMENT ON COLUMN openrails.customer_delinquency.transition_seq IS 'Bumped only when state changes; the idempotency coordinate of the emitted host_lifecycle_events row.';
+COMMENT ON COLUMN openrails.customer_delinquency.transition_seq IS 'Bumped only when state changes; the idempotency coordinate of the emitted host_outbox row.';
 
 ALTER TABLE ONLY openrails.customer_delinquency
     ADD CONSTRAINT customer_delinquency_pkey PRIMARY KEY (merchant_id, customer_id, currency);
@@ -4075,44 +4052,8 @@ ALTER TABLE openrails.payments ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payments TO openrails_app;
 
-CREATE TABLE openrails.payment_settlement_events (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    payment_id uuid NOT NULL,
-    amount bigint NOT NULL,
-    currency text NOT NULL,
-    settled_at timestamp with time zone DEFAULT now() NOT NULL,
-    delivered_at timestamp with time zone,
-    CONSTRAINT payment_settlement_events_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
-);
-
-ALTER TABLE ONLY openrails.payment_settlement_events FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.payment_settlement_events IS 'Durable host-consumption queue for real successful payments; consumers ack after idempotent processing.';
-
-ALTER TABLE ONLY openrails.payment_settlement_events
-    ADD CONSTRAINT payment_settlement_events_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY openrails.payment_settlement_events
-    ADD CONSTRAINT uq_payment_settlement_events_payment UNIQUE (payment_id);
-
-CREATE INDEX idx_payment_settlement_events_delivered ON openrails.payment_settlement_events USING btree (merchant_id, delivered_at) WHERE (delivered_at IS NOT NULL);
-
-CREATE INDEX idx_payment_settlement_events_merchant_id ON openrails.payment_settlement_events USING btree (merchant_id, id);
-
-CREATE INDEX idx_payment_settlement_events_pending ON openrails.payment_settlement_events USING btree (id) WHERE (delivered_at IS NULL);
-
-ALTER TABLE ONLY openrails.payment_settlement_events
-    ADD CONSTRAINT payment_settlement_events_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY openrails.payment_settlement_events
-    ADD CONSTRAINT payment_settlement_events_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES openrails.payments(merchant_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.payment_settlement_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.payment_settlement_events ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.payment_settlement_events TO openrails_app;
+ALTER TABLE ONLY openrails.host_outbox
+    ADD CONSTRAINT host_outbox_payment_fk FOREIGN KEY (merchant_id, payment_id) REFERENCES openrails.payments(merchant_id, id) ON DELETE CASCADE;
 
 CREATE TABLE openrails.checkout_sessions (
     id uuid DEFAULT uuidv7() NOT NULL,

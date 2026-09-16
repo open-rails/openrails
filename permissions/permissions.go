@@ -10,6 +10,8 @@ import "strings"
 
 // Merchant (seller) permissions.
 const (
+	MerchantHostEventsRead         = "merchant:host-events:read"
+	MerchantHostEventsAcknowledge  = "merchant:host-events:acknowledge"
 	MerchantSettingsRead           = "merchant:settings:read"
 	MerchantSettingsUpdate         = "merchant:settings:update"
 	MerchantPaymentProvidersRead   = "merchant:payment-providers:read"

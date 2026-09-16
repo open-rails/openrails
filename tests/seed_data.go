@@ -1035,7 +1035,7 @@ func (suite *TestContainerSuite) CountUnreadNotifications(userID string) int {
 	tenantSubjectID := suite.resolveCustomer(ctx, userID)
 
 	return suite.Count(ctx,
-		"SELECT COUNT(*) FROM openrails.notification_queue WHERE customer_id = $1 AND seen = false",
+		"SELECT COUNT(*) FROM openrails.notifications WHERE customer_id = $1 AND read_at IS NULL",
 		tenantSubjectID)
 }
 

@@ -13,23 +13,19 @@ import (
 // The table list is DERIVED from every migration's SQL, not hand-maintained —
 // the previous hardcoded list only covered 0001, so a merchant-scoped table
 // added in a later migration escaped enforcement silently (0005's
-// payment_settlement_events shipped with merchant_id and no RLS; nothing
-// failed). Exemptions are declared IN the schema as a
+// payment_settlement_events, now host_outbox, shipped with merchant_id and no
+// RLS; nothing failed). Exemptions are declared IN the schema as a
 // `COMMENT ON TABLE ... 'RLS-exempt by design: ...'` marker, and the exempt set
 // is additionally asserted by name below so widening it requires review here.
 var rlsExemptTables = []string{
-	"merchants",     // the tenant directory itself — the scope, not a scoped row
-	"worker_health", // per-worker-kind process health
+	"merchants",    // the tenant directory itself — the scope, not a scoped row
+	"worker_state", // per-worker-kind process health
 	// #836 instance-level operator kill switch for destructive convergence.
 	// Deliberately readable from the no-GUC background connections it polices
 	// (intent runner, sweep scheduler); carries no tenant data — the
 	// per-merchant half lives in the RLS-protected
 	// merchant_destructive_policy.
 	"destructive_action_switch",
-	// or#837 resume point for capped fan-out sweeps — a worker kind and the
-	// merchant id it stopped at. Written from the no-GUC background pass that
-	// reads the SECURITY DEFINER work queue; holds no tenant data.
-	"worker_sweep_cursors",
 }
 
 // minMerchantScopedTables guards against a vacuous pass: if the SQL parsing
@@ -472,7 +468,7 @@ func TestEveryMerchantIDTableRequiresRLS(t *testing.T) {
 	}
 	// Sentinels from migrations beyond the baseline: proves later migrations are
 	// actually being read.
-	for _, tbl := range []string{"payments", "customer_invoice_profiles", "payment_settlement_events"} {
+	for _, tbl := range []string{"payments", "customer_invoice_profiles", "host_outbox"} {
 		if !s.merchantScoped[tbl] {
 			t.Fatalf("expected %q in the derived merchant-scoped set", tbl)
 		}

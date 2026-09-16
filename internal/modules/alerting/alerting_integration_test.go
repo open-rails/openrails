@@ -68,7 +68,7 @@ func seedMerchant(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) {
 	exec(t, pool, `INSERT INTO openrails.merchants (id, slug, status) VALUES ($1,$2,'active') ON CONFLICT (id) DO NOTHING`, mid, slug)
 	t.Cleanup(func() {
 		ctx := context.Background()
-		for _, tbl := range []string{"merchant_notifications", "merchant_webhooks", "payments", "subscriptions", "prices", "products", "customers", "psps", "merchant_configurations", "webhook_health", "webhook_health_daily", "reconciliation_findings", "reconciliation_runs"} {
+		for _, tbl := range []string{"notifications", "merchant_webhooks", "payments", "subscriptions", "prices", "products", "customers", "psps", "merchant_configurations", "webhook_health", "webhook_health_daily", "reconciliation_findings", "reconciliation_runs"} {
 			_, _ = pool.Exec(ctx, `DELETE FROM openrails.`+tbl+` WHERE merchant_id = $1`, mid)
 		}
 		_, _ = pool.Exec(ctx, `DELETE FROM openrails.merchants WHERE id = $1`, mid)
@@ -149,7 +149,7 @@ func countNotifications(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) int {
 	t.Helper()
 	var n int
 	require.NoError(t, pool.QueryRow(context.Background(),
-		`SELECT count(*) FROM openrails.merchant_notifications WHERE merchant_id=$1`, mid).Scan(&n))
+		`SELECT count(*) FROM openrails.notifications WHERE merchant_id=$1`, mid).Scan(&n))
 	return n
 }
 

@@ -110,7 +110,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	var lastSuccess *time.Time
 	require.NoError(t, dbi.Qx(ctx).QueryRow(ctx,
-		`SELECT last_success_at FROM openrails.worker_health WHERE worker_kind = $1`,
+		`SELECT last_success_at FROM openrails.worker_state WHERE worker_kind = $1`,
 		riverjobs.CleanupExpiredDataArgs{}.Kind()).Scan(&lastSuccess))
 	require.NotNil(t, lastSuccess, "health bookkeeping must be installed without host cooperation (#895)")
 

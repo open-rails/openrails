@@ -104,7 +104,7 @@ func TestAutoTopupSafety_DefinitiveDeclinesDisableExactlyOnce(t *testing.T) {
 		clock.Advance(time.Hour)
 	}
 	var notices int
-	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM openrails.notification_queue WHERE customer_id=$1 AND event_type='auto_topup_disabled'", payer.UUID()).Scan(&notices))
+	require.NoError(t, pool.QueryRow(ctx, "SELECT count(*) FROM openrails.notifications WHERE customer_id=$1 AND event_type='auto_topup_disabled'", payer.UUID()).Scan(&notices))
 	require.Equal(t, 1, notices)
 	// Unrelated settings writes do not undo automatic disablement or counters.
 	threshold := int64(500)

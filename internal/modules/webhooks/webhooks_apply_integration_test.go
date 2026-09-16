@@ -223,7 +223,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_customer_accounts WHERE account_id = $1", f.railCustomerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subID)

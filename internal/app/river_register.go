@@ -136,7 +136,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add converge sweep worker: %w", err)
 	}
-	// Notification email sweep (#789): delivers undelivered notification_queue
+	// Notification email sweep (#789): delivers undelivered notifications
 	// rows (emailed_at NULL) — including the converge NOTIFY pass's access-ended
 	// rows, which are created without inline delivery.
 	if err := addTrackedWorker(r, workers, &riverjobs.NotificationEmailSweepWorker{

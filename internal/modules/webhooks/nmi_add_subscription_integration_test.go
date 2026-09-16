@@ -188,7 +188,7 @@ func newNMIConvergeFixture(t *testing.T, dsn string, subStatus models.Subscripti
 
 	t.Cleanup(func() {
 		cctx := context.Background()
-		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", f.tenantSubjectID)
+		_, _ = pool.Exec(cctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.payments WHERE customer_id = $1", f.tenantSubjectID)
 		_, _ = pool.Exec(cctx, "DELETE FROM openrails.subscriptions WHERE id = $1", f.subscriptionID)

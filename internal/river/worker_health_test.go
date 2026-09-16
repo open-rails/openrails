@@ -16,10 +16,10 @@ func agoAt(d time.Duration) *time.Time {
 	return &t
 }
 
-// evalRow keeps these cases on the worker_health-only evidence path (no
+// evalRow keeps these cases on the worker_state-only evidence path (no
 // river_job watermark), which is exactly the shape the old River-job checker
 // evaluated — so the ported rules are compared like for like.
-func evalRow(row gen.OpenrailsWorkerHealth, now time.Time, failureThreshold, staleMultiplier int, minStale time.Duration) string {
+func evalRow(row gen.OpenrailsWorkerState, now time.Time, failureThreshold, staleMultiplier int, minStale time.Duration) string {
 	return evaluateKindProgress(row, KindProgress{}, now, failureThreshold, staleMultiplier, minStale)
 }
 
@@ -30,19 +30,19 @@ func TestEvaluateWorkerHealth(t *testing.T) {
 
 	cases := []struct {
 		name string
-		row  gen.OpenrailsWorkerHealth
+		row  gen.OpenrailsWorkerState
 		want string
 	}{
-		{"fresh row, no runs yet", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-time.Minute), ExpectedPeriodSeconds: i64p(3600)}, ""},
-		{"consecutive failures trip", gen.OpenrailsWorkerHealth{RegisteredAt: now, ConsecutiveFailures: 3}, "consecutive_failures"},
-		{"two failures do not trip", gen.OpenrailsWorkerHealth{RegisteredAt: now, ConsecutiveFailures: 2}, ""},
-		{"never succeeded past grace", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-4 * time.Hour), ExpectedPeriodSeconds: i64p(3600)}, "never_succeeded"},
-		{"never succeeded within grace", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-2 * time.Hour), ExpectedPeriodSeconds: i64p(3600)}, ""},
-		{"stale periodic", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(3600), LastSuccessAt: agoAt(4 * time.Hour)}, "stale"},
-		{"on-time periodic", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(3600), LastSuccessAt: agoAt(30 * time.Minute)}, ""},
-		{"on-demand never alerts on cadence", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-240 * time.Hour)}, ""},
-		{"min-stale floor beats k*period", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(60), LastSuccessAt: agoAt(5 * time.Minute)}, ""},
-		{"past min-stale floor", gen.OpenrailsWorkerHealth{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(60), LastSuccessAt: agoAt(11 * time.Minute)}, "stale"},
+		{"fresh row, no runs yet", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-time.Minute), ExpectedPeriodSeconds: i64p(3600)}, ""},
+		{"consecutive failures trip", gen.OpenrailsWorkerState{RegisteredAt: now, ConsecutiveFailures: 3}, "consecutive_failures"},
+		{"two failures do not trip", gen.OpenrailsWorkerState{RegisteredAt: now, ConsecutiveFailures: 2}, ""},
+		{"never succeeded past grace", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-4 * time.Hour), ExpectedPeriodSeconds: i64p(3600)}, "never_succeeded"},
+		{"never succeeded within grace", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-2 * time.Hour), ExpectedPeriodSeconds: i64p(3600)}, ""},
+		{"stale periodic", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(3600), LastSuccessAt: agoAt(4 * time.Hour)}, "stale"},
+		{"on-time periodic", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(3600), LastSuccessAt: agoAt(30 * time.Minute)}, ""},
+		{"on-demand never alerts on cadence", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-240 * time.Hour)}, ""},
+		{"min-stale floor beats k*period", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(60), LastSuccessAt: agoAt(5 * time.Minute)}, ""},
+		{"past min-stale floor", gen.OpenrailsWorkerState{RegisteredAt: now.Add(-24 * time.Hour), ExpectedPeriodSeconds: i64p(60), LastSuccessAt: agoAt(11 * time.Minute)}, "stale"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,16 +55,16 @@ func TestWorkerAlertDue(t *testing.T) {
 	now := healthNow()
 	every := 24 * time.Hour
 
-	require.True(t, workerAlertDue(gen.OpenrailsWorkerHealth{}, now, every), "first trip alerts")
-	require.False(t, workerAlertDue(gen.OpenrailsWorkerHealth{LastAlertedAt: agoAt(time.Hour)}, now, every), "recently alerted waits")
-	require.True(t, workerAlertDue(gen.OpenrailsWorkerHealth{LastAlertedAt: agoAt(25 * time.Hour)}, now, every), "re-alert pacing elapsed")
+	require.True(t, workerAlertDue(gen.OpenrailsWorkerState{}, now, every), "first trip alerts")
+	require.False(t, workerAlertDue(gen.OpenrailsWorkerState{LastAlertedAt: agoAt(time.Hour)}, now, every), "recently alerted waits")
+	require.True(t, workerAlertDue(gen.OpenrailsWorkerState{LastAlertedAt: agoAt(25 * time.Hour)}, now, every), "re-alert pacing elapsed")
 	// A success AFTER the last alert = a fresh incident.
-	require.True(t, workerAlertDue(gen.OpenrailsWorkerHealth{LastAlertedAt: agoAt(2 * time.Hour), LastSuccessAt: agoAt(time.Hour)}, now, every))
+	require.True(t, workerAlertDue(gen.OpenrailsWorkerState{LastAlertedAt: agoAt(2 * time.Hour), LastSuccessAt: agoAt(time.Hour)}, now, every))
 }
 
 func TestWorkerHealthAlertIdempotencyKey(t *testing.T) {
 	lastErrorAt := healthNow().Add(-time.Minute)
-	row := gen.OpenrailsWorkerHealth{
+	row := gen.OpenrailsWorkerState{
 		WorkerKind:          "test.worker",
 		RegisteredAt:        healthNow().Add(-48 * time.Hour),
 		LastSuccessAt:       agoAt(4 * time.Hour),

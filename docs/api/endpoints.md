@@ -503,3 +503,35 @@ with `{ "url": "..." }` and retains webhook identity. A metadata/secret version
 mismatch refuses delivery until the same URL update is retried successfully.
 Manifest deployments retain read-only provider credentials while this managed
 webhook namespace uses the configured encrypted DB/Vault backend.
+
+## Host event consumption
+
+| Method | Path | Permission | Purpose |
+|---|---|---|---|
+| GET | `/v1/merchant/host-events` | `merchant:host-events:read` | Bounded typed pending host events |
+| POST | `/v1/merchant/host-events/{id}/acknowledge` | `merchant:host-events:acknowledge` | Idempotent acknowledgment after host processing |
+| GET | `/v1/merchant/customers/{customer_id}/payment-settlement-status` | `merchant:payments:read` | Historical positive rail payment for `price_id` |
+
+`GET /v1/merchant/host-events` and `POST /v1/merchant/host-events/{id}/acknowledge`
+are shared by standalone HTTP and the embedded Go `Client`. They require
+`merchant:host-events:read` and `merchant:host-events:acknowledge`, respectively.
+
+The list is merchant-scoped and bounded (`limit` defaults to 100, maximum 1000).
+`type` selects `payment.settled`, `delinquency.grace`, `delinquency.entered`, or
+`delinquency.cleared`. Pending events are returned oldest first. Acknowledge only
+after idempotent host processing commits, then fetch again; a UUID high-water
+mark can miss transactions that commit late. Acknowledgment is idempotent and
+independent of customer and merchant notification read state. A payment event
+contains the original payment UUID, amount, currency, merchant and settlement
+time, preserving the fee-attribution coordinate.
+
+`include_acknowledged=true` includes retained acknowledged rows; `payment_id`
+selects one payment's event. Acknowledged rows are retained for 30 days by default;
+pending rows survive retention. Hosts should filter by event type so one
+consumer's pending work cannot starve another type.
+
+`GET /v1/merchant/customers/{customer_id}/payment-settlement-status?price_id=...`
+backs `Client.HasSettledPayment` and requires `merchant:payments:read`. It reads
+the durable payment records: a positive completed or refunded original rail
+payment establishes the historical fact for that merchant, customer and price.
+Acknowledging or pruning its host event does not erase that fact.

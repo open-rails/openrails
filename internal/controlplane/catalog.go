@@ -116,7 +116,7 @@ func Groups() []authcore.PersonaDef {
 						PermMerchantPaymentsRead, PermMerchantPaymentsRefund,
 						PermMerchantInvoicesRead, PermMerchantInvoicesCollect,
 						PermMerchantSubscriptionsRead, PermMerchantSubscriptionsUpdate,
-						PermMerchantUsageRead, PermMerchantRepairAlertsRead, PermMerchantMetricsRead,
+						PermMerchantUsageRead, PermMerchantHostEventsRead, PermMerchantRepairAlertsRead, PermMerchantMetricsRead,
 						PermMerchantDashboardUpdate,
 					},
 				},
@@ -127,7 +127,7 @@ func Groups() []authcore.PersonaDef {
 						PermMerchantSettingsRead, PermMerchantPaymentProvidersRead,
 						PermMerchantCatalogRead, PermMerchantCustomerSettingsRead,
 						PermMerchantPaymentsRead, PermMerchantInvoicesRead, PermMerchantSubscriptionsRead,
-						PermMerchantUsageRead, PermMerchantRepairAlertsRead, PermMerchantMetricsRead,
+						PermMerchantUsageRead, PermMerchantHostEventsRead, PermMerchantRepairAlertsRead, PermMerchantMetricsRead,
 					},
 				},
 			},
@@ -226,6 +226,8 @@ const (
 	PermMerchantSubscriptionsUpdate    = permissions.MerchantSubscriptionsUpdate
 	PermMerchantAdmissionsCreate       = permissions.MerchantAdmissionsCreate
 	PermMerchantUsageRead              = permissions.MerchantUsageRead
+	PermMerchantHostEventsRead         = permissions.MerchantHostEventsRead
+	PermMerchantHostEventsAcknowledge  = permissions.MerchantHostEventsAcknowledge
 	PermMerchantRepairAlertsRead       = permissions.MerchantRepairAlertsRead
 	PermMerchantMetricsRead            = permissions.MerchantMetricsRead
 	PermMerchantDashboardUpdate        = permissions.MerchantDashboardUpdate

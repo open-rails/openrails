@@ -771,7 +771,7 @@ export interface MerchantWebhook {
 }
 
 // MerchantNotification is the in_app store — MERCHANT-operator-facing (distinct
-// from the customer notification_queue). Surfaced as the header bell.
+// from customer recipients in notifications). Surfaced as the header bell.
 export interface MerchantNotification {
   id: string
   severity: AlertSeverity

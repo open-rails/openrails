@@ -67,7 +67,7 @@ func (q *Queries) CountMerchantRowsMoneyAccounts(ctx context.Context, merchantID
 }
 
 const countMerchantRowsNotificationQueue = `-- name: CountMerchantRowsNotificationQueue :one
-SELECT count(*) FROM openrails.notification_queue WHERE merchant_id = $1
+SELECT count(*) FROM openrails.notifications WHERE merchant_id = $1
 `
 
 func (q *Queries) CountMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -205,7 +205,7 @@ func (q *Queries) PurgeMerchantRowsMoneyAccounts(ctx context.Context, merchantID
 }
 
 const purgeMerchantRowsNotificationQueue = `-- name: PurgeMerchantRowsNotificationQueue :exec
-DELETE FROM openrails.notification_queue WHERE merchant_id = $1
+DELETE FROM openrails.notifications WHERE merchant_id = $1
 `
 
 func (q *Queries) PurgeMerchantRowsNotificationQueue(ctx context.Context, merchantID uuid.UUID) error {

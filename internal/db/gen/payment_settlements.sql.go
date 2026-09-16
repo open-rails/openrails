@@ -12,32 +12,12 @@ import (
 	"github.com/google/uuid"
 )
 
-const acknowledgePaymentSettlement = `-- name: AcknowledgePaymentSettlement :execrows
-UPDATE openrails.payment_settlement_events
-   SET delivered_at = COALESCE(delivered_at, now())
- WHERE merchant_id = $1
-   AND id = $2
-`
-
-type AcknowledgePaymentSettlementParams struct {
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-func (q *Queries) AcknowledgePaymentSettlement(ctx context.Context, arg AcknowledgePaymentSettlementParams) (int64, error) {
-	result, err := q.db.Exec(ctx, acknowledgePaymentSettlement, arg.MerchantID, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteDeliveredPaymentSettlementsBefore = `-- name: DeleteDeliveredPaymentSettlementsBefore :execrows
-DELETE FROM openrails.payment_settlement_events
+DELETE FROM openrails.host_outbox
  WHERE ctid IN (
-    SELECT pse.ctid FROM openrails.payment_settlement_events pse
+    SELECT pse.ctid FROM openrails.host_outbox pse
      WHERE pse.merchant_id = $1::uuid
-       AND pse.delivered_at IS NOT NULL
+       AND pse.event_type = 'payment.settled' AND pse.delivered_at IS NOT NULL
        AND pse.delivered_at < $2::timestamptz
      LIMIT $3::int
 )
@@ -56,54 +36,4 @@ func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, a
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const listPendingPaymentSettlements = `-- name: ListPendingPaymentSettlements :many
-SELECT id, merchant_id, payment_id, amount, currency, settled_at
-  FROM openrails.payment_settlement_events
- WHERE merchant_id = $1
-   AND delivered_at IS NULL
- ORDER BY id
- LIMIT $2
-`
-
-type ListPendingPaymentSettlementsParams struct {
-	MerchantID uuid.UUID
-	RowLimit   int64
-}
-
-type ListPendingPaymentSettlementsRow struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	PaymentID  uuid.UUID
-	Amount     int64
-	Currency   string
-	SettledAt  time.Time
-}
-
-func (q *Queries) ListPendingPaymentSettlements(ctx context.Context, arg ListPendingPaymentSettlementsParams) ([]ListPendingPaymentSettlementsRow, error) {
-	rows, err := q.db.Query(ctx, listPendingPaymentSettlements, arg.MerchantID, arg.RowLimit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPendingPaymentSettlementsRow
-	for rows.Next() {
-		var i ListPendingPaymentSettlementsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.PaymentID,
-			&i.Amount,
-			&i.Currency,
-			&i.SettledAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }

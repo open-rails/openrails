@@ -36,7 +36,7 @@ func TestSchemaCoversTenantOwnedRLSTables(t *testing.T) {
 		"payments",
 		"customers",
 		"merchant_secrets",
-		"payment_settlement_events",
+		"host_outbox",
 		"psps", // renamed from rail_merchant_accounts in 0003: RLS state follows the rename
 	} {
 		if missing := s.missingRLS(tbl); len(missing) > 0 {

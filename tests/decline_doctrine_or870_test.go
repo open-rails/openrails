@@ -46,7 +46,7 @@ func notificationEventTypes(t *testing.T, suite *TestContainerSuite, customerID 
 	t.Helper()
 	ctx := suite.MerchantCtx()
 	rows, err := suite.Pool.Query(ctx, `
-		SELECT event_type FROM openrails.notification_queue
+		SELECT event_type FROM openrails.notifications
 		WHERE customer_id = $1
 		ORDER BY created_at`, customerID)
 	require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestOr870Bucket3CancelsAtTheRailAndDeletesNoPaymentMethod(t *testing.T) {
 
 	var reason string
 	require.NoError(t, suite.Pool.QueryRow(suite.MerchantCtx(), `
-		SELECT COALESCE(data->>'reason', '') FROM openrails.notification_queue
+		SELECT COALESCE(data->>'reason', '') FROM openrails.notifications
 		WHERE event_type = $1 AND customer_id = $2
 		ORDER BY created_at DESC LIMIT 1`,
 		models.NotificationPremiumEnded, sub.CustomerID).Scan(&reason))

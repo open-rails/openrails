@@ -105,7 +105,7 @@ just settled is never held out by our evaluation lag.
 ## What you enforce: the signal
 
 Delinquency transitions land on a durable, acknowledged feed —
-`openrails.host_lifecycle_events`, the same shape as the payment-settlements feed.
+`openrails.host_outbox`, the typed host event feed that also carries payment settlements.
 Not a webhook: a missed cut-off signal is a revenue leak and a missed restore
 signal is an outage for someone who has already paid.
 
@@ -121,12 +121,21 @@ Payload: `from_state`, `to_state`, `overdue_amount`, `overdue_since`,
 Embedded hosts:
 
 ```go
-events, err := controlplane.ListPendingHostLifecycleEvents(ctx, app, merchantID, 100)
-for _, ev := range events {
-    if err := yourShutoff(ctx, ev); err != nil {
-        continue // unacked events are redelivered
+// client is returned by runtime.Client(openrails.WithMerchantID(mid))
+// or openrails.NewRemote(...); both use the same operations.
+for _, kind := range []openrails.HostEventType{
+    openrails.HostEventDelinquencyGrace,
+    openrails.HostEventDelinquencyEntered,
+    openrails.HostEventDelinquencyCleared,
+} {
+    events, err := client.ListHostEvents(ctx, openrails.HostEventListOptions{Type: kind, Limit: 100})
+    if err != nil { return err }
+    for _, event := range events {
+        if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
+            return err // leave the event pending for replay
+        }
+        if err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
     }
-    _ = controlplane.AcknowledgeHostLifecycleEvent(ctx, app, merchantID, ev.ID)
 }
 ```
 

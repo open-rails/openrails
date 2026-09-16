@@ -26,24 +26,25 @@ SELECT * FROM openrails.merchant_webhooks ORDER BY created_at DESC, id;
 DELETE FROM openrails.merchant_webhooks WHERE id = $1;
 
 -- ============================================================================
--- merchant_notifications  (in_app bell)
+-- notifications  (in_app bell)
 -- ============================================================================
 
 -- name: CreateMerchantNotification :one
-INSERT INTO openrails.merchant_notifications (merchant_id, severity, title, body, link, data)
-VALUES (sqlc.arg(merchant_id)::uuid, $1, $2, $3, $4, $5)
+INSERT INTO openrails.notifications (merchant_id, recipient_kind, event_type, severity, title, body, link, data)
+VALUES (sqlc.arg(merchant_id)::uuid, 'merchant', 'operator.alert', sqlc.arg(severity)::text, sqlc.arg(title)::text, sqlc.arg(body)::text, sqlc.arg(link)::text, COALESCE(sqlc.narg(data)::jsonb, '{}'::jsonb))
 RETURNING *;
 
 -- name: ListMerchantNotifications :many
-SELECT * FROM openrails.merchant_notifications
-WHERE (NOT sqlc.arg(unread_only)::boolean OR read_at IS NULL)
+SELECT * FROM openrails.notifications
+WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id()
+  AND (NOT sqlc.arg(unread_only)::boolean OR read_at IS NULL)
 ORDER BY created_at DESC, id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: MarkMerchantNotificationRead :execrows
-UPDATE openrails.merchant_notifications
+UPDATE openrails.notifications
 SET read_at = COALESCE(read_at, now())
-WHERE id = $1;
+WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id() AND id = $1;
 
 -- name: CountUnreadMerchantNotifications :one
-SELECT count(*) FROM openrails.merchant_notifications WHERE read_at IS NULL;
+SELECT count(*) FROM openrails.notifications WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id() AND read_at IS NULL;

@@ -379,7 +379,7 @@ type OpenrailsCustomer struct {
 	LastSeenAt time.Time
 }
 
-// or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_lifecycle_events signal; the operator owns the shutoff.
+// or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
 type OpenrailsCustomerDelinquency struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -390,7 +390,7 @@ type OpenrailsCustomerDelinquency struct {
 	EnteredAt       time.Time
 	OverdueAmount   int64
 	OverdueInvoices int64
-	// Bumped only when state changes; the idempotency coordinate of the emitted host_lifecycle_events row.
+	// Bumped only when state changes; the idempotency coordinate of the emitted host_outbox row.
 	TransitionSeq int64
 	EvaluatedAt   time.Time
 	CreatedAt     time.Time
@@ -524,12 +524,14 @@ type OpenrailsGrant struct {
 	CreatedAt    time.Time
 }
 
-// or#878 durable host-consumption queue for lifecycle signals the embedding host must act on — today only arrears delinquency transitions (delinquency.grace / delinquency.entered / delinquency.cleared). Consumers ack after idempotent processing; delivered rows are pruned. OpenRails emits the signal and never performs the shutoff: it does not know what the host is running.
-type OpenrailsHostLifecycleEvent struct {
+// Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state.
+type OpenrailsHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	EventType   string
 	SubjectType string
+	PaymentID   *uuid.UUID
+	Amount      *int64
 	SubjectID   uuid.UUID
 	// The transition's currency. NOT NULL (CUR-1): every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.
 	Currency    string
@@ -747,19 +749,6 @@ type OpenrailsMerchantDormancyNotice struct {
 	WarnCount     int64
 }
 
-// Immediate merchant-operator notifications (console bell).
-type OpenrailsMerchantNotification struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Severity   string
-	Title      string
-	Body       string
-	Link       string
-	Data       []byte
-	CreatedAt  time.Time
-	ReadAt     *time.Time
-}
-
 // or#858: the manifest of what a merchant purge is ABOUT TO DESTROY — per-table row counts, merchant secret NAMES, and the explicit list of what is not captured. It is NOT a backup and restores nothing; the only restore path is Postgres PITR (docs/backup-and-recovery.md). Merchant deletion is gated on a matching inventory so the operator has seen the blast radius, not so the data can come back. Was merchant_exports (#225), a name that promised a restore point that never existed.
 type OpenrailsMerchantPurgeInventory struct {
 	ID         uuid.UUID
@@ -833,15 +822,20 @@ type OpenrailsMoneySetting struct {
 	AutoTopupFailures         int64
 }
 
-// Queue for user notifications related to billing and subscriptions
-type OpenrailsNotificationQueue struct {
-	ID         uuid.UUID
-	EventType  string
-	Data       []byte
-	Seen       bool
-	CreatedAt  time.Time
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
+// Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.
+type OpenrailsNotification struct {
+	ID            uuid.UUID
+	EventType     string
+	Data          []byte
+	RecipientKind string
+	ReadAt        *time.Time
+	Severity      string
+	Title         string
+	Body          string
+	Link          string
+	CreatedAt     time.Time
+	MerchantID    uuid.UUID
+	CustomerID    *uuid.UUID
 	// #789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
 	EmailedAt *time.Time
 }
@@ -975,17 +969,6 @@ type OpenrailsPaymentMethod struct {
 	ParkedAt *time.Time
 	// or#795: when this instrument was last SUBMITTED to a batch account-updater cycle (not when it last changed). NULL = never. The staleness half of the due-work predicate: an instrument refreshed inside the lookahead window is not re-submitted, so one renewal cycle costs at most one network lookup per card.
 	AccountUpdaterCheckedAt *time.Time
-}
-
-// Durable host-consumption queue for real successful payments; consumers ack after idempotent processing.
-type OpenrailsPaymentSettlementEvent struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	PaymentID   uuid.UUID
-	Amount      int64
-	Currency    string
-	SettledAt   time.Time
-	DeliveredAt *time.Time
 }
 
 // Pricing tiers for products with rail-specific identifiers
@@ -1465,9 +1448,11 @@ type OpenrailsWebhookHealthDaily struct {
 	Drift      int64
 }
 
-// #689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table. RLS-exempt by design: process health per worker kind, not tenant data.
-type OpenrailsWorkerHealth struct {
-	WorkerKind string
+// RLS-exempt by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
+type OpenrailsWorkerState struct {
+	WorkerKind       string
+	CursorMerchantID *uuid.UUID
+	CursorUpdatedAt  *time.Time
 	// First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.
 	RegisteredAt time.Time
 	// Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).
@@ -1480,14 +1465,6 @@ type OpenrailsWorkerHealth struct {
 	// When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).
 	LastAlertedAt *time.Time
 	UpdatedAt     time.Time
-}
-
-// RLS-exempt by design: or#837 resume point for capped fan-out sweeps — the last merchant id a bounded pass handled. A cap without a cursor re-serves the same head every tick and starves the tail; a cursor without a cap is the unbounded enumeration this replaced. Operator-global process state, no tenant data (see worker_health).
-type OpenrailsWorkerSweepCursor struct {
-	WorkerKind string
-	// Exclusive lower bound for the next pass. NULL = the previous pass drained its work queue, so the next one starts from the beginning.
-	CursorMerchantID *uuid.UUID
-	UpdatedAt        time.Time
 }
 
 type ProfilesUser struct {

@@ -192,7 +192,7 @@ func readSweepCursor(t *testing.T, ctx context.Context, super *pgxpool.Pool) *uu
 	t.Helper()
 	var cur *uuid.UUID
 	require.NoError(t, super.QueryRow(ctx,
-		"SELECT cursor_merchant_id FROM openrails.worker_sweep_cursors WHERE worker_kind = $1",
+		"SELECT cursor_merchant_id FROM openrails.worker_state WHERE worker_kind = $1",
 		KindCleanupExpiredData).Scan(&cur))
 	return cur
 }
@@ -202,10 +202,10 @@ func readSweepCursor(t *testing.T, ctx context.Context, super *pgxpool.Pool) *uu
 func resetSweepCursor(t *testing.T, ctx context.Context, super *pgxpool.Pool) {
 	t.Helper()
 	_, err := super.Exec(ctx,
-		"DELETE FROM openrails.worker_sweep_cursors WHERE worker_kind = $1", KindCleanupExpiredData)
+		"DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindCleanupExpiredData)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = super.Exec(context.Background(),
-			"DELETE FROM openrails.worker_sweep_cursors WHERE worker_kind = $1", KindCleanupExpiredData)
+			"DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindCleanupExpiredData)
 	})
 }

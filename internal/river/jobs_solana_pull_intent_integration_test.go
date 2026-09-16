@@ -294,7 +294,7 @@ func TestSolanaReconcileWorker_RLSScopeFindsRecordedPayment(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = fx.db.Qx(fx.ctx).Exec(fx.ctx,
-			`DELETE FROM openrails.notification_queue WHERE data->>'transaction_id' = $1`, sig)
+			`DELETE FROM openrails.notifications WHERE data->>'transaction_id' = $1`, sig)
 	})
 
 	subID := fx.row.SubscriptionID
@@ -322,7 +322,7 @@ func repairAlertCount(t *testing.T, fx *solanaPullFixture, signature string) int
 	var count int
 	err := fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `
 		SELECT count(*)
-		  FROM openrails.notification_queue
+		  FROM openrails.notifications
 		 WHERE event_type = 'system_alert'
 		   AND data->>'operation' = 'solana_crank_unrecorded_pull'
 		   AND data->>'transaction_id' = $1`, signature,
