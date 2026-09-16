@@ -229,7 +229,7 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	require.NotNil(t, planned.Plan)
 	require.Nil(t, planned.Result)
 
-	listURL := surface.BaseURL + "/v1/merchant/catalog/products?tier_group=" + url.QueryEscape(groupSlug) + "&active_only=true"
+	listURL := surface.BaseURL + "/v1/merchant/catalog/products?tier_group=" + url.QueryEscape(groupSlug) + "&archived=false"
 	missingStatus, missingBody := requestJSON(t, http.MethodGet, listURL, token, nil)
 	require.Equal(t, http.StatusOK, missingStatus, string(missingBody))
 	var missingPage struct {

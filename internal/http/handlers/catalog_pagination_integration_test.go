@@ -67,7 +67,7 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
 	require.Len(t, large.Items, 1000)
 	last := catalogPageRequest[billingservice.CatalogProduct](t, fx, AdminListProducts, fmt.Sprintf("tier_group=target&limit=5000&offset=%d", large.Offset+large.Limit))
 	require.Len(t, last.Items, 5)
-	active := catalogPageRequest[billingservice.CatalogProduct](t, fx, AdminListProducts, "tier_group=target&active_only=true&limit=5000")
+	active := catalogPageRequest[billingservice.CatalogProduct](t, fx, AdminListProducts, "tier_group=target&archived=false&limit=5000")
 	require.EqualValues(t, 955, active.Total)
 	require.Len(t, active.Items, 955)
 	for _, p := range active.Items {
