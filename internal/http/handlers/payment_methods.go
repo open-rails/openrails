@@ -612,7 +612,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 
 	var subs []subscriptionSummary
 	for _, s := range pm.Subscriptions {
-		summary := subscriptionSummary{ID: s.ID.String(), CreatedAt: s.CreatedAt}
+		summary := subscriptionSummary{ID: api.FormatSubscriptionID(s.ID), CreatedAt: s.CreatedAt}
 		if s.Product != nil {
 			summary.DisplayName = s.Product.DisplayName
 			summary.Description = s.Product.Description

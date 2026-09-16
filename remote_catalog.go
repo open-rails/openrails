@@ -111,7 +111,7 @@ func (c *Client) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, 
 func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPage[CatalogPrice], error) {
 	q := pageQuery(filter.PageOptions)
 	q.Set("active_only", strconv.FormatBool(filter.ActiveOnly))
-	q.Set("currency", filter.Currency)
+	q.Set("currency", normalizeCurrency(filter.Currency))
 	q.Set("type", filter.Type)
 	if filter.ProductID != nil {
 		q.Set("product_id", filter.ProductID.String())

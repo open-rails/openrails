@@ -11,6 +11,7 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
@@ -227,7 +228,7 @@ func AdminListPrices(r *httprequest.Request) {
 		return
 	}
 	filter := catalog.PriceFilter{
-		Currency: strings.ToLower(strings.TrimSpace(r.Query("currency"))),
+		Currency: moneyutil.NormalizeCurrency(r.Query("currency")),
 		Type:     strings.TrimSpace(r.Query("type")),
 	}
 	if raw := strings.TrimSpace(r.Query("product_id")); raw != "" {

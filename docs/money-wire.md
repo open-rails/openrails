@@ -10,6 +10,11 @@ to Number before parsing loses values above 2^53.
 
 Invoice responses include unit_decimals. For USD, "1234567" with scale 6 means
 1.234567 USD. JPY uses its declared scale, not an assumed cents/micros scale.
+Currency codes are the registry's uppercase ISO-4217 spelling on every wire
+surface, whatever case a request sent; requests are read case-insensitively.
+Identifiers of resource kinds `pkg/api` prefixes (`prod_`, `price_`, `sub_`,
+`pay_`, `pm_`, `cs_`) travel prefixed on every DTO that names them, and every
+operation accepts the prefixed form; customer, merchant and PSP ids are plain UUIDs.
 Counts and timestamps are not money: counts remain numbers, and invoice/receipt
 timestamps use RFC3339 with fractional seconds. Missing optional timestamps are
 omitted; explicit nullable receipt fields use null.
