@@ -53,14 +53,14 @@ func TestWorkerStateConcurrentHealthAndCursorPreserveFields(t *testing.T) {
 	stored, err := restarted.GetSweepCursor(ctx, kind)
 	require.NoError(t, err)
 	require.Equal(t, &cursor, stored.CursorMerchantID)
-	require.NotNil(t, stored.CursorUpdatedAt)
+	require.EqualValues(t, 1, stored.CursorVersion)
 	require.NoError(t, restarted.RecordWorkerFailure(ctx, gen.RecordWorkerFailureParams{WorkerKind: kind, Now: now, LastError: &failure}))
-	n, err := restarted.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, ExpectedCursorUpdatedAt: stored.CursorUpdatedAt})
+	n, err := restarted.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, ExpectedCursorVersion: stored.CursorVersion})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
 	row := readWorkerState(t, pool, kind)
 	require.Nil(t, row.CursorMerchantID)
-	require.NotNil(t, row.CursorUpdatedAt)
+	require.EqualValues(t, 2, row.CursorVersion)
 	require.NotNil(t, row.LastSuccessAt)
 	require.True(t, now.Equal(*row.LastSuccessAt))
 	require.NotNil(t, row.LastErrorAt)
@@ -242,8 +242,8 @@ func TestWorkerStateHealthWritesAreMonotonicUnderOutOfOrderJobs(t *testing.T) {
 
 // The sweep cursor is a ring position (it wraps inside a pass), so it cannot
 // be ordered against its predecessor; a save is a compare-and-swap on the
-// version the pass read. A pass that finishes after a newer pass moved the
-// cursor must not move it back, and health writes never disturb the version.
+// opaque version the pass read. A pass that finishes after a newer pass moved
+// the cursor must not move it back, and health writes never disturb the version.
 func TestSweepCursorSaveIsCompareAndSwapOnTheVersionRead(t *testing.T) {
 	ctx := context.Background()
 	pool := dbtest.SharedPGXPool(t)
@@ -255,7 +255,7 @@ func TestSweepCursorSaveIsCompareAndSwapOnTheVersionRead(t *testing.T) {
 	first, err := loadSweepCursor(ctx, q, kind)
 	require.NoError(t, err)
 	require.Nil(t, first.CursorMerchantID)
-	require.Nil(t, first.CursorUpdatedAt)
+	require.Zero(t, first.CursorVersion)
 	a, b := uuid.New(), uuid.New()
 	start := make(chan struct{})
 	type saved struct {
@@ -266,7 +266,7 @@ func TestSweepCursorSaveIsCompareAndSwapOnTheVersionRead(t *testing.T) {
 	for _, next := range []uuid.UUID{a, b} {
 		go func(next uuid.UUID) {
 			<-start
-			n, err := q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, CursorMerchantID: &next, ExpectedCursorUpdatedAt: first.CursorUpdatedAt})
+			n, err := q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, CursorMerchantID: &next, ExpectedCursorVersion: first.CursorVersion})
 			require.NoError(t, err)
 			results <- saved{next, n}
 		}(next)
@@ -286,11 +286,38 @@ func TestSweepCursorSaveIsCompareAndSwapOnTheVersionRead(t *testing.T) {
 	second, err := loadSweepCursor(ctx, q, kind)
 	require.NoError(t, err)
 	require.Equal(t, winner, second.CursorMerchantID)
-	require.NotNil(t, second.CursorUpdatedAt)
+	require.EqualValues(t, 1, second.CursorVersion)
 
 	// A late pass that read the pre-race cursor cannot move it back.
 	stale := uuid.New()
 	saveSweepCursor(ctx, q, kind, first, &stale, logger)
+	require.Equal(t, second, mustLoadSweepCursor(t, ctx, q, kind))
+
+	// The token is a counter, so its uniqueness never depends on the clock
+	// advancing between saves (a timestamp token repeats when two saves share
+	// a tick, or the clock steps back). Read->save cycles as fast as the
+	// database answers must yield strictly consecutive versions, and the token
+	// read before each save must be dead the moment that save applies.
+	prev := second
+	for i := range 32 {
+		next := uuid.New()
+		saveSweepCursor(ctx, q, kind, prev, &next, logger)
+		cur := mustLoadSweepCursor(t, ctx, q, kind)
+		require.Equal(t, &next, cur.CursorMerchantID, "cycle %d", i)
+		require.Equal(t, prev.CursorVersion+1, cur.CursorVersion, "cycle %d", i)
+		n, err := q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, CursorMerchantID: &stale, ExpectedCursorVersion: prev.CursorVersion})
+		require.NoError(t, err)
+		require.Zero(t, n, "cycle %d: the token read before the save must not apply after it", i)
+		require.Equal(t, cur, mustLoadSweepCursor(t, ctx, q, kind), "cycle %d", i)
+		prev = cur
+	}
+	second = prev
+	// Every token ever issued for this kind, not just the previous one, is dead.
+	for v := range second.CursorVersion {
+		n, err := q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, CursorMerchantID: &stale, ExpectedCursorVersion: v})
+		require.NoError(t, err)
+		require.Zero(t, n, "version %d", v)
+	}
 	require.Equal(t, second, mustLoadSweepCursor(t, ctx, q, kind))
 
 	// Health bookkeeping on the same row leaves the cursor version alone.
@@ -304,23 +331,24 @@ func TestSweepCursorSaveIsCompareAndSwapOnTheVersionRead(t *testing.T) {
 	saveSweepCursor(ctx, q, kind, second, nil, logger)
 	third := mustLoadSweepCursor(t, ctx, q, kind)
 	require.Nil(t, third.CursorMerchantID)
-	require.NotNil(t, third.CursorUpdatedAt)
-	require.True(t, third.CursorUpdatedAt.After(*second.CursorUpdatedAt))
-	n, err := q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, CursorMerchantID: &stale, ExpectedCursorUpdatedAt: second.CursorUpdatedAt})
+	require.Equal(t, second.CursorVersion+1, third.CursorVersion)
+	n, err := q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: kind, CursorMerchantID: &stale, ExpectedCursorVersion: second.CursorVersion})
 	require.NoError(t, err)
 	require.EqualValues(t, 0, n)
 	require.Equal(t, third, mustLoadSweepCursor(t, ctx, q, kind))
 
-	// The health writer creating the row first (NULL cursor version) is the
-	// same state as no row: the first cursor save applies.
+	// The health writer creating the row first (version 0 by default) is the
+	// same state as no row: the first cursor save applies and takes version 1.
 	seeded := newWorkerStateKind(t, pool, "seeded")
 	require.NoError(t, q.RecordWorkerSuccess(ctx, gen.RecordWorkerSuccessParams{WorkerKind: seeded, Now: time.Now().UTC()}))
 	read := mustLoadSweepCursor(t, ctx, q, seeded)
-	require.Nil(t, read.CursorUpdatedAt)
-	n, err = q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: seeded, CursorMerchantID: &a, ExpectedCursorUpdatedAt: read.CursorUpdatedAt})
+	require.Zero(t, read.CursorVersion)
+	n, err = q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{WorkerKind: seeded, CursorMerchantID: &a, ExpectedCursorVersion: read.CursorVersion})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n)
-	require.Equal(t, &a, mustLoadSweepCursor(t, ctx, q, seeded).CursorMerchantID)
+	seededCursor := mustLoadSweepCursor(t, ctx, q, seeded)
+	require.Equal(t, &a, seededCursor.CursorMerchantID)
+	require.EqualValues(t, 1, seededCursor.CursorVersion)
 }
 
 func mustLoadSweepCursor(t *testing.T, ctx context.Context, q *gen.Queries, kind string) gen.GetSweepCursorRow {

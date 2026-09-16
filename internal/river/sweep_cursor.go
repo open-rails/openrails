@@ -12,8 +12,8 @@ import (
 )
 
 // loadSweepCursor reads a kind's fair-sweep ring position together with the
-// cursor version the pass must present when it saves. A kind that has never
-// swept starts at the beginning of the ring.
+// opaque version the pass must present when it saves. A kind that has never
+// swept starts at the beginning of the ring with version zero.
 func loadSweepCursor(ctx context.Context, q *gen.Queries, kind string) (gen.GetSweepCursorRow, error) {
 	row, err := q.GetSweepCursor(ctx, kind)
 	if err != nil && !db.IsNotFound(err) {
@@ -29,9 +29,9 @@ func loadSweepCursor(ctx context.Context, q *gen.Queries, kind string) (gen.GetS
 // correctness, so neither is a job error.
 func saveSweepCursor(ctx context.Context, q *gen.Queries, kind string, read gen.GetSweepCursorRow, next *uuid.UUID, logger *log.Entry) {
 	n, err := q.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{
-		WorkerKind:              kind,
-		CursorMerchantID:        next,
-		ExpectedCursorUpdatedAt: read.CursorUpdatedAt,
+		WorkerKind:            kind,
+		CursorMerchantID:      next,
+		ExpectedCursorVersion: read.CursorVersion,
 	})
 	if err != nil {
 		logger.WithError(err).Warn("sweep: could not persist cursor")
