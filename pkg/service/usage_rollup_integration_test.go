@@ -42,7 +42,7 @@ func TestServiceUsageRollup_NoDoubleDebit_GroupsByDimension(t *testing.T) {
 	for _, e := range events {
 		e.src = uuid.NewString()
 		admit, err := svc.Admit(ctx, billingservice.AdmitInput{CustomerID: payer, Invoker: "user:a", InvokerType: "payer",
-			Currency: money.DefaultCurrency, EstimatedAmount: e.amount, SourceID: e.src, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
+			Currency: money.DefaultCurrency, EstimatedAmount: e.amount, SourceID: e.src, ExpiresAt: time.Now().Add(time.Hour)})
 		require.NoError(t, err)
 		require.True(t, admit.Allowed)
 		req := billingservice.CaptureHoldRequest{RequestID: e.src, Amount: e.amount, EventType: "owner/" + e.endpoint, Resource: e.endpoint,

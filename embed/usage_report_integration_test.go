@@ -58,20 +58,25 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 
 	from := time.Now().Add(-time.Hour)
 	to := time.Now().Add(time.Hour)
-	occurred := time.Now().UTC().Truncate(time.Second)
+	// Sub-second instant: the wire carries RFC3339 with fractional seconds, so
+	// the event lands at exactly this microsecond on both transports.
+	occurred := time.Now().UTC().Truncate(time.Microsecond)
+	if occurred.Nanosecond() == 0 {
+		occurred = occurred.Add(time.Microsecond)
+	}
 
 	// Two gauge segment events via the EMBEDDED unified client; the first is
 	// replayed and must not double-record.
 	report := openrails.UsageReport{
-		CustomerID:     payerID.String(),
-		Invoker:        "usage-report-test",
-		Currency:       currency,
-		EventType:      meterKey,
-		Dimensions:     map[string]int64{meterKey: 1800},
-		Amount:         0,
-		Source:         "usage-report-test",
-		SourceID:       uuid.NewString(),
-		OccurredAtUnix: occurred.Unix(),
+		CustomerID: payerID.String(),
+		Invoker:    "usage-report-test",
+		Currency:   currency,
+		EventType:  meterKey,
+		Dimensions: map[string]int64{meterKey: 1800},
+		Amount:     0,
+		Source:     "usage-report-test",
+		SourceID:   uuid.NewString(),
+		OccurredAt: &occurred,
 	}
 	require.NoError(t, embeddedClient.RecordUsage(ctx, report))
 	require.NoError(t, embeddedClient.RecordUsage(ctx, report), "idempotent replay must succeed")
@@ -94,10 +99,20 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 		WHERE customer_id = $1 AND event_type = $2`, payerID, meterKey).Scan(&eventCount, &totalUnits))
 	require.Equal(t, 3, eventCount, "replay must not create a fourth event")
 	require.Equal(t, int64(1800+5400+3600), totalUnits)
+	var occurredAt []time.Time
+	rows, err := pool.Query(ctx, `SELECT DISTINCT occurred_at FROM openrails.usage_events WHERE customer_id = $1 AND event_type = $2`, payerID, meterKey)
+	require.NoError(t, err)
+	for rows.Next() {
+		var at time.Time
+		require.NoError(t, rows.Scan(&at))
+		occurredAt = append(occurredAt, at.UTC())
+	}
+	rows.Close()
+	require.Equal(t, []time.Time{occurred}, occurredAt, "both transports keep the sub-second occurred_at")
 
 	// Gauge rate card: 500_000 micros per 3600 unit-seconds.
 	rateMicros, divideBy := int64(500_000), int64(3600)
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4)`,
 		productID, "usage-report-"+uuid.NewString(), "Usage Report Product", merchantID)
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'sum')`,

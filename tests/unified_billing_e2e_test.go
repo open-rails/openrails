@@ -152,7 +152,7 @@ func (h *billingE2EHarness) admit(userID, source, requestID string, amount int64
 		"estimated_amount": strconv.FormatInt(amount, 10),
 		"request_id":       requestID,
 		"source":           source,
-		"expires_at":       time.Now().Add(15 * time.Minute).Unix(),
+		"expires_at":       time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339Nano),
 	}}})
 	if w.Code != http.StatusOK {
 		return w

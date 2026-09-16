@@ -142,8 +142,8 @@ func TestOr891_ServiceCaptureRefusesAChangedAmount(t *testing.T) {
 	res, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:z", InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 5_000,
-		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
-		Source:        "admit", SourceID: reqID,
+		ExpiresAt: time.Now().Add(time.Hour),
+		Source:    "admit", SourceID: reqID,
 	})
 	require.NoError(t, err)
 	require.True(t, res.Allowed)

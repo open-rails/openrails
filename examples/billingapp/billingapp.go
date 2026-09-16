@@ -91,7 +91,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	}
 	r.Deposited = deposit.Amount
 
-	expires := time.Now().Add(time.Hour).Unix()
+	expires := time.Now().Add(time.Hour)
 	job := in.Run + ":job"
 	admitted, err := client.Admit(ctx, openrails.AdmitRequest{
 		CustomerID: payer, Invoker: invoker, InvokerType: openrails.InvokerTypePayer, Currency: in.Currency,

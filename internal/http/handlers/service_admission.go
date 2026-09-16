@@ -41,7 +41,7 @@ func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.Custom
 		Roles:                   req.Roles,
 	}
 	if req.ExpiresAt != nil {
-		in.ExpiresAtUnix = *req.ExpiresAt
+		in.ExpiresAt = *req.ExpiresAt
 	}
 	return in
 }

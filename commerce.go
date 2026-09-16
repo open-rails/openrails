@@ -1,5 +1,7 @@
 package openrails
 
+import "time"
+
 type CheckoutRailOption struct {
 	Selector string `json:"selector"`
 	PSPID    string `json:"psp_id"`
@@ -80,7 +82,8 @@ type CheckoutPayment struct {
 }
 
 // CheckoutSession is the durable result of a checkout attempt. Amount is native
-// currency units (micros for fiat), encoded as a decimal string over HTTP.
+// currency units (micros for fiat), encoded as a decimal string over HTTP;
+// timestamps are RFC3339 instants.
 type CheckoutSession struct {
 	ID             string            `json:"id"`
 	Status         string            `json:"status"` // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
@@ -93,8 +96,8 @@ type CheckoutSession struct {
 	URL            *string           `json:"url"` // Redirect URL for CCBill/Stripe
 	SubscriptionID *string           `json:"subscription_id"`
 	PaymentID      *string           `json:"payment_id"`
-	ExpiresAt      int64             `json:"expires_at"` // Unix epoch seconds
-	Created        int64             `json:"created"`    // Unix epoch seconds
+	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
 	Metadata       map[string]string `json:"metadata"`
 	RailData       map[string]any    `json:"rail_data"` // Rail-specific response data
 }

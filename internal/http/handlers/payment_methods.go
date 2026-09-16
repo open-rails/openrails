@@ -629,7 +629,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 		PSPID:          pm.PspID.String(),
 		BillingDetails: paymentMethodBillingDetailsFromMetadata(metadata),
 		Card:           card,
-		Created:        api.ToUnix(pm.CreatedAt),
+		CreatedAt:      pm.CreatedAt,
 		Metadata:       metadata,
 		Health:         paymentMethodHealthFrom(pm, charge),
 		Subscriptions:  subs,
