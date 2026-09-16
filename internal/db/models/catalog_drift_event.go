@@ -61,14 +61,16 @@ const (
 // CatalogDriftEvent is an alert-only record produced by the catalog
 // reconciliation loop (issue #209). The loop never mutates Stripe, NMI, or the
 // catalog rows; it only records divergence here. An event is "open" while
-// ResolvedAt IS NULL. Rows dedupe on (provider, kind, openrails_resource_type,
+// ResolvedAt IS NULL. Rows dedupe on (psp, kind, openrails_resource_type,
 // openrails_resource_id, external_resource_id, field) so reruns are idempotent.
 //
 // The external_resource_id column generalizes across providers: it holds the
 // Stripe object id for the Stripe pass and the NMI plan_id for the NMI pass.
 type CatalogDriftEvent struct {
 	ID uuid.UUID `json:"id"`
-	// Provider is "stripe" or "nmi"; it disambiguates the shared field_drift kind.
+	// PSPID is the immutable provider account whose catalog was compared.
+	PSPID uuid.UUID `json:"psp_id"`
+	// Provider is the PSP's rail; it disambiguates the shared field_drift kind.
 	Provider CatalogDriftProvider `json:"provider"`
 	Kind     CatalogDriftKind     `json:"kind"`
 

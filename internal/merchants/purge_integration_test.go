@@ -129,7 +129,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		// table rather than the Go type.
 		var raw []byte
 		require.NoError(t, super.QueryRow(ctx,
-			`SELECT manifest FROM openrails.merchant_purge_inventories WHERE id = $1::uuid`, inv.ID).Scan(&raw))
+			`SELECT inventory_manifest FROM openrails.maintenance_runs WHERE id = $1::uuid AND kind='purge_inventory'`, inv.ID).Scan(&raw))
 		var manifest map[string]any
 		require.NoError(t, json.Unmarshal(raw, &manifest))
 		require.Equal(t, false, manifest["is_backup"])
@@ -195,7 +195,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 
 		total := fresh.TotalRows
 		require.NoError(t, svc.Delete(ctx, mid, DeleteOptions{
-			ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &total, Actor: "or858-operator"}))
+			ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &total, InventoryID: fresh.ID, Actor: "or858-operator"}))
 		require.Equal(t, 0, rowsLeft(t))
 
 		var status string
@@ -207,7 +207,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		var expectedRows int64
 		var affected []byte
 		require.NoError(t, super.QueryRow(ctx, `
-			SELECT kind, actor, expected_rows, affected FROM openrails.destructive_runs
+			SELECT kind, actor, expected_rows, affected FROM openrails.maintenance_runs
 			 WHERE merchant_id = $1::uuid AND kind = $2`,
 			merchantID, DestructiveRunKindMerchantPurge).Scan(&kind, &actor, &expectedRows, &affected))
 		require.Equal(t, DestructiveRunKindMerchantPurge, kind)
@@ -277,7 +277,7 @@ func TestMerchantPurgeRefusesWhenRetainedHistoryPinsRows(t *testing.T) {
 	require.Equal(t, 1, inv.TotalRows)
 
 	err = svc.Delete(ctx, mid, DeleteOptions{
-		ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &inv.TotalRows, Actor: "or858-test"})
+		ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &inv.TotalRows, InventoryID: inv.ID, Actor: "or858-test"})
 	var blocked *ErrPurgeBlockedByRetainedHistory
 	require.ErrorAs(t, err, &blocked, "a pinned purge must refuse with an explanation, got %v", err)
 	require.Contains(t, err.Error(), "NOTHING was deleted")

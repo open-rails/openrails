@@ -69,7 +69,7 @@ func (q *Queries) AdminIgnoreReconciliationFinding(ctx context.Context, arg Admi
 
 const adminListReconciliationFindings = `-- name: AdminListReconciliationFindings :many
 
-SELECT f.id, f.merchant_id, f.finding_type, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, count(*) OVER () AS total_count
+SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class, count(*) OVER () AS total_count
 FROM openrails.reconciliation_findings f
 WHERE f.merchant_id = $1::uuid
   AND (CASE
@@ -125,6 +125,14 @@ func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg Admin
 			&i.OpenrailsReconciliationFinding.ID,
 			&i.OpenrailsReconciliationFinding.MerchantID,
 			&i.OpenrailsReconciliationFinding.FindingType,
+			&i.OpenrailsReconciliationFinding.Rail,
+			&i.OpenrailsReconciliationFinding.PspID,
+			&i.OpenrailsReconciliationFinding.OpenrailsResourceType,
+			&i.OpenrailsReconciliationFinding.OpenrailsResourceID,
+			&i.OpenrailsReconciliationFinding.ExternalResourceID,
+			&i.OpenrailsReconciliationFinding.Field,
+			&i.OpenrailsReconciliationFinding.OpenrailsValue,
+			&i.OpenrailsReconciliationFinding.ExternalValue,
 			&i.OpenrailsReconciliationFinding.SubjectKey,
 			&i.OpenrailsReconciliationFinding.Severity,
 			&i.OpenrailsReconciliationFinding.Status,
@@ -141,6 +149,7 @@ func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg Admin
 			&i.OpenrailsReconciliationFinding.ResolvedBy,
 			&i.OpenrailsReconciliationFinding.NotifiedAt,
 			&i.OpenrailsReconciliationFinding.NotifiedSeverity,
+			&i.OpenrailsReconciliationFinding.SeenRunClass,
 			&i.TotalCount,
 		); err != nil {
 			return nil, err
@@ -456,13 +465,13 @@ func (q *Queries) CountUnknownSubsPastPaidThrough(ctx context.Context, arg Count
 const createReconciliationRun = `-- name: CreateReconciliationRun :one
 
 
-INSERT INTO openrails.reconciliation_runs (
-    merchant_id, mode, rails, window_since, window_until, started_at, status
+INSERT INTO openrails.maintenance_runs (
+    merchant_id, kind, mode, rails, window_since, window_until, started_at, status
 ) VALUES (
-    $1, $2, $3,
+    $1, 'reconciliation', $2, $3,
     $4, $5, now(), 'running'
 )
-RETURNING id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type CreateReconciliationRunParams struct {
@@ -480,7 +489,7 @@ type CreateReconciliationRunParams struct {
 // ============================================================================
 // Run lifecycle
 // ============================================================================
-func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (OpenrailsReconciliationRun, error) {
+func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (OpenrailsMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, createReconciliationRun,
 		arg.MerchantID,
 		arg.Mode,
@@ -488,10 +497,13 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 		arg.WindowSince,
 		arg.WindowUntil,
 	)
-	var i OpenrailsReconciliationRun
+	var i OpenrailsMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
+		&i.Kind,
+		&i.Actor,
+		&i.PspID,
 		&i.Mode,
 		&i.Rails,
 		&i.WindowSince,
@@ -499,8 +511,18 @@ func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconci
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
+		&i.DryRun,
+		&i.Coverage,
+		&i.ExpectedRows,
+		&i.Affected,
+		&i.ReversedAt,
+		&i.ReversedBy,
+		&i.Note,
 		&i.Summary,
 		&i.Error,
+		&i.InventoryManifest,
+		&i.InventoryTotalRows,
+		&i.RunClass,
 	)
 	return i, err
 }
@@ -530,12 +552,12 @@ func (q *Queries) DismissReconciliationFinding(ctx context.Context, arg DismissR
 }
 
 const finishReconciliationRun = `-- name: FinishReconciliationRun :execrows
-UPDATE openrails.reconciliation_runs
+UPDATE openrails.maintenance_runs
 SET status = $1,
     summary = $2,
     error = $3,
     finished_at = now()
-WHERE id = $4 AND status = 'running'
+WHERE id = $4 AND kind='reconciliation' AND merchant_id=openrails.current_merchant_id() AND status = 'running'
 `
 
 type FinishReconciliationRunParams struct {
@@ -559,17 +581,21 @@ func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconci
 }
 
 const getLatestReconciliationRun = `-- name: GetLatestReconciliationRun :one
-SELECT id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM openrails.maintenance_runs
+WHERE kind='reconciliation' AND merchant_id=openrails.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT 1
 `
 
-func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReconciliationRun, error) {
+func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, getLatestReconciliationRun)
-	var i OpenrailsReconciliationRun
+	var i OpenrailsMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
+		&i.Kind,
+		&i.Actor,
+		&i.PspID,
 		&i.Mode,
 		&i.Rails,
 		&i.WindowSince,
@@ -577,14 +603,24 @@ func (q *Queries) GetLatestReconciliationRun(ctx context.Context) (OpenrailsReco
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
+		&i.DryRun,
+		&i.Coverage,
+		&i.ExpectedRows,
+		&i.Affected,
+		&i.ReversedAt,
+		&i.ReversedBy,
+		&i.Note,
 		&i.Summary,
 		&i.Error,
+		&i.InventoryManifest,
+		&i.InventoryTotalRows,
+		&i.RunClass,
 	)
 	return i, err
 }
 
 const getReconciliationFinding = `-- name: GetReconciliationFinding :one
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM openrails.reconciliation_findings
 WHERE id = $1 AND merchant_id = openrails.current_merchant_id()
 `
 
@@ -603,6 +639,14 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 		&i.ID,
 		&i.MerchantID,
 		&i.FindingType,
+		&i.Rail,
+		&i.PspID,
+		&i.OpenrailsResourceType,
+		&i.OpenrailsResourceID,
+		&i.ExternalResourceID,
+		&i.Field,
+		&i.OpenrailsValue,
+		&i.ExternalValue,
 		&i.SubjectKey,
 		&i.Severity,
 		&i.Status,
@@ -619,20 +663,24 @@ func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (O
 		&i.ResolvedBy,
 		&i.NotifiedAt,
 		&i.NotifiedSeverity,
+		&i.SeenRunClass,
 	)
 	return i, err
 }
 
 const getReconciliationRun = `-- name: GetReconciliationRun :one
-SELECT id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs WHERE id = $1
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM openrails.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=openrails.current_merchant_id()
 `
 
-func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (OpenrailsReconciliationRun, error) {
+func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (OpenrailsMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, getReconciliationRun, id)
-	var i OpenrailsReconciliationRun
+	var i OpenrailsMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
+		&i.Kind,
+		&i.Actor,
+		&i.PspID,
 		&i.Mode,
 		&i.Rails,
 		&i.WindowSince,
@@ -640,8 +688,18 @@ func (q *Queries) GetReconciliationRun(ctx context.Context, id uuid.UUID) (Openr
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.Status,
+		&i.DryRun,
+		&i.Coverage,
+		&i.ExpectedRows,
+		&i.Affected,
+		&i.ReversedAt,
+		&i.ReversedBy,
+		&i.Note,
 		&i.Summary,
 		&i.Error,
+		&i.InventoryManifest,
+		&i.InventoryTotalRows,
+		&i.RunClass,
 	)
 	return i, err
 }
@@ -722,7 +780,7 @@ func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAban
 }
 
 const listActionableReconciliationFindingsByProvider = `-- name: ListActionableReconciliationFindingsByProvider :many
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM openrails.reconciliation_findings
 WHERE evidence->>'provider' = $1 AND status IN ('reconcile_required', 'requires_review')
 ORDER BY finding_type, subject_key
 `
@@ -740,6 +798,14 @@ func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Con
 			&i.ID,
 			&i.MerchantID,
 			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
 			&i.SubjectKey,
 			&i.Severity,
 			&i.Status,
@@ -756,6 +822,7 @@ func (q *Queries) ListActionableReconciliationFindingsByProvider(ctx context.Con
 			&i.ResolvedBy,
 			&i.NotifiedAt,
 			&i.NotifiedSeverity,
+			&i.SeenRunClass,
 		); err != nil {
 			return nil, err
 		}
@@ -1363,9 +1430,9 @@ func (q *Queries) ListRecentlyClosedLastEntitlementWindows(ctx context.Context, 
 }
 
 const listReconciliationFindings = `-- name: ListReconciliationFindings :many
-SELECT id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity FROM openrails.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM openrails.reconciliation_findings
 WHERE ($1::text IS NULL OR status = $1::text)
-  AND ($2::text IS NULL OR evidence->>'provider' = $2::text)
+  AND ($2::text IS NULL OR COALESCE(NULLIF(rail,''),evidence->>'provider') = $2::text)
   AND ($3::text IS NULL OR finding_type = $3::text)
   AND (NOT $4::boolean OR status = 'requires_review')
 ORDER BY last_seen_at DESC, id
@@ -1401,6 +1468,14 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 			&i.ID,
 			&i.MerchantID,
 			&i.FindingType,
+			&i.Rail,
+			&i.PspID,
+			&i.OpenrailsResourceType,
+			&i.OpenrailsResourceID,
+			&i.ExternalResourceID,
+			&i.Field,
+			&i.OpenrailsValue,
+			&i.ExternalValue,
 			&i.SubjectKey,
 			&i.Severity,
 			&i.Status,
@@ -1417,6 +1492,7 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 			&i.ResolvedBy,
 			&i.NotifiedAt,
 			&i.NotifiedSeverity,
+			&i.SeenRunClass,
 		); err != nil {
 			return nil, err
 		}
@@ -1429,7 +1505,8 @@ func (q *Queries) ListReconciliationFindings(ctx context.Context, arg ListReconc
 }
 
 const listReconciliationRuns = `-- name: ListReconciliationRuns :many
-SELECT id, merchant_id, mode, rails, window_since, window_until, started_at, finished_at, status, summary, error FROM openrails.reconciliation_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM openrails.maintenance_runs
+WHERE kind='reconciliation' AND merchant_id=openrails.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT $2 OFFSET $1
 `
@@ -1439,18 +1516,21 @@ type ListReconciliationRunsParams struct {
 	PageLimit  int64
 }
 
-func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconciliationRunsParams) ([]OpenrailsReconciliationRun, error) {
+func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconciliationRunsParams) ([]OpenrailsMaintenanceRun, error) {
 	rows, err := q.db.Query(ctx, listReconciliationRuns, arg.PageOffset, arg.PageLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsReconciliationRun
+	var items []OpenrailsMaintenanceRun
 	for rows.Next() {
-		var i OpenrailsReconciliationRun
+		var i OpenrailsMaintenanceRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
+			&i.Kind,
+			&i.Actor,
+			&i.PspID,
 			&i.Mode,
 			&i.Rails,
 			&i.WindowSince,
@@ -1458,8 +1538,18 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 			&i.StartedAt,
 			&i.FinishedAt,
 			&i.Status,
+			&i.DryRun,
+			&i.Coverage,
+			&i.ExpectedRows,
+			&i.Affected,
+			&i.ReversedAt,
+			&i.ReversedBy,
+			&i.Note,
 			&i.Summary,
 			&i.Error,
+			&i.InventoryManifest,
+			&i.InventoryTotalRows,
+			&i.RunClass,
 		); err != nil {
 			return nil, err
 		}
@@ -2454,7 +2544,7 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     last_seen_run = COALESCE(EXCLUDED.last_seen_run, openrails.reconciliation_findings.last_seen_run),
     last_seen_at = now(),
     updated_at = now()
-RETURNING id, merchant_id, finding_type, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity
+RETURNING id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class
 `
 
 type UpsertReconciliationFindingParams struct {
@@ -2491,6 +2581,14 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		&i.ID,
 		&i.MerchantID,
 		&i.FindingType,
+		&i.Rail,
+		&i.PspID,
+		&i.OpenrailsResourceType,
+		&i.OpenrailsResourceID,
+		&i.ExternalResourceID,
+		&i.Field,
+		&i.OpenrailsValue,
+		&i.ExternalValue,
 		&i.SubjectKey,
 		&i.Severity,
 		&i.Status,
@@ -2507,6 +2605,7 @@ func (q *Queries) UpsertReconciliationFinding(ctx context.Context, arg UpsertRec
 		&i.ResolvedBy,
 		&i.NotifiedAt,
 		&i.NotifiedSeverity,
+		&i.SeenRunClass,
 	)
 	return i, err
 }

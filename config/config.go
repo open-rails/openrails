@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/go-viper/mapstructure/v2"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
@@ -694,6 +695,8 @@ var ReservedPSPRails = map[string]models.Rail{
 // Embedded hosts build them in code (embedded.PaymentProvider); standalone
 // declares rail accounts in the merchant config manifest instead.
 type PSPConfig struct {
+	// ID is the immutable psps row id. Resolution OUTPUT only; zero for static sets.
+	ID uuid.UUID
 	// Key is the merchant's PSP key for this account (psps.key / the manifest
 	// `psps.<key>` map name, e.g. "mobius"). Resolution OUTPUT only — set by
 	// railresolve sources, never declared inside the entry itself.

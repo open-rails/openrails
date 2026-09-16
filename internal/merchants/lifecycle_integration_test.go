@@ -170,31 +170,51 @@ CREATE TABLE IF NOT EXISTS openrails.rail_intents (
     CONSTRAINT rail_intents_addressed CHECK (((psp_id IS NOT NULL) OR (custodian_id IS NOT NULL)))
 );
 
-CREATE TABLE IF NOT EXISTS openrails.merchant_purge_inventories (
-    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id  UUID NOT NULL,
-    status       TEXT NOT NULL DEFAULT 'completed',
-    manifest     JSONB,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
-    completed_at TIMESTAMPTZ
-);
-
-CREATE TABLE IF NOT EXISTS openrails.destructive_runs (
-    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    merchant_id   UUID NOT NULL,
-    psp_id        UUID,
-    kind          TEXT NOT NULL,
-    actor         TEXT NOT NULL,
-    started_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-    finished_at   TIMESTAMPTZ,
-    dry_run       BOOLEAN NOT NULL DEFAULT false,
-    coverage      JSONB,
-    expected_rows BIGINT,
-    affected      JSONB,
-    reversed_at   TIMESTAMPTZ,
-    reversed_by   TEXT,
-    status        TEXT NOT NULL DEFAULT 'running',
-    note          TEXT
+CREATE TABLE IF NOT EXISTS openrails.maintenance_runs (
+    id uuid DEFAULT gen_random_uuid() PRIMARY KEY,
+    merchant_id uuid NOT NULL,
+    kind text NOT NULL,
+    actor text DEFAULT '' NOT NULL,
+    psp_id uuid,
+    mode text DEFAULT '' NOT NULL,
+    rails text[] DEFAULT '{}' NOT NULL,
+    window_since timestamp with time zone,
+    window_until timestamp with time zone,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
+    finished_at timestamp with time zone,
+    status text DEFAULT 'running' NOT NULL,
+    dry_run boolean DEFAULT false NOT NULL,
+    coverage jsonb,
+    expected_rows bigint,
+    affected jsonb,
+    reversed_at timestamp with time zone,
+    reversed_by text,
+    note text,
+    summary jsonb,
+    error text,
+    inventory_manifest jsonb,
+    inventory_total_rows bigint,
+    run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' ELSE 'destructive' END) STORED NOT NULL,
+    CONSTRAINT maintenance_runs_expected_rows CHECK (expected_rows IS NULL OR expected_rows >= 0),
+    CONSTRAINT maintenance_runs_status CHECK (status IN ('running','completed','failed','reversed')),
+    CONSTRAINT maintenance_runs_shape CHECK ((
+        (kind = 'reconciliation' AND mode IN ('advisory','enforce')
+         AND status IN ('running','completed','failed') AND psp_id IS NULL
+         AND NOT dry_run AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
+         AND reversed_at IS NULL AND reversed_by IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
+        OR (kind IN ('prune','converge_enforce','merchant_purge') AND btrim(actor) <> ''
+         AND mode = '' AND cardinality(rails) = 0 AND window_since IS NULL AND window_until IS NULL
+         AND summary IS NULL AND error IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
+        OR (kind = 'purge_inventory' AND status = 'completed' AND finished_at IS NOT NULL
+         AND mode = '' AND cardinality(rails) = 0 AND psp_id IS NULL
+         AND window_since IS NULL AND window_until IS NULL AND NOT dry_run
+         AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
+         AND reversed_at IS NULL AND reversed_by IS NULL AND summary IS NULL AND error IS NULL
+         AND inventory_manifest IS NOT NULL AND jsonb_typeof(inventory_manifest) = 'object'
+         AND jsonb_typeof(inventory_manifest->'total_rows') = 'number'
+         AND inventory_total_rows IS NOT NULL AND inventory_total_rows >= 0
+         AND inventory_total_rows = (inventory_manifest->>'total_rows')::bigint)
+    ) IS TRUE)
 );
 `
 
@@ -226,6 +246,7 @@ func TestLifecycleFixtureProviderProvenanceMatchesBaseline(t *testing.T) {
 		{"subscriptions", "psp_id uuid not null"},
 		{"payments", "constraint payments_psp_required_on_rail check (((psp_id is not null) or (rail = any (array['manual'::text, 'admin'::text]))))"},
 		{"rail_intents", "constraint rail_intents_addressed check (((psp_id is not null) or (custodian_id is not null)))"},
+		{"maintenance_runs", "run_class text generated always as (case when kind = 'reconciliation' then 'observation' when kind = 'purge_inventory' then 'inventory' else 'destructive' end) stored not null"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.object, func(t *testing.T) {
@@ -557,6 +578,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.Equal(t, 1, inv.RowCounts["entitlements"])
 	require.NotEmpty(t, inv.NotCaptured)
 
+	confirmed.InventoryID = inv.ID
 	require.NoError(t, svc.Delete(ctx, tn.ID, confirmed))
 
 	var entCount int
@@ -631,7 +653,7 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, inv.ID)
 	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{
-		ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &inv.TotalRows}))
+		ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &inv.TotalRows, InventoryID: inv.ID}))
 	_, err = svc.ResolveBySlug(ctx, "acme")
 	require.ErrorIs(t, err, ErrMerchantRouteUnresolved)
 }

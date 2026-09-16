@@ -648,7 +648,7 @@ BEGIN
         PERFORM openrails.assert_cross_merchant_reader();
         IF (
         OLD.retired_at IS NOT NULL OR EXISTS (
-            SELECT 1 FROM openrails.destructive_runs r
+            SELECT 1 FROM openrails.maintenance_runs r
              WHERE r.merchant_id=OLD.id AND r.kind='merchant_purge'
                AND r.affected->>'database_purged'='true'
         )
@@ -748,7 +748,7 @@ CREATE FUNCTION openrails.pending_merchant_secret_cleanups(p_after uuid, p_limit
     AS $$
 BEGIN
  PERFORM openrails.assert_cross_merchant_reader();
- RETURN QUERY SELECT r.merchant_id,r.id FROM openrails.destructive_runs r
+ RETURN QUERY SELECT r.merchant_id,r.id FROM openrails.maintenance_runs r
  JOIN openrails.merchants m ON m.id=r.merchant_id
  WHERE r.kind='merchant_purge' AND r.status IN ('running','failed')
    AND r.affected->>'database_purged'='true' AND r.coverage ? 'secret_cleanup'
@@ -1148,44 +1148,71 @@ ALTER TABLE openrails.product_includes ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_includes TO openrails_app;
 
-CREATE TABLE openrails.reconciliation_runs (
+CREATE TABLE openrails.maintenance_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
-    mode text NOT NULL,
-    rails text[] NOT NULL,
+    kind text NOT NULL,
+    actor text DEFAULT '' NOT NULL,
+    psp_id uuid,
+    mode text DEFAULT '' NOT NULL,
+    rails text[] DEFAULT '{}' NOT NULL,
     window_since timestamp with time zone,
     window_until timestamp with time zone,
-    started_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    started_at timestamp with time zone DEFAULT now() NOT NULL,
     finished_at timestamp with time zone,
-    status text DEFAULT 'running'::text NOT NULL,
+    status text DEFAULT 'running' NOT NULL,
+    dry_run boolean DEFAULT false NOT NULL,
+    coverage jsonb,
+    expected_rows bigint,
+    affected jsonb,
+    reversed_at timestamp with time zone,
+    reversed_by text,
+    note text,
     summary jsonb,
     error text,
-    CONSTRAINT chk_reconciliation_runs_mode CHECK ((mode = ANY (ARRAY['advisory'::text, 'enforce'::text]))),
-    CONSTRAINT chk_reconciliation_runs_status CHECK ((status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text])))
+    inventory_manifest jsonb,
+    inventory_total_rows bigint,
+    run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' ELSE 'destructive' END) STORED NOT NULL,
+    CONSTRAINT maintenance_runs_expected_rows CHECK (expected_rows IS NULL OR expected_rows >= 0),
+    CONSTRAINT maintenance_runs_status CHECK (status IN ('running','completed','failed','reversed')),
+    CONSTRAINT maintenance_runs_shape CHECK ((
+        (kind = 'reconciliation' AND mode IN ('advisory','enforce')
+         AND status IN ('running','completed','failed') AND psp_id IS NULL
+         AND NOT dry_run AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
+         AND reversed_at IS NULL AND reversed_by IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
+        OR (kind IN ('prune','converge_enforce','merchant_purge') AND btrim(actor) <> ''
+         AND mode = '' AND cardinality(rails) = 0 AND window_since IS NULL AND window_until IS NULL
+         AND summary IS NULL AND error IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
+        OR (kind = 'purge_inventory' AND status = 'completed' AND finished_at IS NOT NULL
+         AND mode = '' AND cardinality(rails) = 0 AND psp_id IS NULL
+         AND window_since IS NULL AND window_until IS NULL AND NOT dry_run
+         AND coverage IS NULL AND expected_rows IS NULL AND affected IS NULL
+         AND reversed_at IS NULL AND reversed_by IS NULL AND summary IS NULL AND error IS NULL
+         AND inventory_manifest IS NOT NULL AND jsonb_typeof(inventory_manifest) = 'object'
+         AND jsonb_typeof(inventory_manifest->'total_rows') = 'number'
+         AND inventory_total_rows IS NOT NULL AND inventory_total_rows >= 0
+         AND inventory_total_rows = (inventory_manifest->>'total_rows')::bigint)
+    ) IS TRUE)
 );
 
-ALTER TABLE ONLY openrails.reconciliation_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.maintenance_runs FORCE ROW LEVEL SECURITY;
+COMMENT ON TABLE openrails.maintenance_runs IS 'Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images.';
+COMMENT ON COLUMN openrails.maintenance_runs.coverage IS 'The coverage proof authorizing a destructive run, retained unchanged for audit and undo.';
+COMMENT ON COLUMN openrails.maintenance_runs.expected_rows IS 'The operator-confirmed or planned affected row count.';
+COMMENT ON COLUMN openrails.maintenance_runs.inventory_manifest IS 'Purge row counts, secret names, and omitted resources. Not a backup and never an undo image.';
+COMMENT ON COLUMN openrails.maintenance_runs.run_class IS 'Derived from the immutable kind. Child foreign keys include it, so findings can reference only observation runs and stamped rows, intents and before-images only destructive runs.';
 
-COMMENT ON TABLE openrails.reconciliation_runs IS 'One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-rail counts and the dunning-forensics report. or#859 Class A forensics: INSERT at start, UPDATE at finish, never DELETE — a rollback that erases the evidence of what went wrong defeats itself.';
-
-ALTER TABLE ONLY openrails.reconciliation_runs
-    ADD CONSTRAINT reconciliation_runs_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY openrails.reconciliation_runs
-    ADD CONSTRAINT reconciliation_runs_merchant_id_id_key UNIQUE (merchant_id, id);
-
-CREATE INDEX idx_reconciliation_runs_merchant_id ON openrails.reconciliation_runs USING btree (merchant_id);
-
-CREATE INDEX idx_reconciliation_runs_started_at ON openrails.reconciliation_runs USING btree (started_at DESC);
-
-ALTER TABLE ONLY openrails.reconciliation_runs
-    ADD CONSTRAINT reconciliation_runs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.reconciliation_runs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.reconciliation_runs ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,UPDATE ON TABLE openrails.reconciliation_runs TO openrails_app;
+ALTER TABLE ONLY openrails.maintenance_runs ADD CONSTRAINT maintenance_runs_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY openrails.maintenance_runs ADD CONSTRAINT maintenance_runs_merchant_id_id_class_key UNIQUE (merchant_id,id,run_class);
+ALTER TABLE ONLY openrails.maintenance_runs ADD CONSTRAINT maintenance_runs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
+CREATE INDEX maintenance_runs_merchant_kind_started ON openrails.maintenance_runs (merchant_id,kind,started_at DESC);
+CREATE INDEX maintenance_runs_pending_secret_cleanup_idx ON openrails.maintenance_runs (id)
+    WHERE kind='merchant_purge' AND status IN ('running','failed') AND affected->>'database_purged'='true' AND coverage ? 'secret_cleanup';
+ALTER TABLE openrails.maintenance_runs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.maintenance_runs
+    USING (merchant_id = openrails.current_merchant_id()) WITH CHECK (merchant_id = openrails.current_merchant_id());
+GRANT SELECT,INSERT ON TABLE openrails.maintenance_runs TO openrails_app;
+GRANT UPDATE(finished_at,status,summary,error,affected,reversed_at,reversed_by,note) ON TABLE openrails.maintenance_runs TO openrails_app;
 
 CREATE TABLE openrails.reconciliation_state (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1455,48 +1482,6 @@ CREATE POLICY merchant_isolation ON openrails.catalog_credit_purchase_prices USI
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_credit_purchase_prices TO openrails_app;
 
-CREATE TABLE openrails.catalog_drift_events (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    rail text NOT NULL,
-    kind text NOT NULL,
-    openrails_resource_type text NOT NULL,
-    openrails_resource_id text,
-    external_resource_id text,
-    field text,
-    openrails_value text,
-    external_value text,
-    detected_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    resolved_at timestamp with time zone,
-    merchant_id uuid NOT NULL,
-    CONSTRAINT catalog_drift_events_kind_check CHECK ((kind = ANY (ARRAY['orphan_in_stripe'::text, 'missing_in_stripe'::text, 'orphan_in_nmi'::text, 'missing_in_nmi'::text, 'field_drift'::text]))),
-    CONSTRAINT catalog_drift_events_openrails_resource_type_check CHECK ((openrails_resource_type = ANY (ARRAY['product'::text, 'price'::text]))),
-    CONSTRAINT catalog_drift_events_rail_check CHECK ((rail = ANY (ARRAY['stripe'::text, 'nmi'::text])))
-);
-
-ALTER TABLE ONLY openrails.catalog_drift_events FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.catalog_drift_events IS 'Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.';
-
-ALTER TABLE ONLY openrails.catalog_drift_events
-    ADD CONSTRAINT catalog_drift_events_pkey PRIMARY KEY (id);
-
-CREATE INDEX idx_catalog_drift_events_merchant_id ON openrails.catalog_drift_events USING btree (merchant_id);
-
-CREATE INDEX idx_catalog_drift_events_open ON openrails.catalog_drift_events USING btree (detected_at DESC) WHERE (resolved_at IS NULL);
-
-CREATE INDEX idx_catalog_drift_open_resource ON openrails.catalog_drift_events USING btree (merchant_id, openrails_resource_type, openrails_resource_id) WHERE (resolved_at IS NULL);
-
-CREATE UNIQUE INDEX uq_catalog_drift_open ON openrails.catalog_drift_events USING btree (merchant_id, rail, kind, openrails_resource_type, COALESCE(openrails_resource_id, ''::text), COALESCE(external_resource_id, ''::text), COALESCE(field, ''::text)) WHERE (resolved_at IS NULL);
-
-ALTER TABLE ONLY openrails.catalog_drift_events
-    ADD CONSTRAINT catalog_drift_events_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.catalog_drift_events ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.catalog_drift_events USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_drift_events TO openrails_app;
-
 CREATE TABLE openrails.catalog_meters (
     merchant_id uuid NOT NULL,
     key text NOT NULL,
@@ -1707,71 +1692,6 @@ ALTER TABLE openrails.dashboard_configs ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.dashboard_configs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.dashboard_configs TO openrails_app;
-
-CREATE TABLE openrails.destructive_runs (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    psp_id uuid,
-    kind text NOT NULL,
-    actor text NOT NULL,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    finished_at timestamp with time zone,
-    dry_run boolean DEFAULT false NOT NULL,
-    coverage jsonb,
-    expected_rows bigint,
-    affected jsonb,
-    reversed_at timestamp with time zone,
-    reversed_by text,
-    status text DEFAULT 'running'::text NOT NULL,
-    note text,
-    CONSTRAINT chk_destructive_runs_expected_rows CHECK (((expected_rows IS NULL) OR (expected_rows >= 0))),
-    CONSTRAINT chk_destructive_runs_status CHECK ((status = ANY (ARRAY['running'::text, 'completed'::text, 'failed'::text, 'reversed'::text])))
-);
-
-ALTER TABLE ONLY openrails.destructive_runs FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.destructive_runs IS 'or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. kind=prune stamps rows it soft-deleted (destructive_run_id on the row); kind=converge_enforce captures before-images of the rows it OVERWROTE plus the provider intents it queued. Both reverse with `openrails undo-run --run <id>`, which dispatches on kind, plans before it applies, and refuses a kind it cannot reverse. declared_import / plan_migration / catalog_push are declared and not yet converted; merchant_delete is registered as unrecoverable (it hard-DELETEs Class A rows).';
-
-COMMENT ON COLUMN openrails.destructive_runs.coverage IS 'The SnapshotCoverage absence proof that authorised the run, verbatim — the guard that should have stopped an empty-roster mass cancellation, made auditable after the fact rather than only preventive.';
-
-COMMENT ON COLUMN openrails.destructive_runs.expected_rows IS 'The operator''s typed confirmation. A run whose discovered row count differs refuses before writing anything.';
-
-COMMENT ON COLUMN openrails.destructive_runs.status IS 'running = stamped rows may exist but the run did not finish (crash/abort); a rollback still reverses it, which is why rows are stamped before they are written.';
-
-ALTER TABLE ONLY openrails.destructive_runs
-    ADD CONSTRAINT destructive_runs_merchant_id_id_key UNIQUE (merchant_id, id);
-
-ALTER TABLE ONLY openrails.destructive_runs
-    ADD CONSTRAINT destructive_runs_pkey PRIMARY KEY (id);
-
-CREATE INDEX destructive_runs_pending_secret_cleanup_idx ON openrails.destructive_runs USING btree (id) WHERE ((kind = 'merchant_purge'::text) AND (status = ANY (ARRAY['running'::text, 'failed'::text])) AND ((affected ->> 'database_purged'::text) = 'true'::text) AND (coverage ? 'secret_cleanup'::text));
-
-CREATE INDEX idx_destructive_runs_merchant_id ON openrails.destructive_runs USING btree (merchant_id);
-
-CREATE INDEX idx_destructive_runs_merchant_kind_started ON openrails.destructive_runs USING btree (merchant_id, kind, started_at DESC);
-
-CREATE INDEX idx_destructive_runs_merchant_started ON openrails.destructive_runs USING btree (merchant_id, started_at DESC);
-
-ALTER TABLE ONLY openrails.destructive_runs
-    ADD CONSTRAINT destructive_runs_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.destructive_runs ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.destructive_runs USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT ON TABLE openrails.destructive_runs TO openrails_app;
-
-GRANT UPDATE(finished_at) ON TABLE openrails.destructive_runs TO openrails_app;
-
-GRANT UPDATE(affected) ON TABLE openrails.destructive_runs TO openrails_app;
-
-GRANT UPDATE(reversed_at) ON TABLE openrails.destructive_runs TO openrails_app;
-
-GRANT UPDATE(reversed_by) ON TABLE openrails.destructive_runs TO openrails_app;
-
-GRANT UPDATE(status) ON TABLE openrails.destructive_runs TO openrails_app;
-
-GRANT UPDATE(note) ON TABLE openrails.destructive_runs TO openrails_app;
 
 CREATE TABLE openrails.host_outbox (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2179,35 +2099,6 @@ CREATE POLICY merchant_isolation ON openrails.merchant_destructive_policy USING 
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_destructive_policy TO openrails_app;
 
-CREATE TABLE openrails.merchant_purge_inventories (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    status text DEFAULT 'completed'::text NOT NULL,
-    manifest jsonb,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    completed_at timestamp with time zone,
-    CONSTRAINT merchant_purge_inventories_status_check CHECK ((status = 'completed'::text))
-);
-
-ALTER TABLE ONLY openrails.merchant_purge_inventories FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.merchant_purge_inventories IS 'or#858: the manifest of what a merchant purge is ABOUT TO DESTROY — per-table row counts, merchant secret NAMES, and the explicit list of what is not captured. It is NOT a backup and restores nothing; the only restore path is Postgres PITR (docs/backup-and-recovery.md). Merchant deletion is gated on a matching inventory so the operator has seen the blast radius, not so the data can come back. Was merchant_exports (#225), a name that promised a restore point that never existed.';
-
-COMMENT ON COLUMN openrails.merchant_purge_inventories.manifest IS 'The inventory manifest: row_counts, total_rows, secret_names (never values), not_captured, is_backup=false. total_rows must still match at purge time — a stale inventory does not authorise a purge.';
-
-ALTER TABLE ONLY openrails.merchant_purge_inventories
-    ADD CONSTRAINT merchant_purge_inventories_pkey PRIMARY KEY (id);
-
-CREATE INDEX idx_merchant_purge_inventories_merchant ON openrails.merchant_purge_inventories USING btree (merchant_id, created_at DESC);
-
-ALTER TABLE ONLY openrails.merchant_purge_inventories
-    ADD CONSTRAINT merchant_purge_inventories_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_purge_inventories USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.merchant_purge_inventories ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_purge_inventories TO openrails_app;
 
 CREATE TABLE openrails.merchant_secrets (
     merchant_id uuid NOT NULL,
@@ -2544,6 +2435,9 @@ ALTER TABLE ONLY openrails.psps
 ALTER TABLE ONLY openrails.psps
     ADD CONSTRAINT psps_merchant_id_id_key UNIQUE (merchant_id, id);
 
+ALTER TABLE ONLY openrails.psps
+    ADD CONSTRAINT psps_merchant_id_id_rail_key UNIQUE (merchant_id, id, rail);
+
 CREATE INDEX idx_psps_custodian ON openrails.psps USING btree (custodian_id) WHERE (custodian_id IS NOT NULL);
 
 CREATE INDEX idx_psps_merchant ON openrails.psps USING btree (merchant_id);
@@ -2634,6 +2528,7 @@ CREATE TABLE openrails.rail_intents (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     psp_id uuid,
     destructive_run_id uuid,
+    destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     custodian_id uuid,
     CONSTRAINT chk_rail_intents_executed CHECK (((status <> 'succeeded'::text) OR (executed_at IS NOT NULL))),
     CONSTRAINT chk_rail_intents_origin CHECK ((origin = ANY (ARRAY['user'::text, 'admin'::text, 'system'::text]))),
@@ -2701,7 +2596,7 @@ ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES openrails.custodians(id, merchant_id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.rail_intents
-    ADD CONSTRAINT rail_intents_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT rail_intents_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2825,6 +2720,14 @@ CREATE TABLE openrails.reconciliation_findings (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
     finding_type text NOT NULL,
+    rail text DEFAULT '' NOT NULL,
+    psp_id uuid,
+    openrails_resource_type text DEFAULT '' NOT NULL,
+    openrails_resource_id text,
+    external_resource_id text,
+    field text,
+    openrails_value text,
+    external_value text,
     subject_key text NOT NULL,
     severity text NOT NULL,
     status text DEFAULT 'open'::text NOT NULL,
@@ -2841,11 +2744,22 @@ CREATE TABLE openrails.reconciliation_findings (
     resolved_by text,
     notified_at timestamp with time zone,
     notified_severity text,
+    seen_run_class text GENERATED ALWAYS AS (CASE WHEN first_seen_run IS NOT NULL OR last_seen_run IS NOT NULL THEN 'observation' END) STORED,
+    CONSTRAINT reconciliation_findings_catalog_shape CHECK (
+        (finding_type IN ('catalog.orphan_in_stripe','catalog.missing_in_stripe','catalog.orphan_in_nmi','catalog.missing_in_nmi','catalog.missing_in_solana','catalog.field_drift')
+         AND rail IN ('stripe','nmi','solana') AND psp_id IS NOT NULL AND openrails_resource_type IN ('product','price')
+         AND (finding_type = 'catalog.field_drift' OR finding_type LIKE 'catalog.%_in_' || rail)
+         AND first_seen_run IS NULL AND last_seen_run IS NULL
+         AND subject_key = jsonb_build_array(psp_id::text,openrails_resource_type,coalesce(openrails_resource_id,''),coalesce(external_resource_id,''),coalesce(field,''))::text)
+        OR (finding_type NOT LIKE 'catalog.%' AND rail='' AND psp_id IS NULL AND openrails_resource_type=''
+         AND openrails_resource_id IS NULL AND external_resource_id IS NULL AND field IS NULL
+         AND openrails_value IS NULL AND external_value IS NULL)
+    ),
     CONSTRAINT chk_reconciliation_findings_resolution CHECK (((resolution IS NULL) OR (resolution = ANY (ARRAY['auto_vanished'::text, 'enforced'::text, 'admin_fixed'::text, 'ignored'::text])))),
     CONSTRAINT chk_reconciliation_findings_resolved_fields CHECK ((((status = ANY (ARRAY['auto_fixed'::text, 'fixed'::text, 'ignored'::text])) AND (resolved_at IS NOT NULL) AND (resolution IS NOT NULL)) OR ((status = ANY (ARRAY['reconcile_required'::text, 'requires_review'::text])) AND (resolved_at IS NULL) AND (resolution IS NULL)))),
     CONSTRAINT chk_reconciliation_findings_severity CHECK ((severity = ANY (ARRAY['critical'::text, 'high'::text, 'medium'::text, 'low'::text]))),
     CONSTRAINT chk_reconciliation_findings_status CHECK ((status = ANY (ARRAY['auto_fixed'::text, 'reconcile_required'::text, 'requires_review'::text, 'fixed'::text, 'ignored'::text]))),
-    CONSTRAINT chk_reconciliation_findings_type CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
+    CONSTRAINT chk_reconciliation_findings_type CHECK ((finding_type ~ '^(pull|derive|life|consistency|notify|catalog)\.[a-z0-9_]+(\.[a-z0-9_]+)?$'::text))
 );
 
 ALTER TABLE ONLY openrails.reconciliation_findings FORCE ROW LEVEL SECURITY;
@@ -2853,6 +2767,8 @@ ALTER TABLE ONLY openrails.reconciliation_findings FORCE ROW LEVEL SECURITY;
 COMMENT ON TABLE openrails.reconciliation_findings IS 'Durable reconciliation findings ledger. Stable identity per (merchant, finding_type, subject_key); provider/account context lives in evidence for pull.* findings. Statuses: reconcile_required, requires_review, auto_fixed, fixed, ignored (#573).';
 
 COMMENT ON COLUMN openrails.reconciliation_findings.subject_key IS 'Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.';
+
+COMMENT ON COLUMN openrails.reconciliation_findings.psp_id IS 'Catalog findings only: the immutable PSP account whose catalog was compared. Part of the identity; absence can be proven only by a complete read of this account.';
 
 COMMENT ON COLUMN openrails.reconciliation_findings.first_seen_run IS 'Reconciliation run that first observed this finding; NULL when raised outside a run (e.g. the intents volume breaker).';
 
@@ -2879,11 +2795,16 @@ CREATE INDEX idx_reconciliation_findings_requires_review ON openrails.reconcilia
 
 CREATE UNIQUE INDEX uq_reconciliation_findings_identity ON openrails.reconciliation_findings USING btree (merchant_id, finding_type, subject_key);
 
-ALTER TABLE ONLY openrails.reconciliation_findings
-    ADD CONSTRAINT reconciliation_findings_first_seen_run_fk FOREIGN KEY (merchant_id, first_seen_run) REFERENCES openrails.reconciliation_runs(merchant_id, id) ON DELETE RESTRICT;
+CREATE INDEX idx_reconciliation_findings_open_catalog ON openrails.reconciliation_findings USING btree (merchant_id, psp_id, openrails_resource_type, openrails_resource_id, rail) WHERE ((resolved_at IS NULL) AND (finding_type ~~ 'catalog.%'::text));
 
 ALTER TABLE ONLY openrails.reconciliation_findings
-    ADD CONSTRAINT reconciliation_findings_last_seen_run_fk FOREIGN KEY (merchant_id, last_seen_run) REFERENCES openrails.reconciliation_runs(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT reconciliation_findings_first_seen_run_fk FOREIGN KEY (merchant_id, first_seen_run, seen_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
+
+ALTER TABLE ONLY openrails.reconciliation_findings
+    ADD CONSTRAINT reconciliation_findings_last_seen_run_fk FOREIGN KEY (merchant_id, last_seen_run, seen_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
+
+ALTER TABLE ONLY openrails.reconciliation_findings
+    ADD CONSTRAINT reconciliation_findings_psp_fk FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES openrails.psps(merchant_id, id, rail) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.reconciliation_findings
     ADD CONSTRAINT reconciliation_findings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -2893,6 +2814,14 @@ CREATE POLICY merchant_isolation ON openrails.reconciliation_findings USING ((me
 ALTER TABLE openrails.reconciliation_findings ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reconciliation_findings TO openrails_app;
+
+-- Read-only projection of the standing findings owner; no second lifecycle.
+CREATE VIEW openrails.catalog_drift_events WITH (security_invoker=true) AS
+SELECT id,psp_id,rail,substr(finding_type,9)::text AS kind,openrails_resource_type,openrails_resource_id,
+       external_resource_id,field,openrails_value,external_value,
+       created_at AS detected_at,resolved_at,merchant_id
+FROM openrails.reconciliation_findings WHERE finding_type LIKE 'catalog.%';
+GRANT SELECT ON openrails.catalog_drift_events TO openrails_app;
 
 CREATE TABLE openrails.reprice_batches (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3238,6 +3167,7 @@ CREATE TABLE openrails.destructive_run_before_images (
     before jsonb NOT NULL,
     captured_at timestamp with time zone DEFAULT now() NOT NULL,
     restored_at timestamp with time zone,
+    destructive_run_class text GENERATED ALWAYS AS ('destructive') STORED NOT NULL,
     CONSTRAINT chk_destructive_run_before_images_table CHECK ((table_name = ANY (ARRAY['subscriptions'::text, 'entitlements'::text])))
 );
 
@@ -3260,7 +3190,7 @@ ALTER TABLE ONLY openrails.destructive_run_before_images
     ADD CONSTRAINT destructive_run_before_images_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.destructive_run_before_images
-    ADD CONSTRAINT destructive_run_before_images_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT destructive_run_before_images_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 
 ALTER TABLE openrails.destructive_run_before_images ENABLE ROW LEVEL SECURITY;
 
@@ -3523,6 +3453,7 @@ CREATE TABLE openrails.subscriptions (
     psp_id uuid NOT NULL,
     deleted_at timestamp with time zone,
     destructive_run_id uuid,
+    destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     CONSTRAINT chk_cancelled_has_timestamp CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancelled_at IS NOT NULL))),
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
     CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::openrails.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
@@ -3612,7 +3543,7 @@ ALTER TABLE ONLY openrails.subscriptions
     ADD CONSTRAINT subscriptions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.subscriptions
-    ADD CONSTRAINT subscriptions_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT subscriptions_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.subscriptions
     ADD CONSTRAINT subscriptions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -3933,6 +3864,7 @@ CREATE TABLE openrails.payments (
     token_type text,
     deleted_at timestamp with time zone,
     destructive_run_id uuid,
+    destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     money_movement text DEFAULT 'none'::text NOT NULL,
     CONSTRAINT chk_payment_not_future CHECK ((purchased_at <= (now() + '00:05:00'::interval))),
     CONSTRAINT chk_payments_attempt_kind CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text])))),
@@ -4016,7 +3948,7 @@ ALTER TABLE ONLY openrails.payments
     ADD CONSTRAINT payments_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.payments
-    ADD CONSTRAINT payments_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT payments_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.payments
     ADD CONSTRAINT payments_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -4065,6 +3997,7 @@ CREATE TABLE openrails.checkout_sessions (
     psp_id uuid NOT NULL,
     deleted_at timestamp with time zone,
     destructive_run_id uuid,
+    destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     routing_reason jsonb,
     CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
     CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text])))
@@ -4105,7 +4038,7 @@ ALTER TABLE ONLY openrails.checkout_sessions
     ADD CONSTRAINT checkout_sessions_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.checkout_sessions
-    ADD CONSTRAINT checkout_sessions_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT checkout_sessions_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.checkout_sessions
     ADD CONSTRAINT checkout_sessions_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
@@ -4240,6 +4173,7 @@ CREATE TABLE openrails.entitlements (
     customer_id uuid NOT NULL,
     grant_id uuid,
     destructive_run_id uuid,
+    destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     CONSTRAINT chk_entitlements_source_type CHECK ((source_type = ANY (ARRAY['subscription'::text, 'one_off'::text, 'admin'::text, 'grace'::text, 'grant'::text]))),
     CONSTRAINT chk_revoke_fields_together CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL))),
     CONSTRAINT chk_valid_time_window CHECK (((end_at IS NULL) OR (start_at < end_at)))
@@ -4283,7 +4217,7 @@ ALTER TABLE ONLY openrails.entitlements
     ADD CONSTRAINT entitlements_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id) ON DELETE RESTRICT;
+    ADD CONSTRAINT entitlements_destructive_run_fk FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT;
 
 ALTER TABLE ONLY openrails.entitlements
     ADD CONSTRAINT entitlements_grant_fk FOREIGN KEY (merchant_id, customer_id, grant_id) REFERENCES openrails.grants(merchant_id, customer_id, id);

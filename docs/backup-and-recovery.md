@@ -110,7 +110,7 @@ recovery becomes a second incident.
 ## What is not a backup
 
 **The merchant purge inventory.** `TakePurgeInventory` (was `Export`) writes row
-counts and secret *names* to `openrails.merchant_purge_inventories`. It copies no
+counts and secret *names* to `openrails.maintenance_runs`. It copies no
 data — no customer, subscription, payment, entitlement or catalog row, and no
 secret value. It exists so an operator sees the blast radius before confirming a
 purge, and it can restore nothing. Its own recorded manifest says so

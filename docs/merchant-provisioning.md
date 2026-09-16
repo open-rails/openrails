@@ -352,7 +352,7 @@ global process configuration.
 ### The purge is one-way, and the inventory is not a backup
 
 `TakePurgeInventory` copies no data. It writes counts and secret names to
-`openrails.merchant_purge_inventories` so an operator sees the blast radius
+`openrails.maintenance_runs` so an operator sees the blast radius
 before confirming — nothing more. The only way back from a purge is
 **whole-cluster Postgres point-in-time recovery** with the
 `ENCRYPTION_MASTER_KEY` and Vault alongside it (`backup-and-recovery.md`).
@@ -364,7 +364,7 @@ before confirming — nothing more. The only way back from a purge is
 2. a typed confirmation phrase: `purge merchant <slug> permanently, no backup exists`
 3. a typed row count that must equal the true total
 4. a purge inventory recorded against *that* count — a stale one authorises nothing
-5. a `destructive_runs` row (`kind='merchant_purge'`) recording who, what and how many
+5. a `maintenance_runs` row (`kind='merchant_purge'`) recording who, what and how many
 
 **There is deliberately no route and no CLI for it.** A test guard fails the
 build if `merchants.DeleteOptions` is constructed anywhere outside the package.

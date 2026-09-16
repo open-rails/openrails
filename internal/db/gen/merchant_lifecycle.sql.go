@@ -12,7 +12,7 @@ import (
 )
 
 const countMerchantRowsCatalogDriftEvents = `-- name: CountMerchantRowsCatalogDriftEvents :one
-SELECT count(*) FROM openrails.catalog_drift_events WHERE merchant_id = $1
+SELECT count(*) FROM openrails.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
 `
 
 func (q *Queries) CountMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
@@ -160,7 +160,7 @@ func (q *Queries) CountMerchantRowsSubscriptions(ctx context.Context, merchantID
 }
 
 const purgeMerchantRowsCatalogDriftEvents = `-- name: PurgeMerchantRowsCatalogDriftEvents :exec
-DELETE FROM openrails.catalog_drift_events WHERE merchant_id = $1
+DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
 `
 
 func (q *Queries) PurgeMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) error {

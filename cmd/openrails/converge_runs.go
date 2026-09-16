@@ -89,7 +89,7 @@ func runConvergeList(cmd *cobra.Command, merchantSlug string, limit int, format 
 	defer func() { _ = database.Close() }()
 
 	kind := reconcile.DestructiveRunKindConvergeEnforce
-	var runs []gen.OpenrailsDestructiveRun
+	var runs []gen.OpenrailsMaintenanceRun
 	ctx := merchant.WithID(cmd.Context(), mid)
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error

@@ -40,7 +40,7 @@ func seedSweepMerchants(t *testing.T, count int) (*db.DB, []uuid.UUID) {
 	_, err := admin.Exec(ctx, `INSERT INTO openrails.merchants(id,slug,status) SELECT id,'sweep-'||id::text,'active' FROM unnest($1::uuid[]) AS id`, ids)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.catalog_drift_events WHERE merchant_id=ANY($1::uuid[])`, ids)
+		_, _ = admin.Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=ANY($1::uuid[])`, ids)
 		_, _ = admin.Exec(ctx, `DELETE FROM openrails.psps WHERE merchant_id=ANY($1::uuid[])`, ids)
 		_, _ = admin.Exec(ctx, `DELETE FROM openrails.merchants WHERE id=ANY($1::uuid[])`, ids)
 	})
@@ -56,10 +56,13 @@ type sweepRails struct {
 	failures map[uuid.UUID]string
 }
 
-func (r *sweepRails) Armed(ctx context.Context, _ string) (bool, error) {
+func (r *sweepRails) Armed(ctx context.Context, rail string) (bool, error) {
 	id, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
+	}
+	if rail != string(models.RailStripe) {
+		return false, nil
 	}
 	r.seen[id.UUID()]++
 	if query := r.failures[id.UUID()]; query != "" {
@@ -73,8 +76,9 @@ func TestCatalogSweepCoverageAndFailureHealth(t *testing.T) {
 	database, ids := seedSweepMerchants(t, 1001)
 	ctx := context.Background()
 	admin := dbtest.SharedSuperuserPGXPool(t)
-	_, err := admin.Exec(ctx, `INSERT INTO openrails.catalog_drift_events(merchant_id,rail,kind,openrails_resource_type,openrails_resource_id,external_resource_id,detected_at)
- SELECT id,'stripe','orphan_in_stripe','product',id::text,'product_'||id::text,now() FROM unnest($1::uuid[]) AS id`, ids)
+	_, err := admin.Exec(ctx, `INSERT INTO openrails.reconciliation_findings(merchant_id,finding_type,subject_key,severity,status,rail,psp_id,openrails_resource_type,openrails_resource_id,external_resource_id)
+ SELECT p.merchant_id,'catalog.orphan_in_stripe',jsonb_build_array(p.id::text,'product',p.merchant_id::text,'product_'||p.merchant_id::text,'')::text,'low','reconcile_required','stripe',p.id,'product',p.merchant_id::text,'product_'||p.merchant_id::text
+   FROM openrails.psps p WHERE p.merchant_id=ANY($1::uuid[])`, ids)
 	require.NoError(t, err)
 	source := &sweepRails{database: database, seen: map[uuid.UUID]int{}, failures: map[uuid.UUID]string{
 		ids[0]: "SELECT 1/0", // Earlier nonstructural PG error must not mask later drift.
@@ -94,7 +98,7 @@ func TestCatalogSweepCoverageAndFailureHealth(t *testing.T) {
 	}
 	var resolved int
 	require.NoError(t, admin.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_drift_events WHERE merchant_id=ANY($1::uuid[]) AND resolved_at IS NOT NULL`, ids).Scan(&resolved))
-	require.Equal(t, len(ids)-2, resolved, "healthy merchants must still finish, including the second page")
+	require.Zero(t, resolved, "an unarmed or failed account read is never absence proof")
 	var lastSuccess *time.Time
 	var failures int
 	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_state WHERE worker_kind=$1`, KindCatalogReconciliationPull).Scan(&lastSuccess, &failures))

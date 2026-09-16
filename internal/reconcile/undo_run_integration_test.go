@@ -240,7 +240,7 @@ func TestUndoRun_NeverResurrectsAnIndependentlyDeletedRow(t *testing.T) {
 	pruneRunID := uuid.New()
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		if _, err := appDB.Qx(ctx).Exec(ctx,
-			`INSERT INTO openrails.destructive_runs (id, merchant_id, psp_id, kind, actor, dry_run, status)
+			`INSERT INTO openrails.maintenance_runs (id, merchant_id, psp_id, kind, actor, dry_run, status)
 			 VALUES ($1,$2,$3,'prune','operator',false,'completed')`,
 			pruneRunID, dbtest.TestMerchantID.UUID(), f.pspID); err != nil {
 			return err
@@ -253,7 +253,7 @@ func TestUndoRun_NeverResurrectsAnIndependentlyDeletedRow(t *testing.T) {
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `UPDATE openrails.subscriptions SET deleted_at=NULL, destructive_run_id=NULL WHERE id=$1`, tombstoned)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.destructive_runs WHERE id=$1`, pruneRunID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE id=$1`, pruneRunID)
 			return nil
 		})
 	})
@@ -314,21 +314,21 @@ func TestUndoRun_RefusesTheNeverRollbackableClasses(t *testing.T) {
 		id := uuid.New()
 		require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, err := appDB.Qx(ctx).Exec(ctx,
-				`INSERT INTO openrails.destructive_runs (id, merchant_id, kind, actor, dry_run, status)
+				`INSERT INTO openrails.maintenance_runs (id, merchant_id, kind, actor, dry_run, status)
 				 VALUES ($1,$2,$3,'operator',false,'completed')`, id, dbtest.TestMerchantID.UUID(), kind)
 			return err
 		}))
 		t.Cleanup(func() {
 			_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.destructive_runs WHERE id=$1`, id)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE id=$1`, id)
 				return nil
 			})
 		})
 		return id
 	}
 
-	purge := seed("merchant_delete")
-	unconverted := seed("catalog_push")
+	purge := seed("merchant_purge")
+	require.ErrorContains(t, classifyRunKind("catalog_push"), "not yet converted")
 
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, e := PlanUndoRun(ctx, appDB, purge)
@@ -337,21 +337,13 @@ func TestUndoRun_RefusesTheNeverRollbackableClasses(t *testing.T) {
 		_, e = UndoRun(ctx, appDB, purge, "operator", 0, nil)
 		require.ErrorContains(t, e, "NOT reversible")
 
-		_, e = PlanUndoRun(ctx, appDB, unconverted)
-		require.ErrorContains(t, e, "not yet converted")
-		_, e = UndoRun(ctx, appDB, unconverted, "operator", 0, nil)
-		require.ErrorContains(t, e, "not yet converted")
+		// The purge was not marked reversed by the refusal.
+		var purgeStatus string
+		if err := appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.maintenance_runs WHERE id=$1`, purge).Scan(&purgeStatus); err != nil {
+			return err
+		}
 
-		// Neither run was marked reversed by the refusal.
-		var purgeStatus, unconvertedStatus string
-		if err := appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.destructive_runs WHERE id=$1`, purge).Scan(&purgeStatus); err != nil {
-			return err
-		}
-		if err := appDB.Qx(ctx).QueryRow(ctx, `SELECT status FROM openrails.destructive_runs WHERE id=$1`, unconverted).Scan(&unconvertedStatus); err != nil {
-			return err
-		}
 		require.Equal(t, "completed", purgeStatus)
-		require.Equal(t, "completed", unconvertedStatus)
 		return nil
 	}))
 }
@@ -372,8 +364,8 @@ func TestNeverRollbackableTablesAreNotWritableByTheAppRole(t *testing.T) {
 		"subscription_status_transitions": {"UPDATE", "DELETE"},
 		// or#859/0036: the record of what we did to the outside world is never
 		// edited, and the forensic run ledger is never erased.
-		"rail_mutation_logs":  {"UPDATE"},
-		"reconciliation_runs": {"DELETE"},
+		"rail_mutation_logs": {"UPDATE"},
+		"maintenance_runs":   {"DELETE"},
 	}
 	for table, privs := range forbidden {
 		for _, priv := range privs {

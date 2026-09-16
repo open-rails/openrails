@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	solanago "github.com/gagliardetto/solana-go"
@@ -237,9 +238,10 @@ func TestSolanaAdapter_RemoteWritesDisabledDefersPublish(t *testing.T) {
 
 func TestSolanaAdapter_VerifySyncDisabledWithoutRPC(t *testing.T) {
 	a := &solanaAdapter{svc: &Service{}} // no runtime -> SolanaRPC nil
+	// An unreadable chain is sync_disabled, never an in-sync verdict.
 	drift, missing, err := a.Verify(context.Background(), map[string]string{solanaKeyPlanPDA: "x"}, nil)
-	if err != nil || drift != nil || missing {
-		t.Fatalf("Verify without RPC = (%v,%v,%v), want sync_disabled (nil,false,nil)", drift, missing, err)
+	if err == nil || !strings.Contains(err.Error(), "is not configured") || drift != nil || missing {
+		t.Fatalf("Verify without RPC = (%v,%v,%v), want a not-configured error", drift, missing, err)
 	}
 }
 

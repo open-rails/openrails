@@ -192,7 +192,7 @@ same on-chain identity caveat as any signer change.
 ## Merchant purge cleanup
 
 A committed merchant purge records its immutable Vault address/namespace and UUID
-root in `destructive_runs.coverage.secret_cleanup`. Database completion is stored
+root in `maintenance_runs.coverage.secret_cleanup`. Database completion is stored
 in `affected.database_purged`; the original authorization/inventory proof remains
 immutable. The run stays `running` or `failed` until every secret version has been
 deleted and a fresh root listing is empty. An external failure returns

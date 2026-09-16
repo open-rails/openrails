@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// DestructiveRunKindPrune is this run kind's key in openrails.destructive_runs
+// DestructiveRunKindPrune is this run kind's key in openrails.maintenance_runs
 // (or#859 §5.1 — the general ledger; prune is its first user).
 const DestructiveRunKindPrune = "prune"
 
@@ -36,7 +36,7 @@ type PruneParams struct {
 
 // PruneResult tallies one PSP's prune pass.
 type PruneResult struct {
-	// RunID is the destructive_runs id when Apply wrote anything — the handle
+	// RunID is the maintenance_runs id when Apply wrote anything — the handle
 	// `openrails undo-run --run <id>` reverses.
 	RunID                  uuid.UUID
 	Subscriptions          int // soft-deleted (Apply) or would-delete (dry-run)
@@ -91,7 +91,7 @@ func (e *ErrPruneCountMismatch) Error() string {
 // did not pull is out of scope, never "maybe ours") and safe by construction:
 //
 //   - or#858: nothing is DELETED. Eligible rows are SOFT-deleted (deleted_at)
-//     and stamped with a destructive_runs id, so the whole pass reverses with
+//     and stamped with a maintenance_runs id, so the whole pass reverses with
 //     `openrails undo-run --run <id>`.
 //   - An empty remote set REFUSES — in the SQL (cardinality 0 matches nothing)
 //     and here (an error) — rather than matching everything.

@@ -8,32 +8,34 @@
 -- ============================================================================
 
 -- name: CreateReconciliationRun :one
-INSERT INTO openrails.reconciliation_runs (
-    merchant_id, mode, rails, window_since, window_until, started_at, status
+INSERT INTO openrails.maintenance_runs (
+    merchant_id, kind, mode, rails, window_since, window_until, started_at, status
 ) VALUES (
-    sqlc.arg(merchant_id), sqlc.arg(mode), sqlc.arg(rails),
+    sqlc.arg(merchant_id), 'reconciliation', sqlc.arg(mode), sqlc.arg(rails),
     sqlc.narg(window_since), sqlc.narg(window_until), now(), 'running'
 )
 RETURNING *;
 
 -- name: FinishReconciliationRun :execrows
-UPDATE openrails.reconciliation_runs
+UPDATE openrails.maintenance_runs
 SET status = sqlc.arg(status),
     summary = sqlc.narg(summary),
     error = sqlc.narg(error),
     finished_at = now()
-WHERE id = sqlc.arg(id) AND status = 'running';
+WHERE id = sqlc.arg(id) AND kind='reconciliation' AND merchant_id=openrails.current_merchant_id() AND status = 'running';
 
 -- name: GetReconciliationRun :one
-SELECT * FROM openrails.reconciliation_runs WHERE id = $1;
+SELECT * FROM openrails.maintenance_runs WHERE id = $1 AND kind='reconciliation' AND merchant_id=openrails.current_merchant_id();
 
 -- name: GetLatestReconciliationRun :one
-SELECT * FROM openrails.reconciliation_runs
+SELECT * FROM openrails.maintenance_runs
+WHERE kind='reconciliation' AND merchant_id=openrails.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT 1;
 
 -- name: ListReconciliationRuns :many
-SELECT * FROM openrails.reconciliation_runs
+SELECT * FROM openrails.maintenance_runs
+WHERE kind='reconciliation' AND merchant_id=openrails.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
@@ -134,7 +136,7 @@ WHERE id = $1 AND merchant_id = openrails.current_merchant_id();
 -- name: ListReconciliationFindings :many
 SELECT * FROM openrails.reconciliation_findings
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
-  AND (sqlc.narg(provider)::text IS NULL OR evidence->>'provider' = sqlc.narg(provider)::text)
+  AND (sqlc.narg(provider)::text IS NULL OR COALESCE(NULLIF(rail,''),evidence->>'provider') = sqlc.narg(provider)::text)
   AND (sqlc.narg(finding_type)::text IS NULL OR finding_type = sqlc.narg(finding_type)::text)
   AND (NOT sqlc.arg(only_review_queue)::boolean OR status = 'requires_review')
 ORDER BY last_seen_at DESC, id

@@ -16,7 +16,7 @@ import (
 )
 
 // DestructiveRunKindMerchantPurge is the merchant purge's kind in the general
-// openrails.destructive_runs ledger (or#859 §5.1 — the same ledger --prune
+// openrails.maintenance_runs ledger (or#859 §5.1 — the same ledger --prune
 // writes, so one query answers "what did this deployment destroy, and who
 // asked for it").
 const DestructiveRunKindMerchantPurge = "merchant_purge"
@@ -128,7 +128,7 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 // real per-merchant archive is or#859 phase 2 (`openrails merchant snapshot`);
 // until that exists, a purge is one-way.
 type PurgeInventory struct {
-	// ID is the openrails.merchant_purge_inventories row id.
+	// ID is the openrails.maintenance_runs row id.
 	ID string
 	// MerchantSlug is the merchant this inventory describes.
 	MerchantSlug string
@@ -185,7 +185,7 @@ func notCaptured(counts map[string]int, secrets int) []string {
 }
 
 // TakePurgeInventory records what a purge of this merchant would destroy and
-// returns it. It writes an openrails.merchant_purge_inventories row that Delete
+// returns it. It writes an openrails.maintenance_runs row that Delete
 // then requires — the gate exists so the operator has SEEN the blast radius,
 // not because the inventory can undo anything. See PurgeInventory.
 //
@@ -242,8 +242,8 @@ func (s *Service) TakePurgeInventory(ctx context.Context, id merchant.ID) (Purge
 
 	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `
-			INSERT INTO openrails.merchant_purge_inventories (merchant_id, status, manifest, completed_at)
-			VALUES ($1::uuid, 'completed', $2::jsonb, current_timestamp)
+			INSERT INTO openrails.maintenance_runs (merchant_id, kind, status, inventory_manifest, inventory_total_rows, finished_at)
+			VALUES ($1::uuid, 'purge_inventory', 'completed', $2::jsonb, ($2::jsonb->>'total_rows')::bigint, current_timestamp)
 			RETURNING id::text
 		`, id.String(), string(manifestJSON)).Scan(&inv.ID)
 	}); err != nil {
@@ -292,6 +292,10 @@ type DeleteOptions struct {
 	// row count they believe they are destroying. It must match what the purge
 	// discovers, or nothing is written.
 	ExpectRows *int
+	// InventoryID identifies the exact completed purge inventory the operator
+	// reviewed. A matching total alone is insufficient: a different set of
+	// rows can have the same total.
+	InventoryID string
 	// Actor is who asked for it; recorded on the destructive run.
 	Actor string
 }
@@ -308,7 +312,7 @@ func (e *ErrPurgeNotConfirmed) Error() string {
 	return fmt.Sprintf(
 		"refusing to purge merchant %s: this destroys %d rows across every merchant-owned table and is NOT reversible — "+
 			"the purge inventory is not a backup, and only Postgres PITR can bring the merchant back. "+
-			"To proceed, take a fresh inventory and pass ConfirmPhrase=%q with ExpectRows=%d",
+			"To proceed, take a fresh inventory and pass its InventoryID, ConfirmPhrase=%q with ExpectRows=%d",
 		e.Slug, e.TotalRows, e.Want, e.TotalRows)
 }
 
@@ -382,7 +386,7 @@ func (e *ErrPurgeBlockedByRetainedHistory) Error() string {
 //
 // It then purges the supported merchant-owned rows and DB-backed secrets,
 // and tombstones the directory row (status='deleted', deleted_at) inside one
-// transaction, stamped with a destructive_runs row (kind=merchant_purge). The
+// transaction, stamped with a maintenance_runs row (kind=merchant_purge). The
 // run captures database completion and any external cleanup target atomically.
 // A Vault purge completes the run only after external cleanup is verified; failed
 // cleanup stays retryable through RetrySecretCleanup and its scheduled worker.
@@ -464,11 +468,19 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		// inventory-before-purge: an inventory for the merchant's CURRENT row
 		// count. A stale one proves nothing about what is about to be destroyed.
 		var matching int
+		countsJSON, err := json.Marshal(counts)
+		if err != nil {
+			return fmt.Errorf("merchants: marshal current purge counts: %w", err)
+		}
+		if _, err := uuid.Parse(opts.InventoryID); err != nil {
+			return &ErrPurgeInventoryStale{Slug: m.Slug, TotalRows: total}
+		}
 		if err := tx.QueryRow(ctx, `
-			SELECT count(*) FROM openrails.merchant_purge_inventories
-			 WHERE merchant_id = $1::uuid AND status = 'completed'
-			   AND (manifest->>'total_rows')::bigint = $2::bigint
-		`, id.String(), int64(total)).Scan(&matching); err != nil {
+			SELECT count(*) FROM openrails.maintenance_runs
+			 WHERE id = $1::uuid AND merchant_id = $2::uuid AND kind='purge_inventory' AND status = 'completed'
+			   AND inventory_total_rows = $3::bigint
+			   AND inventory_manifest->'row_counts' = $4::jsonb
+		`, opts.InventoryID, id.String(), int64(total), string(countsJSON)).Scan(&matching); err != nil {
 			return fmt.Errorf("merchants: check inventory-before-purge: %w", err)
 		}
 		if matching == 0 {

@@ -31,14 +31,11 @@ var NeverRollbackableTables = map[string]string{
 	"webhook_events": "dedup truth (IDEM-11). Roll it back and every webhook after T becomes re-processable: duplicate grants, " +
 		"duplicate charges, duplicate cancels",
 	"reconciliation_findings": "forensics: a rollback that erases the evidence of what went wrong defeats itself",
-	"reconciliation_runs":     "forensics: the run ledger a finding is attributed to",
-	"catalog_drift_events":    "forensics: provider-drift evidence",
-	"merchant_exports":        "forensics: the export record merchant deletion is gated on",
 	"price_key_movements":     "forensics: price-identity history",
 }
 
 // Two tables an undo legitimately writes and which are nonetheless append-only
-// in substance — `destructive_runs` and `destructive_run_before_images` — are
+// in substance — `maintenance_runs` and `destructive_run_before_images` — are
 // absent from the register on purpose. They are the undo's own bookkeeping
 // (status/reversed_at, restored_at), and the schema already holds the line
 // harder than a name list could: both carry COLUMN-level UPDATE grants, so
@@ -59,7 +56,7 @@ const railIntentsForwardOnlyReason = "forward lifecycle transition only: pending
 // reverse, mapped to what the operator must reach for instead. Refusing them by
 // name beats attempting a reversal that would silently restore nothing.
 var UnrecoverableRunKinds = map[string]string{
-	"merchant_delete": "a merchant purge hard-DELETEs append-only Class A rows (grants, the ledger, the intent and mutation logs). " +
+	"merchant_purge": "a merchant purge hard-DELETEs append-only Class A rows (grants, the ledger, the intent and mutation logs). " +
 		"Nothing local restores them: recovery is tier 0 (cluster PITR) or a tier 2 snapshot taken before the purge",
 }
 

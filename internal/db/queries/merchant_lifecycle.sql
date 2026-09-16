@@ -16,10 +16,10 @@ SELECT count(*) FROM openrails.prices WHERE merchant_id = $1;
 DELETE FROM openrails.prices WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsCatalogDriftEvents :one
-SELECT count(*) FROM openrails.catalog_drift_events WHERE merchant_id = $1;
+SELECT count(*) FROM openrails.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%';
 
 -- name: PurgeMerchantRowsCatalogDriftEvents :exec
-DELETE FROM openrails.catalog_drift_events WHERE merchant_id = $1;
+DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%';
 
 -- name: CountMerchantRowsPaymentMethods :one
 SELECT count(*) FROM openrails.payment_methods WHERE merchant_id = $1;

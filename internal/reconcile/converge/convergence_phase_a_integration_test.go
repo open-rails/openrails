@@ -22,12 +22,12 @@ func TestConvergenceFindings_PhaseA_Taxonomy(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(ctx, dbtest.TestMerchantID)
-	// first_seen_run/last_seen_run FK into reconciliation_runs (#709): seed a run.
+	// first_seen_run/last_seen_run FK into observation maintenance_runs (#709): seed a run.
 	runID := uuid.New()
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		_, err := appDB.Qx(ctx).Exec(ctx, `
-			INSERT INTO openrails.reconciliation_runs (id, merchant_id, mode, rails, status)
-			VALUES ($1, $2, 'advisory', '{self}', 'completed')`, runID, merchantID)
+			INSERT INTO openrails.maintenance_runs (id, merchant_id, kind, mode, rails, status)
+			VALUES ($1, $2, 'reconciliation', 'advisory', '{self}', 'completed')`, runID, merchantID)
 		return err
 	}))
 	suffix := uuid.NewString()[:8]

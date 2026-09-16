@@ -182,7 +182,7 @@ func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
-			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
+			`DELETE FROM openrails.maintenance_runs WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
 			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,

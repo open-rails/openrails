@@ -14,14 +14,14 @@ import (
 
 const createDestructiveRun = `-- name: CreateDestructiveRun :one
 
-INSERT INTO openrails.destructive_runs (
+INSERT INTO openrails.maintenance_runs (
     id, merchant_id, psp_id, kind, actor, dry_run, coverage, expected_rows, note
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     $4::text, $5::text, $6::boolean,
     $7::jsonb, $8::bigint, $9::text
 )
-RETURNING id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type CreateDestructiveRunParams struct {
@@ -40,7 +40,7 @@ type CreateDestructiveRunParams struct {
 // Deliberately the GENERAL run table (or#859 §5.1): kind='prune' is its first
 // user. Opened BEFORE anything is written, so a crash mid-run still leaves a
 // reversible record.
-func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiveRunParams) (OpenrailsDestructiveRun, error) {
+func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiveRunParams) (OpenrailsMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, createDestructiveRun,
 		arg.ID,
 		arg.MerchantID,
@@ -52,34 +52,43 @@ func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiv
 		arg.ExpectedRows,
 		arg.Note,
 	)
-	var i OpenrailsDestructiveRun
+	var i OpenrailsMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.PspID,
 		&i.Kind,
 		&i.Actor,
+		&i.PspID,
+		&i.Mode,
+		&i.Rails,
+		&i.WindowSince,
+		&i.WindowUntil,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.Status,
 		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
 		&i.ReversedAt,
 		&i.ReversedBy,
-		&i.Status,
 		&i.Note,
+		&i.Summary,
+		&i.Error,
+		&i.InventoryManifest,
+		&i.InventoryTotalRows,
+		&i.RunClass,
 	)
 	return i, err
 }
 
 const finishDestructiveRun = `-- name: FinishDestructiveRun :one
-UPDATE openrails.destructive_runs
+UPDATE openrails.maintenance_runs
 SET status = $1::text,
     finished_at = $2::timestamptz,
     affected = $3::jsonb
-WHERE merchant_id = $4::uuid AND id = $5::uuid
-RETURNING id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note
+WHERE merchant_id = $4::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = $5::uuid
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type FinishDestructiveRunParams struct {
@@ -90,7 +99,7 @@ type FinishDestructiveRunParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiveRunParams) (OpenrailsDestructiveRun, error) {
+func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiveRunParams) (OpenrailsMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, finishDestructiveRun,
 		arg.Status,
 		arg.Now,
@@ -98,30 +107,39 @@ func (q *Queries) FinishDestructiveRun(ctx context.Context, arg FinishDestructiv
 		arg.MerchantID,
 		arg.ID,
 	)
-	var i OpenrailsDestructiveRun
+	var i OpenrailsMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.PspID,
 		&i.Kind,
 		&i.Actor,
+		&i.PspID,
+		&i.Mode,
+		&i.Rails,
+		&i.WindowSince,
+		&i.WindowUntil,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.Status,
 		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
 		&i.ReversedAt,
 		&i.ReversedBy,
-		&i.Status,
 		&i.Note,
+		&i.Summary,
+		&i.Error,
+		&i.InventoryManifest,
+		&i.InventoryTotalRows,
+		&i.RunClass,
 	)
 	return i, err
 }
 
 const getDestructiveRun = `-- name: GetDestructiveRun :one
-SELECT id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note FROM openrails.destructive_runs
-WHERE merchant_id = $1::uuid AND id = $2::uuid
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM openrails.maintenance_runs
+WHERE merchant_id = $1::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = $2::uuid
 `
 
 type GetDestructiveRunParams struct {
@@ -129,32 +147,42 @@ type GetDestructiveRunParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunParams) (OpenrailsDestructiveRun, error) {
+func (q *Queries) GetDestructiveRun(ctx context.Context, arg GetDestructiveRunParams) (OpenrailsMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, getDestructiveRun, arg.MerchantID, arg.ID)
-	var i OpenrailsDestructiveRun
+	var i OpenrailsMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.PspID,
 		&i.Kind,
 		&i.Actor,
+		&i.PspID,
+		&i.Mode,
+		&i.Rails,
+		&i.WindowSince,
+		&i.WindowUntil,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.Status,
 		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
 		&i.ReversedAt,
 		&i.ReversedBy,
-		&i.Status,
 		&i.Note,
+		&i.Summary,
+		&i.Error,
+		&i.InventoryManifest,
+		&i.InventoryTotalRows,
+		&i.RunClass,
 	)
 	return i, err
 }
 
 const listDestructiveRuns = `-- name: ListDestructiveRuns :many
-SELECT id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note FROM openrails.destructive_runs
+SELECT id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class FROM openrails.maintenance_runs
 WHERE merchant_id = $1::uuid
+  AND kind IN ('prune','converge_enforce','merchant_purge')
   AND ($2::text IS NULL OR kind = $2::text)
 ORDER BY started_at DESC
 LIMIT $3::int
@@ -166,31 +194,40 @@ type ListDestructiveRunsParams struct {
 	Lim        int32
 }
 
-func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRunsParams) ([]OpenrailsDestructiveRun, error) {
+func (q *Queries) ListDestructiveRuns(ctx context.Context, arg ListDestructiveRunsParams) ([]OpenrailsMaintenanceRun, error) {
 	rows, err := q.db.Query(ctx, listDestructiveRuns, arg.MerchantID, arg.Kind, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsDestructiveRun
+	var items []OpenrailsMaintenanceRun
 	for rows.Next() {
-		var i OpenrailsDestructiveRun
+		var i OpenrailsMaintenanceRun
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
-			&i.PspID,
 			&i.Kind,
 			&i.Actor,
+			&i.PspID,
+			&i.Mode,
+			&i.Rails,
+			&i.WindowSince,
+			&i.WindowUntil,
 			&i.StartedAt,
 			&i.FinishedAt,
+			&i.Status,
 			&i.DryRun,
 			&i.Coverage,
 			&i.ExpectedRows,
 			&i.Affected,
 			&i.ReversedAt,
 			&i.ReversedBy,
-			&i.Status,
 			&i.Note,
+			&i.Summary,
+			&i.Error,
+			&i.InventoryManifest,
+			&i.InventoryTotalRows,
+			&i.RunClass,
 		); err != nil {
 			return nil, err
 		}
@@ -379,14 +416,15 @@ func (q *Queries) ListPSPSubscriptionCandidates(ctx context.Context, arg ListPSP
 }
 
 const markDestructiveRunReversed = `-- name: MarkDestructiveRunReversed :one
-UPDATE openrails.destructive_runs
+UPDATE openrails.maintenance_runs
 SET status = 'reversed',
     reversed_at = $1::timestamptz,
     reversed_by = $2::text
 WHERE merchant_id = $3::uuid
+  AND kind IN ('prune','converge_enforce','merchant_purge')
   AND id = $4::uuid
   AND status <> 'reversed'
-RETURNING id, merchant_id, psp_id, kind, actor, started_at, finished_at, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, status, note
+RETURNING id, merchant_id, kind, actor, psp_id, mode, rails, window_since, window_until, started_at, finished_at, status, dry_run, coverage, expected_rows, affected, reversed_at, reversed_by, note, summary, error, inventory_manifest, inventory_total_rows, run_class
 `
 
 type MarkDestructiveRunReversedParams struct {
@@ -396,30 +434,39 @@ type MarkDestructiveRunReversedParams struct {
 	ID         uuid.UUID
 }
 
-func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestructiveRunReversedParams) (OpenrailsDestructiveRun, error) {
+func (q *Queries) MarkDestructiveRunReversed(ctx context.Context, arg MarkDestructiveRunReversedParams) (OpenrailsMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, markDestructiveRunReversed,
 		arg.Now,
 		arg.ReversedBy,
 		arg.MerchantID,
 		arg.ID,
 	)
-	var i OpenrailsDestructiveRun
+	var i OpenrailsMaintenanceRun
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
-		&i.PspID,
 		&i.Kind,
 		&i.Actor,
+		&i.PspID,
+		&i.Mode,
+		&i.Rails,
+		&i.WindowSince,
+		&i.WindowUntil,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.Status,
 		&i.DryRun,
 		&i.Coverage,
 		&i.ExpectedRows,
 		&i.Affected,
 		&i.ReversedAt,
 		&i.ReversedBy,
-		&i.Status,
 		&i.Note,
+		&i.Summary,
+		&i.Error,
+		&i.InventoryManifest,
+		&i.InventoryTotalRows,
+		&i.RunClass,
 	)
 	return i, err
 }
@@ -515,6 +562,7 @@ UPDATE openrails.payments
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid
 WHERE merchant_id = $3::uuid
+
   AND id = $4::uuid
   AND deleted_at IS NULL
 `
@@ -545,6 +593,7 @@ SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
     updated_at = $1::timestamptz
 WHERE merchant_id = $3::uuid
+
   AND id = $4::uuid
   AND deleted_at IS NULL
 `

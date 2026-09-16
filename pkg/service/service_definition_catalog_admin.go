@@ -10,7 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -433,10 +435,15 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 			IDs:       copyStringMap(ids),
 			LookupKey: ids[providerLookupKey],
 		}
-		drift, missing, verifyErr := adapter.Verify(ctx, ids, local)
+		// Read exactly the account this link is bound to.
+		verifyCtx := ctx
+		if pspID, perr := uuid.Parse(ids[models.RailKeyPSPID]); perr == nil {
+			verifyCtx = db.WithPSPID(ctx, pspID)
+		}
+		drift, missing, verifyErr := adapter.Verify(verifyCtx, ids, local)
 		if verifyErr != nil {
 			lower := strings.ToLower(verifyErr.Error())
-			if strings.Contains(lower, "stripe is not configured") {
+			if strings.Contains(lower, "is not configured") {
 				state.SyncStatus = SyncStatusSyncDisabled
 			} else {
 				state.Status = ProviderStatusError
@@ -590,13 +597,20 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 	} else {
 		finalStates = verified
 	}
-	// Resolving a price via reconcile auto-closes any open catalog drift events
-	// tied to it (issue #209). Best-effort: failures here (e.g. the
-	// catalog_drift_events table not yet present) must not fail the reconcile.
+	// Close drift only for accounts whose post-reconcile read proved the price in
+	// sync. Unknown, disabled, missing or drifted accounts keep their findings.
 	if !opts.DryRun {
-		if _, derr := s.ResolveDriftForResource(ctx, models.CatalogDriftResourcePrice, priceID.String()); derr != nil {
-			// swallow — drift auto-close is advisory; the next loop run reconciles it.
-			_ = derr
+		for _, state := range finalStates {
+			if state.SyncStatus != SyncStatusInSync {
+				continue
+			}
+			pspID, perr := uuid.Parse(state.IDs[models.RailKeyPSPID])
+			if perr != nil {
+				continue
+			}
+			if _, derr := s.ResolveDriftForResource(ctx, pspID, models.CatalogDriftResourcePrice, priceID.String()); derr != nil {
+				log.WithContext(ctx).WithError(derr).WithField("price_id", priceID.String()).Warn("catalog reconcile: drift resolution deferred to the next pass")
+			}
 		}
 	}
 	return &ReconcileResult{Providers: finalStates, Actions: actions}, nil
@@ -685,9 +699,13 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 	if len(residual) > 0 {
 		syncStatus = SyncStatusDrifted
 	}
-	// Resolving via reconcile auto-closes open product drift events.
-	if _, derr := s.ResolveDriftForResource(ctx, models.CatalogDriftResourceProduct, productID.String()); derr != nil {
-		_ = derr
+	// Close product drift only for the active Stripe account just verified in sync.
+	if syncStatus == SyncStatusInSync {
+		if account, ok, aerr := catalog.ActiveDriftPSP(ctx, s.rt.RailConfigs, models.RailStripe); aerr == nil && ok {
+			if _, derr := s.ResolveDriftForResource(ctx, account.ID, models.CatalogDriftResourceProduct, productID.String()); derr != nil {
+				log.WithContext(ctx).WithError(derr).WithField("product_id", productID.String()).Warn("catalog reconcile: drift resolution deferred to the next pass")
+			}
+		}
 	}
 	return &ProductReconcileResult{SyncStatus: syncStatus, Drift: residual, Action: "updated_remote"}, nil
 }

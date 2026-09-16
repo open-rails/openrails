@@ -146,7 +146,7 @@ func seedPullMerchant(t *testing.T, dbi *db.DB, slug string) merchant.ID {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
-			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
+			`DELETE FROM openrails.maintenance_runs WHERE merchant_id = $1`,
 			`DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchant_destructive_policy WHERE merchant_id = $1`,
 			`DELETE FROM openrails.psps WHERE merchant_id = $1`,

@@ -207,9 +207,9 @@ type OpenrailsCatalogCreditPurchasePrice struct {
 	UpdatedAt  time.Time
 }
 
-// Alert-only drift/orphan records from the catalog reconciliation loop; resolved via per-price reconcile.
 type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
+	PspID                 *uuid.UUID
 	Rail                  string
 	Kind                  string
 	OpenrailsResourceType string
@@ -291,8 +291,9 @@ type OpenrailsCheckoutSession struct {
 	// PSP selected for this provider checkout/session. Required (or#893).
 	PspID uuid.UUID
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
-	DeletedAt        *time.Time
-	DestructiveRunID *uuid.UUID
+	DeletedAt           *time.Time
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
 	// or#288 processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
 	RoutingReason []byte
 }
@@ -419,28 +420,6 @@ type OpenrailsDestructiveActionSwitch struct {
 	UpdatedAt time.Time
 }
 
-// or#858/or#859 tier 1: every destructive operation is an attributable, scoped, stamped unit of damage with a single-command undo. kind=prune stamps rows it soft-deleted (destructive_run_id on the row); kind=converge_enforce captures before-images of the rows it OVERWROTE plus the provider intents it queued. Both reverse with `openrails undo-run --run <id>`, which dispatches on kind, plans before it applies, and refuses a kind it cannot reverse. declared_import / plan_migration / catalog_push are declared and not yet converted; merchant_delete is registered as unrecoverable (it hard-DELETEs Class A rows).
-type OpenrailsDestructiveRun struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	PspID      *uuid.UUID
-	Kind       string
-	Actor      string
-	StartedAt  time.Time
-	FinishedAt *time.Time
-	DryRun     bool
-	// The SnapshotCoverage absence proof that authorised the run, verbatim — the guard that should have stopped an empty-roster mass cancellation, made auditable after the fact rather than only preventive.
-	Coverage []byte
-	// The operator's typed confirmation. A run whose discovered row count differs refuses before writing anything.
-	ExpectedRows *int64
-	Affected     []byte
-	ReversedAt   *time.Time
-	ReversedBy   *string
-	// running = stamped rows may exist but the run did not finish (crash/abort); a rollback still reverses it, which is why rows are stamped before they are written.
-	Status string
-	Note   *string
-}
-
 // or#859 tier 1: the row as it stood immediately before a destructive run overwrote it. or#858's soft-delete stamp reverses DELETEs; this reverses UPDATEs — which is the damage the empty-roster mass-cancellation actually did. One image per (run, table, row); FK-pinned to exactly one run.
 type OpenrailsDestructiveRunBeforeImage struct {
 	ID               uuid.UUID
@@ -452,7 +431,8 @@ type OpenrailsDestructiveRunBeforeImage struct {
 	Before     []byte
 	CapturedAt time.Time
 	// When the reverse replayed this image. NULL after a completed reversal means the image was captured as evidence but deliberately never replayed: entitlement rows are RECOMPUTED from the append-only grant log by Converge, never restored (or#859 §3.3 / Class D). Restoring one directly could make it disagree with its grant, which recomputation cannot.
-	RestoredAt *time.Time
+	RestoredAt          *time.Time
+	DestructiveRunClass string
 }
 
 type OpenrailsEntitlement struct {
@@ -470,9 +450,10 @@ type OpenrailsEntitlement struct {
 	Period       pgtype.Range[pgtype.Timestamptz]
 	MerchantID   uuid.UUID
 	// OpenRails payable tenant subject for this entitlement window.
-	CustomerID       uuid.UUID
-	GrantID          *uuid.UUID
-	DestructiveRunID *uuid.UUID
+	CustomerID          uuid.UUID
+	GrantID             *uuid.UUID
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
 }
 
 // #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
@@ -679,6 +660,38 @@ type OpenrailsLedgerTransfer struct {
 	Operation string
 }
 
+// Typed maintenance run headers: reconciliation observations, reversible destructive work, and immutable purge inventories. Each kind has explicit columns and constraints; before-images remain in destructive_run_before_images.
+type OpenrailsMaintenanceRun struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Kind        string
+	Actor       string
+	PspID       *uuid.UUID
+	Mode        string
+	Rails       []string
+	WindowSince *time.Time
+	WindowUntil *time.Time
+	StartedAt   time.Time
+	FinishedAt  *time.Time
+	Status      string
+	DryRun      bool
+	// The coverage proof authorizing a destructive run, retained unchanged for audit and undo.
+	Coverage []byte
+	// The operator-confirmed or planned affected row count.
+	ExpectedRows *int64
+	Affected     []byte
+	ReversedAt   *time.Time
+	ReversedBy   *string
+	Note         *string
+	Summary      []byte
+	Error        *string
+	// Purge row counts, secret names, and omitted resources. Not a backup and never an undo image.
+	InventoryManifest  []byte
+	InventoryTotalRows *int64
+	// Derived from the immutable kind. Child foreign keys include it, so findings can reference only observation runs and stamped rows, intents and before-images only destructive runs.
+	RunClass string
+}
+
 // Merchant / billing-namespace directory: a dumb billing bucket (whose books a row goes on). GLOBAL (control-plane) table, not tenant-scoped. Carries ONLY billing/money-rail state, NO auth. Merchants are registered explicitly; there is no default merchant. RLS-exempt by design: it IS the tenant directory — the scope, not a scoped row.
 type OpenrailsMerchant struct {
 	ID uuid.UUID
@@ -727,17 +740,6 @@ type OpenrailsMerchantDestructivePolicy struct {
 	UpdatedBy            *string
 	Reason               *string
 	UpdatedAt            time.Time
-}
-
-// or#858: the manifest of what a merchant purge is ABOUT TO DESTROY — per-table row counts, merchant secret NAMES, and the explicit list of what is not captured. It is NOT a backup and restores nothing; the only restore path is Postgres PITR (docs/backup-and-recovery.md). Merchant deletion is gated on a matching inventory so the operator has seen the blast radius, not so the data can come back. Was merchant_exports (#225), a name that promised a restore point that never existed.
-type OpenrailsMerchantPurgeInventory struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Status     string
-	// The inventory manifest: row_counts, total_rows, secret_names (never values), not_captured, is_backup=false. total_rows must still match at purge time — a stale inventory does not authorise a purge.
-	Manifest    []byte
-	CreatedAt   time.Time
-	CompletedAt *time.Time
 }
 
 // DB-backed per-merchant secret store (issue #225). Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned and RLS protected.
@@ -890,8 +892,9 @@ type OpenrailsPayment struct {
 	// #796 credential form presented to the network: network_token | pan_via_proxy | psp_token. NULL = unknown/legacy; excluded from token_type-dimensioned metrics.
 	TokenType *string
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
-	DeletedAt        *time.Time
-	DestructiveRunID *uuid.UUID
+	DeletedAt           *time.Time
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
 	// or#827 rail|none — positive marker for real money movement at the payment rail. 'rail' rows carry a rail-issued transaction_id and are the ONLY rows the host settlement feed publishes; 'none' rows are bookkeeping (attempt anchors, declines, placeholders). Fail-closed default: undeclared = 'none'.
 	MoneyMovement string
 }
@@ -1158,7 +1161,8 @@ type OpenrailsRailIntent struct {
 	// PSP the outbound intent was enqueued against. Required unless the intent is custodian-addressed (rail_intents_addressed) — or#893/or#795.
 	PspID *uuid.UUID
 	// or#859: the destructive run whose pass enqueued this intent. The reverse of that run supersedes the ones still pending/failed_retryable and reports the rest — succeeded ones as irreversible provider-side divergence, in_flight/unknown_needs_verify ones as ambiguous. Attribution only: never cleared, never used to delete a row.
-	DestructiveRunID *uuid.UUID
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
 	// or#893/or#795: the custodian this outbound write is addressed to, for intents that target a custodian rather than a gateway account (the batch account updater). NULL for the ordinary PSP-addressed intent. Composite FK: an intent can only reference ITS OWN merchant's custodian.
 	CustodianID *uuid.UUID
 }
@@ -1204,6 +1208,15 @@ type OpenrailsReconciliationFinding struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	FindingType string
+	Rail        string
+	// Catalog findings only: the immutable PSP account whose catalog was compared. Part of the identity; absence can be proven only by a complete read of this account.
+	PspID                 *uuid.UUID
+	OpenrailsResourceType string
+	OpenrailsResourceID   *string
+	ExternalResourceID    *string
+	Field                 *string
+	OpenrailsValue        *string
+	ExternalValue         *string
 	// Stable identity of the drifted subject within (provider, finding_type): rail subscription id, transaction id, local subscription/payment-method uuid, or tenant_subject uuid depending on the check.
 	SubjectKey        string
 	Severity          string
@@ -1227,21 +1240,7 @@ type OpenrailsReconciliationFinding struct {
 	NotifiedAt *time.Time
 	// #787: severity at last notification; a further increase while still open re-fires, re-observation at the same/lower severity does not.
 	NotifiedSeverity *string
-}
-
-// One row per manual reconcile run (#107): advisory diffs or enforce convergence against the payment rails. Summary jsonb carries per-rail counts and the dunning-forensics report. or#859 Class A forensics: INSERT at start, UPDATE at finish, never DELETE — a rollback that erases the evidence of what went wrong defeats itself.
-type OpenrailsReconciliationRun struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Mode        string
-	Rails       []string
-	WindowSince *time.Time
-	WindowUntil *time.Time
-	StartedAt   time.Time
-	FinishedAt  *time.Time
-	Status      string
-	Summary     []byte
-	Error       *string
+	SeenRunClass     *string
 }
 
 // #511 per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.
@@ -1328,8 +1327,9 @@ type OpenrailsSubscription struct {
 	// PSP that produced this remote subscription mirror row. Required (or#893).
 	PspID uuid.UUID
 	// or#858 soft delete: set, the row is invisible to every live read. Only `pull-provider --prune` sets it, and `openrails undo-run` clears it.
-	DeletedAt        *time.Time
-	DestructiveRunID *uuid.UUID
+	DeletedAt           *time.Time
+	DestructiveRunID    *uuid.UUID
+	DestructiveRunClass *string
 }
 
 // #773: a scheduled, applied, or canceled price move for one subscription. Applied at the subscription's first renewal on/after effective_at (v1: no proration/mid-cycle).

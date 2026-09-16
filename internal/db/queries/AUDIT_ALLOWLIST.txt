@@ -50,8 +50,6 @@ unbounded-many ListActiveSolanaMerchantWallets             # or#837 converge sca
 unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge scan
 unbounded-many ListActionableReconciliationFindingsByProvider # or#837 converge scan
 unbounded-many CountOpenReconciliationFindingsByTypeSeverity  # or#837 converge scan
-unbounded-many ListOpenCatalogDriftEvents                  # or#837 scan of all open drift events
-unbounded-many CountOpenCatalogDriftByKind                 # or#837 scan of all open drift events
 unbounded-many ListStuckRailIntents                        # or#837 scan of all live intents
 unbounded-many ListWebhookExpectedRails                    # or#837 aggregate over all live subscriptions
 unbounded-many ListMoneyAccountPairs                       # or#837 aggregate over all ledger transfers

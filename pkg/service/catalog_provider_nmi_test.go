@@ -419,8 +419,10 @@ func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 
 func TestMobiusAdapter_VerifyUnconfiguredIsSyncDisabled(t *testing.T) {
 	a := &nmiAdapter{svc: &Service{rt: &app.Runtime{}}}
+	// VerifyPriceSync maps "is not configured" to sync_disabled. A nil error
+	// would be read as in sync and could close drift nothing verified.
 	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{})
-	if err != nil || missing || drift != nil {
-		t.Fatalf("expected sync_disabled (nil,false,nil), got drift=%v missing=%v err=%v", drift, missing, err)
+	if err == nil || !strings.Contains(err.Error(), "is not configured") || missing || drift != nil {
+		t.Fatalf("expected a not-configured error, got drift=%v missing=%v err=%v", drift, missing, err)
 	}
 }

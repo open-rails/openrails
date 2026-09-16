@@ -544,3 +544,14 @@ backs `Client.HasSettledPayment` and requires `merchant:payments:read`. It reads
 the durable payment records: a positive completed or refunded original rail
 payment establishes the historical fact for that merchant, customer and price.
 Acknowledging or pruning its host event does not erase that fact.
+
+## Catalog drift findings
+
+`GET /v1/merchant/catalog/drift` lists open standing findings; each carries the
+immutable `psp_id` of the provider account that was compared. A refresh reads
+the active Stripe and NMI accounts completely and each stored Solana plan
+individually. Only a successful read of that account (or that Solana price)
+resolves an absent finding; unarmed, failed or other accounts keep theirs, an
+older snapshot never overrides newer evidence, and an ignored finding stays
+ignored. Price/product reconcile closes findings only for accounts it verified
+in sync.

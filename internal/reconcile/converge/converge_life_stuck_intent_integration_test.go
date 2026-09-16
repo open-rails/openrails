@@ -63,7 +63,7 @@ func TestConverge_LifeStuckIntent(t *testing.T) {
 
 	t.Cleanup(func() {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			for _, table := range []string{"reconciliation_findings", "reconciliation_runs", "rail_intents"} {
+			for _, table := range []string{"reconciliation_findings", "maintenance_runs", "rail_intents"} {
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.`+table+` WHERE merchant_id=$1`, mID.UUID())
 			}
 			return nil
