@@ -309,11 +309,14 @@ func TestUpgradeAmbiguousCreateLanded_AdoptsInline(t *testing.T) {
 	require.Equal(t, models.StatusActive, local.Status)
 	require.Equal(t, fx.newPrice.ID, local.PriceID)
 
-	// The old subscription is cancelled locally and deleted remotely (step 5).
+	// The old subscription is cancelled locally and marked for the durable
+	// verify-then-delete intent. This fixture does not run the intent worker,
+	// so no direct provider delete is allowed in the request path.
 	old, oerr := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, fx.existingSub.ID)
 	require.NoError(t, oerr)
 	require.Equal(t, models.StatusCancelled, old.Status)
-	require.EqualValues(t, 1, fx.gateway.subDeletes.Load(), "old NMI subscription cancelled")
+	require.NotNil(t, old.DeletionScheduledAt)
+	require.Zero(t, fx.gateway.subDeletes.Load(), "predecessor delete is owned by the durable intent")
 }
 
 // Ambiguous successor create with no immediate roster match: the request
