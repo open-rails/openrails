@@ -49,6 +49,10 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 			exec(`INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3)`, psp, mid, psp.String())
 			exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','test-anchor','4242','visa')`, method, mid, customer, psp)
 			exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,deletion_scheduled_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10,NULL,NULL,NULL)`, sub, mid, customer, product, price, psp, sub.String(), method, now, end)
+			_, err := client.DeletePaymentMethod(ctx, customer.String(), method.String())
+			require.ErrorIs(t, err, openrails.ErrConflict, "active subscription blocks deleting its card before any provider mutation")
+			_, err = client.DeletePaymentMethod(ctx, uuid.NewString(), method.String())
+			require.ErrorIs(t, err, openrails.ErrDenied, "merchant mutation still checks the addressed customer's ownership")
 			require.NoError(t, client.CancelSubscription(ctx, sub.String(), openrails.CancelSubscriptionRequest{Reason: "customer request"}))
 			var intents int
 			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2 AND intent_type='nmi_delete_subscription'`, mid, sub).Scan(&intents))
@@ -96,4 +100,6 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 	reader, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(token))
 	require.NoError(t, err)
 	require.ErrorIs(t, reader.ResumeSubscription(ctx, uuid.NewString()), openrails.ErrDenied)
+	_, err = reader.DeletePaymentMethod(ctx, uuid.NewString(), uuid.NewString())
+	require.ErrorIs(t, err, openrails.ErrDenied)
 }

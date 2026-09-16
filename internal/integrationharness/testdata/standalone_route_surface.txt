@@ -5,6 +5,7 @@ DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/catalog/meters/{key}/rate-card
 DELETE /v1/merchant/customers/{customer_id}/credits/{grant_id}
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
+DELETE /v1/merchant/customers/{customer_id}/payment-methods/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
 DELETE /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}
 DELETE /v1/merchant/customers/{customer_id}/spend-delegations/{scope}/{scope_key}
