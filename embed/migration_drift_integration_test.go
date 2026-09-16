@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/migrate"
 	postgresmigrations "github.com/open-rails/openrails/migrations/postgres"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // upstream#1627 / or#901: an EMBEDDED host must refuse to boot on a database whose
@@ -82,9 +81,9 @@ func TestEmbeddedRuntimeRefusesOrphanedMigrations(t *testing.T) {
 	rdb, _ := dbtest.SharedRedisClient(t)
 	newRuntime := func() (*embed.Runtime, error) {
 		cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-		return embed.New(ctx, embed.Options{Options: embedded.Options{
-			Config: cfg, Redis: rdb, River: embedded.RiverManagedByOpenRails(),
-		}})
+		return embed.New(ctx, embed.Options{
+			Config: cfg, Redis: rdb, River: embed.RiverManagedByOpenRails(),
+		})
 	}
 
 	// Control: the same host boots cleanly when the ledger matches the build.

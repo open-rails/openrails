@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -29,7 +31,7 @@ func TestHostTransactionsCommitAndRollBackWithHostRows(t *testing.T) {
 	client, err := runtime.Client()
 	require.NoError(t, err)
 	hostTx := runtime.HostTransactions()
-	pool := runtime.Embedded().App().Runtime.DB.Pool()
+	pool := app.HostGraph(runtime).Runtime.DB.Pool()
 
 	_, err = h.Pool().Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS public.host_provider_obligation_facts (

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/embedded"
+	"github.com/open-rails/openrails/internal/hosttools"
 )
 
 // newPullProviderCmd wires the #107/#511 provider-pull CLI:
@@ -103,7 +103,7 @@ func runPullProvider(cmd *cobra.Command, providerNames []string, pspStr, sinceSt
 	if selected.PermissionGroupID == "" {
 		authority = nil
 	}
-	return embedded.PullProvider(cmd.Context(), embedded.PullProviderOptions{
+	return hosttools.PullProvider(cmd.Context(), hosttools.PullProviderOptions{
 		NameAuthority:        authority,
 		Config:               cfg,
 		MerchantID:           mid,
@@ -129,7 +129,7 @@ func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug strin
 	if err != nil {
 		return err
 	}
-	return embedded.PullProviderReport(cmd.Context(), embedded.PullProviderReportOptions{
+	return hosttools.PullProviderReport(cmd.Context(), hosttools.PullProviderReportOptions{
 		Config:     cfg,
 		MerchantID: mid,
 		RunID:      runIDStr,
@@ -165,7 +165,7 @@ func newPruneCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return embedded.PruneList(c.Context(), embedded.PruneListOptions{
+			return hosttools.PruneList(c.Context(), hosttools.PruneListOptions{
 				Config: cfg, MerchantID: mid, Limit: limit, Format: format, Out: os.Stdout,
 			})
 		},
