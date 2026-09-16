@@ -103,9 +103,7 @@ func (s *PGHistorySource) ListEvents(ctx context.Context, railNames []string, si
 		if r.RailSubscriptionID != nil {
 			ev.RailSubscriptionID = *r.RailSubscriptionID
 		}
-		if r.RailTransactionID != nil {
-			ev.RailTransactionID = *r.RailTransactionID
-		}
+		ev.RailTransactionID = r.RailTransactionID
 		if r.AmountMicros != nil {
 			micros := *r.AmountMicros
 			ev.AmountMicros = &micros
