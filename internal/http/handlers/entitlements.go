@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -39,19 +40,8 @@ func convergeAfterMutation(r *httprequest.Request, customer uuid.UUID) {
 	}
 }
 
-type ServiceEntitlementRecord struct {
-	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id,omitempty"`
-	Entitlement  string     `json:"entitlement"`
-	StartAt      time.Time  `json:"start_at"`
-	EndAt        *time.Time `json:"end_at,omitempty"`
-	SourceID     *string    `json:"source_id,omitempty"`
-	SourceType   string     `json:"source_type"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason *string    `json:"revoke_reason,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-}
+// ServiceEntitlementRecord is the shared client entitlement wire type.
+type ServiceEntitlementRecord = openrails.EntitlementRecord
 
 type adminUserEntitlementsPath struct {
 	UserID string `uri:"customer_id" binding:"required"`
@@ -60,11 +50,6 @@ type adminUserEntitlementsPath struct {
 type adminEntitlementPath struct {
 	UserID        string `uri:"customer_id" binding:"required"`
 	EntitlementID string `uri:"id" binding:"required"`
-}
-
-type grantEntitlementRequest struct {
-	Entitlement string `json:"entitlement" binding:"required"`
-	Hours       *int   `json:"hours,omitempty"`
 }
 
 func ServiceGetCustomerEntitlements(r *httprequest.Request) {
@@ -259,8 +244,13 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	var req grantEntitlementRequest
+	var req openrails.GrantEntitlementRequest
 	if !r.BindJSON(&req) {
+		return
+	}
+	req.Entitlement = strings.TrimSpace(req.Entitlement)
+	if req.Entitlement == "" {
+		r.ErrorJSON(http.StatusBadRequest, "entitlement is required")
 		return
 	}
 	svc := r.State.EntitlementService
@@ -268,37 +258,57 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "entitlement service unavailable")
 		return
 	}
-	adminUser := r.GetUser()
-	if adminUser == nil || adminUser.ID == "" {
-		r.ErrorJSON(http.StatusUnauthorized, "missing admin identity")
+	// #511: a manual grant is an admin-sourced ledger fact whose SourceID is
+	// the grant's own identity. Hours extends the finite timeline; EndAt fixes
+	// this grant's own end; neither is indefinite.
+	params := entitlements.PushNewEntitlementParams{UserID: path.UserID, Entitlement: req.Entitlement, SourceType: models.EntitlementSourceAdmin, SourceID: uuidutil.NewV7()}
+	switch {
+	case req.Hours != nil && req.EndAt != nil:
+		r.ErrorJSON(http.StatusBadRequest, "hours and end_at are mutually exclusive")
 		return
+	case req.Hours != nil:
+		if *req.Hours <= 0 {
+			r.ErrorJSON(http.StatusBadRequest, "hours must be > 0 (or omit for indefinite)")
+			return
+		}
+		d := time.Duration(*req.Hours) * time.Hour
+		params.Duration = &d
+	case req.EndAt != nil:
+		if !req.EndAt.After(r.Clock.Now()) {
+			r.ErrorJSON(http.StatusBadRequest, "end_at must be in the future")
+			return
+		}
+		endAt := req.EndAt.UTC()
+		params.EndAt = &endAt
+	default:
+		params.Indefinite = true
 	}
-	if req.Hours != nil && *req.Hours <= 0 {
-		r.ErrorJSON(http.StatusBadRequest, "hours must be > 0 (or omit for indefinite)")
-		return
-	}
-	tenantSubjectID, err := tenantSubjectForEntitlementGrantTarget(r, path.UserID)
+	var err error
+	params.CustomerID, err = tenantSubjectForEntitlementGrantTarget(r, path.UserID)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to resolve target tenant subject")
 		return
 	}
-	// #511: a manually-granted entitlement is now just an `admin`-sourced grant in
-	// the ledger (the source of truth); no separate entitlement_grants provenance
-	// row. SourceID is the grant's own identity.
-	adminGrantID := uuidutil.NewV7()
-	var ent *models.Entitlement
-	if req.Hours != nil {
-		d := time.Duration(*req.Hours) * time.Hour
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Duration: &d, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrantID})
-	} else {
-		ent, err = svc.PushNewEntitlement(r.Request.Context(), entitlements.PushNewEntitlementParams{UserID: path.UserID, CustomerID: tenantSubjectID, Entitlement: req.Entitlement, Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminGrantID})
-	}
+	ent, err := svc.PushNewEntitlement(r.Request.Context(), params)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	convergeAfterMutation(r, tenantSubjectID) // #511: re-converge the customer inline
-	r.JSON(http.StatusCreated, ent)
+	convergeAfterMutation(r, params.CustomerID) // #511: re-converge the customer inline
+	r.JSON(http.StatusCreated, entitlementRecordFromModel(ent))
+}
+
+func entitlementRecordFromModel(e *models.Entitlement) openrails.EntitlementRecord {
+	rec := openrails.EntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+	if e.SourceID != nil {
+		source := e.SourceID.String()
+		rec.SourceID = &source
+	}
+	if e.RevokeReason != nil {
+		reason := string(*e.RevokeReason)
+		rec.RevokeReason = &reason
+	}
+	return rec
 }
 
 // tenantSubjectForEntitlementGrantTarget resolves the payable customer for an

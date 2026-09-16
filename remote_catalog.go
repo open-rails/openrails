@@ -111,6 +111,18 @@ func (c *Client) UpdatePrice(ctx context.Context, id uuid.UUID, request UpdatePr
 	return &out, nil
 }
 
+// SetPriceKey moves a price onto key in place. A live price already holding
+// key is archived first.
+func (c *Client) SetPriceKey(ctx context.Context, id uuid.UUID, key string) (*CatalogPrice, error) {
+	var out CatalogPrice
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/prices/"+id.String()+"/key", struct {
+		Key string `json:"key"`
+	}{Key: key}, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // EnsureUsageProduct preserves an existing catalog definition and handles
 // concurrent bootstrap through the same catalog commands in every deployment.
 func (c *Client) EnsureUsageProduct(ctx context.Context, key, name string) (uuid.UUID, error) {

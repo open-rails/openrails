@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -343,16 +344,35 @@ func PutAdminInvoiceProfile(r *httprequest.Request) {
 	}
 	r.SuccessJSON(profile)
 }
+
+var invoiceAdminRefusals = []struct {
+	err    error
+	status int
+	code   string
+}{
+	{money.ErrInvoiceActionNotAllowed, http.StatusConflict, openrails.CodeInvoiceActionNotAllowed},
+	{money.ErrInvoiceNotRetryable, http.StatusConflict, openrails.CodeInvoiceNotRetryable},
+	{money.ErrInvoiceRetryInProgress, http.StatusConflict, openrails.CodeInvoiceRetryInProgress},
+	{money.ErrInvoiceRetryOutcomeUnknown, http.StatusConflict, openrails.CodeInvoiceRetryOutcomeUnknown},
+	{money.ErrInvoiceRetryIdempotencyConflict, http.StatusConflict, openrails.CodeInvoiceRetryIdempotencyConflict},
+	{money.ErrInvoicePaymentReferenceUsed, http.StatusConflict, openrails.CodeInvoicePaymentReferenceUsed},
+	{money.ErrInvoicePaymentExceedsDue, http.StatusConflict, openrails.CodeInvoicePaymentExceedsDue},
+	{money.ErrInvoicePaymentInvalid, http.StatusBadRequest, openrails.CodeInvoicePaymentInvalid},
+	{money.ErrCollectionPaymentMethodInvalid, http.StatusBadRequest, openrails.CodeCollectionPaymentMethodInvalid},
+	{money.ErrCollectionPaymentMethodRequired, http.StatusBadRequest, openrails.CodeCollectionPaymentMethodRequired},
+}
+
 func writeInvoiceAdminError(r *httprequest.Request, err error) {
-	switch {
-	case db.IsNotFound(err):
+	if db.IsNotFound(err) {
 		r.ErrorJSON(http.StatusNotFound, "invoice or customer not found")
-	case errors.Is(err, money.ErrInvoiceActionNotAllowed), errors.Is(err, money.ErrInvoiceNotRetryable), errors.Is(err, money.ErrInvoiceRetryInProgress), errors.Is(err, money.ErrInvoiceRetryOutcomeUnknown), errors.Is(err, money.ErrInvoiceRetryIdempotencyConflict), errors.Is(err, money.ErrInvoicePaymentReferenceUsed), errors.Is(err, money.ErrInvoicePaymentExceedsDue):
-		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, money.ErrInvoicePaymentInvalid), errors.Is(err, money.ErrCollectionPaymentMethodInvalid), errors.Is(err, money.ErrCollectionPaymentMethodRequired):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-	default:
-		log.WithError(err).Warn("merchant invoice operation failed")
-		r.ErrorJSON(http.StatusInternalServerError, "invoice operation failed")
+		return
 	}
+	for _, refusal := range invoiceAdminRefusals {
+		if errors.Is(err, refusal.err) {
+			r.APIError(api.NewAPIError(refusal.status, api.ErrorTypeInvalidRequest, refusal.code, err.Error()))
+			return
+		}
+	}
+	log.WithError(err).Warn("merchant invoice operation failed")
+	r.ErrorJSON(http.StatusInternalServerError, "invoice operation failed")
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -88,34 +89,11 @@ var publicRailProfiles = map[string]railPublicProfile{
 // (internal/custodians), not a second whitelist here — the Public flag on a
 // setting slot is the whitelist.
 
-// PublicPSPConfig is the browser-facing description of one ARMED PSP: the
-// value checkout's payment.rail selector takes, the rail it runs on, how a
-// frontend must drive it, and the public-by-nature values it needs to do so.
-type PublicPSPConfig struct {
-	// Key is the checkout wire selector (psps.key, e.g. "mobius"). Falls back
-	// to the rail kind for accounts declared without a key — the same value
-	// checkout's resolveRailTarget accepts for a single-account rail.
-	Key string `json:"key"`
-	// Rail is the gateway kind: nmi, ccbill, stripe, solana.
-	Rail string `json:"rail"`
-	// Custodian is WHO HOLDS the card (or#880): "psp" when the gateway does,
-	// else the third party whose page tokenizes it. Orthogonal to Rail — a
-	// browser drives the CUSTODIAN's tokenizer, then we charge the Rail.
-	Custodian string `json:"custodian"`
-	// DisplayName is the buyer-facing rail name ("Credit Card", "Stripe").
-	DisplayName string `json:"display_name"`
-	// Flow is how a browser drives this rail: tokenize | redirect | wallet.
-	Flow string `json:"flow"`
-	// Config holds the whitelisted public values for this rail's flow. Empty
-	// for redirect/wallet flows.
-	Config map[string]string `json:"config,omitempty"`
-}
-
-// PublicCheckoutConfig is the response body of the public discovery endpoint.
-type PublicCheckoutConfig struct {
-	Object string            `json:"object"`
-	PSPs   []PublicPSPConfig `json:"psps"`
-}
+// PublicPSPConfig and PublicCheckoutConfig are the shared client wire types.
+type (
+	PublicPSPConfig      = openrails.CheckoutPSPConfig
+	PublicCheckoutConfig = openrails.CheckoutConfig
+)
 
 // PublicPSPConfigFor projects an armed PSP onto its public browser config.
 // ok=false means the PSP must not be advertised: an unknown rail, or a

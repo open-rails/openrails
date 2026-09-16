@@ -39,6 +39,15 @@ func (c *Client) ListCheckoutRailOptions(ctx context.Context, priceID string) ([
 	return out, nil
 }
 
+// GetCheckoutConfig returns the bound merchant's public checkout configuration.
+func (c *Client) GetCheckoutConfig(ctx context.Context) (*CheckoutConfig, error) {
+	var out CheckoutConfig
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/checkout-config", nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) ResolveEffectiveTier(ctx context.Context, customerID, group string) (*EffectiveTier, error) {
 	var out *EffectiveTier
 	path := "/v1/merchant/customers/" + url.PathEscape(customerID) + "/effective-tier?" + url.Values{"group": {group}}.Encode()

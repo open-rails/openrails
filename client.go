@@ -538,8 +538,7 @@ type ResourceRevenueResponse struct {
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
 }
 
-// EntitlementRecord is one active entitlement row — the handler's
-// ServiceEntitlementRecord wire shape (entitlements.go) verbatim.
+// EntitlementRecord is one entitlement window.
 type EntitlementRecord struct {
 	ID           string     `json:"id"`
 	CustomerID   string     `json:"customer_id,omitempty"`

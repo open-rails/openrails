@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -18,21 +19,7 @@ import (
 // per-subscription ledger), POST /:id/cancel. Mounted next to the #773
 // reprice routes — same authz, same error vocabulary.
 
-type planMigrationRequestBody struct {
-	SourcePrice string `json:"source_price"`
-	TargetPrice string `json:"target_price"`
-	// EffectiveAt: first renewal on/after this instant. Mutually exclusive
-	// with NoticeDays; both empty means "now" (= each sub's next renewal).
-	EffectiveAt time.Time `json:"effective_at,omitzero"`
-	// NoticeDays computes effective_at = now + notice_days.
-	NoticeDays             int    `json:"notice_days,omitempty"`
-	Immediate              bool   `json:"immediate,omitempty"`
-	AcknowledgeShortNotice bool   `json:"acknowledge_short_notice,omitempty"`
-	FallbackPolicy         string `json:"fallback_policy,omitempty"`
-	ArchiveSource          *bool  `json:"archive_source,omitempty"`
-}
-
-func (b *planMigrationRequestBody) toServiceRequest(r *httprequest.Request) (subscriptions.PlanMigrationRequest, bool) {
+func planMigrationServiceRequest(r *httprequest.Request, b openrails.PlanMigrationRequest) (subscriptions.PlanMigrationRequest, bool) {
 	var out subscriptions.PlanMigrationRequest
 	if strings.TrimSpace(b.SourcePrice) == "" || strings.TrimSpace(b.TargetPrice) == "" {
 		r.ErrorJSON(http.StatusBadRequest, "source_price and target_price required")
@@ -88,11 +75,11 @@ func writePlanMigrationError(r *httprequest.Request, err error) {
 // CreatePlanMigration commits a plan migration: batch + per-subscription
 // rows, source archive, rail pushes, schedule-time notices.
 func CreatePlanMigration(r *httprequest.Request) {
-	var body planMigrationRequestBody
+	var body openrails.PlanMigrationRequest
 	if !r.BindJSON(&body) {
 		return
 	}
-	req, ok := body.toServiceRequest(r)
+	req, ok := planMigrationServiceRequest(r, body)
 	if !ok {
 		return
 	}
@@ -108,11 +95,11 @@ func CreatePlanMigration(r *httprequest.Request) {
 // per-rail auto/requires-action/skip counts the operator reviews BEFORE
 // committing.
 func PreviewPlanMigration(r *httprequest.Request) {
-	var body planMigrationRequestBody
+	var body openrails.PlanMigrationRequest
 	if !r.BindJSON(&body) {
 		return
 	}
-	req, ok := body.toServiceRequest(r)
+	req, ok := planMigrationServiceRequest(r, body)
 	if !ok {
 		return
 	}

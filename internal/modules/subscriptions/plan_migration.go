@@ -50,6 +50,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -101,41 +102,12 @@ type PlanMigrationRequest struct {
 	ArchiveSource *bool
 }
 
-// PlanMigrationOutcome is one subscription's classification in a migration
-// (or preview).
-type PlanMigrationOutcome struct {
-	SubscriptionID uuid.UUID  `json:"subscription_id"`
-	RepriceID      *uuid.UUID `json:"reprice_id,omitempty"`
-	Rail           string     `json:"rail"`
-	// Disposition: scheduled | applied_immediately | skipped | blocked.
-	Disposition string `json:"disposition"`
-	Reason      string `json:"reason,omitempty"`
-}
-
-// PlanMigrationResult is the batch header + per-subscription ledger returned
-// by both Preview (BatchID nil, nothing written) and Migrate.
-type PlanMigrationResult struct {
-	BatchID        *uuid.UUID             `json:"batch_id,omitempty"`
-	SourcePriceID  uuid.UUID              `json:"source_price_id"`
-	TargetPriceID  uuid.UUID              `json:"target_price_id"`
-	EffectiveAt    time.Time              `json:"effective_at"`
-	FallbackPolicy string                 `json:"fallback_policy"`
-	Matched        int                    `json:"matched"`
-	Scheduled      int                    `json:"scheduled"`
-	Skipped        int                    `json:"skipped"`
-	Blocked        int                    `json:"blocked"`
-	ByRail         map[string]*RailCounts `json:"by_rail"`
-	Outcomes       []PlanMigrationOutcome `json:"outcomes"`
-	SourceArchived bool                   `json:"source_archived"`
-}
-
-// RailCounts is the per-rail capability summary the operator reviews before
-// committing (auto-migratable vs requires-action vs blocked/skipped).
-type RailCounts struct {
-	Auto           int `json:"auto"`
-	RequiresAction int `json:"requires_action"`
-	Skipped        int `json:"skipped"`
-}
+// Plan migration results are the shared client wire types.
+type (
+	PlanMigrationOutcome = openrails.PlanMigrationOutcome
+	PlanMigrationResult  = openrails.PlanMigrationResult
+	RailCounts           = openrails.PlanMigrationRailCounts
+)
 
 // PaymentMethodLookup resolves a subscription's payment method — the
 // engine-driven-rail detector (#297 stored-credential recurring anchor).
@@ -633,18 +605,8 @@ func (s *PlanMigrationService) GetBatch(ctx context.Context, batchID uuid.UUID, 
 	return batch, rows, nil
 }
 
-// PlanMigrationCancelResult reports a batch cancel — including the rows whose
-// rail-side change the cancel could NOT undo.
-type PlanMigrationCancelResult struct {
-	Canceled int `json:"canceled"`
-	// RailReleaseRequired lists subscriptions whose Stripe boundary push
-	// already created a provider-side subscription schedule: the internal row
-	// is canceled, but STRIPE WILL STILL FLIP THE PRICE at period end (and
-	// converge will follow provider truth) unless the schedule is released
-	// out of band. Empty means the cancel is complete on both sides.
-	RailReleaseRequired []uuid.UUID `json:"rail_release_required,omitempty"`
-	Warning             string      `json:"warning,omitempty"`
-}
+// PlanMigrationCancelResult is the shared client cancel result.
+type PlanMigrationCancelResult = openrails.PlanMigrationCancelResult
 
 // CancelBatch cancels every still-scheduled row in the batch (rows already
 // applied or blocked are untouched). It does NOT un-archive the source price.

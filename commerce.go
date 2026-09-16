@@ -7,6 +7,28 @@ type CheckoutRailOption struct {
 	Mode     string `json:"mode"`
 }
 
+// CheckoutConfig lists the merchant's armed PSPs and the public values a
+// browser needs to drive each one. It never contains merchant secrets.
+type CheckoutConfig struct {
+	Object string              `json:"object"`
+	PSPs   []CheckoutPSPConfig `json:"psps"`
+}
+
+// CheckoutPSPConfig describes one armed PSP for browser checkout.
+type CheckoutPSPConfig struct {
+	// Key is the checkout payment.rail selector.
+	Key string `json:"key"`
+	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
+	Rail string `json:"rail"`
+	// Custodian holds the card: "psp", or the third party whose page tokenizes it.
+	Custodian   string `json:"custodian"`
+	DisplayName string `json:"display_name"`
+	// Flow is how a browser drives this PSP: tokenize, redirect or wallet.
+	Flow string `json:"flow"`
+	// Config holds whitelisted public values, such as a tokenization key.
+	Config map[string]string `json:"config,omitempty"`
+}
+
 type CheckoutCustomerIdentity struct {
 	ID            string `json:"id"`
 	VerifiedEmail string `json:"verified_email"`
