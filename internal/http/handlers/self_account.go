@@ -92,6 +92,10 @@ func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 	if !ok {
 		return
 	}
+	if err := money.RequireBillingCurrency(currency); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
+	}
 	methodID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
@@ -103,14 +107,11 @@ func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 		return
 	}
 	if err := svc.SetInvoiceCollectionPaymentMethod(r.Request.Context(), payer, currency, methodID); err != nil {
-		switch {
-		case errors.Is(err, money.ErrCollectionPaymentMethodInvalid):
+		if errors.Is(err, money.ErrCollectionPaymentMethodInvalid) {
 			r.ErrorJSON(http.StatusBadRequest, "payment method is not eligible for invoice collection")
-		case errors.Is(err, money.ErrBillingUnitRequired), strings.Contains(err.Error(), "unknown currency"):
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-		default:
-			r.ErrorJSON(http.StatusInternalServerError, "failed to set collection payment method")
+			return
 		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to set collection payment method")
 		return
 	}
 	r.SuccessJSON(collectionPaymentMethodResponse{Currency: currency, PaymentMethodID: api.FormatPaymentMethodID(methodID)})

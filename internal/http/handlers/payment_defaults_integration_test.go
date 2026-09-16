@@ -97,6 +97,8 @@ func TestSavedMethodCollectionDefaultsAreCurrencyAndCustomerScoped(t *testing.T)
 	require.Equal(t, http.StatusBadRequest, code, "another customer's method is refused over HTTP: %v", body)
 	code, _ = setDefaultMethodHTTP(t, fx, fx.customer, "USD", "not-a-method")
 	require.Equal(t, http.StatusBadRequest, code)
+	code, _ = setDefaultMethodHTTP(t, fx, fx.customer, "XYZ", api.FormatPaymentMethodID(usd.ID))
+	require.Equal(t, http.StatusBadRequest, code, "unknown currency is a client error")
 	for _, handler := range []func(*httprequest.Request){ListPaymentMethods, GetAdminUserPaymentMethods, GetAdminUserBillingProfile} {
 		got := readDefaultMethods(t, fx, fx.customer, handler)
 		require.Len(t, got, 3)
