@@ -1,7 +1,7 @@
 # Reviewed release contract
 
 `contract.json` records exported Go declarations, including generic signatures,
-receiver types, aliases and JSON tags. It includes all currently public Go
+receiver types, aliases, JSON tags and the declaring file’s import paths. It includes all currently public Go
 packages so a helper accidentally used by a consumer cannot disappear silently.
 It also hashes the fresh SQL baseline, canonical wire fixtures, route registry,
 authorization boundary and HTTP handlers (including anonymous response maps).

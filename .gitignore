@@ -156,3 +156,6 @@ audit-*.md
 
 # Local-only advisor/planning scratch — never committed
 plans/
+
+# Local contract qualification receipts
+.reports/

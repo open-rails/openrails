@@ -205,20 +205,12 @@ func render(fs *token.FileSet, node ast.Node) string {
 }
 
 func renderWithImports(fs *token.FileSet, node ast.Node, imports map[string]string) string {
-	referenced := map[string]bool{}
-	ast.Inspect(node, func(n ast.Node) bool {
-		if sel, ok := n.(*ast.SelectorExpr); ok {
-			if id, ok := sel.X.(*ast.Ident); ok {
-				if path, ok := imports[id.Name]; ok {
-					referenced[id.Name+"="+path] = true
-				}
-			}
-		}
-		return true
-	})
-	names := make([]string, 0, len(referenced))
-	for name := range referenced {
-		names = append(names, name)
+	// Retain exact import paths, including implicit package names that differ
+	// from the path (pgx/v5, go-redis/v9). An AST-only scanner must not guess a
+	// package's declared name and miss a changed public referenced type.
+	names := make([]string, 0, len(imports))
+	for name, path := range imports {
+		names = append(names, name+"="+path)
 	}
 	sort.Strings(names)
 	return render(fs, node) + " [imports: " + strings.Join(names, ", ") + "]"
