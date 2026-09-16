@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
-	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
@@ -46,8 +45,13 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 		"ccbill": {AccountID: "999982-0000", CCBill: &config.CCBillRailConfig{Salt: "declared-facts-fixture"}},
 		"solana": {AccountID: wallet, Solana: &config.SolanaRailConfig{Tokens: map[string]config.TokenConfig{"USDC": {Name: "USD Coin"}}}},
 	}
-	remote := h.StartStandalone("USD", integrationharness.WithRails(rails))
+	remote := h.StartStandalone("USD")
 	remote.App().Runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(fakeMintReader{decimals: 6})
+	// A merchant of its own, so the armed rails never leak into the shared
+	// test merchant's checkout document.
+	owned := remote.ProvisionOwnedMerchant("facts-" + uuid.NewString()[:8])
+	mid := owned.MerchantID
+	integrationharness.SeedPSPs(ctx, t, remote.App().Runtime, mid, rails)
 	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
 		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
@@ -55,12 +59,12 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	runtime.Embedded().App().Runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(fakeMintReader{decimals: 6})
-	local, err := runtime.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
+	local, err := runtime.Client(openrails.WithMerchantID(mid))
 	require.NoError(t, err)
-	mid := dbtest.TestMerchantID
+	standalone := remote.Client(openrails.WithTokenProvider(func(context.Context) (string, error) { return owned.APIKey, nil }))
 	pool := h.MerchantPool(mid.UUID())
 
-	for name, client := range map[string]*openrails.Client{"embedded": local, "standalone": remote.Client()} {
+	for name, client := range map[string]*openrails.Client{"embedded": local, "standalone": standalone} {
 		t.Run(name, func(t *testing.T) {
 			checkout, err := client.GetCheckoutConfig(ctx)
 			require.NoError(t, err)
@@ -146,7 +150,7 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&registry))
 	require.Equal(t, openrails.CurrencyRegistry{Object: "currencies", Currencies: openrails.Currencies()}, registry)
 
-	reader, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(remote.MintAPIKey(dbtest.TestMerchantSlug, "facts-reader", []string{permissions.MerchantCatalogRead})))
+	reader, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(remote.MintAPIKey(owned.MerchantSlug, "facts-reader", []string{permissions.MerchantCatalogRead})))
 	require.NoError(t, err)
 	_, err = reader.EnsureCustomer(ctx, openrails.CustomerID(uuid.New()))
 	require.ErrorIs(t, err, openrails.ErrDenied)
