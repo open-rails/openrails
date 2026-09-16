@@ -287,7 +287,7 @@ func (s *Service) SweepUsage(ctx context.Context, payer identity.CustomerID, cur
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	cur, err := s.resolveCurrency(ctx, currency)
+	cur, err := requireCurrency(currency)
 	if err != nil {
 		return err
 	}
@@ -315,7 +315,7 @@ func (s *Service) ListPendingCharges(ctx context.Context, payer identity.Custome
 	if s == nil || s.rt == nil {
 		return nil, fmt.Errorf("service not initialized")
 	}
-	cur, err := s.resolveCurrency(ctx, currency)
+	cur, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
 	}
@@ -341,7 +341,7 @@ func (s *Service) GetOutstandingOwed(ctx context.Context, payer identity.Custome
 	if s == nil || s.rt == nil {
 		return 0, fmt.Errorf("service not initialized")
 	}
-	cur, err := s.resolveCurrency(ctx, currency)
+	cur, err := requireCurrency(currency)
 	if err != nil {
 		return 0, err
 	}

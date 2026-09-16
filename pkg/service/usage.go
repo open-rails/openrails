@@ -72,7 +72,7 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) error {
 	if in.CustomerID.IsZero() {
 		return fmt.Errorf("payer required")
 	}
-	cur, err := s.resolveCurrency(ctx, in.Currency)
+	cur, err := requireCurrency(in.Currency)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur, err := s.resolveCurrency(ctx, currency)
+	cur, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
 	}

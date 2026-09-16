@@ -104,7 +104,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	if req.Invoker == "" {
 		return nil, fmt.Errorf("invoker required")
 	}
-	currency, err := s.resolveCurrency(ctx, req.Currency)
+	currency, err := requireCurrency(req.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -128,15 +128,11 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	if err != nil {
 		return nil, err
 	}
-	displayCurrency, displayErr := s.DisplayCurrency(ctx, trx.Currency)
-	if displayErr != nil {
-		return nil, displayErr
-	}
 	return &CreditTransaction{
 		ID:              trx.ID,
 		CustomerID:      trx.CustomerID,
 		Invoker:         trx.Invoker,
-		Currency:        displayCurrency,
+		Currency:        trx.Currency,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -202,7 +198,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if req.Invoker == "" {
 		return nil, fmt.Errorf("invoker required")
 	}
-	currency, err := s.resolveCurrency(ctx, req.Currency)
+	currency, err := requireCurrency(req.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -226,15 +222,11 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	if err != nil {
 		return nil, err
 	}
-	displayCurrency, displayErr := s.DisplayCurrency(ctx, trx.Currency)
-	if displayErr != nil {
-		return nil, displayErr
-	}
 	return &CreditTransaction{
 		ID:              trx.ID,
 		CustomerID:      trx.CustomerID,
 		Invoker:         trx.Invoker,
-		Currency:        displayCurrency,
+		Currency:        trx.Currency,
 		Amount:          trx.Amount,
 		BalanceAfter:    trx.BalanceAfter,
 		TransactionType: trx.TransactionType,
@@ -274,15 +266,11 @@ func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID
 	if trx == nil {
 		return nil, nil
 	}
-	displayCurrency, displayErr := s.DisplayCurrency(ctx, trx.Currency)
-	if displayErr != nil {
-		return nil, displayErr
-	}
 	return &CreditTransaction{
 		ID:              trx.ID,
 		CustomerID:      trx.CustomerID,
 		Invoker:         trx.Invoker,
-		Currency:        displayCurrency,
+		Currency:        trx.Currency,
 		Amount:          trx.Amount,
 		TransactionType: trx.TransactionType,
 		Status:          trx.Status,
@@ -349,7 +337,7 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		return nil, fmt.Errorf("customer_id required")
 	}
-	currency, err := s.resolveCurrency(ctx, req.Currency)
+	currency, err := requireCurrency(req.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -357,13 +345,9 @@ func (s *Service) ServiceUsageRollup(ctx context.Context, req ServiceUsageRollup
 	if err != nil {
 		return nil, err
 	}
-	displayCurrency, err := s.DisplayCurrency(ctx, currency)
-	if err != nil {
-		return nil, err
-	}
 	out := make([]ServiceUsageRollupRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, ServiceUsageRollupRow{Key: r.Key, Currency: displayCurrency, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
+		out = append(out, ServiceUsageRollupRow{Key: r.Key, Currency: currency, EventCount: r.EventCount, TotalAmount: r.TotalAmount})
 	}
 	return out, nil
 }
@@ -381,7 +365,7 @@ func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency s
 	}
 	defer release()
 
-	currency, err := s.resolveCurrency(ctx, currency)
+	currency, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
 	}
@@ -389,13 +373,9 @@ func (s *Service) ResourceRevenueDaily(ctx context.Context, resource, currency s
 	if err != nil {
 		return nil, err
 	}
-	displayCurrency, err := s.DisplayCurrency(ctx, currency)
-	if err != nil {
-		return nil, err
-	}
 	out := make([]ResourceRevenueDailyRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, ResourceRevenueDailyRow{Date: r.Date, Currency: displayCurrency, Amount: r.Amount})
+		out = append(out, ResourceRevenueDailyRow{Date: r.Date, Currency: currency, Amount: r.Amount})
 	}
 	return out, nil
 }
