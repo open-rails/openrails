@@ -21,3 +21,31 @@ values beyond JavaScript's safe integer range; numeric money above 2^53 is shown
 as out of range and rejected as input. No compatibility
 parser accepts numeric money on these finalized routes during the pre-v1 cut.
 Remaining unconverted endpoints are tracked in #983 and are not frozen yet.
+
+## Admin console browser support
+
+The exact display path (`web/admin/src/lib/format.ts`) depends on:
+
+| Feature | Used for | Minimum (MDN compat data) |
+|---|---|---|
+| `Intl.NumberFormat.prototype.format` with a decimal **string** argument (ECMA-402 2023) | rendering the exact major-unit decimal without a `Number` | Chrome/Edge 106, Firefox 116, Safari/iOS 15.4, Node 19 |
+| `BigInt` (literals, `**`, `%`, `/`, comparisons) | scaling int64 units, input parsing, invoice arithmetic | Chrome/Edge 67, Firefox 68, Safari/iOS 14, Node 10.4 |
+| `Object.hasOwn` | registry lookup | Chrome/Edge 93, Firefox 92, Safari/iOS 15.4 |
+| `Intl.NumberFormat` options `style: "currency"`, `currency`, `maximumFractionDigits`, `useGrouping` (boolean) | currency and plain-number rendering | baseline (Chrome 24, Firefox 29, Safari 10) |
+
+`format(bigint)` and `formatToParts` are not used. The minimum for exact
+display of every int64 amount is therefore **Chrome/Edge 106, Firefox 116,
+Safari/iOS 15.4**. The Vite build target (`baseline-widely-available`:
+Chrome/Edge 111, Firefox 114, Safari 16.4) is the syntax floor; browsers
+below it may fail to parse the bundle and show nothing.
+
+On a browser inside the syntax floor but without exact decimal-string
+formatting (Firefox 114–115), `format` coerces the string through `Number`.
+`format.ts` probes this once at load (`intlFormatsDecimalStringsExactly`,
+formatting `2^53 + 1`). On such an engine amounts below 10^15 native units are
+still rendered, because a `Number` rounds back to those digits at every registry
+scale, and larger amounts render as `<currency> amount exceeds this browser's
+exact display range` instead of a silently rounded figure.
+`src/lib/format-legacy-intl.test.ts` proves both halves against a coercing
+`Intl.NumberFormat`. Without `BigInt` the bundle does not parse; without
+`Object.hasOwn` the registry lookup throws — neither shows a wrong amount.

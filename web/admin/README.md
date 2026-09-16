@@ -1,5 +1,9 @@
 # React + TypeScript + Vite + shadcn/ui
 
+Browser support for exact money display (Intl decimal strings, BigInt) and the
+behaviour on older engines is documented in
+[docs/money-wire.md](../../docs/money-wire.md#admin-console-browser-support).
+
 This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
 
 ## Adding components
