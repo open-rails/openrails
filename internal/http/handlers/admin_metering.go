@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"github.com/open-rails/openrails"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -26,20 +27,9 @@ type adminUsageMeterPageResponse struct {
 	WritesAllowed       bool   `json:"writes_allowed"`
 }
 
-type adminUsageMeterRequest struct {
-	EventType     string            `json:"event_type"`
-	ValueProperty string            `json:"value_property"`
-	Aggregation   string            `json:"aggregation"`
-	Unit          string            `json:"unit,omitempty"`
-	GroupBy       map[string]string `json:"group_by,omitempty"`
-}
+type adminUsageMeterRequest = openrails.UsageMeterRequest
 
-type adminDefaultUsageRateCardRequest struct {
-	ProductID uuid.UUID           `json:"product_id"`
-	Filter    map[string][]string `json:"filter"`
-	Price     pricing.RatePrice   `json:"price"`
-	Allowance *pricing.Allowance  `json:"allowance,omitempty"`
-}
+type adminDefaultUsageRateCardRequest = openrails.DefaultUsageRateCardRequest
 
 func AdminListUsageMeters(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)

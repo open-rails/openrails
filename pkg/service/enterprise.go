@@ -145,14 +145,7 @@ func (s *Service) EnsureUsageProduct(ctx context.Context, key, displayName strin
 }
 
 // UsageMeterSpec declares a host-owned usage meter (upserted idempotently).
-type UsageMeterSpec struct {
-	Key           string            `json:"key"`
-	EventType     string            `json:"event_type"`
-	ValueProperty string            `json:"value_property"`
-	Aggregation   string            `json:"aggregation"` // sum | count
-	Unit          string            `json:"unit,omitempty"`
-	GroupBy       map[string]string `json:"group_by,omitempty"`
-}
+type UsageMeterSpec = openrails.UsageMeterSpec
 
 // EnsureUsageMeter idempotently declares a host-owned catalog meter.
 func (s *Service) EnsureUsageMeter(ctx context.Context, spec UsageMeterSpec) error {
