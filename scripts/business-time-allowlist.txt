@@ -94,7 +94,6 @@ internal/reconcile/store.go|return time.Now().UTC()|business_time_boundary|Expli
 internal/reconcile/unknown_probe.go|return time.Now().UTC()|business_time_boundary|Standalone provider probe default; owning reconcile paths pass an observation instant|1
 internal/river/job_liveness.go|tracker := progress.NewTracker(time.Now())|infrastructure_time|Worker progress tracker elapsed-time origin|1
 internal/river/jobs_admission_denials.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/river/jobs_business_cycle.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_catalog_reconciliation.go|now := time.Now().UTC()|infrastructure_time|Provider catalog drift observation timestamp|1
 internal/river/jobs_cleanup.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_converge_sweep.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
