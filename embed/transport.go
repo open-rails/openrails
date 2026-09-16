@@ -2,6 +2,7 @@ package embed
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -74,6 +75,9 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 			mid = v // host pinned it per call via openrails.WithMerchant
 		}
 	}
+	// Only the caller's cancellation and deadline reach the engine; every host
+	// context value is dropped (engineContext).
+	ctx = engineContext(ctx)
 	ctx = billingauth.WithHostPrincipal(ctx, &billingauth.HostPrincipal{
 		MerchantID:  mid,
 		Permissions: hostPermissions(),
@@ -156,3 +160,17 @@ func (w *bufferedResponse) response(req *http.Request) *http.Response {
 func merchantMismatchMsg(bound, pinned merchant.ID) string {
 	return fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, bound)
 }
+
+// engineContext derives the context the engine serves an in-process call under.
+// It keeps only the host's cancellation and deadline: every host context value
+// — the session user the host is serving, request auth caches, a pinned
+// merchant connection, rate-limit subjects — is dropped, so the engine
+// attributes the call to the Client's bound merchant exactly as it attributes a
+// standalone API-key request, never to the host's own caller.
+func engineContext(host context.Context) context.Context {
+	return detachedValues{Context: host}
+}
+
+type detachedValues struct{ context.Context }
+
+func (detachedValues) Value(any) any { return nil }
