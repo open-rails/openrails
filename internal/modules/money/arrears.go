@@ -39,7 +39,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	if amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
 	}
-	// #474 invariant: owed/arrears is external-currency-only (reject custom credits).
+	// Owed/arrears requires a registered currency.
 	cur := normalizeCurrency(currency)
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err

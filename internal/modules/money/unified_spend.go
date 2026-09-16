@@ -120,10 +120,7 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 // actual charge and is idempotent on (merchant, payer, currency, source,
 // source_id).
 //
-// Custom units consume existing credits only; insufficient funding refuses the
-// capture without creating debt. The overdraft policy below applies to ISO units.
-//
-// #513 decision 8: ISO capture RECORDS REALITY UNCONDITIONALLY. The Redis spendgate
+// #513 decision 8: capture RECORDS REALITY UNCONDITIONALLY. The Redis spendgate
 // at admit time is the ONLY gate, and concurrent admits may bounded-over-admit.
 // Capture therefore must NOT re-gate the credit line: it draws the prepaid
 // balance first and records any remainder as owed/overdraft (even for a prepaid
@@ -220,7 +217,6 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 // point) and handled idempotency. Returns the amounts drawn from balance and
 // accrued to owed (either may be 0).
 //
-// Custom units always require sufficient prepaid balance. For ISO units,
 // preAuthorized selects the gating contract:
 //   - false (immediate SpendCredits): the remainder is GATED by the account's
 //     credit line — a prepaid payer (no/zero credit line) or a spend that would

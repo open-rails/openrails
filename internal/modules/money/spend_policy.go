@@ -48,8 +48,7 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	// Account settings / owed are billing-layer (#475 invariant):
-	// custom credit units are never billed in.
+	// Account settings require a registered billing currency.
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
 	}

@@ -105,7 +105,7 @@ generically; the merchant index bounds the scan, the page `LIMIT` the result.
   backlog makes each one a single long transaction.
 - *Missing indexes* — `solana_subscriptions.merchant_id` (its RLS predicate is
   not index-backed; the only true `Seq Scan` in the codebase),
-  `product_usage_limit_bindings` (no index at all), `grants.payment_id`,
+  `grants.payment_id`,
   `checkout_sessions.payment_id`, `checkout_sessions.subscription_id`,
   `reprice_batches.price_key`.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`, `…ByCustomerIDs`.
@@ -206,21 +206,7 @@ or#893 squashed the migration chain into `0001`, and every inline
 `-- squawk-ignore` lived in a file that squash deleted. Those exemptions were
 records of what one-time rename/backfill/hard-cut migrations actually did; the
 baseline states the result instead. The invariants they protected survive as
-constraints, indexes and COMMENTs on the objects themselves. What follows is
-what has been earned since.
-
-**`0002_drop_credit_purchase_round.up.sql` — `ban-drop-column`.** or#823 drops
-`catalog_credit_purchase_prices.round`, a column written and never read: the
-runtime credit-purchase quote (`money.loadCatalogCreditPurchase`) lists its
-columns explicitly and this was not among them. The rule guards against a client
-that still names a dropped column, and squawk cannot see who reads what — every
-client that named this one is in this repo and stops naming it in the same
-commit (the sidecar INSERT, and the embedded manifest dump that echoed it back
-out). The residual case the rule really covers, an older binary INSERTing it
-against the new schema, is a catalog-apply/dump path rather than the money path,
-and migratekit applies at boot ahead of the binary that needs it. The rounding
-that IS read lives inside the offer's `price` jsonb as `per_unit.round` and is
-untouched.
+constraints, indexes and COMMENTs on the objects themselves.
 
 Because the baseline is the only file and the only excluded path, squawk has
 nothing to check and exits non-zero on the empty glob. `scripts/migration-lint.sh`
