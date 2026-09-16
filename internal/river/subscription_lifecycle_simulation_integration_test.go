@@ -115,8 +115,8 @@ type simSub struct {
 	entName    string
 }
 
-// seedSimSubscription creates a product (one entitlement + one per-renewal
-// USD credit grant), an auto-renew "monthly" price, an NMI payment method,
+// seedSimSubscription creates an entitlement-bearing product, a monthly price,
+// an NMI payment method,
 // and a subscription starting `active` for [periodStart, periodStart+cycle).
 // When withInitialPayment is true it also records a completed payment at
 // periodStart — the checkout charge that "opens" the period and is the #664
@@ -136,8 +136,6 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 	subID := uuid.New()
 	userID := uuid.New().String()
 	now := periodStart
-
-	require.NoError(t, err)
 
 	entitlementsSpec := map[string]*int{entName: nil}
 	entitlementsSpecJSON, err := json.Marshal(entitlementsSpec)
@@ -462,15 +460,8 @@ func paymentCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.UUID
 
 // --- scenario 1: happy renewals -------------------------------------------
 
-// testHappyRenewals: every charge is approved. Per cycle it asserts exactly
-// one dunning attempt, exactly one completed payment, exactly one credit
-// grant (a per-subscription grants-table row count — catches a double-grant
-// bug even if a clawback would otherwise mask the balance), the subscription
-// returns to `active` with the period advanced by exactly one cycle, and the
-// entitlement stays standing-access-active throughout. It also exercises
-// CreditExpiryWorker: the product's credit lot expires after 35 days (a bit
-// over one cycle), so by the third renewal the FIRST lot has been clawed back
-// and the balance reflects only the still-live lots.
+// testHappyRenewals verifies one charge and payment per renewal, standing access,
+// and no bundled balance deposits.
 func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t)
@@ -498,16 +489,13 @@ func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 
 		require.Equal(t, cycle, stub.count(), "cycle %d: exactly one dunning attempt", cycle)
 		require.Equal(t, cycle+1, paymentCount(t, ctx, dbi, sim.subID, payments.PaymentStatusCompletedValue), "cycle %d: signup + one completed renewal payment per cycle", cycle)
-		require.Equal(t, 0, creditGrantCount(t, ctx, dbi, sim.subID), "cycle %d: exactly one credit grant", cycle)
+		require.Equal(t, 0, creditGrantCount(t, ctx, dbi, sim.subID), "cycle %d: no bundled balance grant", cycle)
 
 		periodEnd = wantEnd
 	}
 	stub.assertDrained(t)
 
-	// Credit expiry (#514/CreditExpiryWorker, clock-driven): the cycle-1 lot
-	// (granted ~day31, expiry 35d later) is well past expiry by the third
-	// renewal (~day91); the cycle-2 lot (granted ~day61, expiry ~day96) is
-	// not. Balance must reflect only the live lots.
+	// Renewals do not materialize the deferred bundled balance feature.
 	bal, err := rig.moneySvc.GetBalanceForCustomer(ctx, identity.CustomerID(sim.customerID), "USD")
 	require.NoError(t, err)
 	require.Equal(t, int64(0), bal.Balance, "subscription renewals do not create bundled balances")
@@ -539,7 +527,7 @@ func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 	require.Equal(t, 2, stub.count(), "one declined attempt + one successful retry")
 	require.Equal(t, 1, paymentCount(t, ctx, dbi, sim.subID, payments.PaymentStatusFailedValue), "the declined attempt is durably recorded")
 	require.Equal(t, 2, paymentCount(t, ctx, dbi, sim.subID, payments.PaymentStatusCompletedValue), "signup + the successful renewal (not the decline)")
-	require.Equal(t, 0, creditGrantCount(t, ctx, dbi, sim.subID), "credit granted only on the successful attempt")
+	require.Equal(t, 0, creditGrantCount(t, ctx, dbi, sim.subID), "renewal success does not grant a bundled balance")
 
 	// Prove the cadence is fully restored: the next cycle renews normally too.
 	secondPeriodEnd := *sub.CurrentPeriodEndsAt

@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
@@ -124,7 +123,6 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
-	moneySvc := money.NewMoneyService(dbi, nil)
 
 	// Same shape as the production Work loop: the pass runs on a merchant-scoped
 	// connection, so both the read and the enqueue carry the GUC. On the bare
@@ -272,7 +270,6 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
-	moneySvc := money.NewMoneyService(dbi, nil)
 
 	// Same shape as the production Work loop: the pass runs on a merchant-scoped
 	// connection, so both the read and the lifecycle writes carry the GUC.

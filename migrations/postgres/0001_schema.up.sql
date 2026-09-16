@@ -4309,7 +4309,7 @@ CREATE TABLE openrails.admission_operations (
     merchant_id uuid NOT NULL,
     request_id text NOT NULL CHECK (octet_length(request_id) BETWEEN 1 AND 255),
     payer_id uuid NOT NULL,
-    currency text NOT NULL CONSTRAINT admission_operations_currency_shape CHECK (currency ~ '^[A-Z]{3,12}$',
+    currency text NOT NULL CONSTRAINT admission_operations_currency_shape CHECK (currency ~ '^[A-Z]{3,12}$'),
     estimated_amount bigint NOT NULL CHECK (estimated_amount >= 0),
     available_amount bigint NOT NULL CHECK (available_amount >= 0),
     terms jsonb NOT NULL CHECK (jsonb_typeof(terms) = 'object' AND octet_length(terms::text) <= 65536),

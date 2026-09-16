@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
+func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	ctx := context.Background()
@@ -58,9 +58,8 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	billingDays := 720
 	billingDays32 := int32(billingDays)
 
-	require.NoError(t, err)
 	description := "Test"
-	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
+	_, err := q.CreateProduct(ctx, gen.CreateProductParams{
 		ID:          productID,
 		Key:         "test_product_" + uuid.New().String(),
 		DisplayName: "Test Product",
@@ -228,11 +227,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	}))
 	require.Equal(t, dunningOutcomeSucceeded, outcome)
 
-	// The successful rebill granted the renewal's 100 USD credit lot exactly once.
-	// Post-#512/#514 a credit grant materializes a SINGLE ledger deposit and the
-	// balance is DERIVED (the old money_transactions 'deposit'/'subscription_renewal'
-	// row is now a ledger_transfers deposit). Balance read through the money service
-	// is schema-rewritten; a double grant would read 200.
+	// A successful subscription renewal does not create a bundled balance.
 	var bal *models.MoneyBalance
 	require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
 		var e error
@@ -368,7 +363,6 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	notifSvc := subscriptions.NewNotificationService(dbi, nil)
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
-	moneySvc := money.NewMoneyService(dbi, nil)
 
 	// Same shape as the production Work loop: read AND repair on a
 	// merchant-scoped connection. On the bare context subscriptions' FORCEd RLS
