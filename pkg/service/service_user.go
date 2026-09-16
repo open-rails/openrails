@@ -1119,7 +1119,7 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	if userID == "" {
 		return nil, fmt.Errorf("user_id required")
 	}
-	currency, err := s.resolveCurrency(ctx, currency)
+	currency, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
 	}
@@ -1136,14 +1136,10 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	if err != nil {
 		return nil, err
 	}
-	display, err := s.DisplayCurrency(ctx, bal.Currency)
-	if err != nil {
-		return nil, err
-	}
 	return &CreditBalance{
-		Currency:      display,
-		DisplayName:   display,
-		Unit:          display,
+		Currency:      bal.Currency,
+		DisplayName:   bal.Currency,
+		Unit:          bal.Currency,
 		DecimalPlaces: decimals,
 		Balance:       bal.Balance,
 		HeldBalance:   bal.HeldBalance,
@@ -1176,11 +1172,7 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency st
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer could not be resolved from subject")
 	}
-	canonical, err := s.resolveCurrency(ctx, currency)
-	if err != nil {
-		return nil, err
-	}
-	display, err := s.DisplayCurrency(ctx, canonical)
+	canonical, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
 	}
@@ -1195,7 +1187,7 @@ func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency st
 			ID:              t.ID,
 			CustomerID:      t.CustomerID,
 			Invoker:         t.Invoker,
-			Currency:        display,
+			Currency:        canonical,
 			Amount:          t.Amount,
 			TransactionType: t.TransactionType,
 			Source:          t.Source,
