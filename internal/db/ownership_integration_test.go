@@ -160,22 +160,4 @@ func TestOwnedRowsRejectForeignParentsAndPreserveDeletionScope(t *testing.T) {
 	require.Equal(t, payer, customerID)
 	require.Nil(t, method)
 
-	// Both merchants can hold this other subject too. Deleting A's relationship
-	// nulls only A's optional history link; B's customer and history remain.
-	temporary := uuid.New()
-	for _, r := range []ownedBillingRows{a, b} {
-		_, err = r.pool.Exec(ctx, "INSERT INTO openrails.customers(id,merchant_id) VALUES($1,$2)", temporary, r.merchant)
-		require.NoError(t, err)
-		_, err = r.pool.Exec(ctx, `INSERT INTO openrails.imported_dunning_history(merchant_id,customer_id,event_type,rail,occurred_at,source) VALUES($1,$2,'notice','nmi',now(),'ownership-delete')`, r.merchant, temporary)
-		require.NoError(t, err)
-	}
-	_, err = a.pool.Exec(ctx, "DELETE FROM openrails.customers WHERE id=$1", temporary)
-	require.NoError(t, err)
-	var customer *uuid.UUID
-	require.NoError(t, a.pool.QueryRow(ctx, "SELECT merchant_id,customer_id FROM openrails.imported_dunning_history WHERE source='ownership-delete'").Scan(&merchantID, &customer))
-	require.Equal(t, a.merchant, merchantID)
-	require.Nil(t, customer)
-	require.NoError(t, b.pool.QueryRow(ctx, "SELECT merchant_id,customer_id FROM openrails.imported_dunning_history WHERE source='ownership-delete'").Scan(&merchantID, &customer))
-	require.Equal(t, b.merchant, merchantID)
-	require.Equal(t, temporary, *customer)
 }

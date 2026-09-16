@@ -14,9 +14,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #735: the PG-backed reconcile history source merges imported legacy dunning
-// rows with failed payments, time-ordered, merchant-isolated (RLS + explicit
-// merchant filter). It replaced the ClickHouse DunningHistoryService.
+// Retained failed-payment history is time-ordered and merchant-isolated.
 func TestPGHistorySource(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantA := dbtest.TestMerchantID
@@ -26,12 +24,13 @@ func TestPGHistorySource(t *testing.T) {
 	ctxB := merchant.WithID(context.Background(), merchantB)
 
 	sfx := uuid.NewString()[:8]
-	t1 := time.Date(2019, 5, 1, 12, 0, 0, 0, time.UTC) // imported legacy event
+	t1 := time.Date(2019, 5, 1, 12, 0, 0, 0, time.UTC) // older failed payment
 	t2 := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC) // failed payment
 
 	prodA, priceA := uuid.New(), uuid.New()
 	prodB, priceB := uuid.New(), uuid.New()
 	payFailedA, payCompletedA, payFailedB := uuid.New(), uuid.New(), uuid.New()
+	payOlderA, payOtherRailA := uuid.New(), uuid.New()
 	var custA, custB uuid.UUID
 
 	seed := func(ctx context.Context, mid uuid.UUID, prodID, priceID uuid.UUID, tag string) {
@@ -53,14 +52,14 @@ func TestPGHistorySource(t *testing.T) {
 			_, err := appDB.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		// Imported legacy dunning row with correlation keys in detail.
-		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source, detail)
-		      VALUES ($1,'charge_failure','nmi',$2,'host-one_users_logs',
-		              '{"rail_subscription_id":"legacy-sub-`+sfx+`","rail_transaction_id":"legacy-txn-`+sfx+`","status":"declined","amount_micros":9990000}'::jsonb)`,
-			merchantA.UUID(), t1)
-		// Off-rail imported row: must not surface for a ["nmi"] query.
-		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source)
-		      VALUES ($1,'charge_failure','ccbill',$2,'host-one_users_logs')`, merchantA.UUID(), t1)
+		// Older payment evidence and an off-rail control remain ordinary receipts.
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
+			payOlderA, merchantA.UUID(), custA, priceA, "older-txn-"+sfx, t1, pspA)
+		pspOther := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantA.UUID(), "ccbill")
+		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
+		      VALUES ($1,$2,$3,$4,'ccbill',$5,9990000,9990000,'USD','failed',$6,$7)`,
+			payOtherRailA, merchantA.UUID(), custA, priceA, "offrail-txn-"+sfx, t1, pspOther)
 		// Failed payment = go-forward dunning evidence.
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
@@ -85,8 +84,6 @@ func TestPGHistorySource(t *testing.T) {
 		exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2)`, custB, merchantB.UUID())
 		seed(ctx, merchantB.UUID(), prodB, priceB, "b")
 		pspB := dbtest.EnsureTestPSP(ctx, t, appDB.Qx(ctx), merchantB.UUID(), "nmi")
-		exec(`INSERT INTO openrails.imported_dunning_history (merchant_id, event_type, rail, occurred_at, source)
-		      VALUES ($1,'charge_failure','nmi',$2,'mobius_schedulers')`, merchantB.UUID(), t1)
 		exec(`INSERT INTO openrails.payments (id, merchant_id, customer_id, price_id, rail, transaction_id, amount, list_amount, currency, status, purchased_at, psp_id)
 		      VALUES ($1,$2,$3,$4,'nmi',$5,9990000,9990000,'USD','failed',$6,$7)`,
 			payFailedB, merchantB.UUID(), custB, priceB, "fail-txn-b-"+sfx, t2, pspB)
@@ -99,8 +96,7 @@ func TestPGHistorySource(t *testing.T) {
 			mid uuid.UUID
 		}{{ctxA, merchantA.UUID()}, {ctxB, merchantB.UUID()}} {
 			_ = appDB.RunInMerchantConn(c.ctx, func(ctx context.Context) error {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.imported_dunning_history WHERE merchant_id=$1`, c.mid)
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payFailedA, payCompletedA, payFailedB})
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.payments WHERE id=ANY($1)`, []uuid.UUID{payFailedA, payCompletedA, payFailedB, payOlderA, payOtherRailA})
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=ANY($1)`, []uuid.UUID{priceA, priceB})
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=ANY($1)`, []uuid.UUID{prodA, prodB})
 				return nil
@@ -112,7 +108,7 @@ func TestPGHistorySource(t *testing.T) {
 	src := NewPGHistorySource(appDB)
 	require.True(t, src.Configured())
 
-	t.Run("merges imported rows and failed payments oldest-first", func(t *testing.T) {
+	t.Run("returns failed payments oldest-first", func(t *testing.T) {
 		var events []HistoryEvent
 		require.NoError(t, appDB.RunInMerchantConn(ctxA, func(ctx context.Context) error {
 			var err error
@@ -121,16 +117,16 @@ func TestPGHistorySource(t *testing.T) {
 		}))
 		require.Len(t, events, 2)
 
-		imported := events[0]
-		require.Equal(t, "imported_dunning_history", imported.Table)
-		require.Equal(t, "charge_failure", imported.EventType)
-		require.Equal(t, "nmi", imported.Rail)
-		require.Equal(t, "legacy-sub-"+sfx, imported.RailSubscriptionID)
-		require.Equal(t, "legacy-txn-"+sfx, imported.RailTransactionID)
-		require.Equal(t, "declined", imported.Status)
-		require.NotNil(t, imported.AmountMicros)
-		require.Equal(t, int64(9_990_000), *imported.AmountMicros)
-		require.True(t, imported.OccurredAt.Equal(t1))
+		older := events[0]
+		require.Equal(t, "payments", older.Table)
+		require.Equal(t, "charge_failure", older.EventType)
+		require.Equal(t, "nmi", older.Rail)
+		require.Empty(t, older.RailSubscriptionID)
+		require.Equal(t, "older-txn-"+sfx, older.RailTransactionID)
+		require.Equal(t, "failed", older.Status)
+		require.NotNil(t, older.AmountMicros)
+		require.Equal(t, int64(9_990_000), *older.AmountMicros)
+		require.True(t, older.OccurredAt.Equal(t1))
 
 		failed := events[1]
 		require.Equal(t, "payments", failed.Table)
@@ -158,10 +154,10 @@ func TestPGHistorySource(t *testing.T) {
 			events, err = src.ListEvents(ctx, []string{"nmi"}, time.Time{}, time.Time{})
 			return err
 		}))
-		require.Len(t, events, 2)
+		require.Len(t, events, 1)
 		for _, ev := range events {
 			require.NotContains(t, ev.RailTransactionID, "fail-txn-"+sfx)
-			require.NotEqual(t, "legacy-sub-"+sfx, ev.RailSubscriptionID)
+			require.NotEqual(t, "older-txn-"+sfx, ev.RailTransactionID)
 		}
 	})
 }
