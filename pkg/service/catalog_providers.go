@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"sort"
 	"strings"
+
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/pkg/merchant"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -30,12 +32,7 @@ import (
 // PendingAction describes a manual step the operator must complete to bring a
 // pending_manual_link provider to linked status. Surfaced on CreatePrice and on
 // GetPrice/Reconcile responses when at least one provider is still pending.
-type PendingAction struct {
-	Provider      string                                  `json:"provider"`
-	Action        string                                  `json:"action"`
-	Hint          string                                  `json:"hint"`
-	PatchRequired map[string]map[string]map[string]string `json:"patch_required,omitempty"`
-}
+type PendingAction = openrails.PendingAction
 
 // providerLookupKey is the conventional key under which an adapter stores its
 // canonical lookup key on the rails[provider] map (when one exists).
