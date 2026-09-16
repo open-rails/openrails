@@ -36,7 +36,7 @@ type paymentPath struct {
 }
 
 type refundRequest struct {
-	Amount       int64  `json:"amount" binding:"required,gt=0"`
+	Amount       int64  `json:"amount,string" binding:"required,gt=0"`
 	Reason       string `json:"reason,omitempty"`
 	RevokeAccess bool   `json:"revoke_access,omitempty"`
 }
@@ -59,7 +59,7 @@ type adminOffChannelPaymentPath struct {
 type adminOffChannelPaymentRequest struct {
 	PriceID          string         `json:"price_id" binding:"required"`
 	TransactionID    string         `json:"transaction_id" binding:"required"`
-	Amount           *int64         `json:"amount,omitempty"`
+	Amount           *int64         `json:"amount,omitempty,string"`
 	Currency         string         `json:"currency,omitempty"`
 	PurchasedAt      string         `json:"purchased_at,omitempty"`
 	DiscountCode     *string        `json:"discount_code,omitempty"`

@@ -1,5 +1,7 @@
 // Types mirror the Go handlers' JSON shapes exactly (see internal/http/handlers).
-// All money fields are MICROS (millionths of a currency unit).
+// Money is native units at the currency registry scale; exact wires send int64
+// decimal strings (docs/money-wire.md).
+import type { MoneyAmount } from "@/lib/format"
 
 export type SubscriptionStatus =
   "pending" | "active" | "past_due" | "cancelled" | "unknown"
@@ -50,7 +52,9 @@ export interface RawSubscription {
 export interface RawPrice {
   id: string
   product_id?: string
-  amount?: number
+  // Exact string on merchant subscription routes; still a number on the
+  // customer billing profile (#983 pending).
+  amount?: MoneyAmount
   currency?: string
   archived?: boolean
   // Key (#774): the durable, movable-pointer handle for this price's
@@ -69,7 +73,7 @@ export interface RawPayment {
   refunded_payment_id?: string
   rail: Rail
   transaction_id: string
-  amount: number
+  amount: MoneyAmount
   list_amount: number
   currency: string
   status: string // "pending" | "completed" | "failed" | "refunded"
@@ -165,8 +169,8 @@ export interface PaymentObject {
   object: "charge" | "refund"
   status?:
     "succeeded" | "pending" | "failed" | "refunded" | "partially_refunded"
-  amount: number
-  amount_refunded: number
+  amount: string
+  amount_refunded: string
   currency: string
   user: string // usr_...
   subscription?: string // sub_...
@@ -192,8 +196,8 @@ export interface TierChangePreview {
   price_id: string
   rail: Rail
   currency: string
-  amount_due_now: number
-  next_charge_amount: number
+  amount_due_now: string
+  next_charge_amount: string
   next_charge_date?: string
   effective: "now" | "period_end"
   is_estimate: boolean
@@ -216,8 +220,8 @@ export interface TierChangeResult {
   message?: string
   delayed_start?: string
   currency?: string
-  amount_due_now: number
-  next_charge_amount: number
+  amount_due_now: string
+  next_charge_amount: string
   next_charge_date?: string
 }
 
@@ -242,13 +246,13 @@ export type UsagePriceModel = "per_unit" | "tiered" | "package"
 
 export interface UsageRateTier {
   up_to: number | null
-  unit_amount?: number
-  flat_amount?: number
+  unit_amount?: string
+  flat_amount?: string
 }
 
 export interface UsageRateMatrixCell {
-  unit_amount: number
-  maximum_amount?: number
+  unit_amount: string
+  maximum_amount?: string
   included?: number
 }
 
@@ -256,10 +260,10 @@ export interface UsageRatePrice {
   model: UsagePriceModel
   currency: string
   per_unit?: {
-    unit_amount?: number
+    unit_amount?: string
     divide_by?: number
     round?: "up" | "down" | "half_up"
-    maximum_amount?: number
+    maximum_amount?: string
     matrix?: {
       dimension: string
       cells: Record<string, UsageRateMatrixCell>
@@ -270,7 +274,7 @@ export interface UsageRatePrice {
     tiers: UsageRateTier[]
   }
   package?: {
-    amount: number
+    amount: string
     package_size: number
     free_units?: number
   }
@@ -396,11 +400,11 @@ export interface CatalogPrice {
   key: string
   product_id: string
   archived: boolean
-  unit_amount: number
+  unit_amount: string
   currency: string
   access_duration_hours?: number
   auto_renew: boolean
-  trial_unit_amount?: number
+  trial_unit_amount?: string
   trial_duration_hours?: number
   created_at: string
   updated_at: string

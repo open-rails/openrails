@@ -188,8 +188,8 @@ function RefundDialog({
 }: {
   payment: {
     id: string
-    amount: number
-    amount_refunded: number
+    amount: string
+    amount_refunded: string
     currency: string
     rail: string
   }
@@ -199,7 +199,9 @@ function RefundDialog({
   disabledNote?: string
 }) {
   const [open, setOpen] = React.useState(false)
-  const remaining = payment.amount - payment.amount_refunded
+  const remaining = (
+    BigInt(payment.amount) - BigInt(payment.amount_refunded)
+  ).toString()
   const queryClient = useQueryClient()
   const refund = useMutation(
     adminMutations.refundPayment(
@@ -217,7 +219,12 @@ function RefundDialog({
     },
     onSubmit: async ({ value }) => {
       const amount = nativeAmountFromInput(value.amount, payment.currency)
-      if (amount === null || amount <= 0 || amount > remaining) return
+      if (
+        amount === null ||
+        BigInt(amount) <= 0n ||
+        BigInt(amount) > BigInt(remaining)
+      )
+        return
       try {
         await refund.mutateAsync({
           amount,
@@ -283,10 +290,10 @@ function RefundDialog({
                       value,
                       payment.currency
                     )
-                    if (amount === null || amount <= 0) {
+                    if (amount === null || BigInt(amount) <= 0n) {
                       return "Enter an amount greater than zero"
                     }
-                    return amount > remaining
+                    return BigInt(amount) > BigInt(remaining)
                       ? "Amount exceeds the remaining refundable balance"
                       : undefined
                   },

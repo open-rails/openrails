@@ -284,7 +284,7 @@ func TestCrossMerchantPaymentIsolationHTTP(t *testing.T) {
 
 	// A refund moves money out of B's account — the write that must never cross.
 	status, body = requestJSON(t, http.MethodPost, p.url("/v1/merchant/payments/"+payID+"/refunds"), p.aToken, map[string]any{
-		"amount": 1000000,
+		"amount": "1000000",
 		"reason": "cross-merchant refund attempt",
 	})
 	require.NotContainsf(t, []int{http.StatusOK, http.StatusCreated, http.StatusAccepted}, status,
