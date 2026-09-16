@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -27,8 +28,8 @@ import (
 )
 
 // TestOperationAuthorizationLifecycle induces the minimal th-005 contract on
-// real Postgres + Redis: replay/refusal/release and cross-store capacity
-// serialization in both reservation interleavings.
+// real Postgres: replay/refusal/release and payer-lock capacity serialization
+// against durable admission in both reservation interleavings.
 func TestOperationAuthorizationLifecycle(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
@@ -62,9 +63,9 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	body := []byte(`{"format":"th-auth-v1","operation_id":"op-funded"}`)
-	request := OperationAuthorizationRequest{
+	request := openrails.OperationAuthorizationRequest{
 		OperationID:             "op-funded-" + uuid.NewString(),
-		Payer:                   payer,
+		Payer:                   openrails.CustomerID(payer),
 		RecordOwner:             "issuer:owner-1",
 		AuthorizedUSDMicros:     6_000,
 		ClaimReference:          "claim:" + uuid.NewString(),
@@ -74,9 +75,8 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 
 	opened, err := openOperationAuthorizationInCommittedTx(ctx, rt, request)
 	require.NoError(t, err)
-	require.Equal(t, OperationAuthorizationOpen, opened.State)
+	require.Equal(t, openrails.OperationAuthorizationOpen, opened.State)
 	require.False(t, opened.Replayed)
-	require.NotEqual(t, uuid.Nil, opened.LedgerAccountID, "reservation must link to the existing ledger")
 	capacity, err := rt.Service().GetCreditAccount(merchantCtx, payer, "USD")
 	require.NoError(t, err)
 	require.Equal(t, int64(6_000), capacity.HeldAmount)
@@ -92,15 +92,15 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	changed.AuthorizationBody = []byte(`{"format":"th-auth-v1","operation_id":"changed"}`)
 	changed.AuthorizationBodySHA256 = sha256.Sum256(changed.AuthorizationBody)
 	_, err = openOperationAuthorizationInCommittedTx(ctx, rt, changed)
-	require.ErrorIs(t, err, ErrOperationAuthorizationConflict)
-	var conflict *OperationAuthorizationConflict
+	require.ErrorIs(t, err, openrails.ErrOperationAuthorizationConflict)
+	var conflict *openrails.OperationAuthorizationConflict
 	require.True(t, errors.As(err, &conflict))
 	require.Equal(t, "authorization_body", conflict.Field)
 
 	secondBody := []byte(`{"format":"th-auth-v1","operation_id":"op-capacity"}`)
-	second := OperationAuthorizationRequest{
+	second := openrails.OperationAuthorizationRequest{
 		OperationID:             "op-capacity-" + uuid.NewString(),
-		Payer:                   payer,
+		Payer:                   openrails.CustomerID(payer),
 		RecordOwner:             request.RecordOwner,
 		AuthorizedUSDMicros:     5_000,
 		ClaimReference:          "claim:" + uuid.NewString(),
@@ -111,11 +111,13 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrInsufficientCredits,
 		"the first open row must reserve capacity without moving ledger money")
 
-	released, err := rt.ReleaseOperationAuthorization(ctx, ReleaseOperationAuthorizationRequest{
+	client, err := rt.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
+	require.NoError(t, err)
+	released, err := client.ReleaseOperationAuthorization(ctx, openrails.ReleaseOperationAuthorizationRequest{
 		OperationID: request.OperationID, ReleaseReference: "absence-proof:" + uuid.NewString(),
 	})
 	require.NoError(t, err)
-	require.Equal(t, OperationAuthorizationReleased, released.State)
+	require.Equal(t, openrails.OperationAuthorizationReleased, released.State)
 	require.False(t, released.Replayed)
 	require.NotNil(t, released.ReleasedAt)
 	capacity, err = rt.Service().GetCreditAccount(merchantCtx, payer, "USD")
@@ -123,35 +125,35 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.Equal(t, int64(0), capacity.HeldAmount)
 	require.Equal(t, int64(10_000), capacity.AvailableAmount)
 
-	releasedAgain, err := rt.ReleaseOperationAuthorization(ctx, ReleaseOperationAuthorizationRequest{
+	releasedAgain, err := client.ReleaseOperationAuthorization(ctx, openrails.ReleaseOperationAuthorizationRequest{
 		OperationID: request.OperationID, ReleaseReference: released.TerminalReference,
 	})
 	require.NoError(t, err)
 	require.True(t, releasedAgain.Replayed)
 	require.Equal(t, released.ReleasedAt, releasedAgain.ReleasedAt)
 
-	read, err := rt.GetOperationAuthorization(ctx, request.OperationID)
+	read, err := client.GetOperationAuthorization(ctx, request.OperationID)
 	require.NoError(t, err)
-	require.Equal(t, OperationAuthorizationReleased, read.State)
+	require.Equal(t, openrails.OperationAuthorizationReleased, read.State)
 	terminalReplay, err := openOperationAuthorizationInCommittedTx(ctx, rt, request)
 	require.NoError(t, err)
 	require.True(t, terminalReplay.Replayed)
-	require.Equal(t, OperationAuthorizationReleased, terminalReplay.State,
+	require.Equal(t, openrails.OperationAuthorizationReleased, terminalReplay.State,
 		"an exact replay reports terminal truth and must never reopen capacity")
 
 	openedSecond, err := openOperationAuthorizationInCommittedTx(ctx, rt, second)
 	require.NoError(t, err, "release must restore the reserved capacity")
-	require.Equal(t, OperationAuthorizationOpen, openedSecond.State)
+	require.Equal(t, openrails.OperationAuthorizationOpen, openedSecond.State)
 
 	// 5,000 remains after openedSecond. Two distinct 3,000 operations race from
 	// independent transactions: the customer-row money lock plus the open-row SUM
 	// must allow exactly one, never let both read the same stale capacity.
-	contenders := make([]OperationAuthorizationRequest, 2)
+	contenders := make([]openrails.OperationAuthorizationRequest, 2)
 	for i := range contenders {
 		contenderBody := []byte(`{"format":"th-auth-v1","operation_id":"concurrent"}`)
-		contenders[i] = OperationAuthorizationRequest{
+		contenders[i] = openrails.OperationAuthorizationRequest{
 			OperationID:             "op-concurrent-" + uuid.NewString(),
-			Payer:                   payer,
+			Payer:                   openrails.CustomerID(payer),
 			RecordOwner:             request.RecordOwner,
 			AuthorizedUSDMicros:     3_000,
 			ClaimReference:          "claim:" + uuid.NewString(),
@@ -183,7 +185,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.Equal(t, 1, openedCount, "one distinct operation may reserve the remaining capacity")
 	require.Equal(t, 1, refusedCount, "the other distinct operation must observe the first reservation")
 
-	// Prove the shared PG->Redis mutex in both interleavings on fresh payers.
+	// Prove the shared payer lock in both interleavings on fresh payers.
 	// First, a durable authorization owns the customer lock before admission:
 	// admission must wait for commit, then read the reduced PG capacity and deny.
 	fundPayer := func(amount int64) identity.CustomerID {
@@ -197,11 +199,11 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 		require.NoError(t, depositErr)
 		return p
 	}
-	newAuthorization := func(p identity.CustomerID, amount int64) OperationAuthorizationRequest {
+	newAuthorization := func(p identity.CustomerID, amount int64) openrails.OperationAuthorizationRequest {
 		operationID := "op-cross-store-" + uuid.NewString()
 		body := []byte(`{"format":"th-auth-v1","operation_id":"` + operationID + `"}`)
-		return OperationAuthorizationRequest{
-			OperationID: operationID, Payer: p, RecordOwner: request.RecordOwner,
+		return openrails.OperationAuthorizationRequest{
+			OperationID: operationID, Payer: openrails.CustomerID(p), RecordOwner: request.RecordOwner,
 			AuthorizedUSDMicros: amount, ClaimReference: "claim:" + uuid.NewString(),
 			AuthorizationBody: body, AuthorizationBodySHA256: sha256.Sum256(body),
 		}
@@ -235,7 +237,7 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	authFirstTx, err := rt.emb.App().Runtime.DB.Pool().Begin(ctx)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = authFirstTx.Rollback(context.Background()) })
-	_, err = rt.OpenOperationAuthorizationTx(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
+	_, err = rt.HostTransactions().OpenOperationAuthorization(ctx, authFirstTx, newAuthorization(authFirstPayer, 6_000))
 	require.NoError(t, err)
 	admissionStarted := make(chan struct{})
 	admissionDone := make(chan admissionResult, 1)
@@ -251,8 +253,8 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	require.False(t, afterAuth.decision.Allowed)
 	require.True(t, afterAuth.decision.BlockedBalance)
 
-	// Then Redis admission owns the same PG lock through its Lua reservation.
-	// Authorization must wait, then subtract that live Redis hold and refuse.
+	// Then admission owns the same payer lock through its durable reservation.
+	// Authorization must wait, then subtract that admission hold and refuse.
 	admissionFirstPayer := fundPayer(10_000)
 	admissionEntered := make(chan struct{})
 	releaseAdmission := make(chan struct{})
@@ -297,9 +299,8 @@ func TestOperationAuthorizationLifecycle(t *testing.T) {
 	overflowRequest := newAuthorization(overflowPayer, 1)
 	_, err = openOperationAuthorizationInCommittedTx(ctx, rt, overflowRequest)
 	require.ErrorContains(t, err, "capacity overflow")
-	notInserted, err := rt.GetOperationAuthorization(ctx, overflowRequest.OperationID)
-	require.NoError(t, err)
-	require.Nil(t, notInserted, "overflow refusal must not leave an authorization row")
+	_, err = client.GetOperationAuthorization(ctx, overflowRequest.OperationID)
+	require.ErrorIs(t, err, openrails.ErrOperationAuthorizationNotFound, "overflow refusal must not leave an authorization row")
 }
 
 func requirePayerLockWait(t *testing.T, ctx context.Context, dsn string) {
@@ -319,13 +320,13 @@ func requirePayerLockWait(t *testing.T, ctx context.Context, dsn string) {
 	}, 5*time.Second, 10*time.Millisecond, "a contender must be visibly waiting on the shared PostgreSQL payer lock")
 }
 
-func openOperationAuthorizationInCommittedTx(ctx context.Context, rt *Runtime, request OperationAuthorizationRequest) (*OperationAuthorization, error) {
+func openOperationAuthorizationInCommittedTx(ctx context.Context, rt *Runtime, request openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
 	tx, err := rt.emb.App().Runtime.DB.Pool().Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
-	auth, err := rt.OpenOperationAuthorizationTx(ctx, tx, request)
+	auth, err := rt.HostTransactions().OpenOperationAuthorization(ctx, tx, request)
 	if err != nil {
 		return nil, err
 	}

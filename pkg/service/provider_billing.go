@@ -2,83 +2,33 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type ProviderBillingQualificationState = money.ProviderBillingQualificationState
-type ProviderBillingQualificationReason = money.ProviderBillingQualificationReason
-type ProviderBillingLifecycleEvidence = money.ProviderBillingLifecycleEvidence
-type ProviderBillingRecord = money.ProviderBillingRecord
-type ProviderBillingEvidenceRefusalKind = money.ProviderBillingEvidenceRefusalKind
-type ProviderBillingObservationRefusal = money.ProviderBillingObservationRefusal
-type ProviderBillingObservationRequest = money.ProviderBillingObservationInput
-type ProviderBillingObservationConflict = money.ProviderBillingObservationConflict
-
-const (
-	ProviderBillingQualificationPending  = money.ProviderBillingQualificationPending
-	ProviderBillingQualificationRefused  = money.ProviderBillingQualificationRefused
-	ProviderBillingQualificationEligible = money.ProviderBillingQualificationEligible
-
-	ProviderBillingAwaitingEqualObservation = money.ProviderBillingAwaitingEqualObservation
-	ProviderBillingAwaitingQuiescence       = money.ProviderBillingAwaitingQuiescence
-	ProviderBillingCoverageIncomplete       = money.ProviderBillingCoverageIncomplete
-	ProviderBillingObservationChanged       = money.ProviderBillingObservationChanged
-	ProviderBillingProviderEvidenceRefused  = money.ProviderBillingProviderEvidenceRefused
-	ProviderBillingNegativeOrCorrective     = money.ProviderBillingNegativeOrCorrective
-	ProviderBillingDecreasingProviderCost   = money.ProviderBillingDecreasingProviderCost
-	ProviderBillingEligible                 = money.ProviderBillingEligible
-
-	ProviderBillingRefusalSchemaAmbiguity  = money.ProviderBillingRefusalSchemaAmbiguity
-	ProviderBillingRefusalSubmicroAmount   = money.ProviderBillingRefusalSubmicroAmount
-	ProviderBillingRefusalAmountOverflow   = money.ProviderBillingRefusalAmountOverflow
-	ProviderBillingRefusalResponseTooLarge = money.ProviderBillingRefusalResponseTooLarge
-)
-
-var (
-	ErrProviderBillingObservationConflict   = money.ErrProviderBillingObservationConflict
-	ErrProviderBillingQualificationRefused  = money.ErrProviderBillingQualificationRefused
-	ErrProviderBillingQualificationNotFound = money.ErrProviderBillingQualificationNotFound
-)
-
-type ProviderBillingQualification struct {
-	OperationID                    string
-	MerchantID                     uuid.UUID
-	Provider                       string
-	ProviderResourceID             string
-	ProviderLifetimeStart          time.Time
-	ProviderLifetimeEnd            time.Time
-	ProviderAbsentAt               time.Time
-	ProviderAbsenceReference       string
-	BillingStopReference           string
-	WindowsClosedAt                time.Time
-	WindowsClosedReference         string
-	LifecycleEvidenceBody          []byte
-	LifecycleEvidenceSHA256        [sha256.Size]byte
-	Quiescence                     time.Duration
-	State                          ProviderBillingQualificationState
-	Reason                         ProviderBillingQualificationReason
-	BaselineObservationID          string
-	QualifiedObservationID         string
-	QualifiedProviderCostUSDMicros *int64
-	QualifiedAt                    *time.Time
-	Authorization                  *OperationAuthorization
-	CreatedAt                      time.Time
-	UpdatedAt                      time.Time
-	Replayed                       bool
+// RecordProviderBillingObservation records exact provider/lifecycle facts in an
+// OpenRails-owned transaction. OpenRails alone qualifies, rates, and settles.
+func (s *Service) RecordProviderBillingObservation(ctx context.Context, req openrails.ProviderBillingObservationRequest) (*openrails.ProviderBillingQualification, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var out *openrails.ProviderBillingQualification
+	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out, err = s.RecordProviderBillingObservationTx(ctx, tx, req)
+		return err
+	})
+	return out, err
 }
 
-// RecordProviderBillingObservationTx records exact provider/lifecycle facts
-// and lets OpenRails alone qualify and settle them in the caller-owned
-// transaction. It never calls a provider and accepts no caller-rated amount.
-func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req ProviderBillingObservationRequest) (*ProviderBillingQualification, error) {
+// RecordProviderBillingObservationTx is the host-transaction form. It never
+// calls a provider and accepts no caller-rated amount.
+func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req openrails.ProviderBillingObservationRequest) (*openrails.ProviderBillingQualification, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -105,7 +55,7 @@ func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx
 	return providerBillingQualificationFromMoney(result), nil
 }
 
-func (s *Service) GetProviderBillingQualification(ctx context.Context, operationID string) (*ProviderBillingQualification, error) {
+func (s *Service) GetProviderBillingQualification(ctx context.Context, operationID string) (*openrails.ProviderBillingQualification, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -118,32 +68,51 @@ func (s *Service) GetProviderBillingQualification(ctx context.Context, operation
 	return providerBillingQualificationFromMoney(result), nil
 }
 
-func providerBillingQualificationFromMoney(result *money.ProviderBillingQualification) *ProviderBillingQualification {
-	if result == nil {
-		return nil
+func (s *Service) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*openrails.ProviderBillingQualification, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
 	}
-	return &ProviderBillingQualification{
-		OperationID:                    result.OperationID,
-		MerchantID:                     result.MerchantID,
-		Provider:                       result.Provider,
-		ProviderResourceID:             result.ProviderResourceID,
-		ProviderLifetimeStart:          result.ProviderLifetimeStart,
-		ProviderLifetimeEnd:            result.ProviderLifetimeEnd,
-		ProviderAbsentAt:               result.ProviderAbsentAt,
-		ProviderAbsenceReference:       result.ProviderAbsenceReference,
-		BillingStopReference:           result.BillingStopReference,
-		WindowsClosedAt:                result.WindowsClosedAt,
-		WindowsClosedReference:         result.WindowsClosedReference,
-		LifecycleEvidenceBody:          result.LifecycleEvidenceBody,
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.moneyService().GetProviderBillingQualificationInTx(ctx, txDB, operationID)
+	if err != nil {
+		return nil, err
+	}
+	return providerBillingQualificationFromMoney(result), nil
+}
+
+func providerBillingQualificationFromMoney(result *money.ProviderBillingQualification) *openrails.ProviderBillingQualification {
+	return &openrails.ProviderBillingQualification{
+		OperationID: result.OperationID,
+		MerchantID:  result.MerchantID,
+		Lifecycle: openrails.ProviderBillingLifecycleEvidence{
+			Provider:                 result.Provider,
+			ProviderResourceID:       result.ProviderResourceID,
+			ProviderLifetimeStart:    result.ProviderLifetimeStart,
+			ProviderLifetimeEnd:      result.ProviderLifetimeEnd,
+			ProviderAbsentAt:         result.ProviderAbsentAt,
+			ProviderAbsenceReference: result.ProviderAbsenceReference,
+			BillingStopReference:     result.BillingStopReference,
+			WindowsClosedAt:          result.WindowsClosedAt,
+			WindowsClosedReference:   result.WindowsClosedReference,
+			LifecycleEvidenceBody:    result.LifecycleEvidenceBody,
+		},
 		LifecycleEvidenceSHA256:        result.LifecycleEvidenceSHA256,
-		Quiescence:                     result.Quiescence,
-		State:                          result.State,
-		Reason:                         result.Reason,
+		QuiescenceSeconds:              int64(result.Quiescence.Seconds()),
+		State:                          openrails.ProviderBillingQualificationState(result.State),
+		Reason:                         openrails.ProviderBillingQualificationReason(result.Reason),
 		BaselineObservationID:          result.BaselineObservationID,
 		QualifiedObservationID:         result.QualifiedObservationID,
 		QualifiedProviderCostUSDMicros: result.QualifiedProviderCostUSDMicros,
 		QualifiedAt:                    result.QualifiedAt,
-		Authorization:                  operationAuthorizationFromMoney(result.Authorization),
+		Authorization:                  *operationAuthorizationFromMoney(result.Authorization),
 		CreatedAt:                      result.CreatedAt,
 		UpdatedAt:                      result.UpdatedAt,
 		Replayed:                       result.Replayed,

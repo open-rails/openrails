@@ -57,7 +57,7 @@ func TestPassThroughProviderCostSettlementLifecycle(t *testing.T) {
 		if bindErr != nil {
 			return nil, bindErr
 		}
-		auth, settleErr := svc.SettlePassThroughProviderCostInTx(boundCtx, txDB, in)
+		auth, settleErr := svc.SettlePassThroughProviderCostInTxForTest(boundCtx, txDB, in)
 		if settleErr != nil {
 			return nil, settleErr
 		}

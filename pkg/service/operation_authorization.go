@@ -2,77 +2,34 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type OperationAuthorizationState = money.OperationAuthorizationState
+// Provider-operation commands exist in two forms with identical semantics: the
+// plain form commits its own merchant transaction (the Client routes), and the
+// Tx form rides a transaction owned by an embedding host, which alone commits
+// or rolls it back.
 
-const (
-	OperationAuthorizationOpen     = money.OperationAuthorizationOpen
-	OperationAuthorizationReleased = money.OperationAuthorizationReleased
-	OperationAuthorizationSettled  = money.OperationAuthorizationSettled
-)
-
-var (
-	ErrOperationAuthorizationConflict           = money.ErrOperationAuthorizationConflict
-	ErrOperationAuthorizationNotFound           = money.ErrOperationAuthorizationNotFound
-	ErrOperationAuthorizationNotOpen            = money.ErrOperationAuthorizationNotOpen
-	ErrOperationAuthorizationHasBillingEvidence = money.ErrOperationAuthorizationHasBillingEvidence
-)
-
-type OperationAuthorizationConflict = money.OperationAuthorizationConflict
-
-// OperationAuthorizationRequest is exact host-authored authority for one
-// provider operation. OpenRails validates the digest but deliberately does not
-// parse or reserialize AuthorizationBody.
-type OperationAuthorizationRequest struct {
-	OperationID             string // canonical, at most 255 bytes
-	Payer                   identity.CustomerID
-	RecordOwner             string // canonical, at most 255 bytes
-	AuthorizedUSDMicros     int64
-	ClaimReference          string // canonical, at most 1024 bytes
-	AuthorizationBody       []byte // exact canonical bytes, 1..65536 bytes
-	AuthorizationBodySHA256 [sha256.Size]byte
+func (s *Service) OpenOperationAuthorization(ctx context.Context, req openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var out *openrails.OperationAuthorization
+	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out, err = s.OpenOperationAuthorizationTx(ctx, tx, req)
+		return err
+	})
+	return out, err
 }
 
-type OperationAuthorization struct {
-	OperationID                     string
-	MerchantID                      uuid.UUID
-	Payer                           identity.CustomerID
-	RecordOwner                     string
-	LedgerAccountID                 uuid.UUID
-	AuthorizedUSDMicros             int64
-	ClaimReference                  string
-	AuthorizationBody               []byte
-	AuthorizationBodySHA256         [sha256.Size]byte
-	State                           OperationAuthorizationState
-	TerminalReference               string
-	SettlementProviderCostUSDMicros *int64
-	SettlementRatedUSDMicros        *int64
-	SettlementBody                  []byte
-	SettlementBodySHA256            [sha256.Size]byte
-	CreatedAt                       time.Time
-	ReleasedAt                      *time.Time
-	SettledAt                       *time.Time
-	Replayed                        bool
-}
-
-type ReleaseOperationAuthorizationRequest struct {
-	OperationID      string
-	ReleaseReference string // canonical opaque proof reference, at most 1024 bytes
-}
-
-// OpenOperationAuthorizationTx rides a transaction owned by the embedding
-// host. It neither commits nor rolls back that transaction.
-func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req OperationAuthorizationRequest) (*OperationAuthorization, error) {
+func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req openrails.OperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -87,7 +44,7 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	}
 	auth, err := s.moneyService().OpenOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationInput{
 		OperationID:             req.OperationID,
-		Payer:                   req.Payer,
+		Payer:                   identity.CustomerID(req.Payer),
 		RecordOwner:             req.RecordOwner,
 		AuthorizedUSDMicros:     req.AuthorizedUSDMicros,
 		ClaimReference:          req.ClaimReference,
@@ -100,55 +57,95 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-func (s *Service) GetOperationAuthorization(ctx context.Context, operationID string) (*OperationAuthorization, error) {
+func (s *Service) GetOperationAuthorization(ctx context.Context, operationID string) (*openrails.OperationAuthorization, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 	auth, err := s.moneyService().GetOperationAuthorization(ctx, operationID)
-	if err != nil || auth == nil {
-		return nil, err
-	}
-	return operationAuthorizationFromMoney(auth), nil
-}
-
-func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req ReleaseOperationAuthorizationRequest) (*OperationAuthorization, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	auth, err := s.moneyService().ReleaseOperationAuthorization(ctx, req.OperationID, req.ReleaseReference)
 	if err != nil {
 		return nil, err
 	}
 	return operationAuthorizationFromMoney(auth), nil
 }
 
-func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *OperationAuthorization {
-	if auth == nil {
-		return nil
+func (s *Service) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, operationID string) (*openrails.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
 	}
-	return &OperationAuthorization{
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := s.moneyService().GetOperationAuthorizationInTx(ctx, txDB, operationID)
+	if err != nil {
+		return nil, err
+	}
+	return operationAuthorizationFromMoney(auth), nil
+}
+
+func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req openrails.ReleaseOperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	var out *openrails.OperationAuthorization
+	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		out, err = s.ReleaseOperationAuthorizationTx(ctx, tx, req)
+		return err
+	})
+	return out, err
+}
+
+func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req openrails.ReleaseOperationAuthorizationRequest) (*openrails.OperationAuthorization, error) {
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
+	if err != nil {
+		return nil, err
+	}
+	auth, err := s.moneyService().ReleaseOperationAuthorizationInTx(ctx, txDB, req.OperationID, req.ReleaseReference)
+	if err != nil {
+		return nil, err
+	}
+	return operationAuthorizationFromMoney(auth), nil
+}
+
+func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *openrails.OperationAuthorization {
+	out := &openrails.OperationAuthorization{
 		OperationID:                     auth.OperationID,
 		MerchantID:                      auth.MerchantID,
-		Payer:                           auth.Payer,
+		Payer:                           openrails.CustomerID(auth.Payer),
 		RecordOwner:                     auth.RecordOwner,
-		LedgerAccountID:                 auth.LedgerAccountID,
 		AuthorizedUSDMicros:             auth.AuthorizedUSDMicros,
 		ClaimReference:                  auth.ClaimReference,
 		AuthorizationBody:               auth.AuthorizationBody,
 		AuthorizationBodySHA256:         auth.AuthorizationBodySHA256,
-		State:                           auth.State,
+		State:                           openrails.OperationAuthorizationState(auth.State),
 		TerminalReference:               auth.TerminalReference,
 		SettlementProviderCostUSDMicros: auth.SettlementProviderCostUSDMicros,
 		SettlementRatedUSDMicros:        auth.SettlementRatedUSDMicros,
-		SettlementBody:                  auth.SettlementBody,
-		SettlementBodySHA256:            auth.SettlementBodySHA256,
 		CreatedAt:                       auth.CreatedAt,
 		ReleasedAt:                      auth.ReleasedAt,
 		SettledAt:                       auth.SettledAt,
 		Replayed:                        auth.Replayed,
 	}
+	if auth.State == money.OperationAuthorizationSettled {
+		digest := openrails.SHA256(auth.SettlementBodySHA256)
+		out.SettlementBody = auth.SettlementBody
+		out.SettlementBodySHA256 = &digest
+	}
+	return out
 }

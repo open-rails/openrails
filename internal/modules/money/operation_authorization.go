@@ -9,9 +9,11 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -40,26 +42,16 @@ const (
 )
 
 var (
-	ErrOperationAuthorizationConflict           = errors.New("operation_authorization_conflict")
-	ErrOperationAuthorizationNotFound           = errors.New("operation_authorization_not_found")
-	ErrOperationAuthorizationNotOpen            = errors.New("operation_authorization_not_open")
-	ErrOperationAuthorizationHasBillingEvidence = errors.New("operation_authorization_has_billing_evidence")
+	ErrOperationAuthorizationConflict           = openrails.ErrOperationAuthorizationConflict
+	ErrOperationAuthorizationNotFound           = openrails.ErrOperationAuthorizationNotFound
+	ErrOperationAuthorizationNotOpen            = openrails.ErrOperationAuthorizationNotOpen
+	ErrOperationAuthorizationHasBillingEvidence = openrails.ErrOperationAuthorizationHasBillingEvidence
 )
 
 // OperationAuthorizationConflict means an operation id already committed with
 // a different immutable field. The field name is safe to report; body contents
 // are intentionally omitted from the error.
-type OperationAuthorizationConflict struct {
-	Field string
-}
-
-func (e *OperationAuthorizationConflict) Error() string {
-	return fmt.Sprintf("operation authorization id reused with changed %s", e.Field)
-}
-
-func (e *OperationAuthorizationConflict) Unwrap() error {
-	return ErrOperationAuthorizationConflict
-}
+type OperationAuthorizationConflict = openrails.OperationAuthorizationConflict
 
 type OperationAuthorizationInput struct {
 	OperationID             string
@@ -93,7 +85,7 @@ type OperationAuthorization struct {
 	Replayed                        bool
 }
 
-type PassThroughProviderCostSettlementInput struct {
+type passThroughProviderCostSettlementInput struct {
 	OperationID           string
 	ProviderCostUSDMicros int64
 	SettlementBody        []byte
@@ -111,7 +103,7 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 		return nil, fmt.Errorf("operation authorization requires a bound transaction")
 	}
 	if err := validateOperationAuthorizationInput(in); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -232,7 +224,7 @@ func addOperationCapacity(capacity, addition int64) (int64, error) {
 }
 
 func validateOperationAuthorizationInput(in OperationAuthorizationInput) error {
-	if err := validateOperationAuthorizationText("operation_id", in.OperationID, operationAuthorizationMaxIDBytes); err != nil {
+	if err := validateOperationID(in.OperationID); err != nil {
 		return err
 	}
 	if in.Payer.IsZero() {
@@ -259,6 +251,8 @@ func validateOperationAuthorizationInput(in OperationAuthorizationInput) error {
 	return nil
 }
 
+// validateOperationAuthorizationText requires text that survives JSON and
+// PostgreSQL unchanged, so embedded and HTTP callers name the same row.
 func validateOperationAuthorizationText(field, value string, maxBytes int) error {
 	if strings.TrimSpace(value) == "" || strings.TrimSpace(value) != value {
 		return fmt.Errorf("%s required in canonical form", field)
@@ -266,7 +260,18 @@ func validateOperationAuthorizationText(field, value string, maxBytes int) error
 	if len(value) > maxBytes {
 		return fmt.Errorf("%s exceeds %d bytes", field, maxBytes)
 	}
+	if !utf8.ValidString(value) || strings.ContainsRune(value, 0) {
+		return fmt.Errorf("%s must be valid UTF-8 without NUL", field)
+	}
 	return nil
+}
+
+// validateOperationID also refuses dot segments, which no HTTP route can carry.
+func validateOperationID(operationID string) error {
+	if operationID == "." || operationID == ".." {
+		return fmt.Errorf("operation_id %q is not a valid operation id", operationID)
+	}
+	return validateOperationAuthorizationText("operation_id", operationID, operationAuthorizationMaxIDBytes)
 }
 
 func replayOperationAuthorization(row gen.OpenrailsOperationAuthorization, in OperationAuthorizationInput) (*OperationAuthorization, error) {
@@ -289,16 +294,17 @@ func replayOperationAuthorization(row gen.OpenrailsOperationAuthorization, in Op
 	return operationAuthorizationFromRow(row, true), nil
 }
 
-// SettlePassThroughProviderCostInTx applies OpenRails' permanent pass-through
+// settlePassThroughProviderCostInTx applies OpenRails' permanent pass-through
 // provider-cost rating and performs the final customer settlement through the
 // existing double-entry ledger in a caller-owned transaction. It never calls
-// request admission and never commits or rolls back the transaction.
+// request admission and never commits or rolls back the transaction. It is
+// unexported: only the provider-billing qualifier may supply its cost.
 //
 // The payer row is the money mutex. Terminally settling before the ledger helper
 // excludes this authorization's full hold while every other open authorization
 // stays held. The pre-authorized helper never re-gates: the rated settlement
 // above the authorization is posted as owed/overdraft truth rather than clamped.
-func (s *MoneyService) SettlePassThroughProviderCostInTx(ctx context.Context, txDB *db.DB, in PassThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
+func (s *MoneyService) settlePassThroughProviderCostInTx(ctx context.Context, txDB *db.DB, in passThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -392,8 +398,8 @@ func passThroughProviderCostSettlementKey(operationID string) IdempotencyKey {
 	return MustIdempotencyKey(OpCapture, operationAuthorizationPassThroughSource, fmt.Sprintf("%x", digest[:]))
 }
 
-func validatePassThroughProviderCostSettlementInput(in PassThroughProviderCostSettlementInput) error {
-	if err := validateOperationAuthorizationText("operation_id", in.OperationID, operationAuthorizationMaxIDBytes); err != nil {
+func validatePassThroughProviderCostSettlementInput(in passThroughProviderCostSettlementInput) error {
+	if err := validateOperationID(in.OperationID); err != nil {
 		return err
 	}
 	if in.ProviderCostUSDMicros < 0 {
@@ -408,7 +414,7 @@ func validatePassThroughProviderCostSettlementInput(in PassThroughProviderCostSe
 	return nil
 }
 
-func replayPassThroughProviderCostSettlement(row gen.OpenrailsOperationAuthorization, in PassThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
+func replayPassThroughProviderCostSettlement(row gen.OpenrailsOperationAuthorization, in passThroughProviderCostSettlementInput) (*OperationAuthorization, error) {
 	if row.SettlementProviderCostUsdMicros == nil || row.SettlementRatedUsdMicros == nil {
 		return nil, fmt.Errorf("settled operation authorization has incomplete settlement amounts")
 	}
@@ -435,146 +441,122 @@ func replayPassThroughProviderCostSettlement(row gen.OpenrailsOperationAuthoriza
 	return operationAuthorizationFromRow(row, true), nil
 }
 
-// GetOperationAuthorization reads one merchant-scoped authorization. Missing
-// rows return (nil, nil), matching other engine-native read primitives.
+// GetOperationAuthorization reads one merchant-scoped authorization.
 func (s *MoneyService) GetOperationAuthorization(ctx context.Context, operationID string) (*OperationAuthorization, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if err := validateOperationAuthorizationText("operation_id", operationID, operationAuthorizationMaxIDBytes); err != nil {
-		return nil, err
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
 	var out *OperationAuthorization
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		row, getErr := s.db.Gen(ctx).GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
-			MerchantID: merchantID.UUID(), OperationID: operationID,
-		})
-		if errors.Is(getErr, pgx.ErrNoRows) {
-			return nil
-		}
-		if getErr != nil {
-			return getErr
-		}
-		out = operationAuthorizationFromRow(row, false)
-		return nil
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var err error
+		out, err = s.GetOperationAuthorizationInTx(ctx, s.db, operationID)
+		return err
 	})
 	return out, err
 }
 
-// ReleaseOperationAuthorization terminally releases an open reservation after
-// the embedding host has proven the provider create did not happen. OpenRails
-// binds the caller's opaque proof reference but owns no provider ambiguity
-// logic. Any durable provider-billing qualification proves this path advanced
-// beyond release eligibility and is refused. Repeating the same release is an
-// idempotent replay when no such qualification exists.
-func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operationID, releaseReference string) (*OperationAuthorization, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
+// GetOperationAuthorizationInTx reads through a caller-owned transaction, so it
+// observes that transaction's uncommitted open, release, or settlement.
+func (s *MoneyService) GetOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, operationID string) (*OperationAuthorization, error) {
+	if txDB == nil {
+		return nil, fmt.Errorf("operation authorization requires a bound transaction")
 	}
-	if err := validateOperationAuthorizationText("operation_id", operationID, operationAuthorizationMaxIDBytes); err != nil {
-		return nil, err
-	}
-	if err := validateOperationAuthorizationText("release_reference", releaseReference, operationAuthorizationMaxReferenceBytes); err != nil {
-		return nil, err
+	if err := validateOperationID(operationID); err != nil {
+		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var out *OperationAuthorization
-	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		txSvc := &MoneyService{db: s.db.NewWithPgxTx(tx), clock: s.clock}
-		q := gen.New(tx)
-		ensureNoBillingEvidence := func() error {
-			_, qualificationErr := q.GetProviderBillingQualificationForUpdate(ctx, gen.GetProviderBillingQualificationForUpdateParams{
-				MerchantID: merchantID.UUID(), OperationID: operationID,
-			})
-			if qualificationErr == nil {
-				return ErrOperationAuthorizationHasBillingEvidence
-			}
-			if errors.Is(qualificationErr, pgx.ErrNoRows) {
-				return nil
-			}
-			return qualificationErr
-		}
-		row, getErr := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
-			MerchantID: merchantID.UUID(), OperationID: operationID,
-		})
-		if errors.Is(getErr, pgx.ErrNoRows) {
-			return ErrOperationAuthorizationNotFound
-		}
-		if getErr != nil {
-			return getErr
-		}
-		payer := identity.CustomerID(row.PayerID)
-		if _, lockErr := txSvc.lockBalance(ctx, q, payer, payer.UUID().String(), operationAuthorizationCurrency); lockErr != nil {
-			return lockErr
-		}
-		row, getErr = q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
-			MerchantID: merchantID.UUID(), OperationID: operationID,
-		})
-		if getErr != nil {
-			return getErr
-		}
-		if evidenceErr := ensureNoBillingEvidence(); evidenceErr != nil {
-			return evidenceErr
-		}
-		switch OperationAuthorizationState(row.State) {
-		case OperationAuthorizationReleased:
-			if row.TerminalReference == nil || *row.TerminalReference != releaseReference {
-				return &OperationAuthorizationConflict{Field: "release_reference"}
-			}
-			out = operationAuthorizationFromRow(row, true)
-			return nil
-		case OperationAuthorizationSettled:
-			return ErrOperationAuthorizationNotOpen
-		case OperationAuthorizationOpen:
-		default:
-			return fmt.Errorf("operation authorization has invalid state %q", row.State)
-		}
+	row, err := txDB.Gen(ctx).GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
+		MerchantID: merchantID.UUID(), OperationID: operationID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOperationAuthorizationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return operationAuthorizationFromRow(row, false), nil
+}
 
-		released, releaseErr := q.ReleaseOperationAuthorization(ctx, gen.ReleaseOperationAuthorizationParams{
-			MerchantID:        merchantID.UUID(),
-			OperationID:       operationID,
-			TerminalReference: releaseReference,
-			ReleasedAt:        s.now().UTC(),
-		})
-		if errors.Is(releaseErr, pgx.ErrNoRows) {
-			current, rereadErr := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{
-				MerchantID: merchantID.UUID(), OperationID: operationID,
-			})
-			if rereadErr != nil {
-				return rereadErr
-			}
-			switch OperationAuthorizationState(current.State) {
-			case OperationAuthorizationReleased:
-				if current.TerminalReference == nil || *current.TerminalReference != releaseReference {
-					return &OperationAuthorizationConflict{Field: "release_reference"}
-				}
-				out = operationAuthorizationFromRow(current, true)
-				return nil
-			case OperationAuthorizationSettled:
-				return ErrOperationAuthorizationNotOpen
-			case OperationAuthorizationOpen:
-				if evidenceErr := ensureNoBillingEvidence(); evidenceErr != nil {
-					return evidenceErr
-				}
-				return ErrOperationAuthorizationNotOpen
-			default:
-				return fmt.Errorf("operation authorization has invalid state %q", current.State)
-			}
-		}
-		if releaseErr != nil {
-			return releaseErr
-		}
-		out = operationAuthorizationFromRow(released, false)
-		return nil
+func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operationID, releaseReference string) (*OperationAuthorization, error) {
+	var out *OperationAuthorization
+	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = s.ReleaseOperationAuthorizationInTx(ctx, s.db.NewWithPgxTx(tx), operationID, releaseReference)
+		return err
 	})
 	return out, err
+}
+
+// ReleaseOperationAuthorizationInTx terminally releases an open reservation in
+// a caller-owned transaction, so the host's proven provider non-creation and
+// the monetary release commit or roll back together. OpenRails binds the opaque
+// proof reference but owns no provider ambiguity logic. Any durable billing
+// qualification refuses release; repeating the same release replays.
+func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, operationID, releaseReference string) (*OperationAuthorization, error) {
+	if txDB == nil {
+		return nil, fmt.Errorf("operation authorization requires a bound transaction")
+	}
+	if err := validateOperationID(operationID); err != nil {
+		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+	}
+	if err := validateOperationAuthorizationText("release_reference", releaseReference, operationAuthorizationMaxReferenceBytes); err != nil {
+		return nil, fmt.Errorf("%w: %v", openrails.ErrInvalid, err)
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := txDB.Gen(ctx)
+	params := gen.GetOperationAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: operationID}
+	row, err := q.GetOperationAuthorization(ctx, params)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrOperationAuthorizationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The payer row is the money mutex shared with open and settlement; state
+	// is re-read under it.
+	payer := identity.CustomerID(row.PayerID)
+	txSvc := &MoneyService{db: txDB, clock: s.clock}
+	if _, err := txSvc.lockBalance(ctx, q, payer, row.RecordOwner, operationAuthorizationCurrency); err != nil {
+		return nil, err
+	}
+	if row, err = q.GetOperationAuthorization(ctx, params); err != nil {
+		return nil, err
+	}
+	_, err = q.GetProviderBillingQualificationForUpdate(ctx, gen.GetProviderBillingQualificationForUpdateParams{
+		MerchantID: merchantID.UUID(), OperationID: operationID,
+	})
+	if err == nil {
+		return nil, ErrOperationAuthorizationHasBillingEvidence
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	switch OperationAuthorizationState(row.State) {
+	case OperationAuthorizationReleased:
+		if row.TerminalReference == nil || *row.TerminalReference != releaseReference {
+			return nil, &OperationAuthorizationConflict{Field: "release_reference"}
+		}
+		return operationAuthorizationFromRow(row, true), nil
+	case OperationAuthorizationSettled:
+		return nil, ErrOperationAuthorizationNotOpen
+	case OperationAuthorizationOpen:
+	default:
+		return nil, fmt.Errorf("operation authorization has invalid state %q", row.State)
+	}
+	released, err := q.ReleaseOperationAuthorization(ctx, gen.ReleaseOperationAuthorizationParams{
+		MerchantID: merchantID.UUID(), OperationID: operationID,
+		TerminalReference: releaseReference, ReleasedAt: s.now().UTC(),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("operation authorization changed state under the payer lock")
+	}
+	if err != nil {
+		return nil, err
+	}
+	return operationAuthorizationFromRow(released, false), nil
 }
 
 func operationAuthorizationFromRow(row gen.OpenrailsOperationAuthorization, replayed bool) *OperationAuthorization {

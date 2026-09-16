@@ -71,6 +71,9 @@ func (e *StatusError) Error() string {
 
 // Is classifies this response without inspecting its human message.
 func (e *StatusError) Is(target error) bool {
+	if coded, ok := target.(*codedError); ok {
+		return e.Code == coded.code
+	}
 	switch target {
 	case ErrInsufficientCredits:
 		return e.Code == "insufficient_credits"

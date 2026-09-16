@@ -407,6 +407,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Policy | `GetMerchantSettings`, `SetMerchantSettings`, `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation` |
 | Funding / reporting | `DepositCredits`, `SetCreditLimit`, `GetCreditLimit`, `UsageRollup`, `ResourceRevenueDaily` |
 | Lookups / entitlements | `Balance`, `GetCreditAccount`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `ListProductAccess`, `HasProductAccess` |
+| Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification` |
 
 ```go
 verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
@@ -431,6 +432,10 @@ as the remote constructor. Both modes default to a two-second call deadline;
 
 Checkout creation/read/confirmation, checkout provider options and effective-tier
 resolution use the shared client too. See [the commerce client](api/commerce.md).
+
+A host that must commit its own provider obligation atomically with the OpenRails
+authorization, release or settlement uses `rt.HostTransactions()` with a transaction
+from its pool. See [provider obligations](architecture/provider-obligation-contract.md).
 
 Every `rt.Service()` method pins its own merchant-scoped connection, so a bare Go
 call reads the merchant's rows without ceremony — and one with no merchant on the
