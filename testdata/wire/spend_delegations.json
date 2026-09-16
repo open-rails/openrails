@@ -1,0 +1,21 @@
+{
+  "delegations": [
+    {
+      "scope": "invoker",
+      "scope_key": "worker-1",
+      "windows": [
+        {
+          "key": "day",
+          "window_seconds": 86400,
+          "limit": "9223372036854775807",
+          "currency": "USD"
+        }
+      ],
+      "provenance": "sha256:fixture"
+    },
+    {
+      "scope": "subject",
+      "windows": []
+    }
+  ]
+}
