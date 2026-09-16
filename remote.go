@@ -12,15 +12,18 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Client executes the same typed billing operations over an HTTP or in-process
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
-	baseURL  string
-	currency string
-	client   *http.Client
-	timeout  time.Duration
+	baseURL    string
+	merchantID MerchantID
+	currency   string
+	client     *http.Client
+	timeout    time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
 	// #411, or an OpenRails-issued API key). It is the SOLE credential; a
 	// mint failure errors the call so the problem surfaces instead of being
@@ -30,28 +33,41 @@ type Client struct {
 	setupErr error
 }
 
-// RemoteOption configures NewRemote.
-type RemoteOption func(*Client)
+// ClientOption configures NewRemote.
+type ClientOption func(*Client)
+
+// WithMerchantID binds this client to one immutable merchant UUID. The server
+// checks the binding against the authenticated merchant before executing a
+// command. It is an assertion, never authority to select another merchant.
+func WithMerchantID(id MerchantID) ClientOption {
+	return func(c *Client) {
+		if id.IsZero() {
+			c.setupErr = fmt.Errorf("openrails: merchant ID must not be zero")
+			return
+		}
+		c.merchantID = id
+	}
+}
 
 // WithHTTPClient injects a transport (tests, custom TLS/conn pooling). When
 // unset a client bounded by the configured timeout is created. The per-call
 // timeout (WithTimeout) is enforced via a per-request context deadline
 // REGARDLESS of the injected client, so a custom client that omits
 // http.Client.Timeout still cannot stall the hot path.
-func WithHTTPClient(hc *http.Client) RemoteOption {
+func WithHTTPClient(hc *http.Client) ClientOption {
 	return func(r *Client) { r.client = hc }
 }
 
 // WithCurrency sets the client-level currency used by Balance and by requests
 // that leave their currency empty. Empty currency is rejected by service routes.
-func WithCurrency(currency string) RemoteOption {
+func WithCurrency(currency string) ClientOption {
 	return func(r *Client) { r.currency = strings.TrimSpace(currency) }
 }
 
 // WithTokenProvider supplies the per-call Bearer minting function. REQUIRED for
 // any authenticated deployment: without it every call fails with a descriptive
 // error (the mintless tokenFn pattern from go-client, #411).
-func WithTokenProvider(fn func(context.Context) (string, error)) RemoteOption {
+func WithTokenProvider(fn func(context.Context) (string, error)) ClientOption {
 	return func(r *Client) { r.tokenFn = fn }
 }
 
@@ -59,7 +75,7 @@ func WithTokenProvider(fn func(context.Context) (string, error)) RemoteOption {
 // over WithTokenProvider for the blessed static-credential case. An empty key
 // fails each call with a descriptive error instead of erroring at construction
 // (the mintless tokenFn pattern).
-func WithAPIKey(key string) RemoteOption {
+func WithAPIKey(key string) ClientOption {
 	key = strings.TrimSpace(key)
 	return func(c *Client) {
 		if key == "" {
@@ -76,13 +92,13 @@ func WithAPIKey(key string) RemoteOption {
 // path; on timeout the fail-policy decides (ErrUnreachable). A non-positive
 // value disables the per-call deadline (rely on ctx / the client transport).
 // Defaults to 2s.
-func WithTimeout(d time.Duration) RemoteOption {
+func WithTimeout(d time.Duration) ClientOption {
 	return func(r *Client) { r.timeout = d }
 }
 
 // NewRemote builds the client for standalone or SaaS HTTP. It validates static
 // configuration without I/O; Verify checks live credentials and reachability.
-func NewRemote(baseURL string, opts ...RemoteOption) (*Client, error) {
+func NewRemote(baseURL string, opts ...ClientOption) (*Client, error) {
 	r := &Client{
 		baseURL: strings.TrimRight(strings.TrimSpace(baseURL), "/"),
 		timeout: 2 * time.Second,
@@ -678,6 +694,15 @@ type clientResponse struct {
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
 func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
+	expectedMerchant := c.merchantID
+	if pinned, ok := merchant.FromContext(ctx); ok {
+		if !expectedMerchant.IsZero() && expectedMerchant != pinned {
+			return nil, &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
+				Type: "invalid_request_error", Code: "resource_conflict", Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant),
+			}}
+		}
+		expectedMerchant = pinned
+	}
 	var raw []byte
 	if body != nil {
 		var merr error
@@ -714,6 +739,9 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
+	if !expectedMerchant.IsZero() {
+		req.Header.Set(merchant.BindingHeader, expectedMerchant.String())
+	}
 	if raw != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

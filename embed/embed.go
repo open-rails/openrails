@@ -131,21 +131,17 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 
 // Client returns the same typed client as NewRemote over the in-process
 // operation transport. Options, validation and errors follow the same path.
-func (r *Runtime) Client(options ...ClientOption) (*openrails.Client, error) {
-	config := &clientOptions{}
-	for _, option := range options {
-		if option != nil {
-			option(config)
-		}
-	}
+func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
 	rt := r.emb.App().Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt) })
-	defaults := []openrails.RemoteOption{
+	defaults := []openrails.ClientOption{
 		openrails.WithHTTPClient(&http.Client{Transport: &inprocessTransport{handler: r.handler, rt: rt}}),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }),
-		openrails.WithCurrency(config.currency),
 	}
-	return openrails.NewRemote(inprocessBaseURL, append(defaults, config.remoteOptions...)...)
+	if id := rt.ConfiguredMerchant(); !id.IsZero() {
+		defaults = append(defaults, openrails.WithMerchantID(id))
+	}
+	return openrails.NewRemote(inprocessBaseURL, append(defaults, options...)...)
 }
 
 // Service exposes the underlying pkg/service facade for host code that wants

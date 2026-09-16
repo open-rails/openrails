@@ -50,7 +50,7 @@ func TestInProcessClientHonorsExplicitUnlimitedTimeout(t *testing.T) {
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
-	c, cErr := rt.Client(WithRemoteOptions(openrails.WithTimeout(0)))
+	c, cErr := rt.Client(openrails.WithTimeout(0))
 	if cErr != nil {
 		t.Fatal(cErr)
 	}

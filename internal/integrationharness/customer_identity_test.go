@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -56,7 +55,7 @@ func TestOneSubjectHasIndependentMerchantBillingThroughBothClients(t *testing.T)
 				map[string]any{"subjects": []string{"not-a-uuid"}})
 			require.Equal(t, http.StatusBadRequest, status, string(body))
 			host := h.StartEmbeddedMerchant("USD", side.merchant, side.slug)
-			local, err := host.Runtime().Client(embed.WithCurrency("USD"))
+			local, err := host.Runtime().Client(openrails.WithCurrency("USD"))
 			require.NoError(t, err)
 			request := openrails.DepositCreditsRequest{
 				CustomerID: &payer, Invoker: subject.String(), Currency: "USD", Amount: side.amount,

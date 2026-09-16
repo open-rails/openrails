@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/stretchr/testify/require"
@@ -19,7 +18,7 @@ import (
 func TestMerchantSettingsAtomicDocument(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
-	local, err := h.StartEmbeddedHost("USD").Runtime().Client(embed.WithCurrency("USD"))
+	local, err := h.StartEmbeddedHost("USD").Runtime().Client(openrails.WithCurrency("USD"))
 	require.NoError(t, err)
 	remote := h.StartStandalone("USD").Client()
 	clients := []*openrails.Client{local, remote}

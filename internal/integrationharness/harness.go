@@ -242,8 +242,8 @@ func (s *Surface) Server() *server.Server { return s.server }
 
 // Client returns a fresh *openrails.Client (NewRemote) for this surface, carrying
 // its token + currency. opts append/override.
-func (s *Surface) Client(opts ...openrails.RemoteOption) *openrails.Client {
-	base := []openrails.RemoteOption{
+func (s *Surface) Client(opts ...openrails.ClientOption) *openrails.Client {
+	base := []openrails.ClientOption{
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return s.Token, nil }),
 		openrails.WithCurrency(s.currency),
 		openrails.WithTimeout(30 * time.Second),
