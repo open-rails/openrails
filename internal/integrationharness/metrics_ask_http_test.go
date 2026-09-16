@@ -147,8 +147,8 @@ func TestMerchantMetricsAsk(t *testing.T) {
 		require.NoError(t, err)
 		for i := 0; i < events; i++ {
 			_, err = pool.Exec(ctx,
-				`INSERT INTO openrails.usage_events (merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id)
-				 VALUES ($1, $2, 'ask-test', 'USD', 'api', 'call', 1000, 'test', $3)`,
+				`INSERT INTO openrails.usage_events (merchant_id, customer_id, invoker_id, currency, resource, event_type, amount, source, source_id, pricing_authority)
+				 VALUES ($1, $2, 'ask-test', 'USD', 'api', 'call', 1000, 'test', $3, 'host')`,
 				merchantID, customerID, uuid.NewString())
 			require.NoError(t, err)
 		}

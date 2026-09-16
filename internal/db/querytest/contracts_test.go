@@ -273,20 +273,21 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 
 	resource := "query-contract-resource"
 	err = q.InsertUsageEvent(ctx, gen.InsertUsageEventParams{
-		ID:         uuid.New(),
-		MerchantID: merchantID,
-		CustomerID: customerID,
-		InvokerID:  "contract-invoker",
-		Resource:   &resource,
-		EventType:  "api_call",
-		Currency:   "USD",
-		Amount:     600,
-		Source:     "contract",
-		SourceID:   "usage-" + customerID.String(),
-		Metadata:   []byte(`{}`),
-		OccurredAt: now.Add(-time.Hour),
-		CreatedAt:  now,
-		Dimensions: []byte(`{"tokens":3}`),
+		ID:               uuid.New(),
+		MerchantID:       merchantID,
+		CustomerID:       customerID,
+		InvokerID:        "contract-invoker",
+		Resource:         &resource,
+		EventType:        "api_call",
+		Currency:         "USD",
+		Amount:           600,
+		Source:           "contract",
+		SourceID:         "usage-" + customerID.String(),
+		PricingAuthority: "catalog",
+		Metadata:         []byte(`{}`),
+		OccurredAt:       now.Add(-time.Hour),
+		CreatedAt:        now,
+		Dimensions:       []byte(`{"tokens":3}`),
 	})
 	require.NoError(t, err)
 	usageTotals, err := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{

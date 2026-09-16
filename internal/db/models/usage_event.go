@@ -7,8 +7,9 @@ import (
 )
 
 // UsageEvent is one append-only, multi-dimensional record of metered usage
-// (issue #289). The host prices the event in Currency's internal precision, and
-// OpenRails records it AND debits the ledger in the SAME transaction.
+// (issue #289). Host-priced events carry final cost; catalog events carry an
+// unpriced meter input. OpenRails records each and debits only host cost in the
+// SAME transaction.
 // It is the source of truth for usage reporting + #303 invoice line items.
 //
 // Idempotency is enforced by a unique index on
@@ -33,13 +34,16 @@ type UsageEvent struct {
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
 	// cached_input_tokens, requests, ...). Host-defined.
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
-	// Amount is the host-priced cost in Currency's internal precision (>= 0).
+	// Amount is the cost or meter input in Currency's internal precision (>= 0).
+	// PricingAuthority determines whether catalog rating may consume this event.
 	Amount int64 `json:"amount"`
 	// Source + SourceID form the idempotency key (SourceID is typically the request id).
 	Source   string `json:"source"`
 	SourceID string `json:"source_id"`
 	// LedgerTransferID links to the ledger debit transfer this event produced.
-	LedgerTransferID *uuid.UUID     `json:"ledger_transfer_id,omitempty"`
+	LedgerTransferID *uuid.UUID `json:"ledger_transfer_id,omitempty"`
+	// PricingAuthority identifies whether amount is final host pricing or catalog input.
+	PricingAuthority string         `json:"-"`
 	Metadata         map[string]any `json:"metadata,omitempty"`
 	OccurredAt       time.Time      `json:"occurred_at"`
 	CreatedAt        time.Time      `json:"created_at"`

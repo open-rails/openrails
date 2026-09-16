@@ -119,6 +119,7 @@ func usageEventFromGen(r gen.OpenrailsUsageEvent) (*models.UsageEvent, error) {
 		Source:           r.Source,
 		SourceID:         r.SourceID,
 		LedgerTransferID: r.LedgerTransferID,
+		PricingAuthority: r.PricingAuthority,
 		OccurredAt:       r.OccurredAt,
 		CreatedAt:        r.CreatedAt,
 	}

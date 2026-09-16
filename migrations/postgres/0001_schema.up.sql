@@ -3159,6 +3159,8 @@ CREATE TABLE openrails.usage_events (
     source text NOT NULL,
     source_id text NOT NULL,
     ledger_transfer_id uuid,
+    -- Pricing authority: catalog rows are metered inputs; host rows already carry final money.
+    pricing_authority text NOT NULL CHECK (pricing_authority IN ('host', 'catalog')),
     metadata jsonb,
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -3173,6 +3175,8 @@ COMMENT ON TABLE openrails.usage_events IS 'Append-only multi-dimensional metere
 COMMENT ON COLUMN openrails.usage_events.invoker_id IS 'Caller-supplied principal string that fired this metered usage event. Opaque to OpenRails; attribution + grouping only, not a FK. Joins use source/source_id.';
 
 COMMENT ON COLUMN openrails.usage_events.currency IS 'Native OpenRails currency code; amount uses this currency internal precision.';
+
+COMMENT ON COLUMN openrails.usage_events.pricing_authority IS 'host = amount is final host-priced settlement and must not be catalog-rated; catalog = amount is a metered input for catalog rating. Capture writes host, including zero-cost captures; RecordUsage writes host for positive amounts and catalog for zero-cost meter inputs.';
 
 COMMENT ON COLUMN openrails.usage_events.resource IS 'Caller-supplied free-form string for what was metered (tensorhub: endpoint slug; doujins: plan/item slug). Opaque to OpenRails; nullable, not a FK.';
 
