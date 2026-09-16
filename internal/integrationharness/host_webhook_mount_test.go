@@ -14,8 +14,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/embedded"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 // TestHostRoutedWebhookMountHTTP proves the #734 Host-routed webhook mount

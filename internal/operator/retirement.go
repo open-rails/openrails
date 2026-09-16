@@ -1,4 +1,4 @@
-package controlplane
+package operator
 
 // Merchant retirement host seam. Core supplies activity facts and the safe,
 // irreversible retire mechanism; a hosted product owns dormancy policy

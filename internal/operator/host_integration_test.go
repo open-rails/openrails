@@ -1,6 +1,6 @@
 //go:build integration
 
-package controlplane_test
+package operator_test
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

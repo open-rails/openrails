@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/stretchr/testify/require"
 
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // Repeating an HTTP key must re-enter current authorization. Only documented

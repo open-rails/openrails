@@ -65,10 +65,10 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

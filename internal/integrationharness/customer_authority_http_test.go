@@ -11,10 +11,10 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	orauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	"github.com/stretchr/testify/require"
 )
 

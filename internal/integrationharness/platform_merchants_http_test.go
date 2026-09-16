@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // #721: platform operator merchant directory — /v1/platform/merchants over the

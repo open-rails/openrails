@@ -10,7 +10,7 @@
 // The control plane is held on app.App as `any` (App.ControlPlane); this package
 // builds the concrete *controlplane.ControlPlane, attaches it via
 // App.SetControlPlane, and recovers it with Get for the standalone gin server.
-package controlplane
+package operator
 
 import (
 	"context"
