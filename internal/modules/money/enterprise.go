@@ -29,6 +29,7 @@ func (s *MoneyService) SweepUsage(ctx context.Context, payer identity.CustomerID
 
 // MarkInvoicesPastDue transitions the merchant's overdue open receivables
 // (due_at < now, amount_due > 0) to past_due. Returns the number flipped.
+// Queues one overdue notice per invoice, including already-past-due failures.
 func (s *MoneyService) MarkInvoicesPastDue(ctx context.Context, now time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")

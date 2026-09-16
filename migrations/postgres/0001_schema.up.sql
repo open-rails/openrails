@@ -232,24 +232,6 @@ $$;
 REVOKE ALL ON FUNCTION openrails.assert_cross_merchant_reader() FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.assert_cross_merchant_reader() TO openrails_app;
 
-CREATE FUNCTION openrails.business_cycle_work_merchant_ids(p_limit integer) RETURNS TABLE(merchant_id uuid)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'openrails', 'pg_catalog'
-    AS $$
-BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
-    RETURN QUERY
-    SELECT DISTINCT p.merchant_id
-      FROM openrails.customer_business_profiles p
-     LIMIT p_limit;
-END;
-$$;
-
-COMMENT ON FUNCTION openrails.business_cycle_work_merchant_ids(p_limit integer) IS 'or#910: merchants with at least one onboarded business customer — the fan-out list for BusinessCycleWorker (dunning ladder + budget alerts). Ids only; notices, recommendation edges and alerts are computed per-merchant under RunInMerchantScope.';
-
-REVOKE ALL ON FUNCTION openrails.business_cycle_work_merchant_ids(p_limit integer) FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.business_cycle_work_merchant_ids(p_limit integer) TO openrails_app;
-
 CREATE FUNCTION openrails.count_destructive_intents_by_actor_since(p_actor text, p_intent_types text[], p_since timestamp with time zone) RETURNS bigint
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO 'openrails', 'pg_catalog'
@@ -4569,46 +4551,6 @@ ALTER TABLE openrails.auto_topup_episodes ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.auto_topup_episodes USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.auto_topup_episodes TO openrails_app;
-
-CREATE TABLE openrails.customer_business_profiles (
-    merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    terms_version text NOT NULL,
-    terms_accepted_at timestamp with time zone NOT NULL,
-    terms_accepted_by text DEFAULT ''::text NOT NULL,
-    kyc_reference text DEFAULT ''::text NOT NULL,
-    currency text NOT NULL,
-    budget_alert_thresholds bigint[] DEFAULT '{}'::bigint[] NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    suspension_recommended_at timestamp with time zone,
-    suspension_reason text DEFAULT ''::text NOT NULL,
-    CONSTRAINT customer_business_profiles_currency_shape CHECK (((currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^[a-z0-9][a-z0-9_-]*/[^/[:space:]]+$'::text))),
-    CONSTRAINT customer_business_profiles_terms_version_chk CHECK ((terms_version <> ''::text))
-);
-
-ALTER TABLE ONLY openrails.customer_business_profiles FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.customer_business_profiles IS 'or#908 B2B onboarding record. Row presence IS the business posture (no settable flag exists); created only through the onboard chokepoint (terms acceptance required), deleted only through offboard (refused while the payer owes). Budget-alert thresholds are notify-only — alerts never cap.';
-
-COMMENT ON COLUMN openrails.customer_business_profiles.suspension_recommended_at IS 'or#910: when the dunning cycle last RECOMMENDED suspension (a signal — hosts enforce; OpenRails never revokes access). NULL = no open recommendation. Set once per episode, cleared when the past-due book is settled.';
-
-COMMENT ON COLUMN openrails.customer_business_profiles.suspension_reason IS 'or#910: the operator-readable reason behind the open recommendation ("invoice INV-7 unpaid 15 days past due"). Empty when no recommendation is open.';
-
-ALTER TABLE ONLY openrails.customer_business_profiles
-    ADD CONSTRAINT customer_business_profiles_pkey PRIMARY KEY (merchant_id, customer_id);
-
-ALTER TABLE ONLY openrails.customer_business_profiles
-    ADD CONSTRAINT customer_business_profiles_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY openrails.customer_business_profiles
-    ADD CONSTRAINT customer_business_profiles_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.customer_business_profiles ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.customer_business_profiles USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customer_business_profiles TO openrails_app;
 
 CREATE TABLE openrails.merchant_dormancy_notices (
     merchant_id uuid NOT NULL,

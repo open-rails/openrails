@@ -1290,31 +1290,47 @@ func (q *Queries) MarkInvoiceUncollectibleForPayer(ctx context.Context, arg Mark
 	return i, err
 }
 
-const markInvoicesPastDue = `-- name: MarkInvoicesPastDue :execrows
-UPDATE openrails.invoices
-SET status = 'past_due',
-    updated_at = $2::timestamptz
-WHERE merchant_id = $1
-  AND status = 'open'
-  AND amount_due > 0
-  AND due_at IS NOT NULL
-  AND due_at < $2::timestamptz
+const markInvoicesPastDue = `-- name: MarkInvoicesPastDue :one
+WITH overdue AS (
+    UPDATE openrails.invoices
+    SET status = 'past_due', updated_at = $1::timestamptz
+    WHERE merchant_id = $2::uuid
+      AND status = 'open' AND amount_due > 0
+      AND due_at IS NOT NULL AND due_at < $1::timestamptz
+    RETURNING merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
+), candidates AS (
+    SELECT merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at FROM overdue
+    UNION ALL
+    SELECT merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
+    FROM openrails.invoices
+    WHERE merchant_id = $2::uuid
+      AND status = 'past_due' AND amount_due > 0
+      AND due_at IS NOT NULL AND due_at < $1::timestamptz
+), notices AS (
+    INSERT INTO openrails.notification_queue (id, merchant_id, customer_id, event_type, data, seen, created_at)
+    SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'invoice_overdue',
+           jsonb_build_object('invoice_id', id,
+                              'invoice_number', COALESCE(NULLIF(invoice_number, ''), id::text),
+                              'amount_due', amount_due::text, 'currency', currency, 'due_at', due_at),
+           false, $1::timestamptz
+    FROM candidates
+    ON CONFLICT (id) DO NOTHING
+)
+SELECT count(*) FROM overdue
 `
 
 type MarkInvoicesPastDueParams struct {
-	MerchantID uuid.UUID
 	Now        time.Time
+	MerchantID uuid.UUID
 }
 
-// #798: net-N receivables whose due date has passed become past_due. The
-// collection path already treats open and past_due alike; this transition is
-// the host-visible dunning signal.
+// Invoice transitions and payer notifications commit in one statement. Collection
+// failures may already have set past_due; those invoices still need their notice.
 func (q *Queries) MarkInvoicesPastDue(ctx context.Context, arg MarkInvoicesPastDueParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markInvoicesPastDue, arg.MerchantID, arg.Now)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	row := q.db.QueryRow(ctx, markInvoicesPastDue, arg.Now, arg.MerchantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const recordInvoiceCollectionFailure = `-- name: RecordInvoiceCollectionFailure :execrows

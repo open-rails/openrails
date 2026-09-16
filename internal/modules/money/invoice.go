@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -325,6 +326,26 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			PeriodTo:   inv.PeriodTo,
 		}); err != nil {
 			return err
+		}
+		if inv.AmountDue > 0 {
+			number := inv.ID.String()
+			if inv.InvoiceNumber != nil && *inv.InvoiceNumber != "" {
+				number = *inv.InvoiceNumber
+			}
+			data, err := models.ToJSONB(map[string]any{
+				"invoice_id": inv.ID.String(), "invoice_number": number,
+				"amount_due": strconv.FormatInt(inv.AmountDue, 10), "currency": inv.Currency, "due_at": inv.DueAt,
+			})
+			if err != nil {
+				return err
+			}
+			if err := q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+				ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, "invoice_issued", inv.MerchantID.String(), inv.ID.String()),
+				MerchantID: inv.MerchantID, CustomerID: inv.CustomerID,
+				EventType: string(models.NotificationInvoiceIssued), Data: data, CreatedAt: now,
+			}); err != nil {
+				return fmt.Errorf("invoice issued notification: %w", err)
+			}
 		}
 		return nil
 	})

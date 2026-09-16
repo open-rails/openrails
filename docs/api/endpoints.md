@@ -292,10 +292,6 @@ for those routes.
 | POST | `/v1/merchant/customers/{customer_id}/product-access` | `merchant:customer-settings:update` | Manually grant product access |
 | DELETE | `/v1/merchant/customers/{customer_id}/product-access/{id}` | `merchant:customer-settings:update` | Revoke a manual product-access grant |
 | POST | `/v1/merchant/customers/{customer_id}/credits` | `merchant:credits:grant` | Grant credits (or#906): `{ currency, amount, source_id, invoker?, source?, expires_at?, description? }` — the human-admin deposit. `source_id` is the reproducible idempotency key (same semantics as the machine deposit above); `source` defaults to `admin`, `invoker` to the customer id. Owner-level permission (NOT held by the fixed support role); rate-limited as an admin grant operation |
-| GET | `/v1/merchant/customers/{customer_id}/business-profile` | `merchant:customer-settings:read` | Read business onboarding, invoicing and credit posture; 404 for a consumer |
-| PUT | `/v1/merchant/customers/{customer_id}/business-profile` | `merchant:customer-settings:update` | Onboard or update a business payer, including terms acceptance and invoice profile |
-| DELETE | `/v1/merchant/customers/{customer_id}/business-profile` | `merchant:customer-settings:update` | Return to consumer posture; refused while the payer has an outstanding balance |
-| GET | `/v1/merchant/business-customers` | `merchant:customer-settings:read` | List onboarded business payers |
 | GET | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:read` | Read invoicing terms, tax facts, contacts and memo |
 | PUT | `/v1/merchant/customers/{customer_id}/invoice-profile` | `merchant:customer-settings:update` | Replace the profile used for future invoice snapshots |
 | GET | `/v1/merchant/customers/{customer_id}/rate-overrides` | `merchant:customer-settings:read` | List the payer's negotiated meter rate cards |
