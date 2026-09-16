@@ -3,12 +3,13 @@ package billingauth
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails/internal/requestauth"
 	"net/http"
 	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 type cookieAdmissionKey struct{}

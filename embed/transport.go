@@ -8,12 +8,13 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/open-rails/openrails/internal/requestauth"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -49,7 +50,7 @@ func hostPermissions() []string {
 
 // inprocessTransport dispatches SDK requests directly into the in-process
 // neutral handler — no socket, no serialization loss, one JSON round-trip. It
-// attaches the host principal as a CONTEXT VALUE (billingauth.WithHostPrincipal);
+// attaches the host principal as a CONTEXT VALUE (requestauth.WithHostPrincipal);
 // headers are never the trust carrier, so nothing a network peer sends can
 // impersonate the host.
 type inprocessTransport struct {
@@ -78,7 +79,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
 	ctx = engineContext(ctx)
-	ctx = billingauth.WithHostPrincipal(ctx, &billingauth.HostPrincipal{
+	ctx = requestauth.WithHostPrincipal(ctx, &requestauth.HostPrincipal{
 		MerchantID:  mid,
 		Permissions: hostPermissions(),
 	})

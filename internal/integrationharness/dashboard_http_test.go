@@ -231,12 +231,14 @@ func TestMerchantDashboard(t *testing.T) {
 		// metrics:read suffices to view…
 		status, _ = requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/dashboard", aRO, nil)
 		require.Equal(t, http.StatusOK, status)
-		// …but not to rewrite the shared layout or spend LLM tokens.
+		// …but not to rewrite the shared layout. NL generation is not mounted
+		// on this keyless surface at all; its write gate is covered below on
+		// the LLM-armed surface.
 		status, _ = requestJSON(t, http.MethodPut, surface.BaseURL+"/v1/merchant/dashboard", aRO, customLayout)
 		require.Equal(t, http.StatusForbidden, status)
 		status, _ = requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/dashboard/widgets/generate", aRO,
 			map[string]string{"prompt": "anything"})
-		require.Equal(t, http.StatusForbidden, status)
+		require.Equal(t, http.StatusNotFound, status)
 	})
 }
 
@@ -275,10 +277,9 @@ func TestDashboardWidgetGenerate(t *testing.T) {
 		token := surface.MintAPIKey(dbtest.TestMerchantSlug, "gen-off-"+uuid.NewString(),
 			[]string{controlplane.PermMerchantMetricsRead, controlplane.PermMerchantDashboardUpdate})
 
-		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/dashboard/widgets/generate",
+		status, _ := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/dashboard/widgets/generate",
 			token, map[string]string{"prompt": "cancellations per day"})
-		require.Equal(t, http.StatusNotImplemented, status)
-		require.Contains(t, string(body), "LLM_API_KEY")
+		require.Equal(t, http.StatusNotFound, status, "an unconfigured capability is an absent route, never a 501")
 
 		// The console bootstrap hides the NL box.
 		status, cfgBody, _ := getRaw(t, surface.BaseURL+"/admin/config.json")
@@ -299,6 +300,13 @@ func TestDashboardWidgetGenerate(t *testing.T) {
 		[]string{controlplane.PermMerchantMetricsRead, controlplane.PermMerchantDashboardUpdate})
 	svc := surface.App().Runtime.DashboardService
 	require.True(t, svc.NLConfigured())
+
+	t.Run("generate needs the dashboard write grant", func(t *testing.T) {
+		readOnly := surface.MintAPIKey(dbtest.TestMerchantSlug, "gen-ro-"+uuid.NewString(), []string{controlplane.PermMerchantMetricsRead})
+		status, _ := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/dashboard/widgets/generate", readOnly,
+			map[string]string{"prompt": "anything"})
+		require.Equal(t, http.StatusForbidden, status)
+	})
 
 	t.Run("config.json advertises nl widgets when configured", func(t *testing.T) {
 		status, cfgBody, _ := getRaw(t, surface.BaseURL+"/admin/config.json")

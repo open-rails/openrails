@@ -122,8 +122,8 @@ export interface AskResponse {
   evidence: AskEvidence[]
 }
 
-// askMetrics: free-form question → LLM-run metrics queries + answer. 501 when
-// llm.ask_enabled / the LLM key are not configured.
+// askMetrics: free-form question → LLM-run metrics queries + answer. Not
+// mounted when llm.ask_enabled / the LLM key are not configured.
 export const askMetrics = (question: string) =>
   api<AskResponse>("/merchant/metrics/ask", {
     method: "POST",
