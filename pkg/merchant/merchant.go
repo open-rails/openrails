@@ -20,6 +20,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// BindingHeader asserts an expected immutable merchant UUID. It grants no
+// authority; merchant routes compare it with the authenticated principal before
+// acquiring a merchant database connection.
+const BindingHeader = "X-OpenRails-Merchant-ID"
+
 // slugRe is the legal merchant-slug pattern: lowercase alnum + hyphens, no
 // leading/trailing hyphen, <=63 chars. The same slug is also the AuthKit
 // merchant permission-group instance slug in standalone.

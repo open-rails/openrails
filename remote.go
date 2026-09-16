@@ -12,15 +12,18 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // Client executes the same typed billing operations over an HTTP or in-process
 // transport. Applications may define narrow interfaces for the methods they use.
 type Client struct {
-	baseURL  string
-	currency string
-	client   *http.Client
-	timeout  time.Duration
+	baseURL    string
+	merchantID MerchantID
+	currency   string
+	client     *http.Client
+	timeout    time.Duration
 	// tokenFn mints the per-call Bearer (e.g. a host-signed AuthKit service JWT,
 	// #411, or an OpenRails-issued API key). It is the SOLE credential; a
 	// mint failure errors the call so the problem surfaces instead of being
@@ -32,6 +35,19 @@ type Client struct {
 
 // RemoteOption configures NewRemote.
 type RemoteOption func(*Client)
+
+// WithMerchantID binds this client to one immutable merchant UUID. The server
+// checks the binding against the authenticated merchant before executing a
+// command. It is an assertion, never authority to select another merchant.
+func WithMerchantID(id MerchantID) RemoteOption {
+	return func(c *Client) {
+		if id.IsZero() {
+			c.setupErr = fmt.Errorf("openrails: merchant ID must not be zero")
+			return
+		}
+		c.merchantID = id
+	}
+}
 
 // WithHTTPClient injects a transport (tests, custom TLS/conn pooling). When
 // unset a client bounded by the configured timeout is created. The per-call
@@ -678,6 +694,15 @@ type clientResponse struct {
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
 func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
+	expectedMerchant := c.merchantID
+	if pinned, ok := merchant.FromContext(ctx); ok {
+		if !expectedMerchant.IsZero() && expectedMerchant != pinned {
+			return nil, &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
+				Type: "invalid_request_error", Code: "resource_conflict", Message: "merchant binding mismatch",
+			}}
+		}
+		expectedMerchant = pinned
+	}
 	var raw []byte
 	if body != nil {
 		var merr error
@@ -714,6 +739,9 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	req.Header.Set("Accept", "application/json")
+	if !expectedMerchant.IsZero() {
+		req.Header.Set(merchant.BindingHeader, expectedMerchant.String())
+	}
 	if raw != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

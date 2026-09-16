@@ -145,6 +145,9 @@ func (r *Runtime) Client(options ...ClientOption) (*openrails.Client, error) {
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }),
 		openrails.WithCurrency(config.currency),
 	}
+	if id := rt.ConfiguredMerchant(); !id.IsZero() {
+		defaults = append(defaults, openrails.WithMerchantID(id))
+	}
 	return openrails.NewRemote(inprocessBaseURL, append(defaults, config.remoteOptions...)...)
 }
 

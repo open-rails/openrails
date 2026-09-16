@@ -365,6 +365,17 @@ func (opts Options) merchantActionPermissionMW(perm string) router.Middleware {
 				}
 				return
 			}
+			if raw := strings.TrimSpace(r.Header(merchant.BindingHeader)); raw != "" {
+				expected, err := merchant.ParseID(raw)
+				if err != nil || expected.IsZero() {
+					r.ErrorJSON(http.StatusBadRequest, "invalid merchant binding")
+					return
+				}
+				if expected != principal.MerchantID {
+					r.APIError(api.ConflictError("merchant binding mismatch"))
+					return
+				}
+			}
 			if r.Request != nil && !principal.MerchantID.IsZero() {
 				r.Request = r.Request.WithContext(merchant.WithID(r.Request.Context(), principal.MerchantID))
 			}
