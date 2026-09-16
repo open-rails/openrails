@@ -155,47 +155,6 @@ func (s *ProductService) Delete(ctx context.Context, id uuid.UUID) error {
 	return errors.New("products cannot be deleted; use Deactivate() instead to preserve historical data")
 }
 
-// updateRow writes the full product row (the raw persistence Update, formerly
-// repo.ProductRepo.Update). Unexported on purpose: the public Update() forbids
-// arbitrary changes; the allowed mutations funnel here.
-func (s *ProductService) updateRow(ctx context.Context, product *models.Product) error {
-	entSpec, err := models.ToJSONB(product.EntitlementsSpec)
-	if err != nil {
-		return err
-	}
-	credSpec, err := models.ToJSONB(product.CreditsSpec)
-	if err != nil {
-		return err
-	}
-	var desc *string
-	if product.Description != "" {
-		desc = &product.Description
-	}
-	tierRank32, err := productTierRankInt32(product.TierRank)
-	if err != nil {
-		return err
-	}
-	rows, err := s.db.Gen(ctx).UpdateProduct(ctx, gen.UpdateProductParams{
-		ID:               product.ID,
-		Key:              product.Key,
-		DisplayName:      product.DisplayName,
-		Description:      desc,
-		EntitlementsSpec: entSpec,
-		CreditsSpec:      credSpec,
-		TierGroup:        product.TierGroup,
-		TierRank:         tierRank32,
-		Archived:         product.Archived,
-		UpdatedAt:        models.UpdateTimestamp(product.UpdatedAt),
-	})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
 func (s *ProductService) GetByKey(ctx context.Context, key string) (*models.Product, error) {
 	row, err := s.db.Gen(ctx).GetProductByKey(ctx, key)
 	if err != nil {
@@ -218,32 +177,20 @@ func (s *ProductService) Activate(ctx context.Context, id uuid.UUID) error {
 
 // SetArchived sets the archived lifecycle flag on a product.
 func (s *ProductService) SetArchived(ctx context.Context, id uuid.UUID, archived bool) error {
-	product, err := s.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	product.Archived = archived
-	return s.updateRow(ctx, product)
+	_, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Archived: &archived})
+	return err
 }
 
-// UpdateDisplayName updates only the display name (cosmetic, does not affect historical data).
+// UpdateDisplayName changes only the display name.
 func (s *ProductService) UpdateDisplayName(ctx context.Context, id uuid.UUID, displayName string) error {
-	product, err := s.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	product.DisplayName = displayName
-	return s.updateRow(ctx, product)
+	_, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{DisplayName: &displayName})
+	return err
 }
 
-// UpdateDescription updates only the description (cosmetic, does not affect historical data).
+// UpdateDescription changes only the description; empty clears it.
 func (s *ProductService) UpdateDescription(ctx context.Context, id uuid.UUID, description string) error {
-	product, err := s.GetByID(ctx, id)
-	if err != nil {
-		return err
-	}
-	product.Description = description
-	return s.updateRow(ctx, product)
+	_, err := s.UpdateDefinition(ctx, id, ProductDefinitionUpdateParams{Description: &description})
+	return err
 }
 
 type ProductDefinitionUpdateParams struct {
@@ -259,38 +206,36 @@ type ProductDefinitionUpdateParams struct {
 	Archived         *bool
 }
 
-// UpdateDefinition updates host-configurable fields on a product (catalog definition surface).
-//
-// This is intentionally separate from Update(), which forbids arbitrary changes for safety.
+// UpdateDefinition atomically applies only the supplied fields. Set flags
+// distinguish omission from clearing nullable definitions; nil scalar pointers
+// leave their columns unchanged. A description of "" clears it.
 func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, params ProductDefinitionUpdateParams) (*models.Product, error) {
-	product, err := s.GetByID(ctx, id)
+	entSpec, err := models.ToJSONB(params.EntitlementsSpec)
 	if err != nil {
 		return nil, err
 	}
-	if params.DisplayName != nil {
-		product.DisplayName = *params.DisplayName
-	}
-	if params.Description != nil {
-		product.Description = *params.Description
-	}
-	if params.SetEntitlements {
-		product.EntitlementsSpec = params.EntitlementsSpec
-	}
-	if params.SetTierGroup {
-		product.TierGroup = params.TierGroup
-	}
-	if params.TierRank != nil {
-		product.TierRank = *params.TierRank
-	}
-	if params.Archived != nil {
-		product.Archived = *params.Archived
-	}
-	if params.SetCredits {
-		product.CreditsSpec = params.CreditsSpec
-	}
-
-	if err := s.updateRow(ctx, product); err != nil {
+	credSpec, err := models.ToJSONB(params.CreditsSpec)
+	if err != nil {
 		return nil, err
 	}
-	return product, nil
+	var rank *int32
+	if params.TierRank != nil {
+		value, err := productTierRankInt32(*params.TierRank)
+		if err != nil {
+			return nil, err
+		}
+		rank = &value
+	}
+	row, err := s.db.Gen(ctx).PatchProduct(ctx, gen.PatchProductParams{
+		ID: id, DisplayName: params.DisplayName,
+		Description: params.Description, SetDescription: params.Description != nil,
+		EntitlementsSpec: entSpec, SetEntitlements: params.SetEntitlements,
+		CreditsSpec: credSpec, SetCredits: params.SetCredits,
+		TierGroup: params.TierGroup, SetTierGroup: params.SetTierGroup,
+		TierRank: rank, Archived: params.Archived,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return models.ProductFromGen(row)
 }
