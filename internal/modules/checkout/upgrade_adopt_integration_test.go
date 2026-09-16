@@ -44,6 +44,7 @@ type fakeNMIUpgradeGateway struct {
 	saleCalls       atomic.Int64
 	saleMode        atomic.Value
 	saleVisible     atomic.Bool
+	saleLanded      atomic.Bool
 	saleTxn         string
 	createCalls     atomic.Int64
 	createMode      atomic.Value // "approve" | "ambiguousLanded" | "ambiguousLost"
@@ -65,6 +66,21 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions/"):
+			if !strings.HasSuffix(r.URL.Path, "/subscriptions/"+f.subID) || !f.subExists.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}`, f.subID, f.railCustomerRef, f.planID)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/"):
+			amount, _ := f.saleAmount.Load().(string)
+			if !strings.HasSuffix(r.URL.Path, "/payments/"+f.saleTxn) || !f.saleLanded.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"%s","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"%s"}]}`, f.saleTxn, amount, f.railCustomerRef, f.saleTxn, amount)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions"):
 			if f.subExists.Load() {
 				fmt.Fprintf(w, `{"subscriptions":[{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}],"next_cursor":null,"has_more":false}`,
@@ -102,8 +118,10 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 				case "decline":
 					fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=202")
 				case "ambiguousHidden":
+					f.saleLanded.Store(true)
 					w.WriteHeader(http.StatusBadGateway)
 				default:
+					f.saleLanded.Store(true)
 					f.saleVisible.Store(true)
 					fmt.Fprintf(w, "response=1&responsetext=SUCCESS&transactionid=%s&authcode=OK", f.saleTxn)
 				}

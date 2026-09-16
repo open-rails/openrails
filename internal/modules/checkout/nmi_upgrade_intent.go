@@ -66,6 +66,8 @@ type nmiUpgradeStep struct {
 	Enrollment  *nmi.AddSubscriptionResponse `json:"enrollment,omitempty"`
 	Sale        *nmi.SaleResponse            `json:"sale,omitempty"`
 	Refusal     string                       `json:"refusal,omitempty"`
+	// Resolution records operator evidence that supplied this step's outcome.
+	Resolution map[string]any `json:"resolution,omitempty"`
 }
 type nmiUpgradeProgress struct {
 	Successor *nmiUpgradeStep `json:"successor,omitempty"`
@@ -262,6 +264,84 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		out["transaction_id"] = progress.Proration.Sale.TransactionID
 	}
 	return intents.Succeeded(out)
+}
+
+// Resolve accepts exact provider evidence for one submitted step that has no
+// receipt. A successor reference must be a live subscription on the frozen
+// vault and plan that no other local subscription owns; a proration reference
+// must be an approved sale of the frozen amount on the frozen vault.
+// Non-execution applies the step's definitive-refusal path. The recorded step
+// then converges through the same verifier path as a provider receipt, so an
+// unsent proration is still submitted only by the executor.
+func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	if h.Checkout == nil || h.Checkout.Lifecycle == nil {
+		return intents.Outcome{}, errors.New("upgrade lifecycle unavailable")
+	}
+	var p NMIUpgradePayload
+	if err := json.Unmarshal(in.Payload, &p); err != nil {
+		return intents.Outcome{}, err
+	}
+	var progress nmiUpgradeProgress
+	if len(in.ResultEvidence) > 0 {
+		if err := json.Unmarshal(in.ResultEvidence, &progress); err != nil {
+			return intents.Outcome{}, err
+		}
+	}
+	var step *nmiUpgradeStep
+	switch resolution.Step {
+	case "successor":
+		step = progress.Successor
+	case "proration":
+		step = progress.Proration
+	default:
+		return intents.Outcome{}, fmt.Errorf("%w: upgrade step must be successor or proration", intents.ErrResolutionInvalid)
+	}
+	if step == nil {
+		return intents.Outcome{}, intents.RejectResolution("%s step was never submitted", resolution.Step)
+	}
+	if step.Refusal != "" || step.Enrollment != nil || step.Sale != nil {
+		return intents.Outcome{}, intents.RejectResolution("%s step already has an outcome", resolution.Step)
+	}
+	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, in.Rail))
+	if err != nil {
+		return intents.Outcome{}, fmt.Errorf("resolve nmi client: %w", err)
+	}
+	ref := resolution.ProviderReference
+	switch {
+	case resolution.Step == "successor" && resolution.NotExecuted:
+		step.Refusal = "provider confirmed the successor enrollment was not executed"
+	case resolution.Step == "successor":
+		if err := client.ConfirmLiveSubscription(ctx, ref, p.VaultID, p.PlanID); err != nil {
+			return intents.Outcome{}, intents.RejectResolution("%v", err)
+		}
+		local, err := h.Checkout.SubscriptionService.GetByPSPSubscriptionID(ctx, in.Rail, ref)
+		switch {
+		case err == nil && local.ID != p.NewSubscriptionID:
+			return intents.Outcome{}, intents.RejectResolution("subscription %s is already registered to local subscription %s", ref, local.ID)
+		case err != nil && !db.IsNotFound(err):
+			return intents.Outcome{}, err
+		}
+		step.Enrollment = &nmi.AddSubscriptionResponse{SubscriptionID: ref}
+	case resolution.NotExecuted:
+		if err := refuseContradictedNonExecution(ctx, client, "upg-"+shortHash(in.IdempotencyKey)); err != nil {
+			return intents.Outcome{}, err
+		}
+		step.Refusal = "provider confirmed the proration sale was not executed"
+	default:
+		cents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
+		if err != nil {
+			return intents.Outcome{}, err
+		}
+		if err := client.ConfirmApprovedSale(ctx, ref, p.VaultID, cents); err != nil {
+			return intents.Outcome{}, intents.RejectResolution("%v", err)
+		}
+		step.Sale = &nmi.SaleResponse{TransactionID: ref}
+	}
+	step.Resolution = resolution.Record(h.Checkout.now())
+	if err := intents.NewStore(h.Checkout.SubscriptionService.Database()).RecordProgress(ctx, in.ID, map[string]any{resolution.Step: step}); err != nil {
+		return intents.Outcome{}, fmt.Errorf("persist resolved %s step: %w", resolution.Step, err)
+	}
+	return h.advance(ctx, in, false), nil
 }
 
 // A definitive proration refusal leaves an unpaid successor schedule. Retain

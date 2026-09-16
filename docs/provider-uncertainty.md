@@ -13,7 +13,9 @@ mutation. A captured provider receipt survives local finalization failure in
 the existing intent result evidence. Local effects are retried against that
 same receipt. Query unavailability or delayed visibility never authorizes a
 new sale. NMI processor communication/duplicate response codes 420, 421 and 430
-also require verification rather than release/resend. Non-idempotent refund receipt rules follow the same rule.
+also require verification rather than release/resend. Non-idempotent refund
+receipt rules follow the same rule; an NMI refund's exact provider id is
+retained on the operation if its local receipt write fails.
 
 Known pre-submission refusal (unconfigured/read-only provider, failed local
 prerequisite) parks the intent without consuming an attempt. It can be retried
@@ -29,6 +31,21 @@ deadline passes. An expired in-flight lease is still reclaimable for
 verification. Re-enqueuing the operation cannot reset it to a fresh charge.
 Verification retains the existing lease/backoff schedule; it is not a tight
 polling loop. Queued operations that were never attempted can expire normally.
+
+An unknown operation that provider reads cannot settle is resolved by an
+operator with `openrails intents resolve`, never by resending. A
+`--receipt` is read back by its exact provider id and must match the frozen
+operation (sale: approved sale of the amount on the vault; enrollment: live
+subscription on the vault and plan, unowned locally; refund: approved refund of
+the reserved amount on the original sale's vault) before local effects commit
+through the normal receipt path. `--not-executed` records provider-confirmed
+non-execution and takes the type's definitive-refusal path; it is refused while
+the operation's exact order reference shows a successful sale. Rebills and
+custodian sales accept only non-execution because their receipts correlate
+exactly by order reference. Every resolution records actor and reason on the
+operation and in the mutation log. NMI subscription enrollment follows the
+upgrade rule: a roster row matching only vault and plan is surfaced as an
+operator candidate, not adopted.
 
 There is no evidence-free invoice unpark/force-resend method. The original
 attempt and its amount remain durable until a receipt resolves it. No

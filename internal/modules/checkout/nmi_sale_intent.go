@@ -227,6 +227,54 @@ func (h *NMISaleIntentHandler) Verify(ctx context.Context, intent gen.OpenrailsR
 	return h.finalize(ctx, intent.MerchantID, p, orderID, txnID, true)
 }
 
+// Resolve accepts an exact transaction the provider confirms is an approved
+// sale of the frozen amount on the frozen vault, or provider-confirmed
+// non-execution. It never re-sends the sale.
+func (h *NMISaleIntentHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	p, err := decodeNMISalePayload(intent)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if resolution.Step != "" {
+		return intents.Outcome{}, fmt.Errorf("%w: a sale has no steps", intents.ErrResolutionInvalid)
+	}
+	if receipt := intents.EvidenceString(intent, nmiSaleEvidenceTransactionID); receipt != "" {
+		return intents.Outcome{}, intents.RejectResolution("operation already holds receipt %s; its verifier completes registration", receipt)
+	}
+	client, err := h.Sale.nmiClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
+	if err != nil {
+		return intents.Outcome{}, fmt.Errorf("resolve nmi client: %w", err)
+	}
+	orderID := nmiSaleIntentOrderID(intent.ID, p.E2ERunID)
+	if resolution.NotExecuted {
+		if err := refuseContradictedNonExecution(ctx, client, orderID); err != nil {
+			return intents.Outcome{}, err
+		}
+		return intents.TerminalWithEvidence("provider confirmed the sale was not executed", nil), nil
+	}
+	amountCents, err := moneyutil.NativeToRailMinorExact(p.Currency, p.AmountMicros)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if err := client.ConfirmApprovedSale(ctx, resolution.ProviderReference, p.CustomerVaultID, amountCents); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("%v", err)
+	}
+	return h.finalize(ctx, intent.MerchantID, p, orderID, resolution.ProviderReference, true), nil
+}
+
+// refuseContradictedNonExecution rejects a non-execution attestation while the
+// provider shows a successful sale on the operation's exact order reference.
+func refuseContradictedNonExecution(ctx context.Context, client *nmi.NMIClient, orderID string) error {
+	txn, found, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
+	if err != nil {
+		return fmt.Errorf("read provider order before accepting non-execution: %w", err)
+	}
+	if found {
+		return intents.RejectResolution("provider shows successful sale %s for order %s", txn, orderID)
+	}
+	return nil
+}
+
 // finalize registers the confirmed charge locally (payment row, entitlements,
 // credits — RegisterPurchase is idempotent on (rail, transaction_id)) and
 // returns the evidence the producer builds its response from.

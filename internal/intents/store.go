@@ -268,6 +268,27 @@ func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, b
 	})
 }
 
+// ClaimUnknownByID leases one unknown operation for operator resolution.
+// ok=false means it is not unknown or another worker holds its lease.
+func (s *Store) ClaimUnknownByID(ctx context.Context, id uuid.UUID, now, leaseUntil time.Time) (gen.OpenrailsRailIntent, bool, error) {
+	row, err := s.db.Gen(ctx).ClaimUnknownRailIntentByID(ctx, gen.ClaimUnknownRailIntentByIDParams{
+		ID: id, Now: now.UTC(), LeaseUntil: leaseUntil.UTC(),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.OpenrailsRailIntent{}, false, nil
+	}
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, false, err
+	}
+	return row, true, nil
+}
+
+// ReleaseUnknownClaim drops a resolver lease without changing the operation.
+func (s *Store) ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, error) {
+	n, err := s.db.Gen(ctx).ReleaseUnknownRailIntentClaim(ctx, id)
+	return n == 1, err
+}
+
 // ExpireOverdue expires every live intent whose relevance window elapsed —
 // except destructive intents whose merchant has an OPEN held_bulk finding
 // (#679): breaker-held intents never expire out from under the operator.

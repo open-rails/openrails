@@ -16,4 +16,12 @@ proration response can recover from its stable account-scoped order reference;
 an empty query never permits resend. A definitive proration refusal queues the
 known successor for durable cancellation while leaving the predecessor active.
 
+An unresolved step is closed with `openrails intents resolve --step successor|proration`.
+A successor receipt must be a live subscription on the frozen vault and plan
+that no other local subscription owns; a proration receipt must be an approved
+sale of the frozen amount on the frozen vault. The resolved step then follows
+the verifier path: an unsent proration is still submitted only by the executor.
+Successor non-execution terminates the operation and releases the predecessor
+for a new request; proration non-execution queues successor cancellation.
+
 Provider search visibility and exact correlation remain adapter evidence; local loopback tests prove the application's no-resend and transaction behavior, not a live provider guarantee.

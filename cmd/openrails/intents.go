@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/intents"
@@ -51,7 +52,78 @@ func newIntentsCmd() *cobra.Command {
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().IntVar(&limit, "limit", 500, "Maximum rows to list")
 
+	cmd.AddCommand(newIntentsResolveCmd())
 	return cmd
+}
+
+// newIntentsResolveCmd applies operator evidence to one unknown provider
+// operation. A provider reference is read back by its exact id and matched to
+// the frozen operation before local effects commit; --not-executed records
+// provider-confirmed non-execution. Neither resends the unresolved mutation.
+func newIntentsResolveCmd() *cobra.Command {
+	var (
+		merchantSlug string
+		intentID     string
+		step         string
+		reference    string
+		notExecuted  bool
+		actor        string
+		reason       string
+	)
+	cmd := &cobra.Command{
+		Use:   "resolve",
+		Short: "Resolve an unknown provider operation with an exact provider receipt or provider-confirmed non-execution",
+		Args:  cobra.NoArgs,
+		RunE: func(c *cobra.Command, _ []string) error {
+			id, err := uuid.Parse(strings.TrimSpace(intentID))
+			if err != nil {
+				return fmt.Errorf("--intent must be a UUID: %w", err)
+			}
+			resolution := intents.Resolution{Step: step, ProviderReference: reference, NotExecuted: notExecuted, Actor: actor, Reason: reason}
+			cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
+			return runIntentsResolve(c.Context(), cfg, merchantSlug, id, resolution)
+		},
+	}
+	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
+	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
+	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration)")
+	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription or refund id")
+	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record provider-confirmed non-execution")
+	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
+	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")
+	return cmd
+}
+
+func runIntentsResolve(ctx context.Context, cfg *config.Config, merchantSlug string, id uuid.UUID, resolution intents.Resolution) error {
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+	if strings.TrimSpace(resolution.Actor) == "" || resolution.Actor == "unknown" {
+		return fmt.Errorf("--actor is required")
+	}
+	application, err := app.Bootstrap(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("bootstrap application: %w", err)
+	}
+	defer func() { _ = application.Close(context.Background()) }()
+	mid, err := resolveCLIMerchant(ctx, application.Runtime.DB, merchantSlug)
+	if err != nil {
+		return err
+	}
+	ctx = merchant.WithID(ctx, mid)
+	return application.Runtime.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		row, err := application.Runtime.IntentRunner().Resolve(ctx, id, resolution)
+		if err != nil {
+			return err
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		out := map[string]any{"id": row.ID, "type": row.IntentType, "status": row.Status, "failure_reason": row.LastFailureReason}
+		if len(row.ResultEvidence) > 0 {
+			out["result_evidence"] = json.RawMessage(row.ResultEvidence)
+		}
+		return enc.Encode(out)
+	})
 }
 
 func newIntentsLogCmd() *cobra.Command {

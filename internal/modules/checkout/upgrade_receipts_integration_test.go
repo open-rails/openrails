@@ -268,3 +268,139 @@ func TestUpgradeWireAmountsUseFrozenMicros(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 }
+
+func (fx *upgradeAdoptFixture) resolve(t *testing.T, resolution intents.Resolution) (gen.OpenrailsRailIntent, error) {
+	t.Helper()
+	return fx.svc.Intents.(*intents.Runner).Resolve(fx.ctx, fx.operation(t).ID, resolution)
+}
+
+func (fx *upgradeAdoptFixture) count(t *testing.T, query string, args ...any) int {
+	t.Helper()
+	var n int
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, query, args...).Scan(&n))
+	return n
+}
+
+// A landed successor whose response was lost is not adopted from roster
+// similarity. Only the exact subscription id, read back on the frozen vault and
+// plan, resolves it; the executor then submits the never-sent proration once
+// and the swap, payment, access and predecessor delete commit exactly once.
+func TestUpgradeUnknownSuccessorResolvesOnlyFromExactReceipt(t *testing.T) {
+	fx := newUpgradeAdoptFixture(t)
+	fx.positiveProration()
+	fx.newProduct.EntitlementsSpec = map[string]*int{"upgraded_access": nil}
+	fx.gateway.createMode.Store("ambiguousLanded")
+	_, err := fx.upgrade(t)
+	require.ErrorIs(t, err, ErrCheckoutProcessing)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, fx.restartAndVerify(t).Status)
+
+	_, err = fx.resolve(t, intents.Resolution{Step: "proration", ProviderReference: fx.gateway.saleTxn, Actor: "ops", Reason: "wrong step"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected, "an unsent step has nothing to resolve")
+	_, err = fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: "rsub-missing", Actor: "ops", Reason: "wrong id"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected)
+
+	resolved, err := fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: fx.gateway.subID, Actor: "ops@example.test", Reason: "NMI subscription detail"})
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusFailedRetryable, resolved.Status, "the verifier never submits the unsent proration")
+	require.Zero(t, fx.gateway.saleCalls.Load())
+	old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusActive, old.Status)
+	var journal nmiUpgradeProgress
+	require.NoError(t, json.Unmarshal(resolved.ResultEvidence, &journal))
+	require.Equal(t, "ops@example.test", journal.Successor.Resolution["actor"])
+
+	fx.newPrice.Amount = 999_000_000
+	response, err := fx.upgrade(t)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	require.Equal(t, "60.00", fx.gateway.saleAmount.Load(), "the frozen proration is submitted")
+	next, err := fx.svc.SubscriptionService.GetByID(fx.ctx, *response.SubscriptionID)
+	require.NoError(t, err)
+	require.Equal(t, fx.gateway.subID, next.RailSubscriptionID)
+	old, err = fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusCancelled, old.Status)
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND amount=60000000`, next.ID))
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.entitlements WHERE source_id=$1`, next.ID))
+	require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, old.ID, intents.TypeNMIDeleteSubscription))
+	require.Equal(t, 1, operatorResolutionLogs(t, fx.db, resolved.ID))
+
+	_, err = fx.resolve(t, intents.Resolution{Step: "successor", ProviderReference: fx.gateway.subID, Actor: "ops", Reason: "again"})
+	require.ErrorIs(t, err, intents.ErrResolutionNotUnknown)
+	require.Equal(t, intents.StatusSucceeded, fx.restartAndVerify(t).Status)
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+}
+
+// A hidden proration sale converges from its exact transaction; provider-
+// confirmed non-execution instead takes the definitive-refusal path, and is
+// refused while the stable order reference shows a successful sale.
+func TestUpgradeUnknownProrationResolution(t *testing.T) {
+	t.Run("exact receipt", func(t *testing.T) {
+		fx := newUpgradeAdoptFixture(t)
+		fx.positiveProration()
+		fx.gateway.saleMode.Store("ambiguousHidden")
+		_, err := fx.upgrade(t)
+		require.ErrorIs(t, err, ErrCheckoutProcessing)
+		require.Equal(t, intents.StatusUnknownNeedsVerify, fx.restartAndVerify(t).Status)
+		resolved, err := fx.resolve(t, intents.Resolution{Step: "proration", ProviderReference: fx.gateway.saleTxn, Actor: "ops", Reason: "NMI transaction detail"})
+		require.NoError(t, err)
+		require.Equal(t, intents.StatusSucceeded, resolved.Status)
+		var p NMIUpgradePayload
+		require.NoError(t, json.Unmarshal(resolved.Payload, &p))
+		require.Equal(t, 1, fx.count(t, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1 AND transaction_id=$2`, p.NewSubscriptionID, fx.gateway.saleTxn))
+		require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+		require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	})
+	t.Run("non-execution", func(t *testing.T) {
+		fx := newUpgradeAdoptFixture(t)
+		fx.positiveProration()
+		fx.gateway.saleMode.Store("ambiguousHidden")
+		_, err := fx.upgrade(t)
+		require.ErrorIs(t, err, ErrCheckoutProcessing)
+		fx.gateway.saleVisible.Store(true)
+		_, err = fx.resolve(t, intents.Resolution{Step: "proration", NotExecuted: true, Actor: "ops", Reason: "wrong"})
+		require.ErrorIs(t, err, intents.ErrResolutionRejected)
+		fx.gateway.saleVisible.Store(false)
+		fx.gateway.saleLanded.Store(false)
+		resolved, err := fx.resolve(t, intents.Resolution{Step: "proration", NotExecuted: true, Actor: "ops", Reason: "NMI confirmed no sale"})
+		require.NoError(t, err)
+		require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
+		var p NMIUpgradePayload
+		require.NoError(t, json.Unmarshal(resolved.Payload, &p))
+		next, err := fx.svc.SubscriptionService.GetByID(fx.ctx, p.NewSubscriptionID)
+		require.NoError(t, err)
+		require.Equal(t, models.StatusCancelled, next.Status)
+		old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, p.OldSubscriptionID)
+		require.NoError(t, err)
+		require.Equal(t, models.StatusActive, old.Status)
+		require.Equal(t, 0, fx.count(t, `SELECT count(*) FROM openrails.payments WHERE subscription_id=$1`, p.NewSubscriptionID))
+		_, err = fx.upgrade(t)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, ErrCheckoutProcessing)
+		require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+	})
+}
+
+// Provider-confirmed non-execution of the successor terminates the operation
+// with the predecessor intact and releases the predecessor for a new request.
+func TestUpgradeSuccessorNonExecutionReleasesPredecessor(t *testing.T) {
+	fx := newUpgradeAdoptFixture(t)
+	fx.gateway.createMode.Store("ambiguousLost")
+	_, err := fx.upgrade(t)
+	require.ErrorIs(t, err, ErrCheckoutProcessing)
+	resolved, err := fx.resolve(t, intents.Resolution{Step: "successor", NotExecuted: true, Actor: "ops", Reason: "NMI confirmed no subscription"})
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
+	old, err := fx.svc.SubscriptionService.GetByID(fx.ctx, fx.existingSub.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusActive, old.Status)
+
+	fx.gateway.createMode.Store("approve")
+	fx.req.IdempotencyKey = uuid.NewString()
+	response, err := fx.upgrade(t)
+	require.NoError(t, err)
+	require.Equal(t, "success", response.Status)
+	require.EqualValues(t, 2, fx.gateway.createCalls.Load(), "only a definitively unexecuted enrollment permits a new operation")
+}

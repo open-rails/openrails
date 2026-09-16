@@ -247,39 +247,77 @@ func (h *NMISubscriptionCreateIntentHandler) Verify(ctx context.Context, intent 
 	return h.verifyAtProvider(ctx, intent.MerchantID, client, p, orderID)
 }
 
-// verifyAtProvider answers "did THIS create land at NMI?" via reads:
-//   - the order-id sale search finds the atomic first charge (immediate starts);
-//   - a subscription-roster scan finds the enrolled record by (vault, plan) —
-//     the delayed-start case, which produces no first charge. A remote match is
-//     accepted when it is unknown locally (the orphan this issue exists to
-//     catch) or when its local row carries THIS intent's order id (finalize
-//     crashed midway; re-finalize).
-//
-// A missing match remains inconclusive; this function never authorizes a resend.
+// verifyAtProvider answers "did THIS create land at NMI?" via reads. The
+// roster exposes vault and plan, not the enrollment's order reference, so a
+// matching remote subscription is only a candidate for operator resolution.
+// The exception is exact local evidence: a row already registered with THIS
+// intent's order id (finalize crashed midway) is re-finalized. A missing or
+// merely similar match remains unknown and never authorizes a resend.
 func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Context, merchantID uuid.UUID, client *nmi.NMIClient, p NMISubscriptionCreatePayload, orderID string) intents.Outcome {
 	txnID, txnFound, err := client.FindSuccessfulSaleByOrderID(ctx, orderID)
 	if err != nil {
 		return intents.Ambiguous("pre-send verification read failed: " + err.Error())
 	}
-
-	candidates, err := findUnregisteredRemoteSubscriptions(ctx, h.Checkout.SubscriptionService, client, strings.ToLower(p.Provider), p.CustomerVaultID, p.PlanID, orderID)
+	roster, err := scanRemoteSubscriptions(ctx, h.Checkout.SubscriptionService, client, strings.ToLower(p.Provider), p.CustomerVaultID, p.PlanID, orderID)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-
-	switch {
-	case len(candidates) == 1:
-		return h.finalize(ctx, merchantID, p, orderID, candidates[0], txnID, true)
-	case len(candidates) > 1:
-		return intents.Ambiguous(fmt.Sprintf("%d unregistered remote subscriptions match vault %s plan %s; operator attention required",
-			len(candidates), p.CustomerVaultID, p.PlanID))
-	case txnFound:
-		// Charged but no matching enrollment found: never resend (that would
-		// double-charge); keep verifying.
-		return intents.Ambiguous("successful sale found for order id but no matching remote subscription; keeping under verification")
-	default:
-		return intents.Ambiguous("submitted enrollment has no exact provider receipt; no automatic resend")
+	if len(roster.registered) == 1 {
+		return h.finalize(ctx, merchantID, p, orderID, roster.registered[0], txnID, true)
 	}
+	evidence := map[string]any{}
+	if txnFound {
+		evidence[nmiSaleEvidenceTransactionID] = txnID
+	}
+	if len(roster.unregistered) > 0 {
+		evidence["candidate_subscription_ids"] = roster.unregistered
+	}
+	reason := "submitted enrollment has no exact provider receipt; no automatic resend"
+	if len(roster.unregistered) > 0 {
+		reason = fmt.Sprintf("%d unregistered remote subscriptions match vault and plan; resolve with the exact enrollment receipt", len(roster.unregistered))
+	}
+	return intents.AmbiguousWithEvidence(reason, evidence)
+}
+
+// Resolve accepts an exact enrollment receipt that the provider confirms is a
+// live subscription on the frozen vault and plan, or provider-confirmed
+// non-execution. It never re-sends the enrollment.
+func (h *NMISubscriptionCreateIntentHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	p, err := decodeNMISubscriptionCreatePayload(intent)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if resolution.Step != "" {
+		return intents.Outcome{}, fmt.Errorf("%w: subscription create has no steps", intents.ErrResolutionInvalid)
+	}
+	if sub := intents.EvidenceString(intent, "provider_subscription_id"); sub != "" {
+		return intents.Outcome{}, intents.RejectResolution("operation already holds enrollment receipt %s; its verifier completes registration", sub)
+	}
+	client, err := h.Checkout.resolveNMIClient(ctx, nmiIntentClientName(p.PSP, intent.Rail))
+	if err != nil {
+		return intents.Outcome{}, fmt.Errorf("resolve nmi client: %w", err)
+	}
+	if resolution.NotExecuted {
+		if txn := intents.EvidenceString(intent, nmiSaleEvidenceTransactionID); txn != "" {
+			return intents.Outcome{}, intents.RejectResolution("operation holds enrollment charge %s", txn)
+		}
+		if err := refuseContradictedNonExecution(ctx, client, nmiSaleIntentOrderID(intent.ID, p.E2ERunID)); err != nil {
+			return intents.Outcome{}, err
+		}
+		return intents.TerminalWithEvidence("provider confirmed the enrollment was not executed", nil), nil
+	}
+	ref := resolution.ProviderReference
+	if err := client.ConfirmLiveSubscription(ctx, ref, p.CustomerVaultID, p.PlanID); err != nil {
+		return intents.Outcome{}, intents.RejectResolution("%v", err)
+	}
+	local, err := h.Checkout.SubscriptionService.GetByPSPSubscriptionID(ctx, strings.ToLower(p.Provider), ref)
+	switch {
+	case err == nil && local.ID != p.LocalSubscriptionID:
+		return intents.Outcome{}, intents.RejectResolution("subscription %s is already registered to local subscription %s", ref, local.ID)
+	case err != nil && !db.IsNotFound(err):
+		return intents.Outcome{}, err
+	}
+	return h.finalize(ctx, intent.MerchantID, p, nmiSaleIntentOrderID(intent.ID, p.E2ERunID), ref, intents.EvidenceString(intent, nmiSaleEvidenceTransactionID), true), nil
 }
 
 // railSubscriptionReader is the local-lookup surface the roster scan needs
@@ -288,18 +326,22 @@ type railSubscriptionReader interface {
 	GetByPSPSubscriptionID(ctx context.Context, provider, railSubscriptionID string) (*models.Subscription, error)
 }
 
-// findUnregisteredRemoteSubscriptions scans the NMI recurring roster for
-// subscriptions on (vault, plan) that are unknown locally, or whose local row
-// carries the given order id (a partially-completed finalize). Shared by the
-// nmi_subscription_create verify leg and the upgrade successor-create
-// ambiguity recovery (#674): both answer "did OUR create land at NMI?".
-func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscriptionReader, client *nmi.NMIClient, provider, railCustomerRef, planID, orderID string) ([]string, error) {
-	var candidates []string
+type rosterMatches struct {
+	// registered rows carry THIS operation's order id locally: exact evidence.
+	registered []string
+	// unregistered rows share only vault and plan: operator candidates.
+	unregistered []string
+}
+
+// scanRemoteSubscriptions scans the NMI recurring roster for subscriptions on
+// (vault, plan) and classifies them by local evidence.
+func scanRemoteSubscriptions(ctx context.Context, subs railSubscriptionReader, client *nmi.NMIClient, provider, railCustomerRef, planID, orderID string) (rosterMatches, error) {
+	var out rosterMatches
 	cursor := ""
 	for {
 		page, perr := client.ListSubscriptionsPage(ctx, cursor, 0)
 		if perr != nil {
-			return nil, fmt.Errorf("subscription roster read failed: %w", perr)
+			return out, fmt.Errorf("subscription roster read failed: %w", perr)
 		}
 		for _, sub := range page.Subscriptions {
 			if strings.TrimSpace(sub.CustomerVaultID) != strings.TrimSpace(railCustomerRef) {
@@ -311,15 +353,13 @@ func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscript
 			local, lerr := subs.GetByPSPSubscriptionID(ctx, provider, sub.ID)
 			if lerr != nil {
 				if !db.IsNotFound(lerr) {
-					return nil, fmt.Errorf("local subscription lookup failed: %w", lerr)
+					return out, fmt.Errorf("local subscription lookup failed: %w", lerr)
 				}
-				// Unknown locally: the orphan the create left behind.
-				candidates = append(candidates, sub.ID)
+				out.unregistered = append(out.unregistered, sub.ID)
 				continue
 			}
 			if orderID != "" && subscriptionMetadataString(local.Metadata, "order_id") == orderID {
-				// Registered by a partially-completed finalize of THIS intent.
-				candidates = append(candidates, sub.ID)
+				out.registered = append(out.registered, sub.ID)
 			}
 		}
 		next := string(page.NextCursor)
@@ -328,7 +368,7 @@ func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscript
 		}
 		cursor = next
 	}
-	return candidates, nil
+	return out, nil
 }
 
 // nmiIntentClientName picks the client-resolution name for an NMI intent: the

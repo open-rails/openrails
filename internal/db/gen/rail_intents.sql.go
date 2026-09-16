@@ -229,6 +229,58 @@ func (q *Queries) ClaimRailIntentByID(ctx context.Context, arg ClaimRailIntentBy
 	return i, err
 }
 
+const claimUnknownRailIntentByID = `-- name: ClaimUnknownRailIntentByID :one
+UPDATE openrails.rail_intents
+SET claimed_until = $1::timestamptz,
+    updated_at = now()
+WHERE id = $2
+  AND status = 'unknown_needs_verify'
+  AND (claimed_until IS NULL OR claimed_until <= $3::timestamptz)
+RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, custodian_id
+`
+
+type ClaimUnknownRailIntentByIDParams struct {
+	LeaseUntil time.Time
+	ID         uuid.UUID
+	Now        time.Time
+}
+
+// Claims ONE unknown operation for operator resolution. Like the verifier
+// claim, status and attempts are unchanged; the lease excludes a concurrent
+// verifier or resolver.
+func (q *Queries) ClaimUnknownRailIntentByID(ctx context.Context, arg ClaimUnknownRailIntentByIDParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, claimUnknownRailIntentByID, arg.LeaseUntil, arg.ID, arg.Now)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
 const countActiveSubscriptionsByMerchant = `-- name: CountActiveSubscriptionsByMerchant :one
 SELECT count(*) FROM openrails.subscriptions
 WHERE merchant_id = $1::uuid AND status = 'active'
@@ -1061,6 +1113,23 @@ type ParkRailIntentParams struct {
 // must not escalate backoff.
 func (q *Queries) ParkRailIntent(ctx context.Context, arg ParkRailIntentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, parkRailIntent, arg.NextAttemptAt, arg.Reason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const releaseUnknownRailIntentClaim = `-- name: ReleaseUnknownRailIntentClaim :execrows
+UPDATE openrails.rail_intents
+SET claimed_until = NULL,
+    updated_at = now()
+WHERE id = $1 AND status = 'unknown_needs_verify'
+`
+
+// Releases a resolver lease after rejected evidence, leaving the operation
+// exactly as it was.
+func (q *Queries) ReleaseUnknownRailIntentClaim(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseUnknownRailIntentClaim, id)
 	if err != nil {
 		return 0, err
 	}

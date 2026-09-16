@@ -92,6 +92,10 @@ func (f *fakeLedger) ClaimDue(context.Context, time.Time, time.Time, int64) ([]g
 func (f *fakeLedger) ClaimDueVerify(context.Context, time.Time, time.Time, int64) ([]gen.OpenrailsRailIntent, error) {
 	return f.dueVerify, nil
 }
+func (f *fakeLedger) ClaimUnknownByID(context.Context, uuid.UUID, time.Time, time.Time) (gen.OpenrailsRailIntent, bool, error) {
+	return gen.OpenrailsRailIntent{}, false, nil
+}
+func (f *fakeLedger) ReleaseUnknownClaim(context.Context, uuid.UUID) (bool, error) { return false, nil }
 func (f *fakeLedger) RenewClaim(context.Context, uuid.UUID, time.Time, time.Time) (bool, error) {
 	return true, nil
 }
