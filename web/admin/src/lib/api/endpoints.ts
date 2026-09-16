@@ -3,12 +3,6 @@
 import { api, type ItemsEnvelope, type ListEnvelope } from "./client"
 import type {
   AdminSubscription,
-  AlertChannelRef,
-  AlertDeliveryResult,
-  AlertRule,
-  AlertSeverity,
-  AlertTemplate,
-  AlertTemplateInfo,
   CatalogDriftEvent,
   CatalogDriftReport,
   CatalogPrice,
@@ -696,45 +690,6 @@ export const setCreditLimit = (
 export const getTrustLevel = (customerId: string, currency: string) =>
   api<{ currency: string; trust_level: string }>("/merchant/trust-level", {
     query: { customer_id: customerId, currency },
-  })
-
-// --- Alerting: rule templates (#736) ---
-
-// listAlertTemplates fetches the in-code template registry (key, param schema,
-// defaults) the create/edit dialog renders its fields from.
-export const listAlertTemplates = (signal?: AbortSignal) =>
-  api<{ data: AlertTemplateInfo[] }>("/merchant/alerts/templates", { signal })
-
-// --- Alerting: rules (#736) ---
-
-export interface AlertRuleRequest {
-  template: AlertTemplate
-  params: Record<string, unknown>
-  severity: AlertSeverity
-  channels: AlertChannelRef[]
-  enabled: boolean
-}
-
-export const listAlertRules = (signal?: AbortSignal) =>
-  api<{ data: AlertRule[] | null }>("/merchant/alerts/rules", { signal })
-
-export const createAlertRule = (body: AlertRuleRequest) =>
-  api<AlertRule>("/merchant/alerts/rules", { method: "POST", body })
-
-export const updateAlertRule = (id: string, body: Partial<AlertRuleRequest>) =>
-  api<AlertRule>(`/merchant/alerts/rules/${id}`, { method: "PATCH", body })
-
-export const deleteAlertRule = (id: string) =>
-  api<{ deleted: boolean; id: string }>(`/merchant/alerts/rules/${id}`, {
-    method: "DELETE",
-  })
-
-// testAlertRule fires one test delivery through the rule's real channels —
-// the ONLY test-fire surface (there is no per-webhook test endpoint).
-export const testAlertRule = (id: string) =>
-  api<{ results: AlertDeliveryResult[] }>(`/merchant/alerts/rules/${id}/test`, {
-    method: "POST",
-    body: {},
   })
 
 // --- Alerting: webhooks (#736) ---

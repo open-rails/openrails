@@ -1,7 +1,6 @@
 DELETE /v1/customers/{customer_id}/payment-methods/{id}
 DELETE /v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}
 DELETE /v1/me/payment-methods/{id}
-DELETE /v1/merchant/alerts/rules/{id}
 DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/catalog/meters/{key}/rate-card
 DELETE /v1/merchant/customers/{customer_id}/business-profile
@@ -53,8 +52,6 @@ GET /v1/me/subscriptions/{id}
 GET /v1/me/tier
 GET /v1/me/transactions
 GET /v1/me/usage
-GET /v1/merchant/alerts/rules
-GET /v1/merchant/alerts/templates
 GET /v1/merchant/api-host
 GET /v1/merchant/api-keys
 GET /v1/merchant/business-customers
@@ -125,7 +122,6 @@ GET /v1/products
 GET /v1/solana/config
 GET /v1/solana/tokens
 GET /{$}
-PATCH /v1/merchant/alerts/rules/{id}
 PATCH /v1/merchant/catalog/prices/{id}
 PATCH /v1/merchant/catalog/products/{id}
 PATCH /v1/merchant/team/{user_id}
@@ -154,8 +150,6 @@ POST /v1/merchant/admissions
 POST /v1/merchant/admissions/{id}/capture
 POST /v1/merchant/admissions/{id}/extend
 POST /v1/merchant/admissions/{id}/release
-POST /v1/merchant/alerts/rules
-POST /v1/merchant/alerts/rules/{id}/test
 POST /v1/merchant/api-keys
 POST /v1/merchant/catalog/ask
 POST /v1/merchant/catalog/copilot/confirm

@@ -844,20 +844,8 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	team.Handle(http.MethodPatch, "/:user_id", h(httphandlers.MerchantChangeTeamRole(opts.Team)), membersManage)
 	team.Handle(http.MethodDelete, "/:user_id", h(httphandlers.MerchantRemoveTeamMember(opts.Team)), membersManage)
 
-	// #736 metric threshold alerting: rule/webhook CRUD + test-fire (settings-
-	// write gated for mutations) and the notification bell (metrics-read). Reads
-	// share metrics-read (an alert is a saved view over a metric); mutations are
-	// settings-write. NB: /merchant/webhooks (outbound alert sinks) is distinct
-	// from the /merchants/{m}/webhooks/{provider} inbound provider ingestion.
+	// Outbound notification destinations and the merchant notification bell.
 	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
-	alerts := rr.Group("/alerts")
-	alerts.Handle(http.MethodGet, "/templates", h(httphandlers.AlertRuleTemplates), metricsRead...)
-	alerts.Handle(http.MethodGet, "/rules", h(httphandlers.ListAlertRules), metricsRead...)
-	alerts.Handle(http.MethodPost, "/rules", h(httphandlers.CreateAlertRule), settingsWrite...)
-	alerts.Handle(http.MethodPatch, "/rules/:id", h(httphandlers.UpdateAlertRule), settingsWrite...)
-	alerts.Handle(http.MethodDelete, "/rules/:id", h(httphandlers.DeleteAlertRule), settingsWrite...)
-	alerts.Handle(http.MethodPost, "/rules/:id/test", h(httphandlers.TestFireAlertRule), settingsWrite...)
-
 	webhooks := rr.Group("/webhooks")
 	webhooks.Handle(http.MethodGet, "", h(httphandlers.ListMerchantWebhooks), metricsRead...)
 	webhooks.Handle(http.MethodPost, "", h(httphandlers.CreateMerchantWebhook), settingsWrite...)

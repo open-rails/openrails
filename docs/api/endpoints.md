@@ -406,7 +406,7 @@ manifest-guarded like catalog writes).
 | DELETE | `/v1/merchant/payment-providers/{provider}` | Remove provider config |
 | POST | `/v1/merchant/payment-providers/routing/dry-run` | Explain which PSP a checkout would get, and why every other candidate was skipped. Read permission — creates nothing (or#288) |
 
-### Metrics, dashboard, alerts, notifications
+### Metrics, dashboard, webhooks, notifications
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
@@ -416,15 +416,9 @@ manifest-guarded like catalog writes).
 | GET | `/v1/merchant/dashboard` | `merchant:metrics:read` | Saved dashboard config |
 | PUT | `/v1/merchant/dashboard` | `merchant:dashboard:update` | Replace dashboard config |
 | POST | `/v1/merchant/dashboard/widgets/generate` | `merchant:dashboard:update` | NL widget generation |
-| GET | `/v1/merchant/alerts/templates` | `merchant:metrics:read` | Alert rule templates |
-| GET | `/v1/merchant/alerts/rules` | `merchant:metrics:read` | List alert rules |
-| POST | `/v1/merchant/alerts/rules` | `merchant:settings:update` | Create rule |
-| PATCH | `/v1/merchant/alerts/rules/{id}` | `merchant:settings:update` | Update rule |
-| DELETE | `/v1/merchant/alerts/rules/{id}` | `merchant:settings:update` | Delete rule |
-| POST | `/v1/merchant/alerts/rules/{id}/test` | `merchant:settings:update` | Test-fire a rule |
 | GET | `/v1/merchant/webhooks` | `merchant:metrics:read` | List outbound alert webhook metadata; destination host only, never URL credentials |
 | POST | `/v1/merchant/webhooks` | `merchant:settings:update` | Create outbound webhook; URL is write-only and stored encrypted |
-| PUT | `/v1/merchant/webhooks/{id}/url` | `merchant:settings:update` | Replace the destination credential while preserving the webhook ID and alert rules |
+| PUT | `/v1/merchant/webhooks/{id}/url` | `merchant:settings:update` | Replace the destination credential while preserving the webhook identity |
 | DELETE | `/v1/merchant/webhooks/{id}` | `merchant:settings:update` | Delete outbound webhook |
 | GET | `/v1/merchant/notifications` | `merchant:metrics:read` | Merchant notification feed |
 | GET | `/v1/merchant/notifications/unread-count` | `merchant:metrics:read` | Unread count |
@@ -508,7 +502,7 @@ Outbound alert webhook URLs are write-only credentials, including path/query
 components. The read projection contains `destination_host`, never the URL.
 DB-backed writes require `ENCRYPTION_MASTER_KEY` even in development; Vault
 uses the configured merchant secret backend. Rotation uses `PUT .../{id}/url`
-with `{ "url": "..." }` and retains rule references. A metadata/secret version
+with `{ "url": "..." }` and retains webhook identity. A metadata/secret version
 mismatch refuses delivery until the same URL update is retried successfully.
 Manifest deployments retain read-only provider credentials while this managed
 webhook namespace uses the configured encrypted DB/Vault backend.

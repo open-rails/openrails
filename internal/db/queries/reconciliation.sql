@@ -98,6 +98,18 @@ ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
+-- name: ClaimReconciliationFindingNotification :execrows
+-- Claim one open episode/escalation in the same transaction as its notification.
+UPDATE openrails.reconciliation_findings
+SET notified_at = sqlc.arg(notified_at)::timestamptz,
+    notified_severity = sqlc.arg(severity)::text
+WHERE id = sqlc.arg(id)::uuid
+  AND status = 'requires_review'
+  AND severity = sqlc.arg(severity)::text
+  AND (notified_at IS NULL OR
+       array_position(ARRAY['critical','high','medium','low'], severity) <
+       COALESCE(array_position(ARRAY['critical','high','medium','low'], notified_severity), 5));
+
 -- name: MarkReconciliationFindingNotified :execrows
 -- #787: dedupe linkage for the immediate notify path — set once a finding
 -- pushes an operator notification, cleared by every resolution statement below
@@ -106,40 +118,6 @@ UPDATE openrails.reconciliation_findings
 SET notified_at = sqlc.arg(notified_at)::timestamptz,
     notified_severity = sqlc.arg(severity)::text
 WHERE id = sqlc.arg(id);
-
--- name: ListArmedFindingsDigestMerchants :many
--- #787: CROSS-MERCHANT armed-merchant scan for the low-severity findings
--- digest, mirroring ListArmedAlertMerchants — including the fix. It ran on the
--- base pool, which carries no app.merchant_id, so reconciliation_findings' RLS
--- matched nothing and the digest had never run (or#861). Now through migration
--- 0021's SECURITY DEFINER reader; ids only, digest content stays per-merchant.
-SELECT merchant_id FROM openrails.armed_findings_digest_merchant_ids();
-
--- name: CountLowSeverityFindingsPendingDigest :one
-SELECT count(*) FROM openrails.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL;
-
--- name: MarkLowSeverityFindingsDigested :execrows
-UPDATE openrails.reconciliation_findings
-SET notified_at = sqlc.arg(notified_at)::timestamptz, notified_severity = 'low'
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL;
-
--- name: GetFindingDigestWatermark :one
--- Scalar subquery (not a plain SELECT ... WHERE) so a merchant with no digest
--- row yet returns one row with NULL rather than :one erroring on zero rows.
-SELECT (
-    SELECT last_digested_at FROM openrails.finding_digest_state
-    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-) AS last_digested_at;
-
--- name: TouchFindingDigestWatermark :exec
-INSERT INTO openrails.finding_digest_state (merchant_id, last_digested_at, updated_at)
-VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(last_digested_at)::timestamptz, now())
-ON CONFLICT (merchant_id) DO UPDATE SET
-    last_digested_at = EXCLUDED.last_digested_at,
-    updated_at = now();
 
 -- SEC-18: the merchant predicate is DEFENCE IN DEPTH, not decoration. This is a
 -- merchant-admin by-id surface (GET /v1/merchant/findings/:id, and the resolve

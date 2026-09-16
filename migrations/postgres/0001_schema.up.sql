@@ -212,40 +212,6 @@ COMMENT ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text
 REVOKE ALL ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.account_updater_work_merchant_ids(p_custodian text, p_environment text, p_now timestamp with time zone, p_default_lookahead_days integer, p_after uuid, p_limit integer) TO openrails_app;
 
-CREATE FUNCTION openrails.armed_alert_merchant_ids() RETURNS TABLE(merchant_id uuid)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'openrails', 'pg_catalog'
-    AS $$
-BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
-    RETURN QUERY
-    SELECT DISTINCT r.merchant_id FROM openrails.alert_rules r WHERE r.enabled;
-END;
-$$;
-
-COMMENT ON FUNCTION openrails.armed_alert_merchant_ids() IS 'Merchants with at least one enabled alert rule — the evaluator''s work set. Ids only: the rules themselves are still read per-merchant under MerchantTx. Replaces a base-pool scan that selected nothing, so the evaluator had never run (or#861).';
-
-REVOKE ALL ON FUNCTION openrails.armed_alert_merchant_ids() FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.armed_alert_merchant_ids() TO openrails_app;
-
-CREATE FUNCTION openrails.armed_findings_digest_merchant_ids() RETURNS TABLE(merchant_id uuid)
-    LANGUAGE plpgsql STABLE SECURITY DEFINER
-    SET search_path TO 'openrails', 'pg_catalog'
-    AS $$
-BEGIN
-    PERFORM openrails.assert_cross_merchant_reader();
-    RETURN QUERY
-    SELECT DISTINCT f.merchant_id
-      FROM openrails.reconciliation_findings f
-     WHERE f.status = 'requires_review' AND f.severity = 'low' AND f.notified_at IS NULL;
-END;
-$$;
-
-COMMENT ON FUNCTION openrails.armed_findings_digest_merchant_ids() IS '#787: merchants holding at least one undigested low-severity requires_review finding. Ids only; the digest content is read per-merchant. Replaces a base-pool scan that selected nothing (or#861).';
-
-REVOKE ALL ON FUNCTION openrails.armed_findings_digest_merchant_ids() FROM PUBLIC;
-GRANT ALL ON FUNCTION openrails.armed_findings_digest_merchant_ids() TO openrails_app;
-
 CREATE FUNCTION openrails.assert_cross_merchant_reader() RETURNS void
     LANGUAGE plpgsql STABLE
     SET search_path TO 'openrails', 'pg_catalog'
@@ -1435,48 +1401,6 @@ CREATE POLICY merchant_isolation ON openrails.admission_denials_hourly USING ((m
 
 GRANT SELECT,INSERT,UPDATE ON TABLE openrails.admission_denials_hourly TO openrails_app;
 
-CREATE TABLE openrails.alert_rules (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    name text DEFAULT ''::text NOT NULL,
-    template text NOT NULL,
-    params jsonb DEFAULT '{}'::jsonb NOT NULL,
-    severity text DEFAULT 'warning'::text NOT NULL,
-    channels jsonb DEFAULT '[]'::jsonb NOT NULL,
-    enabled boolean DEFAULT true NOT NULL,
-    fired_at timestamp with time zone,
-    cleared_at timestamp with time zone,
-    last_evaluated_at timestamp with time zone,
-    last_value double precision,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT alert_rules_severity_check CHECK ((severity = ANY (ARRAY['warning'::text, 'critical'::text])))
-);
-
-ALTER TABLE ONLY openrails.alert_rules FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.alert_rules IS '#736 per-merchant metric threshold rules. template + params compile to a #733 metrics query the evaluator runs on a slow tick; fired_at/cleared_at are edge-triggered state (fire once on crossing, clear on recrossing).';
-
-COMMENT ON COLUMN openrails.alert_rules.channels IS 'ordered channel refs: [{"type":"in_app"}|{"type":"email"}|{"type":"webhook","webhook_id":"<uuid>"}].';
-
-COMMENT ON COLUMN openrails.alert_rules.fired_at IS 'set when the current active alert opened (NULL = not firing); the evaluator never re-fires while non-NULL.';
-
-ALTER TABLE ONLY openrails.alert_rules
-    ADD CONSTRAINT alert_rules_pkey PRIMARY KEY (id);
-
-CREATE INDEX alert_rules_enabled_merchant_idx ON openrails.alert_rules USING btree (merchant_id) WHERE enabled;
-
-CREATE INDEX alert_rules_merchant_idx ON openrails.alert_rules USING btree (merchant_id);
-
-ALTER TABLE ONLY openrails.alert_rules
-    ADD CONSTRAINT alert_rules_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.alert_rules ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.alert_rules USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.alert_rules TO openrails_app;
-
 CREATE TABLE openrails.billing_policies (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -1894,28 +1818,6 @@ GRANT UPDATE(status) ON TABLE openrails.destructive_runs TO openrails_app;
 
 GRANT UPDATE(note) ON TABLE openrails.destructive_runs TO openrails_app;
 
-CREATE TABLE openrails.finding_digest_state (
-    merchant_id uuid NOT NULL,
-    last_digested_at timestamp with time zone,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-ALTER TABLE ONLY openrails.finding_digest_state FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.finding_digest_state IS '#787: one row per merchant recording when the low-severity reconciliation-findings digest last fired.';
-
-ALTER TABLE ONLY openrails.finding_digest_state
-    ADD CONSTRAINT finding_digest_state_pkey PRIMARY KEY (merchant_id);
-
-ALTER TABLE ONLY openrails.finding_digest_state
-    ADD CONSTRAINT finding_digest_state_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE CASCADE;
-
-ALTER TABLE openrails.finding_digest_state ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.finding_digest_state USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.finding_digest_state TO openrails_app;
-
 CREATE TABLE openrails.host_lifecycle_events (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2320,7 +2222,6 @@ CREATE TABLE openrails.merchant_notifications (
     title text NOT NULL,
     body text DEFAULT ''::text NOT NULL,
     link text DEFAULT ''::text NOT NULL,
-    rule_id uuid,
     data jsonb,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     read_at timestamp with time zone
@@ -2328,7 +2229,7 @@ CREATE TABLE openrails.merchant_notifications (
 
 ALTER TABLE ONLY openrails.merchant_notifications FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE openrails.merchant_notifications IS '#736 MERCHANT-operator-facing in_app alert store (console bell). rule_id references the source alert_rules row informationally (no FK: notifications outlive rule deletion).';
+COMMENT ON TABLE openrails.merchant_notifications IS 'Immediate merchant-operator notifications (console bell).';
 
 ALTER TABLE ONLY openrails.merchant_notifications
     ADD CONSTRAINT merchant_notifications_pkey PRIMARY KEY (id);

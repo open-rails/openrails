@@ -7,36 +7,9 @@ package gen
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
-
-const countPaymentMethodsExpiringWithin = `-- name: CountPaymentMethodsExpiringWithin :one
-
-SELECT count(*) FROM openrails.payment_methods
-WHERE expiry_date ~ '^[0-9]{2}/[0-9]{2}$'
-  AND (date_trunc('month', to_date(expiry_date, 'MM/YY')) + interval '1 month' - interval '1 day')
-        BETWEEN $1::timestamptz
-            AND ($1::timestamptz + make_interval(days => $2::int))
-`
-
-type CountPaymentMethodsExpiringWithinParams struct {
-	Now       time.Time
-	DaysAhead int32
-}
-
-// ============================================================================
-// payment_methods digest (#733 payment_methods_expiring is Deferred; the
-// monthly digest template runs this dedicated RLS-scoped count instead).
-// expiry_date is 'MM/YY'; a card lapses at the END of its expiry month.
-// ============================================================================
-func (q *Queries) CountPaymentMethodsExpiringWithin(ctx context.Context, arg CountPaymentMethodsExpiringWithinParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPaymentMethodsExpiringWithin, arg.Now, arg.DaysAhead)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
 
 const countUnreadMerchantNotifications = `-- name: CountUnreadMerchantNotifications :one
 SELECT count(*) FROM openrails.merchant_notifications WHERE read_at IS NULL
@@ -49,66 +22,11 @@ func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context) (int64, 
 	return count, err
 }
 
-const createAlertRule = `-- name: CreateAlertRule :one
-
-
-INSERT INTO openrails.alert_rules (merchant_id, name, template, params, severity, channels, enabled)
-VALUES ($7::uuid, $1, $2, $3, $4, $5, $6)
-RETURNING id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at
-`
-
-type CreateAlertRuleParams struct {
-	Name       string
-	Template   string
-	Params     []byte
-	Severity   string
-	Channels   []byte
-	Enabled    bool
-	MerchantID uuid.UUID
-}
-
-// #736 metric threshold alerting.
-// Merchant-scoped statements (all except ListArmedAlertMerchants) run inside
-// RunInMerchantConn so the app.merchant_id GUC + RLS policy scope them to the
-// request/eval merchant; INSERTs still pass merchant_id for the RLS WITH CHECK.
-// ============================================================================
-// alert_rules
-// ============================================================================
-func (q *Queries) CreateAlertRule(ctx context.Context, arg CreateAlertRuleParams) (OpenrailsAlertRule, error) {
-	row := q.db.QueryRow(ctx, createAlertRule,
-		arg.Name,
-		arg.Template,
-		arg.Params,
-		arg.Severity,
-		arg.Channels,
-		arg.Enabled,
-		arg.MerchantID,
-	)
-	var i OpenrailsAlertRule
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Name,
-		&i.Template,
-		&i.Params,
-		&i.Severity,
-		&i.Channels,
-		&i.Enabled,
-		&i.FiredAt,
-		&i.ClearedAt,
-		&i.LastEvaluatedAt,
-		&i.LastValue,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const createMerchantNotification = `-- name: CreateMerchantNotification :one
 
-INSERT INTO openrails.merchant_notifications (merchant_id, severity, title, body, link, rule_id, data)
-VALUES ($7::uuid, $1, $2, $3, $4, $5, $6)
-RETURNING id, merchant_id, severity, title, body, link, rule_id, data, created_at, read_at
+INSERT INTO openrails.merchant_notifications (merchant_id, severity, title, body, link, data)
+VALUES ($6::uuid, $1, $2, $3, $4, $5)
+RETURNING id, merchant_id, severity, title, body, link, data, created_at, read_at
 `
 
 type CreateMerchantNotificationParams struct {
@@ -116,7 +34,6 @@ type CreateMerchantNotificationParams struct {
 	Title      string
 	Body       string
 	Link       string
-	RuleID     *uuid.UUID
 	Data       []byte
 	MerchantID uuid.UUID
 }
@@ -130,7 +47,6 @@ func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerc
 		arg.Title,
 		arg.Body,
 		arg.Link,
-		arg.RuleID,
 		arg.Data,
 		arg.MerchantID,
 	)
@@ -142,7 +58,6 @@ func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerc
 		&i.Title,
 		&i.Body,
 		&i.Link,
-		&i.RuleID,
 		&i.Data,
 		&i.CreatedAt,
 		&i.ReadAt,
@@ -195,18 +110,6 @@ func (q *Queries) CreateMerchantWebhook(ctx context.Context, arg CreateMerchantW
 	return i, err
 }
 
-const deleteAlertRule = `-- name: DeleteAlertRule :execrows
-DELETE FROM openrails.alert_rules WHERE id = $1
-`
-
-func (q *Queries) DeleteAlertRule(ctx context.Context, id uuid.UUID) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteAlertRule, id)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const deleteMerchantWebhook = `-- name: DeleteMerchantWebhook :execrows
 DELETE FROM openrails.merchant_webhooks WHERE id = $1
 `
@@ -217,32 +120,6 @@ func (q *Queries) DeleteMerchantWebhook(ctx context.Context, id uuid.UUID) (int6
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const getAlertRule = `-- name: GetAlertRule :one
-SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at FROM openrails.alert_rules WHERE id = $1
-`
-
-func (q *Queries) GetAlertRule(ctx context.Context, id uuid.UUID) (OpenrailsAlertRule, error) {
-	row := q.db.QueryRow(ctx, getAlertRule, id)
-	var i OpenrailsAlertRule
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Name,
-		&i.Template,
-		&i.Params,
-		&i.Severity,
-		&i.Channels,
-		&i.Enabled,
-		&i.FiredAt,
-		&i.ClearedAt,
-		&i.LastEvaluatedAt,
-		&i.LastValue,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const getMerchantWebhook = `-- name: GetMerchantWebhook :one
@@ -266,118 +143,8 @@ func (q *Queries) GetMerchantWebhook(ctx context.Context, id uuid.UUID) (Openrai
 	return i, err
 }
 
-const listAlertRules = `-- name: ListAlertRules :many
-SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at FROM openrails.alert_rules ORDER BY created_at DESC, id
-`
-
-func (q *Queries) ListAlertRules(ctx context.Context) ([]OpenrailsAlertRule, error) {
-	rows, err := q.db.Query(ctx, listAlertRules)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsAlertRule
-	for rows.Next() {
-		var i OpenrailsAlertRule
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Name,
-			&i.Template,
-			&i.Params,
-			&i.Severity,
-			&i.Channels,
-			&i.Enabled,
-			&i.FiredAt,
-			&i.ClearedAt,
-			&i.LastEvaluatedAt,
-			&i.LastValue,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listArmedAlertMerchants = `-- name: ListArmedAlertMerchants :many
-SELECT merchant_id FROM openrails.armed_alert_merchant_ids()
-`
-
-// CROSS-MERCHANT: the evaluator scheduler's armed-merchant selection, through
-// migration 0021's SECURITY DEFINER reader (or#861). It used to be a base-pool
-// `SELECT DISTINCT merchant_id FROM alert_rules` — but the base pool is not
-// privileged, it is the same openrails_app role with no app.merchant_id, so
-// alert_rules' FORCEd RLS matched `merchant_id = NULL` and this returned NO
-// MERCHANTS: the alert evaluator had never run in production. Ids only; the
-// rules themselves are still read per-merchant under MerchantTx.
-func (q *Queries) ListArmedAlertMerchants(ctx context.Context) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listArmedAlertMerchants)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []*uuid.UUID
-	for rows.Next() {
-		var merchant_id *uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listEnabledAlertRules = `-- name: ListEnabledAlertRules :many
-SELECT id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at FROM openrails.alert_rules WHERE enabled ORDER BY created_at, id
-`
-
-// Evaluator's per-merchant rule set (RLS-scoped; partial index backs it).
-func (q *Queries) ListEnabledAlertRules(ctx context.Context) ([]OpenrailsAlertRule, error) {
-	rows, err := q.db.Query(ctx, listEnabledAlertRules)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []OpenrailsAlertRule
-	for rows.Next() {
-		var i OpenrailsAlertRule
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Name,
-			&i.Template,
-			&i.Params,
-			&i.Severity,
-			&i.Channels,
-			&i.Enabled,
-			&i.FiredAt,
-			&i.ClearedAt,
-			&i.LastEvaluatedAt,
-			&i.LastValue,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listMerchantNotifications = `-- name: ListMerchantNotifications :many
-SELECT id, merchant_id, severity, title, body, link, rule_id, data, created_at, read_at FROM openrails.merchant_notifications
+SELECT id, merchant_id, severity, title, body, link, data, created_at, read_at FROM openrails.merchant_notifications
 WHERE (NOT $1::boolean OR read_at IS NULL)
 ORDER BY created_at DESC, id
 LIMIT $2::int
@@ -404,7 +171,6 @@ func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchan
 			&i.Title,
 			&i.Body,
 			&i.Link,
-			&i.RuleID,
 			&i.Data,
 			&i.CreatedAt,
 			&i.ReadAt,
@@ -453,62 +219,6 @@ func (q *Queries) ListMerchantWebhooks(ctx context.Context) ([]OpenrailsMerchant
 	return items, nil
 }
 
-const markAlertRuleCleared = `-- name: MarkAlertRuleCleared :exec
-UPDATE openrails.alert_rules
-SET fired_at = NULL,
-    cleared_at = $2::timestamptz,
-    last_evaluated_at = $3::timestamptz,
-    last_value = $4,
-    updated_at = now()
-WHERE id = $1
-`
-
-type MarkAlertRuleClearedParams struct {
-	ID          uuid.UUID
-	ClearedAt   time.Time
-	EvaluatedAt time.Time
-	Value       *float64
-}
-
-// Edge transition: the metric recrossed back under threshold.
-func (q *Queries) MarkAlertRuleCleared(ctx context.Context, arg MarkAlertRuleClearedParams) error {
-	_, err := q.db.Exec(ctx, markAlertRuleCleared,
-		arg.ID,
-		arg.ClearedAt,
-		arg.EvaluatedAt,
-		arg.Value,
-	)
-	return err
-}
-
-const markAlertRuleFired = `-- name: MarkAlertRuleFired :exec
-UPDATE openrails.alert_rules
-SET fired_at = $2::timestamptz,
-    cleared_at = NULL,
-    last_evaluated_at = $3::timestamptz,
-    last_value = $4,
-    updated_at = now()
-WHERE id = $1
-`
-
-type MarkAlertRuleFiredParams struct {
-	ID          uuid.UUID
-	FiredAt     time.Time
-	EvaluatedAt time.Time
-	Value       *float64
-}
-
-// Edge transition: open a new active alert. Records the crossing value.
-func (q *Queries) MarkAlertRuleFired(ctx context.Context, arg MarkAlertRuleFiredParams) error {
-	_, err := q.db.Exec(ctx, markAlertRuleFired,
-		arg.ID,
-		arg.FiredAt,
-		arg.EvaluatedAt,
-		arg.Value,
-	)
-	return err
-}
-
 const markMerchantNotificationRead = `-- name: MarkMerchantNotificationRead :execrows
 UPDATE openrails.merchant_notifications
 SET read_at = COALESCE(read_at, now())
@@ -550,73 +260,6 @@ func (q *Queries) RotateMerchantWebhookURL(ctx context.Context, arg RotateMercha
 		&i.SecretVersion,
 		&i.Format,
 		&i.Enabled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const touchAlertRuleEvaluated = `-- name: TouchAlertRuleEvaluated :exec
-UPDATE openrails.alert_rules
-SET last_evaluated_at = $2::timestamptz,
-    last_value = $3,
-    updated_at = now()
-WHERE id = $1
-`
-
-type TouchAlertRuleEvaluatedParams struct {
-	ID          uuid.UUID
-	EvaluatedAt time.Time
-	Value       *float64
-}
-
-// No state change (still-firing, still-quiet, or digest emitted): only advance
-// the evaluation watermark + observed value.
-func (q *Queries) TouchAlertRuleEvaluated(ctx context.Context, arg TouchAlertRuleEvaluatedParams) error {
-	_, err := q.db.Exec(ctx, touchAlertRuleEvaluated, arg.ID, arg.EvaluatedAt, arg.Value)
-	return err
-}
-
-const updateAlertRule = `-- name: UpdateAlertRule :one
-UPDATE openrails.alert_rules
-SET name = $2, params = $3, severity = $4, channels = $5, enabled = $6, updated_at = now()
-WHERE id = $1
-RETURNING id, merchant_id, name, template, params, severity, channels, enabled, fired_at, cleared_at, last_evaluated_at, last_value, created_at, updated_at
-`
-
-type UpdateAlertRuleParams struct {
-	ID       uuid.UUID
-	Name     string
-	Params   []byte
-	Severity string
-	Channels []byte
-	Enabled  bool
-}
-
-// Full read-modify-write of the mutable fields (handler patches then persists).
-func (q *Queries) UpdateAlertRule(ctx context.Context, arg UpdateAlertRuleParams) (OpenrailsAlertRule, error) {
-	row := q.db.QueryRow(ctx, updateAlertRule,
-		arg.ID,
-		arg.Name,
-		arg.Params,
-		arg.Severity,
-		arg.Channels,
-		arg.Enabled,
-	)
-	var i OpenrailsAlertRule
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Name,
-		&i.Template,
-		&i.Params,
-		&i.Severity,
-		&i.Channels,
-		&i.Enabled,
-		&i.FiredAt,
-		&i.ClearedAt,
-		&i.LastEvaluatedAt,
-		&i.LastValue,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

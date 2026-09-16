@@ -304,6 +304,33 @@ func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context,
 	return result.RowsAffected(), nil
 }
 
+const claimReconciliationFindingNotification = `-- name: ClaimReconciliationFindingNotification :execrows
+UPDATE openrails.reconciliation_findings
+SET notified_at = $1::timestamptz,
+    notified_severity = $2::text
+WHERE id = $3::uuid
+  AND status = 'requires_review'
+  AND severity = $2::text
+  AND (notified_at IS NULL OR
+       array_position(ARRAY['critical','high','medium','low'], severity) <
+       COALESCE(array_position(ARRAY['critical','high','medium','low'], notified_severity), 5))
+`
+
+type ClaimReconciliationFindingNotificationParams struct {
+	NotifiedAt time.Time
+	Severity   string
+	ID         uuid.UUID
+}
+
+// Claim one open episode/escalation in the same transaction as its notification.
+func (q *Queries) ClaimReconciliationFindingNotification(ctx context.Context, arg ClaimReconciliationFindingNotificationParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimReconciliationFindingNotification, arg.NotifiedAt, arg.Severity, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countErrorEpisodeTotals = `-- name: CountErrorEpisodeTotals :one
 SELECT fl.total::bigint            AS freeloader_total,
        fl.open_count::bigint       AS freeloader_open,
@@ -354,19 +381,6 @@ func (q *Queries) CountErrorEpisodeTotals(ctx context.Context, merchantID uuid.U
 		&i.OrphanedDays,
 	)
 	return i, err
-}
-
-const countLowSeverityFindingsPendingDigest = `-- name: CountLowSeverityFindingsPendingDigest :one
-SELECT count(*) FROM openrails.reconciliation_findings
-WHERE merchant_id = $1::uuid
-  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL
-`
-
-func (q *Queries) CountLowSeverityFindingsPendingDigest(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countLowSeverityFindingsPendingDigest, merchantID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
 }
 
 const countOpenReconciliationFindingsByTypeSeverity = `-- name: CountOpenReconciliationFindingsByTypeSeverity :many
@@ -542,22 +556,6 @@ func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconci
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const getFindingDigestWatermark = `-- name: GetFindingDigestWatermark :one
-SELECT (
-    SELECT last_digested_at FROM openrails.finding_digest_state
-    WHERE merchant_id = $1::uuid
-) AS last_digested_at
-`
-
-// Scalar subquery (not a plain SELECT ... WHERE) so a merchant with no digest
-// row yet returns one row with NULL rather than :one erroring on zero rows.
-func (q *Queries) GetFindingDigestWatermark(ctx context.Context, merchantID uuid.UUID) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, getFindingDigestWatermark, merchantID)
-	var last_digested_at *time.Time
-	err := row.Scan(&last_digested_at)
-	return last_digested_at, err
 }
 
 const getLatestReconciliationRun = `-- name: GetLatestReconciliationRun :one
@@ -967,35 +965,6 @@ func (q *Queries) ListActiveSubsMissingEntitlementProjection(ctx context.Context
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listArmedFindingsDigestMerchants = `-- name: ListArmedFindingsDigestMerchants :many
-SELECT merchant_id FROM openrails.armed_findings_digest_merchant_ids()
-`
-
-// #787: CROSS-MERCHANT armed-merchant scan for the low-severity findings
-// digest, mirroring ListArmedAlertMerchants — including the fix. It ran on the
-// base pool, which carries no app.merchant_id, so reconciliation_findings' RLS
-// matched nothing and the digest had never run (or#861). Now through migration
-// 0021's SECURITY DEFINER reader; ids only, digest content stays per-merchant.
-func (q *Queries) ListArmedFindingsDigestMerchants(ctx context.Context) ([]*uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, listArmedFindingsDigestMerchants)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []*uuid.UUID
-	for rows.Next() {
-		var merchant_id *uuid.UUID
-		if err := rows.Scan(&merchant_id); err != nil {
-			return nil, err
-		}
-		items = append(items, merchant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1762,26 +1731,6 @@ func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownS
 	return items, nil
 }
 
-const markLowSeverityFindingsDigested = `-- name: MarkLowSeverityFindingsDigested :execrows
-UPDATE openrails.reconciliation_findings
-SET notified_at = $1::timestamptz, notified_severity = 'low'
-WHERE merchant_id = $2::uuid
-  AND status = 'requires_review' AND severity = 'low' AND notified_at IS NULL
-`
-
-type MarkLowSeverityFindingsDigestedParams struct {
-	NotifiedAt time.Time
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) MarkLowSeverityFindingsDigested(ctx context.Context, arg MarkLowSeverityFindingsDigestedParams) (int64, error) {
-	result, err := q.db.Exec(ctx, markLowSeverityFindingsDigested, arg.NotifiedAt, arg.MerchantID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const markReconciliationFindingAutoFixed = `-- name: MarkReconciliationFindingAutoFixed :execrows
 UPDATE openrails.reconciliation_findings
 SET status = 'auto_fixed',
@@ -2462,24 +2411,6 @@ func (q *Queries) SetSubscriptionNextRetry(ctx context.Context, arg SetSubscript
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const touchFindingDigestWatermark = `-- name: TouchFindingDigestWatermark :exec
-INSERT INTO openrails.finding_digest_state (merchant_id, last_digested_at, updated_at)
-VALUES ($1::uuid, $2::timestamptz, now())
-ON CONFLICT (merchant_id) DO UPDATE SET
-    last_digested_at = EXCLUDED.last_digested_at,
-    updated_at = now()
-`
-
-type TouchFindingDigestWatermarkParams struct {
-	MerchantID     uuid.UUID
-	LastDigestedAt time.Time
-}
-
-func (q *Queries) TouchFindingDigestWatermark(ctx context.Context, arg TouchFindingDigestWatermarkParams) error {
-	_, err := q.db.Exec(ctx, touchFindingDigestWatermark, arg.MerchantID, arg.LastDigestedAt)
-	return err
 }
 
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one

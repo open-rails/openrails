@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	log "github.com/sirupsen/logrus"
@@ -49,6 +50,14 @@ func TestWebhookCredentialHTTPWorkflow(t *testing.T) {
 	rt.AlertService = alerting.NewService(alerting.Deps{DB: rt.DB, Secrets: rt.Merchants.Secrets(), Outbound: httpx.Policy{Allow: httpx.AllowLoopback}, WebhookBackoff: time.Millisecond})
 	rawURL := sink.URL + "/hook/path-secret?token=query-secret"
 	base := surface.BaseURL + "/v1/merchant"
+	for _, route := range []string{"/alerts/templates", "/alerts/rules"} {
+		status, _ := requestJSON(t, http.MethodGet, base+route, surface.Token, nil)
+		require.Equal(t, http.StatusNotFound, status, "deferred alert route must be absent")
+	}
+	var removedTables int
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='openrails' AND table_name IN ('alert_rules','finding_digest_state')`).Scan(&removedTables))
+	require.Zero(t, removedTables)
+
 	status, raw := requestJSON(t, http.MethodPost, base+"/webhooks", surface.Token, map[string]any{"name": "synthetic sink", "url": rawURL, "format": "slack"})
 	require.Equal(t, 201, status, string(raw))
 	require.NotContains(t, string(raw), "path-secret")
@@ -67,13 +76,20 @@ func TestWebhookCredentialHTTPWorkflow(t *testing.T) {
 	require.Equal(t, 200, status, string(raw))
 	require.NotContains(t, string(raw), "secret")
 	require.NotContains(t, string(raw), `"url"`)
-	status, raw = requestJSON(t, http.MethodPost, base+"/alerts/rules", surface.Token, map[string]any{"name": "delivery", "template": "chargeback_rate_by_rail_account", "params": map[string]any{"threshold": 0.1}, "channels": []map[string]any{{"type": "webhook", "webhook_id": hook.ID}}})
-	require.Equal(t, 201, status, string(raw))
-	var rule alerting.Rule
-	require.NoError(t, json.Unmarshal(raw, &rule))
-	testURL := base + "/alerts/rules/" + rule.ID.String() + "/test"
-	status, _ = requestJSON(t, http.MethodPost, testURL, viewer, nil)
-	require.Equal(t, 403, status)
+	notify := func() {
+		require.NoError(t, rt.DB.RunInMerchantScope(ctx, dbtest.TestMerchantID, "webhook proof", func(mctx context.Context) error {
+			store := &reconcile.PGStore{DB: rt.DB}
+			run, err := store.CreateRun(mctx, reconcile.ModeAdvisory, []reconcile.Provider{reconcile.ProviderNMI}, nil, nil)
+			if err != nil {
+				return err
+			}
+			rec, err := store.UpsertFinding(mctx, run, reconcile.Finding{Provider: reconcile.ProviderNMI, Type: reconcile.FindingChargebackActiveSub, SubjectKey: uuid.NewString(), Severity: reconcile.SeverityMedium, Status: reconcile.FindingStatusRequiresReview})
+			if err != nil {
+				return err
+			}
+			return rt.AlertService.NotifyFinding(mctx, rec)
+		}))
+	}
 	rotateURL := base + "/webhooks/" + hook.ID.String() + "/url"
 	status, _ = requestJSON(t, http.MethodPut, rotateURL, viewer, map[string]any{"url": rawURL})
 	require.Equal(t, 403, status)
@@ -87,9 +103,7 @@ func TestWebhookCredentialHTTPWorkflow(t *testing.T) {
 	var rotated alerting.Webhook
 	require.NoError(t, json.Unmarshal(raw, &rotated))
 	require.Equal(t, hook.ID, rotated.ID)
-	status, raw = requestJSON(t, http.MethodPost, testURL, surface.Token, nil)
-	require.Equal(t, 200, status, string(raw))
-	require.Contains(t, string(raw), `"ok":true`)
+	notify()
 	mu.Lock()
 	require.Equal(t, []string{"/hook/rotated-secret?token=rotated-query"}, paths)
 	mu.Unlock()
@@ -98,21 +112,19 @@ func TestWebhookCredentialHTTPWorkflow(t *testing.T) {
 	newerURL := sink.URL + "/hook/pending-secret"
 	_, err = rt.Merchants.Secrets().Put(ctx, dbtest.TestMerchantID, name, newerURL)
 	require.NoError(t, err)
-	status, raw = requestJSON(t, http.MethodPost, testURL, surface.Token, nil)
-	require.Equal(t, 200, status, string(raw))
-	require.Contains(t, string(raw), `"ok":false`)
-	require.NotContains(t, string(raw), "pending-secret")
+	notify()
+	mu.Lock()
+	require.Len(t, paths, 1, "incomplete rotation must not deliver")
+	mu.Unlock()
 	status, raw = requestJSON(t, http.MethodPut, rotateURL, surface.Token, map[string]any{"url": newerURL})
 	require.Equal(t, 200, status, string(raw))
-	status, raw = requestJSON(t, http.MethodPost, testURL, surface.Token, nil)
-	require.Equal(t, 200, status, string(raw))
-	require.Contains(t, string(raw), `"ok":true`)
+	notify()
 	// Closed local server causes a real transport error whose URL must never be logged.
 	sink.Close()
 	var logs bytes.Buffer
 	old := log.StandardLogger().Out
 	log.SetOutput(&logs)
-	status, raw = requestJSON(t, http.MethodPost, testURL, surface.Token, nil)
+	notify()
 	log.SetOutput(old)
 	require.Equal(t, 200, status, string(raw))
 	require.NotContains(t, logs.String(), "pending-secret")
