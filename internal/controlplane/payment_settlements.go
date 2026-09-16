@@ -33,7 +33,7 @@ type PaymentSettlement struct {
 // for one merchant. This is a host seam; callers must authorize the merchant ID
 // before use.
 //
-// or#861: this ran on the bare pool. payment_settlement_events gained RLS in
+// or#861: this ran on the bare pool. host_outbox gained RLS in
 // migration 0010 and the feed was never re-pointed, so under openrails_app the
 // WHERE clause was ANDed with `merchant_id = NULL` and the feed listed NOTHING
 // — a host-facing data-loss bug that every test missed because the tests ran on
@@ -62,11 +62,14 @@ func (c *ControlPlane) ListPendingPaymentSettlements(ctx context.Context, mercha
 
 	settlements := make([]PaymentSettlement, 0, len(rows))
 	for _, row := range rows {
+		if row.PaymentID == nil || row.Amount == nil {
+			return nil, fmt.Errorf("control plane: settlement %s has incomplete payment payload", row.ID)
+		}
 		settlements = append(settlements, PaymentSettlement{
 			ID:         row.ID,
 			MerchantID: merchant.ID(row.MerchantID),
-			PaymentID:  row.PaymentID,
-			Amount:     row.Amount,
+			PaymentID:  *row.PaymentID,
+			Amount:     *row.Amount,
 			Currency:   row.Currency,
 			SettledAt:  row.SettledAt,
 		})

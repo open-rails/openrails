@@ -80,7 +80,7 @@ func newEnv(t *testing.T) *env {
 		merchant: dbtest.TestMerchantID,
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.host_lifecycle_events WHERE subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.host_outbox WHERE subject_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customer_delinquency WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())

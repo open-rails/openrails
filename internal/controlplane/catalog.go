@@ -226,6 +226,8 @@ const (
 	PermMerchantSubscriptionsUpdate    = permissions.MerchantSubscriptionsUpdate
 	PermMerchantAdmissionsCreate       = permissions.MerchantAdmissionsCreate
 	PermMerchantUsageRead              = permissions.MerchantUsageRead
+	PermMerchantHostEventsRead         = permissions.MerchantHostEventsRead
+	PermMerchantHostEventsAcknowledge  = permissions.MerchantHostEventsAcknowledge
 	PermMerchantRepairAlertsRead       = permissions.MerchantRepairAlertsRead
 	PermMerchantMetricsRead            = permissions.MerchantMetricsRead
 	PermMerchantDashboardUpdate        = permissions.MerchantDashboardUpdate

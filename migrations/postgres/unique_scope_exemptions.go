@@ -28,7 +28,7 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	"merchants_slug_key":               "slug is the global tenant address (ID-10)",
 	"uq_merchants_api_host_live":       "api_host routes unauthenticated webhooks; it must be globally unique (ID-10)",
 	"uq_merchants_permission_group_id": "org<->merchant is 1:1 across the whole install (GAP-9)",
-	"worker_state_pkey":               "RLS-exempt: per-worker-kind process health",
+	"worker_state_pkey":                "RLS-exempt: per-worker-kind process health",
 	"destructive_action_switch_pkey":   "RLS-exempt: instance-level operator kill switch",
 	"schema_migrations_pkey":           "migration ledger",
 
@@ -36,7 +36,7 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	// row cannot be seen, let alone referenced, across a tenant boundary, so
 	// the unique cannot collide between merchants and is not an oracle.
 	"uq_grants_termination":                       "supersedes_id FKs a merchant-owned grant",
-	"uq_payment_settlement_events_payment":        "payment_id FKs a merchant-owned payment",
+	"uq_host_outbox_payment":                      "payment_id FKs a merchant-owned payment",
 	"uq_subscription_reprices_one_scheduled":      "subscription_id FKs a merchant-owned subscription",
 	"uq_subscriptions_customer_tier_group_active": "customer_id FKs a merchant-owned customer (ID-3's one-live-per-tier-group rule)",
 	"unique_prices_product_amount_window":         "product_id FKs a merchant-owned product (ID-5 price financial substance)",

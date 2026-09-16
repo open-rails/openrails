@@ -56,7 +56,7 @@ func TestHostLifecycleEventsCrossMerchantIsolation(t *testing.T) {
 		mA, "hleiso-a-"+suffix, mB, "hleiso-b-"+suffix)
 	exec(`INSERT INTO openrails.customers (id, merchant_id) VALUES ($1, $2), ($3, $4)`, custA, mA, custB, mB)
 	t.Cleanup(func() {
-		_, _ = super.Exec(context.Background(), `DELETE FROM openrails.host_lifecycle_events WHERE merchant_id = ANY($1)`, []uuid.UUID{mA, mB})
+		_, _ = super.Exec(context.Background(), `DELETE FROM openrails.host_outbox WHERE merchant_id = ANY($1)`, []uuid.UUID{mA, mB})
 		_, _ = super.Exec(context.Background(), `DELETE FROM openrails.customers WHERE id = ANY($1)`, []uuid.UUID{custA, custB})
 		_, _ = super.Exec(context.Background(), `DELETE FROM openrails.merchants WHERE id = ANY($1)`, []uuid.UUID{mA, mB})
 	})
@@ -70,7 +70,7 @@ func TestHostLifecycleEventsCrossMerchantIsolation(t *testing.T) {
 		defer tx.Rollback(ctx) //nolint:errcheck
 		_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, mid.String())
 		require.NoError(t, err)
-		_, err = tx.Exec(ctx, `INSERT INTO openrails.host_lifecycle_events
+		_, err = tx.Exec(ctx, `INSERT INTO openrails.host_outbox
 			(merchant_id, event_type, subject_type, subject_id, currency, data, dedupe_key)
 			VALUES ($1, 'delinquency.entered', 'customer', $2, 'USD', '{"to_state":"delinquent"}'::jsonb, $3)`,
 			mid, subject, dedupe)
@@ -122,15 +122,15 @@ func TestHostLifecycleEventsCrossMerchantIsolation(t *testing.T) {
 	}
 	appTx(&mA, func(tx gen.DBTX) {
 		var n int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.host_lifecycle_events WHERE merchant_id = $1`, mB).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.host_outbox WHERE merchant_id = $1`, mB).Scan(&n))
 		require.Zero(t, n, "app role under A's GUC must not see B's events")
-		tag, err := tx.Exec(ctx, `UPDATE openrails.host_lifecycle_events SET delivered_at = now() WHERE id = $1`, listB[0].ID)
+		tag, err := tx.Exec(ctx, `UPDATE openrails.host_outbox SET delivered_at = now() WHERE id = $1`, listB[0].ID)
 		require.NoError(t, err)
 		require.Zero(t, tag.RowsAffected(), "app role under A's GUC must not ack B's event")
 	})
 	appTx(nil, func(tx gen.DBTX) {
 		var n int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.host_lifecycle_events`).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.host_outbox`).Scan(&n))
 		require.Zero(t, n, "no merchant GUC must fail closed")
 	})
 
@@ -151,7 +151,7 @@ func TestHostLifecycleEventsCrossMerchantIsolation(t *testing.T) {
 		t.Helper()
 		var affected int64
 		appTx(&mid, func(tx gen.DBTX) {
-			tag, err := tx.Exec(ctx, `INSERT INTO openrails.host_lifecycle_events
+			tag, err := tx.Exec(ctx, `INSERT INTO openrails.host_outbox
 				(merchant_id, event_type, subject_type, subject_id, currency, data, dedupe_key)
 				VALUES ($1, 'delinquency.entered', 'customer', $2, 'USD', '{}'::jsonb, $3)
 				ON CONFLICT (merchant_id, dedupe_key) DO NOTHING`, mid, subject, dedupe)

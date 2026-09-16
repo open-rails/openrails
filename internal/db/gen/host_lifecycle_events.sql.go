@@ -13,10 +13,10 @@ import (
 )
 
 const acknowledgeHostLifecycleEvent = `-- name: AcknowledgeHostLifecycleEvent :execrows
-UPDATE openrails.host_lifecycle_events
+UPDATE openrails.host_outbox
 SET delivered_at = COALESCE(delivered_at, $1::timestamptz)
 WHERE merchant_id = $2
-  AND id = $3
+  AND event_type <> 'payment.settled' AND id = $3
 `
 
 type AcknowledgeHostLifecycleEventParams struct {
@@ -34,11 +34,11 @@ func (q *Queries) AcknowledgeHostLifecycleEvent(ctx context.Context, arg Acknowl
 }
 
 const deleteDeliveredHostLifecycleEventsBefore = `-- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
-DELETE FROM openrails.host_lifecycle_events
+DELETE FROM openrails.host_outbox
 WHERE ctid IN (
-    SELECT hle.ctid FROM openrails.host_lifecycle_events hle
+    SELECT hle.ctid FROM openrails.host_outbox hle
     WHERE hle.merchant_id = $1::uuid
-      AND hle.delivered_at IS NOT NULL
+      AND hle.event_type <> 'payment.settled' AND hle.delivered_at IS NOT NULL
       AND hle.delivered_at < $2::timestamptz
     LIMIT $3::int
 )
@@ -61,7 +61,7 @@ func (q *Queries) DeleteDeliveredHostLifecycleEventsBefore(ctx context.Context, 
 
 const enqueueHostLifecycleEvent = `-- name: EnqueueHostLifecycleEvent :execrows
 
-INSERT INTO openrails.host_lifecycle_events
+INSERT INTO openrails.host_outbox
     (merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data, dedupe_key)
 VALUES (
     $1, $2::text, $3::text,
@@ -82,7 +82,7 @@ type EnqueueHostLifecycleEventParams struct {
 }
 
 // or#878 durable host-consumption feed. Same guarantees as
-// payment_settlement_events (0005/0010): merchant-scoped, explicitly acked,
+// host_outbox (0005/0010): merchant-scoped, explicitly acked,
 // pruned after delivery. A missed cut-off signal is a revenue leak and a missed
 // restore signal is an outage, so neither may be a fire-and-forget webhook.
 // Idempotent on the transition's dedupe key: re-announcing a transition is a
@@ -106,9 +106,9 @@ func (q *Queries) EnqueueHostLifecycleEvent(ctx context.Context, arg EnqueueHost
 
 const listPendingHostLifecycleEvents = `-- name: ListPendingHostLifecycleEvents :many
 SELECT id, merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data
-FROM openrails.host_lifecycle_events
+FROM openrails.host_outbox
 WHERE merchant_id = $1
-  AND delivered_at IS NULL
+  AND event_type <> 'payment.settled' AND delivered_at IS NULL
 ORDER BY id
 LIMIT $2
 `

@@ -157,7 +157,7 @@ rests on a single dated manual probe.
 - **Webhooks, CCBill** — the rail has **no HMAC**; source IP is the only transport authentication. Inbound fixtures are hand-authored, not captured deliveries.
 - **Event ingestion, Solana** — the rail emits nothing. Confirmation arrives by polling: a Solana Pay reference poller, slot-gated reads (`ReadUntilConsistent` / `*AtSlot`) so a read after a confirm cannot observe stale state, and a reconcile fetcher over locally-known PDAs. Note the reconcile fetcher's own reads deliberately skip the slot gate (`internal/reconcile/solana.go:158`).
 - **Reconciliation pull, CCBill** — the DataLink transaction-export **column mapping has never been validated against a live account** (`internal/integrations/ccbill/datalink_export.go:23`); the typed accessors are best-effort and the raw fields are authoritative.
-- **Settlement ingestion** — no rail has it. The `payment_settlement_events` feed is an OpenRails-internal pending/ack queue, not provider payout reconciliation. There is no Stripe balance-transaction or payout call site.
+- **Settlement ingestion** — no rail has it. The `host_outbox` feed is an OpenRails-internal pending/ack queue, not provider payout reconciliation. There is no Stripe balance-transaction or payout call site.
 
 ## Maintenance
 

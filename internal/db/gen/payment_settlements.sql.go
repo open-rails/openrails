@@ -13,10 +13,10 @@ import (
 )
 
 const acknowledgePaymentSettlement = `-- name: AcknowledgePaymentSettlement :execrows
-UPDATE openrails.payment_settlement_events
+UPDATE openrails.host_outbox
    SET delivered_at = COALESCE(delivered_at, now())
  WHERE merchant_id = $1
-   AND id = $2
+   AND event_type = 'payment.settled' AND id = $2
 `
 
 type AcknowledgePaymentSettlementParams struct {
@@ -33,11 +33,11 @@ func (q *Queries) AcknowledgePaymentSettlement(ctx context.Context, arg Acknowle
 }
 
 const deleteDeliveredPaymentSettlementsBefore = `-- name: DeleteDeliveredPaymentSettlementsBefore :execrows
-DELETE FROM openrails.payment_settlement_events
+DELETE FROM openrails.host_outbox
  WHERE ctid IN (
-    SELECT pse.ctid FROM openrails.payment_settlement_events pse
+    SELECT pse.ctid FROM openrails.host_outbox pse
      WHERE pse.merchant_id = $1::uuid
-       AND pse.delivered_at IS NOT NULL
+       AND pse.event_type = 'payment.settled' AND pse.delivered_at IS NOT NULL
        AND pse.delivered_at < $2::timestamptz
      LIMIT $3::int
 )
@@ -59,10 +59,10 @@ func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, a
 }
 
 const listPendingPaymentSettlements = `-- name: ListPendingPaymentSettlements :many
-SELECT id, merchant_id, payment_id, amount, currency, settled_at
-  FROM openrails.payment_settlement_events
+SELECT id, merchant_id, payment_id, amount, currency, occurred_at AS settled_at
+  FROM openrails.host_outbox
  WHERE merchant_id = $1
-   AND delivered_at IS NULL
+   AND event_type = 'payment.settled' AND delivered_at IS NULL
  ORDER BY id
  LIMIT $2
 `
@@ -75,8 +75,8 @@ type ListPendingPaymentSettlementsParams struct {
 type ListPendingPaymentSettlementsRow struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	PaymentID  uuid.UUID
-	Amount     int64
+	PaymentID  *uuid.UUID
+	Amount     *int64
 	Currency   string
 	SettledAt  time.Time
 }

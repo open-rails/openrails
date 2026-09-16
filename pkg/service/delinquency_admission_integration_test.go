@@ -116,7 +116,7 @@ func seedOverdueInvoice(t *testing.T, ctx context.Context, pool *pgxpool.Pool, p
 		due.Add(-24*time.Hour), due, amount, due)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.host_lifecycle_events WHERE subject_id = $1", payer.UUID())
+		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.host_outbox WHERE subject_id = $1", payer.UUID())
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.customer_delinquency WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.notification_queue WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.invoices WHERE id = $1", id)

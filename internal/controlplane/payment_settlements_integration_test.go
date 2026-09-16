@@ -20,7 +20,7 @@ import (
 
 // #827: the payment-settlements host feed must be merchant-scoped end to end —
 // the controlplane functions by explicit predicate (the controlplane pool is
-// privileged) and payment_settlement_events by fail-closed RLS for the
+// privileged) and host_outbox by fail-closed RLS for the
 // openrails_app (NOBYPASSRLS) role.
 func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	ctx := context.Background()
@@ -128,17 +128,17 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 	}
 	appTx(&mA, func(tx gen.DBTX) {
 		var n int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.payment_settlement_events WHERE merchant_id = $1`, mB).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.host_outbox WHERE merchant_id = $1`, mB).Scan(&n))
 		require.Zero(t, n, "app role under A's GUC must not see B's events")
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.payment_settlement_events`).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.host_outbox`).Scan(&n))
 		require.Equal(t, 1, n, "app role under A's GUC sees exactly A's event")
-		tag, err := tx.Exec(ctx, `UPDATE openrails.payment_settlement_events SET delivered_at = now() WHERE id = $1`, listB[0].ID)
+		tag, err := tx.Exec(ctx, `UPDATE openrails.host_outbox SET delivered_at = now() WHERE id = $1`, listB[0].ID)
 		require.NoError(t, err)
 		require.Zero(t, tag.RowsAffected(), "app role under A's GUC must not ack B's event")
 	})
 	appTx(nil, func(tx gen.DBTX) {
 		var n int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.payment_settlement_events`).Scan(&n))
+		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.host_outbox`).Scan(&n))
 		require.Zero(t, n, "no merchant GUC must fail closed")
 	})
 
@@ -151,7 +151,7 @@ func TestPaymentSettlementsCrossMerchantIsolation(t *testing.T) {
 
 	// Pruning (#827): only acked rows older than the cutoff go; A's pending
 	// event survives, and RLS scopes the delete to B.
-	_, err = super.Exec(ctx, `UPDATE openrails.payment_settlement_events SET delivered_at = now() - interval '31 days' WHERE payment_id = $1`, payB)
+	_, err = super.Exec(ctx, `UPDATE openrails.host_outbox SET delivered_at = now() - interval '31 days' WHERE payment_id = $1`, payB)
 	require.NoError(t, err)
 	appTx(&mB, func(tx gen.DBTX) {
 		n, err := gen.New(tx).DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{

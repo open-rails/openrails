@@ -276,7 +276,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,
 		"payment_settlements":       result.PaymentSettlements,
-		"host_lifecycle_events":     result.HostLifecycleEvents,
+		"host_outbox":     result.HostLifecycleEvents,
 	})
 
 	if cleanupErr != nil {

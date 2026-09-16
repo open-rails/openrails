@@ -65,7 +65,7 @@ func TestDelinquencyWorker_EvaluatesEveryMerchantWithDueWork(t *testing.T) {
 	t.Cleanup(func() {
 		bg := context.Background()
 		for _, f := range fixtures {
-			_, _ = super.Exec(bg, `DELETE FROM openrails.host_lifecycle_events WHERE merchant_id = $1`, f.merchant.UUID())
+			_, _ = super.Exec(bg, `DELETE FROM openrails.host_outbox WHERE merchant_id = $1`, f.merchant.UUID())
 			_, _ = super.Exec(bg, `DELETE FROM openrails.customer_delinquency WHERE merchant_id = $1`, f.merchant.UUID())
 			_, _ = super.Exec(bg, `DELETE FROM openrails.notification_queue WHERE customer_id = $1`, f.customer)
 			_, _ = super.Exec(bg, `DELETE FROM openrails.invoices WHERE merchant_id = $1`, f.merchant.UUID())

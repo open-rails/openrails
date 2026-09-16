@@ -379,7 +379,7 @@ type OpenrailsCustomer struct {
 	LastSeenAt time.Time
 }
 
-// or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_lifecycle_events signal; the operator owns the shutoff.
+// or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_outbox signal; the operator owns the shutoff.
 type OpenrailsCustomerDelinquency struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
@@ -390,7 +390,7 @@ type OpenrailsCustomerDelinquency struct {
 	EnteredAt       time.Time
 	OverdueAmount   int64
 	OverdueInvoices int64
-	// Bumped only when state changes; the idempotency coordinate of the emitted host_lifecycle_events row.
+	// Bumped only when state changes; the idempotency coordinate of the emitted host_outbox row.
 	TransitionSeq int64
 	EvaluatedAt   time.Time
 	CreatedAt     time.Time
@@ -524,12 +524,14 @@ type OpenrailsGrant struct {
 	CreatedAt    time.Time
 }
 
-// or#878 durable host-consumption queue for lifecycle signals the embedding host must act on — today only arrears delinquency transitions (delinquency.grace / delinquency.entered / delinquency.cleared). Consumers ack after idempotent processing; delivered rows are pruned. OpenRails emits the signal and never performs the shutoff: it does not know what the host is running.
-type OpenrailsHostLifecycleEvent struct {
+// Typed durable host events: successful rail payment settlements and delinquency lifecycle transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state.
+type OpenrailsHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
 	EventType   string
 	SubjectType string
+	PaymentID   *uuid.UUID
+	Amount      *int64
 	SubjectID   uuid.UUID
 	// The transition's currency. NOT NULL (CUR-1): every lifecycle event is per-(merchant, payer, currency) and the currency is part of its dedupe key, so an event without one is not a well-formed event.
 	Currency    string
@@ -977,16 +979,7 @@ type OpenrailsPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 }
 
-// Durable host-consumption queue for real successful payments; consumers ack after idempotent processing.
-type OpenrailsPaymentSettlementEvent struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	PaymentID   uuid.UUID
-	Amount      int64
-	Currency    string
-	SettledAt   time.Time
-	DeliveredAt *time.Time
-}
+
 
 // Pricing tiers for products with rail-specific identifiers
 type OpenrailsPrice struct {

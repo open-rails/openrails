@@ -77,7 +77,7 @@ func TestPaymentSettlementFeedRequiresDeclaredMoneyMovement(t *testing.T) {
 		t.Helper()
 		var n int
 		require.NoError(t, super.QueryRow(ctx,
-			`SELECT count(*) FROM openrails.payment_settlement_events WHERE payment_id = $1`, payID).Scan(&n))
+			`SELECT count(*) FROM openrails.host_outbox WHERE payment_id = $1`, payID).Scan(&n))
 		return n
 	}
 
