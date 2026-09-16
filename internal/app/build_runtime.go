@@ -726,7 +726,6 @@ func createServices(database *db.DB, cfg *config.Config, railConfigs railresolve
 		purchaseService, // For creating Payment records on renewal
 		clock,
 	)
-	subscriptionLifecycleService.SetCreditGranter(moneyService)
 	subscriptionLifecycleService.SetConfig(cfg)
 
 	subscriptionService := subscriptions.NewSubscriptionService(

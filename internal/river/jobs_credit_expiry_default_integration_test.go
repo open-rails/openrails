@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -96,19 +95,13 @@ func grantCreditLot(t *testing.T, ctx context.Context, dbi *db.DB, grantedAt tim
 	t.Helper()
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), uuid.New().String())
 	svc := money.NewMoneyService(dbi, clockwork.NewFakeClockAt(grantedAt))
-	require.NoError(t, svc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
-		Payer:     identity.CustomerID(customerID),
-		PaymentID: uuid.New(),
-		Source:    "purchase",
-		Spec: models.CreditsSpec{
-			"expiry_default_probe": {
-				Unit:        "USD",
-				Amount:      1_000,
-				Cadence:     models.CreditGrantCadenceOnce,
-				ExpiryHours: expiryHours,
-			},
-		},
-	}))
+	var expiresAt *time.Time
+	if expiryHours != nil && *expiryHours > 0 {
+		expiry := grantedAt.Add(time.Duration(*expiryHours) * time.Hour)
+		expiresAt = &expiry
+	}
+	_, err := svc.Deposit(ctx, money.DepositParams{Invoker: customerID.String(), Currency: "USD", Amount: 1_000, Source: "manual", ExpiresAt: expiresAt})
+	require.NoError(t, err)
 	return creditLot{customer: identity.CustomerID(customerID), unit: "USD"}
 }
 

@@ -125,7 +125,6 @@ func TestDunningWorker_MaterializeRecordsParkedIntent(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
-	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: the pass runs on a merchant-scoped
 	// connection, so both the read and the enqueue carry the GUC. On the bare
@@ -274,7 +273,6 @@ func TestDunningWorker_MaterializeStalenessParksLocally(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
-	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: the pass runs on a merchant-scoped
 	// connection, so both the read and the lifecycle writes carry the GUC.

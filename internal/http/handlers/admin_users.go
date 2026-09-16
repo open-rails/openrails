@@ -166,22 +166,20 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 				return
 			}
 			for _, bal := range balances {
-				decimals, builtin, err := r.State.MoneyService.ResolveUnit(ctx, bal.Currency)
+				decimals, err := money.CurrencyDecimals(bal.Currency)
 				if err != nil {
 					r.ErrorJSON(http.StatusInternalServerError, "failed to resolve credit currency")
 					return
 				}
 				var owed int64
 				balanceTrust := ""
-				if builtin {
-					owed, err = r.State.MoneyService.GetOutstandingOwed(ctx, payer, bal.Currency)
-					if err != nil {
-						r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
-						return
-					}
-					if tl, err := r.State.MoneyService.GetTrustLevel(ctx, payer, bal.Currency); err == nil {
-						balanceTrust = tl
-					}
+				owed, err = r.State.MoneyService.GetOutstandingOwed(ctx, payer, bal.Currency)
+				if err != nil {
+					r.ErrorJSON(http.StatusInternalServerError, "failed to load outstanding owed amount")
+					return
+				}
+				if tl, err := r.State.MoneyService.GetTrustLevel(ctx, payer, bal.Currency); err == nil {
+					balanceTrust = tl
 				}
 				service, err := billingservice.New(r.State)
 				if err != nil {
