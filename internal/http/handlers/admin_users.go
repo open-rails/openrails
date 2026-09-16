@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -61,10 +62,7 @@ type adminSubscriptionPath struct {
 	SubscriptionID string `uri:"id" binding:"required"`
 }
 
-type adminCancelSubscriptionRequest struct {
-	Reason       string `json:"reason"`
-	RevokeAccess bool   `json:"revoke_access,omitempty"`
-}
+type adminCancelSubscriptionRequest = openrails.CancelSubscriptionRequest
 
 func GetAdminUserBillingProfile(r *httprequest.Request) {
 	var path adminUserPath
@@ -235,7 +233,11 @@ func GetAdminUserPaymentMethods(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
 		return
 	}
-	pms, err := r.State.PaymentMethodService.GetByUserID(r.Request.Context(), path.UserID)
+	limit, offset, ok := invoicePage(r)
+	if !ok {
+		return
+	}
+	pms, total, err := r.State.PaymentMethodService.ListByUserID(r.Request.Context(), path.UserID, limit, offset)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load payment methods")
 		return
@@ -244,11 +246,15 @@ func GetAdminUserPaymentMethods(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	r.SuccessJSON(map[string]any{"object": "list", "data": methods})
+	r.SuccessJSON(api.NewList(methods, total, limit, offset))
 }
 
 func GetAdminSubscriptions(r *httprequest.Request) {
-	queryOpts := query.QueryOptions[subscriptions.GetSubscriptionsFilters]{Limit: 50, Offset: 0}
+	limit, offset, ok := invoicePage(r)
+	if !ok {
+		return
+	}
+	queryOpts := query.QueryOptions[subscriptions.GetSubscriptionsFilters]{Limit: limit, Offset: offset}
 	if err := r.ShouldBindQuery(&queryOpts); err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -269,7 +275,11 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
-	r.SuccessJSONPaginated(subscriptions, total, queryOpts.Limit, queryOpts.Offset)
+	out := make([]openrails.Subscription, 0, len(subscriptions))
+	for _, sub := range subscriptions {
+		out = append(out, subscriptionView(sub, r.Clock.Now()))
+	}
+	r.SuccessJSON(api.NewList(out, total, limit, offset))
 }
 
 func GetAdminSubscription(r *httprequest.Request) {
@@ -293,7 +303,7 @@ func GetAdminSubscription(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusNotFound, err.Error())
 		return
 	}
-	r.SuccessJSON(subscription)
+	r.SuccessJSON(subscriptionView(subscription, r.Clock.Now()))
 }
 
 func AdminCancelSubscription(r *httprequest.Request) {

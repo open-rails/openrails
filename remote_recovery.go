@@ -1,0 +1,80 @@
+package openrails
+
+import (
+	"context"
+	"net/http"
+	"net/url"
+	"strconv"
+)
+
+func pageQuery(options PageOptions) url.Values {
+	limit := options.Limit
+	if limit == 0 {
+		limit = 50
+	}
+	return url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(options.Offset)}}
+}
+
+func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilter) (*Page[Subscription], error) {
+	q := pageQuery(filter.PageOptions)
+	if filter.CustomerID != "" {
+		q.Set("user_id", filter.CustomerID)
+	}
+	if filter.Status != "" {
+		q.Set("status", filter.Status)
+	}
+	if filter.Rail != "" {
+		q.Set("rail", filter.Rail)
+	}
+	var out Page[Subscription]
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions?"+q.Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) GetSubscription(ctx context.Context, id string) (*Subscription, error) {
+	var out Subscription
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/subscriptions/"+url.PathEscape(id), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) CancelSubscription(ctx context.Context, id string, request CancelSubscriptionRequest) error {
+	return c.do(ctx, http.MethodPost, "/v1/merchant/subscriptions/"+url.PathEscape(id)+"/cancel", request, nil)
+}
+
+// ResumeSubscription queues recovery. A successful return confirms durable
+// acceptance; GetSubscription reads the resulting state after worker execution.
+func (c *Client) ResumeSubscription(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodPost, "/v1/merchant/subscriptions/"+url.PathEscape(id)+"/resume", nil, nil)
+}
+
+func (c *Client) UpdateSubscriptionPaymentMethod(ctx context.Context, id string, request UpdateSubscriptionPaymentMethodRequest) error {
+	return c.do(ctx, http.MethodPut, "/v1/merchant/subscriptions/"+url.PathEscape(id)+"/payment-method", request, nil)
+}
+
+func (c *Client) PreviewTierChange(ctx context.Context, id string, request ChangeTierRequest) (*TierChangePreviewResponse, error) {
+	var out TierChangePreviewResponse
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/subscriptions/"+url.PathEscape(id)+"/change-tier/preview", request, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) ChangeTier(ctx context.Context, id, key string, request ChangeTierRequest) (*TierChangeResponse, error) {
+	var out TierChangeResponse
+	if err := c.doWithHeaders(ctx, http.MethodPost, "/v1/merchant/subscriptions/"+url.PathEscape(id)+"/change-tier", request, &out, http.Header{"Idempotency-Key": {key}}); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *Client) ListPaymentMethods(ctx context.Context, customerID string, options PageOptions) (*Page[PaymentMethod], error) {
+	var out Page[PaymentMethod]
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/customers/"+url.PathEscape(customerID)+"/payment-methods?"+pageQuery(options).Encode(), nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

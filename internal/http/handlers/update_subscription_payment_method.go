@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"github.com/open-rails/openrails"
 	"net/http"
 	"time"
 
@@ -16,9 +17,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-type updateSubscriptionPaymentMethodBody struct {
-	PaymentMethodID string `json:"payment_method_id" binding:"required"`
-}
+type updateSubscriptionPaymentMethodBody = openrails.UpdateSubscriptionPaymentMethodRequest
 
 func UpdateSubscriptionPaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()

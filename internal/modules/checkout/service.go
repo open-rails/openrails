@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails"
 	"io"
 	"net/http"
 	"net/url"
@@ -46,46 +47,13 @@ import (
 
 // TierChangeResponse represents the response from a tier change operation.
 // This reuses the CheckoutSessionResponse envelope pattern for API consistency.
-type TierChangeResponse struct {
-	Object         string                         `json:"object"`                    // "tier_change"
-	Status         string                         `json:"status"`                    // succeeded, requires_action, blocked
-	Mode           string                         `json:"mode"`                      // "tier_change"
-	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
-	PriceID        string                         `json:"price_id"`                  // Target price ID
-	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
-	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Rail info
-	SubscriptionID *string                        `json:"subscription_id,omitempty"` // Affected subscription
-	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
-	Message        string                         `json:"message,omitempty"`         // User-friendly message
-	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"`   // For scheduled downgrades
-	// Money summary so the client can confirm/announce what actually happened.
-	// AmountDueNow is what was charged immediately (0 for a scheduled downgrade);
-	// NextChargeAmount/NextChargeDate describe the next renewal at the new price.
-	// For Stripe upgrades AmountDueNow is the local Model B estimate (Stripe
-	// finalizes the exact proration on its side), so treat it as approximate.
-	Currency         string     `json:"currency,omitempty"`
-	AmountDueNow     int64      `json:"amount_due_now"`
-	NextChargeAmount int64      `json:"next_charge_amount"`
-	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
-}
+type TierChangeResponse = openrails.TierChangeResponse
 
 // TierChangePreviewResponse is the non-mutating dry-run of a tier change: it
 // reports what a confirm WOULD charge now and at the next renewal, without
 // touching Stripe or the local subscription. The frontend renders it as a
 // "Right now: $X / On <date>: $Y" confirmation before calling change-tier.
-type TierChangePreviewResponse struct {
-	Object           string     `json:"object"` // "tier_change_preview"
-	Action           string     `json:"action"` // upgrade | downgrade
-	PriceID          string     `json:"price_id"`
-	Rail             string     `json:"rail"`
-	Currency         string     `json:"currency"`
-	AmountDueNow     int64      `json:"amount_due_now"`     // cents charged immediately (0 for downgrade)
-	NextChargeAmount int64      `json:"next_charge_amount"` // cents at next renewal (new plan price)
-	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
-	Effective        string     `json:"effective"`   // "now" (upgrade) | "period_end" (downgrade)
-	IsEstimate       bool       `json:"is_estimate"` // true when the rail finalizes the exact amount (Stripe upgrades)
-	Message          string     `json:"message,omitempty"`
-}
+type TierChangePreviewResponse = openrails.TierChangePreviewResponse
 
 // CheckoutService handles unified checkout for subscriptions and one-time purchases
 type CheckoutService struct {
