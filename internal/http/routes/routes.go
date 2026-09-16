@@ -158,6 +158,9 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// providerRoutes: it is exactly the endpoint that TELLS a frontend which
 	// rails this merchant has.
 	group.Handle(http.MethodGet, "/checkout-config", h(httphandlers.GetCheckoutConfig))
+	// The currency scale registry behind every monetary string on the wire:
+	// system-fixed, so it needs neither a merchant nor a database connection.
+	rr.Handle(http.MethodGet, "/currencies", h(httphandlers.GetCurrencies))
 	if providerRoutes.Solana {
 		group.Handle(http.MethodGet, "/solana/config", h(httphandlers.GetSolanaConfig))
 		group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))

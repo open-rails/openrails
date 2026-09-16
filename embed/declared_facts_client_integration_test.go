@@ -4,6 +4,8 @@ package embed_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
@@ -134,6 +136,15 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 			require.Equal(t, 1, windows)
 		})
 	}
+
+	// The currency registry is public and identical to the compiled-in table.
+	resp, err := http.Get(remote.BaseURL + "/v1/currencies")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	var registry openrails.CurrencyRegistry
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&registry))
+	require.Equal(t, openrails.CurrencyRegistry{Object: "currencies", Currencies: openrails.Currencies()}, registry)
 
 	reader, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(remote.MintAPIKey(dbtest.TestMerchantSlug, "facts-reader", []string{permissions.MerchantCatalogRead})))
 	require.NoError(t, err)
