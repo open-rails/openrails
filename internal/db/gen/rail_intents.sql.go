@@ -239,7 +239,7 @@ SET claimed_until = $1::timestamptz,
 WHERE id = $2
   AND status = 'unknown_needs_verify'
   AND (claimed_until IS NULL OR claimed_until <= $3::timestamptz)
-RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, custodian_id
+RETURNING id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id
 `
 
 type ClaimUnknownRailIntentByIDParams struct {
@@ -279,6 +279,7 @@ func (q *Queries) ClaimUnknownRailIntentByID(ctx context.Context, arg ClaimUnkno
 		&i.UpdatedAt,
 		&i.PspID,
 		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
 		&i.CustodianID,
 	)
 	return i, err
