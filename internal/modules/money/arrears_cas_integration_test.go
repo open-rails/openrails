@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/stretchr/testify/require"
 )
@@ -20,27 +21,25 @@ type hookCharger struct {
 	hook    func()
 }
 
-func (h *hookCharger) ChargeSavedMethod(_ context.Context, req money.ChargeRequest) (money.ChargeResult, error) {
-	h.charges = append(h.charges, req)
-	if h.hook != nil {
-		h.hook()
-	}
-	return money.ChargeResult{TransactionID: "tx_" + req.IdempotencyKey}, nil
+func (h *hookCharger) Prepare(_ context.Context, req money.ChargeRequest) (money.PreparedCharge, error) {
+	return money.PreparedChargeFunc(func(context.Context) (money.ChargeResult, error) {
+		h.charges = append(h.charges, req)
+		if h.hook != nil {
+			h.hook()
+		}
+		return money.ChargeResult{TransactionID: "tx_" + req.IdempotencyKey}, nil
+	}), nil
 }
 
 // TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment proves the
-// #674 minimal hardening: when the invoice mutates between the successful
-// provider charge and the snapshot CAS (ApplyInvoicePaymentSnapshot returns 0
-// rows), the charge is NEVER silently dropped — a settled invoice_payments row
-// and the owed_payment ledger transfer are still recorded (unapplied to
-// amount_due) for repair.
+// #674 hardening: the live operation pointer refuses API mutations, but if the
+// invoice is still mutated under the operation between the successful provider
+// charge and the snapshot CAS (0 rows), the charge is NEVER silently dropped —
+// a settled invoice_payments row and the owed_payment ledger transfer are
+// recorded (unapplied to amount_due) for repair.
 func TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment(t *testing.T) {
-	svc, pool, payer, cur, ctx := moneyInEnv(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -53,22 +52,21 @@ func TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment(t *testin
 	require.NoError(t, err)
 	require.Equal(t, "open", inv.Status)
 
-	// Between provider success and the recording tx, the invoice is voided out
-	// from under the collector: the snapshot CAS will match 0 rows.
 	ch := &hookCharger{hook: func() {
 		_, err := pool.Exec(ctx,
 			`UPDATE openrails.invoices SET status = 'voided', amount_due = 0, voided_at = now() WHERE id = $1`, inv.ID)
 		require.NoError(t, err)
 	}}
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	runner := collectionRunner(dbi, ch, nil)
+	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "the provider charge happened and must be counted")
 	require.Len(t, ch.charges, 1)
-	key := "invoice:" + inv.ID.String() + ":attempt:0"
-	require.Equal(t, key, ch.charges[0].IdempotencyKey, "key = invoice + durable attempt identity, not the mutable amount snapshot")
+	op := latestCollectionIntent(t, pool, ctx, inv.ID)
+	require.Equal(t, op.ID.String(), ch.charges[0].IdempotencyKey, "provider identity = the durable operation, not the mutable amount snapshot")
+	key := "invoice_collection:" + inv.ID.String() + ":attempt:0"
+	require.Equal(t, key, op.IdempotencyKey)
 
-	// The successful charge is recorded: settled invoice_payments row + the
-	// owed_payment transfer at the attempt key.
 	var settled int
 	var recorded int64
 	require.NoError(t, pool.QueryRow(ctx, `
@@ -86,24 +84,19 @@ func TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment(t *testin
 		  AND source = 'invoice_charge' AND source_id = $2`, payer.UUID(), key).Scan(&transfers))
 	require.Equal(t, 1, transfers)
 
-	// Voided invoice is no longer chargeable: the next sweep must not re-charge.
-	n, err = svc.ChargeOutstanding(ctx, ch, 0)
+	n, err = svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1)
 }
 
 // TestChargeOutstanding_AttemptKeyAdvancesAfterRecordedAttempt proves the durable
-// attempt identity: a recorded failed attempt advances the key; an unrecorded
-// outcome (transient error before recording) replays the SAME key so the
-// provider's idempotency guard can dedupe instead of double-charging.
+// attempt identity: a recorded failed attempt ends its operation; the explicit
+// retry is a NEW operation with its own provider identity, and its ledger key is
+// the client's retry key bound to the invoice.
 func TestChargeOutstanding_AttemptKeyAdvancesAfterRecordedAttempt(t *testing.T) {
-	svc, pool, payer, cur, ctx := moneyInEnv(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -115,22 +108,26 @@ func TestChargeOutstanding_AttemptKeyAdvancesAfterRecordedAttempt(t *testing.T) 
 	inv, err := svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
-	// Recorded decline -> attempt 0 recorded as failed.
 	decl := &fakeCharger{declineAll: true}
-	n, err := svc.ChargeOutstanding(ctx, decl, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, decl, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
-	require.Len(t, decl.charges, 1)
-	require.Equal(t, "invoice:"+inv.ID.String()+":attempt:0", decl.charges[0].IdempotencyKey)
+	require.Equal(t, 1, decl.chargeCount())
+	first := latestCollectionIntent(t, pool, ctx, inv.ID)
+	require.Equal(t, intents.StatusFailedTerminal, first.Status)
+	require.Equal(t, first.ID.String(), decl.charges[0].IdempotencyKey)
 
-	// Explicit retry: the recorded failure advances the durable attempt count -> new key.
 	ok := &fakeCharger{}
-	_, err = svc.RetryInvoiceCollection(ctx, ok, payer, inv.ID)
+	result, err := svc.RetryInvoiceCollection(ctx, collectionRunner(dbi, ok, nil), payer, money.InvoiceCollectionRetryRequest{
+		InvoiceID: inv.ID, IdempotencyKey: "retry-after-decline", PaymentMethodID: pm,
+	})
 	require.NoError(t, err)
-	require.Len(t, ok.charges, 1)
-	require.Equal(t, "invoice:"+inv.ID.String()+":attempt:1", ok.charges[0].IdempotencyKey)
-
-	paid, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
-	require.NoError(t, err)
-	require.Equal(t, "paid", paid.Status)
+	require.False(t, result.Replayed)
+	require.Equal(t, 1, ok.chargeCount())
+	second := latestCollectionIntent(t, pool, ctx, inv.ID)
+	require.NotEqual(t, first.ID, second.ID)
+	require.Equal(t, second.ID.String(), ok.charges[0].IdempotencyKey, "a new operation carries a new provider identity")
+	require.Contains(t, second.IdempotencyKey, "invoice_collection:"+inv.ID.String()+":retry:")
+	require.Equal(t, "settled", result.Attempt.Status)
+	require.Equal(t, "paid", result.Invoice.Status)
 }

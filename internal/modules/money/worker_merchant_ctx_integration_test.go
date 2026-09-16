@@ -22,11 +22,7 @@ import (
 
 func TestInvoiceWorker_NoMerchantContext_CollectsSeededMerchant(t *testing.T) {
 	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -44,7 +40,7 @@ func TestInvoiceWorker_NoMerchantContext_CollectsSeededMerchant(t *testing.T) {
 		string(models.RailNMI): adapter,
 	})
 	// EXACTLY like River: a bare background context, no merchant pinned.
-	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Charger: ch}.Work(context.Background(), &river.Job[riverjobs.InvoiceArgs]{
+	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Intents: collectionRunner(dbi, ch, nil)}.Work(context.Background(), &river.Job[riverjobs.InvoiceArgs]{
 		Args: riverjobs.InvoiceArgs{Collect: true, CollectionThresholdAmount: 1},
 	})
 	require.NoError(t, err)

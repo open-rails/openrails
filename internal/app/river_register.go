@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/money"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
@@ -237,12 +238,11 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// Invoice collection and reconciliation workers. Collection waits until
 	// an off-session charger is configured.
 	if err := addTrackedWorker(r, workers, &riverjobs.InvoiceWorker{
-		DB:       r.DB,
-		Money:    r.MoneyService,
-		Charger:  r.MoneyCharger,
-		Verifier: r.CollectionResolver,
-		Config:   r.Config,
-		Clock:    clock,
+		DB:      r.DB,
+		Money:   r.MoneyService,
+		Intents: r.intentRunner(intentRegistry, clock),
+		Config:  r.Config,
+		Clock:   clock,
 	}); err != nil {
 		return fmt.Errorf("add invoice worker: %w", err)
 	}
@@ -323,6 +323,9 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		intents.NewStripeRefundHandler(r.DB, r.Config, r.RailConfigs, clock),
 		ccbillRefund,
 		intents.NewManualRebillHandler(r.DB, r.Config, r.CollectionResolver, clock),
+		// Invoice collection rides the ledger like every other money mover; the
+		// charger and reconciliation reads are the #725 store-armed plane.
+		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Config, clock),
 		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock),
 		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock),
 		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPCResolver.ChainReader(), clock),

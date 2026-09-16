@@ -1635,6 +1635,7 @@ CREATE TABLE openrails.invoices (
     next_collection_attempt_at timestamp with time zone,
     last_collection_failure_code text,
     last_collection_failure_message text,
+    collection_intent_id uuid,
     CONSTRAINT invoices_amounts_nonneg_chk CHECK (((subtotal_amount >= 0) AND (total_amount >= 0) AND (amount_paid >= 0) AND (amount_due >= 0))),
     CONSTRAINT invoices_collection_failure_count_nonneg CHECK ((collection_failure_count >= 0)),
     CONSTRAINT invoices_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text]))),
@@ -1656,6 +1657,8 @@ COMMENT ON COLUMN openrails.invoices.tax IS '#798 tax document fields (tax id, j
 
 COMMENT ON COLUMN openrails.invoices.billing_contacts IS '#798 billing contacts ([{name,email}]) snapshotted from the payer invoice profile at finalize.';
 
+COMMENT ON COLUMN openrails.invoices.collection_intent_id IS 'The live invoice_collection operation (rail_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation''s terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.';
+
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_pkey PRIMARY KEY (id);
 
@@ -1676,6 +1679,8 @@ CREATE INDEX ix_invoices_open_due ON openrails.invoices USING btree (merchant_id
 CREATE INDEX ix_invoices_payer ON openrails.invoices USING btree (merchant_id, customer_id, period_from DESC);
 
 CREATE UNIQUE INDEX uq_invoices_period ON openrails.invoices USING btree (merchant_id, customer_id, currency, period_from, period_to);
+
+CREATE INDEX ix_invoices_collection_intent ON openrails.invoices USING btree (merchant_id, collection_intent_id) WHERE (collection_intent_id IS NOT NULL);
 
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
@@ -4421,6 +4426,9 @@ CREATE POLICY merchant_isolation ON openrails.price_psp_bindings
     USING (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
     WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
 GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO openrails_app;
+
+ALTER TABLE ONLY openrails.invoices
+    ADD CONSTRAINT invoices_collection_intent_fk FOREIGN KEY (merchant_id, collection_intent_id) REFERENCES openrails.rail_intents(merchant_id, id) ON DELETE RESTRICT;
 
 -- One unresolved upgrade owns the predecessor's provider mutation sequence.
 CREATE UNIQUE INDEX uq_rail_intents_upgrade_predecessor ON openrails.rail_intents(merchant_id, subscription_id)

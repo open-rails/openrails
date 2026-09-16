@@ -61,7 +61,7 @@ func (f *fakeClassicNMIGateway) form(t *testing.T, i int) url.Values {
 //  3. an agreement-scoped anchor always wins and rides initial_transaction_id.
 func TestChargeOutstanding_StoredCredentialMITFallbacks(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	cleanupInvoiceRows(t, pool, ctx, payer)
+	cleanupCollection(t, pool, ctx, payer)
 
 	fake := &fakeClassicNMIGateway{txn: func(call int) string { return fmt.Sprintf("txn-297-%d", call) }}
 	server := httptest.NewServer(fake.handler())
@@ -104,7 +104,7 @@ func TestChargeOutstanding_StoredCredentialMITFallbacks(t *testing.T) {
 
 	// Leg 1: no scoped anchor uses the older vault-creation transaction ID.
 	require.Empty(t, refOf(), "instrument starts without an agreement-scoped anchor")
-	n, err := svc.ChargeOutstanding(ctx, charger, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, charger, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	legacyForm := fake.form(t, 0)
@@ -122,7 +122,7 @@ func TestChargeOutstanding_StoredCredentialMITFallbacks(t *testing.T) {
 	_, err = pool.Exec(ctx,
 		"UPDATE openrails.payment_methods SET initial_transaction_id = '' WHERE id = $1", pm)
 	require.NoError(t, err)
-	n, err = svc.ChargeOutstanding(ctx, charger, 0)
+	n, err = svc.ChargeOutstanding(ctx, collectionRunner(dbi, charger, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	unanchoredForm := fake.form(t, 1)
@@ -142,7 +142,7 @@ func TestChargeOutstanding_StoredCredentialMITFallbacks(t *testing.T) {
 		"UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref = $2 WHERE id = $1",
 		pm, anchor)
 	require.NoError(t, err)
-	n, err = svc.ChargeOutstanding(ctx, charger, 0)
+	n, err = svc.ChargeOutstanding(ctx, collectionRunner(dbi, charger, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	form := fake.form(t, 2)
