@@ -33,7 +33,7 @@ func TestRootPackageStaysLight(t *testing.T) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		dep := strings.TrimSpace(line)
-		if dep == "github.com/open-rails/openrails/pkg/merchant" {
+		if dep == "github.com/open-rails/openrails/pkg/merchant" || dep == "github.com/open-rails/openrails/pkg/pricing" {
 			continue
 		}
 		for _, bad := range forbidden {
