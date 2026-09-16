@@ -819,3 +819,7 @@ route tier:
   mount), not a database column or config key, and it has no dependency on
   `api_host`/Host resolution. The legacy global `cors_origins` config key
   stays retired: OpenRails' CORS posture isn't configurable at all.
+
+## Payment-method update notices
+
+A recoverable stored-card failure sends an immediate `payment_method_update_required` payer notice and parks collection until the method is fixed. Core does not schedule repeated payment-method reminder ladders. Hosts may own additional reminders. Normal retry/dunning, provider verification, stored-card account updates and paid-period access are unchanged.
