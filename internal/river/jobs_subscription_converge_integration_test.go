@@ -31,8 +31,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/modules/webhookhealth"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/sigverify"
 )
 
@@ -73,6 +73,7 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 	dbi := dbtest.OpenAppDB(t, dsn)
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	merchantID := dbtest.TestMerchantID.UUID()
+	var pspID uuid.UUID
 	baseCtx := dbtest.WithTestMerchant(context.Background())
 	dbtest.EnsureTestMerchant(baseCtx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()))
 
@@ -91,7 +92,7 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 			_, err := dbi.Qx(ctx).Exec(ctx, sql, args...)
 			require.NoError(t, err)
 		}
-		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "stripe")
+		pspID = dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), merchantID, "stripe")
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			productID, "burst-prod-"+suffix, merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
@@ -158,7 +159,7 @@ func TestSubscriptionConvergeBurstCoalescesToOneFetch(t *testing.T) {
 	// ---- N wake-ups within the debounce window ⇒ ONE job, ONE fetch ---------
 	enq := &SubscriptionConvergeEnqueuer{Client: client, Debounce: 500 * time.Millisecond}
 	for i := 0; i < 5; i++ {
-		require.NoError(t, enq.EnqueueSubscriptionConverge(ctx, webhooks.ConvergeRequest{
+		require.NoError(t, enq.EnqueueSubscriptionConverge(ctx, webhooks.ConvergeRequest{PSPID: pspID,
 			MerchantID:            merchantID,
 			Rail:                  "stripe",
 			SubscriptionReference: railSubID,
@@ -253,6 +254,7 @@ func nmiE2ESig(secret, ts string, body []byte) string {
 }
 
 type convergeE2EFixture struct {
+	pspID      uuid.UUID
 	dbi        *db.DB
 	merchantID uuid.UUID
 	customer   uuid.UUID
@@ -285,6 +287,7 @@ func seedConvergeE2ESubscription(t *testing.T, dbi *db.DB, baseCtx context.Conte
 			require.NoError(t, err)
 		}
 		pspID := dbtest.EnsureTestPSP(ctx, t, dbi.Qx(ctx), f.merchantID, rail)
+		f.pspID = pspID
 		exec(`INSERT INTO openrails.products (id, key, display_name, entitlements_spec, merchant_id) VALUES ($1,$2,$2,'{}'::jsonb,$3)`,
 			f.productID, "e2e-prod-"+suffix, f.merchantID)
 		exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id) VALUES ($1,$2,29990000,'USD',720,true,$3)`,
@@ -424,7 +427,7 @@ func TestWebhookWakeUpEndToEnd_StripeRenewal(t *testing.T) {
 		SignatureValid: &verified,
 		ReceivedAt:     time.Now(),
 	}
-	require.NoError(t, dispatcher.Process(baseCtx, msg))
+	require.NoError(t, dispatcher.Process(db.WithPSPID(baseCtx, f.pspID), msg))
 
 	awaitConvergeCompletion(t, events)
 	require.EqualValues(t, 1, fake.requests.Load(), "one wake-up, one fetch")
@@ -529,7 +532,7 @@ func TestWebhookWakeUpEndToEnd_NMIRenewal(t *testing.T) {
 		ReceivedAt:     time.Now(),
 	}
 	// The NMI dispatcher leg RE-VERIFIES the signature itself (handler.Verify).
-	require.NoError(t, dispatcher.Process(baseCtx, msg))
+	require.NoError(t, dispatcher.Process(db.WithPSPID(baseCtx, f.pspID), msg))
 
 	awaitConvergeCompletion(t, events)
 	// NMI v5 declares next billing as a bare DATE — the adopted period end is
@@ -565,7 +568,7 @@ func TestSubscriptionConverge_SnoozeHandsOffOnObservedPullCoverage(t *testing.T)
 	}))
 	t.Cleanup(func() {
 		_ = dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.webhook_health WHERE merchant_id = $1 AND rail = 'nmi'`, f.merchantID)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.rail_refresh_watermarks WHERE merchant_id = $1 AND rail = 'nmi'`, f.merchantID)
 			return nil
 		})
 	})
@@ -594,20 +597,53 @@ func TestSubscriptionConverge_SnoozeHandsOffOnObservedPullCoverage(t *testing.T)
 	jobCreated := time.Now().UTC().Add(-3 * 24 * time.Hour) // far past the old 24 h give-up
 	job := &river.Job[SubscriptionConvergeArgs]{
 		JobRow: &rivertype.JobRow{ID: 1, Kind: KindSubscriptionConverge, CreatedAt: jobCreated},
-		Args:   SubscriptionConvergeArgs{MerchantID: f.merchantID, Rail: "nmi", SubscriptionReference: f.railSubID},
+		Args:   SubscriptionConvergeArgs{PSPID: f.pspID, MerchantID: f.merchantID, Rail: "nmi", SubscriptionReference: f.railSubID},
 	}
 
 	// A pull that ran BEFORE the job was born is not coverage: snooze.
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		return webhookhealth.StampPull(ctx, dbi, "nmi", jobCreated.Add(-time.Hour))
+		return (&ProviderRefreshWorker{DB: dbi}).recordWatermarkSuccess(ctx, f.merchantID, reconcile.ProviderNMI, f.pspID, jobCreated.Add(-time.Hour))
 	}))
 	err = worker.Work(context.Background(), job)
 	var snooze *rivertype.JobSnoozeError
 	require.ErrorAs(t, err, &snooze, "evidence not settled and nobody else has looked since: the job keeps its own watch (age is not a reason to stop)")
 
+	// A current pull for a sibling account does not cover this account.
+	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+		otherPSP := uuid.New()
+		_, err := dbi.Qx(ctx).Exec(ctx, `INSERT INTO openrails.psps(id, merchant_id, rail, environment, account_id, key) VALUES($1,$2,'nmi','test',$3,$3)`, otherPSP, f.merchantID, uuid.NewString())
+		if err != nil {
+			return err
+		}
+		return (&ProviderRefreshWorker{DB: dbi}).recordWatermarkSuccess(ctx, f.merchantID, reconcile.ProviderNMI, otherPSP, time.Now().UTC())
+	}))
+	require.ErrorAs(t, worker.Work(context.Background(), job), &snooze, "a sibling account cannot retire this account's dirty mark")
+
 	// A pull completed since the job was born: the pull owns the row now.
 	require.NoError(t, dbi.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		return webhookhealth.StampPull(ctx, dbi, "nmi", time.Now().UTC())
+		return (&ProviderRefreshWorker{DB: dbi}).recordWatermarkSuccess(ctx, f.merchantID, reconcile.ProviderNMI, f.pspID, time.Now().UTC())
 	}))
 	require.NoError(t, worker.Work(context.Background(), job), "handed off on observed pull coverage")
+}
+
+func TestSubscriptionConvergeQueueIsolatesPSPs(t *testing.T) {
+	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
+	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(t, err)
+	enq := &SubscriptionConvergeEnqueuer{Client: client}
+	ref := "same-ref-" + uuid.NewString()
+	ctx := context.Background()
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, `DELETE FROM river_job WHERE kind=$1 AND args->>'subscription_reference'=$2`, KindSubscriptionConverge, ref)
+	})
+	for _, pspID := range []uuid.UUID{uuid.New(), uuid.New()} {
+		for i := 0; i < 3; i++ {
+			require.NoError(t, enq.EnqueueSubscriptionConverge(ctx, webhooks.ConvergeRequest{
+				MerchantID: dbtest.TestMerchantID.UUID(), PSPID: pspID, Rail: "nmi", SubscriptionReference: ref,
+			}))
+		}
+	}
+	var jobs int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM river_job WHERE kind=$1 AND args->>'subscription_reference'=$2`, KindSubscriptionConverge, ref).Scan(&jobs))
+	require.Equal(t, 2, jobs, "same provider reference must coalesce only within its PSP account")
 }

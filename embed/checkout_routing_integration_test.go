@@ -83,6 +83,11 @@ func bootRoutingFixture(
 		"mobius":   {"rail": "nmi", "plan_id": "plan-" + slug},
 		"paykings": {"rail": "nmi", "plan_id": "plan-old-" + slug},
 	}
+	for key := range links {
+		if _, ok := psps[key]; !ok {
+			delete(links, key)
+		}
+	}
 	scoped := merchant.WithID(ctx, id)
 	prices, err := catalog.NewPriceService(appDB).GetAll(scoped)
 	require.NoError(t, err)

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
@@ -27,6 +28,7 @@ import (
 // ConvergeRequest identifies one dirty subscription for fetch-and-converge.
 type ConvergeRequest struct {
 	MerchantID uuid.UUID
+	PSPID      uuid.UUID
 	// Rail is the canonical rail/provider key the event arrived on (the NMI
 	// alias key selects the gateway client).
 	Rail string
@@ -65,7 +67,12 @@ func markSubscriptionDirty(ctx context.Context, enq SubscriptionConvergeEnqueuer
 	if err != nil {
 		return fmt.Errorf("mark subscription dirty: no merchant on context: %w", err)
 	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return err
+	}
 	if err := enq.EnqueueSubscriptionConverge(ctx, ConvergeRequest{
+		PSPID:                 pspID,
 		MerchantID:            mid.UUID(),
 		Rail:                  rail,
 		SubscriptionReference: reference,

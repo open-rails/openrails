@@ -110,6 +110,8 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 
 	params := fx.enqueueParams(1)
 	params.PspID = accountRowID // #704 provenance stamp (what dunning enqueues)
+	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()), `UPDATE openrails.subscriptions SET psp_id=$2 WHERE id=$1`, *params.SubscriptionID, accountRowID)
+	require.NoError(t, err)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)

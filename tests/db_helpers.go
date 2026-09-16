@@ -58,6 +58,12 @@ func (suite *TestContainerSuite) InsertProduct(ctx context.Context, p *models.Pr
 
 func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Price) {
 	suite.t.Helper()
+	ctx = dbtest.WithTestMerchant(ctx)
+	for _, cfg := range p.PSPLinks {
+		if cfg[models.RailKeyPSPID] == "" {
+			cfg[models.RailKeyPSPID] = dbtest.EnsureTestPSP(ctx, suite.t, suite.MerchantPool(), dbtest.TestMerchantID.UUID(), cfg[models.RailKeyRail]).String()
+		}
+	}
 	if p.MerchantID == uuid.Nil {
 		tid, err := merchant.Require(ctx)
 		if err != nil {

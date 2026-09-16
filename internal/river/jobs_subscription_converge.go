@@ -30,7 +30,7 @@ import (
 )
 
 // #684: webhooks are wake-up signals. This worker is the coalesced dirty-flag
-// fetch: unique per (merchant, rail, subscription reference) with a short
+// fetch: unique per (merchant, PSP, rail, subscription reference) with a short
 // debounce, so a burst of events about one subscription collapses to ONE
 // provider fetch, converged through the #665 decider. Provider outages leave
 // the job retrying (the dirty mark parks; access intact — #664 posture).
@@ -50,7 +50,7 @@ const (
 	// fetched charge or decline, or checkout expiry — the converge then
 	// returns something other than ErrConvergeRetryLater), or the provider
 	// refresh pull having covered this rail since the job was born
-	// (webhook_health.last_pull_at, stamped after every completed pass) —
+	// (rail_refresh_watermarks, scoped to the captured PSP) —
 	// from then on the pull re-reads the same provider evidence on its own
 	// cadence, and this job's snooze would only duplicate it. It used to give
 	// up after 24 h whether or not anything else had looked.
@@ -58,10 +58,11 @@ const (
 	subscriptionConvergeMissingClient = "converge: rail client not configured"
 )
 
-// SubscriptionConvergeArgs identifies one dirty subscription. Only the three
+// SubscriptionConvergeArgs identifies one dirty subscription. Only the four
 // identity fields participate in uniqueness — EventType/EventCreated are
 // forensics, so a burst about one subscription dedupes to one job.
 type SubscriptionConvergeArgs struct {
+	PSPID                 uuid.UUID `json:"psp_id" river:"unique"`
 	MerchantID            uuid.UUID `json:"merchant_id" river:"unique"`
 	Rail                  string    `json:"rail" river:"unique"`
 	SubscriptionReference string    `json:"subscription_reference" river:"unique"`
@@ -101,12 +102,16 @@ func (e *SubscriptionConvergeEnqueuer) EnqueueSubscriptionConverge(ctx context.C
 	if e == nil || e.Client == nil {
 		return fmt.Errorf("subscription converge enqueuer: river client unavailable")
 	}
+	if req.PSPID == uuid.Nil {
+		return db.ErrNoPSPInContext
+	}
 	debounce := e.Debounce
 	if debounce <= 0 {
 		debounce = SubscriptionConvergeDebounce
 	}
 	_, err := e.Client.Insert(ctx, SubscriptionConvergeArgs{
 		MerchantID:            req.MerchantID,
+		PSPID:                 req.PSPID,
 		Rail:                  strings.ToLower(strings.TrimSpace(req.Rail)),
 		SubscriptionReference: strings.TrimSpace(req.SubscriptionReference),
 		EventType:             req.EventType,
@@ -156,14 +161,14 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 	if w.DB == nil {
 		return fmt.Errorf("subscription converge: db not configured")
 	}
-	if args.MerchantID == uuid.Nil || strings.TrimSpace(args.Rail) == "" || strings.TrimSpace(args.SubscriptionReference) == "" {
+	if args.PSPID == uuid.Nil || args.MerchantID == uuid.Nil || strings.TrimSpace(args.Rail) == "" || strings.TrimSpace(args.SubscriptionReference) == "" {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"merchant_id": args.MerchantID, "rail": args.Rail, "reference": args.SubscriptionReference,
 		}).Warn("subscription converge: incomplete identity; dropping job")
 		return nil
 	}
 
-	mctx := merchant.WithID(ctx, merchant.ID(args.MerchantID))
+	mctx := db.WithPSPID(merchant.WithID(ctx, merchant.ID(args.MerchantID)), args.PSPID)
 	var customerID uuid.UUID
 	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 		var cerr error
@@ -207,14 +212,14 @@ func (w *SubscriptionConvergeWorker) Work(ctx context.Context, job *river.Job[Su
 // provider read a minute, whereas a wrong hand-off could leave a pending
 // signup to a pull that never runs.
 func (w *SubscriptionConvergeWorker) pullCoveredSince(mctx context.Context, args SubscriptionConvergeArgs, since time.Time) (bool, time.Time) {
-	var pulledAt *time.Time
+	var pulledAt time.Time
 	err := w.DB.RunInMerchantConn(mctx, func(cctx context.Context) error {
 		var qerr error
-		pulledAt, qerr = w.DB.Gen(cctx).GetWebhookPullWatermark(cctx, gen.GetWebhookPullWatermarkParams{
-			MerchantID: args.MerchantID, Rail: args.Rail,
+		pulledAt, qerr = w.DB.Gen(cctx).GetPSPRefreshWatermark(cctx, gen.GetPSPRefreshWatermarkParams{
+			MerchantID: args.MerchantID, Rail: args.Rail, PspID: args.PSPID,
 		})
 		if qerr != nil && db.IsNotFound(qerr) {
-			pulledAt, qerr = nil, nil
+			pulledAt, qerr = time.Time{}, nil
 		}
 		return qerr
 	})
@@ -222,10 +227,10 @@ func (w *SubscriptionConvergeWorker) pullCoveredSince(mctx context.Context, args
 		log.WithContext(mctx).WithError(err).WithField("rail", args.Rail).Warn("subscription converge: pull watermark read failed; keeping the snooze")
 		return false, time.Time{}
 	}
-	if pulledAt == nil || !pulledAt.After(since) {
+	if !pulledAt.After(since) {
 		return false, time.Time{}
 	}
-	return true, *pulledAt
+	return true, pulledAt
 }
 
 func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args SubscriptionConvergeArgs) (uuid.UUID, error) {
@@ -259,7 +264,7 @@ func (w *SubscriptionConvergeWorker) convergeOne(ctx context.Context, args Subsc
 		if w.NMIResolver == nil {
 			return uuid.Nil, fmt.Errorf("%s (nmi rail %q)", subscriptionConvergeMissingClient, args.Rail)
 		}
-		client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, args.MerchantID, nil)
+		client, ok, err := w.NMIResolver.ResolveNMIClient(ctx, args.MerchantID, &args.PSPID)
 		if err != nil {
 			return uuid.Nil, fmt.Errorf("%s (nmi rail %q): %w", subscriptionConvergeMissingClient, args.Rail, err)
 		}

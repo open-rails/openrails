@@ -595,7 +595,7 @@ func (suite *TestContainerSuite) WorkerCtx() context.Context { return context.Ba
 // GetPrice retrieves a price by ID from the database.
 func (suite *TestContainerSuite) GetPrice(priceID uuid.UUID) *models.Price {
 	suite.t.Helper()
-	price, err := catalog.NewPriceService(suite.FixtureDB()).GetByID(suite.ctx, priceID)
+	price, err := catalog.NewPriceService(suite.FixtureDB()).GetByID(suite.MerchantCtx(), priceID)
 	require.NoError(suite.t, err, "Failed to get price by ID")
 	return price
 }

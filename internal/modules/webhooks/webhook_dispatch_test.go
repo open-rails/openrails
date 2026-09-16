@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
@@ -58,8 +59,9 @@ func TestHandleNMIWebhookDispatchesSubscriptionSignals(t *testing.T) {
 				ConvergeEnqueuer: enqueuer,
 			}
 
-			require.NoError(t, svc.HandleNMIWebhook(dbtest.WithTestMerchant(context.Background())))
-			require.Equal(t, []ConvergeRequest{{
+			pspID := uuid.New()
+			require.NoError(t, svc.HandleNMIWebhook(db.WithPSPID(dbtest.WithTestMerchant(context.Background()), pspID)))
+			require.Equal(t, []ConvergeRequest{{PSPID: pspID,
 				MerchantID:            dbtest.TestMerchantID.UUID(),
 				Rail:                  "nmi",
 				SubscriptionReference: tc.reference,
