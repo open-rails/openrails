@@ -20,6 +20,13 @@ other HTTP 402 responses do not imply a low credit balance. Metadata numbers
 are decoded as `json.Number` so their integer precision is preserved. The body
 request ID takes precedence, with `X-Request-ID` as a fallback.
 
+Refusals the transport answers before a handler runs use the same envelope:
+a request body over the deployment's cap (1 MiB in every deployment, the
+in-process embedded Client included) is `413` with code `request_body_too_large`
+(`openrails.ErrRequestBodyTooLarge`); an unreadable body is `400
+invalid_request_body`; an unauthenticated request on a host-authenticated
+route is `401 unauthorized`.
+
 Transport failures preserve their cause: `errors.Is(err, context.Canceled)` and
 `errors.Is(err, context.DeadlineExceeded)` work in both modes. A transport failure
 is not proof that an operation was rejected or did not commit. Financial retries

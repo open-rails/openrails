@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/controlplane"
+	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/pkg/api"
@@ -37,7 +38,9 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 	httproutes.RegisterCatalogRoutes(router.NewMux(mux, "/v1/merchant/catalog", rt), rt, opts)
 	// #737: DeclaredBilling import, same gate (host principal holds merchant:*).
 	httproutes.RegisterImportRoutes(router.NewMux(mux, "/v1/import", rt), rt, opts)
-	return mux
+	// The same request body cap the HTTP mounts apply, so an oversized request
+	// is refused with the same 413 envelope in every deployment.
+	return middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux)
 }
 
 // hostPermissions is the embedded host's authority over its own merchant: the

@@ -351,7 +351,12 @@ func (h *Harness) StartEmbeddedMerchant(currency string, id merchant.ID, slug st
 	)
 	httproutes.RegisterCatalogRoutes(router.NewMux(mux, "/v1/merchant/catalog", runtime), runtime, routeOptions)
 	httproutes.RegisterMerchantActionRoutes(router.NewMux(mux, "/v1/merchant", runtime), runtime, routeOptions)
-	srv := httptest.NewServer(middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(runtime.ConfiguredMerchant)))
+	// The production mounts (internal/http/embedhttp, server.go) cap request
+	// bodies before any route; the fixture host must refuse the same way.
+	srv := httptest.NewServer(middleware.ChainHTTP(mux,
+		middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes),
+		middleware.ResolveMerchantHTTP(runtime.ConfiguredMerchant),
+	))
 	h.cleanup(srv.Close)
 
 	return &Surface{
