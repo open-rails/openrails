@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"sort"
 	"strings"
+
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/pkg/merchant"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -30,12 +32,7 @@ import (
 // PendingAction describes a manual step the operator must complete to bring a
 // pending_manual_link provider to linked status. Surfaced on CreatePrice and on
 // GetPrice/Reconcile responses when at least one provider is still pending.
-type PendingAction struct {
-	Provider      string                                  `json:"provider"`
-	Action        string                                  `json:"action"`
-	Hint          string                                  `json:"hint"`
-	PatchRequired map[string]map[string]map[string]string `json:"patch_required,omitempty"`
-}
+type PendingAction = openrails.PendingAction
 
 // providerLookupKey is the conventional key under which an adapter stores its
 // canonical lookup key on the rails[provider] map (when one exists).
@@ -330,7 +327,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	remoteWritesDisabled := s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
 	// Provider objects key on the RECURRING cadence (nil for one-off / finite
 	// windows — those settle as one-time charges; the access window is OpenRails-side).
-	reqCycle := req.RecurringCycleDays()
+	reqCycle := priceRequestCycleDays(req)
 	pctx := autoCreateContext{
 		PriceID:              priceID,
 		ProductID:            req.ProductID,

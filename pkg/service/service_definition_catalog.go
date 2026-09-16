@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -55,7 +56,7 @@ func toModelCreditsSpec(in CreditsSpec) models.CreditsSpec {
 
 // ProviderStatus is the per-provider attachment state surfaced in admin
 // responses. Issue #208 defines these four values.
-type ProviderStatus string
+type ProviderStatus = openrails.ProviderStatus
 
 const (
 	ProviderStatusLinked            ProviderStatus = "linked"
@@ -67,7 +68,7 @@ const (
 // SyncStatus is the per-provider freshness/drift state. Populated only by
 // paths that perform a live retrieve (?verify=true reads or reconcile);
 // otherwise defaults to "unknown".
-type SyncStatus string
+type SyncStatus = openrails.SyncStatus
 
 const (
 	SyncStatusUnknown      SyncStatus = "unknown"
@@ -80,22 +81,11 @@ const (
 
 // ProviderState is the uniform per-provider response surface. Replaces the
 // pre-#208 stripe-specific StripeRailState.
-type ProviderState struct {
-	Status     ProviderStatus    `json:"status"`
-	IDs        map[string]string `json:"ids,omitempty"`
-	LookupKey  string            `json:"lookup_key,omitempty"`
-	SyncStatus SyncStatus        `json:"sync_status,omitempty"`
-	Drift      []DriftField      `json:"drift,omitempty"`
-	Message    string            `json:"message,omitempty"`
-}
+type ProviderState = openrails.ProviderState
 
 // DriftField describes a single divergent field discovered by verify/reconcile.
 // Replaces the pre-#208 RailDriftField (Stripe-only).
-type DriftField struct {
-	Field          string `json:"field"`
-	OpenRailsValue string `json:"openrails_value"`
-	RemoteValue    string `json:"remote_value"`
-}
+type DriftField = openrails.DriftField
 
 // CatalogProduct is the OpenRails-side view of a product. Products are pure
 // OpenRails concepts and have NO direct provider linkage in the user-facing
@@ -365,36 +355,7 @@ func productToCatalogProduct(p *models.Product) *CatalogProduct {
 
 // CatalogPrice is the OpenRails-side view of a price. The declarative
 // `providers` shape is the only rail configuration surface.
-type CatalogPrice struct {
-	ID uuid.UUID `json:"id"`
-	// Key (#774) is the durable, per-merchant-unique movable-pointer handle for
-	// this price's substance-version chain — the stable name to check out
-	// against, reprice by, or reference in support conversations. ID stays the
-	// #662 immutable substance UUID.
-	Key                 string    `json:"key"`
-	ProductID           uuid.UUID `json:"product_id"`
-	Archived            bool      `json:"archived"`
-	UnitAmount          int64     `json:"unit_amount"`
-	Currency            string    `json:"currency"`
-	AccessDurationHours *int      `json:"access_duration_hours,omitempty"`
-	AutoRenew           bool      `json:"auto_renew"`
-	TrialUnitAmount     *int64    `json:"trial_unit_amount,omitempty"`
-	TrialDurationHours  *int      `json:"trial_duration_hours,omitempty"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
-
-	// Providers carries the typed per-provider attachment state for every
-	// rail this price is linked to. Always populated when at least one
-	// provider is attached; SyncStatus defaults to "unknown" until a
-	// verify/reconcile path is invoked.
-	Providers map[string]ProviderState `json:"providers,omitempty"`
-
-	// PendingManualActions lists per-provider manual steps the operator must
-	// complete to bring a pending_manual_link provider to linked status. Set
-	// on the CreatePrice response and populated on GetPrice when at least one
-	// provider is still pending.
-	PendingManualActions []PendingAction `json:"pending_manual_actions,omitempty"`
-}
+type CatalogPrice = openrails.CatalogPrice
 
 // CreatePriceRequest is the declarative-shape create request introduced in
 // issue #208. Callers state which providers a price should exist in (Providers)
@@ -407,61 +368,7 @@ type CatalogPrice struct {
 //     price is created in OpenRails with a pending_manual_link status for
 //     that provider; the response carries a PendingAction telling the operator
 //     what to do.
-type CreatePriceRequest struct {
-	ProductID uuid.UUID `json:"product_id"`
-
-	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
-	// this price's substance-version chain — distinct from ID, which stays the
-	// #662 immutable substance UUID. Optional: auto-defaults to
-	// "<product-key>-<interval>" when omitted (see PriceIntervalLabel).
-	// Declaring the SAME key with a DIFFERENT financial substance is a version
-	// bump: the new/reactivated substance row becomes the key's current
-	// target and the previously-current row is archived (grandfathered).
-	Key string `json:"key,omitempty"`
-
-	// A price's ROW IDENTITY IS its financial substance — the product key plus
-	// these immutable money terms. There is no price slug: the content-based
-	// provider keys are derived from (product_key, currency, unit_amount,
-	// access duration, renewal flag, and trial terms), so they are stable across
-	// DB rebuilds and a different amount is, by construction, a different price.
-	UnitAmount int64  `json:"unit_amount"`
-	Currency   string `json:"currency"`
-
-	// AccessDurationHours (#622): the access window a purchase grants, in HOURS
-	// (supports sub-day windows). nil = indefinite/durable; a positive value = a
-	// finite window (rental, one-off, or the billing period when AutoRenew). Part
-	// of price identity.
-	AccessDurationHours *int `json:"access_duration_hours,omitempty"`
-	// AutoRenew (#622): whether the price recharges and extends the window after
-	// AccessDurationHours. Requires a finite AccessDurationHours. Part of identity.
-	AutoRenew bool `json:"auto_renew"`
-
-	// TrialUnitAmount / TrialDurationHours (#622): optional trial FIRST phase that
-	// differs from the recurring terms. TrialUnitAmount 0 = free trial; both nil =
-	// a flat price. Must be set together and require AutoRenew (there is a "then
-	// recurring" part).
-	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
-	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
-
-	// Providers is the list of provider names to attach (e.g. ["stripe",
-	// "ccbill", "nmi"]). Empty means "DB-only price with no external
-	// links" — useful for testing or for prices that are not sold externally.
-	PSPs []string `json:"psps,omitempty"`
-
-	// PSPLinks maps PSP key -> provider-specific link/config key/value pairs.
-	// Schema is per-provider:
-	//   stripe : {"price_id": "price_xxx", "product_id": "prod_xxx" (optional)}
-	//   ccbill : {"form_name": "...", "flex_id": "..."}
-	//   nmi : {"plan_id": "..."}
-	//   solana : {"token": "USD1"} or {"plan_pda": "..."}; omitted token defaults to USDC
-	// Any provider with a non-empty link here is implicitly added to the
-	// attach set even if absent from Providers.
-	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
-
-	// Archived creates the price retired — migrates a historical plan in one
-	// step (grandfathered subscriptions bill it; new buyers cannot).
-	Archived bool `json:"archived,omitempty"`
-}
+type CreatePriceRequest = openrails.CreatePriceRequest
 
 // priceNaturalKeyNull is the canonical encoding of a SQL NULL price field for
 // id derivation (#662). The unique_prices_product_amount_window index is
@@ -505,7 +412,7 @@ func priceDeterministicID(productID uuid.UUID, amount int64, currency string, ac
 // RecurringCycleDays returns the recurring billing cadence in WHOLE DAYS for an
 // auto-renewing request, or nil for a one-off/durable price (#622). The window
 // is in hours; providers bill in days, so the cadence is hours/24.
-func (req CreatePriceRequest) RecurringCycleDays() *int {
+func priceRequestCycleDays(req CreatePriceRequest) *int {
 	if !req.AutoRenew || req.AccessDurationHours == nil {
 		return nil
 	}
@@ -697,25 +604,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 // UpdatePriceRequest is the declarative-shape PATCH for a price. Add or rotate
 // PSP links via `psp_links` (partial merge into the existing map). To clear a
 // PSP entirely, supply an empty inner map for it and set ReplacePSPLinks=true.
-type UpdatePriceRequest struct {
-	// PSPLinks merges per-PSP link maps into the existing psp_links map.
-	// Supply only the PSPs you want to add or rotate. Each map's values are
-	// validated through the matching rail adapter's Attach.
-	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
-
-	// ReplacePSPLinks, when true, replaces the entire psp_links map rather
-	// than merging — useful for clearing a PSP. When false (the default)
-	// supplied entries are merged into the existing map and PSPs not
-	// mentioned are left alone.
-	ReplacePSPLinks bool `json:"replace_psp_links,omitempty"`
-
-	// Archived sets the lifecycle flag. archived propagates to providers as
-	// active=false; unarchived as active=true.
-	Archived *bool `json:"archived,omitempty"`
-
-	// See UpdateProductRequest.SkipRailSync.
-	SkipRailSync bool `json:"skip_rail_sync,omitempty"`
-}
+type UpdatePriceRequest = openrails.UpdatePriceRequest
 
 func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req UpdatePriceRequest) (*CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
