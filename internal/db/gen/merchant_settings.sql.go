@@ -20,15 +20,6 @@ func (q *Queries) DeleteDeclarativeBillingPolicyBindings(ctx context.Context, me
 	return err
 }
 
-const deleteDefaultTrustLevelSchedules = `-- name: DeleteDefaultTrustLevelSchedules :exec
-DELETE FROM openrails.tier_schedules WHERE merchant_id = $1 AND customer_id IS NULL
-`
-
-func (q *Queries) DeleteDefaultTrustLevelSchedules(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDefaultTrustLevelSchedules, merchantID)
-	return err
-}
-
 const deleteUndeclaredBillingPolicies = `-- name: DeleteUndeclaredBillingPolicies :exec
 DELETE FROM openrails.billing_policies WHERE merchant_id = $1
 AND NOT (name = ANY(COALESCE($2::text[], '{}')))
@@ -69,42 +60,6 @@ func (q *Queries) FindRemovedCustomerPolicies(ctx context.Context, arg FindRemov
 			return nil, err
 		}
 		items = append(items, policy_name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listDefaultTrustLevelSchedules = `-- name: ListDefaultTrustLevelSchedules :many
-SELECT currency, rungs FROM openrails.tier_schedules
-WHERE merchant_id = $1 AND customer_id IS NULL
-AND currency > $2::text ORDER BY currency LIMIT 100
-`
-
-type ListDefaultTrustLevelSchedulesParams struct {
-	MerchantID    uuid.UUID
-	AfterCurrency string
-}
-
-type ListDefaultTrustLevelSchedulesRow struct {
-	Currency string
-	Rungs    []byte
-}
-
-func (q *Queries) ListDefaultTrustLevelSchedules(ctx context.Context, arg ListDefaultTrustLevelSchedulesParams) ([]ListDefaultTrustLevelSchedulesRow, error) {
-	rows, err := q.db.Query(ctx, listDefaultTrustLevelSchedules, arg.MerchantID, arg.AfterCurrency)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListDefaultTrustLevelSchedulesRow
-	for rows.Next() {
-		var i ListDefaultTrustLevelSchedulesRow
-		if err := rows.Scan(&i.Currency, &i.Rungs); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

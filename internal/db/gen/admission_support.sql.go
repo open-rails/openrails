@@ -61,39 +61,6 @@ func (q *Queries) DeleteInvokerSpendLimit(ctx context.Context, arg DeleteInvoker
 	return result.RowsAffected(), nil
 }
 
-const getEffectiveTierSchedule = `-- name: GetEffectiveTierSchedule :one
-SELECT id, merchant_id, customer_id, currency, rungs, created_at, updated_at FROM openrails.tier_schedules
-WHERE merchant_id = $1
-  AND currency = $3
-  AND (customer_id = $2 OR customer_id IS NULL)
-ORDER BY (customer_id IS NOT NULL) DESC
-LIMIT 1
-`
-
-type GetEffectiveTierScheduleParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Currency   string
-}
-
-// The effective schedule for a (tenant, subject): the subject's own override if
-// present, else the tenant-wide default (customer_id IS NULL). Subject-specific
-// rows sort first so LIMIT 1 picks the override.
-func (q *Queries) GetEffectiveTierSchedule(ctx context.Context, arg GetEffectiveTierScheduleParams) (OpenrailsTierSchedule, error) {
-	row := q.db.QueryRow(ctx, getEffectiveTierSchedule, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var i OpenrailsTierSchedule
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.Currency,
-		&i.Rungs,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const listBillingPolicies = `-- name: ListBillingPolicies :many
 SELECT id, merchant_id, name, policy, created_at, updated_at FROM openrails.billing_policies
 WHERE merchant_id = $1
@@ -410,72 +377,6 @@ func (q *Queries) UpsertInvokerSpendLimit(ctx context.Context, arg UpsertInvoker
 		arg.Provenance,
 		arg.CreatedAt,
 		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertTierScheduleDefault = `-- name: UpsertTierScheduleDefault :exec
-INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, rungs, created_at, updated_at
-) VALUES ($1, $2, NULL, $6, $3, $4, $5)
-ON CONFLICT (merchant_id, currency) WHERE (customer_id IS NULL) DO UPDATE SET
-    rungs = EXCLUDED.rungs,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertTierScheduleDefaultParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Rungs      []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Currency   string
-}
-
-// Tenant-wide tier schedule upsert (#476): customer_id IS NULL is the
-// tenant's default ladder. Schedules are platform-owned.
-func (q *Queries) UpsertTierScheduleDefault(ctx context.Context, arg UpsertTierScheduleDefaultParams) error {
-	_, err := q.db.Exec(ctx, upsertTierScheduleDefault,
-		arg.ID,
-		arg.MerchantID,
-		arg.Rungs,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-		arg.Currency,
-	)
-	return err
-}
-
-const upsertTierScheduleSubject = `-- name: UpsertTierScheduleSubject :exec
-INSERT INTO openrails.tier_schedules (
-    id, merchant_id, customer_id, currency, rungs, created_at, updated_at
-) VALUES ($1, $2, $3, $7, $4, $5, $6)
-ON CONFLICT (merchant_id, customer_id, currency) WHERE (customer_id IS NOT NULL) DO UPDATE SET
-    rungs = EXCLUDED.rungs,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertTierScheduleSubjectParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Rungs      []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Currency   string
-}
-
-// Per-subject tier schedule override upsert (#476): takes precedence over the
-// tenant-wide default for that subject.
-func (q *Queries) UpsertTierScheduleSubject(ctx context.Context, arg UpsertTierScheduleSubjectParams) error {
-	_, err := q.db.Exec(ctx, upsertTierScheduleSubject,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Rungs,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-		arg.Currency,
 	)
 	return err
 }

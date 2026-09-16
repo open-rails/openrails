@@ -1441,27 +1441,3 @@ func (q *Queries) RevokeProductUsageLimitBindingsByGrant(ctx context.Context, ar
 	_, err := q.db.Exec(ctx, revokeProductUsageLimitBindingsByGrant, arg.RevokedAt, arg.MerchantID, arg.GrantID)
 	return err
 }
-
-const sumCreditGrants = `-- name: SumCreditGrants :one
-SELECT COALESCE(SUM(amount), 0)::bigint
-FROM openrails.grants
-WHERE merchant_id = $1::uuid
-  AND customer_id = $2::uuid
-  AND currency = $3::text
-  AND kind = 'credit' AND event = 'grant'
-`
-
-type SumCreditGrantsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-}
-
-// SumCreditGrants: cumulative credits granted to a customer in one currency (the
-// "amount paid / trust signal" that graduates the tier). Replaces SumMoneyDeposits.
-func (q *Queries) SumCreditGrants(ctx context.Context, arg SumCreditGrantsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, sumCreditGrants, arg.MerchantID, arg.CustomerID, arg.Currency)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
