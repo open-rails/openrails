@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -32,7 +33,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
@@ -1051,13 +1051,6 @@ func nmiSubscriptionAttemptStatusFromPayment(attempt *models.Payment) string {
 	return strings.ToLower(strings.TrimSpace(attempt.Status))
 }
 
-// upgradeIdempotencyResult stores the cached result of a successful upgrade for idempotency replay
-type upgradeIdempotencyResult struct {
-	SubscriptionID         string `json:"subscription_id"`
-	ProrationTransactionID string `json:"proration_transaction_id,omitempty"`
-	Message                string `json:"message"`
-}
-
 // processNMISale handles NMI one-time sale (card purchase)
 func (s *CheckoutService) processNMISale(
 	ctx context.Context,
@@ -1568,521 +1561,87 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 // processUpgrade handles tier upgrades with proration
 // Upgrade = user moving to a higher tier (higher TierRank)
 // Behavior: Immediate switch, charge prorated difference for remaining days
-func (s *CheckoutService) processUpgrade(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	newPrice *models.Price,
-	newProduct *models.Product,
-	existingSub *models.Subscription,
-	target railTarget,
-) (*CheckoutResponse, error) {
+func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, existingSub *models.Subscription, target railTarget) (*CheckoutResponse, error) {
 	newPrice = priceForCheckoutTarget(newPrice, target)
-	now := s.now()
-
-	// Derive the payer before any money moves (#364): a zero id must never
-	// reach the subscription/payment writes below.
+	if target.Rail == "ccbill" {
+		return s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
+	}
+	if !rails.IsNMI(models.Rail(target.Rail)) {
+		return nil, fmt.Errorf("unsupported rail for upgrades: %s", target.Rail)
+	}
+	if s.Intents == nil || s.Lifecycle == nil {
+		return nil, errors.New("durable upgrade service unavailable")
+	}
+	if target.Scope == nil || target.Scope.ID != existingSub.PspID {
+		return nil, errors.New("upgrade must use the predecessor's PSP account")
+	}
+	ctx = db.WithPSPID(ctx, existingSub.PspID)
+	key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(req, user.ID, existingSub.ID, newPrice.ID))
+	// Replays use the original durable payload, even if pricing or time changed.
+	database := s.SubscriptionService.Database()
+	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key)
+	if err == nil {
+		var frozen NMIUpgradePayload
+		if err := json.Unmarshal(prior.Payload, &frozen); err != nil {
+			return nil, err
+		}
+		if frozen.UserID != user.ID || frozen.OldSubscriptionID != existingSub.ID || frozen.PriceID != newPrice.ID {
+			return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "upgrade idempotency key belongs to a different request"}
+		}
+		return s.resumeUpgrade(ctx, prior)
+	}
+	if !db.IsNotFound(err) {
+		return nil, err
+	}
+	if existingSub.Price == nil || existingSub.CurrentPeriodEndsAt == nil {
+		return nil, errors.New("existing subscription missing price or period")
+	}
 	customerID, err := customerIDFromUser(user.ID)
 	if err != nil {
 		return nil, err
 	}
-
-	// CCBill handles upgrades via their own Package Upgrade flow
-	if target.Rail == "ccbill" {
-		return s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
+	if existingSub.CustomerID != customerID {
+		return nil, errors.New("upgrade predecessor belongs to another customer")
 	}
-
-	// Solana doesn't support subscriptions
-	if target.Rail == "solana" {
-		return nil, errors.New("solana does not support subscription upgrades")
+	now := s.now().UTC()
+	cycle := newPrice.RecurringCycleHours()
+	if cycle == nil {
+		cycle = existingSub.Price.RecurringCycleHours()
 	}
-
-	// Only NMI-backed rails support programmatic upgrades
-	if !rails.IsNMI(models.Rail(target.Rail)) {
-		return nil, fmt.Errorf("unsupported rail for upgrades: %s", target.Rail)
-	}
-
-	// Get idempotency key (client-provided or generated)
-	const idempOp = "nmi_upgrade"
-	idempotencyKey := s.getUpgradeIdempotencyKey(req, user.ID, existingSub.ID, newPrice.ID)
-
-	// Check idempotency - have we already processed this upgrade?
-	idempRec, alreadyExists, err := s.IdempotencyService.Begin(ctx, idempOp, idempotencyKey)
+	amount, hours, err := CalculateModelBUpgradeCharge(PriceAmountOf(existingSub.Price), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, cycle, now)
 	if err != nil {
-		return nil, fmt.Errorf("idempotency check failed: %w", err)
-	}
-
-	// retryAfterFailure: this request retries a previously-failed attempt whose
-	// proration charge may have landed (verify before charging again, #674).
-	retryAfterFailure := false
-
-	if alreadyExists {
-		switch idempRec.Status {
-		case IdempotencyStatusSuccess:
-			// Return cached result
-			var cached upgradeIdempotencyResult
-			if err := json.Unmarshal(idempRec.Result, &cached); err != nil {
-				log.WithError(err).Warn("failed to unmarshal cached upgrade result")
-				return &CheckoutResponse{
-					Status:        "success",
-					Action:        "upgrade",
-					Message:       "Upgrade already completed",
-					TransactionID: cached.ProrationTransactionID,
-				}, nil
-			}
-			subID, _ := uuid.Parse(cached.SubscriptionID)
-			return &CheckoutResponse{
-				Status:         "success",
-				Action:         "upgrade",
-				Message:        cached.Message,
-				SubscriptionID: &subID,
-				TransactionID:  cached.ProrationTransactionID,
-			}, nil
-		case IdempotencyStatusPending:
-			return nil, errors.New("upgrade already in progress, please wait")
-		case IdempotencyStatusFailed:
-			// A failed request may have crossed either NMI write boundary. The
-			// request-level idempotency row is not proof that a provider write was
-			// unsent, so never restart the upgrade from a fresh provider call.
-			// Reconciliation below may adopt already-recorded receipts; an empty
-			// provider search remains processing and requires operator/provider
-			// reconciliation before another write is permitted.
-			// Only an explicitly processing failure means an earlier provider
-			// boundary was crossed. Validation/configuration failures are known
-			// clean and remain retryable by the caller.
-			retryAfterFailure = strings.Contains(strings.TrimSpace(idempRec.Error), ErrCheckoutProcessing.Error())
-		}
-	}
-
-	// Validate existing subscription has required data
-	if existingSub.Price == nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, errors.New("existing subscription missing price data"))
-		return nil, errors.New("existing subscription missing price data")
-	}
-	oldPrice := existingSub.Price
-
-	// #268: Model B (reset-period) upgrade. Charge `newFull - oldUnused` NOW for
-	// a FRESH full period, then rebill the full new price at now + cycle. The
-	// billing cycle comes from the NEW price (the period being started), with a
-	// fallback to the old price's cycle for legacy prices that omit it.
-	billingCycleHours := newPrice.RecurringCycleHours()
-	if billingCycleHours == nil || *billingCycleHours <= 0 {
-		billingCycleHours = oldPrice.RecurringCycleHours()
-	}
-	prorationAmount, cycleHours, err := CalculateModelBUpgradeCharge(
-		PriceAmountOf(oldPrice),
-		PriceAmountOf(newPrice),
-		existingSub.CurrentPeriodEndsAt,
-		billingCycleHours,
-		now,
-	)
-	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-
-	log.WithFields(log.Fields{
-		"user_id":          user.ID,
-		"old_price":        oldPrice.Amount,
-		"new_price":        newPrice.Amount,
-		"cycle_hours":      cycleHours,
-		"proration_amount": prorationAmount, // Model B first charge (new_full - old_unused)
-		"billing_model":    "B",
-	}).Info("calculating Model-B upgrade first charge")
-
-	// NMI charges in whole cents; prorationAmount is micros. Error (never round)
-	// on a sub-cent remainder — same policy as the one-time sale path.
-	prorationCents, err := moneyutil.NativeToRailMinorExact(newPrice.Currency, prorationAmount)
+	if _, err = moneyutil.NativeToRailMinorExact(newPrice.Currency, amount); err != nil {
+		return nil, err
+	}
+	if _, err = moneyutil.NativeToRailMinorExact(newPrice.Currency, newPrice.Amount); err != nil {
+		return nil, err
+	}
+	plan, err := requireNMIPlanForTarget(newPrice, target)
 	if err != nil {
-		err := fmt.Errorf("upgrade proration amount must be representable in whole cents: %w", err)
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-	// Same rule for the successor's recurring enrollment charge, converted here
-	// so BOTH money conversions fail before any provider write happens.
-	recurringCents, err := moneyutil.NativeToRailMinorExact(newPrice.Currency, newPrice.Amount)
+	vault, billing, method, _, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
 	if err != nil {
-		err := fmt.Errorf("upgrade recurring amount must be representable in whole cents: %w", err)
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-
-	provider := target.Rail
-	if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
-		err := errors.New("existing subscription missing current period end")
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
+	if method == nil {
+		return nil, errors.New("upgrade requires a stored payment method")
 	}
-
-	nmiPlanID, err := requireNMIPlanForTarget(newPrice, target)
+	end := now.Add(time.Duration(hours) * time.Hour)
+	startDate, _ := buildNMIFutureStartDate(end, now)
+	payload := NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Credits: models.CloneCreditsSpec(newProduct.CreditsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
+	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"})
+	var conflict *pgconn.PgError
+	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == "uq_rail_intents_upgrade_predecessor" {
+		// Another unresolved upgrade owns this predecessor's provider steps.
+		return nil, ErrTierChangePending
+	}
 	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
 		return nil, err
 	}
-
-	// #268: Model B resets the billing period to [now, now+cycle]. The immediate
-	// first charge (RunSale below) pays for this fresh period, so the recurring
-	// NMI subscription's first scheduled rebill must land at the NEW period end
-	// (now + cycle), not the old period end.
-	newPeriodStart := now
-	newPeriodEnd := now.Add(time.Duration(cycleHours) * time.Hour)
-	startDate, _ := buildNMIFutureStartDate(newPeriodEnd, now)
-
-	client, err := s.resolveNMIClient(ctx, target.PSP)
-	if err != nil {
-		err := fmt.Errorf("NMI provider '%s' is not configured: %w", target.PSP, err)
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
-
-	// Get or create the payment method
-	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
-	if err != nil {
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, err)
-		return nil, err
-	}
-
-	// #297 CIT contexts for the two upgrade charges: the successor enrollment
-	// rides the RECURRING sequence, the proration sale the UNSCHEDULED one.
-	// An instrument without an anchor makes the charge that sequence's initial
-	// CIT; anchors are captured after success below.
-	recurringCtx := charge.InitialRecurring()
-	unscheduledCtx := charge.InitialOneTime()
-	if resolvedMethod != nil {
-		if ref := strings.TrimSpace(resolvedMethod.StoredCredentialRecurringRef); ref != "" {
-			recurringCtx = charge.RecurringReuse(ref)
-		}
-		if ref := strings.TrimSpace(resolvedMethod.StoredCredentialUnscheduledRef); ref != "" {
-			unscheduledCtx = charge.OneTimeReuse(ref)
-		}
-	}
-
-	// Step 1: Create the successor subscription at NMI before charging/cancelling.
-	newSubscriptionID := uuidutil.NewV7()
-
-	// Successor order id is CONTENT-DERIVED (stable across retries, like the
-	// proration order id below): an ambiguous create stays recoverable — the
-	// roster scan re-finds the orphan instead of minting a second live
-	// subscription (#674 tail).
-	successorOrderID := "upgs-" + shortHash(idempotencyKey)
-
-	// A previous failed attempt may have created the successor at NMI and lost
-	// the response. Adopt it instead of creating a duplicate.
-	var resp *nmi.AddSubscriptionResponse
-	if retryAfterFailure {
-		adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, railCustomerRef, nmiPlanID, successorOrderID)
-		if aerr != nil {
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-			return nil, ErrCheckoutProcessing
-		}
-		if ok {
-			resp = adopted
-		}
-	}
-
-	if resp == nil {
-		if retryAfterFailure {
-			// We already attempted this immutable successor order. An empty
-			// roster cannot prove that NMI did not create it, therefore a
-			// second AddRecurringSubscription is forbidden.
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-			return nil, ErrCheckoutProcessing
-		}
-		params := nmi.RecurringPaymentData{
-			CardUserData: nmi.CardUserData{
-				FirstName: ResolveCheckoutFirstName(req, user),
-				LastName:  ResolveCheckoutLastName(req),
-				Address1:  DefaultIfEmpty(req.Address1, "N/A"),
-				City:      DefaultIfEmpty(req.City, "N/A"),
-				State:     DefaultIfEmpty(req.State, "N/A"),
-				Zip:       DefaultIfEmpty(req.Zip, "00000"),
-				Country:   DefaultIfEmpty(req.Country, "US"),
-			},
-			PlanID:          nmiPlanID,
-			CustomerVaultID: railCustomerRef,
-			BillingID:       railMethodRef,
-			Amount:          moneyutil.Cents(recurringCents),
-			Currency:        newPrice.Currency,
-			Email:           req.Email,
-			OrderID:         successorOrderID,
-			PONumber:        successorOrderID,
-			CustomerID:      user.ID,
-			// Start date uses day precision and must be strictly in the future for NMI.
-			StartDate:        startDate,
-			StoredCredential: nmidirect.StoredCredentialFor(recurringCtx),
-		}
-
-		created, err := client.AddRecurringSubscription(ctx, params)
-		switch {
-		case err == nil:
-			resp = created
-		case nmi.IsTransportAmbiguous(err):
-			// The successor MAY exist at NMI — never treat as a clean failure.
-			// Adopt it if the roster already shows it; otherwise surface
-			// "processing" so the retry (same content-derived key) re-runs the
-			// adopt scan. Never a second blind create, never a live remote
-			// subscription abandoned as failed (#674 tail).
-			adopted, ok, aerr := s.findAdoptableUpgradeSuccessor(ctx, client, provider, railCustomerRef, nmiPlanID, successorOrderID)
-			if aerr != nil || !ok {
-				// An empty roster is inconclusive. The create could have been
-				// accepted while its response was lost; do not issue a second
-				// subscription create. Leave the durable request in processing for
-				// provider reconciliation.
-				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-				return nil, ErrCheckoutProcessing
-			}
-			resp = adopted
-		default:
-			// Verified-clean decline/rejection: nothing was created.
-			subErr := fmt.Errorf("failed to create upgraded subscription: %w", err)
-			var nmiErr *nmi.CustomerVaultError
-			if errors.As(err, &nmiErr) {
-				subErr = &paymentmethods.PaymentMethodError{
-					Err:            subErr,
-					LocalizationID: nmiErr.LocalizationID,
-					Message:        subErr.Error(),
-				}
-			}
-			_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, subErr)
-			return nil, subErr
-		}
-	}
-
-	rollbackNewSubscription := func() {
-		cleanupSub := &models.Subscription{RailSubscriptionID: resp.SubscriptionID}
-		if cancelErr := s.cancelNMISubscription(ctx, cleanupSub, provider); cancelErr != nil {
-			log.WithError(cancelErr).WithFields(log.Fields{
-				"subscription_id":      newSubscriptionID,
-				"rail_subscription_id": resp.SubscriptionID,
-				"rail":                 provider,
-			}).Error("failed to rollback successor NMI subscription after upgrade error")
-		}
-	}
-
-	// Step 2: Charge prorated difference (if positive).
-	var prorationTransactionID string
-	if prorationAmount > 0 {
-		// Derive a stable OrderID from the idempotency key so a retried upgrade
-		// reuses the same order reference at NMI: a charge landed by a previous
-		// ambiguous attempt is re-found by the order id, and NMI's duplicate-
-		// transaction detection backstops a raced double send.
-		prorationOrderID := "upg-" + shortHash(idempotencyKey)
-		if retryAfterFailure {
-			// A previous attempt failed; its charge may have landed. Verify by
-			// the order id BEFORE sending another sale (#674).
-			if txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, prorationOrderID); verr != nil {
-				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-				return nil, ErrCheckoutProcessing
-			} else if found {
-				prorationTransactionID = txnID
-			}
-		}
-		if prorationTransactionID == "" {
-			if retryAfterFailure {
-				// A previous RunSale may have crossed the gateway boundary. An
-				// empty order search is not proof of non-execution; never charge
-				// again under the same request without a positive reconciliation.
-				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-				return nil, ErrCheckoutProcessing
-			}
-			saleResp, err := client.RunSale(ctx, nmi.SaleParams{
-				CustomerVaultID:  railCustomerRef,
-				BillingID:        railMethodRef,
-				Amount:           moneyutil.Cents(prorationCents), // SaleParams.Amount is CENTS
-				Currency:         newPrice.Currency,
-				OrderDescription: fmt.Sprintf("Upgrade proration: %s", newProduct.DisplayName),
-				OrderID:          prorationOrderID,
-				StoredCredential: nmidirect.StoredCredentialFor(unscheduledCtx),
-			})
-			switch {
-			case err == nil:
-				prorationTransactionID = saleResp.TransactionID
-			case nmi.IsTransportAmbiguous(err):
-				// The charge MAY have landed: never treat as a decline. Verify
-				// by the order id; unresolved ⇒ surface "processing" so the
-				// retry (same content-derived key) re-verifies — never a blind
-				// re-charge, never an unrecorded charge treated as failed.
-				txnID, found, verr := client.FindSuccessfulSaleByOrderID(ctx, prorationOrderID)
-				if verr == nil && found {
-					prorationTransactionID = txnID
-				} else {
-					_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-					return nil, ErrCheckoutProcessing
-				}
-			default:
-				// Verified-clean decline/rejection: no money moved. Direct
-				// best-effort cleanup of the payment method created for THIS attempt,
-				// NOT an intent (#674 tail): referenced nowhere, harmless if lost.
-				rollbackNewSubscription()
-				if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
-					_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
-				}
-				prorationErr := fmt.Errorf("failed to charge proration: %w", err)
-				_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, prorationErr)
-				return nil, prorationErr
-			}
-		}
-
-		log.WithFields(log.Fields{
-			"user_id":        user.ID,
-			"transaction_id": prorationTransactionID,
-			"amount":         prorationAmount,
-			"rail":           provider,
-		}).Info("charged upgrade proration")
-	}
-
-	// #297: anchor captures (write-once, best-effort). The proration sale
-	// anchors the unscheduled sequence; the successor's first-charge txn (""
-	// under the delayed start used here — then the first dunning MIT anchors
-	// instead) the recurring one.
-	s.captureStoredCredentialRef(ctx, resolvedMethod, charge.AgreementUnscheduled, prorationTransactionID)
-	s.captureStoredCredentialRef(ctx, resolvedMethod, charge.AgreementRecurring, resp.TransactionID)
-
-	// Step 3: Update local database.
-	//
-	// Ordering note (SEC-10): the new subscription row is created BEFORE the old
-	// one is marked cancelled and BEFORE the old NMI subscription is cancelled.
-	// If the create fails, the old subscription is still active both locally and
-	// at NMI, so compensation only has to refund the proration and cancel the new
-	// NMI subscription — no reactivation.
-	//
-	// Create new subscription record first.
-	var emailPtr *string
-	if req.Email != "" {
-		emailPtr = &req.Email
-	}
-
-	newSubscription := &models.Subscription{
-		ID:         newSubscriptionID,
-		CustomerID: customerID,
-		// or#893: an upgrade stays on the account that holds the original — the
-		// successor is the same customer on the same gateway, so its provenance
-		// is the predecessor's, not a fresh resolution.
-		PspID:                    existingSub.PspID,
-		ProductID:                newPrice.ProductID,
-		PriceID:                  newPrice.ID,
-		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec),
-		CreditsSpecSnapshot:      models.CloneCreditsSpec(newProduct.CreditsSpec),
-		RailSubscriptionID:       resp.SubscriptionID,
-		Status:                   models.StatusActive, // Active immediately since user paid proration
-		Rail:                     models.Rail(provider),
-		UserEmail:                emailPtr,
-		StartedAt:                now,
-		// #268: Model B resets the period — fresh full period [now, now+cycle].
-		CurrentPeriodStartsAt: &newPeriodStart,
-		CurrentPeriodEndsAt:   &newPeriodEnd,
-	}
-
-	if resolvedMethod != nil {
-		newSubscription.PaymentMethodID = &resolvedMethod.ID
-	}
-
-	// Persist the swap ATOMICALLY: the partial unique index
-	// uq_subscriptions_customer_tier_group_active allows only one live
-	// subscription per (payable subject, tier group), so the old row's cancel
-	// and the new row's insert must commit together (cancel first). On failure
-	// the transaction rolls back: the old subscription stays active locally and
-	// at NMI (SEC-10 — nothing to reactivate), and compensation only refunds
-	// the proration and cancels the new NMI subscription.
-	cancelType := models.CancelType("upgrade")
-	existingSub.Status = models.StatusCancelled
-	existingSub.CancelledAt = &now
-	// Keep the deferred-delete marker until the durable NMI delete intent
-	// verifies the predecessor is absent. A tier swap must never issue a
-	// best-effort direct cancellation after the local commit.
-	existingSub.DeletionScheduledAt = &now
-	existingSub.CancelType = &cancelType
-	existingSub.CancelFeedback = nil
-	existingSub.ClearRetrySchedule()
-	if err := s.SubscriptionService.ReplaceForTierChange(ctx, existingSub, newSubscription); err != nil {
-		saveErr := fmt.Errorf("failed to save upgraded subscription: %w", err)
-		// Post-charge DB failure leaves both provider effects possible. Refunds
-		// and cancellation are not safe compensation: either can race a delayed
-		// provider write and create a second inconsistent outcome. Keep the
-		// request failed/processing so reconciliation can finish the local swap
-		// from the immutable provider receipts without another provider mutation.
-		log.WithError(saveErr).WithFields(log.Fields{
-			"user_id": user.ID, "subscription_id": newSubscriptionID,
-			"rail_subscription_id": resp.SubscriptionID, "transaction_id": prorationTransactionID,
-			"event": "upgrade_reconciliation_required",
-		}).Error("upgrade local swap failed after provider effects; reconciliation required")
-		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, ErrCheckoutProcessing)
-		return nil, ErrCheckoutProcessing
-	}
-
-	// Step 4: Update entitlements immediately (grant new tier entitlements)
-	if s.EntitlementService != nil && newProduct.EntitlementsSpec != nil {
-		for entitlementName, durationHours := range newProduct.EntitlementsSpec {
-			notBefore := now
-			var params entitlements.PushNewEntitlementParams
-			if durationHours != nil && *durationHours > 0 {
-				d := time.Duration(*durationHours) * time.Hour
-				params = entitlements.PushNewEntitlementParams{
-					UserID:      user.ID,
-					Entitlement: entitlementName,
-					NotBefore:   &notBefore,
-					Duration:    &d,
-					SourceType:  models.EntitlementSourceSubscription,
-					SourceID:    newSubscriptionID,
-				}
-			} else {
-				params = entitlements.PushNewEntitlementParams{
-					UserID:      user.ID,
-					Entitlement: entitlementName,
-					NotBefore:   &notBefore,
-					Indefinite:  true,
-					SourceType:  models.EntitlementSourceSubscription,
-					SourceID:    newSubscriptionID,
-				}
-			}
-
-			_, err := s.EntitlementService.PushNewEntitlement(ctx, params)
-			if err != nil {
-				log.WithError(err).WithFields(log.Fields{
-					"user_id":         user.ID,
-					"entitlement":     entitlementName,
-					"subscription_id": newSubscriptionID,
-				}).Error("failed to grant upgraded entitlement")
-			}
-		}
-	}
-
-	// Step 5: enqueue the predecessor cancellation only after the local swap
-	// commits. The existing verify-then-delete intent owns provider retries and
-	// keeps DeletionScheduledAt until it has observed the predecessor absent.
-	if s.Intents != nil {
-		if _, err := merchant.Require(ctx); err == nil {
-			_, err = s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
-				MerchantID: existingSub.MerchantID,
-				Provider:   provider, IntentType: intents.TypeNMIDeleteSubscription,
-				SubscriptionID: &existingSub.ID, PspID: existingSub.PspID,
-				Payload:        intents.NMIDeletePayload{UserID: user.ID, RailSubscriptionID: existingSub.RailSubscriptionID},
-				IdempotencyKey: intents.NMIDeleteIdempotencyKey(existingSub.ID),
-				NextAttemptAt:  now, Origin: intents.OriginUser,
-				OriginReason: "cancel predecessor after durable tier upgrade",
-			})
-			if err != nil {
-				log.WithError(err).WithFields(log.Fields{"subscription_id": existingSub.ID, "rail": provider, "event": "upgrade_old_subscription_delete_enqueue_failed"}).Error("predecessor cancellation intent enqueue failed; reconciliation required")
-			}
-		}
-	}
-
-	// Mark idempotency request as complete
-	successMessage := fmt.Sprintf("Upgraded to %s. Prorated charge: %s", newProduct.DisplayName, moneyutil.FormatUSD(moneyutil.Micros(prorationAmount)))
-	cachedResult, _ := json.Marshal(upgradeIdempotencyResult{
-		SubscriptionID:         newSubscriptionID.String(),
-		ProrationTransactionID: prorationTransactionID,
-		Message:                successMessage,
-	})
-	completeCheckoutIdempotency(ctx, s.IdempotencyService, idempOp, idempotencyKey, cachedResult)
-
-	return &CheckoutResponse{
-		Status:         "success",
-		Action:         "upgrade",
-		Message:        successMessage,
-		SubscriptionID: &newSubscriptionID,
-		TransactionID:  prorationTransactionID,
-	}, nil
+	return upgradeResponse(intent)
 }
 
 // shortHash returns a stable 16-hex-char digest of s, used to build
@@ -2090,33 +1649,6 @@ func (s *CheckoutService) processUpgrade(
 func shortHash(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:16]
-}
-
-// findAdoptableUpgradeSuccessor re-finds a successor subscription a previous
-// (transport-ambiguous) upgrade attempt created at NMI: a live roster entry on
-// (payment method, plan) unknown locally. Exactly one match is adopted; zero means the
-// create verifiably did not land (safe to create); more than one is refused
-// (never guess which orphan to adopt — operator attention via the returned
-// error, surfaced as ErrCheckoutProcessing).
-func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, client *nmi.NMIClient, provider, railCustomerRef, planID, orderID string) (*nmi.AddSubscriptionResponse, bool, error) {
-	candidates, err := findUnregisteredRemoteSubscriptions(ctx, s.SubscriptionService, client, provider, railCustomerRef, planID, orderID)
-	if err != nil {
-		return nil, false, err
-	}
-	switch len(candidates) {
-	case 0:
-		return nil, false, nil
-	case 1:
-		log.WithFields(log.Fields{
-			"rail_subscription_id": candidates[0],
-			"rail":                 provider,
-			"order_id":             orderID,
-			"event":                "upgrade_successor_adopted",
-		}).Info("adopted successor NMI subscription from a previous ambiguous upgrade attempt")
-		return &nmi.AddSubscriptionResponse{SubscriptionID: candidates[0]}, true, nil
-	default:
-		return nil, false, fmt.Errorf("%d unregistered remote subscriptions match payment method %s plan %s; operator attention required", len(candidates), railCustomerRef, planID)
-	}
 }
 
 // processDowngrade handles tier downgrades (scheduled for end of period)
@@ -2285,22 +1817,12 @@ func CalculateModelBUpgradeCharge(
 	return firstChargeMicros, cycleHours, nil
 }
 
-// cancelNMISubscription cancels a subscription at NMI
-func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models.Subscription, provider string) error {
-	client, err := s.resolveNMIClient(ctx, provider)
-	if err != nil {
-		return fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
-	}
-
-	if err := client.DeleteRecurringSubscription(ctx, sub.RailSubscriptionID); err != nil {
-		return err
-	}
-	return nil
-}
-
 // TierChange processes a subscription tier change (upgrade or downgrade).
 // This is the unified entry point that routes to rail-specific implementations.
 func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+	if response, found, err := s.replayTierUpgrade(ctx, req, user); found || err != nil {
+		return response, err
+	}
 	// 1. Parse and validate price (#774: price_id accepts a price_key too)
 	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
 	if err != nil {
@@ -2892,7 +2414,14 @@ func (s *CheckoutService) processTierChangeNMI(
 		return nil, err
 	}
 
-	// Map CheckoutResponse to TierChangeResponse
+	if action == "upgrade" {
+		key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(checkoutReq, user.ID, existingSub.ID, newPrice.ID))
+		in, err := intents.NewStore(s.SubscriptionService.Database()).GetByIdempotencyKey(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		return s.upgradeTierResponse(in)
+	}
 	return s.mapCheckoutToTierChangeResponse(checkoutResp, newPrice, action), nil
 }
 

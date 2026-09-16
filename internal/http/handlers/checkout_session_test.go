@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/app"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 )
@@ -141,5 +143,27 @@ func TestWriteCheckoutSessionErrorIncludesUSDCFundingMetadata(t *testing.T) {
 	}
 	if funding["amount_base_units"] != "1500000" || funding["balance_base_units"] != "250000" || funding["shortfall_base_units"] != "1250000" {
 		t.Fatalf("base-unit metadata = %#v", funding)
+	}
+}
+
+// An unresolved provider outcome is a typed retry-with-the-same-key conflict,
+// never an internal error.
+func TestProcessingProviderOutcomeIsConflict(t *testing.T) {
+	session := func(r *httprequest.Request, err error) {
+		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{})
+	}
+	for _, tc := range []struct {
+		write func(*httprequest.Request, error)
+		err   error
+	}{
+		{session, fmt.Errorf("sale: %w", checkout.ErrCheckoutProcessing)},
+		{writeChangeTierError, fmt.Errorf("upgrade: %w", checkout.ErrCheckoutProcessing)},
+		{writeChangeTierError, checkout.ErrTierChangePending},
+	} {
+		rec := httptest.NewRecorder()
+		tc.write(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil), &app.Runtime{}), tc.err)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("%v: status = %d, want %d", tc.err, rec.Code, http.StatusConflict)
+		}
 	}
 }

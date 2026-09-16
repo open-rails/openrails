@@ -395,35 +395,35 @@ INSERT INTO openrails.rail_intents (
 )
 ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     status = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN 'pending'
         ELSE openrails.rail_intents.status
     END,
     next_attempt_at = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.next_attempt_at
         ELSE openrails.rail_intents.next_attempt_at
     END,
     payload = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.payload
         ELSE openrails.rail_intents.payload
     END,
     psp_id = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.psp_id
         ELSE openrails.rail_intents.psp_id
     END,
     origin = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin
         ELSE openrails.rail_intents.origin
     END,
     origin_reason = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.origin_reason
         ELSE openrails.rail_intents.origin_reason
     END,
     actor = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.actor
         ELSE openrails.rail_intents.actor
     END,
     expires_at = CASE
-        WHEN (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
+        WHEN openrails.rail_intents.intent_type <> 'nmi_upgrade' AND (openrails.rail_intents.status IN ('superseded', 'expired') OR (openrails.rail_intents.status = 'pending' AND openrails.rail_intents.attempts = 0)) THEN EXCLUDED.expires_at
         ELSE openrails.rail_intents.expires_at
     END,
     attempts = CASE
@@ -575,6 +575,49 @@ SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id
 // ============================================================================
 func (q *Queries) GetRailIntent(ctx context.Context, id uuid.UUID) (OpenrailsRailIntent, error) {
 	row := q.db.QueryRow(ctx, getRailIntent, id)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
+const getRailIntentByIdempotencyKey = `-- name: GetRailIntentByIdempotencyKey :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid AND idempotency_key = $2::text
+`
+
+type GetRailIntentByIdempotencyKeyParams struct {
+	MerchantID     uuid.UUID
+	IdempotencyKey string
+}
+
+func (q *Queries) GetRailIntentByIdempotencyKey(ctx context.Context, arg GetRailIntentByIdempotencyKeyParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, getRailIntentByIdempotencyKey, arg.MerchantID, arg.IdempotencyKey)
 	var i OpenrailsRailIntent
 	err := row.Scan(
 		&i.ID,

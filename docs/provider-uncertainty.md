@@ -46,7 +46,12 @@ its [Query API](https://docs.nmi.com/reference/query) does not establish a
 terminal-negative guarantee for a missing search result. The engine therefore
 uses absence as inconclusive evidence rather than assuming a provider guarantee.
 
-The multi-effect NMI upgrade/proration path is a separate follow-up under #990;
-its current cache-backed retry/compensation logic is not qualified by these
-intent and invoice changes. That workflow must retain separate durable receipts
-for successor creation, proration and old-subscription cancellation.
+NMI upgrades use the same intent runner with separate write-ahead step markers
+and durable receipts for successor creation and proration. The frozen payload
+owns the prices, billing period, instrument and account. A lost successor
+response stays unresolved: a roster row matching only vault and plan is not
+proof that this operation created it. Proration can recover through its stable
+account-scoped order reference. Both receipts commit the local subscription
+swap, payment, access effects and predecessor delete intent atomically. A
+parsed proration refusal preserves the old subscription and queues a durable
+delete for the unpaid successor. See [upgrade recovery](architecture/upgrade-recovery.md).
