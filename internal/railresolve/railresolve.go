@@ -19,8 +19,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/custodians"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
@@ -115,6 +117,16 @@ func (s *MerchantsSource) scope(ctx context.Context, rail, accountID string) (me
 	if accountID = strings.TrimSpace(accountID); accountID != "" {
 		scope, ok, err := svc.PSPScopeByAccountID(ctx, mid, rail, accountID)
 		return mid, scope, ok, err
+	}
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		scope, ok, err := svc.PSPScopeByID(ctx, mid, pspID)
+		if err != nil || !ok {
+			return mid, scope, ok, err
+		}
+		if scope.Rail != rail || scope.Environment != s.environment() {
+			return mid, merchants.PSPScope{}, false, fmt.Errorf("captured PSP does not match rail/environment")
+		}
+		return mid, scope, true, nil
 	}
 	scope, ok, err := svc.ActivePSPScope(ctx, mid, rail, s.environment())
 	if errors.Is(err, merchants.ErrNoActivePSP) {
@@ -263,6 +275,9 @@ func (s *MerchantsSource) resolveCustody(ctx context.Context, mid merchant.ID, s
 	// ingestion plane of its own (mode 2).
 	if err := config.RejectRetiredCustodySettings(scope.Settings); err != nil {
 		return nil, fmt.Errorf("psp %s/%s: %w", scope.Rail, scope.AccountID, err)
+	}
+	if captured := db.CustodianIDFromContext(ctx); captured != uuid.Nil {
+		scope.CustodianID = &captured
 	}
 	if scope.CustodianID == nil {
 		return nil, nil

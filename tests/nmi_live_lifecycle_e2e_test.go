@@ -44,6 +44,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 )
 
 const (
@@ -215,11 +216,8 @@ func bindPriceToNMIProvider(t *testing.T, suite *TestContainerSuite, priceID uui
 		entry[models.RailKeyPlanID] = planID
 	}
 	price.PSPLinks[nmiE2EProvider] = entry
-	railsJSON, err := json.Marshal(price.PSPLinks)
-	require.NoError(t, err)
-	_, err = suite.Pool.Exec(context.Background(),
-		"UPDATE openrails.prices SET psp_links = $1 WHERE id = $2", railsJSON, price.ID)
-	require.NoError(t, err)
+	price.PSPLinks[nmiE2EProvider][models.RailKeyRail] = string(models.RailNMI)
+	require.NoError(t, catalog.NewPriceService(suite.FixtureDB()).UpdatePSPLinks(dbtest.WithTestMerchant(context.Background()), price.ID, price.PSPLinks))
 }
 
 func setPriceAmount(t *testing.T, suite *TestContainerSuite, p *models.Price, amount int64) {

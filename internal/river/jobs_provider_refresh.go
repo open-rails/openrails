@@ -354,7 +354,7 @@ func (w *ProviderRefreshWorker) refreshMerchant(ctx context.Context, mid uuid.UU
 		}
 
 		armed := builder.Build(tctx, merchant.ID(mid))
-		if err := w.runCCBillDataLinkLane(tctx, armed.CCBillDataLink); err != nil {
+		if err := w.runCCBillDataLinkLane(db.WithPSPID(tctx, armed.Coverage[reconcile.ProviderCCBill].Binding.ID), armed.CCBillDataLink); err != nil {
 			stats.CCBillErrors++
 			logger.WithError(err).WithField("merchant_id", mid).Warn("Provider Refresh: CCBill DataLink lane failed")
 		}

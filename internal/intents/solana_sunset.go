@@ -9,6 +9,7 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -128,12 +129,15 @@ func (h *SolanaSunsetPlanHandler) CheckRelevance(ctx context.Context, intent gen
 	if err != nil {
 		return Relevance{}, err
 	}
+	if intent.PspID == nil || *intent.PspID == uuid.Nil {
+		return Relevance{}, db.ErrNoPSPInContext
+	}
 	pda := strings.TrimSpace(p.PlanPDA)
 	for _, pr := range prices {
 		if !pr.IsPurchasable() {
 			continue
 		}
-		cfg := pr.PSPLinkForRail(models.RailSolana)
+		cfg := pr.ForPSP(*intent.PspID).PSPLinkForRail(models.RailSolana)
 		if cfg != nil && strings.TrimSpace(cfg["plan_pda"]) == pda {
 			return SupersededBy("a purchasable local price references this plan again; sunsetting it would be wrong"), nil
 		}

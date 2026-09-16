@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -75,6 +76,7 @@ func TestStripeInvoicePaymentAlreadyRecorded(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi)
 	svc := &StripeConvergeService{PaymentService: paymentSvc}
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
+	ctx = db.WithPSPID(ctx, pspID)
 
 	// Reconcile-backfill row: keyed by CHARGE id, invoice id only in metadata.
 	const chargeID = "ch_dedup_1"

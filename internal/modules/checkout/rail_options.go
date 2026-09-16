@@ -119,6 +119,7 @@ func checkoutModeForRail(price *models.Price, rail string) models.CheckoutSessio
 // list and routing's fallback classes (or#288) — one place decides, so the
 // advertised list and the routed choice can never disagree.
 func (s *CheckoutSessionService) checkoutRailSkipReason(price *models.Price, target railTarget, providerConfig *config.PSPConfig, mode models.CheckoutSessionMode) string {
+	price = priceForCheckoutTarget(price, target)
 	if price == nil || providerConfig == nil {
 		return models.CheckoutRoutingSkipNotArmed
 	}
@@ -203,9 +204,16 @@ func checkoutPSPLinkForTarget(price *models.Price, target railTarget) map[string
 	if price == nil {
 		return nil
 	}
+	if target.Scope != nil && target.Scope.ID != uuid.Nil {
+		for _, link := range price.PSPLinks {
+			if link[models.RailKeyPSPID] == target.Scope.ID.String() && link[models.RailKeyRail] == target.Rail {
+				return link
+			}
+		}
+	}
 	lookup := func(key string) map[string]string {
 		link := price.PSPLinks[key]
-		if link == nil || !strings.EqualFold(strings.TrimSpace(link[models.RailKeyRail]), target.Rail) {
+		if link == nil || (link[models.RailKeyPSPID] != "" && (target.Scope == nil || link[models.RailKeyPSPID] != target.Scope.ID.String())) || !strings.EqualFold(strings.TrimSpace(link[models.RailKeyRail]), target.Rail) {
 			return nil
 		}
 		return link
@@ -214,4 +222,17 @@ func checkoutPSPLinkForTarget(price *models.Price, target railTarget) map[string
 		return link
 	}
 	return nil
+}
+
+// priceForCheckoutTarget freezes the provider plan selected alongside credentials.
+func priceForCheckoutTarget(price *models.Price, target railTarget) *models.Price {
+	if price == nil {
+		return nil
+	}
+	copy := *price
+	copy.PSPLinks = nil
+	if link := checkoutPSPLinkForTarget(price, target); link != nil {
+		copy.PSPLinks = map[string]map[string]string{target.PSP: link}
+	}
+	return &copy
 }

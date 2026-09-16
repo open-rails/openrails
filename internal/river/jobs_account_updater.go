@@ -298,6 +298,7 @@ func (w AccountUpdaterBatchWorker) ingestMerchant(ctx context.Context, mid uuid.
 	logger := log.WithContext(ctx).WithFields(log.Fields{"worker": KindAccountUpdaterBatch, "merchant_id": mid})
 	var errs error
 	for _, batch := range batches {
+		ctx := db.WithCustodianID(ctx, batch.CustodianID)
 		progress.Mark(ctx, "account updater batch "+batch.ID.String())
 		jobRef := strings.TrimSpace(batch.JobRef)
 		if batch.Status == "pending" || jobRef == "" {
@@ -424,6 +425,7 @@ func (w AccountUpdaterBatchWorker) submitMerchant(ctx context.Context, mid uuid.
 		due, err := q.ListDueAccountUpdaterInstruments(ctx, gen.ListDueAccountUpdaterInstrumentsParams{
 			MerchantID:    mid,
 			Custodian:     row.Kind,
+			CustodianID:   row.ID,
 			StaleBefore:   now.Add(-window),
 			RenewalBefore: now.Add(window),
 			RowLimit:      int64(w.instrumentBatch()),

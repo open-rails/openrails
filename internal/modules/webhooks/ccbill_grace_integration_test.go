@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -74,6 +75,7 @@ func TestCCBillRenewalFailure_NoGraceWindows_StandingAccessIntact(t *testing.T) 
 	require.NoError(t, err)
 
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
+	ctx = db.WithPSPID(ctx, pspID)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		MerchantID:            dbtest.TestMerchantID.UUID(),
 		ID:                    subID,
@@ -222,6 +224,7 @@ func TestCCBillRenewalSuccess_RevokesAndDeletesGraceEntitlements(t *testing.T) {
 	require.NoError(t, err)
 
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
+	ctx = db.WithPSPID(ctx, pspID)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		MerchantID:            dbtest.TestMerchantID.UUID(),
 		ID:                    subID,

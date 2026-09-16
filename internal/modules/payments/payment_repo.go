@@ -214,7 +214,7 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	if err != nil {
 		return nil, nil, err
 	}
-	price, err := models.PriceFromGen(row.OpenrailsPrice)
+	price, err := r.db.PriceFromGen(ctx, row.OpenrailsPrice)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -266,8 +266,26 @@ func (r *PaymentRepo) GetByUserID(ctx context.Context, userID string) ([]*models
 	return models.PaymentsFromGen(rows)
 }
 
-func (r *PaymentRepo) GetByTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
-	row, err := r.db.Gen(ctx).GetPaymentByTransactionID(ctx, gen.GetPaymentByTransactionIDParams{
+func (r *PaymentRepo) GetByPSPTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
+	transactionID = strings.TrimSpace(transactionID)
+	if transactionID == "" {
+		return nil, errors.New("provider transaction reference is required")
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var pspID *uuid.UUID
+	if rail != models.Rail(models.ChannelManual) {
+		id, err := db.RequirePSPID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		pspID = &id
+	}
+	row, err := r.db.Gen(ctx).GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{
+		MerchantID:    merchantID.UUID(),
+		PspID:         pspID,
 		Rail:          string(rail),
 		TransactionID: transactionID,
 	})
@@ -372,8 +390,16 @@ func (r *PaymentRepo) CompleteRefundReservation(ctx context.Context, reservation
 	return nil
 }
 
-func (r *PaymentRepo) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
-	row, err := r.db.Gen(ctx).GetPaymentByMetadataValue(ctx, gen.GetPaymentByMetadataValueParams{
+func (r *PaymentRepo) GetByPSPMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetPaymentByPSPMetadataValue(ctx, gen.GetPaymentByPSPMetadataValueParams{MerchantID: mid.UUID(), PspID: pspID,
 		Key:   strings.TrimSpace(key),
 		Value: strings.TrimSpace(value),
 	})
@@ -582,6 +608,13 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 			prices[price.ID] = price
 		}
 	}
+	bindingPrices := make([]*models.Price, 0, len(prices))
+	for _, price := range prices {
+		bindingPrices = append(bindingPrices, price)
+	}
+	if err := r.db.LoadPricePSPBindings(ctx, bindingPrices, nil); err != nil {
+		return err
+	}
 	subs := map[uuid.UUID]*models.Subscription{}
 	if len(subIDs) > 0 {
 		rows, err := q.ListSubscriptionsByIDs(ctx, subIDs)
@@ -598,6 +631,9 @@ func (r *PaymentRepo) attachPaymentRelations(ctx context.Context, payments []*mo
 	}
 	for _, p := range payments {
 		p.Price = prices[p.PriceID]
+		if p.PspID != nil {
+			p.Price = p.Price.ForPSP(*p.PspID)
+		}
 		if p.SubscriptionID != nil {
 			p.Subscription = subs[*p.SubscriptionID]
 		}

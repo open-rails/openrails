@@ -29,6 +29,7 @@ SELECT merchant_id FROM openrails.account_updater_open_batch_merchant_ids(
 SELECT pm.id, pm.rail_method_ref, pm.expiry_date
 FROM openrails.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
+  AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
   AND pm.custodian = sqlc.arg(custodian)
   AND pm.rail_method_ref <> ''
   AND (pm.account_updater_checked_at IS NULL
@@ -115,6 +116,7 @@ UPDATE openrails.account_updater_batches SET
     completed_at = sqlc.arg(completed_at)::timestamptz,
     updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND job_ref = sqlc.arg(job_ref)
   AND job_ref <> ''
   AND status IN ('pending', 'submitted');

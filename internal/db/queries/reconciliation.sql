@@ -355,9 +355,9 @@ FROM openrails.solana_subscriptions;
 -- jsonb carries that id under the provider's key. Archived prices stay
 -- (grandfathered subscriptions bill them).
 -- name: ReconcileListPricesWithPSPLinks :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, psp_links
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived
 FROM openrails.prices
-WHERE psp_links IS NOT NULL;
+WHERE EXISTS (SELECT 1 FROM openrails.price_psp_bindings b WHERE b.price_id = openrails.prices.id AND b.merchant_id = openrails.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
 
 -- ============================================================================
 -- Enforce appliers: idempotent LOCAL writes only (never a provider call)

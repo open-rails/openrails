@@ -440,3 +440,9 @@ func cleanSecretName(name string) string {
 	}
 	return cleaned
 }
+
+// PSPIdentityScopeResolver resolves immutable account identity for existing
+// obligations. Archived PSPs remain available; new admission uses active scopes.
+type PSPIdentityScopeResolver interface {
+	PSPScopeByID(ctx context.Context, merchantID merchant.ID, pspID uuid.UUID) (PSPScope, bool, error)
+}

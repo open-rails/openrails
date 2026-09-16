@@ -5,7 +5,7 @@ INSERT INTO openrails.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     initial_transaction_id, last_four, card_type, expiry_date,
     metadata, created_at, updated_at, psp_id, rebill_driver,
-    custodian, fingerprint, network_token_id, network_token_status,
+    custodian, custodian_id, fingerprint, network_token_id, network_token_status,
     network_token_par, charge_via
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, sqlc.arg(rail_customer_ref), sqlc.arg(rail_method_ref),
@@ -15,7 +15,10 @@ INSERT INTO openrails.payment_methods (
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.arg(psp_id)::uuid,
     COALESCE(NULLIF(sqlc.arg(rebill_driver)::text, ''), 'provider'),
-    COALESCE(NULLIF(sqlc.arg(custodian)::text, ''), 'psp'), sqlc.arg(fingerprint), sqlc.arg(network_token_id),
+    COALESCE(NULLIF(sqlc.arg(custodian)::text, ''), 'psp'),
+    CASE WHEN COALESCE(NULLIF(sqlc.arg(custodian)::text, ''), 'psp') <> 'psp' THEN
+      COALESCE(sqlc.narg(custodian_id)::uuid, (SELECT p.custodian_id FROM openrails.psps p WHERE p.id=sqlc.arg(psp_id)::uuid AND p.merchant_id=sqlc.arg(merchant_id)::uuid)) END,
+    sqlc.arg(fingerprint), sqlc.arg(network_token_id),
     sqlc.arg(network_token_status), sqlc.arg(network_token_par),
     COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy')
 );
@@ -47,18 +50,15 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY pm.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
--- name: GetPaymentMethodByRailMethodRef :one
-SELECT * FROM openrails.payment_methods pm
-WHERE pm.rail = $1 AND pm.rail_method_ref = $2
-LIMIT 1;
-
 -- name: GetPaymentMethodByRailMethodRefForPSP :one
 -- Provider webhook folds must bind the instrument to the exact account whose
 -- credentials verified the event. The same merchant may run multiple accounts
 -- on one rail, so a rail-only lookup is not sufficient for provider truth.
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.rail = sqlc.arg(rail)
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pm.rail = sqlc.arg(rail)
   AND pm.psp_id = sqlc.arg(psp_id)::uuid
+  AND pm.custodian_id IS NOT DISTINCT FROM sqlc.narg(custodian_id)::uuid
   AND pm.rail_method_ref = sqlc.arg(rail_method_ref)
 LIMIT 1;
 
@@ -121,7 +121,8 @@ ORDER BY s.payment_method_id, p.purchased_at DESC;
 -- customer-scope handle (e.g. an imported multi-card NMI vault). RLS scopes to
 -- the merchant.
 SELECT count(*) FROM openrails.payment_methods
-WHERE rail = $1
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND rail = $1
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)
   AND rail_customer_ref <> ''
   AND id <> sqlc.arg(exclude_id);
@@ -133,7 +134,7 @@ WHERE rail = $1
 -- NMI; the method-ref predicate narrows within shared (imported) vaults and is
 -- skipped when either side has no billing id.
 SELECT * FROM openrails.payment_methods pm
-WHERE pm.merchant_id = sqlc.arg(merchant_id)
+WHERE pm.merchant_id = sqlc.arg(merchant_id) AND pm.psp_id = sqlc.arg(psp_id)::uuid
   AND pm.rail = sqlc.arg(rail)
   AND pm.rail_customer_ref = sqlc.arg(rail_customer_ref)
   AND (pm.rail_method_ref = sqlc.arg(rail_method_ref)
@@ -171,7 +172,7 @@ UPDATE openrails.payment_methods SET
         WHEN sqlc.arg(agreement)::text = 'unscheduled' THEN sqlc.arg(ref)::text
         ELSE stored_credential_unscheduled_ref END,
     updated_at = now()
-WHERE merchant_id = sqlc.arg(merchant_id)
+WHERE merchant_id = sqlc.arg(merchant_id) AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = sqlc.arg(rail)
   AND rail_customer_ref = sqlc.arg(rail_customer_ref)
   AND (rail_method_ref = sqlc.arg(rail_method_ref)
@@ -188,6 +189,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)
 SELECT * FROM openrails.payment_methods pm
 WHERE pm.merchant_id = sqlc.arg(merchant_id)
   AND pm.custodian = sqlc.arg(custodian)
+  AND pm.psp_id = sqlc.arg(psp_id)::uuid
+  AND pm.custodian_id = sqlc.arg(custodian_id)::uuid
   AND pm.fingerprint = sqlc.arg(fingerprint)
   AND pm.fingerprint <> ''
 ORDER BY pm.created_at
@@ -209,7 +212,9 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND id = sqlc.arg(id);
 UPDATE openrails.payment_methods SET
     network_token_status = sqlc.arg(network_token_status),
     updated_at = now()
-WHERE custodian = sqlc.arg(custodian)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
+  AND custodian = sqlc.arg(custodian)
   AND network_token_id = sqlc.arg(network_token_id)
   AND network_token_id <> ''
   AND network_token_status <> sqlc.arg(network_token_status);
@@ -224,7 +229,9 @@ UPDATE openrails.payment_methods SET
     park_reason = sqlc.arg(park_reason),
     parked_at = now(),
     updated_at = now()
-WHERE custodian = sqlc.arg(custodian)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
+  AND custodian = sqlc.arg(custodian)
   AND rail_method_ref = sqlc.arg(rail_method_ref)
   AND park_reason = '';
 
@@ -259,7 +266,9 @@ UPDATE openrails.payment_methods SET
     park_reason = '',
     parked_at = NULL,
     updated_at = now()
-WHERE custodian = sqlc.arg(custodian)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
+  AND custodian = sqlc.arg(custodian)
   AND rail_method_ref = sqlc.arg(old_method_ref);
 
 -- name: RefreshCustodianCardMetadata :execrows
@@ -270,5 +279,7 @@ UPDATE openrails.payment_methods SET
     expiry_date = COALESCE(NULLIF(sqlc.arg(expiry_date)::text, ''), expiry_date),
     fingerprint = COALESCE(NULLIF(sqlc.arg(fingerprint)::text, ''), fingerprint),
     updated_at = now()
-WHERE custodian = sqlc.arg(custodian)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
+  AND custodian = sqlc.arg(custodian)
   AND rail_method_ref = sqlc.arg(rail_method_ref);

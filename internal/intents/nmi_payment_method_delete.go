@@ -297,7 +297,7 @@ func (h *NMIPaymentMethodDeleteHandler) sharedVault(ctx context.Context, pm *mod
 	if strings.TrimSpace(pm.RailCustomerRef) == "" {
 		return false, nil
 	}
-	n, err := paymentmethods.NewPaymentMethodRepo(h.DB).CountSharingCustomerRef(ctx, strings.ToLower(string(pm.Rail)), pm.RailCustomerRef, pm.ID)
+	n, err := paymentmethods.NewPaymentMethodRepo(h.DB).CountSharingCustomerRef(ctx, strings.ToLower(string(pm.Rail)), pm.PspID, pm.RailCustomerRef, pm.ID)
 	if err != nil {
 		return false, err
 	}

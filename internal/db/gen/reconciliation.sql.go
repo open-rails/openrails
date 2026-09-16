@@ -2049,9 +2049,9 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 }
 
 const reconcileListPricesWithPSPLinks = `-- name: ReconcileListPricesWithPSPLinks :many
-SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived, psp_links
+SELECT id, product_id, amount, currency, access_duration_hours, auto_renew, archived
 FROM openrails.prices
-WHERE psp_links IS NOT NULL
+WHERE EXISTS (SELECT 1 FROM openrails.price_psp_bindings b WHERE b.price_id = openrails.prices.id AND b.merchant_id = openrails.prices.merchant_id AND b.psp_id = $1::uuid)
 `
 
 type ReconcileListPricesWithPSPLinksRow struct {
@@ -2062,15 +2062,14 @@ type ReconcileListPricesWithPSPLinksRow struct {
 	AccessDurationHours *int32
 	AutoRenew           bool
 	Archived            bool
-	PspLinks            []byte
 }
 
 // Billable prices with their rail link blobs (provider_links): the PS-1
 // materializer maps a remote plan id onto the local price whose psp_links
 // jsonb carries that id under the provider's key. Archived prices stay
 // (grandfathered subscriptions bill them).
-func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context) ([]ReconcileListPricesWithPSPLinksRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListPricesWithPSPLinks)
+func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context, pspID uuid.UUID) ([]ReconcileListPricesWithPSPLinksRow, error) {
+	rows, err := q.db.Query(ctx, reconcileListPricesWithPSPLinks, pspID)
 	if err != nil {
 		return nil, err
 	}
@@ -2086,7 +2085,6 @@ func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context) ([]Reconc
 			&i.AccessDurationHours,
 			&i.AutoRenew,
 			&i.Archived,
-			&i.PspLinks,
 		); err != nil {
 			return nil, err
 		}

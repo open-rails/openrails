@@ -160,7 +160,7 @@ func (f *repriceFixture) createSubscription(t *testing.T, ctx context.Context, p
 
 func (f *repriceFixture) renewalAmount(t *testing.T, ctx context.Context, rail models.Rail, railSubID string) int64 {
 	t.Helper()
-	require.NoError(t, f.lifecycle.RenewMembership(ctx, &RenewMembershipParams{
+	require.NoError(t, f.lifecycle.RenewMembership(db.WithPSPID(ctx, f.nmiPSPID), &RenewMembershipParams{
 		Rail:               rail,
 		RailSubscriptionID: railSubID,
 		TransactionID:      "reprice-txn-" + uuid.NewString(),

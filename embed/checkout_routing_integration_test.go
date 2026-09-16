@@ -18,6 +18,7 @@ import (
 
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -77,16 +78,16 @@ func bootRoutingFixture(
 	// is under test here, not catalog push.
 	flexID, formName := seedCCBillWebhookCatalog(t, ctx, cfg, slug)
 	appDB := dbtest.OpenMerchantDB(t, id.UUID())
-	links, err := json.Marshal(map[string]map[string]string{
+	links := map[string]map[string]string{
 		"ccbill":   {"rail": "ccbill", "flex_id": flexID, "form_name": formName},
 		"mobius":   {"rail": "nmi", "plan_id": "plan-" + slug},
 		"paykings": {"rail": "nmi", "plan_id": "plan-old-" + slug},
-	})
+	}
+	scoped := merchant.WithID(ctx, id)
+	prices, err := catalog.NewPriceService(appDB).GetAll(scoped)
 	require.NoError(t, err)
-	tag, err := appDB.Pool().Exec(ctx,
-		`UPDATE openrails.prices SET psp_links = $2::jsonb WHERE merchant_id = $1`, id.UUID(), string(links))
-	require.NoError(t, err)
-	require.EqualValues(t, 1, tag.RowsAffected(), "exactly one seeded price must be linked")
+	require.Len(t, prices, 1)
+	require.NoError(t, catalog.NewPriceService(appDB).UpdatePSPLinks(scoped, prices[0].ID, links))
 
 	username := "routing_" + uuid.NewString()[:8]
 	userID := seedProfileUser(t, ctx, dsn, username)

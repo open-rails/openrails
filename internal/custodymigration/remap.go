@@ -53,7 +53,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 		fromPSP := locked.PspID
 		// Re-decide under the lock. A concurrent run may have moved it; a
 		// dunning attempt may have gone in flight since the plan read.
-		if locked.Custodian == p.custodianKind() {
+		if locked.CustodianID != nil && *locked.CustodianID == p.custodian.ID {
 			if locked.RailMethodRef == token {
 				out.Outcome = OutcomeAlreadyMigrated
 				return nil
@@ -77,6 +77,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 			ID:                 existing.ID,
 			FromCustodian:      locked.Custodian,
 			ToCustodian:        p.custodianKind(),
+			ToCustodianID:      p.custodian.ID,
 			ToRailMethodRef:    token,
 			Fingerprint:        strings.TrimSpace(tk.Fingerprint),
 			ChargeVia:          chargeViaFor(tk),
@@ -105,7 +106,7 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 			PaymentMethodID:     existing.ID,
 			Rail:                locked.Rail,
 			FromCustodian:       locked.Custodian,
-			FromCustodianID:     nil,
+			FromCustodianID:     locked.CustodianID,
 			FromRailCustomerRef: locked.RailCustomerRef,
 			FromRailMethodRef:   locked.RailMethodRef,
 			FromPspID:           &fromPSP,
@@ -166,6 +167,7 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 			PspID:              p.targetPSP.ID,
 			RebillDriver:       models.RebillDriverOpenRails,
 			Custodian:          p.custodianKind(),
+			CustodianID:        &p.custodian.ID,
 			Fingerprint:        strings.TrimSpace(tk.Fingerprint),
 			NetworkTokenID:     strings.TrimSpace(tk.NetworkTokenID),
 			NetworkTokenStatus: strings.TrimSpace(tk.NetworkTokenStatus),

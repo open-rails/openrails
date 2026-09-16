@@ -973,7 +973,8 @@ type OpenrailsPaymentMethod struct {
 	// Rail-scoped stored-credential replay reference for the UNSCHEDULED card-network agreement (NMI: gateway transactionid of the initial unscheduled CIT, replayed as initial_transaction_id on unscheduled MITs). Empty = not captured yet.
 	StoredCredentialUnscheduledRef string
 	// or#880 who HOLDS this instrument, orthogonal to who charges it (rail + psp_id): psp = stored at the processor itself (Stripe pm_, NMI customer vault) | basis_theory = neutral third-party vault (#795). Never empty — "no stored instrument" (CCBill, Solana) is the absence of a row, not a custodian value.
-	Custodian string
+	Custodian   string
+	CustodianID *uuid.UUID
 	// Custodian-issued stable fingerprint of the underlying PAN (Basis Theory's default fingerprint expression), for dedup/lookup. '' = the custodian issues none.
 	Fingerprint string
 	// #795 BT network-token uuid; '' = not provisioned.
@@ -1008,10 +1009,8 @@ type OpenrailsPrice struct {
 	ID        uuid.UUID
 	ProductID uuid.UUID
 	// Price amount in row currency micros (1 major unit = 1,000,000).
-	Amount   int64
-	Currency string
-	// PSP link entries keyed by PSP key (e.g. mobius); each entry records its rail and the provider-side object ids (plan_id, price_id, ...).
-	PspLinks   []byte
+	Amount     int64
+	Currency   string
 	Archived   bool
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -1036,6 +1035,18 @@ type OpenrailsPriceKeyMovement struct {
 	PriceID     uuid.UUID
 	EffectiveAt time.Time
 	CreatedAt   time.Time
+}
+
+type OpenrailsPricePspBinding struct {
+	MerchantID               uuid.UUID
+	PriceID                  uuid.UUID
+	PspID                    uuid.UUID
+	PlanID                   *string
+	PriceRef                 *string
+	RecurringBillingOptionID *string
+	PlanPda                  *string
+	FlexID                   *string
+	Configuration            []byte
 }
 
 // Product definitions that can be purchased or subscribed to

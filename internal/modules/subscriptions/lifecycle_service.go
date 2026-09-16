@@ -297,7 +297,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 
 	var existingPendingSub *models.Subscription
 	if params.RailSubscriptionID != nil && strings.TrimSpace(*params.RailSubscriptionID) != "" {
-		found, err := subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(params.Rail), strings.TrimSpace(*params.RailSubscriptionID))
+		found, err := subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), strings.TrimSpace(*params.RailSubscriptionID))
 		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing subscription by rail subscription ID: %w", err)
 		}
@@ -313,7 +313,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	paymentRecorded := false
 	if params.TransactionID != "" && s.PaymentService != nil {
 		paymentService = payments.NewPaymentService(dbb, s.Clock())
-		existingPayment, err := paymentService.GetByTransactionID(ctx, params.Rail, params.TransactionID)
+		existingPayment, err := paymentService.GetByPSPTransactionID(ctx, params.Rail, params.TransactionID)
 		if err != nil && !db.IsNotFound(err) {
 			return nil, nil, fmt.Errorf("failed to check existing payment: %w", err)
 		}
@@ -703,7 +703,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		paymentService := payments.NewPaymentService(db, s.Clock())
 
 		// Lock before checking terminal state or preparing a full-row update.
-		subscription, err := subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
+		subscription, err := subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
 		if err != nil {
 			log.WithContext(ctx).WithFields(log.Fields{
 				"rail":                 params.Rail,
@@ -886,7 +886,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				return fmt.Errorf("failed to persist renewal payment marker: %w", err)
 			}
 			if !created {
-				existingPayment, loadErr := paymentService.GetByTransactionID(ctx, params.Rail, params.TransactionID)
+				existingPayment, loadErr := paymentService.GetByPSPTransactionID(ctx, params.Rail, params.TransactionID)
 				if loadErr != nil {
 					return fmt.Errorf("failed to load duplicate renewal payment marker: %w", loadErr)
 				}
@@ -1198,7 +1198,7 @@ func (s *SubscriptionLifecycleService) ReactivateMembership(ctx context.Context,
 		entitlementService := entitlements.NewEntitlementService(txdb, s.Clock())
 		entitlementService.SetClock(s.Clock())
 
-		subscription, err := subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(params.Rail), railSubID)
+		subscription, err := subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), railSubID)
 		if err != nil {
 			return fmt.Errorf("failed to get subscription for reactivation: %w", err)
 		}
@@ -1369,7 +1369,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 	if params.SubscriptionID != nil {
 		subscription, err = subService.subscriptionRepo.GetByIDForUpdate(ctx, *params.SubscriptionID)
 	} else if params.RailSubscriptionID != nil && params.Rail != nil {
-		subscription, err = subService.subscriptionRepo.GetByRailSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
+		subscription, err = subService.subscriptionRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(*params.Rail), *params.RailSubscriptionID)
 	} else {
 		return nil, fmt.Errorf("either subscription_id or rail details must be provided")
 	}

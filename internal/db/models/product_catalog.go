@@ -156,10 +156,8 @@ type Price struct {
 	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
-	// PSPLinks is a JSONB map of PSP key -> link entry (rail recorded inside).
-	// Keys: "nmi", "ccbill", "solana", "stripe" (the gateway rail).
-	// Values: rail-specific data (e.g., plan_id, price_id, PSP name)
-	// Example: {"nmi": {"plan_id": "123", "provider": "mobius"}, "ccbill": {"price_id": "456"}}
+	// PSPLinks is the catalog projection of normalized price_psp_bindings.
+	// Keys are current PSP labels; each value carries the immutable psp_id.
 	PSPLinks map[string]map[string]string `json:"psp_links,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
@@ -205,6 +203,7 @@ func (p *Price) RecurringCycleDays() *int {
 
 // Link entry key constants (used in the PSPLinks JSONB map)
 const (
+	RailKeyPSPID          = "psp_id"
 	RailKeyPlanID         = "plan_id"
 	RailKeyProvider       = "provider"
 	RailKeyCCBillFormName = "form_name"
@@ -218,7 +217,7 @@ const (
 	RailKeyStripePriceID                = "price_id"
 	RailKeyStripeProductID              = "product_id"
 	// RailKeyRail is the rail (gateway) an entry's provider objects live on.
-	// prices.psp_links keys on the merchant's PSP key (e.g. "mobius") so
+	// The catalog PSPLinks projection keys on the merchant's PSP key (e.g. "mobius") so
 	// several accounts can share one rail; every entry records its rail here.
 	RailKeyRail = "rail"
 )
@@ -357,4 +356,23 @@ func (p *Price) SetStripeConfig(priceID string) {
 	p.SetRailConfig(RailStripe, map[string]string{
 		RailKeyStripePriceID: priceID,
 	})
+}
+
+// ForPSP returns a price view containing only the selected account's bindings.
+// The catalog row and its full binding map remain unchanged for other callers.
+func (p *Price) ForPSP(pspID uuid.UUID) *Price {
+	if p == nil {
+		return nil
+	}
+	copy := *p
+	copy.PSPLinks = nil
+	for key, cfg := range p.PSPLinks {
+		if cfg[RailKeyPSPID] == pspID.String() {
+			if copy.PSPLinks == nil {
+				copy.PSPLinks = map[string]map[string]string{}
+			}
+			copy.PSPLinks[key] = cfg
+		}
+	}
+	return &copy
 }

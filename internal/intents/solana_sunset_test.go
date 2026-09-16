@@ -62,6 +62,8 @@ func encodePlanAccount(owner solanago.PublicKey, status uint8) []byte {
 	return blob
 }
 
+var sunsetTestPSPID = uuid.New()
+
 func sunsetIntent(t *testing.T, pda string) gen.OpenrailsRailIntent {
 	t.Helper()
 	payload, err := json.Marshal(SolanaSunsetPayload{PlanPDA: pda})
@@ -72,6 +74,7 @@ func sunsetIntent(t *testing.T, pda string) gen.OpenrailsRailIntent {
 		ID:             uuid.New(),
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Rail:           "solana",
+		PspID:          &sunsetTestPSPID,
 		IntentType:     TypeSolanaSunsetPlan,
 		Payload:        payload,
 		IdempotencyKey: SolanaSunsetIdempotencyKey(pda),
@@ -232,7 +235,7 @@ func TestSolanaSunset_RelevanceFlipsWhenPlanRejoinsCatalog(t *testing.T) {
 			ID: uuid.New(), ProductID: uuid.New(), Amount: 2300, Currency: "USD",
 			AccessDurationHours: &cycle, AutoRenew: true, Archived: archived,
 			PSPLinks: map[string]map[string]string{
-				string(models.RailSolana): {models.RailKeyRail: "solana", "plan_pda": fx.pda},
+				string(models.RailSolana): {models.RailKeyPSPID: sunsetTestPSPID.String(), models.RailKeyRail: "solana", "plan_pda": fx.pda},
 			},
 		}
 	}

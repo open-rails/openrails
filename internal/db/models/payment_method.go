@@ -50,7 +50,8 @@ type PaymentMethod struct {
 	// who charges it (Rail + PspID). Always stated, never empty; see the
 	// Custodian* constants. "No stored instrument" (CCBill, Solana) is the
 	// absence of a payment_methods row, not a custodian value.
-	Custodian string `json:"-"`
+	Custodian   string     `json:"-"`
+	CustodianID *uuid.UUID `json:"-"`
 
 	// Custodian-held instrument fields (#795, custodian='basis_theory').
 	// Fingerprint is the custodian's stable PAN fingerprint (dedup/lookup);

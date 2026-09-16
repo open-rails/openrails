@@ -81,7 +81,7 @@ type CheckoutCustodianSaleService struct {
 
 type custodianInstrumentStore interface {
 	Create(ctx context.Context, method *models.PaymentMethod) error
-	GetByRailMethodRef(ctx context.Context, provider, methodRef string) (*models.PaymentMethod, error)
+	GetByPSPMethodRef(ctx context.Context, provider, methodRef string) (*models.PaymentMethod, error)
 }
 
 // custodialPSP is the resolved arrangement one custodian sale charges through:
@@ -190,6 +190,7 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		MerchantID: tid.UUID(),
 		Provider:   string(models.RailNMI),
 		IntentType: TypeCustodianSale,
+		PspID:      db.PSPIDFromContext(ctx),
 		PriceID:    &price.ID,
 		Payload: CustodianSalePayload{
 			TokenIntentID: intentID,
@@ -422,7 +423,7 @@ func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID
 	if h.Sale.DB == nil || strings.TrimSpace(fingerprint) == "" {
 		return "", nil
 	}
-	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{
+	row, err := h.Sale.DB.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{CustodianID: db.CustodianIDFromContext(ctx), PspID: db.PSPIDFromContext(ctx),
 		MerchantID:  merchantID,
 		Custodian:   nmiproxy.Custodian,
 		Fingerprint: fingerprint,
@@ -562,7 +563,7 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 	if h.Sale.PaymentMethodService == nil {
 		return nil, errors.New("payment method service not wired")
 	}
-	if existing, err := h.Sale.PaymentMethodService.GetByRailMethodRef(ctx, nmiproxy.Rail, token.ID); err == nil && existing != nil {
+	if existing, err := h.Sale.PaymentMethodService.GetByPSPMethodRef(ctx, nmiproxy.Rail, token.ID); err == nil && existing != nil {
 		return &existing.ID, nil
 	} else if err != nil && !db.IsNotFound(err) && !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 		return nil, err
@@ -594,7 +595,7 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 	}
 	if err := h.Sale.PaymentMethodService.Create(ctx, method); err != nil {
 		// Concurrent write of the same token: reuse the surviving row.
-		if existing, gerr := h.Sale.PaymentMethodService.GetByRailMethodRef(ctx, nmiproxy.Rail, token.ID); gerr == nil && existing != nil {
+		if existing, gerr := h.Sale.PaymentMethodService.GetByPSPMethodRef(ctx, nmiproxy.Rail, token.ID); gerr == nil && existing != nil {
 			return &existing.ID, nil
 		}
 		return nil, err

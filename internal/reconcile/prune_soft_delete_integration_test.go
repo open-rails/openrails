@@ -223,7 +223,7 @@ func TestPruneSoftDeletesAndRollbackRestores(t *testing.T) {
 		_, err := q.GetSubscriptionByID(ctx, f.subID)
 		require.Error(t, err, "GetSubscriptionByID must not see a pruned row")
 
-		_, err = q.GetSubscriptionByRailSubID(ctx, gen.GetSubscriptionByRailSubIDParams{Rail: "nmi", RailSubscriptionID: f.railSub})
+		_, err = q.GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{MerchantID: dbtest.TestMerchantID.UUID(), PspID: db.PSPIDFromContext(ctx), Rail: "nmi", RailSubscriptionID: f.railSub})
 		require.Error(t, err, "provider-id lookup must not see a pruned row")
 
 		live, err := q.ListActiveSubscriptionsByCustomer(ctx, gen.ListActiveSubscriptionsByCustomerParams{MerchantID: merchantID, CustomerID: f.customer})

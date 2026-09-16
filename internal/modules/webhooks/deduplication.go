@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"time"
 
@@ -242,6 +243,13 @@ func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, even
 
 	trimmedEventID := strings.TrimSpace(eventID)
 	op := fmt.Sprintf("webhook.%s.%s", source, eventType)
+	// Provider event IDs are account-local, including retries after archive.
+	// Carry the authenticated identity through both Postgres and cache keys.
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		op += ".psp." + pspID.String()
+	} else if custodianID := db.CustodianIDFromContext(ctx); custodianID != uuid.Nil {
+		op += ".custodian." + custodianID.String()
+	}
 
 	var shouldRecordOutcome bool
 	var mark *dedupMark

@@ -412,6 +412,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 // on the tx signature) and advance the row past the pulled period. Shared by
 // the inline success path and the #674 recorded-signature verify leg.
 func (w *SolanaCrankWorker) finalizePull(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, plan resolvedPlan, sig string) error {
+	ctx = db.WithPSPID(ctx, row.PspID)
 	periodHoursI64, err := safecast.Convert[int64](plan.periodHours)
 	if err != nil {
 		return fmt.Errorf("solana crank: period hours overflow: %w", err)
@@ -476,7 +477,7 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 	if sub.RetryAttempts != nil {
 		retryAttempts = *sub.RetryAttempts
 	}
-	cfg := price.PSPLinkForRail(models.RailSolana)
+	cfg := price.ForPSP(sub.PspID).PSPLinkForRail(models.RailSolana)
 	if cfg == nil {
 		return resolvedPlan{}, fmt.Errorf("solana crank: price %s has no solana rail config", price.ID)
 	}

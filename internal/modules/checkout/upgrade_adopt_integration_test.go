@@ -304,7 +304,7 @@ func TestUpgradeAmbiguousCreateLanded_AdoptsInline(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "never a second blind create")
 
 	// The adopted remote subscription is registered locally and active.
-	local, lerr := fx.svc.SubscriptionService.GetByRailSubscriptionID(fx.ctx, "nmi", fx.gateway.subID)
+	local, lerr := fx.svc.SubscriptionService.GetByPSPSubscriptionID(fx.ctx, "nmi", fx.gateway.subID)
 	require.NoError(t, lerr)
 	require.Equal(t, models.StatusActive, local.Status)
 	require.Equal(t, fx.newPrice.ID, local.PriceID)

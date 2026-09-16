@@ -189,7 +189,7 @@ func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUI
 // fails the test when missing.
 func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, rail models.Rail, transactionID string) *models.Payment {
 	suite.t.Helper()
-	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByTransactionID(ctx, rail, transactionID)
+	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByPSPTransactionID(ctx, rail, transactionID)
 	require.NoError(suite.t, err, "Failed to get payment by transaction %s", transactionID)
 	return p
 }

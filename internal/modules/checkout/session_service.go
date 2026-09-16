@@ -575,6 +575,7 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 		return nil, fmt.Errorf("%w: no PSP is armed for rail %q", ErrCheckoutSessionValidation, rail)
 	}
 	ctx = db.WithPSPID(ctx, pspID)
+	price = priceForCheckoutTarget(price, decision.Target)
 
 	if rail == "stripe" && strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, fmt.Errorf("%w: idempotency key is required for stripe checkout", ErrCheckoutSessionValidation)
@@ -1211,7 +1212,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionSession(ctx context
 		}
 	}
 
-	terms, err := parseSolanaPlanTerms(price.PSPLinkForRail(models.RailSolana))
+	terms, err := parseSolanaPlanTerms(price.ForPSP(session.PspID).PSPLinkForRail(models.RailSolana))
 	if err != nil {
 		return err
 	}
@@ -1284,7 +1285,7 @@ func (s *CheckoutSessionService) initializeSolanaSubscriptionPayRequest(ctx cont
 		}
 	}
 
-	terms, err := parseSolanaPlanTerms(price.PSPLinkForRail(models.RailSolana))
+	terms, err := parseSolanaPlanTerms(price.ForPSP(session.PspID).PSPLinkForRail(models.RailSolana))
 	if err != nil {
 		return err
 	}
@@ -1575,7 +1576,7 @@ func (s *CheckoutSessionService) resolveSolanaTierChange(ctx context.Context, ol
 	if !newPrice.IsPurchasable() {
 		return nil, fmt.Errorf("%w: target price is not available", ErrCheckoutSessionValidation)
 	}
-	newTerms, err := parseSolanaPlanTerms(newPrice.PSPLinkForRail(models.RailSolana))
+	newTerms, err := parseSolanaPlanTerms(newPrice.ForPSP(oldSub.PspID).PSPLinkForRail(models.RailSolana))
 	if err != nil {
 		return nil, fmt.Errorf("%w: target price is not configured for Solana recurring billing", ErrCheckoutSessionValidation)
 	}
@@ -2059,7 +2060,7 @@ func (s *CheckoutSessionService) confirmSolanaSession(ctx context.Context, sessi
 
 	signature := strings.TrimSpace(req.Payment.Signature)
 	if s.db != nil {
-		if existingPayment, err := payments.NewPaymentRepo(s.db).GetByTransactionID(ctx, models.RailSolana, signature); err == nil {
+		if existingPayment, err := payments.NewPaymentRepo(s.db).GetByPSPTransactionID(ctx, models.RailSolana, signature); err == nil {
 			if err := validateSolanaPaymentMatchesSession(existingPayment, session, referenceValue); err != nil {
 				return nil, err
 			}

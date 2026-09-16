@@ -217,6 +217,7 @@ func (fx *custodyFixture) export(tokens ...custodymigration.ImportedToken) custo
 	return custodymigration.VaultExport{
 		ExportedAt:     time.Now().UTC().Add(-time.Hour),
 		SourceRail:     string(models.RailNMI),
+		SourcePSPID:    fx.oldPSP.ID,
 		Custodian:      fx.custodian.Key,
 		PSP:            custodymigration.PSPRef{Rail: string(models.RailNMI), Environment: fx.env, AccountID: fx.newPSP.AccountID},
 		ExpectedTokens: &n,
@@ -373,8 +374,8 @@ func TestCustodyMigration_PerRowOutcomes(t *testing.T) {
 	otherVault := "vault-" + uuid.NewString()[:8]
 	otherMethod, _ := fx.seedPSPVaultedCard(t, otherVault)
 	_, err := fx.db.Pool().Exec(fx.ctx,
-		`UPDATE openrails.payment_methods SET custodian = 'basis_theory', rail_method_ref = $2 WHERE id = $1`,
-		otherMethod, "tok_already_"+uuid.NewString()[:8])
+		`UPDATE openrails.payment_methods SET custodian = 'basis_theory', custodian_id=$3, rail_method_ref = $2 WHERE id = $1`,
+		otherMethod, "tok_already_"+uuid.NewString()[:8], fx.custodian.ID)
 	require.NoError(t, err)
 
 	// A third instrument, to be pointed at a token another instrument holds.

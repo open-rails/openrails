@@ -339,7 +339,11 @@ func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUI
 	// are translated at push time, so no price-attached metered shape exists.
 	rows, err := database.Qx(ctx).Query(ctx, `
 SELECT p.product_id, p.amount, p.currency, p.access_duration_hours, p.auto_renew,
-       p.trial_unit_amount, p.trial_duration_hours, COALESCE(p.psp_links, '{}'::jsonb),
+       p.trial_unit_amount, p.trial_duration_hours, COALESCE((SELECT jsonb_object_agg(COALESCE(psp.key, psp.id::text), binding.configuration || jsonb_strip_nulls(jsonb_build_object(
+           'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
+           'recurring_billing_option_id', binding.recurring_billing_option_id, 'plan_pda', binding.plan_pda, 'flex_id', binding.flex_id)))
+           FROM openrails.price_psp_bindings binding JOIN openrails.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
+           WHERE binding.price_id = p.id AND binding.merchant_id = p.merchant_id), '{}'::jsonb),
        p.archived
 FROM openrails.prices p
 WHERE p.merchant_id = $1

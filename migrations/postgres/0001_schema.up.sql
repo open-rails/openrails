@@ -190,7 +190,7 @@ BEGIN
              SELECT 1
                FROM openrails.payment_methods pm
               WHERE pm.merchant_id = c.merchant_id
-                AND pm.custodian = c.kind
+                AND pm.custodian = c.kind AND pm.custodian_id = c.id
                 AND pm.rail_method_ref <> ''
                 AND (pm.account_updater_checked_at IS NULL
                      OR pm.account_updater_checked_at < p_now - w.lookahead)
@@ -2348,7 +2348,6 @@ CREATE TABLE openrails.prices (
     product_id uuid NOT NULL,
     amount bigint NOT NULL,
     currency text NOT NULL,
-    psp_links jsonb,
     archived boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -2374,7 +2373,6 @@ COMMENT ON TABLE openrails.prices IS 'Pricing tiers for products with rail-speci
 
 COMMENT ON COLUMN openrails.prices.amount IS 'Price amount in row currency micros (1 major unit = 1,000,000).';
 
-COMMENT ON COLUMN openrails.prices.psp_links IS 'PSP link entries keyed by PSP key (e.g. mobius); each entry records its rail and the provider-side object ids (plan_id, price_id, ...).';
 
 COMMENT ON COLUMN openrails.prices.access_duration_hours IS 'access window in HOURS a purchase grants; NULL = indefinite/durable. For auto_renew, hours/24 is the provider billing cadence in days.';
 
@@ -2403,7 +2401,6 @@ CREATE INDEX idx_prices_merchant_key ON openrails.prices USING btree (merchant_i
 
 CREATE INDEX idx_prices_product_id ON openrails.prices USING btree (product_id);
 
-CREATE INDEX idx_prices_psp_links ON openrails.prices USING gin (psp_links);
 
 CREATE UNIQUE INDEX uq_prices_id_product_merchant ON openrails.prices USING btree (id, product_id, merchant_id);
 
@@ -3067,7 +3064,7 @@ ALTER TABLE ONLY openrails.account_updater_batches
 
 CREATE INDEX ix_account_updater_batches_merchant_status ON openrails.account_updater_batches USING btree (merchant_id, status, created_at);
 
-CREATE UNIQUE INDEX uq_account_updater_batches_job ON openrails.account_updater_batches USING btree (merchant_id, job_ref) WHERE (job_ref <> ''::text);
+CREATE UNIQUE INDEX uq_account_updater_batches_job ON openrails.account_updater_batches USING btree (merchant_id, custodian_id, job_ref) WHERE (job_ref <> ''::text);
 
 CREATE UNIQUE INDEX uq_account_updater_batches_open ON openrails.account_updater_batches USING btree (merchant_id, custodian_id) WHERE (status = ANY (ARRAY['pending'::text, 'submitted'::text]));
 
@@ -3362,6 +3359,8 @@ CREATE TABLE openrails.payment_methods (
     stored_credential_recurring_ref text DEFAULT ''::text NOT NULL,
     stored_credential_unscheduled_ref text DEFAULT ''::text NOT NULL,
     custodian text DEFAULT 'psp'::text NOT NULL,
+    custodian_id uuid,
+    CONSTRAINT payment_methods_custodian_identity CHECK ((custodian = 'psp') = (custodian_id IS NULL)),
     fingerprint text DEFAULT ''::text NOT NULL,
     network_token_id text DEFAULT ''::text NOT NULL,
     network_token_status text DEFAULT ''::text NOT NULL,
@@ -3418,9 +3417,9 @@ ALTER TABLE ONLY openrails.payment_methods
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_merchant_id_id_key UNIQUE (merchant_id, id);
 
-CREATE INDEX idx_payment_methods_custodian_method_ref ON openrails.payment_methods USING btree (custodian, rail_method_ref) WHERE (custodian <> 'psp'::text);
+CREATE INDEX idx_payment_methods_custodian_method_ref ON openrails.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text);
 
-CREATE INDEX idx_payment_methods_custodian_network_token ON openrails.payment_methods USING btree (custodian, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id <> ''::text));
+CREATE INDEX idx_payment_methods_custodian_network_token ON openrails.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id <> ''::text));
 
 CREATE INDEX idx_payment_methods_customer ON openrails.payment_methods USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 
@@ -3436,13 +3435,16 @@ CREATE INDEX ix_payment_methods_account_updater_due ON openrails.payment_methods
 
 CREATE INDEX payment_methods_fingerprint_idx ON openrails.payment_methods USING btree (merchant_id, fingerprint) WHERE (fingerprint <> ''::text);
 
-CREATE UNIQUE INDEX uq_payment_methods_psp_instrument ON openrails.payment_methods USING btree (merchant_id, psp_id, rail_customer_ref, rail_method_ref);
+CREATE UNIQUE INDEX uq_payment_methods_psp_instrument ON openrails.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT;
 
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
+
+ALTER TABLE ONLY openrails.payment_methods
+    ADD CONSTRAINT payment_methods_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES openrails.custodians(id, merchant_id);
 
 ALTER TABLE ONLY openrails.payment_methods
     ADD CONSTRAINT payment_methods_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id);
@@ -4847,3 +4849,33 @@ RETURNS bigint LANGUAGE sql STABLE SECURITY INVOKER AS $$
 $$;
 REVOKE ALL ON FUNCTION openrails.financial_held_amount(uuid, uuid, text, timestamptz) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION openrails.financial_held_amount(uuid, uuid, text, timestamptz) TO openrails_app;
+
+-- #993: account identity owns provider price objects. Labels live only on psps.
+CREATE TABLE openrails.price_psp_bindings (
+    merchant_id uuid NOT NULL,
+    price_id uuid NOT NULL,
+    psp_id uuid NOT NULL,
+    plan_id text,
+    price_ref text,
+    recurring_billing_option_id text,
+    plan_pda text,
+    flex_id text,
+    configuration jsonb NOT NULL DEFAULT '{}'::jsonb,
+    PRIMARY KEY (merchant_id, price_id, psp_id),
+    CONSTRAINT price_psp_bindings_price_fk FOREIGN KEY (merchant_id, price_id) REFERENCES openrails.prices(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT price_psp_bindings_psp_fk FOREIGN KEY (merchant_id, psp_id) REFERENCES openrails.psps(merchant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT price_psp_bindings_configuration_object CHECK (jsonb_typeof(configuration) = 'object'),
+    CONSTRAINT price_psp_bindings_configuration_identity CHECK (NOT configuration ?| ARRAY['psp_id', 'rail', 'plan_id', 'price_id', 'recurring_billing_option_id', 'plan_pda', 'flex_id']),
+    CONSTRAINT price_psp_bindings_plan_ref_nonempty CHECK (plan_id IS NULL OR btrim(plan_id) <> ''),
+    CONSTRAINT price_psp_bindings_price_ref_nonempty CHECK (price_ref IS NULL OR btrim(price_ref) <> '')
+);
+CREATE UNIQUE INDEX uq_price_psp_bindings_plan ON openrails.price_psp_bindings (merchant_id, psp_id, plan_id) WHERE plan_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_price_psp_bindings_price ON openrails.price_psp_bindings (merchant_id, psp_id, price_ref) WHERE price_ref IS NOT NULL;
+CREATE UNIQUE INDEX uq_price_psp_bindings_rbo ON openrails.price_psp_bindings (merchant_id, psp_id, recurring_billing_option_id) WHERE recurring_billing_option_id IS NOT NULL;
+CREATE UNIQUE INDEX uq_price_psp_bindings_pda ON openrails.price_psp_bindings (merchant_id, psp_id, plan_pda) WHERE plan_pda IS NOT NULL;
+ALTER TABLE openrails.price_psp_bindings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.price_psp_bindings FORCE ROW LEVEL SECURITY;
+CREATE POLICY merchant_isolation ON openrails.price_psp_bindings
+    USING (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
+    WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
+GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO openrails_app;

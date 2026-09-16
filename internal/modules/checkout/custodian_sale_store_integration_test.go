@@ -149,11 +149,12 @@ func TestCustodianSale_ChargesThroughStoreArmedCustodian(t *testing.T) {
 	require.Equal(t, "key_private_880", cfg.Custody.APIKey)
 
 	intent, err := runner.EnqueueAndExecute(ctx, intents.EnqueueParams{
-		MerchantID: dbtest.TestMerchantID.UUID(),
-		Provider:   string(models.RailNMI),
-		IntentType: TypeCustodianSale,
-		PriceID:    &priceID,
-		PspID:      primaryPSPID,
+		MerchantID:  dbtest.TestMerchantID.UUID(),
+		Provider:    string(models.RailNMI),
+		IntentType:  TypeCustodianSale,
+		PriceID:     &priceID,
+		PspID:       primaryPSPID,
+		CustodianID: custodianID,
 		Payload: CustodianSalePayload{
 			TokenIntentID: bt.intentID,
 			AmountMicros:  1_990_000,

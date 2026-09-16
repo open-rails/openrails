@@ -285,7 +285,7 @@ func (h *NMISubscriptionCreateIntentHandler) verifyAtProvider(ctx context.Contex
 // railSubscriptionReader is the local-lookup surface the roster scan needs
 // (satisfied by *subscriptions.SubscriptionService).
 type railSubscriptionReader interface {
-	GetByRailSubscriptionID(ctx context.Context, provider, railSubscriptionID string) (*models.Subscription, error)
+	GetByPSPSubscriptionID(ctx context.Context, provider, railSubscriptionID string) (*models.Subscription, error)
 }
 
 // findUnregisteredRemoteSubscriptions scans the NMI recurring roster for
@@ -308,7 +308,7 @@ func findUnregisteredRemoteSubscriptions(ctx context.Context, subs railSubscript
 			if sub.Plan == nil || strings.TrimSpace(sub.Plan.ID) != strings.TrimSpace(planID) {
 				continue
 			}
-			local, lerr := subs.GetByRailSubscriptionID(ctx, provider, sub.ID)
+			local, lerr := subs.GetByPSPSubscriptionID(ctx, provider, sub.ID)
 			if lerr != nil {
 				if !db.IsNotFound(lerr) {
 					return nil, fmt.Errorf("local subscription lookup failed: %w", lerr)
@@ -428,7 +428,7 @@ func (h *NMISubscriptionCreateIntentHandler) captureStoredCredentialRef(ctx cont
 		log.WithContext(ctx).Warn("nmi subscription finalize: no DB handle to persist stored-credential reference (#297)")
 		return
 	}
-	if _, err := h.Checkout.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
+	if _, err := h.Checkout.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{PspID: db.PSPIDFromContext(ctx),
 		MerchantID:      merchantID,
 		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
 		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),

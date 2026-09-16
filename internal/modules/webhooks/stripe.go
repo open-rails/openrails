@@ -889,7 +889,7 @@ func (s *StripeWebhookService) recordStripeRefund(ctx context.Context, refund st
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe refund missing id or amount"))
 	}
 	var original *models.Payment
-	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, refundID); err == nil && existing != nil {
+	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, refundID); err == nil && existing != nil {
 		if existing.RefundedPaymentID == nil {
 			return nil
 		}
@@ -965,7 +965,7 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe dispute missing id or amount"))
 	}
 	var original *models.Payment
-	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, disputeID); err == nil && existing != nil {
+	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, disputeID); err == nil && existing != nil {
 		if existing.RefundedPaymentID == nil {
 			return nil
 		}
@@ -1045,7 +1045,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 	if disputeID == "" {
 		return nil
 	}
-	disputeReversal, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, disputeID)
+	disputeReversal, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, disputeID)
 	if err != nil {
 		if db.IsNotFound(err) {
 			return nil
@@ -1058,7 +1058,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 
 	recoveryID := "dispute_won:" + disputeID
 	var existingRecovery *models.Payment
-	if existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, recoveryID); err == nil && existing != nil {
+	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, recoveryID); err == nil && existing != nil {
 		existingRecovery = existing
 	} else if err != nil && !db.IsNotFound(err) {
 		return fmt.Errorf("lookup stripe won dispute recovery payment: %w", err)
@@ -1182,7 +1182,7 @@ func (s *StripeWebhookService) lookupStripeOriginalPayment(ctx context.Context, 
 		if candidate == "" {
 			continue
 		}
-		payment, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, candidate)
+		payment, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, candidate)
 		if err == nil {
 			return payment, nil
 		}

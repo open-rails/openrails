@@ -404,6 +404,7 @@ func (s *CheckoutService) processSubscription(
 	if err != nil {
 		return nil, err
 	}
+	price = priceForCheckoutTarget(price, target)
 	switch {
 	case target.Rail == "ccbill":
 		return s.processCCBillSubscription(ctx, req, user, price)
@@ -441,6 +442,7 @@ func (s *CheckoutService) processOneTimePurchase(
 	if err != nil {
 		return nil, err
 	}
+	price = priceForCheckoutTarget(price, target)
 	switch {
 	case rails.IsNMI(models.Rail(target.Rail)):
 		if custodianHeld(target) {
@@ -450,6 +452,7 @@ func (s *CheckoutService) processOneTimePurchase(
 			if s.CustodianSaleService == nil {
 				return nil, errors.New("custodian-held card checkout is not configured")
 			}
+			ctx = db.WithCustodianID(ctx, *target.Scope.CustodianID)
 			idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "custodian_sale")
 			return s.CustodianSaleService.Process(ctx, req, user, price, product, idempotencyKey)
 		}
@@ -859,7 +862,14 @@ func terminalEvidenceLocalization(intent gen.OpenrailsRailIntent) string {
 }
 
 func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, provider string, subscriptionID uuid.UUID, providerSubscriptionID string, transactionID string, delayedStart *time.Time, orderID string, paymentMethodID *uuid.UUID, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
-	if existing, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, providerSubscriptionID); err == nil {
+	customerID, err := customerIDFromUser(user.ID)
+	if err != nil {
+		return nil, err
+	}
+	if existing, err := s.SubscriptionService.GetByPSPSubscriptionID(ctx, provider, providerSubscriptionID); err == nil {
+		if existing.CustomerID != customerID || existing.PriceID != price.ID {
+			return nil, errors.New("provider subscription belongs to another checkout")
+		}
 		if delayedStart == nil && (existing.Status == models.StatusPending || existing.Status == models.StatusActive) {
 			return s.activateImmediateNMISubscription(ctx, req, user, price, existing.ID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
 		}
@@ -868,10 +878,6 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 		return nil, fmt.Errorf("load existing subscription: %w", err)
 	}
 
-	customerID, err := customerIDFromUser(user.ID)
-	if err != nil {
-		return nil, err
-	}
 	now := s.now().UTC()
 	var emailPtr *string
 	if req.Email != "" {
@@ -906,7 +912,10 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 
 	if err := s.SubscriptionService.Create(ctx, subscription); err != nil {
 		if errors.Is(err, subscriptions.ErrActiveSubscriptionExists) {
-			if existing, loadErr := s.SubscriptionService.GetByRailSubscriptionID(ctx, provider, providerSubscriptionID); loadErr == nil {
+			if existing, loadErr := s.SubscriptionService.GetByPSPSubscriptionID(ctx, provider, providerSubscriptionID); loadErr == nil {
+				if existing.CustomerID != customerID || existing.PriceID != price.ID {
+					return nil, errors.New("provider subscription belongs to another checkout")
+				}
 				if delayedStart == nil && (existing.Status == models.StatusPending || existing.Status == models.StatusActive) {
 					return s.activateImmediateNMISubscription(ctx, req, user, price, existing.ID, provider, providerSubscriptionID, transactionID, orderID, idempOp, idempotencyKey)
 				}
@@ -1568,6 +1577,7 @@ func (s *CheckoutService) processUpgrade(
 	existingSub *models.Subscription,
 	target railTarget,
 ) (*CheckoutResponse, error) {
+	newPrice = priceForCheckoutTarget(newPrice, target)
 	now := s.now()
 
 	// Derive the payer before any money moves (#364): a zero id must never
@@ -3001,15 +3011,7 @@ func requireNMIPlanForTarget(price *models.Price, target railTarget) (string, er
 	if price == nil {
 		return "", errors.New("price is required")
 	}
-	lookup := func(key string) (string, bool) {
-		cfg := price.PSPLinks[key]
-		if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg[models.RailKeyRail]), target.Rail) {
-			return "", false
-		}
-		id := strings.TrimSpace(cfg[models.RailKeyPlanID])
-		return id, id != ""
-	}
-	if id, ok := lookup(target.PSP); ok {
+	if id := strings.TrimSpace(checkoutPSPLinkForTarget(price, target)[models.RailKeyPlanID]); id != "" {
 		return id, nil
 	}
 	return "", fmt.Errorf("price %s is missing NMI plan configuration for payment provider %s (rail %s)", price.ID, target.PSP, target.Rail)

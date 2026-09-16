@@ -377,9 +377,9 @@ func (fx *auFixture) seedInstrument(m *auMerchant, opts instrumentOpts) (uuid.UU
 		INSERT INTO openrails.payment_methods
 		  (id, rail, initial_transaction_id, merchant_id, customer_id, custodian,
 		   rail_method_ref, expiry_date, last_four, card_type, fingerprint,
-		   account_updater_checked_at, park_reason, parked_at, psp_id)
-		VALUES ($1, 'nmi', '', $2, $3, 'basis_theory', $4, $5, '1111', 'visa', $6, $7, $8, $9, $10)`,
-		pmID, m.id, customer, token, expiry, "fp_"+uuid.NewString()[:8], checked, opts.parkReason, parkedAt, m.pspID)
+		   account_updater_checked_at, park_reason, parked_at, psp_id, custodian_id)
+		VALUES ($1, 'nmi', '', $2, $3, CASE WHEN $11::uuid IS NULL THEN 'psp' ELSE 'basis_theory' END, $4, $5, '1111', 'visa', $6, $7, $8, $9, $10, $11)`,
+		pmID, m.id, customer, token, expiry, "fp_"+uuid.NewString()[:8], checked, opts.parkReason, parkedAt, m.pspID, uuidPtrIfNonzero(m.custID))
 	require.NoError(t, err)
 
 	if opts.renewsIn != 0 {
@@ -832,4 +832,11 @@ func TestAccountUpdaterSubmittedBatchEndsOnTheCustodianVerdictNotAClock(t *testi
 	failed := fx.batches(m)[0]
 	require.Equal(t, "failed", failed.Status)
 	require.Contains(t, failed.Failure, "custodian reported job state failed")
+}
+
+func uuidPtrIfNonzero(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
 }

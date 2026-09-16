@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -433,14 +434,15 @@ func (suite *TestContainerSuite) insertPriceIfAbsent(ctx context.Context, price 
 	_, err := suite.Pool.Exec(ctx, `
 		INSERT INTO openrails.prices (
 			id, product_id, archived, amount, currency, access_duration_hours, auto_renew,
-			psp_links, key, created_at, updated_at, merchant_id
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9, ''), $10, $11, $12)
+			key, created_at, updated_at, merchant_id
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), $9, $10, $11)
 		ON CONFLICT (id) DO NOTHING`,
 		price.ID, price.ProductID, price.Archived, price.Amount, money.NormalizeCurrency(price.Currency),
 		price.AccessDurationHours, price.AutoRenew,
-		suite.mustJSONB(price.PSPLinks, len(price.PSPLinks) == 0), price.Key,
+		price.Key,
 		price.CreatedAt, price.UpdatedAt, dbtest.TestMerchantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed price %s", price.ID)
+	require.NoError(suite.t, catalog.NewPriceService(suite.FixtureDB()).UpdatePSPLinks(dbtest.WithTestMerchant(ctx), price.ID, price.PSPLinks))
 }
 
 // TieredTestProducts returns test products with tier groups for upgrade/downgrade testing

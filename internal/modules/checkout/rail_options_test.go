@@ -110,7 +110,7 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 			wantSkip: models.CheckoutRoutingSkipLinkMissing,
 		},
 		{
-			name:    "stripe ambiguous account links",
+			name:    "stripe exact account among sibling links",
 			service: &CheckoutSessionService{},
 			price: &models.Price{ID: uuid.New(), AutoRenew: true, PSPLinks: map[string]map[string]string{
 				"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_active"},
@@ -121,8 +121,7 @@ func TestCheckoutRailSkipReason(t *testing.T) {
 				Rail:   models.RailStripe,
 				Stripe: &config.StripeRailConfig{SecretKey: "sk_test_value"},
 			},
-			mode:     models.CheckoutSessionModeSubscription,
-			wantSkip: models.CheckoutRoutingSkipLinkMissing,
+			mode: models.CheckoutSessionModeSubscription,
 		},
 		{
 			name:    "nmi recurring ready for exact provider",

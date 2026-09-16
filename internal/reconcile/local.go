@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // localRailNames maps a reconcile Provider onto the rail name(s)
@@ -98,7 +99,7 @@ type LocalPaymentMethod struct {
 }
 
 // LocalPrice is the slice of openrails.prices the PS-1 materializer consumes:
-// the catalog psp_links jsonb maps remote plan ids onto
+// the normalized price bindings map remote plan ids onto
 // local prices.
 type LocalPrice struct {
 	ID               uuid.UUID
@@ -197,7 +198,7 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 		state.Subscriptions = append(state.Subscriptions, s)
 	}
 
-	prices, err := q.ReconcileListPricesWithPSPLinks(ctx)
+	prices, err := q.ReconcileListPricesWithPSPLinks(ctx, pspID)
 	if err != nil {
 		return nil, err
 	}
@@ -216,11 +217,15 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			days := int(*row.AccessDurationHours) / 24
 			p.BillingCycleDays = &days
 		}
-		if len(row.PspLinks) > 0 {
-			// Tolerate malformed blobs: a price whose links can't decode simply
-			// never matches a remote plan (PS-1 stays requires_review).
-			_ = json.Unmarshal(row.PspLinks, &p.PSPLinks)
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return nil, err
 		}
+		modelPrice := &models.Price{ID: row.ID, MerchantID: mid.UUID()}
+		if err := l.DB.LoadPricePSPBindings(ctx, []*models.Price{modelPrice}, &pspID); err != nil {
+			return nil, err
+		}
+		p.PSPLinks = modelPrice.PSPLinks
 		state.Prices = append(state.Prices, p)
 	}
 
@@ -320,20 +325,21 @@ func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 				set[pda] = struct{}{}
 			}
 		}
-		prices, err := d.Gen(ctx).ReconcileListPricesWithPSPLinks(ctx)
+		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
 		}
-		for _, row := range prices {
-			if len(row.PspLinks) == 0 {
-				continue
-			}
-			var rails map[string]map[string]string
-			if err := json.Unmarshal(row.PspLinks, &rails); err != nil {
-				continue // malformed links never match; same tolerance as Load
-			}
-			if pda := strings.TrimSpace(rails["solana"]["plan_pda"]); pda != "" {
-				set[pda] = struct{}{}
+		pspID, err := db.RequirePSPID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		bindings, err := d.Gen(ctx).ListPricePSPBindings(ctx, gen.ListPricePSPBindingsParams{MerchantID: mid.UUID(), PspID: &pspID})
+		if err != nil {
+			return nil, err
+		}
+		for _, binding := range bindings {
+			if binding.Rail == string(models.RailSolana) && binding.PlanPda != nil {
+				set[*binding.PlanPda] = struct{}{}
 			}
 		}
 		out := make([]string, 0, len(set))

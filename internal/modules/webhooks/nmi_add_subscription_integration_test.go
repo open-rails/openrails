@@ -242,7 +242,7 @@ func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
 	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","next_billing_date":"%s"}`,
 		f.providerSubID, f.clock.Now().UTC().Add(30*24*time.Hour).Format("2006-01-02"))
 
-	_, err := f.svc.Converge(ctx, f.providerSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "nmi")), f.providerSubID)
 	require.NoError(t, err)
 	require.Equal(t, string(models.StatusActive), f.status(t, ctx))
 
@@ -267,7 +267,7 @@ func TestNMIConvergeActivatesPendingFromFetchedCharge(t *testing.T) {
 
 	// Duplicate wake-up (the sale.success webhook echoing the same charge, in
 	// any order): fetches the same truth, changes nothing.
-	_, err = f.svc.Converge(ctx, f.providerSubID)
+	_, err = f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "nmi")), f.providerSubID)
 	require.NoError(t, err)
 	var count int
 	require.NoError(t, pool.QueryRow(ctx,
@@ -283,7 +283,7 @@ func TestNMIConvergePendingWithoutChargeRetriesLater(t *testing.T) {
 	f := newNMIConvergeFixture(t, dsn, models.StatusPending)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
-	_, err := f.svc.Converge(ctx, f.providerSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "nmi")), f.providerSubID)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrConvergeRetryLater), "settlement lag must snooze, got %v", err)
 	require.Equal(t, string(models.StatusPending), f.status(t, ctx))
@@ -297,7 +297,7 @@ func TestNMIConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	// subscriptionJSON stays "" → v5 GET answers 404; no sale rows either.
-	_, err := f.svc.Converge(ctx, f.providerSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "nmi")), f.providerSubID)
 	require.NoError(t, err)
 	require.Equal(t, string(models.StatusCancelled), f.status(t, ctx))
 }
@@ -310,14 +310,14 @@ func TestNMIConvergeProviderDownParks(t *testing.T) {
 	ctx := dbtest.WithTestMerchant(context.Background())
 
 	f.queryStatus = http.StatusInternalServerError
-	_, err := f.svc.Converge(ctx, f.providerSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "nmi")), f.providerSubID)
 	require.Error(t, err, "provider outage must fail the converge for retry")
 	require.Equal(t, string(models.StatusActive), f.status(t, ctx), "outage must not move local state")
 
 	f.queryStatus = 0
 	f.subscriptionJSON = fmt.Sprintf(`{"object":"subscription","id":"%s","next_billing_date":"%s"}`,
 		f.providerSubID, f.clock.Now().UTC().Add(30*24*time.Hour).Format("2006-01-02"))
-	_, err = f.svc.Converge(ctx, f.providerSubID)
+	_, err = f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "nmi")), f.providerSubID)
 	require.NoError(t, err)
 	require.Equal(t, string(models.StatusActive), f.status(t, ctx))
 }

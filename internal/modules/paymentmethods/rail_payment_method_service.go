@@ -761,7 +761,7 @@ func (s *RailPaymentMethodService) deletePaymentMethodGuards(ctx context.Context
 	// entry (the vault survives for the sibling cards; NMI refuses to empty a
 	// vault, so the LAST row's delete is the whole-vault delete).
 	if s.DB != nil && strings.TrimSpace(pm.RailCustomerRef) != "" {
-		n, err := NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.RailCustomerRef, pm.ID)
+		n, err := NewPaymentMethodRepo(s.DB).CountSharingCustomerRef(ctx, rail, pm.PspID, pm.RailCustomerRef, pm.ID)
 		if err != nil {
 			return false, nil, fmt.Errorf("failed to check payment method sharing: %w", err)
 		}

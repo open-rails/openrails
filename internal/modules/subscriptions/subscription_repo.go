@@ -142,7 +142,7 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 	// All columns are written explicitly so nil values CLEAR fields
 	// (CancelledAt, EndedAt, ...) when reactivating subscriptions. Because this
 	// is a full-row write from an in-memory image, webhook-apply
-	// read-modify-writes must read via GetByRailSubscriptionIDForUpdate inside
+	// read-modify-writes must read via GetByPSPSubscriptionIDForUpdate inside
 	// one tx or a concurrent writer's committed changes get reverted (#675).
 	if now.IsZero() {
 		now = time.Now()
@@ -269,6 +269,13 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 			}
 		}
 	}
+	bindingPrices := make([]*models.Price, 0, len(prices))
+	for _, price := range prices {
+		bindingPrices = append(bindingPrices, price)
+	}
+	if err := r.db.LoadPricePSPBindings(ctx, bindingPrices, nil); err != nil {
+		return err
+	}
 	pms := map[uuid.UUID]*models.PaymentMethod{}
 	if len(pmIDs) > 0 {
 		rows, err := q.ListPaymentMethodsByIDs(ctx, pmIDs)
@@ -284,7 +291,7 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 		}
 	}
 	for _, s := range subs {
-		s.Price = prices[s.PriceID]
+		s.Price = prices[s.PriceID].ForPSP(s.PspID)
 		if s.PaymentMethodID != nil {
 			s.PaymentMethod = pms[*s.PaymentMethodID]
 		}
@@ -399,11 +406,25 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 	return r.oneWithDetails(ctx, row, false)
 }
 
-// GetByRailSubscriptionIDForUpdate is the row-locked (FOR UPDATE) variant for
+// GetByPSPSubscriptionIDForUpdate is the row-locked (FOR UPDATE) variant for
 // webhook-apply read-modify-writes (#675). Must run inside a transaction;
 // UpdateAt is a full-row write, so the lock must be held from read to write.
-func (r *SubscriptionRepo) GetByRailSubscriptionIDForUpdate(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionByRailSubIDForUpdate(ctx, gen.GetSubscriptionByRailSubIDForUpdateParams{
+func (r *SubscriptionRepo) GetByPSPSubscriptionIDForUpdate(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
+	railSubscriptionID = strings.TrimSpace(railSubscriptionID)
+	if railSubscriptionID == "" {
+		return nil, errors.New("provider subscription reference is required")
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetSubscriptionByPSPSubIDForUpdate(ctx, gen.GetSubscriptionByPSPSubIDForUpdateParams{
+		MerchantID:         merchantID.UUID(),
+		PspID:              pspID,
 		Rail:               rail,
 		RailSubscriptionID: railSubscriptionID,
 	})
@@ -413,9 +434,23 @@ func (r *SubscriptionRepo) GetByRailSubscriptionIDForUpdate(ctx context.Context,
 	return r.oneWithDetails(ctx, row, false)
 }
 
-// GetByRailSubscriptionID finds a subscription by rail and rail_subscription_id.
-func (r *SubscriptionRepo) GetByRailSubscriptionID(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionByRailSubID(ctx, gen.GetSubscriptionByRailSubIDParams{
+// GetByPSPSubscriptionID finds a subscription by rail and rail_subscription_id.
+func (r *SubscriptionRepo) GetByPSPSubscriptionID(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
+	railSubscriptionID = strings.TrimSpace(railSubscriptionID)
+	if railSubscriptionID == "" {
+		return nil, errors.New("provider subscription reference is required")
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{
+		MerchantID:         merchantID.UUID(),
+		PspID:              pspID,
 		Rail:               rail,
 		RailSubscriptionID: railSubscriptionID,
 	})
@@ -425,11 +460,24 @@ func (r *SubscriptionRepo) GetByRailSubscriptionID(ctx context.Context, rail, ra
 	return r.oneWithDetails(ctx, row, false)
 }
 
-func (r *SubscriptionRepo) GetByRailMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
-	row, err := r.db.Gen(ctx).GetSubscriptionByRailMetadataValue(ctx, gen.GetSubscriptionByRailMetadataValueParams{
-		Rail:  strings.TrimSpace(rail),
-		Key:   strings.TrimSpace(key),
-		Value: strings.TrimSpace(value),
+func (r *SubscriptionRepo) GetByPSPMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
+	if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		return nil, errors.New("provider metadata key and reference are required")
+	}
+	merchantID, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := r.db.Gen(ctx).GetSubscriptionByPSPMetadataValue(ctx, gen.GetSubscriptionByPSPMetadataValueParams{
+		MerchantID: merchantID.UUID(),
+		PspID:      pspID,
+		Rail:       strings.TrimSpace(rail),
+		Key:        strings.TrimSpace(key),
+		Value:      strings.TrimSpace(value),
 	})
 	if err != nil {
 		return nil, err
@@ -457,8 +505,16 @@ func (r *SubscriptionRepo) GetActiveSubscriptionsByUserID(ctx context.Context, u
 	return derefSubs(subs), nil
 }
 
-func (r *SubscriptionRepo) GetActiveSubscriptionsByRail(ctx context.Context, rail string) ([]*models.Subscription, error) {
-	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsByRail(ctx, rail)
+func (r *SubscriptionRepo) GetActiveSubscriptionsForPSP(ctx context.Context, rail string) ([]*models.Subscription, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.Gen(ctx).ListActiveSubscriptionsForPSP(ctx, gen.ListActiveSubscriptionsForPSPParams{MerchantID: mid.UUID(), PspID: pspID, Rail: rail})
 	if err != nil {
 		return nil, err
 	}

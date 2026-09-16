@@ -57,7 +57,7 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 	subscriptionService := subscriptions.NewSubscriptionService(w.DB, priceService, productService, nil, w.Clock)
 	lifecycleService := &subscriptions.SubscriptionLifecycleService{DB: w.DB}
 	lifecycleService.SetClock(w.Clock)
-	localActive, err := subscriptionService.GetActiveSubscriptionsByRail(ctx, "ccbill")
+	localActive, err := subscriptionService.GetActiveSubscriptionsForPSP(ctx, "ccbill")
 	if err != nil {
 		return fmt.Errorf("load local ccbill subscriptions: %w", err)
 	}
@@ -92,7 +92,7 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 			continue
 		}
 		missingLocal++
-		existing, err := subscriptionService.GetByRailSubscriptionID(ctx, "ccbill", railSubID)
+		existing, err := subscriptionService.GetByPSPSubscriptionID(ctx, "ccbill", railSubID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				if alertErr := w.recordDataLinkRepairAlert(ctx, "ccbill_datalink_missing_local", nil, "", railSubID, &record, nil); alertErr != nil {

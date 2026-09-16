@@ -333,7 +333,8 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid merchant.ID
 		fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))
 		// #714 discovery lanes: the declared account_id IS the merchant wallet.
 		fetcher.MerchantWallet = scope.AccountID
-		fetcher.Plans = SolanaPlanSourceFromDB(b.DB)
+		plans := SolanaPlanSourceFromDB(b.DB)
+		fetcher.Plans = func(ctx context.Context) ([]string, error) { return plans(db.WithPSPID(ctx, scope.ID)) }
 		fetcher.Due = SolanaDueSubscriptionSourceFromDB(b.DB) // #720: due-window bulk-fetch filter
 		fetcher.Resolve = SolanaLocalRecordResolverFromDB(b.DB)
 		out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: fetcher, key: scope.AccountID}

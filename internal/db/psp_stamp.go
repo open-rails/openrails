@@ -14,7 +14,7 @@ type pspIDCtxKey struct{}
 // table, so this is a refusal, not a degraded write — an unattributed mirror row
 // is invisible to a PSP-scoped prune and indistinguishable from a sibling
 // account's row.
-var ErrNoPSPInContext = errors.New("no PSP resolved for this provider write")
+var ErrNoPSPInContext = errors.New("no PSP resolved for this provider operation")
 
 // WithPSPID pins the external account that actually produced a row.
 func WithPSPID(ctx context.Context, id uuid.UUID) context.Context {
@@ -62,4 +62,13 @@ func CustodianIDFromContext(ctx context.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return v
+}
+
+// RequireCustodianID returns the authenticated or captured custodian account.
+func RequireCustodianID(ctx context.Context) (uuid.UUID, error) {
+	id := CustodianIDFromContext(ctx)
+	if id == uuid.Nil {
+		return uuid.Nil, errors.New("no custodian resolved for this provider operation")
+	}
+	return id, nil
 }

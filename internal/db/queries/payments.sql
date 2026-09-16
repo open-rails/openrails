@@ -85,9 +85,11 @@ WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC;
 
--- name: GetPaymentByTransactionID :one
+-- name: GetPaymentByPSPTransactionID :one
 SELECT * FROM openrails.payments purch
-WHERE purch.rail = $1 AND purch.transaction_id = $2
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.psp_id IS NOT DISTINCT FROM sqlc.narg(psp_id)::uuid
+  AND purch.rail = $1 AND purch.transaction_id = $2
   AND purch.deleted_at IS NULL;
 
 -- name: DeletePayment :execrows
@@ -133,9 +135,10 @@ WHERE id = $1
   AND status = 'pending'
   AND deleted_at IS NULL;
 
--- name: GetPaymentByMetadataValue :one
+-- name: GetPaymentByPSPMetadataValue :one
 SELECT * FROM openrails.payments purch
-WHERE purch.metadata ->> sqlc.arg(key)::text = sqlc.arg(value)::text
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.psp_id = sqlc.arg(psp_id)::uuid
+  AND purch.metadata ->> sqlc.arg(key)::text = sqlc.arg(value)::text
   AND purch.deleted_at IS NULL
 LIMIT 1;
 
@@ -263,7 +266,9 @@ SELECT p.id AS payment_id,
 FROM openrails.payments p
 JOIN openrails.subscriptions sub ON sub.id = p.subscription_id
 LEFT JOIN openrails.payment_methods pm ON pm.id = sub.payment_method_id
-WHERE p.subscription_id IS NOT NULL
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.psp_id = sqlc.arg(psp_id)::uuid
+  AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
+  AND p.subscription_id IS NOT NULL
   AND p.deleted_at IS NULL
   AND sub.deleted_at IS NULL
   AND p.rail = sqlc.arg(rail)
@@ -282,7 +287,7 @@ LIMIT 2;
 UPDATE openrails.payments
 SET card_brand = sqlc.arg(card_brand)::text,
     card_last4 = sqlc.arg(card_last4)::text
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
   AND rail = 'stripe'
   AND transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
   AND card_last4 IS NULL
@@ -291,13 +296,15 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 -- name: MergeStripePaymentMetadata :exec
 UPDATE openrails.payments
 SET metadata = COALESCE(metadata, '{}'::jsonb) || sqlc.arg(patch)::jsonb
-WHERE rail = 'stripe'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND rail = 'stripe'
   AND transaction_id = sqlc.arg(transaction_id)
   AND deleted_at IS NULL;
 
 -- name: GetStripeAliasCardSnapshot :one
 SELECT card_brand, card_last4 FROM openrails.payments
-WHERE rail = 'stripe'
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND rail = 'stripe'
   AND transaction_id = ANY(sqlc.arg(transaction_ids)::text[])
   AND card_last4 IS NOT NULL
   AND deleted_at IS NULL
