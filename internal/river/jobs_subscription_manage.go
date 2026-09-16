@@ -108,6 +108,8 @@ func (w CancelSubscriptionWorker) cancel(ctx context.Context, args CancelSubscri
 		}
 	}
 
+	ctx = db.WithPSPID(ctx, sub.PspID)
+
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":         userID,
 		"subscription_id": sub.ID,
@@ -247,6 +249,8 @@ func (w ResumeSubscriptionWorker) resume(ctx context.Context, args ResumeSubscri
 		}).Info("subscription not resumable; skipping resume")
 		return nil
 	}
+
+	ctx = db.WithPSPID(ctx, sub.PspID)
 
 	log.WithContext(ctx).WithFields(log.Fields{
 		"user_id":         userID,

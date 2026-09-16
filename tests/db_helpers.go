@@ -195,7 +195,7 @@ func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUI
 // fails the test when missing.
 func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, rail models.Rail, transactionID string) *models.Payment {
 	suite.t.Helper()
-	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByPSPTransactionID(ctx, rail, transactionID)
+	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByPSPTransactionID(suite.PinPSP(ctx, string(rail)), rail, transactionID)
 	require.NoError(suite.t, err, "Failed to get payment by transaction %s", transactionID)
 	return p
 }
@@ -258,7 +258,7 @@ func (suite *TestContainerSuite) GetEntitlement(ctx context.Context, id uuid.UUI
 // swallowed the not-found error).
 func (suite *TestContainerSuite) GetSubscriptionByRailID(railSubID string) *models.Subscription {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := suite.MerchantCtx()
 
 	var id uuid.UUID
 	err := suite.Pool.QueryRow(ctx,

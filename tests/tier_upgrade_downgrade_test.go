@@ -198,7 +198,7 @@ func TestScheduledDowngrade(t *testing.T) {
 		// Use lifecycle service from runtime
 		lifecycleService := suite.App.Runtime.SubscriptionLifecycleService
 
-		err = lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
+		err = lifecycleService.RenewMembership(suite.PinPSP(ctx, "nmi"), &subscriptions.RenewMembershipParams{
 			Rail:               models.RailNMI,
 			RailSubscriptionID: sub.RailSubscriptionID,
 			TransactionID:      "renewal-txn-" + uuid.New().String()[:8],

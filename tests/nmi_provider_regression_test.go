@@ -114,7 +114,7 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	defer suite.CleanupSubscriptionsForUser(userID)
 
 	txnID := "nmi-renew-" + uuid.New().String()[:8]
-	ctx := suite.MerchantCtx()
+	ctx := suite.PinPSP(suite.MerchantCtx(), "nmi")
 	err := suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Rail:               models.Rail("nmi"),
 		RailSubscriptionID: sub.RailSubscriptionID,

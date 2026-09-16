@@ -24,7 +24,7 @@ func TestEntitlementsDunningStateMachine_CCBill(t *testing.T) {
 	require.NotNil(t, rt.SubscriptionService)
 	require.NotNil(t, rt.SubscriptionLifecycleService)
 
-	ctx := suite.MerchantCtx()
+	ctx := suite.PinPSP(suite.MerchantCtx(), "ccbill")
 
 	// Keep simulated times in the past relative to the DB server's NOW() to avoid
 	// constraints like chk_payment_not_future during RenewalSuccess.
