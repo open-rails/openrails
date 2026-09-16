@@ -60,13 +60,22 @@ func (s *Service) ListHostEvents(ctx context.Context, options openrails.HostEven
 			}
 			event.Payment = &openrails.PaymentSettledEvent{PaymentID: *row.PaymentID, Amount: *row.Amount, Currency: row.Currency}
 		case openrails.HostEventDelinquencyGrace, openrails.HostEventDelinquencyEntered, openrails.HostEventDelinquencyCleared:
-			payload := new(openrails.DelinquencyHostEvent)
-			if err := json.Unmarshal(row.Data, payload); err != nil {
+			// Storage predates the public wire DTO and stores money as JSON
+			// integers. Decode those fields explicitly before the Client emits
+			// lossless decimal strings at the HTTP boundary.
+			var payload struct {
+				openrails.DelinquencyHostEvent
+				OverdueAmount int64 `json:"overdue_amount"`
+				AmountFloor   int64 `json:"amount_floor"`
+			}
+			if err := json.Unmarshal(row.Data, &payload); err != nil {
 				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
 			}
 			payload.CustomerID = row.SubjectID
 			payload.Currency = row.Currency
-			event.Delinquency = payload
+			payload.DelinquencyHostEvent.OverdueAmount = payload.OverdueAmount
+			payload.DelinquencyHostEvent.AmountFloor = payload.AmountFloor
+			event.Delinquency = &payload.DelinquencyHostEvent
 		default:
 			return nil, fmt.Errorf("unknown stored host event type %q", row.EventType)
 		}

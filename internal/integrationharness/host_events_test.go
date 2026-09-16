@@ -22,7 +22,7 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	server := h.StartStandalone("USD")
 	a := server.ProvisionOwnedMerchant("events-a-" + uuid.NewString())
 	b := server.ProvisionOwnedMerchant("events-b-" + uuid.NewString())
-	token := server.MintAPIKey(a.MerchantSlug, "host-events", []string{controlplane.PermMerchantHostEventsRead, controlplane.PermMerchantHostEventsAcknowledge})
+	token := server.MintAPIKey(a.MerchantSlug, "host-events", []string{controlplane.PermMerchantHostEventsRead, controlplane.PermMerchantHostEventsAcknowledge, controlplane.PermMerchantPaymentsRead})
 	remote := server.Client(openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }))
 	host := h.StartEmbeddedMerchant("USD", a.MerchantID, a.MerchantSlug)
 	local, err := host.Runtime().Client()
@@ -36,6 +36,11 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.prices (id,merchant_id,product_id,amount,currency) VALUES ($1,$2,$3,7000000,'USD')`, price, a.MerchantID.UUID(), product)
 	require.NoError(t, err)
 	psp := dbtest.EnsureTestPSP(ctx, t, pool, a.MerchantID.UUID(), "nmi")
+	for _, client := range []*openrails.Client{remote, local} {
+		settled, err := client.HasSettledPayment(ctx, openrails.CustomerID(payer), price)
+		require.NoError(t, err)
+		require.False(t, settled)
+	}
 	// This earlier event commits after the later payment has been consumed.
 	// A persisted UUID high-water mark would be unsafe for this stream.
 	lifecycleID := uuid.Must(uuid.NewV7())
@@ -58,13 +63,16 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.Len(t, first, 1)
 	require.Equal(t, payment, first[0].Payment.PaymentID)
 	require.EqualValues(t, 7000000, first[0].Payment.Amount)
+	status, body := requestJSON(t, http.MethodGet, server.BaseURL+"/v1/merchant/host-events?type=payment.settled", token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	require.Contains(t, string(body), `"amount":"7000000"`)
 	require.Equal(t, "USD", first[0].Payment.Currency)
 	require.True(t, settledAt.Equal(first[0].OccurredAt))
 	require.Nil(t, first[0].Delinquency)
 	replay, err := local.ListHostEvents(ctx, options)
 	require.NoError(t, err)
 	require.Equal(t, first, replay)
-	otherToken := server.MintAPIKey(b.MerchantSlug, "other-host-events", []string{controlplane.PermMerchantHostEventsRead, controlplane.PermMerchantHostEventsAcknowledge})
+	otherToken := server.MintAPIKey(b.MerchantSlug, "other-host-events", []string{controlplane.PermMerchantHostEventsRead, controlplane.PermMerchantHostEventsAcknowledge, controlplane.PermMerchantPaymentsRead})
 	other := server.Client(openrails.WithTokenProvider(func(context.Context) (string, error) { return otherToken, nil }))
 	require.ErrorIs(t, other.AcknowledgeHostEvent(ctx, first[0].ID), openrails.ErrNotFound)
 	missing, err := other.ListHostEvents(ctx, options)
@@ -114,6 +122,45 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	deleted, err := q.DeleteDeliveredPaymentSettlementsBefore(ctx, gen.DeleteDeliveredPaymentSettlementsBeforeParams{MerchantID: a.MerchantID.UUID(), Cutoff: time.Now().Add(time.Hour), RowLimit: 10})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, deleted)
+	// Eligibility comes from durable payments, never acknowledged event history.
+	for _, client := range []*openrails.Client{remote, local} {
+		settled, err := client.HasSettledPayment(ctx, openrails.CustomerID(payer), price)
+		require.NoError(t, err)
+		require.True(t, settled, "settlement proof must survive event retention")
+		for _, pair := range [][2]uuid.UUID{{uuid.New(), price}, {payer, uuid.New()}} {
+			settled, err = client.HasSettledPayment(ctx, openrails.CustomerID(pair[0]), pair[1])
+			require.NoError(t, err)
+			require.False(t, settled)
+		}
+		_, err = client.HasSettledPayment(ctx, openrails.CustomerID(payer), uuid.Nil)
+		require.Error(t, err)
+	}
+	settled, err := other.HasSettledPayment(ctx, openrails.CustomerID(payer), price)
+	require.NoError(t, err)
+	require.False(t, settled, "another merchant must not observe the payment")
+	issuer := server.RegisterDelegatedIssuer("settlement-reader-"+uuid.NewString(), a.MerchantSlug)
+	narrow := issuer.Mint(uuid.NewString(), "", "", []string{controlplane.PermMerchantHostEventsRead})
+	status, body = requestJSON(t, http.MethodGet, server.BaseURL+"/v1/merchant/customers/"+payer.String()+"/payment-settlement-status?price_id="+price.String(), narrow, nil)
+	require.Equal(t, http.StatusForbidden, status, "host-event permission alone must not grant payment reads: %s", body)
+	_, err = pool.Exec(ctx, `UPDATE openrails.payments SET status='refunded' WHERE id=$1`, payment)
+	require.NoError(t, err)
+	settled, err = remote.HasSettledPayment(ctx, openrails.CustomerID(payer), price)
+	require.NoError(t, err)
+	require.True(t, settled, "a refund cannot recreate first-payment eligibility")
+	for _, test := range []struct {
+		status, movement string
+		amount           int64
+	}{
+		{"pending", "rail", 7000000}, {"failed", "rail", 7000000},
+		{"completed", "none", 7000000}, {"completed", "rail", 0},
+	} {
+		_, err = pool.Exec(ctx, `UPDATE openrails.payments SET status=$2,money_movement=$3,amount=$4 WHERE id=$1`, payment, test.status, test.movement, test.amount)
+		require.NoError(t, err)
+		settled, err = local.HasSettledPayment(ctx, openrails.CustomerID(payer), price)
+		require.NoError(t, err)
+		require.False(t, settled, "only a positive completed rail payment establishes eligibility")
+	}
+
 	deleted, err = q.DeleteDeliveredHostLifecycleEventsBefore(ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{MerchantID: a.MerchantID.UUID(), Cutoff: time.Now().Add(time.Hour), RowLimit: 10})
 	require.NoError(t, err)
 	require.Zero(t, deleted, "unacknowledged lifecycle instruction must survive retention")
@@ -122,6 +169,6 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	deleted, err = q.DeleteDeliveredHostLifecycleEventsBefore(ctx, gen.DeleteDeliveredHostLifecycleEventsBeforeParams{MerchantID: a.MerchantID.UUID(), Cutoff: time.Now().Add(time.Hour), RowLimit: 10})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, deleted)
-	status, body := requestJSON(t, http.MethodGet, server.BaseURL+"/v1/merchant/host-events?limit=bad", token, nil)
+	status, body = requestJSON(t, http.MethodGet, server.BaseURL+"/v1/merchant/host-events?limit=bad", token, nil)
 	require.Equal(t, http.StatusBadRequest, status, string(body))
 }

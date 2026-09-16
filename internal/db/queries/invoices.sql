@@ -225,12 +225,12 @@ WITH overdue AS (
       AND status = 'past_due' AND amount_due > 0
       AND due_at IS NOT NULL AND due_at < sqlc.arg(now)::timestamptz
 ), notices AS (
-    INSERT INTO openrails.notification_queue (id, merchant_id, customer_id, event_type, data, seen, created_at)
+    INSERT INTO openrails.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'invoice_overdue',
            jsonb_build_object('invoice_id', id,
                               'invoice_number', COALESCE(NULLIF(invoice_number, ''), id::text),
                               'amount_due', amount_due::text, 'currency', currency, 'due_at', due_at),
-           false, sqlc.arg(now)::timestamptz
+           NULL, sqlc.arg(now)::timestamptz
     FROM candidates
     ON CONFLICT (id) DO NOTHING
 )

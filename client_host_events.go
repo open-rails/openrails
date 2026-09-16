@@ -22,7 +22,7 @@ const (
 
 type PaymentSettledEvent struct {
 	PaymentID uuid.UUID `json:"payment_id"`
-	Amount    int64     `json:"amount"`
+	Amount    int64     `json:"amount,string"`
 	Currency  string    `json:"currency"`
 }
 
@@ -32,10 +32,10 @@ type DelinquencyHostEvent struct {
 	FromState       string     `json:"from_state"`
 	ToState         string     `json:"to_state"`
 	OverdueSince    *time.Time `json:"overdue_since,omitempty"`
-	OverdueAmount   int64      `json:"overdue_amount"`
+	OverdueAmount   int64      `json:"overdue_amount,string"`
 	OverdueInvoices int64      `json:"overdue_invoices"`
 	GraceDays       int64      `json:"grace_days"`
-	AmountFloor     int64      `json:"amount_floor"`
+	AmountFloor     int64      `json:"amount_floor,string"`
 }
 
 // HostEvent has exactly one payload, selected by Type. Acknowledgment is a

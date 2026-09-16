@@ -971,8 +971,6 @@ type OpenrailsPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 }
 
-
-
 // Pricing tiers for products with rail-specific identifiers
 type OpenrailsPrice struct {
 	ID        uuid.UUID

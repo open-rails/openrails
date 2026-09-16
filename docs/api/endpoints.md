@@ -523,3 +523,9 @@ time, preserving the fee-attribution coordinate.
 selects one payment's event. Acknowledged rows are retained for 30 days by default;
 pending rows survive retention. Hosts should filter by event type so one
 consumer's pending work cannot starve another type.
+
+`GET /v1/merchant/customers/{customer_id}/payment-settlement-status?price_id=...`
+backs `Client.HasSettledPayment` and requires `merchant:payments:read`. It reads
+the durable payment records: a positive completed or refunded original rail
+payment establishes the historical fact for that merchant, customer and price.
+Acknowledging or pruning its host event does not erase that fact.
