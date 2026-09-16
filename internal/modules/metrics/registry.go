@@ -115,7 +115,7 @@ var Dimensions = []Dimension{
 	{Name: "currency", Description: "currency code; added implicitly when a money measure is grouped without a single-currency filter"},
 	{Name: "rail", Description: "payment rail (e.g. stripe, mobius, ccbill, solana)"},
 	{Name: "rail_account", Description: "operator-declared PSP label; VAMP thresholds apply per account"},
-	{Name: "stream", Description: "revenue stream: subscription | one_time | usage", Values: []string{"subscription", "one_time", "usage"}},
+	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
 	{Name: "product_id", Description: "product UUID"},
 	{Name: "price_id", Description: "price UUID"},
 	{Name: "billing_cycle", Description: "price cadence: daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},

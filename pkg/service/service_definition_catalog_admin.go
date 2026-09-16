@@ -71,7 +71,7 @@ func (s *Service) GetProduct(ctx context.Context, productID uuid.UUID) (*Catalog
 	if err != nil {
 		return nil, err
 	}
-	return s.catalogProduct(ctx, p)
+	return productToCatalogProduct(p), nil
 }
 
 // GetProductByKey returns a product by its key.
@@ -94,7 +94,7 @@ func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProd
 	if err != nil {
 		return nil, err
 	}
-	return s.catalogProduct(ctx, p)
+	return productToCatalogProduct(p), nil
 }
 
 // ListProductsOptions controls ListProducts filtering and pagination.
@@ -132,10 +132,7 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (C
 	page.Items = make([]CatalogProduct, 0, len(raws))
 	page.Total = total
 	for _, p := range raws {
-		projected, err := s.catalogProduct(ctx, p)
-		if err != nil {
-			return page, err
-		}
+		projected := productToCatalogProduct(p)
 		page.Items = append(page.Items, *projected)
 	}
 	return page, nil
@@ -166,7 +163,7 @@ func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*Ca
 	// Propagate the active flag to Stripe so re-activating an OpenRails product
 	// re-activates its Stripe Product (best-effort).
 	s.propagateProductActiveToStripe(ctx, productID, true)
-	return s.catalogProduct(ctx, updated)
+	return productToCatalogProduct(updated), nil
 }
 
 // DeactivateProduct archives a product. Existing subscriptions on its prices
@@ -194,7 +191,7 @@ func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*
 	}
 	// Propagate the active flag to Stripe (archived -> Stripe active=false).
 	s.propagateProductActiveToStripe(ctx, productID, false)
-	return s.catalogProduct(ctx, updated)
+	return productToCatalogProduct(updated), nil
 }
 
 // GetPrice returns a price by ID.

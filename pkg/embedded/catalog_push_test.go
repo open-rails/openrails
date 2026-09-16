@@ -21,9 +21,8 @@ func writeCatalogPushManifest(t *testing.T, body string) string {
 // TestExampleCatalogManifestParses loads the canonical config/catalog.example.yaml
 // through the real publish path (loadCatalogPushTargets, which runs
 // catalog.Manifest.Validate per merchant) and asserts the multi-merchant example
-// is valid and exercises both the legacy surfaces (usage_limits, credit grants,
-// subscription prices) and the #638/#639 rate-card model (aggregation meters,
-// matrix pricing with a monthly cap, allowances, and a variable credit top-up).
+// is valid and exercises subscription prices and metered rate cards with
+// matrix pricing, monthly caps and allowances.
 // This keeps the example from rotting: a manifest-schema change that breaks it
 // fails here.
 func TestExampleCatalogManifestParses(t *testing.T) {

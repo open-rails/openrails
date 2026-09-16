@@ -1059,7 +1059,7 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 	require.GreaterOrEqual(t, len(file.Catalogs), 1)
 
 	// The example is multi-merchant; exercise the HTTP apply path against the
-	// anthropic catalog (legacy usage_limits + subscription prices, which the
+	// anthropic catalog (subscription prices and entitlements, which the
 	// applier fully supports). Rate-card apply gets its own
 	// test when the applier persists rate_cards (#638).
 	var entry exampleCatalogEntry
@@ -1231,4 +1231,163 @@ func exampleUsageRateCardCount(m catalog.Manifest) int {
 func holdDeadline() *time.Time {
 	v := time.Now().Add(time.Hour)
 	return &v
+}
+
+func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	h := New(t, ctx)
+	standalone := h.StartStandalone("usd")
+	token := standalone.MintAPIKey(
+		dbtest.TestMerchantSlug,
+		"catalog-product-use-cases-"+uuid.NewString(),
+		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
+	)
+
+	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
+	tierGroup := "saas-" + suffix
+	premiumGroup := "premium-" + suffix
+	premiumKey := "premium-" + suffix
+	basicKey := "basic-" + suffix
+	proKey := "pro-" + suffix
+	movieKey := "movie-" + suffix
+
+	manifest := catalog.Manifest{
+		Version: catalog.SupportedVersion,
+		Products: []catalog.Product{
+			{
+				Key:          premiumKey,
+				DisplayName:  "Premium",
+				TierGroup:    premiumGroup,
+				Entitlements: []string{"premium"},
+				Prices: []catalog.Price{{
+					UnitAmount: 9_990_000,
+					Currency:   "USD",
+					Duration:   "30d",
+					AutoRenew:  true,
+				}},
+			},
+			{
+				Key:         basicKey,
+				DisplayName: "Basic",
+				TierGroup:   tierGroup,
+				TierRank:    intPtr(1),
+				Prices: []catalog.Price{{
+					UnitAmount: 19_990_000,
+					Currency:   "USD",
+					Duration:   "30d",
+					AutoRenew:  true,
+				}},
+			},
+			{
+				Key:         proKey,
+				DisplayName: "Pro",
+				TierGroup:   tierGroup,
+				TierRank:    intPtr(2),
+				Prices: []catalog.Price{{
+					UnitAmount: 49_990_000,
+					Currency:   "USD",
+					Duration:   "30d",
+					AutoRenew:  true,
+					Trial:      &catalog.PriceTrial{UnitAmount: 0, Duration: "7d"},
+				}},
+			},
+			{
+				Key:         movieKey,
+				DisplayName: "Catalog Movie",
+				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "USD", Duration: "indefinite"}},
+			},
+		},
+	}
+	require.NoError(t, manifest.Validate())
+	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
+		"catalog": manifest,
+		"insert":  true,
+	})
+	require.Equal(t, http.StatusOK, status, string(body))
+
+	applier := httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}
+	premium := mustCatalogProduct(t, ctx, applier, premiumKey)
+	basic := mustCatalogProduct(t, ctx, applier, basicKey)
+	pro := mustCatalogProduct(t, ctx, applier, proKey)
+	movie := mustCatalogProduct(t, ctx, applier, movieKey)
+
+	require.Contains(t, premium.EntitlementsSpec, "premium")
+	require.Equal(t, tierGroup, *basic.TierGroup)
+	require.Equal(t, 1, basic.TierRank)
+	require.Equal(t, tierGroup, *pro.TierGroup)
+	require.Equal(t, 2, pro.TierRank)
+
+	proPrices, err := applier.ListPricesByProduct(ctx, pro.ID, true)
+	require.NoError(t, err)
+	require.Len(t, proPrices, 1)
+	require.True(t, proPrices[0].AutoRenew)
+	require.NotNil(t, proPrices[0].AccessDurationHours)
+	require.Equal(t, 720, *proPrices[0].AccessDurationHours)
+	require.NotNil(t, proPrices[0].TrialUnitAmount)
+	require.Equal(t, int64(0), *proPrices[0].TrialUnitAmount)
+	require.NotNil(t, proPrices[0].TrialDurationHours)
+	require.Equal(t, 168, *proPrices[0].TrialDurationHours)
+
+	moviePrices, err := applier.ListPricesByProduct(ctx, movie.ID, true)
+	require.NoError(t, err)
+	require.Len(t, moviePrices, 1)
+	require.Nil(t, moviePrices[0].AccessDurationHours)
+	require.False(t, moviePrices[0].AutoRenew)
+
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	pool := dbi.Pool()
+	customerID := uuid.New()
+	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customerID.String())
+	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
+	})
+
+	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
+
+	pastEnd := time.Now().Add(-24 * time.Hour)
+	firstSub, err := grantLedger.Grant(ctx, grants.GrantInput{
+		Customer: customerID,
+		Product:  &premium.ID,
+		Kind:     grants.Entitlement,
+		Source:   grants.Subscription,
+		SourceID: uuid.NewString(),
+		Spec:     &grants.Spec{Entitlements: []string{"premium"}},
+		StartsAt: time.Now().Add(-48 * time.Hour),
+		EndsAt:   &pastEnd,
+	})
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, firstSub))
+	futureEnd := time.Now().Add(30 * 24 * time.Hour)
+	renewal, err := grantLedger.Grant(ctx, grants.GrantInput{
+		Customer: customerID,
+		Product:  &premium.ID,
+		Kind:     grants.Entitlement,
+		Source:   grants.Subscription,
+		SourceID: uuid.NewString(),
+		Spec:     &grants.Spec{Entitlements: []string{"premium"}},
+		StartsAt: time.Now().Add(-time.Hour),
+		EndsAt:   &futureEnd,
+	})
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, renewal))
+	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/customers/"+customerID.String()+"/entitlements", token, nil)
+	require.Equal(t, http.StatusOK, status, string(body))
+	var entitlementRows []struct {
+		Entitlement string `json:"entitlement"`
+	}
+	require.NoError(t, json.Unmarshal(body, &entitlementRows))
+	require.Len(t, entitlementRows, 1)
+	require.Equal(t, "premium", entitlementRows[0].Entitlement)
+
+	ownership, err := grantLedger.Grant(ctx, grants.GrantInput{
+		Customer: customerID,
+		Product:  &movie.ID,
+		Kind:     grants.Ownership,
+		Source:   grants.Purchase,
+		SourceID: uuid.NewString(),
+	})
+	require.NoError(t, err)
+	require.NoError(t, grantLedger.MaterializeGrant(ctx, ownership))
+	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customerID, movie.ID))
 }

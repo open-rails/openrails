@@ -132,6 +132,35 @@ func (s *Service) GrantProductAccess(ctx context.Context, params GrantParams) (*
 	return out, created, nil
 }
 
+// GetGrant returns a single grant by id (merchant-scoped), or nil if not found.
+func (s *Service) GetGrant(ctx context.Context, grantID uuid.UUID) (*models.ProductAccessGrant, error) {
+	var grant *models.ProductAccessGrant
+	err := s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
+		g, e := r.GetByID(ctx, grantID)
+		if e != nil {
+			return e
+		}
+		grant = g
+		return nil
+	})
+	return grant, err
+}
+
+// RevokeProductAccess revokes a single grant by id. Not-found / already-revoked
+// is reported via found=false (not an error) so callers can stay idempotent.
+func (s *Service) RevokeProductAccess(ctx context.Context, grantID uuid.UUID, reason models.ProductAccessRevokeReason) (found bool, err error) {
+	now := s.now().UTC()
+	err = s.withTx(ctx, func(ctx context.Context, r *ProductAccessGrantRepo) error {
+		n, e := r.RevokeByID(ctx, grantID, now, reason)
+		if e != nil {
+			return e
+		}
+		found = n > 0
+		return nil
+	})
+	return found, err
+}
+
 // RevokeProductAccessByPayment revokes all active grants tied to a payment.
 // Used by the refund / chargeback reversal path. Returns the number revoked.
 func (s *Service) RevokeProductAccessByPayment(ctx context.Context, paymentID uuid.UUID, reason models.ProductAccessRevokeReason) (int64, error) {
