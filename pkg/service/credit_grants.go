@@ -50,18 +50,3 @@ func (s *Service) RevokeCreditGrant(ctx context.Context, payer identity.Customer
 	}
 	return result, nil
 }
-
-// CreditUnitDecimals returns the existing registry's scale for a selected unit.
-func (s *Service) CreditUnitDecimals(ctx context.Context, currency string) (int, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer release()
-	code, err := requireCurrency(currency)
-	if err != nil {
-		return 0, err
-	}
-	decimals, err := money.CurrencyDecimals(code)
-	return decimals, err
-}
