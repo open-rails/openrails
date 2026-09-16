@@ -30,8 +30,7 @@ type Invoice struct {
 	AmountDue      int64 `json:"amount_due"`
 
 	// LineItems is the immutable as-billed statement itemization frozen at
-	// close (#726): per-event_type usage rollups plus adjustment lines (e.g.
-	// minimum_spend_trueup). MoneyMovements is the summed-by-type ledger snapshot.
+	// close: per-event_type usage rollups. MoneyMovements is the ledger snapshot.
 	LineItems      []InvoiceLineItem `json:"line_items"`
 	MoneyMovements map[string]int64  `json:"money_movements"`
 
@@ -84,8 +83,7 @@ type InvoiceContact struct {
 }
 
 // InvoiceLineItem is one statement line on an invoice: a per-event_type usage
-// rollup (total amount, event count, summed dimensions) or an adjustment line
-// (event_type = kind, e.g. "minimum_spend_trueup").
+// rollup (total amount, event count, summed dimensions).
 type InvoiceLineItem struct {
 	EventType  string           `json:"event_type"`
 	Amount     int64            `json:"amount"`

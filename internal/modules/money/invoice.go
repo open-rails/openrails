@@ -19,33 +19,13 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// finalizeOptions tunes one FinalizeInvoice call.
-type finalizeOptions struct {
-	minimumSpendTrueUp bool
-}
-
-// FinalizeOption configures FinalizeInvoice.
-type FinalizeOption func(*finalizeOptions)
-
-// WithMinimumSpendTrueUp enables the #643 minimum-spend true-up: at this close,
-// if the customer's rated period total is below their committed minimum_spend, a
-// true-up line brings the invoice up to it. Use ONLY on full-period closes (a
-// commitment true-up is meaningless mid-period), so threshold closes omit it.
-func WithMinimumSpendTrueUp() FinalizeOption {
-	return func(o *finalizeOptions) { o.minimumSpendTrueUp = true }
-}
-
 // FinalizeInvoice builds the period invoice for (payer, currency) over [from,
 // to). Line items are rolled up from openrails.usage_events; money movements and
 // totals come from the money ledger; both are snapshotted on the invoice.
 // Idempotent: re-finalizing the same (period, currency) returns the existing
 // invoice. Arrears invoices with owed accrual become open receivables; prepaid
 // / zero-due invoices are marked paid informational statements.
-func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time, opts ...FinalizeOption) (*models.Invoice, error) {
-	var fo finalizeOptions
-	for _, opt := range opts {
-		opt(&fo)
-	}
+func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -196,28 +176,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			return perr
 		}
 
-		// --- minimum-spend true-up (#643) ---
-		// On a full-period close, if rated usage falls short of the customer's
-		// committed minimum_spend, top the receivable up to it. Accrued as a real
-		// owed liability + line item below, so the ledger stays consistent.
-		trueUp := int64(0)
-		if fo.minimumSpendTrueUp {
-			minSpend, mErr := q.GetCustomerMinimumSpend(ctx, gen.GetCustomerMinimumSpendParams{
-				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
-			})
-			if mErr != nil && !errors.Is(mErr, pgx.ErrNoRows) {
-				return mErr
-			}
-			if mErr == nil && minSpend > pendingReceivable {
-				trueUp = minSpend - pendingReceivable
-			}
-		}
-		receivable := pendingReceivable + trueUp
-		// #726: itemize the true-up on the frozen statement (the only
-		// reader-facing itemization); the money truth is the owed ledger below.
-		if trueUp > 0 {
-			lineItems = append(lineItems, models.InvoiceLineItem{EventType: "minimum_spend_trueup", Amount: trueUp, Count: 1})
-		}
+		receivable := pendingReceivable
 
 		// --- closing balance snapshot (derived, #491) ---
 		bal, balErr := s.deriveBalance(ctx, q, tenantID, payerID, cur)
@@ -276,7 +235,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			PeriodTo:         pto,
 			UsageTotal:       usageTotal,
 			DepositsTotal:    movements["deposit"],
-			OwedAccrued:      movements[txOwedAccrual] + trueUp,
+			OwedAccrued:      movements[txOwedAccrual],
 			OwedPaid:         -movements[txOwedPayment], // owed_payment is stored negative in the map
 			ClosingBalance:   closing,
 			SubtotalAmount:   totalAmount,
@@ -366,14 +325,6 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			PeriodTo:   inv.PeriodTo,
 		}); err != nil {
 			return err
-		}
-		// #643: post the minimum-spend true-up as a real owed liability so the
-		// ledger balance and amount_due agree. Idempotent — FinalizeInvoice
-		// returns the existing invoice on re-finalize before reaching here.
-		if trueUp > 0 {
-			if _, lerr := s.moneyLedger(q, tenantID).AccrueOwed(ctx, payerID, cur, trueUp, ledger.Coord{Operation: ledger.OpMinimumSpendTrueUp, Source: "minimum_spend_trueup", SourceID: inv.ID.String()}, &inv.ID); lerr != nil {
-				return lerr
-			}
 		}
 		return nil
 	})
@@ -737,8 +688,7 @@ func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, bound
 		if err != nil {
 			return count, err
 		}
-		// Full-period close: apply any minimum-spend true-up (#643).
-		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to, WithMinimumSpendTrueUp()); err != nil {
+		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to); err != nil {
 			return count, err
 		}
 		count++

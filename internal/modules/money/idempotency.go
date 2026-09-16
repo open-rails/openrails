@@ -51,12 +51,11 @@ const (
 	OpCreditRevoke    = ledger.OpCreditRevoke
 	OpCreditReinstate = ledger.OpCreditReinstate
 
-	OpArrearsAccrual     = ledger.OpArrearsAccrual
-	OpMeteredRating      = ledger.OpMeteredRating
-	OpMinimumSpendTrueUp = ledger.OpMinimumSpendTrueUp
-	OpInvoicePayment     = ledger.OpInvoicePayment
-	OpManualInvoicePay   = ledger.OpManualInvoicePay
-	OpInvoiceVoid        = ledger.OpInvoiceVoid
+	OpArrearsAccrual   = ledger.OpArrearsAccrual
+	OpMeteredRating    = ledger.OpMeteredRating
+	OpInvoicePayment   = ledger.OpInvoicePayment
+	OpManualInvoicePay = ledger.OpManualInvoicePay
+	OpInvoiceVoid      = ledger.OpInvoiceVoid
 )
 
 // UsageOperation is the operation kind of a metered usage charge (usage:<event_type>).
