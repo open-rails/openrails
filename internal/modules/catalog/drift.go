@@ -340,9 +340,14 @@ func ComputeStripeDrift(remoteProducts []StripeProduct, remotePrices []StripePri
 			continue
 		}
 		id := local.ID.String()
-		remoteMicros := int64(moneyutil.CentsToMicros(moneyutil.Cents(sp.UnitAmount)))
-		if local.Amount != remoteMicros {
-			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "unit_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteMicros, 10))
+		remoteNative, err := moneyutil.RailMinorToNative(sp.Currency, moneyutil.Cents(sp.UnitAmount))
+		if err != nil {
+			// A provider currency that is not in the system registry cannot be
+			// compared safely. Record the currency drift and leave the amount
+			// unresolved rather than applying a USD/cent scale by guesswork.
+			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "currency", local.Currency, sp.Currency)
+		} else if local.Amount != remoteNative {
+			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "unit_amount", strconv.FormatInt(local.Amount, 10), strconv.FormatInt(remoteNative, 10))
 		}
 		if !strings.EqualFold(strings.TrimSpace(local.Currency), strings.TrimSpace(sp.Currency)) {
 			fieldDrift(models.CatalogDriftResourcePrice, id, sp.ID, "currency", local.Currency, sp.Currency)

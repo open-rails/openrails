@@ -110,6 +110,21 @@ func TestComputeStripeDriftOrphanMissingAndFields(t *testing.T) {
 	require.Empty(t, inSync, "Stripe cents must compare against local micros")
 }
 
+func TestComputeStripeDriftUsesCurrencyNativeScale(t *testing.T) {
+	now := time.Now().UTC()
+	psp, productID, priceID := uuid.New(), uuid.New(), uuid.New()
+	products := []*models.Product{driftProduct(productID, "Japanese", "", true)}
+	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 1_230_000, Currency: "JPY", PSPLinks: map[string]map[string]string{
+		"stripe": {models.RailKeyRail: "stripe", models.RailKeyPSPID: psp.String(), models.RailKeyStripePriceID: "price_jpy", models.RailKeyStripeProductID: "prod_jpy"},
+	}}}
+	snap := BuildDriftSnapshot(products, prices, psp)
+	events := ComputeStripeDrift(
+		[]StripeProduct{{ID: "prod_jpy", Name: "Japanese", Active: true, Metadata: map[string]string{StripeMetadataOpenRailsProductKey: "prod-key"}}},
+		[]StripePrice{{ID: "price_jpy", UnitAmount: 123, Currency: "JPY", Active: true, Metadata: map[string]string{StripeMetadataOpenRailsPriceKey: "prod-key.jpy.1230000.onetime"}}},
+		snap, now)
+	require.Empty(t, events, "Stripe whole-yen amount must widen using JPY's native scale")
+}
+
 // Links bound to another account are neither evidence nor expected objects for
 // the account being read (#993 immutable PSP identity).
 func TestDriftSnapshotUsesOnlyTheReadAccountsLinks(t *testing.T) {
