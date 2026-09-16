@@ -16,3 +16,11 @@ Before declaring v1, regenerate after all planned reductions, pin the supported
 release tag, and enforce migration immutability/API compatibility against that
 tag. No v1 tag is created by this tool, and updating this pre-v1 snapshot is not
 permission to break a published v1 contract.
+
+`python3 scripts/check-v1-workflows.py` runs the small release workflow manifest
+against disposable PostgreSQL/Redis fixtures and requires every named test to
+actually pass. Missing/renamed tests and skips fail instead of producing an
+empty green suite. It writes JSON test evidence under `.reports/`. The browser
+sender-proof/cookie workflow remains a separate required CI job. The actual SaaS
+consumer repository must also pass its fee, identity and hosted-routing suites;
+the core harness alone is not proof of that integration.

@@ -1,0 +1,9 @@
+./embed	TestCommerceClientCheckoutAndTier
+./embed	TestRecoveryClientAcrossTransports
+./embed	TestInvoiceClientWorkflowAcrossTransports
+./embed	TestMeteringClientRatesIntoInvoice
+./embed	TestCatalogClientSharedWorkflow
+./pkg/service	TestAdmissionClientRecoveryAndCaptureReceipt
+./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients
+./internal/integrationharness	TestDelegationHTTPWorkflow
+./internal/integrationharness	TestDelegationNativeTLSWorkflow
