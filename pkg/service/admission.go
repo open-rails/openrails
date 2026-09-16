@@ -65,18 +65,7 @@ var ErrHoldDeadlinePassed = admission.ErrHoldDeadlinePassed
 var ErrHoldNotFound = errors.New("hold not found for request_id")
 
 // AdmitResult is the unified admission decision returned to the host.
-type AdmitResult struct {
-	Allowed             bool       `json:"allowed"`
-	Currency            string     `json:"currency,omitempty"`
-	EstimatedAmount     int64      `json:"estimated_amount,omitempty"`
-	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
-	BlockedBy           string     `json:"blocked_by,omitempty"`
-	DenyCode            string     `json:"deny_code,omitempty"`
-	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
-	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
-	Replayed            bool       `json:"replayed"`
-	State               string     `json:"state,omitempty"`
-}
+type AdmitResult = openrails.AdmitResponse
 
 // Admit evaluates policy and reserves a durable request operation in one payer transaction.
 func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error) {
@@ -811,18 +800,7 @@ type WastedSpendInput struct {
 const wastedSpendEventType = "wasted_spend"
 
 // WastedSpendResult describes how OpenRails handled one wasted-spend report.
-type WastedSpendResult struct {
-	Currency             string `json:"currency"`
-	PolicyCurrency       string `json:"policy_currency,omitempty"`
-	RecordedAmount       int64  `json:"recorded_amount"`
-	PolicyRecordedAmount int64  `json:"policy_recorded_amount,omitempty"`
-	ForgivenAmount       int64  `json:"forgiven_amount"`
-	PolicyForgivenAmount int64  `json:"policy_forgiven_amount,omitempty"`
-	ChargedAmount        int64  `json:"charged_amount"`
-	PolicyChargedAmount  int64  `json:"policy_charged_amount,omitempty"`
-	Action               string `json:"action"`
-	Duplicate            bool   `json:"duplicate,omitempty"`
-}
+type WastedSpendResult = openrails.WastedSpendResponse
 
 // ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
 // accrue against their flat Redis cutoff, while direct payer credentials accrue

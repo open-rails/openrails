@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -271,7 +272,7 @@ func admitDelegatedSpend(t *testing.T, srv *httptest.Server, payer uuid.UUID, in
 	t.Helper()
 	body, err := json.Marshal(map[string]any{"items": []map[string]any{{
 		"customer_id": payer.String(), "invoker": invoker, "invoker_type": "delegated",
-		"currency": currency, "estimated_amount": amount, "request_id": requestID,
+		"currency": currency, "estimated_amount": strconv.FormatInt(amount, 10), "request_id": requestID,
 		"expires_at": time.Now().Add(time.Hour).Unix(),
 	}}})
 	require.NoError(t, err)

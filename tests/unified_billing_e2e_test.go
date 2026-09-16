@@ -149,7 +149,7 @@ func (h *billingE2EHarness) admit(userID, source, requestID string, amount int64
 		"invoker":          userID,
 		"invoker_type":     "payer",
 		"currency":         money.DefaultCurrency,
-		"estimated_amount": amount,
+		"estimated_amount": strconv.FormatInt(amount, 10),
 		"request_id":       requestID,
 		"source":           source,
 		"expires_at":       time.Now().Add(15 * time.Minute).Unix(),

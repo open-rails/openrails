@@ -260,12 +260,12 @@ type AdmitRequest struct {
 	TrustLevel      string `json:"trust_level,omitempty"`
 	Resource        string `json:"resource,omitempty"`
 	Currency        string `json:"currency,omitempty"`
-	EstimatedAmount int64  `json:"estimated_amount"`
+	EstimatedAmount int64  `json:"estimated_amount,string"`
 	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
 	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
 	// the host knows it. Zero means the request adds no ongoing rate, which
 	// leaves an accrual_rate_cap payer gated on what is already running.
-	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty"`
+	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty,string"`
 	RequestID               string `json:"request_id"`
 	Source                  string `json:"source,omitempty"`
 	// ExpiresAt (unix seconds) is the deadline of the job this admit covers.
@@ -291,8 +291,8 @@ type AdmitResponse struct {
 	BlockedBy           string     `json:"blocked_by,omitempty"`
 	DenyCode            string     `json:"deny_code,omitempty"`
 	Currency            string     `json:"currency,omitempty"`
-	EstimatedAmount     int64      `json:"estimated_amount,omitempty"`
-	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty"`
+	EstimatedAmount     int64      `json:"estimated_amount,omitempty,string"`
+	StartCapacityAmount int64      `json:"start_capacity_amount,omitempty,string"`
 	RetryAfterSeconds   int64      `json:"retry_after_seconds,omitempty"`
 	HoldExpiresAt       *time.Time `json:"hold_expires_at,omitempty"`
 	Replayed            bool       `json:"replayed"`
@@ -455,7 +455,7 @@ type WastedSpendReport struct {
 	InvokerType string `json:"invoker_type,omitempty"`
 	Currency    string `json:"currency,omitempty"`
 	// Amount is the wasted spend in the currency's internal precision.
-	Amount int64 `json:"amount"`
+	Amount int64 `json:"amount,string"`
 	// Source identifies the system reporting the waste (e.g. "inference-gateway").
 	Source string `json:"source"`
 	// SourceID is the idempotency key for this report within the Source namespace.
@@ -479,7 +479,7 @@ type UsageReport struct {
 	Currency   string           `json:"currency,omitempty"`
 	EventType  string           `json:"event_type"`
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
-	Amount     int64            `json:"amount"`
+	Amount     int64            `json:"amount,string"`
 	Resource   string           `json:"resource,omitempty"`
 	Metadata   map[string]any   `json:"metadata,omitempty"`
 	Source     string           `json:"source"`
@@ -492,12 +492,12 @@ type UsageReport struct {
 type WastedSpendResponse struct {
 	Currency             string `json:"currency"`
 	PolicyCurrency       string `json:"policy_currency,omitempty"`
-	RecordedAmount       int64  `json:"recorded_amount"`
-	PolicyRecordedAmount int64  `json:"policy_recorded_amount,omitempty"`
-	ForgivenAmount       int64  `json:"forgiven_amount"`
-	PolicyForgivenAmount int64  `json:"policy_forgiven_amount,omitempty"`
-	ChargedAmount        int64  `json:"charged_amount"`
-	PolicyChargedAmount  int64  `json:"policy_charged_amount,omitempty"`
+	RecordedAmount       int64  `json:"recorded_amount,string"`
+	PolicyRecordedAmount int64  `json:"policy_recorded_amount,omitempty,string"`
+	ForgivenAmount       int64  `json:"forgiven_amount,string"`
+	PolicyForgivenAmount int64  `json:"policy_forgiven_amount,omitempty,string"`
+	ChargedAmount        int64  `json:"charged_amount,string"`
+	PolicyChargedAmount  int64  `json:"policy_charged_amount,omitempty,string"`
 	Action               string `json:"action"`
 	Duplicate            bool   `json:"duplicate,omitempty"`
 }
