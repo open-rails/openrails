@@ -252,18 +252,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// Set emailService on the NotificationService that was created in createServices
 	serviceInstances.NotificationService.SetEmailService(emailService)
 
-	// #736 alerting: rule templates → #733 metrics queries, edge-triggered
-	// evaluator, multi-channel delivery. The email channel reuses the same
-	// SendGrid seam (nil emailService = email fails soft to a note). The
-	// dashboard deep link in alert payloads is prefixed by the configured
-	// frontend base URL when present.
+	// Immediate merchant notifications share the existing email service.
 	var alertEmailSender alerting.EmailSender
 	if emailService != nil {
 		alertEmailSender = emailService
 	}
 	alertService := alerting.NewService(alerting.Deps{
 		DB:               database,
-		Metrics:          serviceInstances.MetricsService,
 		Email:            alertEmailSender,
 		Clock:            clock,
 		DashboardBaseURL: alertingDashboardBaseURL(cfg),

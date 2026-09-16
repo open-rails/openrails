@@ -160,26 +160,6 @@ type OpenrailsAdmissionOperation struct {
 	ReleasedAt         *time.Time
 }
 
-// #736 per-merchant metric threshold rules. template + params compile to a #733 metrics query the evaluator runs on a slow tick; fired_at/cleared_at are edge-triggered state (fire once on crossing, clear on recrossing).
-type OpenrailsAlertRule struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Name       string
-	Template   string
-	Params     []byte
-	Severity   string
-	// ordered channel refs: [{"type":"in_app"}|{"type":"email"}|{"type":"webhook","webhook_id":"<uuid>"}].
-	Channels []byte
-	Enabled  bool
-	// set when the current active alert opened (NULL = not firing); the evaluator never re-fires while non-NULL.
-	FiredAt         *time.Time
-	ClearedAt       *time.Time
-	LastEvaluatedAt *time.Time
-	LastValue       *float64
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-}
-
 type OpenrailsAutoTopupEpisode struct {
 	IntentID     uuid.UUID
 	MerchantID   uuid.UUID
@@ -534,13 +514,6 @@ type OpenrailsEntitlement struct {
 	DestructiveRunID *uuid.UUID
 }
 
-// #787: one row per merchant recording when the low-severity reconciliation-findings digest last fired.
-type OpenrailsFindingDigestState struct {
-	MerchantID     uuid.UUID
-	LastDigestedAt *time.Time
-	UpdatedAt      time.Time
-}
-
 // #690 episode analytics: spans of entitlement access NOT covered by payment (subscription paid-through snapshot, completed one_off payment, or a live matching grant). Open episodes (window still granting) end at now(). Causes label sanctioned unpaid access (sanctioned_dunning, awaiting_verification) vs failure (unsanctioned). Approximations: paid-through is the current-period snapshot (renewals overwrite it, healed historical lapses are invisible); coverage is contiguous-from-the-left (uncovered TAIL only); cause reads the sub's CURRENT state; refund time falls back to the purchase time when no refund row links.
 type OpenrailsFreeloaderEpisode struct {
 	MerchantID    uuid.UUID
@@ -818,7 +791,7 @@ type OpenrailsMerchantDormancyNotice struct {
 	WarnCount     int64
 }
 
-// #736 MERCHANT-operator-facing in_app alert store (console bell). rule_id references the source alert_rules row informationally (no FK: notifications outlive rule deletion).
+// Immediate merchant-operator notifications (console bell).
 type OpenrailsMerchantNotification struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -826,7 +799,6 @@ type OpenrailsMerchantNotification struct {
 	Title      string
 	Body       string
 	Link       string
-	RuleID     *uuid.UUID
 	Data       []byte
 	CreatedAt  time.Time
 	ReadAt     *time.Time

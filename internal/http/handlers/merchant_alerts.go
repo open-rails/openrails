@@ -1,8 +1,7 @@
 package handlers
 
-// Metric threshold alerting (#736): merchant-operator CRUD for alert rules and
-// outbound webhooks, the in_app notification bell, and per-rule test-fire. Reads
-// share the metrics-read permission; mutations are settings-write gated (routes).
+// Merchant webhook destinations and the notification bell. Reads require
+// metrics-read permission; mutations require settings-write.
 
 import (
 	"errors"
@@ -35,7 +34,7 @@ func alertPathID(r *httprequest.Request) (uuid.UUID, bool) {
 }
 
 func alertValidationError(r *httprequest.Request, verr *alerting.ValidationError) {
-	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "alert_rule_invalid", verr.Error()).
+	r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "webhook_invalid", verr.Error()).
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }
 
@@ -51,116 +50,6 @@ func handleAlertWriteError(r *httprequest.Request, err error, notFoundMsg string
 	default:
 		r.ErrorJSON(http.StatusInternalServerError, "alerting request failed")
 	}
-}
-
-// --- rules -------------------------------------------------------------------
-
-// AlertRuleTemplates handles GET /v1/merchant/alerts/templates: the in-code
-// template registry (key, params, defaults) the console renders create/edit
-// forms from. Additive to the pinned contract (documented in #736) so the
-// console never hardcodes param specs that would drift from the engine.
-func AlertRuleTemplates(r *httprequest.Request) {
-	r.JSON(http.StatusOK, map[string]any{"data": alerting.Templates()})
-}
-
-// ListAlertRules handles GET /v1/merchant/alerts/rules.
-func ListAlertRules(r *httprequest.Request) {
-	svc, ok := alertService(r)
-	if !ok {
-		return
-	}
-	rules, err := svc.ListRules(r.Request.Context())
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to list alert rules")
-		return
-	}
-	r.JSON(http.StatusOK, map[string]any{"data": rules})
-}
-
-// CreateAlertRule handles POST /v1/merchant/alerts/rules.
-func CreateAlertRule(r *httprequest.Request) {
-	svc, ok := alertService(r)
-	if !ok {
-		return
-	}
-	var in alerting.CreateRuleInput
-	if !r.BindJSON(&in) {
-		return
-	}
-	rule, err := svc.CreateRule(r.Request.Context(), in)
-	if err != nil {
-		handleAlertWriteError(r, err, "alert rule not found")
-		return
-	}
-	r.JSON(http.StatusCreated, rule)
-}
-
-// UpdateAlertRule handles PATCH /v1/merchant/alerts/rules/{id}.
-func UpdateAlertRule(r *httprequest.Request) {
-	svc, ok := alertService(r)
-	if !ok {
-		return
-	}
-	id, ok := alertPathID(r)
-	if !ok {
-		return
-	}
-	var in alerting.UpdateRuleInput
-	if !r.BindJSON(&in) {
-		return
-	}
-	rule, err := svc.UpdateRule(r.Request.Context(), id, in)
-	if err != nil {
-		handleAlertWriteError(r, err, "no alert rule with that id in this merchant")
-		return
-	}
-	r.JSON(http.StatusOK, rule)
-}
-
-// DeleteAlertRule handles DELETE /v1/merchant/alerts/rules/{id}.
-func DeleteAlertRule(r *httprequest.Request) {
-	svc, ok := alertService(r)
-	if !ok {
-		return
-	}
-	id, ok := alertPathID(r)
-	if !ok {
-		return
-	}
-	deleted, err := svc.DeleteRule(r.Request.Context(), id)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "failed to delete alert rule")
-		return
-	}
-	if !deleted {
-		r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found", "no alert rule with that id in this merchant"))
-		return
-	}
-	r.JSON(http.StatusOK, map[string]any{"deleted": true, "id": id})
-}
-
-// TestFireAlertRule handles POST /v1/merchant/alerts/rules/{id}/test: sends a
-// clearly-marked TEST alert through the rule's real channels (no edge-state
-// change) and returns the per-channel delivery results.
-func TestFireAlertRule(r *httprequest.Request) {
-	svc, ok := alertService(r)
-	if !ok {
-		return
-	}
-	id, ok := alertPathID(r)
-	if !ok {
-		return
-	}
-	results, err := svc.TestFireRule(r.Request.Context(), id)
-	if err != nil {
-		if db.IsNotFound(err) {
-			r.APIError(api.NewAPIError(http.StatusNotFound, api.ErrorTypeInvalidRequest, "not_found", "no alert rule with that id in this merchant"))
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, "failed to test-fire alert rule")
-		return
-	}
-	r.JSON(http.StatusOK, map[string]any{"results": results})
 }
 
 // --- webhooks ----------------------------------------------------------------
@@ -197,7 +86,7 @@ func CreateMerchantWebhook(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, hook)
 }
 
-// RotateMerchantWebhookURL changes a credential without changing rule references.
+// RotateMerchantWebhookURL changes a credential while retaining webhook identity.
 func RotateMerchantWebhookURL(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {

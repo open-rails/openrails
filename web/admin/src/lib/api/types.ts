@@ -758,63 +758,7 @@ export interface MerchantMembershipList {
 // --- Alerting (#736) ---
 
 export type AlertSeverity = "warning" | "critical"
-// Template keys come from GET /merchant/alerts/templates (AlertTemplateInfo.key)
-// — the v1 set is chargeback_rate_by_rail_account | dunning_spike |
-// payers_at_depletion_risk | payment_methods_expiring — treated as an opaque
-// server-driven string rather than a hardcoded union.
-export type AlertTemplate = string
 export type WebhookFormat = "generic" | "discord" | "slack"
-export type AlertChannelType = "in_app" | "email" | "webhook"
-
-// AlertChannelRef is one entry in a rule's ordered channel array — the ONE wire
-// shape (engine as-built): [{"type":"in_app"},{"type":"email"},
-// {"type":"webhook","webhook_id":"<uuid>"}].
-export interface AlertChannelRef {
-  type: AlertChannelType
-  webhook_id?: string
-}
-
-export type AlertParamType = "number" | "integer" | "window"
-
-// AlertParamSpec documents one template parameter; the create/edit dialog
-// renders its fields from this instead of a hardcoded shape.
-export interface AlertParamSpec {
-  name: string
-  type: AlertParamType
-  required: boolean
-  default?: number | string
-  min?: number
-  max?: number
-  description: string
-}
-
-// AlertTemplateInfo is the schema view of a template — GET /merchant/alerts/templates.
-export interface AlertTemplateInfo {
-  key: string
-  display_name: string
-  description: string
-  default_severity: AlertSeverity
-  digest: boolean
-  metric: string
-  params: AlertParamSpec[]
-}
-
-export interface AlertRule {
-  id: string
-  name: string
-  template: AlertTemplate
-  params: Record<string, unknown>
-  severity: AlertSeverity
-  channels: AlertChannelRef[]
-  enabled: boolean
-  // Edge-trigger state: set while the rule is currently firing.
-  fired_at?: string | null
-  cleared_at?: string | null
-  last_evaluated_at?: string | null
-  last_value?: number | null
-  created_at: string
-  updated_at?: string
-}
 
 export interface MerchantWebhook {
   id: string
@@ -826,13 +770,6 @@ export interface MerchantWebhook {
   updated_at?: string
 }
 
-export interface AlertDeliveryResult {
-  channel: string
-  ok: boolean
-  detail?: string
-  attempts?: number
-}
-
 // MerchantNotification is the in_app store — MERCHANT-operator-facing (distinct
 // from the customer notification_queue). Surfaced as the header bell.
 export interface MerchantNotification {
@@ -841,7 +778,6 @@ export interface MerchantNotification {
   title: string
   body: string
   link?: string | null
-  rule_id?: string | null
   created_at: string
   read_at?: string | null
 }

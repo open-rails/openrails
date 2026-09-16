@@ -43,7 +43,7 @@ import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
-import { AlertsTab } from "./alerts"
+import { NotificationsTab } from "./notifications"
 import { ApiKeysTab } from "./api-keys"
 import { TeamTab } from "./team"
 
@@ -79,7 +79,7 @@ export function SettingsPage() {
             Team
           </TabsTrigger>
           <TabsTrigger value="alerts" className={LINE_TAB}>
-            Alerts
+            Notifications
           </TabsTrigger>
           <TabsTrigger value="providers" className={LINE_TAB}>
             Payment providers
@@ -99,7 +99,7 @@ export function SettingsPage() {
         <TeamTab />
       </TabsContent>
       <TabsContent value="alerts">
-        <AlertsTab />
+        <NotificationsTab />
       </TabsContent>
       <TabsContent value="providers">
         <ProvidersTab />

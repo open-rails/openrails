@@ -61,9 +61,8 @@ Customer Side (your users):
   routes to write or maintain.
 - **Batch import of legacy data** — bring existing subscribers, payments, and vault
   references in from a previous billing system and let reconciliation converge them.
-- **Metric alerts to your endpoints** — define alerts on any billing metric (approval
-  rate drops, chargeback spikes, revenue anomalies) and receive them on outbound
-  webhook sinks you configure.
+- **Operational notifications** — review reconciliation findings in the console,
+  with immediate notifications and encrypted outbound webhook destinations.
 - **Team & scoped API keys** — invite your staff with role-scoped permissions;
   machine access through API keys that carry explicit grants and can never cross
   merchants.
@@ -131,7 +130,7 @@ OpenRails ships the whole recovery stack built in:
 - **The customer conversation, handled** — templated, deduplicated payment-failure and
   card-expiry emails that supersede themselves when the problem resolves.
 - **Proof it's working** — approval rate by rail, token type, and decline reason on your
-  dashboard, with alerts to your endpoints when it drops.
+  customizable dashboard.
 
 ---
 

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // #SEC-21: a merchant-registered alert sink is an SSRF primitive — anyone with
@@ -56,25 +57,11 @@ func TestWebhookDeliveryDoesNotFollowRedirectIntoLinkLocal(t *testing.T) {
 	}))
 	defer redirector.Close()
 
-	var results []alerting.DeliveryResult
 	inConn(t, appDB, mid, func(ctx context.Context) {
-		wh, err := svc.CreateWebhook(ctx, alerting.CreateWebhookInput{Name: "redirector", URL: redirector.URL})
+		_, err := svc.CreateWebhook(ctx, alerting.CreateWebhookInput{Name: "redirector", URL: redirector.URL})
 		require.NoError(t, err)
-		rule, err := svc.CreateRule(ctx, alerting.CreateRuleInput{
-			Template: "chargeback_rate_by_rail_account", Params: map[string]any{"threshold": 0.1},
-			Channels: []alerting.ChannelRef{{Type: alerting.ChannelWebhook, WebhookID: &wh.ID}},
-		})
-		require.NoError(t, err)
-		results, err = svc.TestFireRule(ctx, rule.ID)
-		require.NoError(t, err)
+		require.NoError(t, svc.NotifyFinding(ctx, reconcile.FindingRecord{ID: uuid.New(), Status: reconcile.FindingStatusRequiresReview, Severity: reconcile.SeverityMedium}))
 	})
 
-	require.Len(t, results, 1)
-	require.False(t, results[0].OK)
-	// Blind to the tenant: the fixed policy message, never the dial error, the
-	// status, or the address that was refused.
-	require.Equal(t, "destination address is not publicly routable", results[0].Detail)
-	require.NotContains(t, results[0].Detail, "169.254")
-	require.NotContains(t, results[0].Detail, "dial")
 	require.Positive(t, atomic.LoadInt32(&hits), "the origin was contacted; the redirect target was not")
 }

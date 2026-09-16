@@ -93,48 +93,6 @@ func TestOR860_DestructiveRateCeilingCountsAcrossMerchantsUnderRLS(t *testing.T)
 		"or#860: one actor operating across two merchants must be visible as one actor")
 }
 
-// or#861: the alert evaluator and the #787 findings digest selected their work
-// set on the base pool, so both had never run in production. Same proof shape.
-func TestOR861_ArmedMerchantScansSeeMerchantsUnderRLS(t *testing.T) {
-	ctx, super, app := pools(t)
-
-	suffix := uuid.NewString()[:8]
-	var seeded []uuid.UUID
-	for i := 0; i < 2; i++ {
-		id := uuid.New()
-		seeded = append(seeded, id)
-		_, err := super.Exec(ctx,
-			`INSERT INTO openrails.merchants (id, slug, status) VALUES ($1, $2, 'active')`,
-			id, "or861-"+suffix+"-"+uuid.NewString()[:6])
-		require.NoError(t, err)
-		_, err = super.Exec(ctx,
-			`INSERT INTO openrails.alert_rules (merchant_id, name, template, enabled)
-			 VALUES ($1, $2, 'payment_failure_rate', true)`, id, "or861-rule-"+suffix)
-		require.NoError(t, err)
-	}
-
-	var basePool int64
-	require.NoError(t, app.QueryRow(ctx,
-		`SELECT count(*) FROM (SELECT DISTINCT merchant_id FROM openrails.alert_rules WHERE enabled) x`).
-		Scan(&basePool))
-	require.EqualValues(t, 0, basePool,
-		"the retired base-pool armed scan must still see nothing — that silence is the whole defect")
-
-	armed := map[uuid.UUID]bool{}
-	rows, err := app.Query(ctx, `SELECT merchant_id FROM openrails.armed_alert_merchant_ids()`)
-	require.NoError(t, err)
-	for rows.Next() {
-		var id uuid.UUID
-		require.NoError(t, rows.Scan(&id))
-		armed[id] = true
-	}
-	rows.Close()
-	require.NoError(t, rows.Err())
-	for _, id := range seeded {
-		require.Truef(t, armed[id], "or#861: armed merchant %s missing — the evaluator would skip it", id)
-	}
-}
-
 // The cross-merchant readers must RAISE, not return an empty set, when their
 // definer cannot bypass RLS. That is the property that stops this whole class
 // of defect from ever being silent again (0016's contract, extended by 0021).

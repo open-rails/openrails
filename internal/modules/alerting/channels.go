@@ -12,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -31,8 +30,7 @@ type EmailSender interface {
 	IsEnabled() bool
 }
 
-// deliverer fans an alert out to a rule's channels and returns per-channel
-// delivery results (recorded on the notification, returned by test-fire).
+// deliverer sends immediate notifications to the selected destinations.
 type deliverer struct {
 	store       *store
 	cfgStore    *merchantconfig.Store
@@ -61,26 +59,17 @@ func newDeliverer(database *db.DB, st *store, email EmailSender, outbound httpx.
 	}
 }
 
-// dispatch delivers the alert to every channel on the rule, in order.
-func (d *deliverer) dispatch(ctx context.Context, rule Rule, alert Alert) []DeliveryResult {
-	return d.dispatchChannels(ctx, rule.Channels, &rule.ID, alert)
-}
-
-// dispatchFinding delivers an alert built from a reconciliation finding (#787)
-// through an explicit channel set rather than a rule — findings are not
-// metric-threshold rules, so there is no Rule row to carry channels; callers
-// pass the severity-based default set instead. The stored notification's
-// rule_id stays NULL (informational-only column; no rule produced this alert).
+// dispatchFinding delivers an immediate reconciliation notification.
 func (d *deliverer) dispatchFinding(ctx context.Context, channels []ChannelRef, alert Alert) []DeliveryResult {
-	return d.dispatchChannels(ctx, channels, nil, alert)
+	return d.dispatchChannels(ctx, channels, alert)
 }
 
-func (d *deliverer) dispatchChannels(ctx context.Context, channels []ChannelRef, ruleID *uuid.UUID, alert Alert) []DeliveryResult {
+func (d *deliverer) dispatchChannels(ctx context.Context, channels []ChannelRef, alert Alert) []DeliveryResult {
 	results := make([]DeliveryResult, 0, len(channels))
 	for _, ch := range channels {
 		switch ch.Type {
 		case ChannelInApp:
-			results = append(results, d.deliverInApp(ctx, ruleID, alert))
+			results = append(results, d.deliverInApp(ctx, alert))
 		case ChannelEmail:
 			results = append(results, d.deliverEmail(ctx, alert))
 		case ChannelWebhook:
@@ -92,13 +81,12 @@ func (d *deliverer) dispatchChannels(ctx context.Context, channels []ChannelRef,
 	return results
 }
 
-func (d *deliverer) deliverInApp(ctx context.Context, ruleID *uuid.UUID, alert Alert) DeliveryResult {
+func (d *deliverer) deliverInApp(ctx context.Context, alert Alert) DeliveryResult {
 	_, err := d.store.createNotification(ctx, Notification{
 		Severity: alert.Severity,
 		Title:    alertTitle(alert),
 		Body:     alert.Summary,
 		Link:     alert.DashboardLink,
-		RuleID:   ruleID,
 		Data:     alert,
 	})
 	if err != nil {
@@ -242,24 +230,6 @@ func shapeWebhookBody(format WebhookFormat, alert Alert) ([]byte, error) {
 	}
 }
 
-func alertTitle(alert Alert) string {
-	prefix := ""
-	if alert.Test {
-		prefix = "[TEST] "
-	}
-	return fmt.Sprintf("%s[%s] %s", prefix, strings.ToUpper(string(alert.Severity)), displayName(alert))
-}
-
-func displayName(alert Alert) string {
-	if strings.TrimSpace(alert.RuleName) != "" {
-		return alert.RuleName
-	}
-	if def, ok := templates[alert.Template]; ok {
-		return def.displayName
-	}
-	return alert.Template
-}
-
 func chatMessage(alert Alert) string {
 	var b strings.Builder
 	b.WriteString(alertTitle(alert))
@@ -272,32 +242,16 @@ func chatMessage(alert Alert) string {
 	return b.String()
 }
 
+func alertTitle(alert Alert) string {
+	return fmt.Sprintf("[%s] %s", strings.ToUpper(string(alert.Severity)), alert.Title)
+}
+
 func renderEmail(alert Alert) (html, plain string) {
-	dims := ""
-	if len(alert.Dimensions) > 0 {
-		parts := make([]string, 0, len(alert.Dimensions))
-		for k, v := range alert.Dimensions {
-			parts = append(parts, fmt.Sprintf("%s=%s", k, v))
-		}
-		dims = strings.Join(parts, ", ")
-	}
-	link := ""
-	if alert.DashboardLink != "" {
-		link = alert.DashboardLink
-	}
 	html = fmt.Sprintf(`<h2>%s</h2><p>%s</p>`, alertTitle(alert), alert.Summary)
-	if dims != "" {
-		html += fmt.Sprintf(`<p><strong>Dimensions:</strong> %s</p>`, dims)
-	}
-	if link != "" {
-		html += fmt.Sprintf(`<p><a href="%s">Open dashboard</a></p>`, link)
-	}
 	plain = alertTitle(alert) + "\n\n" + alert.Summary
-	if dims != "" {
-		plain += "\nDimensions: " + dims
-	}
-	if link != "" {
-		plain += "\nDashboard: " + link
+	if alert.DashboardLink != "" {
+		html += fmt.Sprintf(`<p><a href="%s">Open dashboard</a></p>`, alert.DashboardLink)
+		plain += "\nDashboard: " + alert.DashboardLink
 	}
 	return html, plain
 }

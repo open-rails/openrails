@@ -326,25 +326,6 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add solana reconcile worker: %w", err)
 	}
-	// Metric threshold alerting evaluator (#736): selects merchants with enabled
-	// alert rules (indexed) and evaluates each rule under merchant context,
-	// edge-triggering threshold crossings and emitting due digests.
-	if err := addTrackedWorker(r, workers, &riverjobs.AlertEvalWorker{
-		DB:     r.DB,
-		Alerts: r.AlertService,
-		Clock:  clock,
-	}); err != nil {
-		return fmt.Errorf("add alert eval worker: %w", err)
-	}
-	// Low-severity reconciliation-findings digest (#787): a SEPARATE
-	// notification source from the rule evaluator above — findings are
-	// event-sourced, not a metric-threshold rule.
-	if err := addTrackedWorker(r, workers, &riverjobs.FindingsDigestWorker{
-		DB:     r.DB,
-		Alerts: r.AlertService,
-	}); err != nil {
-		return fmt.Errorf("add findings digest worker: %w", err)
-	}
 	// #895: there is deliberately NO worker-health-check WORKER here any more.
 	// The detector used to be a River periodic job, so a stalled River stalled
 	// its own detector and could only report health where health was never in
@@ -840,35 +821,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			return riverjobs.PaymentMethodNoticeArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: time.Hour},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
-	))
-
-	// Every 15 minutes: metric threshold alerting evaluation (#736). Slow
-	// cadence — the metrics it watches (chargeback rate, dunning, depletion) move
-	// on hours, not seconds; the monthly digest is cadence-gated inside the rule.
-	jobs = append(jobs, r.healthPeriodic(
-		15*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.AlertEvalArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
-	))
-
-	// Every 15 minutes: low-severity reconciliation-findings digest (#787). The
-	// outer tick is cheap (indexed armed-merchant scan); the daily cadence gate
-	// lives inside DigestFindings, same shape as the payment_methods_expiring
-	// digest above.
-	jobs = append(jobs, r.healthPeriodic(
-		15*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.FindingsDigestArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},

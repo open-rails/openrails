@@ -13,8 +13,6 @@ import {
   getUsageMeter,
   getUnreadCount,
   dryRunCheckoutRouting,
-  listAlertRules,
-  listAlertTemplates,
   listApiKeys,
   listCatalogDrift,
   listCustomers,
@@ -379,19 +377,6 @@ export const adminQueries = {
       queryKey: [...queryKeys.team(), "invites"],
       queryFn: ({ signal }) => listTeamInvites(signal),
       meta: { errorAction: "Load invites" },
-    }),
-  alertTemplates: () =>
-    queryOptions({
-      queryKey: [...queryKeys.alerts(), "templates"],
-      queryFn: ({ signal }) => listAlertTemplates(signal),
-      staleTime: 5 * 60_000,
-      meta: { errorAction: "Load alert templates" },
-    }),
-  alertRules: () =>
-    queryOptions({
-      queryKey: [...queryKeys.alerts(), "rules"],
-      queryFn: ({ signal }) => listAlertRules(signal),
-      meta: { errorAction: "Load alert rules" },
     }),
   webhooks: () =>
     queryOptions({

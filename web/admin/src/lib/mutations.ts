@@ -13,7 +13,6 @@ import {
   changeTeamRole,
   changeSubscriptionPaymentMethod,
   changeSubscriptionTier,
-  createAlertRule,
   createApiKey,
   createOffChannelPayment,
   createPrice,
@@ -22,7 +21,6 @@ import {
   rotateWebhookURL,
   deactivatePrice,
   deactivateProduct,
-  deleteAlertRule,
   deletePaymentProvider,
   deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
@@ -57,10 +55,7 @@ import {
   revokeProductAccess,
   revokeTeamInvite,
   setCreditLimit,
-  testAlertRule,
-  updateAlertRule,
   updateProduct,
-  type AlertRuleRequest,
   type OffChannelPaymentRequest,
   type DefaultUsageRateCardRequest,
   type CustomerUsageRateOverrideRequest,
@@ -850,44 +845,6 @@ export const adminMutations = {
         ])
         return { credit, trust }
       },
-    }),
-  createAlertRule: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.alerts(), "rules", "create"],
-      mutationFn: (rule: AlertRuleRequest) => createAlertRule(rule),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.alerts(),
-        "rules",
-      ]),
-    }),
-  updateAlertRule: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.alerts(), "rules", "update"],
-      mutationFn: ({
-        id,
-        rule,
-      }: {
-        id: string
-        rule: Partial<AlertRuleRequest>
-      }) => updateAlertRule(id, rule),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.alerts(),
-        "rules",
-      ]),
-    }),
-  deleteAlertRule: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.alerts(), "rules", "delete"],
-      mutationFn: (id: string) => deleteAlertRule(id),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.alerts(),
-        "rules",
-      ]),
-    }),
-  testAlertRule: () =>
-    mutationOptions({
-      mutationKey: [...queryKeys.alerts(), "rules", "test"],
-      mutationFn: (id: string) => testAlertRule(id),
     }),
   createWebhook: (queryClient: QueryClient) =>
     mutationOptions({
