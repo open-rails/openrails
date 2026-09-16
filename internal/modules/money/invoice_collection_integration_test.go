@@ -395,6 +395,61 @@ func TestInvoiceCollection_OperatorNonExecutionMakesInvoiceDueAgain(t *testing.T
 	e.requireSettledOnce(t)
 }
 
+// TestInvoiceCollection_OperatorReleasesNeverSubmittedOperation: an operation
+// parked before any submission (its account never armed) holds the invoice
+// pointer with no verifier to close it. The absent write-ahead fence proves
+// nothing reached the provider, so --not-executed releases it; a receipt does
+// not apply, and an operation that crossed the fence is refused.
+func TestInvoiceCollection_OperatorReleasesNeverSubmittedOperation(t *testing.T) {
+	e := newCollectionEnv(t, string(models.RailNMI))
+	unarmed := &fakeCharger{prepareFailures: 100}
+	runner := collectionRunner(e.db, unarmed, unarmed)
+	_, err := e.svc.ChargeOutstanding(e.ctx, runner, 0)
+	require.NoError(t, err)
+	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	require.Equal(t, intents.StatusPending, op.Status)
+	require.Equal(t, op.ID, *e.invoiceRow(t).CollectionIntentID)
+
+	_, err = runner.Resolve(e.ctx, op.ID, intents.Resolution{ProviderReference: "tx_x", Actor: "ops", Reason: "portal"})
+	require.ErrorIs(t, err, intents.ErrResolutionNotUnknown, "a never-submitted operation has no receipt to accept")
+	require.Equal(t, intents.StatusPending, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+
+	resolved, err := runner.Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "account never armed; releasing the invoice"})
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusFailedTerminal, resolved.Status)
+	require.Contains(t, string(resolved.ResultEvidence), `"actor": "ops"`)
+	inv := e.invoiceRow(t)
+	require.Nil(t, inv.CollectionIntentID)
+	require.Equal(t, int32(0), inv.CollectionFailureCount)
+	require.NotNil(t, inv.NextCollectionAttemptAt)
+	require.Equal(t, []string{"failed"}, e.attemptStatuses(t))
+	require.Zero(t, unarmed.chargeCount())
+	// The released invoice is the operator's again.
+	_, err = e.svc.VoidInvoice(e.ctx, e.payer, e.invoice)
+	require.NoError(t, err)
+}
+
+func TestInvoiceCollection_OperatorReleaseRefusedPastTheSubmissionFence(t *testing.T) {
+	e := newCollectionEnv(t, string(models.RailNMI))
+	unarmed := &fakeCharger{prepareFailures: 100}
+	runner := collectionRunner(e.db, unarmed, unarmed)
+	_, err := e.svc.ChargeOutstanding(e.ctx, runner, 0)
+	require.NoError(t, err)
+	op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	require.Equal(t, intents.StatusPending, op.Status)
+	// An executor that died between the fence and the send leaves a pending
+	// operation that DID possibly submit.
+	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.rail_intents SET result_evidence = jsonb_build_object('submitted_at', $2::text) WHERE id = $1`, op.ID, time.Now().UTC().Format(time.RFC3339Nano))
+	require.NoError(t, err)
+
+	_, err = runner.Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "looks unsent"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected)
+	after := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	require.Equal(t, intents.StatusPending, after.Status, "a rejected release parks the operation back untouched")
+	require.Equal(t, op.ID, *e.invoiceRow(t).CollectionIntentID)
+	require.Equal(t, []string{"attempted"}, e.attemptStatuses(t))
+}
+
 func TestInvoiceCollection_LiveOperationRejectsCompetingInvoiceMutations(t *testing.T) {
 	e := newCollectionEnv(t, string(models.RailStripe))
 	lost := &fakeCharger{lostResponse: true}

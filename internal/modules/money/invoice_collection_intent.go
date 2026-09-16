@@ -106,26 +106,11 @@ func decodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceColl
 	return p, nil
 }
 
-// CheckRelevance: a submitted charge is never superseded. Before any
-// submission the operation applies while the invoice still points at it.
-func (h *InvoiceCollectionHandler) CheckRelevance(ctx context.Context, intent gen.OpenrailsRailIntent) (intents.Relevance, error) {
-	if intent.Attempts > 0 {
-		return intents.StillRelevant(), nil
-	}
-	p, err := decodeInvoiceCollectionPayload(intent)
-	if err != nil {
-		return intents.SupersededBy("unusable invoice collection intent: " + err.Error()), nil
-	}
-	row, err := h.DB.Gen(ctx).GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, ID: p.InvoiceID})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return intents.SupersededBy("invoice no longer exists"), nil
-		}
-		return intents.Relevance{}, err
-	}
-	if row.CollectionIntentID == nil || *row.CollectionIntentID != intent.ID {
-		return intents.SupersededBy("invoice no longer names this collection operation"), nil
-	}
+// CheckRelevance: a collection operation is never superseded. The invoice's
+// pointer blocks every competing mutation while the operation lives, and a
+// possibly submitted charge must reconcile, so only a terminal outcome (or an
+// operator release of a never-submitted operation) ends it.
+func (h *InvoiceCollectionHandler) CheckRelevance(context.Context, gen.OpenrailsRailIntent) (intents.Relevance, error) {
 	return intents.StillRelevant(), nil
 }
 
@@ -310,6 +295,24 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	return h.finalizeSettle(ctx, intent, p, p.Rail, res.TransactionID, res.ExternalInvoiceID, true), nil
 }
 
+// ResolveUnsent releases a pending operation that never reached the provider:
+// the write-ahead fence is absent, so nothing can have been charged. The
+// attempt fails without a decline and the invoice becomes due again. An
+// operation carrying the fence belongs to its verifier.
+func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	p, err := decodeInvoiceCollectionPayload(intent)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if !resolution.NotExecuted || resolution.Step != "" {
+		return intents.Outcome{}, fmt.Errorf("%w: a never-submitted collection accepts only --not-executed", intents.ErrResolutionInvalid)
+	}
+	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) != "" {
+		return intents.Outcome{}, intents.RejectResolution("operation %s crossed its submission fence; only its verifier or an unknown-state resolution can close it", intent.ID)
+	}
+	return h.finalizeNotExecuted(ctx, intent, p), nil
+}
+
 // finalizeFromEvidence retries local effects for an answer the operation
 // already holds (a receipt, a parsed refusal, confirmed non-execution).
 func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload) (intents.Outcome, bool) {
@@ -331,8 +334,9 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 
 // finalizeSettle records one confirmed charge exactly once: invoice snapshot
 // applied, arrears liability settled on the ledger (deduped on the operation
-// key), attempt settled, invoice released. A local failure retains the
-// receipt on the operation for the verifier.
+// key), attempt settled, invoice released — all or nothing. A local failure
+// retains the receipt on the operation for the verifier and keeps the
+// invoice pointed at it.
 func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload, rail, transactionID, externalInvoiceID string, verified bool) intents.Outcome {
 	transactionID = strings.TrimSpace(transactionID)
 	evidence := map[string]any{collectionEvidenceTransactionID: transactionID, collectionEvidenceRail: rail}
@@ -356,11 +360,16 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		if err != nil {
 			return err
 		}
-		if applied == 1 {
-			if ext := optionalString(externalInvoiceID); ext != nil {
-				if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, ExternalInvoiceID: ext, Now: now}); err != nil {
-					return err
-				}
+		if applied != 1 {
+			// The invoice changed under its own live operation (only raw
+			// surgery can do that). Fail closed: nothing is written, the
+			// receipt stays on the operation and the pointer keeps every
+			// further collection off this invoice until an operator repairs it.
+			return fmt.Errorf("invoice %s no longer accepts the frozen snapshot %d; confirmed charge %s needs repair", p.InvoiceID, p.Amount, transactionID)
+		}
+		if ext := optionalString(externalInvoiceID); ext != nil {
+			if _, err := q.SetInvoiceExternalID(ctx, gen.SetInvoiceExternalIDParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, ExternalInvoiceID: ext, Now: now}); err != nil {
+				return err
 			}
 		}
 		currency := normalizeCurrency(p.Currency)
@@ -387,12 +396,12 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		if settled != 1 {
 			return errors.New("settle attempt: claim lost")
 		}
-		if _, err := q.ReleaseInvoiceCollection(ctx, gen.ReleaseInvoiceCollectionParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID, Now: now}); err != nil {
+		released, err := q.ReleaseInvoiceCollection(ctx, gen.ReleaseInvoiceCollectionParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID, Now: now})
+		if err != nil {
 			return err
 		}
-		if applied != 1 {
-			log.WithContext(ctx).WithFields(log.Fields{"invoice_id": p.InvoiceID, "customer_id": p.CustomerID, "amount": p.Amount, "rail_payment_id": transactionID}).
-				Error("invoice charge confirmed but the invoice snapshot no longer applies; payment recorded UNAPPLIED — needs repair")
+		if released != 1 {
+			return fmt.Errorf("invoice %s no longer names this operation; confirmed charge %s needs repair", p.InvoiceID, transactionID)
 		}
 		return nil
 	})
