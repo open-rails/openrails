@@ -34,8 +34,7 @@ func (fx *upgradeAdoptFixture) restartAndVerify(t *testing.T) gen.OpenrailsRailI
 	in := fx.operation(t)
 	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.rail_intents SET next_attempt_at='epoch',claimed_until=NULL WHERE id=$1`, in.ID)
 	require.NoError(t, err)
-	// New runner/handler/request cache: only the database survives the restart.
-	fx.svc.IdempotencyService = newStatefulIdemStub()
+	// New runner and handler: all recovery state lives in the database.
 	runner := &intents.Runner{Store: intents.NewStore(fx.db), Registry: intents.NewRegistry(NewNMIUpgradeIntentHandler(fx.svc)), Config: fullModeConfig(), Clock: fx.svc.Clock()}
 	fx.svc.Intents = runner
 	_, err = runner.RunVerifyOnce(fx.ctx)

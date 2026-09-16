@@ -4,13 +4,11 @@ package checkout
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,55 +32,8 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 )
 
-// statefulIdemStub is a checkoutIdempotencyStore that remembers records across
-// calls so a Fail followed by a retried Begin exercises the
-// retryAfterFailure path of processUpgrade.
-type statefulIdemStub struct {
-	mu   sync.Mutex
-	recs map[string]*IdempotencyRecord
-}
-
-func newStatefulIdemStub() *statefulIdemStub {
-	return &statefulIdemStub{recs: map[string]*IdempotencyRecord{}}
-}
-
-func (s *statefulIdemStub) Begin(_ context.Context, op, key string) (*IdempotencyRecord, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rec, ok := s.recs[op+":"+key]; ok {
-		return rec, true, nil
-	}
-	rec := &IdempotencyRecord{Status: IdempotencyStatusPending, CreatedAt: time.Now()}
-	s.recs[op+":"+key] = rec
-	return rec, false, nil
-}
-
-func (s *statefulIdemStub) Fail(_ context.Context, op, key string, opErr error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rec, ok := s.recs[op+":"+key]; ok {
-		rec.Status = IdempotencyStatusFailed
-		if opErr != nil {
-			rec.Error = opErr.Error()
-		}
-	}
-	return nil
-}
-
-func (s *statefulIdemStub) Complete(_ context.Context, op, key string, result json.RawMessage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if rec, ok := s.recs[op+":"+key]; ok {
-		rec.Status = IdempotencyStatusSuccess
-		rec.Result = result
-	}
-	return nil
-}
-
-// fakeNMIUpgradeGateway scripts the surfaces processUpgrade touches: classic
-// add_subscription (successor create), the v5 subscription roster (adopt
-// scan), v5 DELETE /subscriptions/{id} (old-sub cancel + rollback), and the
-// classic query search (unused here — proration is zero).
+// fakeNMIUpgradeGateway scripts successor creation, proration submission,
+// delayed charge visibility, and a deliberately non-authoritative roster.
 type fakeNMIUpgradeGateway struct {
 	railCustomerRef string
 	planID          string
@@ -272,7 +223,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	pmSvc := paymentmethods.NewPaymentMethodService(dbi)
 	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock)
 	svc := NewCheckoutService(subSvc, productSvc, priceSvc, paymentSvc, entSvc,
-		pmSvc, nil, newStatefulIdemStub(), nil, nil, nil, clock)
+		pmSvc, nil, nil, nil, nil, nil, clock)
 	// #788: the scoped resolver is the ONLY NMI client source; the fixture
 	// overrides it with the fake-gateway client.
 	svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
