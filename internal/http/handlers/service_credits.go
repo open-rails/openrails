@@ -186,19 +186,7 @@ type serviceUsageRollupRequest struct {
 	GroupBy    string `json:"group_by" binding:"required"`
 }
 
-type serviceRecordUsageRequest struct {
-	CustomerID     string           `json:"customer_id" binding:"required"`
-	Invoker        string           `json:"invoker"`
-	Currency       string           `json:"currency"`
-	EventType      string           `json:"event_type" binding:"required"`
-	Dimensions     map[string]int64 `json:"dimensions"`
-	Amount         int64            `json:"amount"`
-	Resource       string           `json:"resource"`
-	Metadata       map[string]any   `json:"metadata"`
-	Source         string           `json:"source" binding:"required"`
-	SourceID       string           `json:"source_id" binding:"required"`
-	OccurredAtUnix int64            `json:"occurred_at_unix"`
-}
+type serviceRecordUsageRequest = openrails.UsageReport
 
 // ServiceRecordUsage records one host-reported metered usage event (#797): a
 // usage_events row (plus a ledger debit for a non-zero amount) that the

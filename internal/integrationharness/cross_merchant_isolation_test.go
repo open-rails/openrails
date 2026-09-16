@@ -187,7 +187,7 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		"invoker":          "delegated-denied",
 		"invoker_type":     "payer",
 		"currency":         "usd",
-		"estimated_amount": 100,
+		"estimated_amount": "100",
 		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-denied-" + uuid.NewString(),
 	}}})
@@ -205,7 +205,7 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		"invoker":          "delegated-allowed",
 		"invoker_type":     "payer",
 		"currency":         "usd",
-		"estimated_amount": 100,
+		"estimated_amount": "100",
 		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-allowed-" + uuid.NewString(),
 	}}})
@@ -233,7 +233,7 @@ func TestStandaloneMerchantAdmitAcceptsDelegatedJWTByPermissionHTTP(t *testing.T
 		"invoker":          "delegated-glob",
 		"invoker_type":     "payer",
 		"currency":         "usd",
-		"estimated_amount": 100,
+		"estimated_amount": "100",
 		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-glob-" + uuid.NewString(),
 	}}})
@@ -283,7 +283,7 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 		"invoker":          "user-denied",
 		"invoker_type":     "payer",
 		"currency":         "usd",
-		"estimated_amount": 100,
+		"estimated_amount": "100",
 		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-user-denied-" + uuid.NewString(),
 	}}})
@@ -296,7 +296,7 @@ func TestStandaloneMerchantAdmitAcceptsUserSessionByPermissionHTTP(t *testing.T)
 		"invoker":          "user-allowed",
 		"invoker_type":     "payer",
 		"currency":         "usd",
-		"estimated_amount": 100,
+		"estimated_amount": "100",
 		"expires_at":       time.Now().Add(time.Hour).Unix(),
 		"request_id":       "admit-user-allowed-" + uuid.NewString(),
 	}}})

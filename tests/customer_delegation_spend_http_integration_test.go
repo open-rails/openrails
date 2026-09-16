@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -122,7 +123,7 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 	admitDelegated := func(invoker, reqID string, amount int64) admitVerdict {
 		body := map[string]any{"items": []map[string]any{{
 			"customer_id": payerID.String(), "invoker": invoker, "invoker_type": "delegated",
-			"currency": money.DefaultCurrency, "estimated_amount": amount, "request_id": reqID,
+			"currency": money.DefaultCurrency, "estimated_amount": strconv.FormatInt(amount, 10), "request_id": reqID,
 			"expires_at": time.Now().Add(time.Hour).Unix(),
 		}}}
 		data, mErr := json.Marshal(body)

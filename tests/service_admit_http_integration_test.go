@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -72,7 +73,7 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 	admitBody := func(reqID string, amount int64) map[string]any {
 		return map[string]any{
 			"customer_id": payerID.String(), "invoker": "user:a", "invoker_type": "payer",
-			"currency": money.DefaultCurrency, "estimated_amount": amount, "request_id": reqID,
+			"currency": money.DefaultCurrency, "estimated_amount": strconv.FormatInt(amount, 10), "request_id": reqID,
 			"expires_at": time.Now().Add(time.Hour).Unix(),
 		}
 	}

@@ -81,7 +81,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	if admitBody["trust_level"] != "gold" {
 		t.Fatalf("expected trust_level on admission item, got %#v", admissionsBody)
 	}
-	if admitBody["accrual_rate_delta_per_hour"] != float64(42) {
+	if admitBody["accrual_rate_delta_per_hour"] != "42" {
 		t.Fatalf("prospective rate missing from admission: %#v", admitBody)
 	}
 

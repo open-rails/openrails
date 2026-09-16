@@ -82,3 +82,36 @@ func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestAdmissionAndUsageMoneyWire(t *testing.T) {
+	for _, value := range []any{
+		AdmitRequest{EstimatedAmount: 9007199254740993, AccrualRateDeltaPerHour: math.MaxInt64},
+		AdmitResponse{Allowed: true, EstimatedAmount: 9007199254740993, StartCapacityAmount: math.MaxInt64},
+		UsageReport{Amount: math.MaxInt64},
+		WastedSpendReport{Amount: math.MaxInt64},
+		WastedSpendResponse{RecordedAmount: math.MaxInt64, ChargedAmount: 9007199254740993},
+	} {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		target := reflect.New(reflect.TypeOf(value))
+		if err := json.Unmarshal(raw, target.Interface()); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(value, target.Elem().Interface()) {
+			t.Fatalf("wire lost precision: %s", raw)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		for name, field := range fields {
+			if strings.Contains(name, "amount") || name == "accrual_rate_delta_per_hour" {
+				if _, ok := field.(string); !ok {
+					t.Fatalf("unsafe monetary number %s: %s", name, raw)
+				}
+			}
+		}
+	}
+}

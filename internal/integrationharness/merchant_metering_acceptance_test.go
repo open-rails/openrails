@@ -225,7 +225,7 @@ func usageReport(customerID uuid.UUID, eventType, sourceID string, occurredAt ti
 		"event_type":       eventType,
 		"dimensions":       map[string]int64{"units": units},
 		"metadata":         map[string]any{"region": "eu"},
-		"amount":           0,
+		"amount":           "0",
 		"source":           "metering-acceptance",
 		"source_id":        sourceID,
 		"occurred_at_unix": occurredAt.Unix(),

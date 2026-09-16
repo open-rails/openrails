@@ -23,27 +23,7 @@ import (
 // maxAdmitBatchItems bounds one /v1/merchant/admissions request (#335).
 const maxAdmitBatchItems = 1000
 
-type serviceAdmitRequest struct {
-	CustomerID string `json:"customer_id"`
-	// Invoker is the end-user attribution/abuse label (#491).
-	Invoker         string `json:"invoker"`
-	InvokerType     string `json:"invoker_type"`
-	TrustLevel      string `json:"trust_level"`
-	Resource        string `json:"resource"`
-	Currency        string `json:"currency"`
-	EstimatedAmount int64  `json:"estimated_amount"`
-	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
-	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
-	// the host knows it. Zero means the request adds no ongoing rate, which
-	// leaves an accrual_rate_cap payer gated on what is already running.
-	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty"`
-	RequestID               string `json:"request_id"`
-	Source                  string `json:"source"`
-	ExpiresAt               *int64 `json:"expires_at"`
-	// Roles are the invoker's immutable role UUIDs (#473) — each (subject, role)
-	// budget-scope policy gates this request's spend.
-	Roles []uuid.UUID `json:"roles"`
-}
+type serviceAdmitRequest = openrails.AdmitRequest
 
 // admitInputFromRequest maps one admission item onto the service-facade input.
 func admitInputFromRequest(req serviceAdmitRequest, payer billingidentity.CustomerID) billingservice.AdmitInput {
@@ -247,16 +227,7 @@ func ServiceGetTrustLevel(r *httprequest.Request) {
 	r.SuccessJSON(map[string]any{"currency": currency, "trust_level": trustLevel})
 }
 
-type serviceReportWastedSpendRequest struct {
-	CustomerID  string `json:"customer_id"`
-	Invoker     string `json:"invoker"`
-	InvokerType string `json:"invoker_type"`
-	Currency    string `json:"currency"`
-	Amount      int64  `json:"amount"`
-	Source      string `json:"source"`
-	SourceID    string `json:"source_id"`
-	Reason      string `json:"reason"`
-}
+type serviceReportWastedSpendRequest = openrails.WastedSpendReport
 
 // ServiceReportWastedSpend records host-reported WASTED $ (#497): delegated
 // invokers accrue toward their flat cutoff; direct payer credentials use

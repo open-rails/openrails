@@ -316,18 +316,10 @@ func (c *Client) GetTrustLevel(ctx context.Context, customerID, currency string)
 
 // ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).
 func (c *Client) ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error) {
-	body := map[string]any{
-		"customer_id":  strings.TrimSpace(report.CustomerID),
-		"invoker":      report.Invoker,
-		"invoker_type": report.InvokerType,
-		"currency":     report.Currency,
-		"amount":       report.Amount,
-		"source":       report.Source,
-		"source_id":    report.SourceID,
-		"reason":       report.Reason,
-	}
+	report.CustomerID = strings.TrimSpace(report.CustomerID)
+
 	var out WastedSpendResponse
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", report, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -339,20 +331,10 @@ func (c *Client) RecordUsage(ctx context.Context, report UsageReport) error {
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
 	}
-	body := map[string]any{
-		"customer_id":      strings.TrimSpace(report.CustomerID),
-		"invoker":          report.Invoker,
-		"currency":         currency,
-		"event_type":       report.EventType,
-		"dimensions":       report.Dimensions,
-		"amount":           report.Amount,
-		"resource":         report.Resource,
-		"metadata":         report.Metadata,
-		"source":           report.Source,
-		"source_id":        report.SourceID,
-		"occurred_at_unix": report.OccurredAtUnix,
-	}
-	return c.do(ctx, http.MethodPost, "/v1/merchant/usage/report", body, nil)
+	report.CustomerID = strings.TrimSpace(report.CustomerID)
+	report.Currency = currency
+
+	return c.do(ctx, http.MethodPost, "/v1/merchant/usage/report", report, nil)
 }
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
