@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,14 +28,7 @@ const (
 // InvoiceProfileDTO is a payer's enterprise invoicing profile: net-N credit
 // terms, collection method and the document fields snapshotted onto every
 // invoice at finalize.
-type InvoiceProfileDTO struct {
-	NetTermsDays     int                 `json:"net_terms_days"`
-	CollectionMethod string              `json:"collection_method"`
-	PONumber         string              `json:"po_number,omitempty"`
-	Tax              map[string]any      `json:"tax,omitempty"`
-	BillingContacts  []InvoiceContactDTO `json:"billing_contacts,omitempty"`
-	Memo             string              `json:"memo,omitempty"`
-}
+type InvoiceProfileDTO = openrails.InvoiceProfileDTO
 
 // SetCustomerInvoiceProfile upserts a payer's invoicing profile. Operator
 // surface — a payer must not grant itself credit terms.

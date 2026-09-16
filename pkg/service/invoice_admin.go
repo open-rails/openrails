@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -21,12 +22,7 @@ const (
 	InvoiceAdminRetryCollection = money.InvoiceAdminRetryCollection
 )
 
-type MerchantInvoiceDTO struct {
-	InvoiceDTO
-	UnitDecimals     int                  `json:"unit_decimals"`
-	CustomerID       uuid.UUID            `json:"customer_id"`
-	AvailableActions []InvoiceAdminAction `json:"available_actions"`
-}
+type MerchantInvoiceDTO = openrails.MerchantInvoiceDTO
 
 func merchantInvoiceDTO(invoice *models.Invoice) (MerchantInvoiceDTO, error) {
 	decimals, ok := moneyutil.CurrencyScale(invoice.Currency)
