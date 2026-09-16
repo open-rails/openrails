@@ -43,7 +43,8 @@ Remaining unconverted endpoints are tracked in #983 and are not frozen yet.
 time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
 (`web/admin/src/lib/api/wire-fixtures.test.ts`) both decode them.
 `wire_money_guard_test.go` fails when a monetary int64 field in a wire package
-is a JSON number unless it is listed, with its reason, as a pending #983 gap.
+is a JSON number unless it is listed with its reason (pending #983, deleted
+elsewhere, or not HTTP), and when a listed field becomes a decimal string.
 Map-literal responses, metrics cells and finding evidence are outside that
 static guard.
 
