@@ -1327,7 +1327,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.webhook_health_daily TO ope
 CREATE TABLE openrails.worker_state (
     worker_kind text NOT NULL,
     cursor_merchant_id uuid,
-    cursor_updated_at timestamp with time zone,
+    cursor_version bigint DEFAULT 0 NOT NULL,
     registered_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     expected_period_seconds bigint,
     last_success_at timestamp with time zone,
@@ -1339,6 +1339,8 @@ CREATE TABLE openrails.worker_state (
 );
 
 COMMENT ON TABLE openrails.worker_state IS 'RLS-exempt by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.';
+
+COMMENT ON COLUMN openrails.worker_state.cursor_version IS 'Opaque compare-and-swap token for fair-sweep cursor saves: +1 per applied save, never touched by health writes, independent of any clock.';
 
 COMMENT ON COLUMN openrails.worker_state.registered_at IS 'First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.';
 

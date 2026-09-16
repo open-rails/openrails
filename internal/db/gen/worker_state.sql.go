@@ -11,7 +11,7 @@ import (
 )
 
 const listWorkerHealth = `-- name: ListWorkerHealth :many
-SELECT worker_kind, cursor_merchant_id, cursor_updated_at, registered_at, expected_period_seconds, last_success_at, last_error_at, last_error, consecutive_failures, last_alerted_at, updated_at FROM openrails.worker_state ORDER BY worker_kind
+SELECT worker_kind, cursor_merchant_id, cursor_version, registered_at, expected_period_seconds, last_success_at, last_error_at, last_error, consecutive_failures, last_alerted_at, updated_at FROM openrails.worker_state ORDER BY worker_kind
 `
 
 func (q *Queries) ListWorkerHealth(ctx context.Context) ([]OpenrailsWorkerState, error) {
@@ -26,7 +26,7 @@ func (q *Queries) ListWorkerHealth(ctx context.Context) ([]OpenrailsWorkerState,
 		if err := rows.Scan(
 			&i.WorkerKind,
 			&i.CursorMerchantID,
-			&i.CursorUpdatedAt,
+			&i.CursorVersion,
 			&i.RegisteredAt,
 			&i.ExpectedPeriodSeconds,
 			&i.LastSuccessAt,
