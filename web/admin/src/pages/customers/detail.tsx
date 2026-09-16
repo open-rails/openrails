@@ -56,7 +56,6 @@ import { toastApiError } from "@/lib/toast"
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
 import { CollectionDefaultBadges } from "./collection-default-badges"
 import { CustomerUsageRatesSection } from "./usage-rates"
-import { AutoTopupSafetySummary } from "./auto-topup-safety"
 import { CustomerCreditSupportSection } from "./credits"
 
 export function CustomerDetailPage() {
@@ -123,7 +122,6 @@ export function CustomerDetailPage() {
                     b.decimal_places
                   )}
                 </p>
-                <AutoTopupSafetySummary status={b.auto_topup} />
               </CardContent>
             </Card>
           ))}

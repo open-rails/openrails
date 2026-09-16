@@ -5,7 +5,6 @@ package tests
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -29,7 +28,7 @@ import (
 // Issue #339 full loop: a HOST-AUTHENTICATED principal (the host-pluggable
 // billingauth.DelegatedAuthenticator seam, NO control plane delegated
 // verifier) drives the /v1/me money surface end-to-end against a real
-// database — reads its account, configures its settings, lists its
+// database — reads its account and lists its
 // transactions — and another subject's data is never visible.
 
 // hostSeamAuthenticator is the host's DelegatedAuthenticator: the host has
@@ -109,23 +108,6 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	require.EqualValues(t, 7_500_000, acct["balance_amount"])
 	require.NotContains(t, acct, "held_amount")
 	require.NotContains(t, acct, "available_amount")
-
-	// --- PUT /v1/me/settings: A configures its own self-imposed settings. ---
-	settingsBody := fmt.Sprintf(`{
-		"currency": %q,
-		"low_balance_threshold": 250000
-	}`, currency)
-	w = doHostSeamSelf(routerA, http.MethodPut, "/v1/me/settings", settingsBody)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	stored := decodeHostSeamBody(t, w)
-	require.EqualValues(t, 250_000, stored["low_balance_threshold"])
-	require.NotContains(t, stored, "billing_mode")
-
-	settings, err := svc.GetCreditAccountSettings(ctx, payerA, currency)
-	require.NoError(t, err)
-	require.NotNil(t, settings.LowBalanceThreshold)
-	require.EqualValues(t, 250_000, *settings.LowBalanceThreshold)
-	require.Equal(t, "prepaid", settings.BillingMode, "customer self-service must not change platform billing mode")
 
 	// --- GET /v1/me/transactions: A sees exactly its deposit. ---
 	w = doHostSeamSelf(routerA, http.MethodGet, "/v1/me/transactions?currency="+currency+"&limit=10", "")

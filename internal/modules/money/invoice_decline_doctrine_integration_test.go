@@ -70,9 +70,10 @@ func declineDoctrineEnv(t *testing.T, cycle time.Duration, clock *clockwork.Fake
 
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "doctrine-"+uuid.NewString(), 5_000_000)
 	require.NoError(t, err)
 

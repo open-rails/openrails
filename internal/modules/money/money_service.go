@@ -411,7 +411,7 @@ func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer iden
 }
 
 // GetAccountSettingsForCustomer returns the stored money-account settings for an
-// payer (billing mode, spend caps, auto-top-up, expiry default), RLS-scoped to
+// payer (billing mode and expiry default), RLS-scoped to
 // the request merchant (issue #242). Never nil — missing rows return the defaults.
 func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	var out *models.MoneyAccount

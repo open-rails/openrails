@@ -133,7 +133,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/solana/recurring/plan_service.go:SubmitForMerchantAddressWithPresubmit": "same Submitter, merchant-fee-payer variant",
 
 	// --- the charge seam --------------------------------------------------
-	"internal/modules/payments/rails/nmidirect/charger.go:Charge": "#297 charge-seam implementation: the ONE seam wire call, reached only via the money CollectionAdapter choke (topup_charge intent handler + arrears/invoice worker attempt-count keys, #672/#673)",
+	"internal/modules/payments/rails/nmidirect/charger.go:Charge": "#297 charge-seam implementation: the ONE seam wire call, reached only via the money CollectionAdapter choke (arrears/invoice worker attempt-count keys, #672/#673)",
 
 	// --- inside the client's own probe ------------------------------------
 	"internal/integrations/nmi/probe.go:voidProbe": "the client probing ITSELF: voids the $0.01 auth ProbeTestMode just made; never touches a customer",

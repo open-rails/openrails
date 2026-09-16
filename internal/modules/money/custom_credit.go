@@ -20,7 +20,7 @@ import (
 // Unqualified codes (`usd`) remain built-in currencies (#474).
 
 // ErrBillingUnitRequired is returned when a billing-layer path (invoice / owed /
-// arrears / charge / auto-topup / account settings) is handed a qualified custom
+// arrears / charge / account settings) is handed a qualified custom
 // credit unit. Only built-in currencies may be billed in (#475 invariant).
 var ErrBillingUnitRequired = errors.New("money: billing requires a built-in currency, not a custom credit unit")
 

@@ -4,7 +4,7 @@
 `PUT /v1/merchant/settings` replaces that document atomically. The Go methods are
 `Client.GetMerchantSettings` and `Client.SetMerchantSettings` in every deployment.
 
-GET includes profile, invoice/arrears policy, checkout routing, auto-top-up safety,
+GET includes profile, invoice/arrears policy, checkout routing,
 named billing policies, default/tier bindings and delegated
 wasted-spend limits. Sending an unchanged GET result preserves the declaration.
 Omitted fields in PUT reset to their defaults; empty lists remove declarations.

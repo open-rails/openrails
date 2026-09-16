@@ -108,19 +108,18 @@ func TestSavedMethodCollectionDefaultsAreCurrencyAndCustomerScoped(t *testing.T)
 	require.Empty(t, got[api.FormatPaymentMethodID(eur.ID)])
 }
 
-func TestCollectionDefaultDisplayPreservesExistingTopupFallback(t *testing.T) {
+func TestCollectionDefaultRemovalDoesNotChooseAnotherSavedMethod(t *testing.T) {
 	fx := newPaymentDefaultsFixture(t)
 	payer := identity.CustomerID(fx.customer)
 	explicit := seedDefaultMethod(t, fx, fx.customer)
 	fallback := seedDefaultMethod(t, fx, fx.customer)
 	require.NoError(t, fx.rt.MoneyService.SetInvoiceCollectionPaymentMethod(fx.ctx, payer, "USD", explicit.ID))
-	fx.exec(`UPDATE openrails.money_settings SET auto_topup_payment_method_id=$1 WHERE merchant_id=$2 AND customer_id=$3 AND currency='USD'`, fallback.ID, fx.merchant, fx.customer)
 	got := readDefaultMethods(t, fx, fx.customer, ListPaymentMethods)
 	require.Equal(t, []string{"USD"}, got[api.FormatPaymentMethodID(explicit.ID)])
 	require.Empty(t, got[api.FormatPaymentMethodID(fallback.ID)])
 	require.NoError(t, fx.rt.PaymentMethodService.Delete(fx.ctx, explicit.ID))
 	got = readDefaultMethods(t, fx, fx.customer, ListPaymentMethods)
-	require.Equal(t, []string{"USD"}, got[api.FormatPaymentMethodID(fallback.ID)], "existing invoice fallback survives removal of the explicit selection")
+	require.Empty(t, got[api.FormatPaymentMethodID(fallback.ID)], "removing the explicit collection method must not select another saved method")
 	require.NoError(t, fx.rt.PaymentMethodService.Delete(fx.ctx, fallback.ID))
 	defaults, err := fx.rt.MoneyService.CollectionPaymentMethodCurrencies(fx.ctx, payer)
 	require.NoError(t, err)

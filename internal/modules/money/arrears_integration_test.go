@@ -63,9 +63,10 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 5_000_000) // $5 owed, in ledger internal units
 	require.NoError(t, err)
 
@@ -103,9 +104,10 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 3_000_001) // $3 + 1 micro owed
 	require.NoError(t, err)
 	_, err = svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
@@ -127,9 +129,10 @@ func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 	svc, pool, payer, cur, ctx := moneyInEnv(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 400)
 	require.NoError(t, err)
 	_, err = svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))

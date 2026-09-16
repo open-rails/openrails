@@ -3713,20 +3713,13 @@ CREATE TABLE openrails.money_settings (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     billing_mode text DEFAULT 'prepaid'::text NOT NULL,
-    low_balance_threshold bigint,
-    auto_topup_enabled boolean DEFAULT false NOT NULL,
-    auto_topup_amount bigint,
-    auto_topup_payment_method_id uuid,
     default_credit_expiry_hours integer,
-    last_topup_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     tier text,
     currency text NOT NULL,
     credit_limit_amount bigint DEFAULT 0 NOT NULL,
     collection_payment_method_id uuid,
-    auto_topup_failures bigint DEFAULT 0 NOT NULL,
-    CONSTRAINT money_settings_auto_topup_failures_check CHECK ((auto_topup_failures >= 0)),
     CONSTRAINT money_settings_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
     CONSTRAINT money_settings_credit_limit_amount_nonneg_chk CHECK ((credit_limit_amount >= 0)),
     CONSTRAINT money_settings_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
@@ -3736,7 +3729,6 @@ ALTER TABLE ONLY openrails.money_settings FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.money_settings IS 'Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in payer/invoker_spend_limits; arrears owed exposure is derived from open invoices.';
 
-COMMENT ON COLUMN openrails.money_settings.low_balance_threshold IS 'Optional low-balance trigger in the row currency internal precision.';
 
 COMMENT ON COLUMN openrails.money_settings.default_credit_expiry_hours IS 'per-account default credit-grant expiry in HOURS; NULL = no default.';
 
@@ -3747,9 +3739,6 @@ COMMENT ON COLUMN openrails.money_settings.credit_limit_amount IS 'Admin-set arr
 
 ALTER TABLE ONLY openrails.money_settings
     ADD CONSTRAINT money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency);
-
-ALTER TABLE ONLY openrails.money_settings
-    ADD CONSTRAINT money_settings_auto_topup_payment_method_fk FOREIGN KEY (merchant_id, customer_id, auto_topup_payment_method_id) REFERENCES openrails.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (auto_topup_payment_method_id);
 
 ALTER TABLE ONLY openrails.money_settings
     ADD CONSTRAINT money_settings_collection_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, collection_payment_method_id) REFERENCES openrails.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (collection_payment_method_id);
@@ -4310,36 +4299,6 @@ CREATE POLICY merchant_isolation ON openrails.entitlements USING ((merchant_id =
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.entitlements TO openrails_app;
 
-CREATE TABLE openrails.auto_topup_episodes (
-    intent_id uuid NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    currency text NOT NULL,
-    reserved_at timestamp with time zone NOT NULL,
-    amount_native bigint NOT NULL,
-    receipt jsonb,
-    finalized_at timestamp with time zone,
-    CONSTRAINT auto_topup_episodes_amount_native_check CHECK ((amount_native > 0)),
-    CONSTRAINT auto_topup_episodes_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-);
-
-ALTER TABLE ONLY openrails.auto_topup_episodes FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE ONLY openrails.auto_topup_episodes
-    ADD CONSTRAINT auto_topup_episodes_pkey PRIMARY KEY (merchant_id, intent_id);
-
-CREATE INDEX auto_topup_episodes_account_time ON openrails.auto_topup_episodes USING btree (merchant_id, customer_id, currency, reserved_at);
-
-CREATE UNIQUE INDEX auto_topup_episodes_one_pending ON openrails.auto_topup_episodes USING btree (merchant_id, customer_id, currency) WHERE (finalized_at IS NULL);
-
-ALTER TABLE ONLY openrails.auto_topup_episodes
-    ADD CONSTRAINT auto_topup_episodes_merchant_id_customer_id_currency_fkey FOREIGN KEY (merchant_id, customer_id, currency) REFERENCES openrails.money_settings(merchant_id, customer_id, currency) ON DELETE CASCADE;
-
-ALTER TABLE openrails.auto_topup_episodes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.auto_topup_episodes USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.auto_topup_episodes TO openrails_app;
 
 CREATE TABLE openrails.merchant_dormancy_notices (
     merchant_id uuid NOT NULL,

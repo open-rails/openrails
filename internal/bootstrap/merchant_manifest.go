@@ -413,8 +413,7 @@ func mergeProviderRailAccountConfig(dst *ProviderRailAccountConfig, src Provider
 }
 
 type MerchantConfig struct {
-	AutoTopupSafety *models.AutoTopupSafetyPolicy `yaml:"auto_topup_safety,omitempty" koanf:"auto_topup_safety"`
-	DisplayName     string                        `yaml:"display_name" koanf:"display_name"`
+	DisplayName string `yaml:"display_name" koanf:"display_name"`
 	// APIHost is the merchant's canonical #734 API host (e.g. "api.myapp.example"):
 	// the Host-header value public routes resolve this merchant from (#850).
 	// Globally unique across active merchants. Omitted leaves the stored value
@@ -1267,14 +1266,11 @@ func reconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 	// Apply the merchant_configurations payload (#646): profile, invoice/collection
 	// policy, and delegated-invoker abuse windows. Load once, mutate only the
 	// declared parts (omit = leave-as-is), upsert if anything changed.
-	if mt.AutoTopupSafety != nil || hasManifestProfile(mt.Profile) || mt.Invoice != nil || len(mt.DelegatedInvokerWastedSpendWindows) > 0 || len(mt.CheckoutRouting) > 0 {
+	if hasManifestProfile(mt.Profile) || mt.Invoice != nil || len(mt.DelegatedInvokerWastedSpendWindows) > 0 || len(mt.CheckoutRouting) > 0 {
 		store := merchantconfig.NewStore(database)
 		conf, _, err := store.Get(mctx)
 		if err != nil {
 			return fmt.Errorf("load merchant configuration: %w", err)
-		}
-		if mt.AutoTopupSafety != nil {
-			conf.AutoTopupSafety = mt.AutoTopupSafety
 		}
 		if hasManifestProfile(mt.Profile) {
 			conf.Profile = models.MerchantProfileConfiguration{

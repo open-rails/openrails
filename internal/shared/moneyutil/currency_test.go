@@ -5,7 +5,7 @@ import "testing"
 // TestNativeToRailMinor pins the ONE internal->rail-minor converter (#671):
 // internal native units (10^Decimals per major) -> provider minor units
 // (10^MinorDecimals per major), ceil. Both call sites (arrears invoice
-// collection and auto top-up) must send the SAME provider amount for the same
+// collection) must send the SAME provider amount for the same
 // internal amount — previously arrears hardcoded /10_000 ceil while topup
 // truncated with an assumed 2-decimal scale (JPY 100x divergence).
 func TestNativeToRailMinor(t *testing.T) {

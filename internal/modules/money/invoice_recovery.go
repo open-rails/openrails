@@ -103,14 +103,9 @@ func (s *MoneyService) ListInvoicePaymentAttempts(ctx context.Context, payer ide
 	return attempts, int(total), nil
 }
 
-// collectionPaymentMethodID is the existing collection precedence: an explicit
-// invoice method wins; the configured top-up method is its fallback. This is
-// independent of any provider-managed subscription's saved method.
+// collectionPaymentMethodID selects the explicit invoice collection method.
 func collectionPaymentMethodID(settings *models.MoneyAccount) *uuid.UUID {
-	if settings.CollectionPaymentMethod != nil {
-		return settings.CollectionPaymentMethod
-	}
-	return settings.AutoTopupPaymentMethod
+	return settings.CollectionPaymentMethod
 }
 
 // CollectionPaymentMethodCurrencies projects the current collection policy for

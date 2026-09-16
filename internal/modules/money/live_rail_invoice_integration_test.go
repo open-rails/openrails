@@ -5,7 +5,6 @@ package money_test
 import (
 	"context"
 	"encoding/json"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"io"
 	"net/http"
 	"net/url"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -69,9 +70,10 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), pmID)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), customerID)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1_000_000))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "live-stripe-invoice-"+time.Now().UTC().Format("150405.000000000"), 750_000)
 	require.NoError(t, err)
@@ -152,9 +154,10 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 		pm, anchor)
 	require.NoError(t, err)
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 2_000_000))
 	amount := (int64(110) + time.Now().UnixNano()%80) * 10_000
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "live-nmi-invoice-"+time.Now().UTC().Format("150405.000000000"), amount)

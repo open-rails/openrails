@@ -8,15 +8,12 @@ import (
 	"github.com/google/uuid"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // Self-service money surface: the authenticated merchant_subject reads its own
-// balance and transaction history, and can set only self-imposed spend caps plus
-// auto-top-up preferences. Platform-owned policy fields are intentionally not
-// accepted on this surface.
+// balance and transaction history.
 //
 // The payer is resolved exactly like the rest of /v1/me
 // (identity.CustomerIDFromString over the acting subject — see
@@ -65,84 +62,6 @@ func GetMyBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(selfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})
-}
-
-type selfAccountSettingsRequest struct {
-	Currency               string  `json:"currency"`
-	LowBalanceThreshold    *int64  `json:"low_balance_threshold"`
-	AutoTopupEnabled       *bool   `json:"auto_topup_enabled"`
-	AutoTopupAmount        *int64  `json:"auto_topup_amount"`
-	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id"`
-}
-
-type selfAccountSettingsResponse struct {
-	AutoTopupFailures      int64      `json:"auto_topup_failures"`
-	Currency               string     `json:"currency"`
-	LowBalanceThreshold    *int64     `json:"low_balance_threshold,omitempty"`
-	AutoTopupEnabled       bool       `json:"auto_topup_enabled"`
-	AutoTopupAmount        *int64     `json:"auto_topup_amount,omitempty"`
-	AutoTopupPaymentMethod *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
-}
-
-func SetMyCreditAccountSettings(r *httprequest.Request) {
-	payer, ok := selfAccountPayer(r)
-	if !ok {
-		return
-	}
-	var req selfAccountSettingsRequest
-	if !r.BindJSON(&req) {
-		return
-	}
-	currency, ok := serviceRequiredCurrency(r, req.Currency)
-	if !ok {
-		return
-	}
-
-	in := money.AccountSettingsInput{
-		LowBalanceThreshold: req.LowBalanceThreshold,
-		AutoTopupEnabled:    req.AutoTopupEnabled,
-		AutoTopupAmount:     req.AutoTopupAmount,
-	}
-	if req.AutoTopupPaymentMethod != nil {
-		pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod))
-		if perr != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid auto_topup_payment_method_id")
-			return
-		}
-		if r.State.PaymentMethodService == nil {
-			r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
-			return
-		}
-		user := r.GetUser()
-		if err := r.State.PaymentMethodService.ValidateOwnership(r.Request.Context(), pm, user.ID); err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "auto_topup_payment_method_id does not belong to this customer")
-			return
-		}
-		in.AutoTopupPaymentMethod = &pm
-	}
-
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
-		return
-	}
-	if err := svc.SetCreditAccountSettings(r.Request.Context(), payer, currency, in); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), payer, currency)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	r.SuccessJSON(selfAccountSettingsResponse{
-		Currency:               settings.Currency,
-		AutoTopupFailures:      settings.AutoTopupFailures,
-		LowBalanceThreshold:    settings.LowBalanceThreshold,
-		AutoTopupEnabled:       settings.AutoTopupEnabled,
-		AutoTopupAmount:        settings.AutoTopupAmount,
-		AutoTopupPaymentMethod: settings.AutoTopupPaymentMethod,
-	})
 }
 
 // GetMyAccountTransactions (GET /v1/me/transactions?currency=&limit=&offset=)

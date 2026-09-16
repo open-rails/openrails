@@ -72,7 +72,6 @@ GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gate
 GET  /v1/me/invoices[/:id]                itemized statements
 GET  /v1/me/payments                      one-off payment history
 GET  /v1/me/entitlements/active           active entitlements
-PUT  /v1/me/settings                      self-imposed caps, auto-topup, currency
 GET  /v1/me/subscriptions[/:id]           own subscriptions (enriched with product/price)
 POST /v1/me/subscriptions/:id/cancel      body {"feedback": "..."} → 202 {"status":"queued"}
 POST /v1/me/subscriptions/:id/resume      cancelled Stripe subscriptions → 202

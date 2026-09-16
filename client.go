@@ -374,7 +374,6 @@ type MerchantProfileInput struct {
 // standalone policy sync jobs.
 type MerchantSettings struct {
 	Profile                    *MerchantProfileInput  `json:"profile,omitempty"`
-	AutoTopupSafety            *AutoTopupSafetyPolicy `json:"auto_topup_safety,omitempty"`
 	InvoiceCollectionThreshold *int64                 `json:"collection_threshold,omitempty"`
 	InvoiceMonthlyFloor        *int64                 `json:"monthly_floor,omitempty"`
 	InvoiceBillingBoundary     string                 `json:"billing_period_boundary,omitempty"`

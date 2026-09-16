@@ -26,7 +26,6 @@ func TestMerchantSettingsAtomicDocument(t *testing.T) {
 	routing := []openrails.CheckoutRoutingRule{{Prefer: []string{"nmi"}}}
 	document := openrails.MerchantSettings{
 		Profile:                    &openrails.MerchantProfileInput{DisplayName: "Atomic merchant", SignupURL: "https://example.test/signup"},
-		AutoTopupSafety:            &openrails.AutoTopupSafetyPolicy{MaxDaily: 2, MaxWeekly: 7, MaxMonthly: 20, DeclinesBeforeDisable: 2},
 		InvoiceCollectionThreshold: &amount, InvoiceMonthlyFloor: &amount, InvoiceBillingBoundary: "calendar_month",
 		AlertEmail: &email, RepriceNoticeWindowDays: &days, ArrearsGraceDays: &days, ArrearsDelinquencyFloor: &amount,
 		CheckoutRouting:                   &routing,
@@ -55,7 +54,6 @@ CREATE TRIGGER issue999_fail_binding BEFORE INSERT ON openrails.billing_policy_b
 		t.Run([]string{"embedded", "remote"}[i], func(t *testing.T) {
 			require.NoError(t, client.SetMerchantSettings(ctx, document))
 			got, before := read(client)
-			require.Equal(t, document.AutoTopupSafety, got.AutoTopupSafety)
 			require.Equal(t, document.InvoiceCollectionThreshold, got.InvoiceCollectionThreshold)
 			require.Equal(t, document.CheckoutRouting, got.CheckoutRouting)
 			require.NoError(t, client.SetMerchantSettings(ctx, got))

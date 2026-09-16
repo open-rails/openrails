@@ -106,9 +106,10 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	// band ($1.10–$1.89) so repeated runs do not trip NMI duplicate detection.
 	owedInternal := (int64(110) + time.Now().UnixNano()%80) * 10_000
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 2_000_000))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "nmi-sandbox-619-"+time.Now().UTC().Format("150405.000000000"), owedInternal)
 	require.NoError(t, err)

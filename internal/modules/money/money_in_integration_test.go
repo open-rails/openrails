@@ -4,16 +4,13 @@ package money_test
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
-	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -216,291 +212,6 @@ func TestDepositWithoutExpiryIsPermanent(t *testing.T) {
 	require.Nil(t, exp, "no explicit expiry means permanent")
 }
 
-// --- #239/#674 auto-top-up (write-through topup_charge intents) ---
-
-// topupHarness drives the #674 flow the AutoTopupWorker runs in production:
-// ListDueAutoTopups → EnqueueAndExecute(topup_charge) through a real intent
-// Runner over the real ledger, with a scripted Charger.
-// staticNMIResolver is a fixed money.NMIClientResolver (#788 test stand-in).
-type staticNMIResolver struct{ client *nmi.NMIClient }
-
-func (f staticNMIResolver) ResolveNMIClient(context.Context, uuid.UUID, *uuid.UUID) (*nmi.NMIClient, bool, error) {
-	if f.client == nil {
-		return nil, false, nil
-	}
-	return f.client, true, nil
-}
-
-type topupHarness struct {
-	svc    *money.MoneyService
-	runner *intents.Runner
-	ch     *fakeCharger
-}
-
-func newTopupHarness(t *testing.T, dbi *db.DB, svc *money.MoneyService, resolver money.NMIClientResolver, ch *fakeCharger) *topupHarness {
-	t.Helper()
-	runner := &intents.Runner{
-		Store:    intents.NewStore(dbi),
-		Registry: intents.NewRegistry(intents.NewTopupChargeHandler(dbi, ch, resolver, nil)),
-		// or#865: an unstated mode parks every intent — say "full" (see main_test.go).
-		Config: fullModeConfig(),
-	}
-	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(context.Background(),
-			"DELETE FROM openrails.rail_intents WHERE intent_type = 'topup_charge' AND merchant_id = $1", dbtest.TestMerchantID.UUID())
-	})
-	return &topupHarness{svc: svc, runner: runner, ch: ch}
-}
-
-// advance moves the runner's clock forward so due/verify claims see backoff
-// windows as elapsed.
-func (h *topupHarness) advance(d time.Duration) {
-	h.runner.Clock = clockwork.NewFakeClockAt(time.Now().UTC().Add(d))
-}
-
-// runOnce mirrors AutoTopupWorker.Work for one merchant pass and returns the
-// post-execution intents.
-func (h *topupHarness) runOnce(t *testing.T, ctx context.Context, cooldown time.Duration) []gen.OpenrailsRailIntent {
-	t.Helper()
-	candidates, err := h.svc.ListDueAutoTopups(ctx, cooldown)
-	require.NoError(t, err)
-	out := make([]gen.OpenrailsRailIntent, 0, len(candidates))
-	for _, c := range candidates {
-		intent, err := h.runner.EnqueueAndExecute(ctx, intents.EnqueueParams{
-			MerchantID: c.MerchantID,
-			Provider:   c.Rail,
-			IntentType: intents.TypeTopupCharge,
-			PspID:      c.PspID,
-			Payload: intents.TopupChargePayload{
-				CustomerID:      c.CustomerID,
-				Currency:        c.Currency,
-				AmountNative:    c.AmountNative,
-				PaymentMethodID: c.PaymentMethodID,
-				EpisodeAnchor:   c.EpisodeAnchor,
-			},
-			IdempotencyKey: intents.TopupChargeIdempotencyKey(c.CustomerID, c.Currency, c.EpisodeAnchor),
-			NextAttemptAt:  time.Now().UTC(),
-			Origin:         intents.OriginSystem,
-			OriginReason:   "test auto-top-up",
-		})
-		require.NoError(t, err)
-		out = append(out, intent)
-	}
-	return out
-}
-
-func seedTopupAccount(t *testing.T, ctx context.Context, svc *money.MoneyService, pool *pgxpool.Pool, payer identity.CustomerID, rail string) uuid.UUID {
-	t.Helper()
-	thr, amt := int64(1000), int64(50_000_000)
-	pm := seedPaymentMethod(t, pool, ctx, payer, rail)
-	enabled := true
-	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		LowBalanceThreshold: &thr, AutoTopupEnabled: &enabled, AutoTopupAmount: &amt, AutoTopupPaymentMethod: &pm,
-	})
-	require.NoError(t, err)
-	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 500, Source: "seed"})
-	require.NoError(t, err)
-	return pm
-}
-
-func TestAutoTopupIntent_ChargesAndDeposits(t *testing.T) {
-	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
-	pm := seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
-	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{})
-
-	done := h.runOnce(t, ctx, time.Hour)
-	require.Len(t, done, 1)
-	require.Equal(t, intents.StatusSucceeded, done[0].Status)
-	require.Len(t, h.ch.charges, 1)
-	// auto_topup_amount is stored in native units; the rail receives cents.
-	require.Equal(t, moneyutil.Cents(5000), h.ch.charges[0].AmountCents)
-	require.Equal(t, pm, h.ch.charges[0].PaymentMethodID)
-	// #674: the provider idempotency key derives from the intent id, within
-	// NMI's 50-char order-id budget.
-	require.Equal(t, "topup:"+done[0].ID.String(), h.ch.charges[0].IdempotencyKey)
-
-	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
-	require.NoError(t, err)
-	// Ledger uses internal units: 500 seed + configured native-unit top-up deposited.
-	require.Equal(t, int64(50_000_500), bal.Balance)
-
-	// Re-run within cooldown: not even a candidate.
-	require.Empty(t, h.runOnce(t, ctx, time.Hour))
-	require.Len(t, h.ch.charges, 1)
-}
-
-func TestAutoTopupRequiresExactRailAmount(t *testing.T) {
-	for _, tc := range []struct {
-		currency string
-		amount   int64
-		minor    moneyutil.Cents
-	}{{"USD", 1000000, 100}, {"EUR", 1000000, 100}, {"JPY", 10000, 1}} {
-		t.Run(tc.currency, func(t *testing.T) {
-			svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-			pm := seedPaymentMethod(t, pool, ctx, payer, "stripe")
-			enabled, threshold := true, tc.amount
-			_, err := svc.UpsertAccountSettings(ctx, payer, tc.currency, money.AccountSettingsInput{
-				AutoTopupEnabled: &enabled, AutoTopupAmount: &tc.amount, AutoTopupPaymentMethod: &pm, LowBalanceThreshold: &threshold,
-			})
-			require.NoError(t, err)
-			fractional := tc.amount + 1
-			_, err = svc.UpsertAccountSettings(ctx, payer, tc.currency, money.AccountSettingsInput{AutoTopupAmount: &fractional})
-			require.ErrorContains(t, err, "auto_topup_amount")
-			settings, err := svc.GetAccountSettings(ctx, payer, tc.currency)
-			require.NoError(t, err)
-			require.Equal(t, tc.amount, *settings.AutoTopupAmount, "invalid settings must roll back")
-
-			charger := &fakeCharger{}
-			h := newTopupHarness(t, dbi, svc, nil, charger)
-			done := h.runOnce(t, ctx, time.Hour)
-			require.Len(t, done, 1)
-			require.Equal(t, intents.StatusSucceeded, done[0].Status)
-			require.Len(t, charger.charges, 1)
-			require.Equal(t, tc.minor, charger.charges[0].AmountCents)
-			balance, err := svc.GetBalanceForCustomer(ctx, payer, tc.currency)
-			require.NoError(t, err)
-			require.Equal(t, tc.amount, balance.Balance, "full charged amount is credited")
-
-			// A malformed queued operation cannot bypass settings validation at submission.
-			payload, err := json.Marshal(intents.TopupChargePayload{CustomerID: payer.UUID(), Currency: tc.currency,
-				AmountNative: fractional, PaymentMethodID: pm, EpisodeAnchor: "genesis"})
-			require.NoError(t, err)
-			handler := intents.NewTopupChargeHandler(nil, charger, nil, nil)
-			outcome := handler.Execute(ctx, gen.OpenrailsRailIntent{Payload: payload})
-			require.Equal(t, intents.OutcomeTerminal, outcome.Class)
-			require.Len(t, charger.charges, 1, "invalid amount must be refused before any provider call")
-		})
-	}
-}
-
-func TestAutoTopupIntent_Declined(t *testing.T) {
-	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
-	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
-	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{declineAll: true})
-
-	done := h.runOnce(t, ctx, time.Hour)
-	require.Len(t, done, 1)
-	require.Equal(t, intents.StatusFailedTerminal, done[0].Status)
-	require.Len(t, h.ch.charges, 1, "charge attempted")
-	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
-	require.NoError(t, err)
-	require.Equal(t, int64(500), bal.Balance, "declined -> no deposit")
-
-	// Decline stamped the cooldown: no immediate re-charge hammering.
-	require.Empty(t, h.runOnce(t, ctx, time.Hour))
-	require.Len(t, h.ch.charges, 1)
-}
-
-// Crash injection (#674): ambiguous charge (timeout after send) parks as
-// unknown_needs_verify — never a decline, never a same-episode blind
-// re-charge. When the local deposit exists (the crash hit AFTER finalize
-// started), the verifier resolves without any provider call.
-func TestAutoTopupIntent_AmbiguousThenVerifyResolves(t *testing.T) {
-	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
-	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
-	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{ambiguous: true})
-
-	done := h.runOnce(t, ctx, time.Hour)
-	require.Len(t, done, 1)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, done[0].Status)
-	require.Len(t, h.ch.charges, 1)
-
-	// Same episode re-scan: the candidate is still due (no stamp), maps onto
-	// the SAME intent, and the runner refuses to blind-retry an in-verify
-	// intent — zero additional charges.
-	again := h.runOnce(t, ctx, time.Hour)
-	require.Len(t, again, 1)
-	require.Equal(t, done[0].ID, again[0].ID, "same episode = same intent")
-	require.Equal(t, intents.StatusUnknownNeedsVerify, again[0].Status)
-	require.Len(t, h.ch.charges, 1, "no blind re-charge while unresolved")
-
-	// Simulate "the charge actually landed and the deposit was recorded just
-	// before the crash": land the deposit under the intent-derived source id.
-	require.NoError(t, svc.RecordAutoTopupReceipt(ctx, done[0].ID, money.AutoTopupReceipt{TransactionID: "confirmed-exact-receipt"}))
-
-	// The verifier resolves from the local deposit — exactly one deposit, one
-	// external charge, intent succeeded.
-	h.advance(2 * time.Minute)
-	_, err := h.runner.RunVerifyOnce(ctx)
-	require.NoError(t, err)
-	final, err := intents.NewStore(dbi).Get(ctx, done[0].ID)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusSucceeded, final.Status)
-	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
-	require.NoError(t, err)
-	require.Equal(t, int64(50_000_500), bal.Balance, "exactly one deposit")
-}
-
-// Crash injection (#674): die AFTER the external charge but BEFORE the
-// deposit. The verifier finds the sale at the provider by the intent-derived
-// order id and finalizes WITHOUT a second charge.
-func TestAutoTopupIntent_ChargeThenCrashBeforeDeposit_NoDoubleCharge(t *testing.T) {
-	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
-	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailNMI))
-
-	// Fake NMI query API: reports a successful sale for the searched order id
-	// once charged=true (the first charge landed at the provider).
-	var charged atomic.Bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = r.ParseForm()
-		orderID := r.Form.Get("order_id")
-		if charged.Load() {
-			_, _ = w.Write([]byte(`<nm_response><transaction><transaction_id>txn-topup-1</transaction_id><order_id>` + orderID + `</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`))
-			return
-		}
-		_, _ = w.Write([]byte(`<nm_response></nm_response>`))
-	}))
-	t.Cleanup(srv.Close)
-	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "k", WebhookSecret: "s"}, true)
-	require.NoError(t, err)
-	client.QueryURL = srv.URL
-
-	ch := &fakeCharger{ambiguous: true} // first attempt: charge sent, response lost
-	h := newTopupHarness(t, dbi, svc, staticNMIResolver{client: client}, ch)
-
-	done := h.runOnce(t, ctx, time.Hour)
-	require.Len(t, done, 1)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, done[0].Status)
-	require.Len(t, ch.charges, 1)
-	charged.Store(true) // the lost response was actually a success at the provider
-
-	// Verifier: finds the sale by the intent-derived order id, deposits, and
-	// succeeds — one charge, one deposit.
-	h.advance(2 * time.Minute)
-	_, err = h.runner.RunVerifyOnce(ctx)
-	require.NoError(t, err)
-	final, err := intents.NewStore(dbi).Get(ctx, done[0].ID)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusSucceeded, final.Status)
-	require.Len(t, ch.charges, 1, "verification never re-charges")
-	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
-	require.NoError(t, err)
-	require.Equal(t, int64(50_000_500), bal.Balance)
-}
-
-// A charger error does not prove no payment was submitted, even on a rail
-// with idempotency keys. Keep the safety slot until an exact receipt is known.
-func TestAutoTopupIntent_UnknownErrorNeverResends(t *testing.T) {
-	svc, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
-	seedTopupAccount(t, ctx, svc, pool, payer, string(models.RailStripe))
-	h := newTopupHarness(t, dbi, svc, nil, &fakeCharger{transientFailures: 1})
-	done := h.runOnce(t, ctx, time.Hour)
-	require.Len(t, done, 1)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, done[0].Status)
-	h.advance(35 * 24 * time.Hour)
-	_, err := h.runner.RunVerifyOnce(ctx)
-	require.NoError(t, err)
-	_, err = h.runner.RunExecuteOnce(ctx)
-	require.NoError(t, err)
-	require.Len(t, h.ch.charges, 1)
-	final, err := intents.NewStore(dbi).Get(ctx, done[0].ID)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, final.Status)
-	bal, err := svc.GetBalanceForCustomer(ctx, payer, currency)
-	require.NoError(t, err)
-	require.Equal(t, int64(500), bal.Balance)
-}
-
 func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	_, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
@@ -661,9 +372,10 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 	})
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 50_000))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "nmi-invoice-collection", 50_000)
 	require.NoError(t, err)
@@ -728,9 +440,10 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_invoice")
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_invoice")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 50_000))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "stripe-invoice-collection", 50_000)
 	require.NoError(t, err)
@@ -837,9 +550,10 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_openrails_decline")
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_openrails_decline")
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 50_000))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "stripe-invoice-decline", 50_000)
 	require.NoError(t, err)
@@ -911,9 +625,10 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *tes
 	})
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 1_000))
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: payer.UUID().String(), Currency: money.DefaultCurrency, Amount: 1_000, Source: "seed"})
 	require.NoError(t, err)
@@ -972,9 +687,10 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 	})
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 500))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "scoped-decline", 500)
 	require.NoError(t, err)
@@ -1019,9 +735,10 @@ func TestChargeOutstanding_WithScopedCharger_TransientErrorRetriesWithoutSettlem
 	})
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 500))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "scoped-transient", 500)
 	require.NoError(t, err)
@@ -1069,9 +786,10 @@ func TestInvoiceWorker_UsesMerchantInvoiceThresholds(t *testing.T) {
 	})
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "worker-scoped-collection", 500)
 	require.NoError(t, err)
 	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))

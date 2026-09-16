@@ -62,10 +62,9 @@ func TestOr897_OutstandingCapPolicy_SeedAPIBusiness(t *testing.T) {
 
 	payer := or897ArrearsPayer(t, ctx, ms, pool)
 	method := or897SeedPaymentMethod(t, ctx, pool, payer)
-	_, err := ms.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		AutoTopupPaymentMethod: &method,
-	})
+	_, err := ms.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{})
 	require.NoError(t, err)
+	require.NoError(t, ms.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, method))
 
 	// The debt through the REAL accrual path: an owed_accrual leg on the payer's
 	// own arrears account, which is what the cap measures.

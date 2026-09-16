@@ -40,7 +40,7 @@ const (
 	// InitiatorCustomer: the cardholder is present and acting (CIT).
 	InitiatorCustomer Initiator = "customer"
 	// InitiatorMerchant: the engine charges off-session (MIT) — renewals,
-	// dunning retries, auto top-ups, arrears collection.
+	// dunning retries and arrears collection.
 	InitiatorMerchant Initiator = "merchant"
 )
 
@@ -54,7 +54,7 @@ const (
 	// retries.
 	AgreementRecurring Agreement = "recurring"
 	// AgreementUnscheduled: no fixed cadence — one-time checkout on a stored
-	// card, auto top-ups, arrears/invoice collection.
+	// card and arrears/invoice collection.
 	AgreementUnscheduled Agreement = "unscheduled"
 )
 
@@ -111,8 +111,8 @@ func RecurringMIT(priorRef string) Context {
 	return Context{Initiator: InitiatorMerchant, Agreement: AgreementRecurring, PriorRef: priorRef}
 }
 
-// UnscheduledMIT: merchant-initiated unscheduled charge (auto top-up,
-// arrears/invoice collection). priorRef must identify the approved initial
+// UnscheduledMIT is a merchant-initiated invoice collection charge.
+// priorRef must identify the approved initial
 // unscheduled CIT. Use the explicitly named legacy constructor when no
 // reference can be recovered.
 func UnscheduledMIT(priorRef string) Context {

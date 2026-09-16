@@ -56,11 +56,6 @@ type MoneyAccount struct {
 	Currency   string    `json:"currency"`
 
 	BillingMode              string     `json:"billing_mode"`
-	LowBalanceThreshold      *int64     `json:"low_balance_threshold,omitempty"`
-	AutoTopupFailures        int64      `json:"auto_topup_failures"`
-	AutoTopupEnabled         bool       `json:"auto_topup_enabled"`
-	AutoTopupAmount          *int64     `json:"auto_topup_amount,omitempty"`
-	AutoTopupPaymentMethod   *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
 	CollectionPaymentMethod  *uuid.UUID `json:"collection_payment_method_id,omitempty"`
 	DefaultCreditExpiryHours *int       `json:"default_credit_expiry_hours,omitempty"`
 
@@ -68,8 +63,7 @@ type MoneyAccount struct {
 	// billing_mode=arrears the balance may go negative up to this amount; AdmitHold
 	// denies insufficient_credit when a new hold would exceed it. 0 = off. NOT
 	// self-serve (set via SetCreditLimit, never UpsertAccountSettings).
-	CreditLimitAmount int64      `json:"credit_limit_amount"`
-	LastTopupAt       *time.Time `json:"last_topup_at,omitempty"`
+	CreditLimitAmount int64 `json:"credit_limit_amount"`
 
 	TrustLevel *string `json:"trust_level,omitempty"`
 
