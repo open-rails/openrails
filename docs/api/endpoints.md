@@ -154,7 +154,11 @@ Tier-change response: `{ object: "tier_change", status: "succeeded"|"requires_ac
 Stripe/NMI upgrades succeed immediately with proration; downgrades succeed with
 a `delayed_start` at period end; CCBill upgrades return `requires_action` with a
 redirect `url`, downgrades are `blocked`; Solana tier changes go through the
-on-chain prepare/confirm routes above.
+on-chain prepare/confirm routes above. An NMI upgrade whose provider outcome is
+unresolved answers `409` (retry with the same `Idempotency-Key` to read the
+durable result); a second upgrade of a subscription with an unresolved upgrade
+also answers `409`. Checkout confirmation uses the same `409` for an unresolved
+sale.
 
 ### Payment methods
 

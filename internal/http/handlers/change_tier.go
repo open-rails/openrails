@@ -128,7 +128,7 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 	case errors.Is(err, checkout.ErrTierChangeBlocked):
 		r.ErrorJSON(http.StatusConflict, err.Error())
-	case errors.Is(err, checkout.ErrTierChangePending):
+	case errors.Is(err, checkout.ErrTierChangePending), errors.Is(err, checkout.ErrCheckoutProcessing):
 		r.ErrorJSON(http.StatusConflict, err.Error())
 	case errors.Is(err, checkout.ErrTierChangeSameProduct):
 		r.ErrorJSON(http.StatusConflict, "already on this plan")

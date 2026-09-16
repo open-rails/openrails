@@ -233,7 +233,7 @@ func TestUpgradeUnresolvedPredecessorRejectsASecondRequest(t *testing.T) {
 	require.ErrorIs(t, err, ErrCheckoutProcessing)
 	fx.req.IdempotencyKey = uuid.NewString()
 	_, err = fx.upgrade(t)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrTierChangePending)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "a second request cannot bypass the first operation's unresolved submission")
 }
 

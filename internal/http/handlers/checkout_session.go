@@ -271,7 +271,7 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		r.ErrorJSON(http.StatusForbidden, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutSessionExpired):
 		r.ErrorJSON(http.StatusGone, err.Error())
-	case errors.Is(err, checkout.ErrCheckoutSessionPending):
+	case errors.Is(err, checkout.ErrCheckoutSessionPending), errors.Is(err, checkout.ErrCheckoutProcessing):
 		r.ErrorJSON(http.StatusConflict, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutSessionConflict):
 		r.ErrorJSON(http.StatusConflict, err.Error())
