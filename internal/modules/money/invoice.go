@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -333,7 +334,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			}
 			data, err := models.ToJSONB(map[string]any{
 				"invoice_id": inv.ID.String(), "invoice_number": number,
-				"amount_due": inv.AmountDue, "currency": inv.Currency, "due_at": inv.DueAt,
+				"amount_due": strconv.FormatInt(inv.AmountDue, 10), "currency": inv.Currency, "due_at": inv.DueAt,
 			})
 			if err != nil {
 				return err

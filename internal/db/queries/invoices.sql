@@ -229,7 +229,7 @@ WITH overdue AS (
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'invoice_overdue',
            jsonb_build_object('invoice_id', id,
                               'invoice_number', COALESCE(NULLIF(invoice_number, ''), id::text),
-                              'amount_due', amount_due, 'currency', currency, 'due_at', due_at),
+                              'amount_due', amount_due::text, 'currency', currency, 'due_at', due_at),
            false, sqlc.arg(now)::timestamptz
     FROM candidates
     ON CONFLICT (id) DO NOTHING

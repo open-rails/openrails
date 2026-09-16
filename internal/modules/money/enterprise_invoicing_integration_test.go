@@ -140,7 +140,7 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 	})
 	require.NoError(t, err)
 
-	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "th798-terms-"+uuid.NewString()[:8], 250_000)
+	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "th798-terms-"+uuid.NewString()[:8], 9_007_199_254_740_993)
 	require.NoError(t, err)
 
 	from := time.Now().Add(-time.Hour)
@@ -152,7 +152,7 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 	require.Equal(t, []string{string(models.NotificationInvoiceIssued)}, notificationEventTypes(t, pool, ctx, payer))
 	issued := notificationData(t, pool, ctx, payer, string(models.NotificationInvoiceIssued))
 	require.Equal(t, inv.ID.String(), issued["invoice_id"])
-	require.Equal(t, float64(250_000), issued["amount_due"])
+	require.Equal(t, "9007199254740993", issued["amount_due"])
 	// Repeating issuance returns the same invoice without another notice.
 	again, err := svc.FinalizeInvoice(ctx, payer, cur, from, to)
 	require.NoError(t, err)
@@ -190,8 +190,23 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 	// pass still sends the ordinary overdue notice when its due date passes.
 	_, err = pool.Exec(ctx, "UPDATE openrails.invoices SET status = $2, due_at = now() - interval '1 day' WHERE id = $1", inv.ID, initialStatus)
 	require.NoError(t, err)
-	flipped, err = svc.MarkInvoicesPastDue(ctx, time.Now())
-	require.NoError(t, err)
+	type dueResult struct {
+		count int
+		err   error
+	}
+	results := make(chan dueResult, 2)
+	for range 2 {
+		go func() {
+			n, err := svc.MarkInvoicesPastDue(ctx, time.Now())
+			results <- dueResult{count: n, err: err}
+		}()
+	}
+	flipped = 0
+	for range 2 {
+		result := <-results
+		require.NoError(t, result.err)
+		flipped += result.count
+	}
 	if initialStatus == "open" {
 		require.GreaterOrEqual(t, flipped, 1)
 	}
@@ -202,12 +217,13 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 	require.Equal(t, []string{string(models.NotificationInvoiceIssued), string(models.NotificationInvoiceOverdue)}, notificationEventTypes(t, pool, ctx, payer))
 	overdue := notificationData(t, pool, ctx, payer, string(models.NotificationInvoiceOverdue))
 	require.Equal(t, inv.ID.String(), overdue["invoice_id"])
+	require.Equal(t, "9007199254740993", overdue["amount_due"])
 	_, err = svc.MarkInvoicesPastDue(ctx, time.Now())
 	require.NoError(t, err)
 	require.Len(t, notificationEventTypes(t, pool, ctx, payer), 2, "a repeated debt pass must not repeat either notice")
 
 	// Manual remittance settles it: exposure returns to zero.
-	paid, err := svc.RecordOutOfBandInvoicePayment(ctx, payer, inv.ID, 250_000, "wire-th798-"+uuid.NewString()[:8])
+	paid, err := svc.RecordOutOfBandInvoicePayment(ctx, payer, inv.ID, 9_007_199_254_740_993, "wire-th798-"+uuid.NewString()[:8])
 	require.NoError(t, err)
 	require.Equal(t, "paid", paid.Status)
 	require.Equal(t, int64(0), paid.AmountDue)
