@@ -409,7 +409,7 @@ func isSolanaRecurringToken(symbol string) bool {
 // sync_disabled (nil,false,nil). Account gone -> missing=true.
 func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *priceVerifyContext) ([]DriftField, bool, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
-		return nil, false, nil
+		return nil, false, fmt.Errorf("solana is not configured")
 	}
 	pdaStr := strings.TrimSpace(ids[solanaKeyPlanPDA])
 	if pdaStr == "" {
@@ -420,7 +420,10 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 		return nil, false, fmt.Errorf("invalid solana plan_pda %q: %w", pdaStr, err)
 	}
 	data, err := a.svc.rt.SolanaRPCResolver.ChainReader().GetAccountData(ctx, pda)
-	if err != nil || len(data) == 0 {
+	if err != nil {
+		return nil, false, fmt.Errorf("read solana plan account: %w", err)
+	}
+	if len(data) == 0 {
 		return nil, true, nil // plan account gone from chain
 	}
 	acct, err := subscriptions.DecodePlanAccount(data)

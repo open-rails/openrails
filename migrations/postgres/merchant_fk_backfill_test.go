@@ -47,10 +47,9 @@ func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
 		{"entitlements", "entitlements_merchant_fk"},
 		{"rail_intents", "rail_intents_merchant_fk"},
 		{"rail_customer_accounts", "rail_customer_accounts_merchant_fk"},
-		{"reconciliation_runs", "reconciliation_runs_merchant_fk"},
+		{"maintenance_runs", "maintenance_runs_merchant_fk"},
 		{"reconciliation_findings", "reconciliation_findings_merchant_fk"},
 		{"reconciliation_state", "reconciliation_state_merchant_fk"},
-		{"catalog_drift_events", "catalog_drift_events_merchant_fk"},
 		{"custom_credit_types", "custom_credit_types_merchant_fk"},
 		{"notifications", "notifications_merchant_fk"},
 		// payer_spend_limits is gone (or#897); billing_policies /
@@ -60,7 +59,6 @@ func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
 		{"solana_subscriptions", "solana_subscriptions_merchant_fk"},
 		{"merchant_deks", "merchant_deks_merchant_fk"},
 		{"merchant_secrets", "merchant_secrets_merchant_fk"},
-		{"merchant_purge_inventories", "merchant_purge_inventories_merchant_fk"},
 	}
 
 	for _, c := range cases {

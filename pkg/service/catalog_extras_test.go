@@ -25,7 +25,7 @@ import (
 
 // extrasTestSnapshot builds a local catalog with one product ("premium") and one
 // price (usd 23_000_000 micros / 30d) linked to stripe price/product ids and an NMI plan id.
-func extrasTestSnapshot() localCatalogSnapshot {
+func extrasTestSnapshot() catalog.DriftSnapshot {
 	productID := uuid.New()
 	priceID := uuid.New()
 	cycleHours := 30 * 24
@@ -49,7 +49,7 @@ func extrasTestSnapshot() localCatalogSnapshot {
 			},
 		},
 	}
-	return buildSnapshotFromRows([]*models.Product{product}, []*models.Price{price})
+	return catalog.BuildDriftSnapshot([]*models.Product{product}, []*models.Price{price}, uuid.Nil)
 }
 
 // -- extras detection: marker classification (ours vs foreign) -----------------
@@ -118,7 +118,7 @@ func TestComputeStripeExtras_MarkerClassification(t *testing.T) {
 
 func TestComputeNMIExtras_MarkerClassification(t *testing.T) {
 	snap := extrasTestSnapshot()
-	plans := []nmiPlan{
+	plans := []catalog.NMIPlan{
 		{PlanID: "premium-usd-23000000-30", PlanName: "Premium"}, // referenced locally: NOT an extra
 		{PlanID: "retired-usd-900-30", PlanName: "Retired"},      // content-addressed shape: OWNED extra
 		{PlanID: "legacy-vip-plan", PlanName: "Legacy VIP"},      // operator-chosen id: FOREIGN extra
@@ -197,7 +197,8 @@ func TestDetectNMIExtras_OverQueryAPI(t *testing.T) {
 	client.QueryURL = server.URL
 	client.V5BaseURL = server.URL
 
-	plans, err := fetchNMIPlans(context.Background(), client)
+	remotePlans, err := client.ListRecurringPlans(context.Background())
+	plans := catalog.MapNMIPlans(remotePlans)
 	if err != nil {
 		t.Fatalf("fetch nmi plans: %v", err)
 	}
@@ -447,12 +448,12 @@ func TestComputeSolanaSunsetExtras(t *testing.T) {
 	pdaAbsentArchived := solanago.NewWallet().PublicKey().String() // archived price, plan gone -> nothing to do
 	pdaActiveLive := solanago.NewWallet().PublicKey().String()     // ACTIVE price -> in the live catalog, never an extra
 
-	snap := buildSnapshotFromRows([]*models.Product{product}, []*models.Price{
+	snap := catalog.BuildDriftSnapshot([]*models.Product{product}, []*models.Price{
 		mkPrice(pdaActiveArchived, true),
 		mkPrice(pdaSunsetArchived, true),
 		mkPrice(pdaAbsentArchived, true),
 		mkPrice(pdaActiveLive, false),
-	})
+	}, uuid.Nil)
 	reader := &fakeSolanaReader{accounts: map[string][]byte{
 		pdaActiveArchived: encodeTestPlanAccount(1), // active
 		pdaSunsetArchived: encodeTestPlanAccount(0), // sunset

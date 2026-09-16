@@ -97,8 +97,8 @@ func TestConvergeEnforceRollback_AccessReturnsByRecomputationNotRestoration(t *t
 				}
 			}
 			_, _ = appDB.Qx(ctx).Exec(ctx,
-				`DELETE FROM openrails.destructive_run_before_images WHERE destructive_run_id IN (SELECT id FROM openrails.destructive_runs WHERE psp_id=$1)`, pspID)
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.destructive_runs WHERE psp_id=$1`, pspID)
+				`DELETE FROM openrails.destructive_run_before_images WHERE destructive_run_id IN (SELECT id FROM openrails.maintenance_runs WHERE psp_id=$1)`, pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE psp_id=$1`, pspID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE product_id IN (SELECT id FROM openrails.products WHERE key LIKE 'rc-'||$1||'-%')`, suffix)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE key LIKE 'rc-'||$1||'-%'`, suffix)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, pspID)

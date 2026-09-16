@@ -275,7 +275,7 @@ which changed `status`, `ended_at`, `cancelled_at`, the grace/retry schedule and
 the period bounds, and queued deferred NMI vault deletes behind them. Tombstones
 cannot undo that, so an enforcing pass records what it is about to overwrite:
 
-- it opens a `destructive_runs` record — merchant-scoped, PSP-bound when the pass
+- it opens a `maintenance_runs` record — merchant-scoped, PSP-bound when the pass
   is account-bound, carrying the coverage proof that authorised it;
 - it captures a **before-image** of each subscription (and of the entitlement
   windows the transition closes) *before* writing. If the capture fails, the

@@ -17,7 +17,7 @@ import (
 )
 
 // DestructiveRunKindConvergeEnforce is the converge-enforce pass's key in
-// openrails.destructive_runs — the SAME ledger `--prune` writes to (or#859
+// openrails.maintenance_runs — the SAME ledger `--prune` writes to (or#859
 // §5.1), never a second one.
 const DestructiveRunKindConvergeEnforce = "converge_enforce"
 

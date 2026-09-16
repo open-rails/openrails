@@ -15,7 +15,7 @@ import (
 const countOpenCatalogDriftByKind = `-- name: CountOpenCatalogDriftByKind :many
 SELECT rail, kind, count(*)::bigint AS n
 FROM openrails.catalog_drift_events
-WHERE resolved_at IS NULL
+WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
 GROUP BY rail, kind
 `
 
@@ -47,7 +47,7 @@ func (q *Queries) CountOpenCatalogDriftByKind(ctx context.Context) ([]CountOpenC
 
 const countOpenCatalogDriftFiltered = `-- name: CountOpenCatalogDriftFiltered :one
 SELECT count(*) FROM openrails.catalog_drift_events
-WHERE resolved_at IS NULL
+WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
   AND ($1::text IS NULL OR rail = $1::text)
   AND ($2::text IS NULL OR kind = $2::text)
   AND ($3::text IS NULL OR openrails_resource_type = $3::text)
@@ -66,48 +66,10 @@ func (q *Queries) CountOpenCatalogDriftFiltered(ctx context.Context, arg CountOp
 	return count, err
 }
 
-const insertCatalogDriftEvent = `-- name: InsertCatalogDriftEvent :exec
-INSERT INTO openrails.catalog_drift_events (
-    id, merchant_id, rail, kind, openrails_resource_type, openrails_resource_id,
-    external_resource_id, field, openrails_value, external_value, detected_at
-) VALUES ($1, $11::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-`
-
-type InsertCatalogDriftEventParams struct {
-	ID                    uuid.UUID
-	Rail                  string
-	Kind                  string
-	OpenrailsResourceType string
-	OpenrailsResourceID   *string
-	ExternalResourceID    *string
-	Field                 *string
-	OpenrailsValue        *string
-	ExternalValue         *string
-	DetectedAt            time.Time
-	MerchantID            uuid.UUID
-}
-
-func (q *Queries) InsertCatalogDriftEvent(ctx context.Context, arg InsertCatalogDriftEventParams) error {
-	_, err := q.db.Exec(ctx, insertCatalogDriftEvent,
-		arg.ID,
-		arg.Rail,
-		arg.Kind,
-		arg.OpenrailsResourceType,
-		arg.OpenrailsResourceID,
-		arg.ExternalResourceID,
-		arg.Field,
-		arg.OpenrailsValue,
-		arg.ExternalValue,
-		arg.DetectedAt,
-		arg.MerchantID,
-	)
-	return err
-}
-
 const listOpenCatalogDriftEvents = `-- name: ListOpenCatalogDriftEvents :many
 
-SELECT id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
-WHERE resolved_at IS NULL
+SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
+WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
 `
 
 // Operational job state: catalog drift events (reconciliation). Manual rebill
@@ -123,6 +85,7 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCa
 		var i OpenrailsCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
+			&i.PspID,
 			&i.Rail,
 			&i.Kind,
 			&i.OpenrailsResourceType,
@@ -146,8 +109,8 @@ func (q *Queries) ListOpenCatalogDriftEvents(ctx context.Context) ([]OpenrailsCa
 }
 
 const listOpenCatalogDriftFiltered = `-- name: ListOpenCatalogDriftFiltered :many
-SELECT id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
-WHERE resolved_at IS NULL
+SELECT id, psp_id, rail, kind, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, detected_at, resolved_at, merchant_id FROM openrails.catalog_drift_events
+WHERE merchant_id=openrails.current_merchant_id() AND resolved_at IS NULL
   AND ($3::text IS NULL OR rail = $3::text)
   AND ($4::text IS NULL OR kind = $4::text)
   AND ($5::text IS NULL OR openrails_resource_type = $5::text)
@@ -180,6 +143,7 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 		var i OpenrailsCatalogDriftEvent
 		if err := rows.Scan(
 			&i.ID,
+			&i.PspID,
 			&i.Rail,
 			&i.Kind,
 			&i.OpenrailsResourceType,
@@ -202,40 +166,128 @@ func (q *Queries) ListOpenCatalogDriftFiltered(ctx context.Context, arg ListOpen
 	return items, nil
 }
 
-const resolveCatalogDriftEvent = `-- name: ResolveCatalogDriftEvent :exec
-UPDATE openrails.catalog_drift_events
-SET resolved_at = $2
-WHERE id = $1 AND resolved_at IS NULL
+const resolveCatalogDriftFinding = `-- name: ResolveCatalogDriftFinding :execrows
+UPDATE openrails.reconciliation_findings
+SET resolved_at = $1::timestamptz, status = 'fixed', resolution = 'auto_vanished',
+    updated_at = $1::timestamptz, notified_at = NULL, notified_severity = NULL
+WHERE merchant_id = openrails.current_merchant_id() AND finding_type LIKE 'catalog.%'
+  AND id = $2::uuid AND psp_id = $3::uuid AND resolved_at IS NULL
+  AND last_seen_at <= $1::timestamptz
 `
 
-type ResolveCatalogDriftEventParams struct {
+type ResolveCatalogDriftFindingParams struct {
+	ResolvedAt time.Time
 	ID         uuid.UUID
-	ResolvedAt *time.Time
+	PspID      uuid.UUID
 }
 
-func (q *Queries) ResolveCatalogDriftEvent(ctx context.Context, arg ResolveCatalogDriftEventParams) error {
-	_, err := q.db.Exec(ctx, resolveCatalogDriftEvent, arg.ID, arg.ResolvedAt)
-	return err
-}
-
-const resolveCatalogDriftForResource = `-- name: ResolveCatalogDriftForResource :execrows
-UPDATE openrails.catalog_drift_events
-SET resolved_at = $1
-WHERE resolved_at IS NULL
-  AND openrails_resource_type = $2
-  AND openrails_resource_id = $3
-`
-
-type ResolveCatalogDriftForResourceParams struct {
-	ResolvedAt            *time.Time
-	OpenrailsResourceType string
-	OpenrailsResourceID   *string
-}
-
-func (q *Queries) ResolveCatalogDriftForResource(ctx context.Context, arg ResolveCatalogDriftForResourceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, resolveCatalogDriftForResource, arg.ResolvedAt, arg.OpenrailsResourceType, arg.OpenrailsResourceID)
+// Absence proof only: the caller has a complete read of this finding's PSP
+// account (or resource) taken no earlier than its latest observation.
+func (q *Queries) ResolveCatalogDriftFinding(ctx context.Context, arg ResolveCatalogDriftFindingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveCatalogDriftFinding, arg.ResolvedAt, arg.ID, arg.PspID)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const resolveCatalogDriftForResource = `-- name: ResolveCatalogDriftForResource :execrows
+UPDATE openrails.reconciliation_findings
+SET resolved_at = $1::timestamptz, status = 'fixed', resolution = 'enforced',
+    updated_at = $1::timestamptz, notified_at = NULL, notified_severity = NULL
+WHERE finding_type LIKE 'catalog.%' AND merchant_id = openrails.current_merchant_id() AND resolved_at IS NULL
+  AND psp_id = $2::uuid
+  AND openrails_resource_type = $3::text
+  AND openrails_resource_id = $4::text
+  AND last_seen_at <= $1::timestamptz
+`
+
+type ResolveCatalogDriftForResourceParams struct {
+	ResolvedAt            time.Time
+	PspID                 uuid.UUID
+	OpenrailsResourceType string
+	OpenrailsResourceID   string
+}
+
+// A per-price reconcile verified this PSP account in sync for the resource.
+func (q *Queries) ResolveCatalogDriftForResource(ctx context.Context, arg ResolveCatalogDriftForResourceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, resolveCatalogDriftForResource,
+		arg.ResolvedAt,
+		arg.PspID,
+		arg.OpenrailsResourceType,
+		arg.OpenrailsResourceID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const upsertCatalogDriftFinding = `-- name: UpsertCatalogDriftFinding :one
+INSERT INTO openrails.reconciliation_findings (
+    id, merchant_id, finding_type, subject_key, severity, status,
+    rail, psp_id, openrails_resource_type, openrails_resource_id,
+    external_resource_id, field, openrails_value, external_value,
+    created_at, last_seen_at, updated_at
+) VALUES (
+    $1::uuid, $2::uuid, 'catalog.' || $3::text,
+    jsonb_build_array($4::uuid::text, $5::text,
+        coalesce($6::text,''), coalesce($7::text,''),
+        coalesce($8::text,''))::text,
+    'low', 'reconcile_required', $9::text, $4::uuid,
+    $5::text, $6::text,
+    $7::text, $8::text,
+    $10::text, $11::text,
+    $12::timestamptz, $12::timestamptz, $12::timestamptz
+)
+ON CONFLICT (merchant_id, finding_type, subject_key) DO UPDATE SET
+    openrails_value = CASE WHEN openrails.reconciliation_findings.status = 'ignored'
+        THEN openrails.reconciliation_findings.openrails_value ELSE EXCLUDED.openrails_value END,
+    external_value = CASE WHEN openrails.reconciliation_findings.status = 'ignored'
+        THEN openrails.reconciliation_findings.external_value ELSE EXCLUDED.external_value END,
+    status = CASE WHEN openrails.reconciliation_findings.status = 'ignored' THEN 'ignored' ELSE 'reconcile_required' END,
+    resolved_at = CASE WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolved_at END,
+    resolution = CASE WHEN openrails.reconciliation_findings.status = 'ignored' THEN openrails.reconciliation_findings.resolution END,
+    last_seen_at = EXCLUDED.last_seen_at,
+    updated_at = EXCLUDED.updated_at
+WHERE EXCLUDED.last_seen_at >= openrails.reconciliation_findings.last_seen_at
+RETURNING status
+`
+
+type UpsertCatalogDriftFindingParams struct {
+	ID                    uuid.UUID
+	MerchantID            uuid.UUID
+	Kind                  string
+	PspID                 uuid.UUID
+	OpenrailsResourceType string
+	OpenrailsResourceID   *string
+	ExternalResourceID    *string
+	Field                 *string
+	Rail                  string
+	OpenrailsValue        *string
+	ExternalValue         *string
+	ObservedAt            time.Time
+}
+
+// One standing finding per (PSP account, resource, external id, field). An
+// older snapshot never overwrites newer evidence (no row is returned). An
+// operator-ignored identity stays ignored with its recorded values.
+func (q *Queries) UpsertCatalogDriftFinding(ctx context.Context, arg UpsertCatalogDriftFindingParams) (string, error) {
+	row := q.db.QueryRow(ctx, upsertCatalogDriftFinding,
+		arg.ID,
+		arg.MerchantID,
+		arg.Kind,
+		arg.PspID,
+		arg.OpenrailsResourceType,
+		arg.OpenrailsResourceID,
+		arg.ExternalResourceID,
+		arg.Field,
+		arg.Rail,
+		arg.OpenrailsValue,
+		arg.ExternalValue,
+		arg.ObservedAt,
+	)
+	var status string
+	err := row.Scan(&status)
+	return status, err
 }

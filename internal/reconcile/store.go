@@ -623,6 +623,9 @@ func (s *PGStore) AppendFindingNotes(ctx context.Context, id uuid.UUID, note str
 func FindingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord {
 	evidence := unmarshalEvidence(row.Evidence)
 	provider, _ := evidence["provider"].(string)
+	if row.Rail != "" {
+		provider = row.Rail
+	}
 	requiresReview := row.Status == string(FindingStatusRequiresReview)
 	rec := FindingRecord{
 		ID:             row.ID,
@@ -665,7 +668,7 @@ func FindingRecordFromRow(row gen.OpenrailsReconciliationFinding) FindingRecord 
 	return rec
 }
 
-func runRecordFromRow(row gen.OpenrailsReconciliationRun) RunRecord {
+func runRecordFromRow(row gen.OpenrailsMaintenanceRun) RunRecord {
 	rec := RunRecord{
 		ID:          row.ID,
 		MerchantID:  row.MerchantID,

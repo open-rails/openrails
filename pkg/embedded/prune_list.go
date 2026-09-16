@@ -56,7 +56,7 @@ func PruneList(ctx context.Context, opts PruneListOptions) error {
 	}
 	ctx = merchant.WithID(ctx, merchantID)
 
-	var runs []gen.OpenrailsDestructiveRun
+	var runs []gen.OpenrailsMaintenanceRun
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
 		runs, e = database.Gen(ctx).ListDestructiveRuns(ctx, gen.ListDestructiveRunsParams{

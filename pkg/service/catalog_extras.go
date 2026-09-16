@@ -175,11 +175,11 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 	if err != nil {
 		return nil, err
 	}
-	var stripeLister stripeProductLister
+	var stripeLister catalog.StripeCatalogLister
 	if s.rt != nil && s.railArmed(ctx, string(models.RailStripe)) {
 		stripeLister = &catalog.StripeCatalogService{Config: cfg, Rails: s.rt.RailConfigs}
 	}
-	var nmiLister nmiPlanLister
+	var nmiLister catalog.NMIPlanLister
 	if client := s.resolveNMIClientForMerchant(ctx); client != nil {
 		nmiLister = client
 	}
@@ -193,15 +193,24 @@ func (s *Service) DetectCatalogExtras(ctx context.Context) (*CatalogExtrasReport
 // detectCatalogExtrasWith is the testable core: the listers/readers are
 // injected so unit tests can supply fixture data. A nil lister skips that
 // provider's pass (with a note).
-func (s *Service) detectCatalogExtrasWith(ctx context.Context, stripeLister stripeProductLister, nmiLister nmiPlanLister, solanaReader solanaPlanReader) (*CatalogExtrasReport, error) {
-	snap, err := s.buildLocalCatalogSnapshot(ctx)
+func (s *Service) detectCatalogExtrasWith(ctx context.Context, stripeLister catalog.StripeCatalogLister, nmiLister catalog.NMIPlanLister, solanaReader solanaPlanReader) (*CatalogExtrasReport, error) {
+	productSvc, priceSvc, err := s.requireCatalogServices()
 	if err != nil {
 		return nil, err
 	}
+	productRows, err := productSvc.GetAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load products: %w", err)
+	}
+	priceRows, err := priceSvc.GetAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load prices: %w", err)
+	}
+	snap := catalog.BuildDriftSnapshot(productRows, priceRows, uuid.Nil)
 	report := &CatalogExtrasReport{}
 
 	if stripeLister != nil {
-		products, prices, ferr := fetchStripeCatalog(ctx, stripeLister)
+		products, prices, ferr := catalog.FetchStripeCatalog(ctx, stripeLister)
 		if ferr != nil {
 			return nil, ferr
 		}
@@ -216,10 +225,11 @@ func (s *Service) detectCatalogExtrasWith(ctx context.Context, stripeLister stri
 	}
 
 	if nmiLister != nil {
-		plans, ferr := fetchNMIPlans(ctx, nmiLister)
+		remotePlans, ferr := nmiLister.ListRecurringPlans(ctx)
 		if ferr != nil {
-			return nil, ferr
+			return nil, fmt.Errorf("list nmi recurring plans: %w", ferr)
 		}
+		plans := catalog.MapNMIPlans(remotePlans)
 		report.ScannedNMIPlans = len(plans)
 		report.Extras = append(report.Extras, computeNMIExtras(plans, snap)...)
 	} else {
@@ -261,8 +271,8 @@ func (s *Service) detectCatalogExtrasWith(ctx context.Context, stripeLister stri
 // relevance checks use (#358), so detection and the ledger can never disagree.
 // Owned = the object bears an OpenRails marker (openrails_product_key /
 // openrails_price_key metadata, or an "openrails."-prefixed lookup_key).
-func computeStripeExtras(products []catalog.StripeProduct, prices []catalog.StripePrice, snap localCatalogSnapshot) []CatalogExtra {
-	ix := snap.extrasIndex()
+func computeStripeExtras(products []catalog.StripeProduct, prices []catalog.StripePrice, snap catalog.DriftSnapshot) []CatalogExtra {
+	ix := extrasIndex(snap)
 	var out []CatalogExtra
 	for _, sp := range products {
 		extra, productKey := ix.StripeProductExtra(sp)
@@ -303,23 +313,23 @@ func computeStripeExtras(products []catalog.StripeProduct, prices []catalog.Stri
 
 // extrasIndex renders the snapshot as the shared extra-ness index
 // (catalog.ExtrasIndex) detection and the #358 relevance checks consult.
-func (snap localCatalogSnapshot) extrasIndex() catalog.ExtrasIndex {
+func extrasIndex(snap catalog.DriftSnapshot) catalog.ExtrasIndex {
 	ix := catalog.ExtrasIndex{
-		StripeProductIDs: make(map[string]struct{}, len(snap.stripeProductIDs)),
-		StripePriceIDs:   make(map[string]struct{}, len(snap.stripePriceIDs)),
-		ProductKeys:      make(map[string]struct{}, len(snap.productByKey)),
-		PriceContentKeys: make(map[string]struct{}, len(snap.priceByContentKey)),
+		StripeProductIDs: make(map[string]struct{}, len(snap.StripeProductIDs)),
+		StripePriceIDs:   make(map[string]struct{}, len(snap.StripePriceIDs)),
+		ProductKeys:      make(map[string]struct{}, len(snap.ProductByKey)),
+		PriceContentKeys: make(map[string]struct{}, len(snap.PriceByContentKey)),
 	}
-	for id := range snap.stripeProductIDs {
+	for id := range snap.StripeProductIDs {
 		ix.StripeProductIDs[id] = struct{}{}
 	}
-	for id := range snap.stripePriceIDs {
+	for id := range snap.StripePriceIDs {
 		ix.StripePriceIDs[id] = struct{}{}
 	}
-	for key := range snap.productByKey {
+	for key := range snap.ProductByKey {
 		ix.ProductKeys[key] = struct{}{}
 	}
-	for ck := range snap.priceByContentKey {
+	for ck := range snap.PriceByContentKey {
 		ix.PriceContentKeys[ck] = struct{}{}
 	}
 	return ix
@@ -330,9 +340,9 @@ func (snap localCatalogSnapshot) extrasIndex() catalog.ExtrasIndex {
 // content-addressed "<product-key>-<currency>-<amount>-<cycle>" shape OpenRails mints
 // (nmiDeterministicPlanID). NMI plans have no active flag, so Active is
 // always true.
-func computeNMIExtras(plans []nmiPlan, snap localCatalogSnapshot) []CatalogExtra {
-	known := make(map[string]struct{}, len(snap.nmiPlanIDByOpenRailsPrice))
-	for _, planID := range snap.nmiPlanIDByOpenRailsPrice {
+func computeNMIExtras(plans []catalog.NMIPlan, snap catalog.DriftSnapshot) []CatalogExtra {
+	known := make(map[string]struct{}, len(snap.NMIPlanByPriceID))
+	for _, planID := range snap.NMIPlanByPriceID {
 		if planID != "" {
 			known[planID] = struct{}{}
 		}
@@ -363,7 +373,7 @@ func computeNMIExtras(plans []nmiPlan, snap localCatalogSnapshot) []CatalogExtra
 // account still exists with status=active. Reads only. Already-sunset and
 // vanished plans are converged — not reported. Read/decode failures become
 // notes (the apply must not fail because one RPC read did).
-func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, snap localCatalogSnapshot) ([]CatalogExtra, int, []CatalogExtrasNote) {
+func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, snap catalog.DriftSnapshot) ([]CatalogExtra, int, []CatalogExtrasNote) {
 	// pda -> is it referenced by ANY purchasable price; plus a representative
 	// label (content key of a referencing price).
 	type pdaState struct {
@@ -371,7 +381,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 		label       string
 	}
 	byPDA := map[string]*pdaState{}
-	for _, pr := range snap.priceByID {
+	for _, pr := range snap.PriceByID {
 		cfg := pr.PSPLinkForRail(models.RailSolana)
 		if cfg == nil {
 			continue
@@ -389,7 +399,7 @@ func computeSolanaSunsetExtras(ctx context.Context, reader solanaPlanReader, sna
 			st.purchasable = true
 		}
 		if st.label == "" {
-			if prod := snap.productByID[pr.ProductID.String()]; prod != nil {
+			if prod := snap.ProductByID[pr.ProductID.String()]; prod != nil {
 				st.label = openRailsPriceContentKey(prod.Key, pr.Currency, pr.Amount, pr.RecurringCycleDays())
 			}
 		}

@@ -108,22 +108,22 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 	afterProducts := []*models.Product{{ID: afterProductID, Key: productKey}}
 	afterPrices := []*models.Price{{ID: afterPriceID, ProductID: afterProductID, Amount: amount, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true}}
 
-	beforeSnap := buildSnapshotFromRows(beforeProducts, beforePrices)
-	afterSnap := buildSnapshotFromRows(afterProducts, afterPrices)
+	beforeSnap := catalog.BuildDriftSnapshot(beforeProducts, beforePrices, uuid.Nil)
+	afterSnap := catalog.BuildDriftSnapshot(afterProducts, afterPrices, uuid.Nil)
 
 	// The snapshot indexes prices by the content key — the same key must appear
 	// in both snapshots even though every UUID changed.
 	contentKey := openRailsPriceContentKey(productKey, currency, amount, cycle)
-	if _, ok := beforeSnap.priceByContentKey[contentKey]; !ok {
+	if _, ok := beforeSnap.PriceByContentKey[contentKey]; !ok {
 		t.Fatalf("before snapshot missing content key %q", contentKey)
 	}
-	if _, ok := afterSnap.priceByContentKey[contentKey]; !ok {
+	if _, ok := afterSnap.PriceByContentKey[contentKey]; !ok {
 		t.Fatalf("after snapshot missing content key %q", contentKey)
 	}
-	if _, ok := beforeSnap.productByKey[productKey]; !ok {
+	if _, ok := beforeSnap.ProductByKey[productKey]; !ok {
 		t.Fatalf("before snapshot missing product key %q", productKey)
 	}
-	if _, ok := afterSnap.productByKey[productKey]; !ok {
+	if _, ok := afterSnap.ProductByKey[productKey]; !ok {
 		t.Fatalf("after snapshot missing product key %q", productKey)
 	}
 
@@ -135,10 +135,10 @@ func TestContentKeysSurviveUUIDRegeneration(t *testing.T) {
 		{ID: "price_live", UnitAmount: amountCents, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productKey, currency, amount, cycle)},
 	}
 	now := time.Now().UTC()
-	if events := computeCatalogDrift(nil, stripePrices, beforeSnap, now); len(events) != 0 {
+	if events := catalog.ComputeStripeDrift(nil, stripePrices, beforeSnap, now); len(events) != 0 {
 		t.Fatalf("pre-wipe: expected re-attach with no drift, got %+v", events)
 	}
-	if events := computeCatalogDrift(nil, stripePrices, afterSnap, now); len(events) != 0 {
+	if events := catalog.ComputeStripeDrift(nil, stripePrices, afterSnap, now); len(events) != 0 {
 		t.Fatalf("post-wipe: expected re-attach with no drift, got %+v", events)
 	}
 }
@@ -161,7 +161,7 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 	// Local catalog has the $29.00 price.
 	products := []*models.Product{{ID: productID, Key: productKey}}
 	prices := []*models.Price{{ID: priceID, ProductID: productID, Amount: 29_000_000, Currency: currency, AccessDurationHours: accessHours, AutoRenew: true}}
-	snap := buildSnapshotFromRows(products, prices)
+	snap := catalog.BuildDriftSnapshot(products, prices, uuid.Nil)
 
 	// Stripe has a price at a DIFFERENT amount ($39.00) under its own (different)
 	// content lookup_key. It must NOT match the $29 row — it is a separate price.
@@ -169,7 +169,7 @@ func TestDifferentAmountIsADifferentPrice(t *testing.T) {
 		{ID: "price_39", UnitAmount: 3900, Currency: currency, Active: true, LookupKey: internalStripeLookupKey(productKey, currency, 39_000_000, cycle)},
 	}
 	now := time.Now().UTC()
-	events := computeCatalogDrift(nil, stripePrices, snap, now)
+	events := catalog.ComputeStripeDrift(nil, stripePrices, snap, now)
 	if got := fieldSet(events); got["unit_amount"] {
 		t.Fatalf("a different amount must NOT be reported as amount drift on the old price: %+v", events)
 	}

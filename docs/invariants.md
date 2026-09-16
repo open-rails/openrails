@@ -192,7 +192,7 @@ defaults are fine; invented **data** defaults are not.
 | FAB-3 | Absent provider dates and tokens return `ok=false`, never a fabricated instant. | `ccbill/subscription_management.go:140,362`; `reconcile/unknown_probe.go:100,201` |
 | FAB-4 | A Solana subscribe/cancel is not classified as a sale — that would fabricate payment. | `reconcile/solana.go:27` |
 | FAB-5 | Missing PSP posture surfaces as posture, not as a fabricated empty. | `reconcile/merchant_wiring.go:183` |
-| FAB-6 | A parse failure must not silently become a zero amount. | Catalog drift's NMI plan amounts were the last `return 0` on parse failure (a zero amount raises drift against every local price); both copies now use the exact parser and SKIP the plan with a warning. `pkg/service/catalog_drift.go`, `river/jobs_catalog_reconciliation.go` |
+| FAB-6 | A parse failure must not silently become a zero amount. | Catalog drift's NMI plan amounts were the last `return 0` on parse failure (a zero amount raises drift against every local price); the shared drift pass uses the exact parser and SKIPS the plan with a warning. `internal/modules/catalog/drift.go` |
 
 ## 9. Destructive and irreversible actions
 
@@ -219,7 +219,7 @@ obeys (`internal/reconcile/never_rollbackable.go`).
 
 | Class | Tables | Rule |
 |---|---|---|
-| **A — append-only spine** | `ledger_transfers`, `ledger_accounts`, `grants`, `subscription_status_transitions`, `rail_mutation_logs`, `webhook_events`, `reconciliation_findings`/`_runs`, `catalog_drift_events`, `merchant_exports`, `price_key_movements` | **NEVER rolled back, at any scope, by any tier.** |
+| **A — append-only spine** | `ledger_transfers`, `ledger_accounts`, `grants`, `subscription_status_transitions`, `rail_mutation_logs`, `webhook_events`, `reconciliation_findings` (catalog drift included), `maintenance_runs` headers (column-restricted UPDATE, no DELETE), `price_key_movements` | **NEVER rolled back, at any scope, by any tier.** |
 | **P — provider mirror** | `payments`, `subscriptions`, `payment_methods`, `rail_customer_accounts`, `solana_subscriptions`, `checkout_sessions`, refund/dispute mirrors, `rail_refresh_watermarks` | Freely restored; `reconcile pull` is the repair. Six of the eight PSP-tagged tables live here, so **per-PSP scope is native**. |
 | **D — derived** | `entitlements`, product access, credit-lot spendability | **Never restored, always recomputed.** `Converge` rebuilds each effect from the append-only grant log. A restored effect can silently disagree with its grant; a re-derived one cannot. |
 | **C — definitions and policy** | `products`, `prices`, rate cards, meters, `psps`, `merchant_webhooks`, spend limits, `merchant_destructive_policy`, … | Merchant-scoped only, **never PSP-scoped**. No external authority — convergence pushes this outward, so corruption here propagates instead of self-correcting. |
@@ -227,7 +227,7 @@ obeys (`internal/reconcile/never_rollbackable.go`).
 
 | # | Invariant | Status |
 |---|---|---|
-| REC-1 | **Class A is never rolled back.** No undo path may write a Class A table. | **ENFORCED** — `TestNeverRollbackableRegisterIsEnforcedOnEveryUndoPath` walks the undo implementations, resolves the sqlc queries they call, and fails on any write to a registered table. Backed by role privilege where it can be: `ledger_transfers`/`ledger_accounts`/`grants`/`subscription_status_transitions` are `GRANT SELECT,INSERT` only, and migration 0036 revokes `UPDATE` on `rail_mutation_logs` and `DELETE` on `reconciliation_runs`. |
+| REC-1 | **Class A is never rolled back.** No undo path may write a Class A table. | **ENFORCED** — `TestNeverRollbackableRegisterIsEnforcedOnEveryUndoPath` walks the undo implementations, resolves the sqlc queries they call, and fails on any write to a registered table. Backed by role privilege where it can be: `ledger_transfers`/`ledger_accounts`/`grants`/`subscription_status_transitions` are `GRANT SELECT,INSERT` only, `rail_mutation_logs` has no `UPDATE`, and `maintenance_runs` has no `DELETE` and only status/finish/reversal/note column `UPDATE`. |
 | REC-2 | **Superseding an unfired intent is a forward transition, not a rollback.** `rail_intents` moves `pending`/`failed_retryable` → `superseded`, never deleted, never rewritten once executed. This is how an undo neutralises a queued provider write. | **ENFORCED** — `TestSupersedeIsTheOnlyRailIntentWriteOnAnUndoPath` pins the status predicate and refuses a DELETE on any undo path. |
 | REC-3 | **Class D is invalidated and re-derived, never restored.** | **ENFORCED** — the reverse soft-deletes the windows the run closed and stamps them with it; `Converge` rebuilds them. Entitlement before-images are captured as evidence and deliberately left `restored_at IS NULL`. |
 | REC-4 | **A destructive operation with no way to record its undo does not run.** | **ENFORCED** — an enforce pass planning state transitions with no `DestructiveRunRecorder` errors before writing, and a before-image capture failure skips that transition. |

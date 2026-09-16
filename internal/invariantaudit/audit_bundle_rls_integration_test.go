@@ -495,7 +495,7 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 		   AND conname = 'destructive_run_before_images_run_fk'`).Scan(&fkDef),
 		"the before-image-to-run foreign key is missing entirely")
 	require.Contains(t, fkDef,
-		"FOREIGN KEY (merchant_id, destructive_run_id) REFERENCES openrails.destructive_runs(merchant_id, id)",
+		"FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES openrails.maintenance_runs(merchant_id, id, run_class)",
 		"ID-11: the run foreign key must carry merchant identity, got: %s", fkDef)
 
 	a, b := uuid.New(), uuid.New()
@@ -510,7 +510,7 @@ func TestID11_BeforeImagesIdentityUniqueIsMerchantLed(t *testing.T) {
 
 	runID := uuid.New()
 	_, err := super.Exec(ctx,
-		`INSERT INTO openrails.destructive_runs (id, merchant_id, kind, actor)
+		`INSERT INTO openrails.maintenance_runs (id, merchant_id, kind, actor)
 		 VALUES ($1, $2, 'converge_enforce', 'or902-invariant-audit')`, runID, a)
 	require.NoError(t, err)
 

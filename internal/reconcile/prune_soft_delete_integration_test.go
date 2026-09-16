@@ -90,7 +90,7 @@ func seedPruneFixture(t *testing.T, appDB *db.DB, baseCtx context.Context) prune
 			} {
 				_, _ = appDB.Qx(ctx).Exec(ctx, sql, f.entID, f.sessID, f.payID, f.subID)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.destructive_runs WHERE psp_id=$1`, f.pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE psp_id=$1`, f.pspID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, priceID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, productID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, f.pspID)
@@ -180,7 +180,7 @@ func TestPruneRefusesWrongExpectedRowCount(t *testing.T) {
 		require.True(t, subLive(ctx, t, appDB, f.subID), "a miscounted confirmation writes nothing")
 
 		var runs int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.destructive_runs WHERE psp_id=$1`, f.pspID).Scan(&runs))
+		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.maintenance_runs WHERE psp_id=$1`, f.pspID).Scan(&runs))
 		require.Zero(t, runs, "a refused prune opens no run")
 		return nil
 	}))

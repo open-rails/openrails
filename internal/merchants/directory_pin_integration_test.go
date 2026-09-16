@@ -119,7 +119,7 @@ func TestRestoreRefusesCommittedPurgeButAllowsFailedPreflight(t *testing.T) {
 		row, _, err := directory.Provision(context.Background(), ProvisionRequest{Slug: "restore-" + uuid.NewString()[:8], PermissionGroupID: uuid.NewString()})
 		require.NoError(t, err)
 		require.NoError(t, wrapped.MerchantTx(context.Background(), row.ID, func(ctx context.Context, tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `INSERT INTO openrails.destructive_runs(merchant_id,kind,actor,status,affected) VALUES($1,'merchant_purge','test','failed',jsonb_build_object('database_purged',$2::boolean))`, row.ID.UUID(), committed)
+			_, err := tx.Exec(ctx, `INSERT INTO openrails.maintenance_runs(merchant_id,kind,actor,status,affected) VALUES($1,'merchant_purge','test','failed',jsonb_build_object('database_purged',$2::boolean))`, row.ID.UUID(), committed)
 			if err != nil {
 				return err
 			}

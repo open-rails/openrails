@@ -129,7 +129,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		// table rather than the Go type.
 		var raw []byte
 		require.NoError(t, super.QueryRow(ctx,
-			`SELECT manifest FROM openrails.merchant_purge_inventories WHERE id = $1::uuid`, inv.ID).Scan(&raw))
+			`SELECT inventory_manifest FROM openrails.maintenance_runs WHERE id = $1::uuid AND kind='purge_inventory'`, inv.ID).Scan(&raw))
 		var manifest map[string]any
 		require.NoError(t, json.Unmarshal(raw, &manifest))
 		require.Equal(t, false, manifest["is_backup"])
@@ -207,7 +207,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 		var expectedRows int64
 		var affected []byte
 		require.NoError(t, super.QueryRow(ctx, `
-			SELECT kind, actor, expected_rows, affected FROM openrails.destructive_runs
+			SELECT kind, actor, expected_rows, affected FROM openrails.maintenance_runs
 			 WHERE merchant_id = $1::uuid AND kind = $2`,
 			merchantID, DestructiveRunKindMerchantPurge).Scan(&kind, &actor, &expectedRows, &affected))
 		require.Equal(t, DestructiveRunKindMerchantPurge, kind)

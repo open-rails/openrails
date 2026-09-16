@@ -226,8 +226,8 @@ func (a *nmiAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (map[
 func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
 	client, _, ok := a.nmiClient(ctx)
 	if !ok || client == nil {
-		// No read API available (NMI not configured): signal sync_disabled.
-		return nil, false, nil
+		// No readable account is not agreement: signal sync_disabled.
+		return nil, false, fmt.Errorf("nmi is not configured")
 	}
 	planID := strings.TrimSpace(ids[models.RailKeyPlanID])
 	if planID == "" {

@@ -101,6 +101,7 @@ SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+
   AND id = sqlc.arg(id)::uuid
   AND deleted_at IS NULL;
 
@@ -109,6 +110,7 @@ UPDATE openrails.payments
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+
   AND id = sqlc.arg(id)::uuid
   AND deleted_at IS NULL;
 
@@ -143,7 +145,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND destructive_run_id = sqlc.ar
 -- reversible record.
 
 -- name: CreateDestructiveRun :one
-INSERT INTO openrails.destructive_runs (
+INSERT INTO openrails.maintenance_runs (
     id, merchant_id, psp_id, kind, actor, dry_run, coverage, expected_rows, note
 ) VALUES (
     sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.narg(psp_id)::uuid,
@@ -153,30 +155,32 @@ INSERT INTO openrails.destructive_runs (
 RETURNING *;
 
 -- name: FinishDestructiveRun :one
-UPDATE openrails.destructive_runs
+UPDATE openrails.maintenance_runs
 SET status = sqlc.arg(status)::text,
     finished_at = sqlc.arg(now)::timestamptz,
     affected = sqlc.narg(affected)::jsonb
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = sqlc.arg(id)::uuid
 RETURNING *;
 
 -- name: MarkDestructiveRunReversed :one
-UPDATE openrails.destructive_runs
+UPDATE openrails.maintenance_runs
 SET status = 'reversed',
     reversed_at = sqlc.arg(now)::timestamptz,
     reversed_by = sqlc.arg(reversed_by)::text
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND kind IN ('prune','converge_enforce','merchant_purge')
   AND id = sqlc.arg(id)::uuid
   AND status <> 'reversed'
 RETURNING *;
 
 -- name: GetDestructiveRun :one
-SELECT * FROM openrails.destructive_runs
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+SELECT * FROM openrails.maintenance_runs
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND kind IN ('prune','converge_enforce','merchant_purge') AND id = sqlc.arg(id)::uuid;
 
 -- name: ListDestructiveRuns :many
-SELECT * FROM openrails.destructive_runs
+SELECT * FROM openrails.maintenance_runs
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND kind IN ('prune','converge_enforce','merchant_purge')
   AND (sqlc.narg(kind)::text IS NULL OR kind = sqlc.narg(kind)::text)
 ORDER BY started_at DESC
 LIMIT sqlc.arg(lim)::int;

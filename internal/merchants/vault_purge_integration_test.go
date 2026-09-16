@@ -161,7 +161,7 @@ func TestVaultPurgeCleanupSurvivesFailureAndRestart(t *testing.T) {
 	var run uuid.UUID
 	var status string
 	var finished *time.Time
-	require.NoError(t, admin.QueryRow(ctx, `SELECT id,status,finished_at FROM openrails.destructive_runs WHERE merchant_id=$1 AND kind='merchant_purge'`, f.id.UUID()).Scan(&run, &status, &finished))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT id,status,finished_at FROM openrails.maintenance_runs WHERE merchant_id=$1 AND kind='merchant_purge'`, f.id.UUID()).Scan(&run, &status, &finished))
 	require.Equal(t, "failed", status)
 	require.Nil(t, finished)
 	var deleted bool
@@ -182,7 +182,7 @@ func TestVaultPurgeCleanupSurvivesFailureAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	worker := riverjobs.MerchantSecretCleanupWorker{DB: f.database, Merchants: service}
 	require.NoError(t, worker.Work(ctx, nil))
-	require.NoError(t, admin.QueryRow(ctx, `SELECT status,finished_at FROM openrails.destructive_runs WHERE id=$1`, run).Scan(&status, &finished))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT status,finished_at FROM openrails.maintenance_runs WHERE id=$1`, run).Scan(&status, &finished))
 	require.Equal(t, "completed", status)
 	require.NotNil(t, finished)
 	metadata, err := vaulttest.RootClient(t).Logical().ReadWithContext(ctx, "secret/metadata/openrails/merchants/"+f.id.String()+"/"+name)
@@ -257,7 +257,7 @@ func TestVaultCleanupCannotRunBeforeDatabaseCommit(t *testing.T) {
 	// Delete the matching inventory before applying: the transaction must fail
 	// without a committed cleanup run, and must leave Vault untouched.
 	admin := dbtest.SharedSuperuserPGXPool(t)
-	_, err = admin.Exec(ctx, `DELETE FROM openrails.merchant_purge_inventories WHERE merchant_id=$1`, f.id.UUID())
+	_, err = admin.Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE merchant_id=$1 AND kind='purge_inventory'`, f.id.UUID())
 	require.NoError(t, err)
 	err = f.service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows})
 	var stale *merchants.ErrPurgeInventoryStale

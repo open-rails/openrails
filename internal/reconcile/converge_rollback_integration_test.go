@@ -88,11 +88,11 @@ func seedConvergeCohort(t *testing.T, appDB *db.DB, baseCtx context.Context, n i
 			}
 			_, _ = appDB.Qx(ctx).Exec(ctx,
 				`DELETE FROM openrails.destructive_run_before_images
-				  WHERE destructive_run_id IN (SELECT id FROM openrails.destructive_runs WHERE psp_id=$1)`, f.pspID)
+				  WHERE destructive_run_id IN (SELECT id FROM openrails.maintenance_runs WHERE psp_id=$1)`, f.pspID)
 			for _, sub := range f.subs {
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub)
 			}
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.destructive_runs WHERE psp_id=$1`, f.pspID)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE psp_id=$1`, f.pspID)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.prices WHERE product_id IN (SELECT id FROM openrails.products WHERE key LIKE 'cr-'||$1||'-%')`, f.suffix)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.products WHERE key LIKE 'cr-'||$1||'-%'`, f.suffix)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.psps WHERE id=$1`, f.pspID)
@@ -333,7 +333,7 @@ func TestConvergeEnforceRun_IsReversible(t *testing.T) {
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		return appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT kind, psp_id, status, expected_rows, (coverage->>'subscriptions_exhaustive')::boolean
-			   FROM openrails.destructive_runs WHERE id=$1`, destRunID).
+			   FROM openrails.maintenance_runs WHERE id=$1`, destRunID).
 			Scan(&gotKind, &gotPsp, &gotStatus, &gotExpect, &gotCovProv)
 	}))
 	require.Equal(t, DestructiveRunKindConvergeEnforce, gotKind)

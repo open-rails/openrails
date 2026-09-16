@@ -59,7 +59,7 @@ type Engine struct {
 	Policy EvidenceFloorReader
 
 	// Runs makes an enforce pass REVERSIBLE (or#859): it opens a
-	// destructive_runs record carrying the coverage proof that authorised the
+	// maintenance_runs record carrying the coverage proof that authorised the
 	// pass, captures a before-image of every subscription the pass is about to
 	// overwrite, and attributes the provider intents it queues. Enforce passes
 	// that would overwrite subscription state REFUSE when it is nil — an

@@ -4,7 +4,7 @@ WHERE id=sqlc.arg(id)::uuid AND deleted_at IS NULL
 FOR UPDATE;
 
 -- name: LockMerchantSecretCleanupRun :one
-SELECT r.* FROM openrails.destructive_runs r
+SELECT r.* FROM openrails.maintenance_runs r
 JOIN openrails.merchants m ON m.id=r.merchant_id
 WHERE r.merchant_id=sqlc.arg(merchant_id)::uuid AND r.id=sqlc.arg(id)::uuid
   AND r.kind='merchant_purge' AND m.deleted_at IS NOT NULL
@@ -12,12 +12,12 @@ WHERE r.merchant_id=sqlc.arg(merchant_id)::uuid AND r.id=sqlc.arg(id)::uuid
 FOR UPDATE OF r,m;
 
 -- name: MarkMerchantDatabasePurged :exec
-UPDATE openrails.destructive_runs
+UPDATE openrails.maintenance_runs
 SET affected=sqlc.arg(affected)::jsonb || '{"database_purged":true}'::jsonb
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 
 -- name: RecordMerchantSecretCleanup :execrows
-UPDATE openrails.destructive_runs
+UPDATE openrails.maintenance_runs
 SET status=sqlc.arg(status)::text,
     finished_at=CASE WHEN sqlc.arg(status)::text='completed' THEN now() ELSE NULL END,
     affected=COALESCE(affected,'{}'::jsonb) || jsonb_build_object(
