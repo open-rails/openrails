@@ -112,3 +112,28 @@ func (c *NMIClient) ConfirmRefund(ctx context.Context, originalTransactionID, re
 	}
 	return nil
 }
+
+// ConfirmRefundNotExecuted reads the original transaction before accepting an
+// operator's non-execution attestation. A successful refund action for the
+// requested amount is contradictory evidence and must keep the operation
+// unresolved; callers must resolve it from that exact receipt instead.
+func (c *NMIClient) ConfirmRefundNotExecuted(ctx context.Context, originalTransactionID string, amount moneyutil.Cents) error {
+	txn, found, err := c.GetPayment(ctx, originalTransactionID)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return receiptMismatch("original transaction %s does not exist", originalTransactionID)
+	}
+	if amount == 0 {
+		cents, ok := exactCents(txn.Amount)
+		if !ok || cents <= 0 {
+			return receiptMismatch("original transaction %s has no exact amount", originalTransactionID)
+		}
+		amount = moneyutil.Cents(cents)
+	}
+	if successfulAction(txn, "refund", amount) {
+		return receiptMismatch("original transaction %s contains a successful refund of %d cents", originalTransactionID, amount)
+	}
+	return nil
+}

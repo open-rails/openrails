@@ -340,6 +340,13 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.OpenrailsRail
 		return Outcome{}, RejectResolution("operation already holds refund receipt %s; its verifier completes it", ref)
 	}
 	if resolution.NotExecuted {
+		client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+		if err != nil || !ok || client == nil {
+			return Outcome{}, fmt.Errorf("nmi rail is not armed for provider %q: %v", intent.Rail, err)
+		}
+		if err := client.ConfirmRefundNotExecuted(ctx, p.ProviderTarget, p.AmountCents); err != nil {
+			return Outcome{}, RejectResolution("provider evidence contradicts non-execution: %v", err)
+		}
 		return h.terminally(ctx, p, "provider confirmed the refund was not executed", nil), nil
 	}
 	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)

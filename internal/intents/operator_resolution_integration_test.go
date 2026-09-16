@@ -101,6 +101,21 @@ func TestNMIRefundUnknownNonExecutionReleasesReservation(t *testing.T) {
 	require.EqualValues(t, 1, fake.refundCalls.Load())
 }
 
+func TestNMIRefundUnknownNonExecutionRejectsSuccessfulRefund(t *testing.T) {
+	fx := seedRefundablePayment(t, 500)
+	fake, client := newFakeNMIRefundGateway(t, fx.originalTxn)
+	fake.refundStatus.Store(http.StatusBadGateway)
+	runner := fx.refundRunner(client, fullModeConfig())
+	row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(500))
+	require.NoError(t, err)
+	fake.refunded.Store(true)
+	_, err = runner.Resolve(dbtest.WithTestMerchant(context.Background()), row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "incorrect dashboard reading"})
+	require.ErrorIs(t, err, ErrResolutionRejected)
+	require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
+	status, _, _ := fx.reservation(t)
+	require.Equal(t, "pending", status)
+}
+
 // A successful refund whose local receipt write fails keeps the exact provider
 // id on the operation; after restart the verifier completes it without resend.
 func TestNMIRefundReceiptSurvivesLocalFailureAcrossRestart(t *testing.T) {
