@@ -792,11 +792,9 @@ type OpenrailsMoneySetting struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	BillingMode string
-	// per-account default credit-grant expiry in HOURS; NULL = no default.
-	DefaultCreditExpiryHours *int32
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-	Tier                     *string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Tier        *string
 	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.

@@ -217,7 +217,6 @@ merchant-admin principal (`merchant:*`) on top of the `customer:*` grants.
 | GET | `/v1/customers/{customer_id}/payments` | `customer:balance:read` |
 | GET | `/v1/customers/{customer_id}/invoices` | `customer:balance:read` |
 | GET | `/v1/customers/{customer_id}/invoices/{id}` | `customer:balance:read` |
-| PUT | `/v1/customers/{customer_id}/settings` | `customer:billing:update` — billing mode (prepaid/arrears) + self-imposed caps |
 | GET/POST | `/v1/customers/{customer_id}/payment-methods` | `customer:payment-methods:update` |
 | PUT/DELETE | `/v1/customers/{customer_id}/payment-methods/{id}` | `customer:payment-methods:update` |
 | POST | `/v1/customers/{customer_id}/billing-portal` | `customer:payment-methods:update` (Stripe rail only) |

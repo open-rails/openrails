@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -27,15 +25,13 @@ const (
 )
 
 // DefaultAccountSettings returns the implicit policy for an payer that has no
-// explicit settings row: prepaid, 365-day default expiry. Used by
+// explicit settings row: prepaid. Used by
 // GetAccountSettings and the enforcement path so an unconfigured account "just
 // works" (prepaid, balance-gated only).
 func DefaultAccountSettings(payer identity.CustomerID) *models.MoneyAccount {
-	hours := 365 * 24
 	return &models.MoneyAccount{
-		CustomerID:               payer.UUID(),
-		BillingMode:              BillingModePrepaid,
-		DefaultCreditExpiryHours: &hours,
+		CustomerID:  payer.UUID(),
+		BillingMode: BillingModePrepaid,
 	}
 }
 
@@ -80,8 +76,7 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 // AccountSettingsInput is the upsert payload for an payer's spend policy. Only
 // non-nil fields are written; nil fields keep their default / existing value.
 type AccountSettingsInput struct {
-	BillingMode              *string
-	DefaultCreditExpiryHours *int
+	BillingMode *string
 }
 
 // UpsertAccountSettings creates or updates the spend policy for (payer,
@@ -141,9 +136,6 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	if in.BillingMode != nil {
 		cur.BillingMode = *in.BillingMode
 	}
-	if in.DefaultCreditExpiryHours != nil {
-		cur.DefaultCreditExpiryHours = in.DefaultCreditExpiryHours
-	}
 
 	cur.MerchantID = tenantID
 	cur.CustomerID = payer.UUID()
@@ -157,19 +149,13 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 		cur.CreatedAt = now
 	}
 
-	var expiry *int32
-	if cur.DefaultCreditExpiryHours != nil {
-		v, _ := safecast.Convert[int32](*cur.DefaultCreditExpiryHours)
-		expiry = &v
-	}
 	if err := s.db.Gen(ctx).UpsertMoneyAccountSettings(ctx, gen.UpsertMoneyAccountSettingsParams{
-		MerchantID:               cur.MerchantID,
-		CustomerID:               cur.CustomerID,
-		Currency:                 cur.Currency,
-		BillingMode:              cur.BillingMode,
-		DefaultCreditExpiryHours: expiry,
-		CreatedAt:                cur.CreatedAt,
-		UpdatedAt:                cur.UpdatedAt,
+		MerchantID:  cur.MerchantID,
+		CustomerID:  cur.CustomerID,
+		Currency:    cur.Currency,
+		BillingMode: cur.BillingMode,
+		CreatedAt:   cur.CreatedAt,
+		UpdatedAt:   cur.UpdatedAt,
 	}); err != nil {
 		return nil, err
 	}

@@ -78,7 +78,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, default_credit_expiry_hours, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -96,7 +96,6 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.BillingMode,
-		&i.DefaultCreditExpiryHours,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tier,
@@ -176,7 +175,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
-SELECT merchant_id, customer_id, billing_mode, default_credit_expiry_hours, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency
 `
@@ -199,7 +198,6 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.BillingMode,
-			&i.DefaultCreditExpiryHours,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Tier,
@@ -218,7 +216,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, default_credit_expiry_hours, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -236,7 +234,6 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.BillingMode,
-		&i.DefaultCreditExpiryHours,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tier,
@@ -335,22 +332,20 @@ func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTi
 const upsertMoneyAccountSettings = `-- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_settings (
     merchant_id, customer_id, currency, billing_mode,
-    default_credit_expiry_hours, created_at, updated_at
-) VALUES ($1, $2, $7, $3, $4, $5, $6)
+    created_at, updated_at
+) VALUES ($1, $2, $6, $3, $4, $5)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
-    default_credit_expiry_hours = EXCLUDED.default_credit_expiry_hours,
     updated_at = EXCLUDED.updated_at
 `
 
 type UpsertMoneyAccountSettingsParams struct {
-	MerchantID               uuid.UUID
-	CustomerID               uuid.UUID
-	BillingMode              string
-	DefaultCreditExpiryHours *int32
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-	Currency                 string
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	BillingMode string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Currency    string
 }
 
 func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMoneyAccountSettingsParams) error {
@@ -358,7 +353,6 @@ func (q *Queries) UpsertMoneyAccountSettings(ctx context.Context, arg UpsertMone
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.BillingMode,
-		arg.DefaultCreditExpiryHours,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 		arg.Currency,

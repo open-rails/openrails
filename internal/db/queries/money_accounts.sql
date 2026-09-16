@@ -68,11 +68,10 @@ ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 -- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_settings (
     merchant_id, customer_id, currency, billing_mode,
-    default_credit_expiry_hours, created_at, updated_at
-) VALUES ($1, $2, sqlc.arg(currency), $3, $4, $5, $6)
+    created_at, updated_at
+) VALUES ($1, $2, sqlc.arg(currency), $3, $4, $5)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
-    default_credit_expiry_hours = EXCLUDED.default_credit_expiry_hours,
     updated_at = EXCLUDED.updated_at;
 
 -- name: SetMoneyAccountCreditLimit :exec

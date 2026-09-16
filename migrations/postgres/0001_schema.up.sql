@@ -3713,7 +3713,6 @@ CREATE TABLE openrails.money_settings (
     merchant_id uuid NOT NULL,
     customer_id uuid NOT NULL,
     billing_mode text DEFAULT 'prepaid'::text NOT NULL,
-    default_credit_expiry_hours integer,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     tier text,
@@ -3730,7 +3729,6 @@ ALTER TABLE ONLY openrails.money_settings FORCE ROW LEVEL SECURITY;
 COMMENT ON TABLE openrails.money_settings IS 'Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; per-invoker caps live in payer/invoker_spend_limits; arrears owed exposure is derived from open invoices.';
 
 
-COMMENT ON COLUMN openrails.money_settings.default_credit_expiry_hours IS 'per-account default credit-grant expiry in HOURS; NULL = no default.';
 
 
 COMMENT ON COLUMN openrails.money_settings.currency IS 'System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.';
