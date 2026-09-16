@@ -43,5 +43,5 @@ func hostPermissions() []string {
 }
 
 func merchantMismatchMsg(bound, pinned merchant.ID) string {
-	return fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, bound)
+	return fmt.Sprintf("openrails: client is bound to merchant %s but the runtime is bound to merchant %s", pinned, bound)
 }
