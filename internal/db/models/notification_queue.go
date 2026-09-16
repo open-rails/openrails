@@ -80,11 +80,6 @@ func (nq *NotificationQueue) IsSeen() bool {
 	return nq.Seen
 }
 
-// MarkAsSeen marks the notification as seen by the user
-func (nq *NotificationQueue) MarkAsSeen() {
-	nq.Seen = true
-}
-
 // IsExpiredForCleanup checks if the notification is old enough to be cleaned up
 func (nq *NotificationQueue) IsExpiredForCleanup() bool {
 	now := time.Now()

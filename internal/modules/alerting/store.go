@@ -129,7 +129,7 @@ func webhookFromRow(row gen.OpenrailsMerchantWebhook) Webhook {
 	}
 }
 
-func notificationFromRow(row gen.OpenrailsMerchantNotification) Notification {
+func notificationFromRow(row gen.OpenrailsNotification) Notification {
 	n := Notification{
 		ID: row.ID, Severity: Severity(row.Severity), Title: row.Title, Body: row.Body,
 		Link: row.Link, CreatedAt: row.CreatedAt, ReadAt: row.ReadAt,

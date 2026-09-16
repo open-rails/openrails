@@ -90,7 +90,7 @@ func newFailopenFixture(t *testing.T, billingHours int32, autoRenew bool) *failo
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE source_id IN (SELECT id FROM openrails.subscriptions WHERE product_id = $1)", productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id::text = $1", userID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id IN (SELECT id FROM openrails.customers WHERE id::text = $1)", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id IN (SELECT id FROM openrails.customers WHERE id::text = $1)", userID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE product_id = $1", productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)
@@ -284,7 +284,7 @@ func TestRenewMembership_DowngradeRevokeFailureRollsBack(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.entitlements WHERE source_id=$1`, sub.ID)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.payments WHERE subscription_id=$1`, sub.ID)
-		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.notification_queue WHERE customer_id=$1`, sub.CustomerID)
+		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.notifications WHERE customer_id=$1`, sub.CustomerID)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.subscriptions WHERE id=$1`, sub.ID)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.prices WHERE id=$1`, targetPriceID)
 		_, _ = f.pool.Exec(ctx, `DELETE FROM openrails.products WHERE id=$1`, targetProductID)

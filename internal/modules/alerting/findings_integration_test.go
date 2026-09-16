@@ -120,9 +120,9 @@ func TestFindingNotificationPersistenceFailureAndConcurrentRetry(t *testing.T) {
 	// An insertion failure must roll back the episode claim before any webhook
 	// receives a delivery. The trigger affects only this test's merchant.
 	exec(t, pool, `CREATE FUNCTION openrails.reject_test_notification() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.merchant_id = TG_ARGV[0]::uuid THEN RAISE EXCEPTION 'injected notification failure'; END IF; RETURN NEW; END $$`)
-	exec(t, pool, `CREATE TRIGGER reject_test_notification BEFORE INSERT ON openrails.merchant_notifications FOR EACH ROW EXECUTE FUNCTION openrails.reject_test_notification('`+mid.String()+`')`)
+	exec(t, pool, `CREATE TRIGGER reject_test_notification BEFORE INSERT ON openrails.notifications FOR EACH ROW EXECUTE FUNCTION openrails.reject_test_notification('`+mid.String()+`')`)
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS reject_test_notification ON openrails.merchant_notifications; DROP FUNCTION IF EXISTS openrails.reject_test_notification()`)
+		_, _ = pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS reject_test_notification ON openrails.notifications; DROP FUNCTION IF EXISTS openrails.reject_test_notification()`)
 	})
 	inConn(t, appDB, mid, func(ctx context.Context) {
 		require.ErrorContains(t, svc.NotifyFinding(ctx, rec), "persist finding notification")
@@ -132,7 +132,7 @@ func TestFindingNotificationPersistenceFailureAndConcurrentRetry(t *testing.T) {
 	})
 	require.Zero(t, sink.callCount())
 	require.Zero(t, countNotifications(t, pool, mid))
-	exec(t, pool, `DROP TRIGGER reject_test_notification ON openrails.merchant_notifications; DROP FUNCTION openrails.reject_test_notification()`)
+	exec(t, pool, `DROP TRIGGER reject_test_notification ON openrails.notifications; DROP FUNCTION openrails.reject_test_notification()`)
 	results := make(chan error, 8)
 	for range 8 {
 		go func() {

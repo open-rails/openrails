@@ -447,13 +447,21 @@ your app can shut off what your app runs. Transitions land on a durable,
 acknowledged feed you drain:
 
 ```go
-events, err := controlplane.ListPendingHostLifecycleEvents(ctx, app, mid, 100)
-for _, ev := range events {
-    switch ev.EventType {
-    case "delinquency.entered": // shut off their resources
-    case "delinquency.cleared": // restore them
+// client is returned by runtime.Client(openrails.WithMerchantID(mid))
+// or openrails.NewRemote(...); both use the same operations.
+for _, kind := range []openrails.HostEventType{
+    openrails.HostEventDelinquencyGrace,
+    openrails.HostEventDelinquencyEntered,
+    openrails.HostEventDelinquencyCleared,
+} {
+    events, err := client.ListHostEvents(ctx, openrails.HostEventListOptions{Type: kind, Limit: 100})
+    if err != nil { return err }
+    for _, event := range events {
+        if err := applyHostAction(ctx, event.Type, event.Delinquency); err != nil {
+            return err // leave the event pending for replay
+        }
+        if err := client.AcknowledgeHostEvent(ctx, event.ID); err != nil { return err }
     }
-    _ = controlplane.AcknowledgeHostLifecycleEvent(ctx, app, mid, ev.ID)
 }
 ```
 

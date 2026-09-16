@@ -172,14 +172,14 @@ func TestNotificationSweepPoisonPageDoesNotStarveReceipt(t *testing.T) {
 	}
 	require.NoError(t, database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		customer = dbtest.EnsureCustomerIDPgxFor(ctx, t, database.Qx(ctx), mid, uuid.NewString())
-		_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.notification_queue(id,merchant_id,customer_id,event_type,data,created_at)
+		_, err := database.Qx(ctx).Exec(ctx, `INSERT INTO openrails.notifications(id,merchant_id,customer_id,event_type,data,created_at)
  SELECT id,$2,$3,'one_off_purchase_completed',jsonb_build_object('user_email','buyer@example.test','amount_micros',CASE WHEN id=$4 THEN '1000000' ELSE 'invalid' END,'currency','USD'),$5
  FROM unnest($1::uuid[]) AS id`, ids, mid, customer, ids[200], time.Now().Add(-time.Hour))
 		return err
 	}))
 	t.Cleanup(func() {
 		_ = database.RunInMerchantConn(mctx, func(ctx context.Context) error {
-			_, err := database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE id=ANY($1::uuid[])`, ids)
+			_, err := database.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE id=ANY($1::uuid[])`, ids)
 			if err != nil {
 				return err
 			}
@@ -198,7 +198,7 @@ func TestNotificationSweepPoisonPageDoesNotStarveReceipt(t *testing.T) {
 	}
 	require.NoError(t, database.RunInMerchantConn(mctx, func(ctx context.Context) error {
 		var delivered, pending int
-		err := database.Qx(ctx).QueryRow(ctx, `SELECT count(*) FILTER(WHERE emailed_at IS NOT NULL),count(*) FILTER(WHERE emailed_at IS NULL) FROM openrails.notification_queue WHERE id=ANY($1::uuid[])`, ids).Scan(&delivered, &pending)
+		err := database.Qx(ctx).QueryRow(ctx, `SELECT count(*) FILTER(WHERE emailed_at IS NOT NULL),count(*) FILTER(WHERE emailed_at IS NULL) FROM openrails.notifications WHERE id=ANY($1::uuid[])`, ids).Scan(&delivered, &pending)
 		require.NoError(t, err)
 		require.Equal(t, 1, delivered)
 		require.Equal(t, 200, pending, "failed rows remain visible and retryable")

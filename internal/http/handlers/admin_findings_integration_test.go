@@ -180,7 +180,7 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 			`DELETE FROM openrails.rail_intents WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_findings WHERE merchant_id = $1`,
 			`DELETE FROM openrails.reconciliation_runs WHERE merchant_id = $1`,
-			`DELETE FROM openrails.notification_queue WHERE merchant_id = $1`,
+			`DELETE FROM openrails.notifications WHERE merchant_id = $1`,
 			`DELETE FROM openrails.product_access_grants WHERE merchant_id = $1`,
 			`DELETE FROM openrails.entitlements WHERE merchant_id = $1`,
 			`DELETE FROM openrails.grants WHERE merchant_id = $1`,

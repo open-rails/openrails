@@ -458,7 +458,7 @@ func workerAlertDue(row gen.OpenrailsWorkerState, now time.Time, reAlertEvery ti
 }
 
 // RaiseAlerts routes every unhealthy kind — and the fleet-level stall itself —
-// to the durable repair-alert channel (notification_queue system alerts, the
+// to the durable repair-alert channel (notifications system alerts, the
 // same admin surface the ledger reconcilers use).
 func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport) error {
 	if m == nil || m.DB == nil {

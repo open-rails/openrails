@@ -76,7 +76,7 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify notification was deleted
-		count := suite.Count(ctx, "SELECT COUNT(*) FROM openrails.notification_queue WHERE id = $1", notification.ID)
+		count := suite.Count(ctx, "SELECT COUNT(*) FROM openrails.notifications WHERE id = $1", notification.ID)
 		assert.Equal(t, 0, count, "Old seen notification should be deleted")
 	})
 
@@ -105,10 +105,10 @@ func TestCleanupExpiredDataWorker(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify recent notification was preserved
-		notifCount := suite.Count(ctx, "SELECT COUNT(*) FROM openrails.notification_queue WHERE id = $1", notification.ID)
+		notifCount := suite.Count(ctx, "SELECT COUNT(*) FROM openrails.notifications WHERE id = $1", notification.ID)
 		assert.Equal(t, 1, notifCount, "Recent notification should be preserved")
 
 		// Clean up test data
-		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE id = $1", notification.ID)
+		_, _ = suite.Pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE id = $1", notification.ID)
 	})
 }

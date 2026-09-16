@@ -60,7 +60,7 @@ func TestCCBillCancellationWebhookAfterLocalCancelIsNoOp(t *testing.T) {
 		entID, now.Add(-10*24*time.Hour), periodEnd, subID, custID, tenantID)
 
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", custID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", custID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", custID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
@@ -116,7 +116,7 @@ func TestCCBillCancellationWebhookAfterLocalCancelIsNoOp(t *testing.T) {
 	// No re-notification.
 	var notifications int
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.notification_queue WHERE customer_id = $1`, custID).Scan(&notifications))
+		`SELECT count(*) FROM openrails.notifications WHERE customer_id = $1`, custID).Scan(&notifications))
 	require.Zero(t, notifications, "no duplicate premium-ended notification")
 }
 

@@ -12,7 +12,7 @@ import (
 )
 
 const countUnreadMerchantNotifications = `-- name: CountUnreadMerchantNotifications :one
-SELECT count(*) FROM openrails.merchant_notifications WHERE read_at IS NULL
+SELECT count(*) FROM openrails.notifications WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id() AND read_at IS NULL
 `
 
 func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context) (int64, error) {
@@ -24,43 +24,47 @@ func (q *Queries) CountUnreadMerchantNotifications(ctx context.Context) (int64, 
 
 const createMerchantNotification = `-- name: CreateMerchantNotification :one
 
-INSERT INTO openrails.merchant_notifications (merchant_id, severity, title, body, link, data)
-VALUES ($6::uuid, $1, $2, $3, $4, $5)
-RETURNING id, merchant_id, severity, title, body, link, data, created_at, read_at
+INSERT INTO openrails.notifications (merchant_id, recipient_kind, event_type, severity, title, body, link, data)
+VALUES ($1::uuid, 'merchant', 'operator.alert', $2::text, $3::text, $4::text, $5::text, COALESCE($6::jsonb, '{}'::jsonb))
+RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
 `
 
 type CreateMerchantNotificationParams struct {
+	MerchantID uuid.UUID
 	Severity   string
 	Title      string
 	Body       string
 	Link       string
 	Data       []byte
-	MerchantID uuid.UUID
 }
 
 // ============================================================================
-// merchant_notifications  (in_app bell)
+// notifications  (in_app bell)
 // ============================================================================
-func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerchantNotificationParams) (OpenrailsMerchantNotification, error) {
+func (q *Queries) CreateMerchantNotification(ctx context.Context, arg CreateMerchantNotificationParams) (OpenrailsNotification, error) {
 	row := q.db.QueryRow(ctx, createMerchantNotification,
+		arg.MerchantID,
 		arg.Severity,
 		arg.Title,
 		arg.Body,
 		arg.Link,
 		arg.Data,
-		arg.MerchantID,
 	)
-	var i OpenrailsMerchantNotification
+	var i OpenrailsNotification
 	err := row.Scan(
 		&i.ID,
-		&i.MerchantID,
+		&i.EventType,
+		&i.Data,
+		&i.RecipientKind,
+		&i.ReadAt,
 		&i.Severity,
 		&i.Title,
 		&i.Body,
 		&i.Link,
-		&i.Data,
 		&i.CreatedAt,
-		&i.ReadAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.EmailedAt,
 	)
 	return i, err
 }
@@ -144,8 +148,9 @@ func (q *Queries) GetMerchantWebhook(ctx context.Context, id uuid.UUID) (Openrai
 }
 
 const listMerchantNotifications = `-- name: ListMerchantNotifications :many
-SELECT id, merchant_id, severity, title, body, link, data, created_at, read_at FROM openrails.merchant_notifications
-WHERE (NOT $1::boolean OR read_at IS NULL)
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM openrails.notifications
+WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id()
+  AND (NOT $1::boolean OR read_at IS NULL)
 ORDER BY created_at DESC, id
 LIMIT $2::int
 `
@@ -155,25 +160,29 @@ type ListMerchantNotificationsParams struct {
 	RowLimit   int32
 }
 
-func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchantNotificationsParams) ([]OpenrailsMerchantNotification, error) {
+func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchantNotificationsParams) ([]OpenrailsNotification, error) {
 	rows, err := q.db.Query(ctx, listMerchantNotifications, arg.UnreadOnly, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsMerchantNotification
+	var items []OpenrailsNotification
 	for rows.Next() {
-		var i OpenrailsMerchantNotification
+		var i OpenrailsNotification
 		if err := rows.Scan(
 			&i.ID,
-			&i.MerchantID,
+			&i.EventType,
+			&i.Data,
+			&i.RecipientKind,
+			&i.ReadAt,
 			&i.Severity,
 			&i.Title,
 			&i.Body,
 			&i.Link,
-			&i.Data,
 			&i.CreatedAt,
-			&i.ReadAt,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.EmailedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -220,9 +229,9 @@ func (q *Queries) ListMerchantWebhooks(ctx context.Context) ([]OpenrailsMerchant
 }
 
 const markMerchantNotificationRead = `-- name: MarkMerchantNotificationRead :execrows
-UPDATE openrails.merchant_notifications
+UPDATE openrails.notifications
 SET read_at = COALESCE(read_at, now())
-WHERE id = $1
+WHERE recipient_kind = 'merchant' AND merchant_id = openrails.current_merchant_id() AND id = $1
 `
 
 func (q *Queries) MarkMerchantNotificationRead(ctx context.Context, id uuid.UUID) (int64, error) {

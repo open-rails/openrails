@@ -27,7 +27,7 @@ type NotificationEmailSweepArgs struct{}
 
 func (NotificationEmailSweepArgs) Kind() string { return KindNotificationEmailSweep }
 
-// NotificationEmailSweepWorker (#789) delivers undelivered notification_queue
+// NotificationEmailSweepWorker (#789) delivers undelivered notifications
 // rows (emailed_at NULL) through the SAME NotificationService.DeliverEmail path
 // the inline dispatch uses — DeliverEmail stamps emailed_at on success, no-ops
 // (and stamps) unsupported types, and leaves failures NULL for the next sweep.

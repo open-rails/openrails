@@ -25,7 +25,17 @@ Customizable dashboards, provider webhook health/history, denial history, worker
 health, durable findings and basic payment notifications remain available.
 
 This is a fresh-schema hard cut: alert_rules, finding_digest_state, their two
-cross-merchant lookup functions, and merchant_notifications.rule_id are absent.
+cross-merchant lookup functions, and notifications.rule_id are absent.
 There is no upgrade/backfill path or hidden replacement module. A future host
 notification product can consume retained operational evidence if a concrete
 consumer needs configurable rules or summaries.
+
+## Recipient storage
+
+Customer billing notices and the merchant console bell share `notifications`.
+Each row declares `recipient_kind`: customer rows have a merchant-scoped
+`customer_id`; merchant rows have no customer and carry the operator message.
+Queries and mutations select their recipient kind explicitly. `read_at` is the
+single inbox read marker; the customer API derives `seen` from it. Only customer
+rows enter the notification email sweep. Reading a notification never
+acknowledges a financial or lifecycle event in `host_outbox`.

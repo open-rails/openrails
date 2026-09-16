@@ -48,10 +48,10 @@ DELETE FROM openrails.payments WHERE merchant_id = $1;
 
 
 -- name: CountMerchantRowsNotificationQueue :one
-SELECT count(*) FROM openrails.notification_queue WHERE merchant_id = $1;
+SELECT count(*) FROM openrails.notifications WHERE merchant_id = $1;
 
 -- name: PurgeMerchantRowsNotificationQueue :exec
-DELETE FROM openrails.notification_queue WHERE merchant_id = $1;
+DELETE FROM openrails.notifications WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsRailCustomers :one
 SELECT count(*) FROM openrails.rail_customer_accounts WHERE merchant_id = $1;

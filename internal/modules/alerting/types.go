@@ -62,7 +62,7 @@ type Webhook struct {
 	UpdatedAt       time.Time     `json:"updated_at"`
 }
 
-// Notification is the API/domain view of a merchant_notifications row.
+// Notification is the API/domain view of a notifications row.
 type Notification struct {
 	ID        uuid.UUID  `json:"id"`
 	Severity  Severity   `json:"severity"`

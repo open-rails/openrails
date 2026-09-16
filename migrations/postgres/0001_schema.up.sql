@@ -876,10 +876,10 @@ BEGIN
               ORDER BY 1 LIMIT p_limit)
             UNION
             (SELECT DISTINCT nq.merchant_id AS mid
-               FROM openrails.notification_queue nq
+               FROM openrails.notifications nq
               WHERE (p_after IS NULL OR nq.merchant_id > p_after)
                 AND (nq.created_at < p_notification_cutoff
-                     OR (nq.seen AND nq.created_at < p_notification_seen_cutoff))
+                     OR (nq.read_at IS NOT NULL AND nq.created_at < p_notification_seen_cutoff))
               ORDER BY 1 LIMIT p_limit)
             UNION
             (SELECT DISTINCT we.merchant_id AS mid
@@ -1786,7 +1786,7 @@ CREATE TABLE openrails.host_outbox (
     data jsonb DEFAULT '{}'::jsonb NOT NULL,
     delivered_at timestamp with time zone,
     dedupe_key text NOT NULL,
-    CONSTRAINT host_outbox_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT host_outbox_currency_shape CHECK (((currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
     CONSTRAINT host_outbox_payload CHECK (
         (event_type = 'payment.settled' AND subject_type = 'payment' AND payment_id IS NOT NULL
          AND subject_id = payment_id AND amount IS NOT NULL AND amount > 0 AND data = '{}'::jsonb)
@@ -1808,7 +1808,7 @@ ALTER TABLE ONLY openrails.host_outbox
 
 CREATE INDEX ix_host_outbox_delivered ON openrails.host_outbox USING btree (merchant_id, delivered_at) WHERE (delivered_at IS NOT NULL);
 
-CREATE INDEX ix_host_outbox_pending ON openrails.host_outbox USING btree (merchant_id, id) WHERE (delivered_at IS NULL);
+CREATE INDEX ix_host_outbox_pending ON openrails.host_outbox USING btree (merchant_id, event_type, id) WHERE (delivered_at IS NULL);
 
 CREATE UNIQUE INDEX uq_host_outbox_dedupe ON openrails.host_outbox USING btree (merchant_id, dedupe_key);
 
@@ -2179,36 +2179,6 @@ CREATE POLICY merchant_isolation ON openrails.merchant_destructive_policy USING 
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_destructive_policy TO openrails_app;
 
-CREATE TABLE openrails.merchant_notifications (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    severity text DEFAULT 'warning'::text NOT NULL,
-    title text NOT NULL,
-    body text DEFAULT ''::text NOT NULL,
-    link text DEFAULT ''::text NOT NULL,
-    data jsonb,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    read_at timestamp with time zone
-);
-
-ALTER TABLE ONLY openrails.merchant_notifications FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.merchant_notifications IS 'Immediate merchant-operator notifications (console bell).';
-
-ALTER TABLE ONLY openrails.merchant_notifications
-    ADD CONSTRAINT merchant_notifications_pkey PRIMARY KEY (id);
-
-CREATE INDEX merchant_notifications_bell_idx ON openrails.merchant_notifications USING btree (merchant_id, read_at, created_at DESC);
-
-ALTER TABLE ONLY openrails.merchant_notifications
-    ADD CONSTRAINT merchant_notifications_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.merchant_notifications USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.merchant_notifications ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_notifications TO openrails_app;
-
 CREATE TABLE openrails.merchant_purge_inventories (
     id uuid DEFAULT uuidv7() NOT NULL,
     merchant_id uuid NOT NULL,
@@ -2295,51 +2265,60 @@ ALTER TABLE openrails.merchant_webhooks ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.merchant_webhooks TO openrails_app;
 
-CREATE TABLE openrails.notification_queue (
+CREATE TABLE openrails.notifications (
     id uuid DEFAULT uuidv7() NOT NULL,
     event_type text NOT NULL,
     data jsonb NOT NULL,
-    seen boolean DEFAULT false NOT NULL,
+    recipient_kind text DEFAULT 'customer' NOT NULL,
+    read_at timestamp with time zone,
+    severity text DEFAULT '' NOT NULL,
+    title text DEFAULT '' NOT NULL,
+    body text DEFAULT '' NOT NULL,
+    link text DEFAULT '' NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    emailed_at timestamp with time zone
+    customer_id uuid,
+    emailed_at timestamp with time zone,
+    CONSTRAINT notifications_recipient CHECK (
+        (recipient_kind = 'customer' AND customer_id IS NOT NULL AND severity = '' AND title = '' AND body = '' AND link = '')
+        OR (recipient_kind = 'merchant' AND customer_id IS NULL AND event_type = 'operator.alert' AND emailed_at IS NULL AND title <> '')
+    )
 );
 
-ALTER TABLE ONLY openrails.notification_queue FORCE ROW LEVEL SECURITY;
+ALTER TABLE ONLY openrails.notifications FORCE ROW LEVEL SECURITY;
 
-COMMENT ON TABLE openrails.notification_queue IS 'Queue for user notifications related to billing and subscriptions';
+COMMENT ON TABLE openrails.notifications IS 'Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.';
 
-COMMENT ON COLUMN openrails.notification_queue.emailed_at IS '#789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).';
+COMMENT ON COLUMN openrails.notifications.emailed_at IS '#789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).';
 
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY openrails.notifications
+    ADD CONSTRAINT notifications_pkey PRIMARY KEY (id);
 
-CREATE INDEX idx_notification_queue_created_at ON openrails.notification_queue USING btree (created_at);
+CREATE INDEX idx_notifications_created_at ON openrails.notifications USING btree (created_at);
 
-CREATE INDEX idx_notification_queue_customer ON openrails.notification_queue USING btree (customer_id) WHERE (customer_id IS NOT NULL);
+CREATE INDEX idx_notifications_customer ON openrails.notifications USING btree (customer_id) WHERE (customer_id IS NOT NULL);
 
-CREATE INDEX idx_notification_queue_event_type ON openrails.notification_queue USING btree (event_type);
+CREATE INDEX idx_notifications_event_type ON openrails.notifications USING btree (event_type);
 
-CREATE INDEX idx_notification_queue_merchant_id ON openrails.notification_queue USING btree (merchant_id);
+CREATE INDEX idx_notifications_merchant_id ON openrails.notifications USING btree (merchant_id);
 
-CREATE INDEX idx_notification_queue_seen ON openrails.notification_queue USING btree (seen);
+CREATE INDEX notifications_inbox_idx ON openrails.notifications USING btree (merchant_id, recipient_kind, customer_id, read_at, created_at DESC);
 
-CREATE INDEX idx_notification_queue_undelivered ON openrails.notification_queue USING btree (merchant_id, created_at, id) WHERE (emailed_at IS NULL);
+CREATE INDEX idx_notifications_undelivered ON openrails.notifications USING btree (merchant_id, created_at, id) WHERE (recipient_kind = 'customer' AND emailed_at IS NULL);
 
-CREATE INDEX ix_notification_queue_retention ON openrails.notification_queue USING btree (merchant_id, created_at);
+CREATE INDEX ix_notifications_retention ON openrails.notifications USING btree (merchant_id, created_at);
 
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
+ALTER TABLE ONLY openrails.notifications
+    ADD CONSTRAINT notifications_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
 
-ALTER TABLE ONLY openrails.notification_queue
-    ADD CONSTRAINT notification_queue_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
+ALTER TABLE ONLY openrails.notifications
+    ADD CONSTRAINT notifications_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
 
-CREATE POLICY merchant_isolation ON openrails.notification_queue USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
+CREATE POLICY merchant_isolation ON openrails.notifications USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
-ALTER TABLE openrails.notification_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE openrails.notifications ENABLE ROW LEVEL SECURITY;
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notification_queue TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.notifications TO openrails_app;
 
 CREATE TABLE openrails.prices (
     id uuid DEFAULT uuidv7() NOT NULL,

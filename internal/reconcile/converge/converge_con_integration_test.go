@@ -49,7 +49,7 @@ func TestConverge_ConReferenceSourceReference(t *testing.T) {
 		_ = appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.reconciliation_findings WHERE merchant_id=$1 AND subject_key = ANY($2)`,
 				merchantID, []string{"entitlement:" + entID.String(), "customer:" + customer.String()})
-			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
+			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, customer)
 			_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE id=$1`, entID)
 			return nil
 		})

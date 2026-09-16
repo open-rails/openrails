@@ -150,7 +150,7 @@ func newSubIntentFixture(t *testing.T) *subIntentFixture {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE intent_type = 'nmi_subscription_create' AND price_id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)

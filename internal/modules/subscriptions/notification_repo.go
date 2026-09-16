@@ -26,7 +26,7 @@ type NotificationQueueRepo struct {
 
 func NewNotificationQueueRepo(d *db.DB) *NotificationQueueRepo { return &NotificationQueueRepo{db: d} }
 
-func notificationsFromGen(rows []gen.OpenrailsNotificationQueue) ([]*models.NotificationQueue, error) {
+func notificationsFromGen(rows []gen.OpenrailsNotification) ([]*models.NotificationQueue, error) {
 	out := make([]*models.NotificationQueue, 0, len(rows))
 	for _, r := range rows {
 		m, err := models.NotificationFromGen(r)
@@ -121,8 +121,8 @@ func (r *NotificationQueueRepo) MarkEmailed(ctx context.Context, id uuid.UUID, a
 	return err
 }
 
-func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id uuid.UUID) error {
-	rows, err := r.db.Gen(ctx).MarkNotificationSeen(ctx, id)
+func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id, customerID uuid.UUID) error {
+	rows, err := r.db.Gen(ctx).MarkNotificationSeen(ctx, gen.MarkNotificationSeenParams{ID: id, CustomerID: customerID})
 	if err != nil {
 		return err
 	}

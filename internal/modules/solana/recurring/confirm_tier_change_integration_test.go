@@ -106,7 +106,7 @@ func TestConfirmTierChange_RollsBackPartialMirrorAndRetries(t *testing.T) {
 	require.NoError(t, repo.Upsert(ctx, oldMirror))
 
 	t.Cleanup(func() {
-		_, _ = dbi.Pool().Exec(ctx, `DELETE FROM openrails.notification_queue WHERE customer_id=$1`, customerID)
+		_, _ = dbi.Pool().Exec(ctx, `DELETE FROM openrails.notifications WHERE customer_id=$1`, customerID)
 		_, _ = dbi.Pool().Exec(ctx, `DELETE FROM openrails.entitlements WHERE customer_id=$1`, customerID)
 		_, _ = dbi.Pool().Exec(ctx, `DELETE FROM openrails.grants WHERE customer_id=$1`, customerID)
 		_, _ = dbi.Pool().Exec(ctx, `DELETE FROM openrails.payments WHERE customer_id=$1`, customerID)
@@ -146,7 +146,7 @@ func TestConfirmTierChange_RollsBackPartialMirrorAndRetries(t *testing.T) {
 	require.ErrorIs(t, err, injected)
 	assertTierChangeState(t, ctx, dbi, customerID, tierGroup, oldSubID, uuid.Nil, 1, models.StatusActive)
 	var queued int
-	require.NoError(t, dbi.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.notification_queue WHERE customer_id=$1`, customerID).Scan(&queued))
+	require.NoError(t, dbi.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.notifications WHERE customer_id=$1`, customerID).Scan(&queued))
 	require.Zero(t, queued, "a rolled-back tier change must not leave or dispatch notification work")
 	_, err = repo.GetBySubscriptionPDA(ctx, newPDA)
 	require.Error(t, err, "the failed transaction must not leave the new mirror's idempotency key")

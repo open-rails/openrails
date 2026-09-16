@@ -503,3 +503,23 @@ with `{ "url": "..." }` and retains webhook identity. A metadata/secret version
 mismatch refuses delivery until the same URL update is retried successfully.
 Manifest deployments retain read-only provider credentials while this managed
 webhook namespace uses the configured encrypted DB/Vault backend.
+
+## Host event consumption
+
+`GET /v1/merchant/host-events` and `POST /v1/merchant/host-events/{id}/acknowledge`
+are shared by standalone HTTP and the embedded Go `Client`. They require
+`merchant:host-events:read` and `merchant:host-events:acknowledge`, respectively.
+
+The list is merchant-scoped and bounded (`limit` defaults to 100, maximum 1000).
+`type` selects `payment.settled`, `delinquency.grace`, `delinquency.entered`, or
+`delinquency.cleared`. Pending events are returned oldest first. Acknowledge only
+after idempotent host processing commits, then fetch again; a UUID high-water
+mark can miss transactions that commit late. Acknowledgment is idempotent and
+independent of customer and merchant notification read state. A payment event
+contains the original payment UUID, amount, currency, merchant and settlement
+time, preserving the fee-attribution coordinate.
+
+`include_acknowledged=true` includes retained acknowledged rows; `payment_id`
+selects one payment's event. Acknowledged rows are retained for 30 days by default;
+pending rows survive retention. Hosts should filter by event type so one
+consumer's pending work cannot starve another type.

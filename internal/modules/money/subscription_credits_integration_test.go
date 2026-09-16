@@ -316,7 +316,7 @@ func newLifecycleCreditsFixture(t *testing.T, credits models.CreditsSpec) *lifec
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.ledger_transfers WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE price_id = $1", priceID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", customerID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE product_id = $1", productID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)

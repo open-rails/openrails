@@ -82,7 +82,7 @@ func newEnv(t *testing.T) *env {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.host_outbox WHERE subject_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.customer_delinquency WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notification_queue WHERE customer_id = $1", payer.UUID())
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.notifications WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.money_settings WHERE customer_id = $1", payer.UUID())
@@ -496,7 +496,7 @@ func requireNotification(t *testing.T, e *env, eventType models.NotificationEven
 	t.Helper()
 	var n int
 	require.NoError(t, e.pool.QueryRow(e.ctx,
-		`SELECT count(*) FROM openrails.notification_queue WHERE customer_id = $1 AND event_type = $2`,
+		`SELECT count(*) FROM openrails.notifications WHERE customer_id = $1 AND event_type = $2`,
 		e.payer.UUID(), string(eventType)).Scan(&n))
 	require.Equal(t, 1, n, "the payer is told exactly once on each rung it can act on: %s", eventType)
 }

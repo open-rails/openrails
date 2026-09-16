@@ -63,7 +63,7 @@ func TestAutoTopupDisabledNotificationDeliversThroughExistingEmailQueue(t *testi
 	require.NoError(t, notifications.DeliverEmail(ctx, row))
 	require.EqualValues(t, 1, sends.Load())
 	var emailed *time.Time
-	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT emailed_at FROM openrails.notification_queue WHERE id=$1", row.ID).Scan(&emailed))
+	require.NoError(t, dbi.Pool().QueryRow(ctx, "SELECT emailed_at FROM openrails.notifications WHERE id=$1", row.ID).Scan(&emailed))
 	require.NotNil(t, emailed)
 	content := RenderAutoTopupDisabledEmail("Shop", "<customer>", "EUR")
 	require.Contains(t, content.HTML, "&lt;customer&gt;")

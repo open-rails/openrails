@@ -749,19 +749,6 @@ type OpenrailsMerchantDormancyNotice struct {
 	WarnCount     int64
 }
 
-// Immediate merchant-operator notifications (console bell).
-type OpenrailsMerchantNotification struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Severity   string
-	Title      string
-	Body       string
-	Link       string
-	Data       []byte
-	CreatedAt  time.Time
-	ReadAt     *time.Time
-}
-
 // or#858: the manifest of what a merchant purge is ABOUT TO DESTROY — per-table row counts, merchant secret NAMES, and the explicit list of what is not captured. It is NOT a backup and restores nothing; the only restore path is Postgres PITR (docs/backup-and-recovery.md). Merchant deletion is gated on a matching inventory so the operator has seen the blast radius, not so the data can come back. Was merchant_exports (#225), a name that promised a restore point that never existed.
 type OpenrailsMerchantPurgeInventory struct {
 	ID         uuid.UUID
@@ -835,15 +822,20 @@ type OpenrailsMoneySetting struct {
 	AutoTopupFailures         int64
 }
 
-// Queue for user notifications related to billing and subscriptions
-type OpenrailsNotificationQueue struct {
-	ID         uuid.UUID
-	EventType  string
-	Data       []byte
-	Seen       bool
-	CreatedAt  time.Time
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
+// Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.
+type OpenrailsNotification struct {
+	ID            uuid.UUID
+	EventType     string
+	Data          []byte
+	RecipientKind string
+	ReadAt        *time.Time
+	Severity      string
+	Title         string
+	Body          string
+	Link          string
+	CreatedAt     time.Time
+	MerchantID    uuid.UUID
+	CustomerID    *uuid.UUID
 	// #789: when the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
 	EmailedAt *time.Time
 }

@@ -553,7 +553,7 @@ func TestConverge_DeriveGrantMissing_UnknownSubscription(t *testing.T) {
 				merchantID, []string{"subscription:" + subAuto.String(), "subscription:" + subBounded.String(), "subscription:" + subBare.String(),
 					"customer:" + custAuto.String(), "customer:" + custBounded.String(), "customer:" + custBare.String()})
 			for _, c := range []uuid.UUID{custAuto, custBounded, custBare} {
-				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notification_queue WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
+				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.notifications WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 				_, _ = appDB.Qx(ctx).Exec(ctx, `DELETE FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2`, merchantID, c)
 			}
