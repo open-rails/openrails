@@ -190,7 +190,10 @@ remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
 `ErrNotFound`, `ErrConflict`, `ErrInsufficientCredits` (402),
 `ErrInternal`, and `ErrUnreachable` — which wraps transport failures,
 timeouts, and 5xx. Every error is a `*StatusError` carrying the HTTP status
-and wire code/message.
+and wire code/message. A blank, whitespace or dot identifier (or a zero UUID)
+is refused by the Client before any request with the same `400 invalid_param`
+`StatusError` the server returns for a malformed identifier, so embedded and
+remote callers observe one error.
 
 **Fail-open vs fail-closed for admission:** key your policy off
 `ErrUnreachable`. A clean deny (`allowed=false`, or `ErrInsufficientCredits`)

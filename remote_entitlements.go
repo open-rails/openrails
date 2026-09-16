@@ -3,8 +3,6 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 )
 
@@ -19,9 +17,16 @@ type GrantEntitlementRequest struct {
 
 // GrantEntitlement records an admin-sourced entitlement for a customer.
 func (c *Client) GrantEntitlement(ctx context.Context, customerID string, request GrantEntitlementRequest) (*EntitlementRecord, error) {
+	path, err := customerPath(customerID)
+	if err != nil {
+		return nil, err
+	}
+	request.Entitlement, err = requireID("entitlement", request.Entitlement)
+	if err != nil {
+		return nil, err
+	}
 	var out EntitlementRecord
-	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/entitlements"
-	if err := c.do(ctx, http.MethodPost, path, request, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/entitlements", request, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -29,6 +34,13 @@ func (c *Client) GrantEntitlement(ctx context.Context, customerID string, reques
 
 // RevokeEntitlement revokes one entitlement window owned by the customer.
 func (c *Client) RevokeEntitlement(ctx context.Context, customerID, entitlementID string) error {
-	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/entitlements/" + url.PathEscape(strings.TrimSpace(entitlementID))
-	return c.do(ctx, http.MethodDelete, path, nil, nil)
+	path, err := customerPath(customerID)
+	if err != nil {
+		return err
+	}
+	entitlement, err := pathID("entitlement_id", entitlementID)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, path+"/entitlements/"+entitlement, nil, nil)
 }

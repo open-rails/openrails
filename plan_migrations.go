@@ -3,6 +3,7 @@ package openrails
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -74,6 +75,9 @@ type PlanMigrationCancelResult struct {
 
 // PreviewPlanMigration classifies the affected subscriptions without writing.
 func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigrationRequest) (*PlanMigrationResult, error) {
+	if err := request.requirePrices(); err != nil {
+		return nil, err
+	}
 	var out PlanMigrationResult
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/preview", request, &out); err != nil {
 		return nil, err
@@ -83,6 +87,9 @@ func (c *Client) PreviewPlanMigration(ctx context.Context, request PlanMigration
 
 // CreatePlanMigration schedules the migration and records its batch.
 func (c *Client) CreatePlanMigration(ctx context.Context, request PlanMigrationRequest) (*PlanMigrationResult, error) {
+	if err := request.requirePrices(); err != nil {
+		return nil, err
+	}
 	var out PlanMigrationResult
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations", request, &out); err != nil {
 		return nil, err
@@ -90,10 +97,22 @@ func (c *Client) CreatePlanMigration(ctx context.Context, request PlanMigrationR
 	return &out, nil
 }
 
+// requirePrices is the server's first check, applied before any I/O.
+func (r PlanMigrationRequest) requirePrices() error {
+	if strings.TrimSpace(r.SourcePrice) == "" || strings.TrimSpace(r.TargetPrice) == "" {
+		return invalidErr("source_price and target_price required")
+	}
+	return nil
+}
+
 // CancelPlanMigration cancels the batch's still-scheduled subscriptions.
 func (c *Client) CancelPlanMigration(ctx context.Context, batchID uuid.UUID) (*PlanMigrationCancelResult, error) {
+	batch, err := requireUUID("batch_id", batchID)
+	if err != nil {
+		return nil, err
+	}
 	var out PlanMigrationCancelResult
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/"+batchID.String()+"/cancel", nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/plan-migrations/"+batch+"/cancel", nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
