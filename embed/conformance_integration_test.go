@@ -34,7 +34,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
@@ -541,7 +540,7 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	// #685: the embedded side is the UNIFIED client — Runtime.Client() over the
 	// in-process transport, traversing the real gate via the context-attached
 	// host principal (not the retired localClient transcriptions).
-	embeddedClient, embeddedClientErr := embedded.Runtime().Client(embed.WithCurrency(currency))
+	embeddedClient, embeddedClientErr := embedded.Runtime().Client(openrails.WithCurrency(currency))
 	if embeddedClientErr != nil {
 		t.Fatal(embeddedClientErr)
 	}

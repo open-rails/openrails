@@ -28,7 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -54,7 +53,7 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 		return id
 	}
 
-	local, err := embedded.Runtime().Client(embed.WithCurrency(currency))
+	local, err := embedded.Runtime().Client(openrails.WithCurrency(currency))
 	require.NoError(t, err)
 	transports := []struct {
 		name   string

@@ -150,3 +150,7 @@ func (w *bufferedResponse) response(req *http.Request) *http.Response {
 		Request:       req,
 	}
 }
+
+func merchantMismatchMsg(bound, pinned merchant.ID) string {
+	return fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, bound)
+}

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 )
@@ -23,7 +22,7 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	host := h.StartEmbeddedHost("USD")
 	standalone := h.StartStandalone("USD")
-	local, localErr := host.Runtime().Client(embed.WithCurrency("USD"))
+	local, localErr := host.Runtime().Client(openrails.WithCurrency("USD"))
 	if localErr != nil {
 		t.Fatal(localErr)
 	}

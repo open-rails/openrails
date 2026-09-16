@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -31,7 +30,7 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	standalone := h.StartStandalone(currency)
 	pool := h.Pool()
 
-	embeddedClient, embeddedClientErr := embedded.Runtime().Client(embed.WithCurrency(currency))
+	embeddedClient, embeddedClientErr := embedded.Runtime().Client(openrails.WithCurrency(currency))
 	if embeddedClientErr != nil {
 		t.Fatal(embeddedClientErr)
 	}
