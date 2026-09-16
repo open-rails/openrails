@@ -22,6 +22,7 @@ type ProductFilter struct {
 	ActiveOnly bool
 	TierGroup  string
 }
+
 // PriceFilter selects prices. Archived nil lists every price; false lists
 // live prices only; true lists archived prices only.
 type PriceFilter struct {
