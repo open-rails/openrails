@@ -698,7 +698,7 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 	if pinned, ok := merchant.FromContext(ctx); ok {
 		if !expectedMerchant.IsZero() && expectedMerchant != pinned {
 			return nil, &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
-				Type: "invalid_request_error", Code: "resource_conflict", Message: "merchant binding mismatch",
+				Type: "invalid_request_error", Code: "resource_conflict", Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant),
 			}}
 		}
 		expectedMerchant = pinned
