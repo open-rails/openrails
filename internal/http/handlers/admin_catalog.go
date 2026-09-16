@@ -97,8 +97,11 @@ func AdminListProducts(r *httprequest.Request) {
 		Limit:     parseIntDefault(r.Query("limit"), 100),
 		Offset:    parseIntDefault(r.Query("offset"), 0),
 	}
-	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
-		opts.ActiveOnly = parseBool(v)
+	// archived=false lists live products, archived=true archived ones; absent
+	// lists both.
+	if v := strings.TrimSpace(r.Query("archived")); v != "" {
+		archived := parseBool(v)
+		opts.Archived = &archived
 	}
 	page, err := svc.ListProducts(r.Request.Context(), opts)
 	if err != nil {
@@ -238,8 +241,10 @@ func AdminListPrices(r *httprequest.Request) {
 		}
 		filter.ProductID = &id
 	}
-	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
-		archived := !parseBool(v)
+	// archived=false lists live prices, archived=true archived ones; absent
+	// lists both.
+	if v := strings.TrimSpace(r.Query("archived")); v != "" {
+		archived := parseBool(v)
 		filter.Archived = &archived
 	}
 	limit := parseIntDefault(r.Query("limit"), 100)

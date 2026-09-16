@@ -56,16 +56,24 @@ func TestCatalogClientSharedWorkflow(t *testing.T) {
 			priced, err = client.GetPrice(ctx, price.ID)
 			require.NoError(t, err)
 			require.Equal(t, product.ID, priced.ProductID)
-			prices, err := client.ListPrices(ctx, openrails.PriceFilter{ProductID: &product.ID, ActiveOnly: true})
+			live, retired := false, true
+			prices, err := client.ListPrices(ctx, openrails.PriceFilter{ProductID: &product.ID, Archived: &live})
 			require.NoError(t, err)
 			require.Len(t, prices.Items, 1)
-			retired := true
 			priced, err = client.UpdatePrice(ctx, price.ID, openrails.UpdatePriceRequest{Archived: &retired})
 			require.NoError(t, err)
 			require.True(t, priced.Archived)
-			prices, err = client.ListPrices(ctx, openrails.PriceFilter{ProductID: &product.ID, ActiveOnly: true})
+			prices, err = client.ListPrices(ctx, openrails.PriceFilter{ProductID: &product.ID, Archived: &live})
 			require.NoError(t, err)
 			require.Empty(t, prices.Items)
+			// No archived filter lists every price; the archived-only filter is explicit.
+			prices, err = client.ListPrices(ctx, openrails.PriceFilter{ProductID: &product.ID})
+			require.NoError(t, err)
+			require.Len(t, prices.Items, 1, "an unset filter lists archived and live prices")
+			prices, err = client.ListPrices(ctx, openrails.PriceFilter{ProductID: &product.ID, Archived: &retired})
+			require.NoError(t, err)
+			require.Len(t, prices.Items, 1)
+			require.True(t, prices.Items[0].Archived)
 			// Archived identity remains addressable for existing obligations.
 			priced, err = client.GetPrice(ctx, price.ID)
 			require.NoError(t, err)

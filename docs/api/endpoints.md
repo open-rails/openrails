@@ -364,14 +364,14 @@ manifest and reboot instead. Reads stay live.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec`, `credits_spec` |
-| GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `active_only` filter before count/pagination |
+| GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `archived` (`false` live only, `true` archived only, absent both) filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
 | PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
 | POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
 | POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |
 | POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids or select declarative provider config; recurring Solana defaults to USDC, accepts `token: USD1`, or resolves an attached `plan_pda`) |
-| GET | `/v1/merchant/catalog/prices` | Paginated prices; `product_id`, `currency`, `type`, `active_only` filters |
+| GET | `/v1/merchant/catalog/prices` | Paginated prices; `product_id`, `currency`, `type`, `archived` (`false` live only, `true` archived only, absent both) filters |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}` | Price by key |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | The key's version chain, most-recent-first |
 | GET | `/v1/merchant/catalog/prices/{id}` | One price |
