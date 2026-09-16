@@ -24,7 +24,8 @@ const maxRetirementCandidatePage = 500
 type GroupReleaser func(ctx context.Context, groupID string) error
 
 // ErrGroupReleasePending reports a committed retirement whose group release has
-// not completed yet; CompletePendingGroupReleases retries it by UUID.
+// not completed or not been recorded; CompletePendingGroupReleases retries it
+// by UUID.
 var ErrGroupReleasePending = errors.New("merchants: retired merchant group release pending")
 
 // RetirementCursor is the keyset position after a candidate.
@@ -126,7 +127,7 @@ func (s *Service) ListRetirementCandidates(ctx context.Context, req RetirementCa
 // RetireUnused atomically retires a never-used merchant bound to groupID, then
 // releases that exact group. The merchant row lock serializes activity inserts
 // (every blocker references it), so the activity check and the irreversible
-// tombstone commit together. A release failure after commit returns Retired
+// tombstone commit together. Any failure after that commit returns Retired
 // with ErrGroupReleasePending.
 func (s *Service) RetireUnused(ctx context.Context, mid merchant.ID, groupID string, reservedSlugs []string, release GroupReleaser) (RetireResult, error) {
 	var res RetireResult
@@ -217,9 +218,12 @@ func (s *Service) releaseRetiredGroup(ctx context.Context, mid merchant.ID, grou
 	if err := release(ctx, groupID); err != nil {
 		return fmt.Errorf("%w: merchant %s group %s: %w", ErrGroupReleasePending, mid, groupID, err)
 	}
-	return s.pool.MerchantTx(ctx, mid, func(ctx context.Context, tx pgx.Tx) error {
+	if err := s.pool.MerchantTx(ctx, mid, func(ctx context.Context, tx pgx.Tx) error {
 		return gen.New(tx).CompleteMerchantGroupRelease(ctx, gen.CompleteMerchantGroupReleaseParams{ID: mid.UUID(), GroupID: groupID})
-	})
+	}); err != nil {
+		return fmt.Errorf("%w: merchant %s group %s released but not recorded: %w", ErrGroupReleasePending, mid, groupID, err)
+	}
+	return nil
 }
 
 func normalizeReserved(slugs []string) []string {
