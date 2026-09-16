@@ -27,7 +27,7 @@ import (
 //
 // CCBill is intentionally NOT reconciled here: CCBill has no catalog-list API,
 // so enumeration is structurally impossible (see the package doc on
-// pkg/service/catalog_drift.go). CCBill links stay manual-only.
+// internal/service/catalog_drift.go). CCBill links stay manual-only.
 //
 // It runs the same catalog.RunDriftPass as Service.RunCatalogReconciliation.
 const KindCatalogReconciliationPull = "openrails.catalog_reconciliation_pull"

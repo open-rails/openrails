@@ -146,7 +146,7 @@ type AdmitRequest struct {
 	Roles []uuid.UUID `json:"roles,omitempty"`
 }
 
-// AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
+// AdmitResponse is the admission verdict (internal/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
 // DenyCode when available. A successful money-bearing admit creates a request_id
 // keyed SQL operation. A deny is returned as (Allowed=false, nil error) on both
@@ -370,7 +370,7 @@ type WastedSpendResponse struct {
 
 // SpendLimitWindow is one fixed money-budget window in a hierarchical
 // budget-scope policy (#473) — same shape as BudgetWindowInput
-// (pkg/service.SpendLimitWindowInput on the wire).
+// (internal/service.SpendLimitWindowInput on the wire).
 type SpendLimitWindow = BudgetWindowInput
 
 // SpendDelegationInput is one payer-owned spend delegation. Machine clients use

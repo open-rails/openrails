@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // ProductAccessGrantResponse is the application-facing view of a durable product

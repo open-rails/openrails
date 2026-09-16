@@ -344,7 +344,7 @@ type PaymentSourceUpdateOutcome struct {
 
 // PaymentSourceUpdateThrough posts the durable nmi_payment_source_update
 // intent and executes it inline (#674 write-through). Wired by the composition
-// root; both the HTTP handler and the embedded pkg/service twin route through
+// root; both the HTTP handler and the embedded internal/service twin route through
 // it.
 type PaymentSourceUpdateThrough struct {
 	Runner *Runner

@@ -9,17 +9,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/stretchr/testify/require"
 )
 
 // TestRecordUsage_UnifiedClient_RatesIntoInvoice proves #797 end to end on
 // BOTH transports: host-reported usage lands in openrails.usage_events through
-// the unified client (idempotent on source+source_id), and the pkg/service
+// the unified client (idempotent on source+source_id), and the internal/service
 // FinalizeInvoice export rates it through a gauge rate card into an invoice.
 func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	ctx := context.Background()

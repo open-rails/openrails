@@ -21,7 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
 	embcp "github.com/open-rails/openrails/internal/operator"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // #814 gap 1 — the SUPPORTED fake-Stripe seam for embedding hosts.

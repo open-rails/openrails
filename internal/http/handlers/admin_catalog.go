@@ -11,14 +11,14 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // Catalog action handlers (issue #205/#510). Mounted under
 // /merchant/catalog/* with the live merchant:catalog:update permission gate.
 //
-// Each handler is a thin shim: bind input -> call pkg/service facade -> emit
-// JSON. The pkg/service facade is the canonical surface; embedded callers and
+// Each handler is a thin shim: bind input -> call internal/service facade -> emit
+// JSON. The internal/service facade is the canonical surface; embedded callers and
 // HTTP callers go through the same code path.
 
 func newAdminBillingService(r *httprequest.Request) (*billingservice.Service, bool) {

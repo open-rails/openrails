@@ -7,7 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	service "github.com/open-rails/openrails/pkg/service"
+	service "github.com/open-rails/openrails/internal/service"
 )
 
 // ServiceEnsureCustomer handles PUT /v1/merchant/customers/{customer_id}:

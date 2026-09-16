@@ -12,9 +12,9 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 func creditPagination(r *httprequest.Request) (limit, offset int, ok bool) {
