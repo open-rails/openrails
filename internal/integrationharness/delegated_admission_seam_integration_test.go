@@ -87,10 +87,15 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	}
 	adminID, adminToken := newUser("or918-admin")
 	plainID, plainToken := newUser("or918-plain")
+	coOwnerID, _ := newUser("or918-coowner")
 
 	// The merchant-admin authority is live permission-group state, not a claim:
-	// the token was minted BEFORE this grant and never learns about it.
-	require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(adminID), controlplane.MerchantRoleOwner), "grant merchant owner")
+	// the token was minted BEFORE this grant and never learns about it. The
+	// co-owner is this test's own fixture: AuthKit refuses to ban a group's last
+	// usable owner, so step (3) must not depend on owners left by other tests.
+	for _, owner := range []string{adminID, coOwnerID} {
+		require.NoError(t, core.Genesis().AssignGroupRole(ctx, controlplane.MerchantGroup(dbtest.TestMerchantSlug), authkit.UserSubject(owner), controlplane.MerchantRoleOwner), "grant merchant owner")
+	}
 
 	// --- the seam, wired the way host-one would wire it -------------------
 	var lookups []string
@@ -179,7 +184,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	// (3) LIVENESS. Ban the admin; the token it already holds is untouched and
 	// still verifies. Without the veto this request would still be a 200.
 	reason := "or918 liveness proof"
-	require.NoError(t, core.BanUser(ctx, adminID, &reason, nil, adminID), "ban the user")
+	require.NoError(t, core.BanUser(ctx, adminID, &reason, nil, coOwnerID), "ban the user")
 	verified, verr := cp.AuthService().Verifier().Verify(ctx, adminToken)
 	require.NoError(t, verr, "the banned user's token still VERIFIES — this is the gap")
 	require.Equal(t, adminID, verified.UserID)
