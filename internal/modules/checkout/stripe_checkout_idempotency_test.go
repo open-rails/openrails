@@ -75,6 +75,32 @@ func TestRejectCheckoutSessionPAN(t *testing.T) {
 	if !errors.Is(err, ErrCheckoutSessionValidation) {
 		t.Fatalf("reject metadata key pan error = %v, want checkout validation error", err)
 	}
+
+	// A typed price/subscription handle whose digit groups happen to form a
+	// Luhn-valid run is an id, not a PAN; a price key with one keeps the scan.
+	const luhnUUID = "a4111111-1111-4111-8119-abcdefabcdef" // digits 4111111111141118119 pass Luhn
+	if !looksLikePAN(luhnUUID) {
+		t.Fatalf("fixture %s must read as card-number-shaped for this test to prove the exemption", luhnUUID)
+	}
+	if err := rejectCheckoutSessionPAN(&CheckoutSessionCreateRequest{
+		Payment: CheckoutSessionPaymentRequest{Rail: "nmi", PaymentToken: "safe-token"},
+		PriceID: "price_" + luhnUUID,
+	}); err != nil {
+		t.Fatalf("prefixed price handle rejected: %v", err)
+	}
+	if err := rejectCheckoutSessionPAN(&CheckoutSessionCreateRequest{
+		Payment:        CheckoutSessionPaymentRequest{Rail: "nmi", PaymentToken: "safe-token"},
+		SubscriptionID: luhnUUID,
+	}); err != nil {
+		t.Fatalf("plain subscription handle rejected: %v", err)
+	}
+	err = rejectCheckoutSessionPAN(&CheckoutSessionCreateRequest{
+		Payment: CheckoutSessionPaymentRequest{Rail: "nmi", PaymentToken: "safe-token"},
+		PriceID: "plan-4111111111111111",
+	})
+	if !errors.Is(err, ErrCheckoutSessionValidation) {
+		t.Fatalf("price key with a pan error = %v, want checkout validation error", err)
+	}
 }
 
 func TestEqualOptionalUUID(t *testing.T) {

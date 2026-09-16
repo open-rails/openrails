@@ -17,7 +17,7 @@ func (c *Client) ListMerchantInvoices(ctx context.Context, filter MerchantInvoic
 		q.Set("customer_id", filter.CustomerID.String())
 	}
 	if filter.Currency != nil {
-		q.Set("currency", *filter.Currency)
+		q.Set("currency", normalizeCurrency(*filter.Currency))
 	}
 	if filter.Status != nil {
 		q.Set("status", *filter.Status)

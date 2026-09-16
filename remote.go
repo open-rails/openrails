@@ -63,7 +63,7 @@ func WithHTTPClient(hc *http.Client) ClientOption {
 // WithCurrency sets the client-level currency used by Balance and by requests
 // that leave their currency empty. Empty currency is rejected by service routes.
 func WithCurrency(currency string) ClientOption {
-	return func(r *Client) { r.currency = strings.TrimSpace(currency) }
+	return func(r *Client) { r.currency = normalizeCurrency(currency) }
 }
 
 // WithTokenProvider supplies the per-call Bearer minting function. REQUIRED for
@@ -643,7 +643,11 @@ func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency st
 // normalizeCurrency preserves non-empty currency/unit codes and lets the service
 // reject missing values consistently.
 func normalizeCurrency(currency string) string {
-	return strings.TrimSpace(currency)
+	currency = strings.TrimSpace(currency)
+	if strings.ContainsAny(currency, ":/") {
+		return currency // a qualified unit keeps its exact spelling
+	}
+	return strings.ToUpper(currency)
 }
 
 // statusErrorFromBody decodes the one canonical error envelope. Foreign proxy

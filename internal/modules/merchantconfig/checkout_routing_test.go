@@ -14,14 +14,14 @@ func TestNormalizeCheckoutRoutingCanonicalises(t *testing.T) {
 
 	out, err := NormalizeCheckoutRouting([]models.CheckoutRoutingRule{
 		{
-			Match:  models.CheckoutRoutingMatch{Currency: " USD ", Country: "us", Mode: " Subscription "},
+			Match:  models.CheckoutRoutingMatch{Currency: " usd ", Country: "us", Mode: " Subscription "},
 			Prefer: []string{" Mobius ", "CCBill"},
 		},
 		{Prefer: []string{"stripe"}},
 	})
 	require.NoError(t, err)
 	require.Len(t, out, 2)
-	assert.Equal(t, "usd", out[0].Match.Currency)
+	assert.Equal(t, "USD", out[0].Match.Currency, "currency codes take the registry's uppercase spelling")
 	assert.Equal(t, "US", out[0].Match.Country)
 	assert.Equal(t, "subscription", out[0].Match.Mode)
 	assert.Equal(t, []string{"mobius", "ccbill"}, out[0].Prefer)

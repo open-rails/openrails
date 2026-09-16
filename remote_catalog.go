@@ -120,7 +120,7 @@ func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPa
 	if filter.Archived != nil {
 		q.Set("archived", strconv.FormatBool(*filter.Archived))
 	}
-	q.Set("currency", filter.Currency)
+	q.Set("currency", normalizeCurrency(filter.Currency))
 	q.Set("type", filter.Type)
 	if filter.ProductID != nil {
 		q.Set("product_id", filter.ProductID.String())
