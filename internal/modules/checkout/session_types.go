@@ -2,6 +2,7 @@ package checkout
 
 import (
 	"errors"
+	"github.com/open-rails/openrails"
 	"time"
 )
 
@@ -71,29 +72,11 @@ type CheckoutSessionConfirmRequest struct {
 	Payment CheckoutSessionConfirmPayment
 }
 
-type CheckoutSessionRedirectToURL struct {
-	URL string `json:"url,omitempty"`
-}
+type CheckoutSessionRedirectToURL = openrails.CheckoutSessionRedirectToURL
 
-type CheckoutSessionNextAction struct {
-	Type          string                        `json:"type"`
-	RedirectToURL *CheckoutSessionRedirectToURL `json:"redirect_to_url,omitempty"`
-	// Transactions carries base64-encoded UNSIGNED Solana transactions the
-	// subscriber's wallet must sign + send, in order, for type
-	// "solana_sign_transactions" (recurring subscribe, #261). After sending, the
-	// frontend calls confirm with the resulting signature; if the session is still
-	// requires_action it signs the next returned transaction and confirms again.
-	Transactions []string `json:"transactions,omitempty"`
-}
+type CheckoutSessionNextAction = openrails.CheckoutSessionNextAction
 
-type CheckoutSessionPaymentResponse struct {
-	Rail           string `json:"rail"`
-	Reference      string `json:"reference,omitempty"`
-	TransactionURL string `json:"transaction_url,omitempty"`
-	SolanaPayURL   string `json:"solana_pay_url,omitempty"`
-	RedirectURL    string `json:"redirect_url,omitempty"`
-	TransactionID  string `json:"transaction_id,omitempty"`
-}
+type CheckoutSessionPaymentResponse = openrails.CheckoutSessionPaymentResponse
 
 type CheckoutSessionResponse struct {
 	Object         string                         `json:"object"`

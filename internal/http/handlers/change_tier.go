@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"github.com/open-rails/openrails"
 	"net/http"
 	"strings"
 
@@ -12,9 +13,7 @@ import (
 	"github.com/open-rails/openrails/pkg/api"
 )
 
-type ChangeTierRequest struct {
-	PriceID string `json:"price_id" binding:"required"`
-}
+type ChangeTierRequest = openrails.ChangeTierRequest
 
 func ChangeTier(r *httprequest.Request) {
 	var req ChangeTierRequest

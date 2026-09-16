@@ -1,6 +1,7 @@
 package api
 
 import (
+	"github.com/open-rails/openrails"
 	"time"
 )
 
@@ -88,14 +89,7 @@ type PaymentRefundsList struct {
 // List is a Stripe-style list response with offset/limit pagination. It mirrors
 // the Gin response package shape without importing Gin, keeping pkg/embedded
 // usable from pure net/http callers (#285).
-type List[T any] struct {
-	Object  string `json:"object"`   // Always "list"
-	Data    []T    `json:"data"`     // The items
-	Total   int64  `json:"total"`    // Total count across all pages
-	Limit   int    `json:"limit"`    // Max items requested
-	Offset  int    `json:"offset"`   // Items skipped
-	HasMore bool   `json:"has_more"` // More items available
-}
+type List[T any] = openrails.Page[T]
 
 // NewList creates a List response with has_more calculated automatically.
 func NewList[T any](data []T, total int64, limit, offset int) List[T] {

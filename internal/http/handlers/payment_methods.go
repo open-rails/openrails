@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -152,60 +153,20 @@ func rejectRawCardFieldValues(fields ...rawCardField) error {
 	return nil
 }
 
-type subscriptionSummary struct {
-	ID          string    `json:"id"`
-	DisplayName string    `json:"display_name"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-}
+type subscriptionSummary = openrails.PaymentMethodSubscription
 
-type paymentMethodResponse struct {
-	ID                          string                       `json:"id"`
-	Object                      string                       `json:"object"`
-	Type                        string                       `json:"type"`
-	Rail                        string                       `json:"rail"`
-	Customer                    *string                      `json:"customer,omitempty"`
-	BillingDetails              *paymentMethodBillingDetails `json:"billing_details,omitempty"`
-	Card                        *paymentMethodCardDetails    `json:"card,omitempty"`
-	Metadata                    map[string]string            `json:"metadata,omitempty"`
-	Created                     int64                        `json:"created"`
-	Health                      *paymentMethodHealth         `json:"health,omitempty"`
-	Subscriptions               []subscriptionSummary        `json:"subscriptions,omitempty"`
-	CollectionDefaultCurrencies []string                     `json:"collection_default_currencies,omitempty"`
-}
+type paymentMethodResponse = openrails.PaymentMethod
 
 // paymentMethodHealth is the #589 DERIVED per-method health, computed at query
 // time (never a stored column). last_charge_* come from openrails.payments via the
 // subscription link; expiry_status from the card's expiry vs now.
-type paymentMethodHealth struct {
-	ExpiryStatus      string     `json:"expiry_status,omitempty"`       // card only: valid|expiring_soon|expired
-	LastChargedAt     *time.Time `json:"last_charged_at,omitempty"`     // most recent charge time
-	LastChargeOutcome string     `json:"last_charge_outcome,omitempty"` // success|failed|refunded|pending
-	Active            bool       `json:"active"`                        // usable: not expired and last charge not failed
-}
+type paymentMethodHealth = openrails.PaymentMethodHealth
 
-type paymentMethodBillingDetails struct {
-	Name    *string               `json:"name,omitempty"`
-	Email   *string               `json:"email,omitempty"`
-	Phone   *string               `json:"phone,omitempty"`
-	Address *paymentMethodAddress `json:"address,omitempty"`
-}
+type paymentMethodBillingDetails = openrails.BillingDetails
 
-type paymentMethodAddress struct {
-	Line1      *string `json:"line1,omitempty"`
-	Line2      *string `json:"line2,omitempty"`
-	City       *string `json:"city,omitempty"`
-	State      *string `json:"state,omitempty"`
-	PostalCode *string `json:"postal_code,omitempty"`
-	Country    *string `json:"country,omitempty"`
-}
+type paymentMethodAddress = openrails.BillingAddress
 
-type paymentMethodCardDetails struct {
-	Brand    *string `json:"brand,omitempty"`
-	Last4    *string `json:"last4,omitempty"`
-	ExpMonth *int    `json:"exp_month,omitempty"`
-	ExpYear  *int    `json:"exp_year,omitempty"`
-}
+type paymentMethodCardDetails = openrails.CardDetails
 
 func CreatePaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
@@ -651,6 +612,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 		Object:         "payment_method",
 		Type:           "card",
 		Rail:           string(pm.Rail),
+		PSPID:          pm.PspID.String(),
 		BillingDetails: paymentMethodBillingDetailsFromMetadata(metadata),
 		Card:           card,
 		Created:        api.ToUnix(pm.CreatedAt),
