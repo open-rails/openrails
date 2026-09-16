@@ -1166,23 +1166,6 @@ ALTER TABLE openrails.products ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO openrails_app;
 
-CREATE TABLE openrails.probe_verdicts (
-    rail text NOT NULL,
-    key_hash text NOT NULL,
-    verdict text NOT NULL,
-    checked_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT chk_probe_verdicts_verdict CHECK ((verdict = ANY (ARRAY['live'::text, 'simulated'::text])))
-);
-
-COMMENT ON TABLE openrails.probe_verdicts IS 'Cached NMI test-mode probe verdicts (#348): one row per (rail, sha256(security_key)). Fresh ''live'' refuses boot from cache, fresh ''simulated'' skips the probe, stale/missing re-probes. RLS-exempt by design: instance-level credential state, not tenant data.';
-
-COMMENT ON COLUMN openrails.probe_verdicts.key_hash IS 'sha256 hex of the rail security key. A rotated key hashes differently, so the cache never answers for a credential it has not seen.';
-
-ALTER TABLE ONLY openrails.probe_verdicts
-    ADD CONSTRAINT probe_verdicts_pkey PRIMARY KEY (rail, key_hash);
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.probe_verdicts TO openrails_app;
-
 CREATE TABLE openrails.product_includes (
     merchant_id uuid NOT NULL,
     product_id uuid NOT NULL,

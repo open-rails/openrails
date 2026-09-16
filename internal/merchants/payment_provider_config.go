@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -684,6 +683,8 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 		// particular request.
 		if sec, gerr := s.secrets.Get(ctx, id, name); gerr == nil {
 			securityKey = strings.TrimSpace(sec.Value)
+		} else if !errors.Is(gerr, ErrSecretNotFound) {
+			return fmt.Errorf("read effective NMI credential for sandbox qualification: %w", gerr)
 		}
 	}
 	if securityKey == "" {
@@ -691,28 +692,13 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 	}
 	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
 	if err != nil {
-		return nil // never stricter than #348: a client that fails to construct cannot be probed
+		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
 	}
 	if s.nmiProbeV5BaseURL != "" {
 		client.V5BaseURL = s.nmiProbeV5BaseURL
 	}
-	// Scoped by merchant + rail + environment + account so a cached verdict
-	// never answers for a different merchant's account.
-	cacheKey := id.String() + ":" + name
-	decision := nmi.CheckTestModeArm(ctx, gen.New(s.pool), client, cacheKey)
-	if decision.ProbeErr != nil {
-		log.WithError(decision.ProbeErr).WithFields(log.Fields{
-			"merchant_id": id.String(), "rail": rail, "account_id": accountID,
-		}).Warn("payment provider arm: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode (#348)")
-		return nil
+	if err := nmi.CheckTestModeArm(ctx, client); err != nil {
+		return fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err)
 	}
-	if !decision.Refuse {
-		return nil
-	}
-	if decision.Cached {
-		return fmt.Errorf("merchants: rail %q account %q: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); arm refused (use the sandbox account credentials, rotate the key, or unset test_mode) (#348)",
-			rail, accountID, decision.CheckedAt.UTC().Format(time.RFC3339), nmi.ProbeVerdictCooldown)
-	}
-	return fmt.Errorf("merchants: rail %q account %q: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; arm refused (use the sandbox account credentials, or unset test_mode) (#348)",
-		rail, accountID)
+	return nil
 }

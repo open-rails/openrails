@@ -23,7 +23,6 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 // or#836 kill switch which must be readable before any merchant is resolved).
 var exemptTables = map[string]string{
 	"merchants":                 "global merchant directory — the thing merchant_id points at",
-	"probe_verdicts":            "deployment-wide probe results",
 	"worker_health":             "deployment-wide worker liveness",
 	"destructive_action_switch": "or#836 kill switch — must be readable with no merchant context",
 	"worker_sweep_cursors":      "or#837 capped-sweep resume points — operator-global process state, no tenant data",

@@ -18,9 +18,8 @@ import (
 // `COMMENT ON TABLE ... 'RLS-exempt by design: ...'` marker, and the exempt set
 // is additionally asserted by name below so widening it requires review here.
 var rlsExemptTables = []string{
-	"merchants",      // the tenant directory itself — the scope, not a scoped row
-	"probe_verdicts", // instance-level credential state
-	"worker_health",  // per-worker-kind process health
+	"merchants",     // the tenant directory itself — the scope, not a scoped row
+	"worker_health", // per-worker-kind process health
 	// #836 instance-level operator kill switch for destructive convergence.
 	// Deliberately readable from the no-GUC background connections it polices
 	// (intent runner, sweep scheduler); carries no tenant data — the
@@ -575,8 +574,6 @@ func TestConsolidatedSchemaClassifiesGlobalTables(t *testing.T) {
 	for _, want := range []string{
 		"COMMENT ON TABLE openrails.merchants IS 'Merchant / billing-namespace directory",
 		"GLOBAL (control-plane) table",
-		"COMMENT ON TABLE openrails.probe_verdicts IS 'Cached NMI test-mode probe verdicts",
-		"RLS-exempt by design: instance-level credential state, not tenant data",
 	} {
 		if !strings.Contains(c, want) {
 			t.Errorf("schema missing global/control-plane table classification %q", want)
