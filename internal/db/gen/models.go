@@ -540,22 +540,6 @@ type OpenrailsHostLifecycleEvent struct {
 	DedupeKey string
 }
 
-// Append-only imported legacy dunning history (#735 import target). Display/forensics evidence only.
-type OpenrailsImportedDunningHistory struct {
-	ID             uuid.UUID
-	MerchantID     uuid.UUID
-	SubscriptionID *uuid.UUID
-	CustomerID     *uuid.UUID
-	EventType      string
-	Rail           string
-	OccurredAt     time.Time
-	// Legacy origin of the imported row, for example a users log or provider scheduler.
-	Source string
-	// Verbatim normalized legacy payload. Correlation keys the reconcile history source extracts when present: rail_subscription_id, rail_transaction_id, status, amount_micros.
-	Detail    []byte
-	CreatedAt time.Time
-}
-
 // Period invoices/statements. For arrears, an open invoice is the receivable and payments are allocated to it. Prepaid invoices remain informational receipts/statements.
 type OpenrailsInvoice struct {
 	ID             uuid.UUID

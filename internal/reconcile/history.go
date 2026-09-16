@@ -13,12 +13,10 @@ import (
 
 // HistoryEvent is one Postgres history row used as the THIRD dunning evidence
 // source: alongside the provider-pulled transaction timeline ("provider") and
-// the local retry fields ("local"), the imported legacy dunning history
-// and failed-payment rows carry history the provider APIs
-// cannot return.
+// the local retry fields ("local"), failed-payment rows carry history the
+// provider APIs may no longer return.
 type HistoryEvent struct {
-	// Table is the originating Postgres table (imported_dunning_history |
-	// payments).
+	// Table is the originating Postgres table (payments).
 	Table     string
 	EventType string
 	Rail      string
@@ -50,11 +48,8 @@ type HistoryEventSource interface {
 // the cap is generous but finite.
 const historyEventLimit = 100000
 
-// PGHistorySource reads dunning history from Postgres (#735):
-// imported_dunning_history (the one-time legacy import) ∪ payments rows with
-// status='failed'. Structured so #733's subscription_status_transitions can be
-// added as another branch later. Display/forensics only — never a decision
-// input.
+// PGHistorySource reads failed payment receipts for dunning forensics.
+// This evidence is display-only, never a charging decision input.
 type PGHistorySource struct {
 	DB *db.DB
 }
@@ -108,9 +103,7 @@ func (s *PGHistorySource) ListEvents(ctx context.Context, railNames []string, si
 		if r.RailSubscriptionID != nil {
 			ev.RailSubscriptionID = *r.RailSubscriptionID
 		}
-		if r.RailTransactionID != nil {
-			ev.RailTransactionID = *r.RailTransactionID
-		}
+		ev.RailTransactionID = r.RailTransactionID
 		if r.AmountMicros != nil {
 			micros := *r.AmountMicros
 			ev.AmountMicros = &micros

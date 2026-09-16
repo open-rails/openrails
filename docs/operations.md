@@ -380,9 +380,8 @@ the admin queue with the blocker documented.
 NMI transaction search, Stripe charges, CCBill exports); **local** (the
 retry fields on the subscription row — `last_retry_at` / `retry_attempts` /
 `next_retry_at` — preserved verbatim by legacy import); **history**
-(failed-payment rows plus, for migrated merchants,
-`openrails.imported_dunning_history` — the deep-history source the provider
-query APIs will not serve). Aggregates report per-source and combined
+(retained failed-payment receipts). Legacy retry-detail artifacts stay with
+the importing host; core does not store arbitrary imported dunning reports. Aggregates report per-source and combined
 last-action, never-attempted vs attempted-and-exhausted counts, and a
 decline-reason histogram; an unavailable history source degrades to a note,
 never an error.
