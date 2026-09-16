@@ -53,7 +53,6 @@ const (
 
 	OpArrearsAccrual     = ledger.OpArrearsAccrual
 	OpMeteredRating      = ledger.OpMeteredRating
-	OpMinimumSpendTrueUp = ledger.OpMinimumSpendTrueUp
 	OpInvoicePayment     = ledger.OpInvoicePayment
 	OpManualInvoicePay   = ledger.OpManualInvoicePay
 	OpInvoiceVoid        = ledger.OpInvoiceVoid

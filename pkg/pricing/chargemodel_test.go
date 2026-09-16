@@ -60,8 +60,7 @@ func TestRate_PerUnitRoundingModes(t *testing.T) {
 
 func TestRate_Cap(t *testing.T) {
 	// Monthly cap: a droplet running far past 672h still bills only the cap. There
-	// is no per-line floor — sub-cent lines are intentional (#642); minimums live
-	// at the account level (minimum_spend, #643).
+	// is no per-line floor — sub-cent lines are intentional (#642).
 	cap := ChargeModel{Kind: ModelPerUnit, UnitAmount: 5_950, DivideBy: 3_600, MaximumAmount: 4_000_000}
 	got, _ := cap.Rate(3_000 * 3_600) // 3000 hours
 	if got != 4_000_000 {

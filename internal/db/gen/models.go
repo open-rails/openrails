@@ -449,16 +449,6 @@ type OpenrailsCustomerInvoiceProfile struct {
 	UpdatedAt        time.Time
 }
 
-// #643 per-customer per-currency minimum-spend commitment; trues-up at periodic invoice close.
-type OpenrailsCustomerMinimumSpend struct {
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
-	Currency     string
-	AmountMicros int64
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
 // #741 per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query(#733 body), grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
 type OpenrailsDashboardConfig struct {
 	MerchantID uuid.UUID
@@ -630,7 +620,7 @@ type OpenrailsInvoice struct {
 	AmountPaid     int64
 	// Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.
 	AmountDue int64
-	// Immutable as-billed statement itemization frozen at close (#726): per-event_type usage rollups plus adjustment lines (e.g. minimum_spend_trueup). The only reader-facing line-item representation.
+	// Immutable as-billed statement itemization frozen at close (#726): per-event_type usage rollups. The only reader-facing line-item representation.
 	LineItems         []byte
 	MoneyMovements    []byte
 	Status            string

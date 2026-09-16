@@ -2009,7 +2009,7 @@ COMMENT ON TABLE openrails.invoices IS 'Period invoices/statements. For arrears,
 
 COMMENT ON COLUMN openrails.invoices.amount_due IS 'Outstanding amount for this invoice in the row currency internal precision. Open arrears balance is derived from open/past-due invoices.';
 
-COMMENT ON COLUMN openrails.invoices.line_items IS 'Immutable as-billed statement itemization frozen at close (#726): per-event_type usage rollups plus adjustment lines (e.g. minimum_spend_trueup). The only reader-facing line-item representation.';
+COMMENT ON COLUMN openrails.invoices.line_items IS 'Immutable as-billed statement itemization frozen at close (#726): per-event_type usage rollups. The only reader-facing line-item representation.';
 
 COMMENT ON COLUMN openrails.invoices.po_number IS '#798 purchase-order reference snapshotted from the payer invoice profile at finalize.';
 
@@ -3428,36 +3428,6 @@ ALTER TABLE openrails.customer_invoice_profiles ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.customer_invoice_profiles USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customer_invoice_profiles TO openrails_app;
-
-CREATE TABLE openrails.customer_minimum_spend (
-    merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    currency text NOT NULL,
-    amount_micros bigint NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT customer_minimum_spend_amount_positive CHECK ((amount_micros > 0)),
-    CONSTRAINT customer_minimum_spend_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
-);
-
-ALTER TABLE ONLY openrails.customer_minimum_spend FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.customer_minimum_spend IS '#643 per-customer per-currency minimum-spend commitment; trues-up at periodic invoice close.';
-
-ALTER TABLE ONLY openrails.customer_minimum_spend
-    ADD CONSTRAINT customer_minimum_spend_pkey PRIMARY KEY (merchant_id, customer_id, currency);
-
-ALTER TABLE ONLY openrails.customer_minimum_spend
-    ADD CONSTRAINT customer_minimum_spend_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY openrails.customer_minimum_spend
-    ADD CONSTRAINT customer_minimum_spend_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.customer_minimum_spend ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.customer_minimum_spend USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.customer_minimum_spend TO openrails_app;
 
 CREATE TABLE openrails.destructive_run_before_images (
     id uuid DEFAULT uuidv7() NOT NULL,

@@ -142,7 +142,7 @@ func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, curre
 
 // InvoiceLineItemDTO is one statement line on an invoice: a per-event_type usage
 // rollup (total amount, event count, summed dimensions) or an adjustment line
-// (event_type = kind, e.g. "minimum_spend_trueup"). It mirrors
+// (event_type identifies the billed usage). It mirrors
 // models.InvoiceLineItem on the public facade so HTTP/library callers don't
 // import the internal models/credits packages.
 type InvoiceLineItemDTO = openrails.InvoiceLineItemDTO

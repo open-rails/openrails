@@ -92,7 +92,6 @@ const (
 
 	OpArrearsAccrual     Operation = "arrears_accrual"      // MoneyService.AccrueOwed
 	OpMeteredRating      Operation = "metered_rating"       // rate-card sweep accrual
-	OpMinimumSpendTrueUp Operation = "minimum_spend_trueup" // invoice close true-up
 	OpInvoicePayment     Operation = "invoice_payment"      // arrears settled by a rail charge
 	OpManualInvoicePay   Operation = "manual_invoice_payment"
 	OpInvoiceVoid        Operation = "invoice_void"
