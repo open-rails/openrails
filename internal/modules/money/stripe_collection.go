@@ -61,10 +61,17 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Openra
 	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
 		result, err := a.Service.CollectInvoice(ctx, params)
 		if err != nil {
-			if refused, ok := stripeDefinitiveRefusal(err); ok {
-				return refused, nil
+			refused, ok := stripeDefinitiveRefusal(err)
+			if !ok {
+				return ChargeResult{}, err
 			}
-			return ChargeResult{}, err
+			// A refusal is definitive only once nothing of this operation can
+			// still be charged at Stripe: the sequence may have left a draft or
+			// open invoice behind. Cleanup failure keeps the outcome unknown.
+			if cerr := a.Service.CleanupCollection(ctx, customerID, params.IdempotencyKey); cerr != nil {
+				return ChargeResult{}, fmt.Errorf("stripe refused (%v) but its objects could not be cleaned up: %w", err, cerr)
+			}
+			return refused, nil
 		}
 		transactionID := strings.TrimSpace(result.ChargeID)
 		if transactionID == "" {
@@ -95,9 +102,9 @@ func (a *StripeCollectionAdapter) stripeCustomerID(ctx context.Context, method g
 
 // stripeDefinitiveRefusal classifies a Stripe error answer. A 4xx other than
 // an idempotency conflict or rate limit is a parsed refusal: Stripe processed
-// the request and rejected it, so no money moved. Everything else (transport
-// loss, 409/429, 5xx, an invoice left unpaid after /pay) is a possible
-// submission that only an idempotent replay or a receipt can settle.
+// the request and rejected it, so no money moved by that request. Everything
+// else (transport loss, 409/429, 5xx, an invoice left unpaid after /pay) is a
+// possible submission that only an idempotent replay or a receipt can settle.
 func stripeDefinitiveRefusal(err error) (ChargeResult, bool) {
 	var apiErr *subscriptions.StripeAPIError
 	if !errors.As(err, &apiErr) || apiErr.StatusCode < 400 || apiErr.StatusCode >= 500 {

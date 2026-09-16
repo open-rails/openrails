@@ -83,14 +83,16 @@ func (e *StripeAPIError) IsHardDecline() bool {
 	}
 }
 
+// CollectInvoice runs one operation's Stripe sequence. The invoice is created
+// FIRST, excluding the customer's pending items, and the line item is
+// attached to that invoice by id: nothing this operation creates can be swept
+// into another invoice, and nothing another operation left behind can be
+// swept into this one. Every request carries an idempotency key rooted in the
+// operation identity.
 func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoiceCollectionParams) (*StripeInvoiceCollectionResult, error) {
 	if err := params.validate(); err != nil {
 		return nil, err
 	}
-	if _, err := s.stripePostForm(ctx, "/v1/invoiceitems", params.invoiceItemValues(), params.IdempotencyKey+":invoice_item"); err != nil {
-		return nil, fmt.Errorf("stripe invoice item create: %w", err)
-	}
-
 	invoiceBody, err := s.stripePostForm(ctx, "/v1/invoices", params.invoiceValues(), params.IdempotencyKey+":invoice")
 	if err != nil {
 		return nil, fmt.Errorf("stripe invoice create: %w", err)
@@ -101,6 +103,9 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 	}
 	if invoice.ID == "" {
 		return nil, errors.New("stripe invoice create returned empty id")
+	}
+	if _, err := s.stripePostForm(ctx, "/v1/invoiceitems", params.invoiceItemValues(invoice.ID), params.IdempotencyKey+":invoice_item"); err != nil {
+		return nil, fmt.Errorf("stripe invoice item create: %w", err)
 	}
 
 	finalizedBody, err := s.stripePostForm(ctx, "/v1/invoices/"+url.PathEscape(invoice.ID)+"/finalize", url.Values{"auto_advance": {"false"}}, params.IdempotencyKey+":finalize")
@@ -154,9 +159,10 @@ func (p StripeInvoiceCollectionParams) validate() error {
 	return nil
 }
 
-func (p StripeInvoiceCollectionParams) invoiceItemValues() url.Values {
+func (p StripeInvoiceCollectionParams) invoiceItemValues(invoiceID string) url.Values {
 	values := url.Values{}
 	values.Set("customer", strings.TrimSpace(p.CustomerID))
+	values.Set("invoice", strings.TrimSpace(invoiceID))
 	values.Set("amount", strconv.FormatInt(int64(p.AmountCents), 10))
 	values.Set("currency", strings.ToLower(strings.TrimSpace(p.Currency)))
 	if description := strings.TrimSpace(p.Description); description != "" {
@@ -172,7 +178,7 @@ func (p StripeInvoiceCollectionParams) invoiceValues() url.Values {
 	values.Set("collection_method", "charge_automatically")
 	values.Set("default_payment_method", strings.TrimSpace(p.PaymentMethodID))
 	values.Set("auto_advance", "false")
-	values.Set("pending_invoice_items_behavior", "include")
+	values.Set("pending_invoice_items_behavior", "exclude")
 	addStripeCollectionMetadata(values, p)
 	return values
 }
@@ -300,37 +306,158 @@ func (s *StripeService) GetCollectionInvoice(ctx context.Context, invoiceID stri
 	return inv.receipt(), true, nil
 }
 
-// FindCollectionInvoiceByKey scans the customer's most recent invoices for
-// the one stamped with the operation key. A bounded list read, not a search
-// index: absence means "not among the last 100", never proof of non-execution.
-func (s *StripeService) FindCollectionInvoiceByKey(ctx context.Context, customerID, key string) (StripeCollectionReceipt, bool, error) {
+// StripeCollectionObjects is everything Stripe still holds for one operation
+// key on a customer: invoices (any status) and pending invoice items.
+type StripeCollectionObjects struct {
+	Invoices     []StripeCollectionReceipt
+	PendingItems []string
+}
+
+// ListCollectionObjects walks every invoice and pending invoice item of the
+// customer and returns the ones stamped with the operation key. Full
+// pagination, not a search index, so absence is an exact read.
+func (s *StripeService) ListCollectionObjects(ctx context.Context, customerID, key string) (StripeCollectionObjects, error) {
 	customerID, key = strings.TrimSpace(customerID), strings.TrimSpace(key)
+	var out StripeCollectionObjects
 	if customerID == "" || key == "" {
-		return StripeCollectionReceipt{}, false, errors.New("stripe customer id and collection key are required")
+		return out, errors.New("stripe customer id and collection key are required")
 	}
-	body, status, err := s.stripeGet(ctx, "/v1/invoices", url.Values{"customer": {customerID}, "limit": {"100"}})
-	if err != nil {
-		return StripeCollectionReceipt{}, false, err
-	}
-	if status >= 400 {
-		return StripeCollectionReceipt{}, false, parseStripeAPIError(status, body)
-	}
-	var list struct {
-		Data []json.RawMessage `json:"data"`
-	}
-	if err := json.Unmarshal(body, &list); err != nil {
-		return StripeCollectionReceipt{}, false, fmt.Errorf("parse stripe invoice list: %w", err)
-	}
-	for _, raw := range list.Data {
+	err := s.stripeListAll(ctx, "/v1/invoices", url.Values{"customer": {customerID}}, func(raw json.RawMessage) error {
 		inv, err := parseStripeCollectionInvoice(raw)
 		if err != nil {
-			return StripeCollectionReceipt{}, false, err
+			return err
 		}
 		if r := inv.receipt(); r.CollectionKey == key {
-			return r, true, nil
+			out.Invoices = append(out.Invoices, r)
+		}
+		return nil
+	})
+	if err != nil {
+		return out, err
+	}
+	err = s.stripeListAll(ctx, "/v1/invoiceitems", url.Values{"customer": {customerID}, "pending": {"true"}}, func(raw json.RawMessage) error {
+		var item struct {
+			ID       string            `json:"id"`
+			Metadata map[string]string `json:"metadata"`
+		}
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return fmt.Errorf("parse stripe invoice item: %w", err)
+		}
+		if strings.TrimSpace(item.Metadata[StripeCollectionKeyMetadata]) == key && item.ID != "" {
+			out.PendingItems = append(out.PendingItems, item.ID)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// ErrStripeCollectionPaid reports that Stripe holds a PAID invoice for the
+// operation key: the operation executed and cannot be treated as refused.
+var ErrStripeCollectionPaid = errors.New("stripe invoice for this operation is paid")
+
+// CleanupCollection makes a refused or provider-confirmed-unexecuted operation
+// definitive at Stripe: pending items stamped with the key are deleted, draft
+// invoices deleted and open invoices voided, so no later invoice can sweep
+// them and nobody can pay them out of band. A paid invoice is never touched;
+// it makes the call fail with ErrStripeCollectionPaid.
+func (s *StripeService) CleanupCollection(ctx context.Context, customerID, key string) error {
+	objects, err := s.ListCollectionObjects(ctx, customerID, key)
+	if err != nil {
+		return err
+	}
+	for _, inv := range objects.Invoices {
+		if strings.EqualFold(inv.Status, "paid") {
+			return fmt.Errorf("%w: %s", ErrStripeCollectionPaid, inv.InvoiceID)
 		}
 	}
-	return StripeCollectionReceipt{}, false, nil
+	for _, id := range objects.PendingItems {
+		if err := s.stripeDelete(ctx, "/v1/invoiceitems/"+url.PathEscape(id)); err != nil {
+			return fmt.Errorf("delete stripe invoice item %s: %w", id, err)
+		}
+	}
+	for _, inv := range objects.Invoices {
+		switch strings.ToLower(inv.Status) {
+		case "draft":
+			if err := s.stripeDelete(ctx, "/v1/invoices/"+url.PathEscape(inv.InvoiceID)); err != nil {
+				return fmt.Errorf("delete stripe draft invoice %s: %w", inv.InvoiceID, err)
+			}
+		case "open", "uncollectible":
+			if _, err := s.stripePostForm(ctx, "/v1/invoices/"+url.PathEscape(inv.InvoiceID)+"/void", url.Values{}, key+":void:"+inv.InvoiceID); err != nil {
+				return fmt.Errorf("void stripe invoice %s: %w", inv.InvoiceID, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *StripeService) stripeListAll(ctx context.Context, path string, query url.Values, each func(json.RawMessage) error) error {
+	startingAfter := ""
+	for {
+		q := url.Values{}
+		for k, v := range query {
+			q[k] = v
+		}
+		q.Set("limit", "100")
+		if startingAfter != "" {
+			q.Set("starting_after", startingAfter)
+		}
+		body, status, err := s.stripeGet(ctx, path, q)
+		if err != nil {
+			return err
+		}
+		if status >= 400 {
+			return parseStripeAPIError(status, body)
+		}
+		var page struct {
+			Data    []json.RawMessage `json:"data"`
+			HasMore bool              `json:"has_more"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return fmt.Errorf("parse stripe list %s: %w", path, err)
+		}
+		for _, raw := range page.Data {
+			if err := each(raw); err != nil {
+				return err
+			}
+			startingAfter = rawString(json.RawMessage(rawField(raw, "id")))
+		}
+		if !page.HasMore || len(page.Data) == 0 || startingAfter == "" {
+			return nil
+		}
+	}
+}
+
+func rawField(raw json.RawMessage, field string) []byte {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	return obj[field]
+}
+
+func (s *StripeService) stripeDelete(ctx context.Context, path string) error {
+	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, s.stripeBaseURL()+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	resp, err := stripeapi.Client(s.Config, 0).Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read stripe response: %w", err)
+	}
+	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusNotFound {
+		return parseStripeAPIError(resp.StatusCode, body)
+	}
+	return nil
 }
 
 func (s *StripeService) stripeGet(ctx context.Context, path string, query url.Values) ([]byte, int, error) {

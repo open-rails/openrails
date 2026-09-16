@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -127,13 +128,20 @@ func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, _ gen.OpenrailsP
 	return money.CollectionVerifyResult{Supported: true, Settled: ok, TransactionID: txn}, nil
 }
 
-func (f *fakeCharger) ConfirmCollectionReceipt(_ context.Context, _ gen.OpenrailsPaymentMethod, providerReference string, expect money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+// ConfirmCollectionReceipt confirms any charge that landed at the fake
+// provider, deliberately NOT bound to the operation key: binding a receipt to
+// the operation's identity is the credential plane's job
+// (MerchantCollectionAdapterBuilder), proven against real gateway fakes in
+// invoice_collection_nmi_receipt_integration_test.go.
+func (f *fakeCharger) ConfirmCollectionReceipt(_ context.Context, _ gen.OpenrailsPaymentMethod, providerReference string, _ money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if txn, ok := f.landed[expect.OperationKey]; ok && txn == providerReference {
-		return money.CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txn}, nil
+	for _, txn := range f.landed {
+		if txn == providerReference {
+			return money.CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txn}, nil
+		}
 	}
-	return money.CollectionVerifyResult{}, fmt.Errorf("transaction %s is not this operation's sale", providerReference)
+	return money.CollectionVerifyResult{}, fmt.Errorf("transaction %s does not exist", providerReference)
 }
 
 func (f *fakeCharger) ConfirmCollectionNotExecuted(_ context.Context, _ gen.OpenrailsPaymentMethod, expect money.CollectionReceiptExpectation) error {
@@ -600,6 +608,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 		switch r.URL.Path {
 		case "/v1/invoiceitems":
 			require.Equal(t, "cus_openrails_invoice", r.Form.Get("customer"))
+			require.Equal(t, "in_openrails_invoice", r.Form.Get("invoice"))
 			require.Equal(t, "5", r.Form.Get("amount"))
 			require.Equal(t, "usd", r.Form.Get("currency"))
 			require.Equal(t, inv.ID.String(), r.Form.Get("metadata[openrails_invoice_id]"))
@@ -609,7 +618,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 			require.Equal(t, "cus_openrails_invoice", r.Form.Get("customer"))
 			require.Equal(t, "charge_automatically", r.Form.Get("collection_method"))
 			require.Equal(t, "pm_openrails_invoice", r.Form.Get("default_payment_method"))
-			require.Equal(t, "include", r.Form.Get("pending_invoice_items_behavior"))
+			require.Equal(t, "exclude", r.Form.Get("pending_invoice_items_behavior"))
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"draft"}`))
 		case "/v1/invoices/in_openrails_invoice/finalize":
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"open","payment_intent":"pi_openrails_invoice"}`))
@@ -637,15 +646,17 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
+	// The invoice is created first, excluding pending items, and the line item
+	// is attached to it by id: nothing can be swept across operations.
 	require.Equal(t, []string{
-		"/v1/invoiceitems",
 		"/v1/invoices",
+		"/v1/invoiceitems",
 		"/v1/invoices/in_openrails_invoice/finalize",
 		"/v1/invoices/in_openrails_invoice/pay",
 	}, calls)
 	// Every Stripe request carries an idempotency key rooted in the operation id.
 	opID := latestCollectionIntent(t, pool, ctx, inv.ID).ID.String()
-	require.Equal(t, []string{opID + ":invoice_item", opID + ":invoice", opID + ":finalize", opID + ":pay"}, keys)
+	require.Equal(t, []string{opID + ":invoice", opID + ":invoice_item", opID + ":finalize", opID + ":pay"}, keys)
 
 	paid, err := svc.GetInvoiceByID(ctx, payer, inv.ID)
 	require.NoError(t, err)
@@ -668,8 +679,8 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Equal(t, []string{
-		"/v1/invoiceitems",
 		"/v1/invoices",
+		"/v1/invoiceitems",
 		"/v1/invoices/in_openrails_invoice/finalize",
 		"/v1/invoices/in_openrails_invoice/pay",
 	}, calls)
@@ -698,20 +709,33 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	inv, err := svc.FinalizeInvoice(ctx, payer, money.DefaultCurrency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
 
+	var voided atomic.Bool
+	var declineKey atomic.Value
+	declineKey.Store("")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
-		switch r.URL.Path {
-		case "/v1/invoiceitems":
-			_, _ = w.Write([]byte(`{"id":"ii_openrails_decline"}`))
-		case "/v1/invoices":
+		key := r.Form.Get("metadata[openrails_collection_key]")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/invoices":
+			// The refusal cleanup reads back what the operation left at Stripe.
+			_, _ = w.Write([]byte(`{"data":[{"id":"in_openrails_decline","status":"open","amount_paid":0,"currency":"usd","metadata":{"openrails_collection_key":"` + declineKey.Load().(string) + `"}}],"has_more":false}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/invoiceitems":
+			_, _ = w.Write([]byte(`{"data":[],"has_more":false}`))
+		case r.URL.Path == "/v1/invoices":
+			declineKey.Store(key)
 			_, _ = w.Write([]byte(`{"id":"in_openrails_decline","status":"draft"}`))
-		case "/v1/invoices/in_openrails_decline/finalize":
+		case r.URL.Path == "/v1/invoiceitems":
+			_, _ = w.Write([]byte(`{"id":"ii_openrails_decline"}`))
+		case r.URL.Path == "/v1/invoices/in_openrails_decline/finalize":
 			_, _ = w.Write([]byte(`{"id":"in_openrails_decline","status":"open","payment_intent":"pi_openrails_decline"}`))
-		case "/v1/invoices/in_openrails_decline/pay":
+		case r.URL.Path == "/v1/invoices/in_openrails_decline/pay":
 			w.WriteHeader(http.StatusPaymentRequired)
 			_, _ = w.Write([]byte(`{"error":{"message":"Your card was declined.","code":"card_declined","decline_code":"do_not_honor"}}`))
+		case r.URL.Path == "/v1/invoices/in_openrails_decline/void":
+			voided.Store(true)
+			_, _ = w.Write([]byte(`{"id":"in_openrails_decline","status":"void"}`))
 		default:
-			t.Fatalf("unexpected Stripe path %s", r.URL.Path)
+			t.Fatalf("unexpected Stripe %s %s", r.Method, r.URL.Path)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -731,6 +755,7 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Equal(t, intents.StatusFailedTerminal, latestCollectionIntent(t, pool, ctx, inv.ID).Status)
+	require.True(t, voided.Load(), "a refused operation voids the open invoice it left at Stripe")
 
 	// Stripe's do_not_honor is or#870 bucket 2 — their card, fixable — so
 	// charging stops and the invoice is left exactly where the clock put it:
