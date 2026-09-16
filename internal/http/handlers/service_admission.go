@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	log "github.com/sirupsen/logrus"
 
