@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +34,11 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 			exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,$4,1000000,'USD',true,720)`, price, mid, product, price.String())
 			exec(`INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id,key) VALUES($1,$2,'nmi','test',$3,$3)`, psp, mid, psp.String())
 			exec(`INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,initial_transaction_id,last_four,card_type) VALUES($1,$2,$3,$4,'nmi','test-anchor','4242','visa')`, method, mid, customer, psp)
-			exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,deletion_scheduled_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','cancelled',$7,$8,$9,$10,$9,'user',$10)`, sub, mid, customer, product, price, psp, sub.String(), method, now, end)
+			exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at,cancelled_at,cancel_type,deletion_scheduled_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10,NULL,NULL,NULL)`, sub, mid, customer, product, price, psp, sub.String(), method, now, end)
+			require.NoError(t, client.CancelSubscription(ctx, sub.String(), openrails.CancelSubscriptionRequest{Reason: "customer request"}))
+			var intents int
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2 AND intent_type='nmi_delete_subscription'`, mid, sub).Scan(&intents))
+			require.Equal(t, 1, intents, "cancel acceptance and remote intent must commit together")
 			page, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: customer.String(), Status: "cancelled", PageOptions: openrails.PageOptions{Limit: 1}})
 			require.NoError(t, err)
 			require.Len(t, page.Data, 1)
@@ -63,7 +68,7 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 			require.NoError(t, client.ResumeSubscription(ctx, row.ID))
 			require.NoError(t, client.ResumeSubscription(ctx, row.ID))
 			var jobs int
-			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM river_job WHERE args->>'subscription_id'=$1 AND kind='resume_subscription'`, sub.String()).Scan(&jobs))
+			require.NoError(t, h.Pool().QueryRow(ctx, `SELECT count(*) FROM river_job WHERE args->>'subscription_id'=$1 AND kind=$2`, sub.String(), riverjobs.KindSubscriptionResume).Scan(&jobs))
 			require.Equal(t, 1, jobs)
 			_, err = client.GetSubscription(ctx, uuid.NewString())
 			require.ErrorIs(t, err, openrails.ErrNotFound)
