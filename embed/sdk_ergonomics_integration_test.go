@@ -33,7 +33,7 @@ func TestSDKErgonomics_WithAPIKeyAndVerify(t *testing.T) {
 	if goodErr != nil {
 		t.Fatal(goodErr)
 	}
-	require.NoError(t, openrails.Verify(ctx, good), "Verify with a real minted API key")
+	require.NoError(t, good.Verify(ctx), "Verify with a real minted API key")
 	settings, err := good.GetMerchantSettings(ctx)
 	require.NoError(t, err, "authenticated call wired via WithAPIKey")
 	require.NotNil(t, settings)
@@ -46,7 +46,7 @@ func TestSDKErgonomics_WithAPIKeyAndVerify(t *testing.T) {
 	if badErr != nil {
 		t.Fatal(badErr)
 	}
-	require.ErrorIs(t, openrails.Verify(ctx, bad), openrails.ErrUnauthorized)
+	require.ErrorIs(t, bad.Verify(ctx), openrails.ErrUnauthorized)
 
 	// Unreachable host: the fail-policy sentinel.
 	unreachable, unreachableErr := openrails.NewRemote("http://127.0.0.1:1",
@@ -56,7 +56,7 @@ func TestSDKErgonomics_WithAPIKeyAndVerify(t *testing.T) {
 	if unreachableErr != nil {
 		t.Fatal(unreachableErr)
 	}
-	require.ErrorIs(t, openrails.Verify(ctx, unreachable), openrails.ErrUnreachable)
+	require.ErrorIs(t, unreachable.Verify(ctx), openrails.ErrUnreachable)
 
 	// Static invalid configuration fails before any operation or I/O.
 	invalid, err := openrails.NewRemote("not a url", openrails.WithAPIKey("whatever"))

@@ -308,7 +308,7 @@ func TestWithAPIKeyAndVerify(t *testing.T) {
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	if err := Verify(context.Background(), client); err != nil {
+	if err := client.Verify(context.Background()); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 	if gotAuth != "Bearer sk-test" {

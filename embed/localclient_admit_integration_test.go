@@ -20,77 +20,60 @@ import (
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
-// TestMerchantPinMismatch is the regression for #772: on an engine already
-// bound to a merchant (first UpsertMerchantConfig, #770), an explicit per-call
-// pin via openrails.WithMerchant naming a DIFFERENT merchant used to be
-// silently ignored — the call executed against the bound merchant instead of
-// erroring — in BOTH places that read the bound merchant: the in-process
-// transport (embed/transport.go RoundTrip, the wire path underneath
-// GetMerchantSettings) and the shared transport underneath SetCustomerSpendDelegations. A ctx pin that AGREES
-// with the bound merchant must keep behaving exactly like an unpinned call.
-func TestMerchantPinMismatch(t *testing.T) {
+// TestInProcessClientBindingIsImmutable: an in-process client names exactly one
+// merchant at construction, and a runtime bound to another merchant refuses it
+// before any handler runs (#772).
+func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 
-	slug := fmt.Sprintf("embed-merchant-pin-mismatch-%d", time.Now().UnixNano())
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	boundID, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
+	_, err = rt.Client()
+	require.ErrorContains(t, err, "WithMerchantID", "a multi-merchant runtime never guesses the merchant")
+	otherID := openrails.MerchantID(uuid.New())
+	early, err := rt.Client(openrails.WithMerchantID(otherID))
 	require.NoError(t, err)
 
-	otherID := openrails.MerchantID(uuid.New())
+	slug := fmt.Sprintf("embed-merchant-binding-%d", time.Now().UnixNano())
+	boundID, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
+	require.NoError(t, err)
 	customerID := seedCustomerForBoundMerchant(ctx, t, boundID)
 
-	client, clientErr := rt.Client()
-	if clientErr != nil {
-		t.Fatal(clientErr)
+	_, err = rt.Client(openrails.WithMerchantID(otherID))
+	require.ErrorContains(t, err, boundID.String(), "construction refuses a different merchant")
+
+	for name, call := range map[string]func() error{
+		"read": func() error { _, err := early.GetMerchantSettings(ctx); return err },
+		"write": func() error {
+			return early.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{{
+				Scope: "invoker", ScopeKey: "test-invoker-mismatch",
+				Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
+			}})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := call()
+			require.ErrorIs(t, err, openrails.ErrConflict)
+			require.Contains(t, err.Error(), boundID.String())
+			require.Contains(t, err.Error(), otherID.String())
+			var se *openrails.StatusError
+			require.True(t, errors.As(err, &se), "must be a *openrails.StatusError, got %T: %v", err, err)
+		})
 	}
 
-	t.Run("wire path: GetMerchantSettings mismatch is refused", func(t *testing.T) {
-		mismatchCtx := openrails.WithMerchant(ctx, otherID)
-		_, err := client.GetMerchantSettings(mismatchCtx)
-		require.Error(t, err)
-		require.Contains(t, err.Error(), boundID.String(), "error must name the bound merchant")
-		require.Contains(t, err.Error(), otherID.String(), "error must name the pinned merchant")
-		var se *openrails.StatusError
-		require.True(t, errors.As(err, &se), "must be a *openrails.StatusError, got %T: %v", err, err)
-		require.True(t, errors.Is(err, openrails.ErrConflict))
-	})
-
-	t.Run("transcribed path: SetCustomerSpendDelegations mismatch is refused", func(t *testing.T) {
-		mismatchCtx := openrails.WithMerchant(ctx, otherID)
-		err := client.SetCustomerSpendDelegations(mismatchCtx, customerID.String(), []openrails.SpendDelegationInput{{
-			Scope:    "invoker",
-			ScopeKey: "test-invoker-mismatch",
-			Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
-		}})
-		require.Error(t, err)
-		require.Contains(t, err.Error(), boundID.String(), "error must name the bound merchant")
-		require.Contains(t, err.Error(), otherID.String(), "error must name the pinned merchant")
-		var se *openrails.StatusError
-		require.True(t, errors.As(err, &se), "must be a *openrails.StatusError, got %T: %v", err, err)
-		require.True(t, errors.Is(err, openrails.ErrConflict))
-	})
-
-	t.Run("matching pin behaves exactly like unpinned", func(t *testing.T) {
-		matchCtx := openrails.WithMerchant(ctx, boundID)
-
-		settings, err := client.GetMerchantSettings(matchCtx)
-		require.NoError(t, err)
-		unpinnedSettings, err := client.GetMerchantSettings(ctx)
-		require.NoError(t, err)
-		require.Equal(t, unpinnedSettings, settings)
-
-		err = client.SetCustomerSpendDelegations(matchCtx, customerID.String(), []openrails.SpendDelegationInput{{
-			Scope:    "invoker",
-			ScopeKey: "test-invoker-match",
-			Windows:  []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
-		}})
-		require.NoError(t, err, "a ctx pin matching the bound merchant must not be refused")
-	})
+	client, err := rt.Client()
+	require.NoError(t, err)
+	require.Equal(t, boundID, client.MerchantID())
+	_, err = client.GetMerchantSettings(ctx)
+	require.NoError(t, err)
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{{
+		Scope: "invoker", ScopeKey: "test-invoker-match",
+		Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
+	}}))
 }
 
 // seedCustomerForBoundMerchant materializes the customers row under the merchant
