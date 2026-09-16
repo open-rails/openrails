@@ -76,7 +76,7 @@ catalogs:
 	require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
 		Config: cfg, PGXPool: pool, Merchant: merchantSlug, Out: &firstDump,
 	}))
-	require.Contains(t, firstDump.String(), "expires: 30d")
+	require.Contains(t, firstDump.String(), "duration: 30d")
 	require.NotContains(t, firstDump.String(), "credit:", "portable manifest uses local names")
 	require.NotContains(t, firstDump.String(), "expiry_hours")
 	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
