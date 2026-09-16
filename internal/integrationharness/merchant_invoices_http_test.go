@@ -237,7 +237,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	require.Equal(t, 200, status, string(body))
 	require.Contains(t, string(body), `"total":2`)
 	require.Contains(t, string(body), `"unit_decimals":4`)
-	require.Contains(t, string(body), `"amount":20000`)
+	require.Contains(t, string(body), `"amount":"20000"`)
 
 	blockedCustomer := makeCustomer(dbtest.TestMerchantID, "USD")
 	blocked := issue(dbtest.TestMerchantID, blockedCustomer, "USD", 2000000)
