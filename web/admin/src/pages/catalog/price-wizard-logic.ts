@@ -1,7 +1,7 @@
 // Pure logic for the #777 price-change wizard — kept isolated from React so
 // it's trivially unit-testable (web/admin has no test runner today; this
 // module is where that debt would be paid down first).
-import { formatMicros } from "@/lib/format"
+import { formatNativeAmount } from "@/lib/format"
 
 export type PriceDirection = "increase" | "decrease" | "unchanged"
 
@@ -97,8 +97,8 @@ export function buildReviewText(params: {
 }): string {
   const { newAmount, currentAmount, currency, affectedCount, plan, now } =
     params
-  const newLabel = formatMicros(newAmount, currency)
-  const oldLabel = formatMicros(currentAmount, currency)
+  const newLabel = formatNativeAmount(newAmount, currency)
+  const oldLabel = formatNativeAmount(currentAmount, currency)
   const lead = `New subscribers pay ${newLabel} immediately.`
 
   if (affectedCount === 0) {

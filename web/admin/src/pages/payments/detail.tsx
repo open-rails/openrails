@@ -33,9 +33,10 @@ import {
 import { REFUNDABLE_RAILS } from "@/lib/api/endpoints"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import {
-  formatMicros,
+  formatNativeAmount,
   formatUnix,
-  microsFromInput,
+  nativeAmountFromInput,
+  nativeAmountToInput,
   shortId,
 } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -95,11 +96,11 @@ export function PaymentDetailPage() {
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Fact label="Amount">
-          {formatMicros(payment.amount, payment.currency)}
+          {formatNativeAmount(payment.amount, payment.currency)}
         </Fact>
         <Fact label="Refunded">
           {payment.amount_refunded
-            ? formatMicros(payment.amount_refunded, payment.currency)
+            ? formatNativeAmount(payment.amount_refunded, payment.currency)
             : "—"}
         </Fact>
         <Fact label="Customer">
@@ -163,7 +164,9 @@ export function PaymentDetailPage() {
                     <TableCell>
                       <StatusBadge status={r.status} />
                     </TableCell>
-                    <TableCell>{formatMicros(r.amount, r.currency)}</TableCell>
+                    <TableCell>
+                      {formatNativeAmount(r.amount, r.currency)}
+                    </TableCell>
                     <TableCell>{formatUnix(r.created)}</TableCell>
                   </TableRow>
                 ))}
@@ -208,12 +211,12 @@ function RefundDialog({
   )
   const form = useForm({
     defaultValues: {
-      amount: String(remaining / 1_000_000),
+      amount: nativeAmountToInput(remaining, payment.currency),
       reason: "",
       revokeAccess: false,
     },
     onSubmit: async ({ value }) => {
-      const amount = microsFromInput(value.amount)
+      const amount = nativeAmountFromInput(value.amount, payment.currency)
       if (amount === null || amount <= 0 || amount > remaining) return
       try {
         await refund.mutateAsync({
@@ -233,7 +236,7 @@ function RefundDialog({
     setOpen(next)
     if (next) {
       form.reset({
-        amount: String(remaining / 1_000_000),
+        amount: nativeAmountToInput(remaining, payment.currency),
         reason: "",
         revokeAccess: false,
       })
@@ -260,7 +263,7 @@ function RefundDialog({
             <DialogTitle>Refund payment</DialogTitle>
             <DialogDescription>
               Executes the refund at the {payment.rail} rail. Remaining
-              refundable: {formatMicros(remaining, payment.currency)}.
+              refundable: {formatNativeAmount(remaining, payment.currency)}.
             </DialogDescription>
           </DialogHeader>
           <form
@@ -276,7 +279,10 @@ function RefundDialog({
                 name="amount"
                 validators={{
                   onChange: ({ value }) => {
-                    const amount = microsFromInput(value)
+                    const amount = nativeAmountFromInput(
+                      value,
+                      payment.currency
+                    )
                     if (amount === null || amount <= 0) {
                       return "Enter an amount greater than zero"
                     }
@@ -296,7 +302,7 @@ function RefundDialog({
                       type="number"
                       step="any"
                       min="0"
-                      max={remaining / 1_000_000}
+                      max={nativeAmountToInput(remaining, payment.currency)}
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(event) =>
@@ -362,7 +368,7 @@ function RefundDialog({
                       type="submit"
                       variant="destructive"
                       disabled={
-                        !microsFromInput(amountInput) ||
+                        !nativeAmountFromInput(amountInput, payment.currency) ||
                         !canSubmit ||
                         isSubmitting
                       }

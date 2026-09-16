@@ -42,7 +42,7 @@ import {
 } from "@/components/ui/table"
 import type { SubscriptionReprice } from "@/lib/api/types"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import { formatDate, formatMicros, shortId } from "@/lib/format"
+import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
@@ -144,7 +144,7 @@ export function SubscriptionDetailPage() {
                   className="underline-offset-2 hover:underline"
                   to={`/catalog/prices/${sub.price_id}`}
                 >
-                  {formatMicros(sub.price.amount, sub.price.currency)}
+                  {formatNativeAmount(sub.price.amount, sub.price.currency)}
                 </Link>
               ) : (
                 <Link
@@ -228,7 +228,9 @@ export function SubscriptionDetailPage() {
                     <TableCell>
                       <StatusBadge status={p.status} />
                     </TableCell>
-                    <TableCell>{formatMicros(p.amount, p.currency)}</TableCell>
+                    <TableCell>
+                      {formatNativeAmount(p.amount, p.currency)}
+                    </TableCell>
                     <TableCell>{formatDate(p.purchased_at)}</TableCell>
                   </TableRow>
                 ))}
@@ -505,7 +507,7 @@ function PendingRepriceBadge({
       <Badge className="bg-held-surface text-held">
         moves to{" "}
         {toPrice
-          ? formatMicros(toPrice.unit_amount, toPrice.currency)
+          ? formatNativeAmount(toPrice.unit_amount, toPrice.currency)
           : shortId(reprice.to_price_id, 9)}{" "}
         on {formatDate(reprice.effective_at)}
       </Badge>

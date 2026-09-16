@@ -57,6 +57,8 @@ jobs:
               sqlc.yaml|migrations/*|internal/db/*|scripts/sqlc-*|scripts/sql-lint.sh|scripts/migration-lint.sh) go=true; sql=true; broad=true ;;
               # Shared production surfaces have unbounded integration impact.
               internal/integrationharness/*|internal/shared/*|config/*) go=true; broad=true ;;
+              # Generated from the Go currency registry; a Go unit test pins it.
+              web/admin/src/lib/currency-units.json) go=true; console=true ;;
               # Admin console SPA and its embed/build plumbing.
               web/admin/*|cmd/openrails/consoleassets/*|scripts/build-admin-console.sh) console=true ;;
               # Changes to the PR test harness itself must exercise the full

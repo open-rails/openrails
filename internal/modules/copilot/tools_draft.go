@@ -63,7 +63,7 @@ func defaultEffectiveDate(direction string, now time.Time) time.Time {
 // phrasing exactly (independently implemented server-side; the console's own
 // TS copy renders the same words when a human edits the draft further).
 func buildPriceChangeReviewText(currency string, currentAmount, newAmount int64, affected int, mode string, effectiveAt, now time.Time) string {
-	lead := fmt.Sprintf("New subscribers pay %s immediately.", moneyutil.FormatDisplay(moneyutil.Micros(newAmount), currency))
+	lead := fmt.Sprintf("New subscribers pay %s immediately.", moneyutil.FormatAmount(newAmount, currency))
 	if affected == 0 {
 		return lead + " No existing subscribers are on a prior version of this price."
 	}
@@ -72,13 +72,13 @@ func buildPriceChangeReviewText(currency string, currentAmount, newAmount int64,
 		subj += "s"
 	}
 	if mode == "grandfather" {
-		return fmt.Sprintf("%s %s keep %s forever (grandfathered).", lead, subj, moneyutil.FormatDisplay(moneyutil.Micros(currentAmount), currency))
+		return fmt.Sprintf("%s %s keep %s forever (grandfathered).", lead, subj, moneyutil.FormatAmount(currentAmount, currency))
 	}
 	if !effectiveAt.After(now) {
-		return fmt.Sprintf("%s %s move to %s at their next renewal. Notices go out on confirm.", lead, subj, moneyutil.FormatDisplay(moneyutil.Micros(newAmount), currency))
+		return fmt.Sprintf("%s %s move to %s at their next renewal. Notices go out on confirm.", lead, subj, moneyutil.FormatAmount(newAmount, currency))
 	}
 	return fmt.Sprintf("%s %s keep %s until %s, then move to %s at their next renewal. Notices go out on confirm.",
-		lead, subj, moneyutil.FormatDisplay(moneyutil.Micros(currentAmount), currency), effectiveAt.Format("Jan 2, 2006"), moneyutil.FormatDisplay(moneyutil.Micros(newAmount), currency))
+		lead, subj, moneyutil.FormatAmount(currentAmount, currency), effectiveAt.Format("Jan 2, 2006"), moneyutil.FormatAmount(newAmount, currency))
 }
 
 // crossConstraintRefusal mirrors subscriptions.validateRepriceConstraints'
@@ -119,12 +119,12 @@ const toolDraftPriceChange = "draft_price_change"
 func toolDefDraftPriceChange() dashboard.ToolDef {
 	return dashboard.ToolDef{
 		Name:        toolDraftPriceChange,
-		Description: "Draft a #777 wizard price-change plan for an EXISTING price key: a version bump (new amount, same key) plus an optional migration. NEVER mutates anything — returns a DRAFT payload for human review/confirm in the console wizard, with the affected-subscriber count and review text already computed. migration_mode defaults per direction (increase->grandfather, decrease->migrate); effective_date defaults to the notice-window floor for an increase, or now for a decrease/grandfather. Pass migrate_to_price_key ONLY if the merchant is asking to move subscribers onto a DIFFERENT, pre-existing product/price (plan consolidation) — that request is refused with a typed reason and workaround, never drafted. Amounts are in MICROS.",
+		Description: "Draft a #777 wizard price-change plan for an EXISTING price key: a version bump (new amount, same key) plus an optional migration. NEVER mutates anything — returns a DRAFT payload for human review/confirm in the console wizard, with the affected-subscriber count and review text already computed. migration_mode defaults per direction (increase->grandfather, decrease->migrate); effective_date defaults to the notice-window floor for an increase, or now for a decrease/grandfather. Pass migrate_to_price_key ONLY if the merchant is asking to move subscribers onto a DIFFERENT, pre-existing product/price (plan consolidation) — that request is refused with a typed reason and workaround, never drafted. Amounts are integer native units of the price currency.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"price_key": {"type": "string", "description": "The key to change (its CURRENT version is the edit target)."},
-				"new_amount": {"type": "integer", "description": "New amount in micros (1,000,000 = 1 currency unit)."},
+				"new_amount": {"type": "integer", "description": "New amount in the price currency's native units (see the doctrine scale table)."},
 				"migration_mode": {"type": "string", "enum": ["grandfather", "migrate"], "description": "Optional; defaults per direction."},
 				"effective_date": {"type": "string", "description": "Optional YYYY-MM-DD; only meaningful when migration_mode=migrate. Defaults per doctrine."},
 				"migrate_to_price_key": {"type": "string", "description": "Optional: a DIFFERENT existing key the merchant wants to move price_key's subscribers onto. Out of scope (#778) — always refused; included only so the refusal can be typed and explained."}
@@ -184,7 +184,7 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 	}
 
 	if args.NewAmount <= 0 {
-		return "", nil, fmt.Errorf("new_amount must be a positive number of micros")
+		return "", nil, fmt.Errorf("new_amount must be a positive number of native currency units")
 	}
 	direction := priceDirection(args.NewAmount, current.Amount)
 	if direction == "unchanged" {
@@ -256,13 +256,13 @@ const toolDraftCatalogDiff = "draft_catalog_diff"
 func toolDefDraftCatalogDiff() dashboard.ToolDef {
 	return dashboard.ToolDef{
 		Name:        toolDraftCatalogDiff,
-		Description: "Draft a NEW price (a new tier/plan variant, e.g. \"add a with-ads tier at $6\") on an EXISTING product. NEVER mutates anything — returns a create-price DRAFT for human review/confirm in the console. Only adds a price to a product that already exists; drafting a brand-new PRODUCT is out of scope for v1 (create the product first, then ask again). Amounts are in MICROS.",
+		Description: "Draft a NEW price (a new tier/plan variant, e.g. \"add a with-ads tier at $6\") on an EXISTING product. NEVER mutates anything — returns a create-price DRAFT for human review/confirm in the console. Only adds a price to a product that already exists; drafting a brand-new PRODUCT is out of scope for v1 (create the product first, then ask again). Amounts are integer native units of the price currency.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
 				"product_key": {"type": "string", "description": "An EXISTING product's key to add the price to."},
 				"new_price_key": {"type": "string", "description": "Optional; auto-defaults to \"<product_key>-<interval>\" (refused if that key is already in use — pass an explicit distinct key, e.g. \"...-with-ads\")."},
-				"unit_amount": {"type": "integer", "description": "Amount in micros (1,000,000 = 1 currency unit)."},
+				"unit_amount": {"type": "integer", "description": "Amount in the currency's native units (see the doctrine scale table)."},
 				"currency": {"type": "string", "description": "Optional; defaults to the product's existing price currency if it has one."},
 				"access_duration_hours": {"type": "integer", "description": "Billing period in hours (720=~monthly, 8760=~yearly). Omit for a durable one-time purchase."},
 				"auto_renew": {"type": "boolean", "description": "Whether it recurs. Requires access_duration_hours."}
@@ -292,7 +292,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 		return "", nil, fmt.Errorf("product_key is required")
 	}
 	if args.UnitAmount <= 0 {
-		return "", nil, fmt.Errorf("unit_amount must be a positive number of micros")
+		return "", nil, fmt.Errorf("unit_amount must be a positive number of native currency units")
 	}
 	product, err := s.products.GetByKey(ctx, productKey)
 	if err != nil {
@@ -323,7 +323,7 @@ func (s *Service) runDraftCatalogDiff(ctx context.Context, raw json.RawMessage) 
 	}
 
 	reviewText := fmt.Sprintf("New tier %q on %s: %s / %s. No existing subscribers are affected until you create it.",
-		key, product.DisplayName, moneyutil.FormatDisplay(moneyutil.Micros(args.UnitAmount), currency), interval)
+		key, product.DisplayName, moneyutil.FormatAmount(args.UnitAmount, currency), interval)
 
 	draft := &CatalogDiffDraft{
 		DraftID: uuid.NewString(), DraftedBy: DraftedBy,

@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select"
 import type { Rail, SubscriptionStatus } from "@/lib/api/types"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
-import { formatDate, formatMicros } from "@/lib/format"
+import { formatDate, formatNativeAmount } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
@@ -197,13 +197,16 @@ export function ChangeTierDialog({
                 <div className="grid gap-1">
                   <dt className="text-xs text-muted-foreground">Due now</dt>
                   <dd className="font-medium tabular-nums">
-                    {formatMicros(reviewed.amount_due_now, reviewed.currency)}
+                    {formatNativeAmount(
+                      reviewed.amount_due_now,
+                      reviewed.currency
+                    )}
                   </dd>
                 </div>
                 <div className="grid gap-1">
                   <dt className="text-xs text-muted-foreground">Next charge</dt>
                   <dd className="font-medium tabular-nums">
-                    {formatMicros(
+                    {formatNativeAmount(
                       reviewed.next_charge_amount,
                       reviewed.currency
                     )}

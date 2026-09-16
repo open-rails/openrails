@@ -1,6 +1,7 @@
 package moneyutil
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -37,14 +38,14 @@ func TestFormatCentsDecimal(t *testing.T) {
 	require.Equal(t, "-12.34", FormatCentsDecimal(-1234))
 }
 
-func TestFormatDisplay(t *testing.T) {
-	require.Equal(t, "$12.340000 USD", FormatDisplay(12_340_000, "usd"))
-	require.Equal(t, "-$12.340000 USD", FormatDisplay(-12_340_000, "USD"))
-	require.Equal(t, "12.340000 EUR", FormatDisplay(12_340_000, "eur"))
-	require.Equal(t, "12.340000", FormatDisplay(12_340_000, ""))
-}
-
 func TestFormatUSD(t *testing.T) {
 	require.Equal(t, "$12.340000", FormatUSD(12_340_000))
 	require.Equal(t, "-$12.340000", FormatUSD(-12_340_000))
+}
+
+func TestFormatDecimalInt64Extremes(t *testing.T) {
+	require.Equal(t, "-9223372036854.775808", FormatMicrosDecimal(math.MinInt64))
+	require.Equal(t, "9223372036854.775807", FormatMicrosDecimal(math.MaxInt64))
+	require.Equal(t, "-92233720368547758.08", FormatCentsDecimal(math.MinInt64))
+	require.Equal(t, "-0.01", FormatCentsDecimal(-1))
 }

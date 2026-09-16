@@ -17,7 +17,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { formatDate, formatMicros, shortId } from "@/lib/format"
+import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
@@ -101,7 +101,7 @@ export function PriceDetailPage() {
           </Link>
         </Fact>
         <Fact label="Amount">
-          {formatMicros(price.unit_amount, price.currency)}
+          {formatNativeAmount(price.unit_amount, price.currency)}
         </Fact>
         <Fact label="Renews">
           {price.currency.toUpperCase()} · {priceIntervalLabel(price)}
@@ -141,7 +141,7 @@ export function PriceDetailPage() {
                 {history.items.map((entry) => (
                   <TableRow key={`${entry.price.id}-${entry.effective_at}`}>
                     <TableCell>
-                      {formatMicros(
+                      {formatNativeAmount(
                         entry.price.unit_amount,
                         entry.price.currency
                       )}

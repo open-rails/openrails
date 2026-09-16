@@ -24,7 +24,7 @@ import type {
   PriceChangeDraft,
 } from "@/lib/api/copilot"
 import { ApiError } from "@/lib/api/client"
-import { formatMicros } from "@/lib/format"
+import { formatNativeAmount } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { PriceChangeWizard } from "@/pages/catalog/price-wizard"
@@ -223,8 +223,8 @@ function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
       </div>
       <p>{draft.review_text}</p>
       <p className="mt-1 text-xs text-muted-foreground">
-        {formatMicros(draft.current_amount, draft.currency)} →{" "}
-        {formatMicros(draft.new_amount, draft.currency)} ·{" "}
+        {formatNativeAmount(draft.current_amount, draft.currency)} →{" "}
+        {formatNativeAmount(draft.new_amount, draft.currency)} ·{" "}
         {draft.affected_count.toLocaleString()} affected · requires human
         confirm
       </p>
@@ -283,7 +283,7 @@ function CatalogDiffDraftCard({ draft }: { draft: CatalogDiffDraft }) {
       <p>{draft.review_text}</p>
       <p className="mt-1 text-xs text-muted-foreground">
         key: {draft.create_price.key} ·{" "}
-        {formatMicros(
+        {formatNativeAmount(
           draft.create_price.unit_amount,
           draft.create_price.currency
         )}

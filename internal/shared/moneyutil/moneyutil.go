@@ -3,6 +3,7 @@ package moneyutil
 import (
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 )
 
@@ -77,38 +78,19 @@ func FormatCentsDecimal(cents Cents) string {
 }
 
 func formatDecimal(amount, scale int64, width int) string {
-	negative := amount < 0
-	// Work entirely in int64. |MinInt64/100| and |MinInt64%100| both fit in int64,
-	// so negating the quotient/remainder to their magnitudes never overflows
-	// (unlike negating amount itself at math.MinInt64) — and there is no int64↔uint64
-	// conversion for gosec G115 to flag.
-	major := amount / scale
+	// Never negate amount: -MinInt64 overflows. |amount%scale| < scale always
+	// fits, and FormatInt renders the quotient's magnitude exactly.
+	whole := strings.TrimPrefix(strconv.FormatInt(amount/scale, 10), "-")
 	minor := amount % scale
-	if major < 0 {
-		major = -major
-	}
-	if minor < 0 {
+	sign := ""
+	if amount < 0 {
+		sign = "-"
 		minor = -minor
 	}
-	if negative {
-		return fmt.Sprintf("-%d.%0*d", major, width, minor)
+	if width == 0 {
+		return sign + whole
 	}
-	return fmt.Sprintf("%d.%0*d", major, width, minor)
-}
-
-func FormatDisplay(micros Micros, currency string) string {
-	code := strings.ToUpper(strings.TrimSpace(currency))
-	amount := FormatMicrosDecimal(micros)
-	if code == "" {
-		return amount
-	}
-	if code == "USD" {
-		if strings.HasPrefix(amount, "-") {
-			return fmt.Sprintf("-$%s %s", strings.TrimPrefix(amount, "-"), code)
-		}
-		return fmt.Sprintf("$%s %s", amount, code)
-	}
-	return fmt.Sprintf("%s %s", amount, code)
+	return fmt.Sprintf("%s%s.%0*d", sign, whole, width, minor)
 }
 
 func FormatUSD(micros Micros) string {

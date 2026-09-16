@@ -7,7 +7,7 @@ import type {
   MetricsQuery,
   MetricsResult,
 } from "@/lib/api/metrics"
-import { formatMicros } from "@/lib/format"
+import { formatNativeAmount } from "@/lib/format"
 
 export function newWidgetId(): string {
   return crypto.randomUUID()
@@ -20,11 +20,16 @@ export function formatMeasure(
   currency?: string
 ): string {
   if (value === null || value === undefined) return "—"
+  // "micros" money cells are native units at the currency's registered scale.
+  // Metrics aggregate in float64, so a fractional ratio shows its nearest unit.
+  if (unit === "micros")
+    return formatNativeAmount(
+      typeof value === "number" ? Math.round(value) : value,
+      currency ?? ""
+    )
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(n)) return String(value)
   switch (unit) {
-    case "micros":
-      return formatMicros(n, currency ?? "").trim()
     case "ratio":
       return `${(n * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
     case "days":

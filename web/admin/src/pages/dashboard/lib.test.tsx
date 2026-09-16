@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryObserver } from "@tanstack/react-query"
 import { adminQueries } from "@/lib/queries"
 import type { MetricsResult } from "@/lib/api/metrics"
-import { formatMicros } from "@/lib/format"
+import { formatNativeAmount } from "@/lib/format"
 import {
   filteredCurrency,
   formatMeasure,
@@ -55,8 +55,8 @@ describe("dashboard currency", () => {
     expect(html).toContain("+0.0% vs previous period")
     expect(html).toContain("+100.0% vs previous period")
     expect(html).not.toContain("+50.0%")
-    expect(html).toContain(formatMicros(100_000_000, "USD"))
-    expect(html).toContain(formatMicros(200_000_000, "JPY"))
+    expect(html).toContain(formatNativeAmount(100_000_000, "USD"))
+    expect(html).toContain(formatNativeAmount(200_000_000, "JPY"))
   })
 
   it("matches all dimension tuples without delimiter collisions", () => {
@@ -98,7 +98,7 @@ describe("dashboard currency", () => {
       const series = group.series[0]
       expect(series.dimensions).toEqual([group.label])
       expect(formatMeasure(100_000_000, series.unit, series.currency)).toBe(
-        formatMicros(100_000_000, group.label)
+        formatNativeAmount(100_000_000, group.label)
       )
       expect(
         formatMeasure(100_000_000, series.unit, series.currency)
@@ -144,7 +144,7 @@ describe("dashboard currency", () => {
       const html = renderToStaticMarkup(
         <WidgetVizView viz={viz} result={result} query={query} />
       )
-      expect(html).toContain(formatMicros(100_000_000, "EUR"))
+      expect(html).toContain(formatNativeAmount(100_000_000, "EUR"))
       expect(html).not.toContain("$")
     }
     expect(formatMeasure(100_000_000, "micros")).not.toContain("$")
