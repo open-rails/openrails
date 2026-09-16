@@ -34,6 +34,7 @@ var retirementNeutralTables = map[string]string{
 	"destructive_runs":              "operator maintenance ledger",
 	"destructive_run_before_images": "operator maintenance ledger",
 	"merchant_purge_inventories":    "operator purge manifest",
+	"maintenance_runs":              "operator maintenance ledger; historical findings do not represent live merchant activity",
 	"reconciliation_runs":           "operator maintenance ledger",
 	"reconciliation_findings":       "operator maintenance ledger",
 	"reconciliation_state":          "reconciliation watermark",

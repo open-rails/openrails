@@ -578,6 +578,7 @@ func TestDelete_RequiresExport(t *testing.T) {
 	require.Equal(t, 1, inv.RowCounts["entitlements"])
 	require.NotEmpty(t, inv.NotCaptured)
 
+	confirmed.InventoryID = inv.ID
 	require.NoError(t, svc.Delete(ctx, tn.ID, confirmed))
 
 	var entCount int
