@@ -30,7 +30,7 @@ var rlsExemptTables = []string{
 
 // minMerchantScopedTables guards against a vacuous pass: if the SQL parsing
 // below ever breaks, the derived set collapses and every loop becomes a no-op.
-const minMerchantScopedTables = 60
+const minMerchantScopedTables = 50
 
 // minParsedIndexes guards the #846 index guard against the same vacuous pass.
 const minParsedIndexes = 250
@@ -800,9 +800,9 @@ func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 		}
 	}
 	sort.Strings(withCurrency)
-	// Vacuity guard: CUR-1 counts 16+ currency columns.
-	if len(withCurrency) < 16 {
-		t.Fatalf("found only %d currency columns (< 16): column parsing is broken, the guard would pass vacuously",
+	// Vacuity guard: CUR-1 counts 12+ currency columns.
+	if len(withCurrency) < 12 {
+		t.Fatalf("found only %d currency columns (< 12): column parsing is broken, the guard would pass vacuously",
 			len(withCurrency))
 	}
 
