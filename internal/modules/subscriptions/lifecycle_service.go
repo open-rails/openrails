@@ -622,6 +622,58 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 	return subscription, notifications, nil
 }
 
+// RecordConfirmedChargeWithoutRenewal records a provider-confirmed renewal
+// charge on a subscription that must NOT be reactivated (terminally
+// cancelled meanwhile). The money moved, so the completed payment row is
+// written exactly once (deduped on rail + transaction id); access and period
+// stay as they are and the charge is flagged for refund review.
+func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx context.Context, params *RenewMembershipParams) error {
+	if params == nil || strings.TrimSpace(params.TransactionID) == "" {
+		return errors.New("confirmed charge requires a transaction id")
+	}
+	return s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		db := db.NewWithPgxTx(tx)
+		subscription, err := NewSubscriptionRepo(db).GetByPSPSubscriptionIDForUpdate(ctx, string(params.Rail), params.RailSubscriptionID)
+		if err != nil {
+			return fmt.Errorf("subscription not found: %w", err)
+		}
+		price, err := catalog.NewPriceService(db).GetByID(ctx, subscription.PriceID)
+		if err != nil {
+			return fmt.Errorf("failed to get price: %w", err)
+		}
+		amount, currency := params.Amount, strings.TrimSpace(params.Currency)
+		if amount <= 0 {
+			amount = price.Amount
+		}
+		if currency == "" {
+			currency = price.Currency
+		}
+		now := s.now().UTC()
+		payment := &models.Payment{
+			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, PriceID: price.ID, SubscriptionID: &subscription.ID,
+			Rail: params.Rail, PspID: pspIDOf(subscription), TransactionID: params.TransactionID,
+			Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusCompletedValue,
+			Metadata:                 map[string]any{"refund_review": "confirmed charge on a cancelled subscription"},
+			EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(subscription.EntitlementsSpecSnapshot),
+			AttemptKind:              func() *string { k := payments.AttemptRenewal; return &k }(),
+			MoneyMovement:            models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
+		}
+		if tt := payments.DefaultTokenType(string(params.Rail), models.CustodianPSP); tt != "" {
+			payment.TokenType = &tt
+		}
+		created, err := payments.NewPaymentService(db, s.Clock()).CreateIfNotExists(ctx, payment)
+		if err != nil {
+			return fmt.Errorf("failed to persist confirmed charge: %w", err)
+		}
+		if created {
+			log.WithContext(ctx).WithFields(log.Fields{
+				"subscription_id": subscription.ID, "transaction_id": params.TransactionID, "status": subscription.Status,
+			}).Error("confirmed rebill charge on a cancelled subscription; payment recorded without reactivation — refund review required")
+		}
+		return nil
+	})
+}
+
 // RenewMembership renews an existing subscription and extends the membership.
 // It also creates a Payment record for the renewal transaction.
 // If a scheduled downgrade exists (ScheduledPriceID), it will be applied on renewal.

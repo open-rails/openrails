@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -79,12 +78,12 @@ type ManualRebillHandler struct {
 	// Resolver arms the store-scoped NMI client per merchant AT CHARGE TIME
 	// (#730/#788: the armed rail state is the ONLY credential plane;
 	// declared-account-with-missing-secret fails closed; no caching).
-	Resolver money.NMIClientResolver
+	Resolver NMIClientResolver
 	Clock    clockwork.Clock
 	Policy   BackoffPolicy
 }
 
-func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver money.NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
+func NewManualRebillHandler(d *db.DB, cfg *config.Config, resolver NMIClientResolver, clock clockwork.Clock) *ManualRebillHandler {
 	return &ManualRebillHandler{DB: d, Config: cfg, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 
@@ -312,21 +311,19 @@ func (h *ManualRebillHandler) findSuccessfulSale(ctx context.Context, client *nm
 	return client.FindSuccessfulSaleByOrderID(ctx, p.OrderReference)
 }
 
-// finalizeSuccess repairs the local lifecycle from a confirmed successful
-// rebill: renew the membership window (payment row, period advance,
-// notifications) and grant per-renewal credits. Idempotent — a subscription
-// that already left past_due (the renewal applied, or a racing worker
-// repaired it) is left alone.
+// finalizeSuccess records a confirmed rebill charge exactly once, whatever
+// dunning did to the subscription meanwhile. The renewal (payment row, period
+// advance, access window) is deduped on the transaction id, so a retried
+// finalize is a no-op:
+//
+//	past_due / unknown (dunning parked it) / active -> RenewMembership
+//	terminally cancelled (user, merchant, chargeback) -> payment row only;
+//	                                    never reactivated, flagged for refund review
 func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uuid.UUID, p ManualRebillPayload, transactionID string) error {
 	subRepo := subscriptions.NewSubscriptionRepo(h.DB)
 	sub, err := subRepo.GetByID(ctx, p.SubscriptionID)
 	if err != nil {
 		return fmt.Errorf("load subscription: %w", err)
-	}
-
-	if sub.Status != models.StatusPastDue ||
-		sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.UTC().Unix() != p.PeriodEnd.UTC().Unix() {
-		return nil
 	}
 
 	priceSvc := catalog.NewPriceService(h.DB)
@@ -349,17 +346,24 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uu
 		amount = price.Amount
 		currency = price.Currency
 	}
-
-	if err := lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
+	params := &subscriptions.RenewMembershipParams{
 		Rail:               models.Rail(strings.ToLower(intentRail(p, sub))),
 		RailSubscriptionID: sub.RailSubscriptionID,
 		TransactionID:      transactionID,
 		Amount:             amount,
 		Currency:           currency,
-	}); err != nil {
+	}
+	if _, terminal := subscriptions.TerminalCancelReason(sub); terminal {
+		return lifecycle.RecordConfirmedChargeWithoutRenewal(ctx, params)
+	}
+	if sub.Status != models.StatusPastDue {
+		log.WithContext(ctx).WithFields(log.Fields{
+			"subscription_id": sub.ID, "status": sub.Status, "transaction_id": transactionID, "dunned_period_end": p.PeriodEnd,
+		}).Warn("manual rebill confirmed after the subscription left past_due; renewing from the confirmed charge")
+	}
+	if err := lifecycle.RenewMembership(ctx, params); err != nil {
 		return fmt.Errorf("renew membership: %w", err)
 	}
-
 	return nil
 }
 
