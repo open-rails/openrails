@@ -105,7 +105,7 @@ just settled is never held out by our evaluation lag.
 ## What you enforce: the signal
 
 Delinquency transitions land on a durable, acknowledged feed —
-`openrails.host_outbox`, the same shape as the payment-settlements feed.
+`openrails.host_outbox`, the typed host event feed that also carries payment settlements.
 Not a webhook: a missed cut-off signal is a revenue leak and a missed restore
 signal is an outage for someone who has already paid.
 

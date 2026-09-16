@@ -36,7 +36,6 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	// row cannot be seen, let alone referenced, across a tenant boundary, so
 	// the unique cannot collide between merchants and is not an oracle.
 	"uq_grants_termination":                       "supersedes_id FKs a merchant-owned grant",
-	"uq_host_outbox_payment":                      "payment_id FKs a merchant-owned payment",
 	"uq_subscription_reprices_one_scheduled":      "subscription_id FKs a merchant-owned subscription",
 	"uq_subscriptions_customer_tier_group_active": "customer_id FKs a merchant-owned customer (ID-3's one-live-per-tier-group rule)",
 	"unique_prices_product_amount_window":         "product_id FKs a merchant-owned product (ID-5 price financial substance)",

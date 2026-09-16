@@ -90,7 +90,7 @@ func TestDelinquencyWorker_EvaluatesEveryMerchantWithDueWork(t *testing.T) {
 			require.Len(t, rows, 1, "merchant %s got no delinquency row — the pass was inert for it", f.merchant)
 			require.Equal(t, "delinquent", rows[0].State)
 
-			events, err := q.ListPendingHostLifecycleEvents(sctx, gen.ListPendingHostLifecycleEventsParams{
+			events, err := q.ListHostEvents(sctx, gen.ListHostEventsParams{
 				MerchantID: f.merchant.UUID(), RowLimit: 10,
 			})
 			require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestDelinquencyWorker_EvaluatesEveryMerchantWithDueWork(t *testing.T) {
 	for _, f := range fixtures {
 		mctx := merchant.WithID(context.Background(), f.merchant)
 		require.NoError(t, dbi.RunInMerchantConn(mctx, func(sctx context.Context) error {
-			events, err := dbi.Gen(sctx).ListPendingHostLifecycleEvents(sctx, gen.ListPendingHostLifecycleEventsParams{
+			events, err := dbi.Gen(sctx).ListHostEvents(sctx, gen.ListHostEventsParams{
 				MerchantID: f.merchant.UUID(), RowLimit: 10,
 			})
 			require.NoError(t, err)

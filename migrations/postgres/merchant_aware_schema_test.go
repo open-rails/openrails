@@ -13,8 +13,8 @@ import (
 // The table list is DERIVED from every migration's SQL, not hand-maintained —
 // the previous hardcoded list only covered 0001, so a merchant-scoped table
 // added in a later migration escaped enforcement silently (0005's
-// host_outbox shipped with merchant_id and no RLS; nothing
-// failed). Exemptions are declared IN the schema as a
+// payment_settlement_events, now host_outbox, shipped with merchant_id and no
+// RLS; nothing failed). Exemptions are declared IN the schema as a
 // `COMMENT ON TABLE ... 'RLS-exempt by design: ...'` marker, and the exempt set
 // is additionally asserted by name below so widening it requires review here.
 var rlsExemptTables = []string{
@@ -822,7 +822,7 @@ func TestCurrencyColumnsCarryShapeCheck(t *testing.T) {
 	}
 
 	// Coverage is asserted PER COLUMN, not by trusting that some loop ran: a
-	// hand-written list is exactly how 0005's host_outbox escaped
+	// hand-written list is exactly how 0005's payment_settlement_events escaped
 	// the RLS guard (GAP-4). Every table that declares a currency column must
 	// also declare its own <table>_currency_shape CHECK.
 	for _, tbl := range withCurrency {

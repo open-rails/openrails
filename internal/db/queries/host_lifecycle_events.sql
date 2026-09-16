@@ -1,7 +1,7 @@
--- or#878 durable host-consumption feed. Same guarantees as
--- host_outbox (0005/0010): merchant-scoped, explicitly acked,
+-- or#878 delinquency writes to host_outbox: merchant-scoped, explicitly acked,
 -- pruned after delivery. A missed cut-off signal is a revenue leak and a missed
 -- restore signal is an outage, so neither may be a fire-and-forget webhook.
+-- Hosts read and acknowledge through host_events.sql.
 
 -- name: EnqueueHostLifecycleEvent :execrows
 -- Idempotent on the transition's dedupe key: re-announcing a transition is a
@@ -13,20 +13,6 @@ VALUES (
     sqlc.arg(subject_id), sqlc.arg(currency)::text, sqlc.arg(occurred_at)::timestamptz,
     sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
-
--- name: ListPendingHostLifecycleEvents :many
-SELECT id, merchant_id, event_type, subject_type, subject_id, currency, occurred_at, data
-FROM openrails.host_outbox
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND event_type <> 'payment.settled' AND delivered_at IS NULL
-ORDER BY id
-LIMIT sqlc.arg(row_limit);
-
--- name: AcknowledgeHostLifecycleEvent :execrows
-UPDATE openrails.host_outbox
-SET delivered_at = COALESCE(delivered_at, sqlc.arg(now)::timestamptz)
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND event_type <> 'payment.settled' AND id = sqlc.arg(id);
 
 -- or#837: batched — row_limit bounds one statement, the caller loops.
 -- name: DeleteDeliveredHostLifecycleEventsBefore :execrows

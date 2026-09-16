@@ -192,15 +192,15 @@ func (e *env) state(t *testing.T) delinquency.Snapshot {
 	return rows[0]
 }
 
-func (e *env) events(t *testing.T) []gen.ListPendingHostLifecycleEventsRow {
+func (e *env) events(t *testing.T) []gen.OpenrailsHostOutbox {
 	t.Helper()
-	rows, err := e.dbi.Gen(e.ctx).ListPendingHostLifecycleEvents(e.ctx, gen.ListPendingHostLifecycleEventsParams{
+	rows, err := e.dbi.Gen(e.ctx).ListHostEvents(e.ctx, gen.ListHostEventsParams{
 		MerchantID: e.merchant.UUID(), RowLimit: 50,
 	})
 	require.NoError(t, err)
-	out := make([]gen.ListPendingHostLifecycleEventsRow, 0, len(rows))
+	out := make([]gen.OpenrailsHostOutbox, 0, len(rows))
 	for _, r := range rows {
-		if r.SubjectID == e.payer.UUID() {
+		if r.EventType != "payment.settled" && r.SubjectID == e.payer.UUID() {
 			out = append(out, r)
 		}
 	}
@@ -399,7 +399,7 @@ func TestDelinquencyIsMerchantIsolated(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, delinquent, "one merchant's unpaid bill must never gate another merchant's admission")
 
-	events, err := otherDB.Gen(otherCtx).ListPendingHostLifecycleEvents(otherCtx, gen.ListPendingHostLifecycleEventsParams{
+	events, err := otherDB.Gen(otherCtx).ListHostEvents(otherCtx, gen.ListHostEventsParams{
 		MerchantID: other.UUID(), RowLimit: 50,
 	})
 	require.NoError(t, err)
@@ -414,8 +414,8 @@ func TestDelinquencyIsMerchantIsolated(t *testing.T) {
 
 // The feed is the deliverable, so its ack discipline is pinned directly: acked
 // events leave the pending feed, and only DELIVERED rows are ever prunable. (The
-// merchant-scoped host seam over the same table is covered in
-// internal/controlplane.)
+// shared Client host-event seam over the same table is covered in
+// internal/integrationharness.)
 func TestHostLifecycleFeedAckDiscipline(t *testing.T) {
 	e := newEnv(t)
 	e.setPolicy(t, e.ctx, 0, 0)
@@ -441,7 +441,7 @@ func TestHostLifecycleFeedAckDiscipline(t *testing.T) {
 	require.Zero(t, n)
 	require.Len(t, e.events(t), 1)
 
-	acked, err := q.AcknowledgeHostLifecycleEvent(e.ctx, gen.AcknowledgeHostLifecycleEventParams{
+	acked, err := q.AcknowledgeHostEvent(e.ctx, gen.AcknowledgeHostEventParams{
 		MerchantID: e.merchant.UUID(), ID: target.ID, Now: now,
 	})
 	require.NoError(t, err)
