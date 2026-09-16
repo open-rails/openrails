@@ -404,7 +404,6 @@ func (s *RepriceService) ResolveEffectivePrice(ctx context.Context, subscription
 		}
 		sub.ProductID = toPrice.ProductID
 		sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(newProduct.EntitlementsSpec)
-		sub.CreditsSpecSnapshot = models.CloneCreditsSpec(newProduct.CreditsSpec)
 	}
 	sub.PriceID = toPrice.ID
 	if err := s.subscriptions.Update(ctx, sub); err != nil {

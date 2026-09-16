@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -23,7 +24,7 @@ func (s *Service) ListCreditGrants(ctx context.Context, payer identity.CustomerI
 		return nil, err
 	}
 	defer release()
-	code, err := s.resolveCurrency(ctx, currency)
+	code, err := requireCurrency(currency)
 	if err != nil {
 		return nil, err
 	}
@@ -31,12 +32,8 @@ func (s *Service) ListCreditGrants(ctx context.Context, payer identity.CustomerI
 	if err != nil {
 		return nil, err
 	}
-	display, err := s.DisplayCurrency(ctx, code)
-	if err != nil {
-		return nil, err
-	}
 	for i := range page.Grants {
-		page.Grants[i].Currency = display
+		page.Grants[i].Currency = code
 	}
 	return page, nil
 }
@@ -51,21 +48,5 @@ func (s *Service) RevokeCreditGrant(ctx context.Context, payer identity.Customer
 	if err != nil {
 		return nil, err
 	}
-	result.Grant.Currency, err = s.DisplayCurrency(ctx, result.Grant.Currency)
-	return result, err
-}
-
-// CreditUnitDecimals returns the existing registry's scale for a selected unit.
-func (s *Service) CreditUnitDecimals(ctx context.Context, currency string) (int, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer release()
-	code, err := s.resolveCurrency(ctx, currency)
-	if err != nil {
-		return 0, err
-	}
-	decimals, _, err := s.moneyService().ResolveUnit(ctx, code)
-	return decimals, err
+	return result, nil
 }

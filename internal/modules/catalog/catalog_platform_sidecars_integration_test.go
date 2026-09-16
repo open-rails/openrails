@@ -63,7 +63,6 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 	priceB := uuid.New()
 	customerA := uuid.New()
 	suffix := uuid.NewString()[:8]
-	usageKey := "api-limit-" + suffix
 	meterKey := "api-calls-" + suffix
 
 	seedTenantAndProduct(t, ctx, appDB, tA, productA, "prod-a-"+suffix)
@@ -85,19 +84,6 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		)
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.catalog_usage_limits (merchant_id, key, measure, windows)
-			 VALUES ($1, $2, 'api_requests', '[{"period":"day","limit":1000}]'::jsonb)`,
-			tA.UUID(), usageKey,
-		)
-		require.NoError(t, err)
-		_, err = tx.Exec(ctx,
-			`INSERT INTO openrails.product_usage_limit_bindings
-			 (id, merchant_id, customer_id, usage_limit_key, measure, windows)
-			 VALUES ($1, $2, $3, $4, 'api_requests', '[{"period":"day","limit":1000}]'::jsonb)`,
-			uuid.New(), tA.UUID(), customerA, usageKey,
-		)
-		require.NoError(t, err)
-		_, err = tx.Exec(ctx,
 			`INSERT INTO openrails.catalog_meters (merchant_id, key, aggregation) VALUES ($1, $2, 'count')`,
 			tA.UUID(), meterKey,
 		)
@@ -111,13 +97,9 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 	}))
 
 	require.NoError(t, appDB.MerchantTx(ctxA, func(ctx context.Context, tx pgx.Tx) error {
-		var usageCount, bindingCount, meterCount, rateCardCount int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_usage_limits WHERE key = $1`, usageKey).Scan(&usageCount))
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.product_usage_limit_bindings WHERE usage_limit_key = $1`, usageKey).Scan(&bindingCount))
+		var meterCount, rateCardCount int
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
-		require.Equal(t, 1, usageCount)
-		require.Equal(t, 1, bindingCount)
 		require.Equal(t, 1, meterCount)
 		require.Equal(t, 1, rateCardCount)
 		return nil
@@ -131,11 +113,9 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		)
 		require.NoError(t, err)
 
-		var usageCount, meterCount, rateCardCount int
-		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_usage_limits WHERE key = $1`, usageKey).Scan(&usageCount))
+		var meterCount, rateCardCount int
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_meters WHERE key = $1`, meterKey).Scan(&meterCount))
 		require.NoError(t, tx.QueryRow(ctx, `SELECT count(*) FROM openrails.catalog_rate_cards WHERE meter_key = $1`, meterKey).Scan(&rateCardCount))
-		require.Equal(t, 0, usageCount)
 		require.Equal(t, 0, meterCount)
 		require.Equal(t, 0, rateCardCount)
 		return nil

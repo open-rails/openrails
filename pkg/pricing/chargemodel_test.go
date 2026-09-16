@@ -127,52 +127,5 @@ func TestRate_GraduatedFlatPerTier(t *testing.T) {
 // Property: across spends, the quote never grants more value than paid, and is
 // maximal (one more unit would exceed the budget). Guards the credit-purchase
 // money path against off-by-one over-granting.
-func TestQuoteUnitsForSpend_NeverOverGrantsAndIsMaximal(t *testing.T) {
-	cm := ChargeModel{Kind: ModelTiered, Mode: TierModeGraduated, Tiers: graduatedTiers()}
-	for _, spend := range []int64{0, 1, 9_999, 10_000, 19_999_999, 20_000_001, 49_999_999, 100_000_000} {
-		units, cost, err := QuoteUnitsForSpend(spend, cm)
-		if err != nil {
-			t.Fatalf("spend %d: %v", spend, err)
-		}
-		if cost > spend {
-			t.Fatalf("spend %d: quoted cost %d exceeds budget (over-granted)", spend, cost)
-		}
-		next, err := cm.Rate(units + 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if next <= spend {
-			t.Fatalf("spend %d: quote of %d units is not maximal (units+1 costs %d <= %d)", spend, units, next, spend)
-		}
-	}
-}
 
 // The credit-purchase "enter $ -> credits" direction, and its inverse, must agree.
-func TestQuoteUnitsForSpend_GraduatedBidirectional(t *testing.T) {
-	cm := ChargeModel{Kind: ModelTiered, Mode: TierModeGraduated, Tiers: graduatedTiers()}
-
-	// $20 buys exactly 2000 credits at the base rate.
-	credits, cost, err := QuoteUnitsForSpend(20_000_000, cm)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if credits != 2_000 || cost != 20_000_000 {
-		t.Fatalf("$20 -> (%d credits, %d cost), want (2000, 20000000)", credits, cost)
-	}
-
-	// $50 buys 5333 credits (floored); never grants more value than paid.
-	credits, cost, err = QuoteUnitsForSpend(50_000_000, cm)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if credits != 5_333 || cost != 49_997_000 {
-		t.Fatalf("$50 -> (%d credits, %d cost), want (5333, 49997000)", credits, cost)
-	}
-	if cost > 50_000_000 {
-		t.Fatalf("quoted cost %d exceeds spend", cost)
-	}
-	// Inverse agrees: pricing the quoted credits reproduces the quoted cost.
-	if back, _ := cm.Rate(credits); back != cost {
-		t.Fatalf("inverse mismatch: Rate(%d)=%d, want %d", credits, back, cost)
-	}
-}

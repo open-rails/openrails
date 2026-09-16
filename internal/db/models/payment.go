@@ -90,7 +90,6 @@ type Payment struct {
 	Metadata         map[string]any `json:"metadata,omitempty"`
 
 	EntitlementsSpecSnapshot map[string]*int `json:"entitlements_spec_snapshot,omitempty"`
-	CreditsSpecSnapshot      CreditsSpec     `json:"credits_spec_snapshot,omitempty"`
 
 	PurchasedAt time.Time `json:"purchased_at"`
 	CreatedAt   time.Time `json:"created_at"`

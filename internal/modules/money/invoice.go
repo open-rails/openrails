@@ -36,7 +36,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 	if !to.After(from) {
 		return nil, fmt.Errorf("invalid period: to must be after from")
 	}
-	// #474 invariant: invoices are external-currency-only (reject custom credits).
+	// Invoices require a registered currency.
 	cur := normalizeCurrency(currency)
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
@@ -673,7 +673,7 @@ func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Ti
 	}
 	count := 0
 	for _, p := range pairs {
-		// Custom-credit balances (#475 qualified codes) are not billed — skip them.
+		// Balances in an unregistered currency are never invoiced.
 		if RequireBillingCurrency(normalizeCurrency(p.Currency)) != nil {
 			continue
 		}

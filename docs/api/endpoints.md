@@ -363,7 +363,7 @@ manifest and reboot instead. Reads stay live.
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec`, `credits_spec` |
+| POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec` |
 | GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `active_only` filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |

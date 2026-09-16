@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,17 +147,10 @@ version: 1
 products:
   - key: topup
     display_name: Topup
-    credits: [{key: credits}]
     prices:
       - currency: usd
-        model: tiered
+        unit_amount: 10_000
         providers: [stripe]
-        tiered:
-          mode: graduated
-          tiers:
-            - {unit_amount: 10_000}
-credit_balances:
-  - {key: credits, unit: credit}
 `
 	_, err := Load(writeManifest(t, body))
 	if err == nil {
@@ -196,76 +188,6 @@ products:
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error must carry %q, got:\n%v", want, err)
 		}
-	}
-}
-
-func TestLoad_RejectsNoncanonicalCreditGrantFields(t *testing.T) {
-	tests := []struct {
-		name      string
-		field     string
-		yamlValue string
-		jsonValue string
-	}{
-		{name: "unit", field: "unit", yamlValue: "other-credit", jsonValue: `"other-credit"`},
-		{name: "currency", field: "currency", yamlValue: "usd", jsonValue: `"usd"`},
-		{name: "expiry hours", field: "expiry_hours", yamlValue: "24", jsonValue: "24"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			body := `
-version: 1
-credit_balances:
-  - {key: credits, unit: credit}
-products:
-  - key: product
-    display_name: Product
-    credits:
-      - key: credits
-        amount: 10
-        ` + tt.field + `: ` + tt.yamlValue + `
-`
-			_, err := Parse([]byte(body))
-			if err == nil || !strings.Contains(err.Error(), "unknown field") {
-				t.Fatalf("want noncanonical %s rejection, got %v", tt.field, err)
-			}
-
-			var grant CreditGrant
-			err = json.Unmarshal([]byte(`{"key":"credits","`+tt.field+`":`+tt.jsonValue+`}`), &grant)
-			if err == nil || !strings.Contains(err.Error(), "unknown field") {
-				t.Fatalf("want noncanonical JSON %s rejection, got %v", tt.field, err)
-			}
-		})
-	}
-}
-
-func TestValidate_CreditGrantPreservesInternalCurrency(t *testing.T) {
-	amount := int64(10)
-	m := &Manifest{
-		Version: SupportedVersion,
-		CreditBalances: []CreditBalance{
-			{Key: "credits", Unit: "credit"},
-		},
-		Products: []Product{
-			{
-				Key:         "product",
-				DisplayName: "Product",
-				Credits: []CreditGrant{
-					{Key: "credits", Currency: "usd", Amount: &amount},
-				},
-			},
-		},
-	}
-
-	if err := m.Validate(); err != nil {
-		t.Fatalf("Validate: %v", err)
-	}
-	grant := m.TierGroups[0].Products[0].Credits[0]
-	if grant.Unit != "CREDIT" {
-		t.Fatalf("credit did not derive balance unit: %q", grant.Unit)
-	}
-	if grant.Currency != "usd" {
-		t.Fatalf("validation discarded internal currency: %q", grant.Currency)
 	}
 }
 
@@ -469,84 +391,6 @@ products:
 	}
 }
 
-func TestLoad_FlatProductsBenefitsUsageLimitsAndRateCards(t *testing.T) {
-	body := `
-version: 1
-usage_limits:
-  - key: starter-spend
-    measure: billable_spend
-    windows:
-      - {window: 5h, amount: 10_000_000}
-meters:
-  - key: api-calls
-    aggregation: sum
-    value_property: $.count
-credit_balances:
-  - key: monthly-usd
-    unit: usd
-  - key: ai-images
-    unit: local-stack/ai-image-credit
-products:
-  - key: premium
-    display_name: Premium
-    entitlements: [premium]
-    usage_limits: [starter-spend]
-    credits:
-      - key: monthly-usd
-        amount: 25_000_000
-        expires: 30d
-        cadence: per_renewal
-      - key: ai-images
-        amount: 100
-    rate_cards:
-      - meter: api-calls
-        payment_term: in_arrears
-        price:
-          model: per_unit
-          currency: usd
-          per_unit: {unit_amount: 200_000, divide_by: 1_000_000}
-`
-	m, err := Load(writeManifest(t, body))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if len(m.TierGroups) != 1 || m.TierGroups[0].Key != "usage-premium" {
-		t.Fatalf("flat products were not normalized: %+v", m.TierGroups)
-	}
-	p := m.TierGroups[0].Products[0]
-	if p.Key != "premium" || p.UsageLimits[0] != "starter-spend" {
-		t.Fatalf("product benefits not normalized: %+v", p)
-	}
-	// or#883: a grant's unit is always the named balance's unit — never declared.
-	if got := p.Credits[0].Unit; got != "USD" {
-		t.Fatalf("credit did not derive balance unit: %q", got)
-	}
-	if got := p.Credits[0].ExpiryHours; got == nil || *got != 30*24 {
-		t.Fatalf("credit expires did not populate expiry hours: %v", got)
-	}
-	if got := p.Credits[1].Unit; got != "local-stack/ai-image-credit" {
-		t.Fatalf("credit did not derive qualified balance unit: %q", got)
-	}
-	// A pure-usage product carries no price row — only the rate card.
-	if len(p.Prices) != 0 {
-		t.Fatalf("pure-usage product should declare no price row, got %+v", p.Prices)
-	}
-	if len(p.RateCards) != 1 {
-		t.Fatalf("expected one rate card, got %+v", p.RateCards)
-	}
-	rc := p.RateCards[0]
-	if rc.Meter != "api-calls" || rc.PaymentTerm != PaymentInArrears {
-		t.Fatalf("rate card meter/term wrong: %+v", rc)
-	}
-	if rc.Price.Model != ModelPerUnit || rc.Price.PerUnit == nil ||
-		rc.Price.PerUnit.UnitAmount != 200_000 || rc.Price.PerUnit.DivideBy != 1_000_000 {
-		t.Fatalf("rate card price wrong: %+v", rc.Price)
-	}
-	if rc.Price.Currency != "USD" {
-		t.Fatalf("rate card currency wrong: %q", rc.Price.Currency)
-	}
-}
-
 // The former gauge shape ({kind: gauge} + metered.per) is expressed canonically:
 // divide_by carries per_units x per-seconds directly. Same integer math, one input.
 func TestLoad_RateCardCarriesTimeDenominatorInDivideBy(t *testing.T) {
@@ -722,20 +566,6 @@ products:
 	})
 }
 
-func TestLoad_UsageLimitReferenceMustExist(t *testing.T) {
-	body := `
-version: 1
-products:
-  - key: api
-    display_name: API
-    usage_limits: [missing]
-`
-	_, err := Load(writeManifest(t, body))
-	if err == nil || !strings.Contains(err.Error(), "unknown usage_limit") {
-		t.Fatalf("want usage_limit reference error, got %v", err)
-	}
-}
-
 func TestLoad_SolanaStablecoinAccepted(t *testing.T) {
 	body := `
 version: 1
@@ -823,5 +653,20 @@ products:
 	}
 	if got := m.TierGroups[0].Products[0].Prices[0].Duration; got != "1h" {
 		t.Fatalf("duration = %q, want 1h", got)
+	}
+}
+
+func TestLoadRejectsDeferredCatalogFeatures(t *testing.T) {
+	for _, field := range []string{"credit_balances", "usage_limits"} {
+		_, err := Parse([]byte("version: 1\n" + field + ": []\nproducts: []\n"))
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("accepted %s: %v", field, err)
+		}
+	}
+	for _, field := range []string{"credits", "includes", "usage_limits"} {
+		_, err := Parse([]byte("version: 1\nproducts:\n  - key: test\n    display_name: Test\n    " + field + ": []\n"))
+		if err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("accepted %s: %v", field, err)
+		}
 	}
 }

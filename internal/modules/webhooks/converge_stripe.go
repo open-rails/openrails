@@ -371,7 +371,6 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 					if s.ProductService != nil {
 						if product, perr2 := s.ProductService.GetByID(ctx, price.ProductID); perr2 == nil {
 							sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(product.EntitlementsSpec)
-							sub.CreditsSpecSnapshot = models.CloneCreditsSpec(product.CreditsSpec)
 							newEntitlementsSpec = product.EntitlementsSpec
 						}
 					}

@@ -46,7 +46,6 @@ type Product struct {
 	Name             string
 	Description      string
 	EntitlementsSpec map[string]*int
-	CreditsSpec      CreditsSpec
 	TierGroup        *string
 	TierRank         int
 	Active           bool

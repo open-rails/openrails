@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/controlplane"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -146,7 +147,7 @@ func ListAdminCreditTransactions(r *httprequest.Request) {
 	for _, t := range items {
 		out = append(out, serviceTxnResponse{ID: t.ID, CustomerID: t.CustomerID, Invoker: t.Invoker, Amount: t.Amount, Currency: t.Currency, TransactionType: t.TransactionType, Status: t.Status, Source: t.Source, CreatedAt: t.CreatedAt})
 	}
-	decimals, err := svc.CreditUnitDecimals(r.Request.Context(), currency)
+	decimals, err := money.CurrencyDecimals(currency)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "credit currency unavailable")
 		return

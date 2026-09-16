@@ -21,9 +21,8 @@ func writeCatalogPushManifest(t *testing.T, body string) string {
 // TestExampleCatalogManifestParses loads the canonical config/catalog.example.yaml
 // through the real publish path (loadCatalogPushTargets, which runs
 // catalog.Manifest.Validate per merchant) and asserts the multi-merchant example
-// is valid and exercises both the legacy surfaces (usage_limits, credit grants,
-// subscription prices) and the #638/#639 rate-card model (aggregation meters,
-// matrix pricing with a monthly cap, allowances, and a variable credit top-up).
+// is valid and exercises subscription prices and metered rate cards with
+// matrix pricing, monthly caps and allowances.
 // This keeps the example from rotting: a manifest-schema change that breaks it
 // fails here.
 func TestExampleCatalogManifestParses(t *testing.T) {
@@ -44,19 +43,10 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 		}
 		byMerchant[tg.Merchant] = tg.Manifest
 	}
-	for _, want := range []string{"anthropic", "digital-ocean", "host-three", "host-four"} {
+	for _, want := range []string{"anthropic", "digital-ocean", "host-three"} {
 		if byMerchant[want] == nil {
 			t.Fatalf("example missing merchant %q (got %d merchants)", want, len(targets))
 		}
-	}
-
-	// anthropic: legacy usage_limits + subscription prices still validate (additive).
-	if len(byMerchant["anthropic"].UsageLimits) < 1 {
-		t.Error("anthropic should declare usage_limits")
-	}
-	// host-four: legacy credit grants still validate (additive).
-	if len(flattenProducts(byMerchant["host-four"])) < 2 {
-		t.Error("host-four should declare prepaid products")
 	}
 
 	// ---- digital-ocean: the #638 rate-card model ----
@@ -117,33 +107,6 @@ func TestExampleCatalogManifestParses(t *testing.T) {
 		t.Error("digital-ocean has no allowance (pooled bandwidth)")
 	}
 
-	// ---- host-three: 4 membership tiers + variable credit top-up (#639/#640) ----
-	hostProducts := flattenProducts(byMerchant["host-three"])
-	for _, key := range []string{"novice", "craftsman", "expert", "grandmaster"} {
-		if _, ok := hostProducts[key]; !ok {
-			t.Errorf("host-three missing membership tier %q", key)
-		}
-	}
-	topup, ok := hostProducts["image-credit-topup"]
-	if !ok || len(topup.Credits) != 1 || topup.Credits[0].Amount != nil || len(topup.Prices) != 1 {
-		t.Fatal("host-three missing image-credit-topup credit offer")
-	}
-	offer := catalog.RatePrice{
-		Model:   topup.Prices[0].Model,
-		Tiered:  topup.Prices[0].Tiered,
-		PerUnit: topup.Prices[0].PerUnit,
-	}
-	if offer.Model != catalog.ModelTiered || offer.Tiered == nil || offer.Tiered.Mode != catalog.TierModeGraduated {
-		t.Errorf("credit top-up must be graduated tiered, got %+v", offer)
-	}
-	// $20 buys exactly 2,000 credits at the $0.01/credit base band (bidirectional quote).
-	credits, spent, err := catalog.QuoteUnitsForSpend(20_000_000, offer.ToChargeModel())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if credits != 2_000 || spent != 20_000_000 {
-		t.Errorf("$20 top-up -> (%d credits, %d spent), want (2000, 20000000)", credits, spent)
-	}
 }
 
 func flattenProducts(m *catalog.Manifest) map[string]catalog.Product {

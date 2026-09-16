@@ -2323,7 +2323,7 @@ const reconcileMaterializeSubscription = `-- name: ReconcileMaterializeSubscript
 INSERT INTO openrails.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
     user_email, current_period_starts_at, current_period_ends_at, started_at,
-    entitlements_spec_snapshot, credits_spec_snapshot, customer_id, psp_id
+    entitlements_spec_snapshot, customer_id, psp_id
 )
 SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $3, $4,
@@ -2331,7 +2331,7 @@ SELECT $1::uuid, pr.id, pr.product_id, $2::openrails.subscription_status,
        $6::timestamptz,
        $7::timestamptz,
        COALESCE($8::timestamptz, now()),
-       p.entitlements_spec, p.credits_spec, $9, $10::uuid
+       p.entitlements_spec, $9, $10::uuid
 FROM openrails.prices pr
 JOIN openrails.products p ON p.id = pr.product_id
 WHERE pr.id = $11

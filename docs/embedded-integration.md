@@ -283,7 +283,7 @@ err := embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
 In mode 1 a mutating push always upgrades to full converge (insert+overwrite+prune —
 the YAML is the truth); in mode 2 a mutating push refuses (plan-only diff stays
 legal). The manifest is `version: 1` + `catalogs: [{merchant, tier_groups, products,
-meters, credit_balances, usage_limits}]`.
+meters}]`.
 
 ### 6. Mounting HTTP
 

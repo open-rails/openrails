@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -148,8 +150,8 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -227,7 +229,7 @@ ORDER BY currency`, tenantID, payerID)
 	q := s.db.Gen(ctx)
 	out := []models.MoneyBalance{}
 	for _, cur := range currencies {
-		bal, err := s.deriveBalance(ctx, q, tenantID, payerID, normalizeUnit(cur))
+		bal, err := s.deriveBalance(ctx, q, tenantID, payerID, normalizeCurrency(cur))
 		if err != nil {
 			return nil, err
 		}
@@ -261,8 +263,8 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 	if fn == nil {
 		return fmt.Errorf("admission capacity callback required")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)
@@ -312,8 +314,8 @@ func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.
 	if s == nil || s.db == nil {
 		return AdmissionCapacity{}, fmt.Errorf("money service not initialized")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return AdmissionCapacity{}, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -374,8 +376,8 @@ func (s *MoneyService) GetTransactionsByCustomer(ctx context.Context, payer iden
 	if payer.IsZero() {
 		return nil, 0, fmt.Errorf("payer required")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, 0, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -539,8 +541,8 @@ func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params Dep
 	if err != nil {
 		return nil, err
 	}
-	cur := normalizeUnit(params.Currency)
-	if _, _, err := resolveUnit(ctx, q, cur); err != nil {
+	cur := normalizeCurrency(params.Currency)
+	if _, err := CurrencyDecimals(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -709,7 +711,7 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 // job (#491); this fails only if the lots physically cannot cover `amount` (a
 // gated caller never hits that). Returns the derived balance AFTER the debit.
 func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, key IdempotencyKey, resource string, amount int64) (newBalance int64, applied bool, err error) {
-	cur := normalizeUnit(currency)
+	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, false, err
@@ -751,7 +753,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // reading/mutating the customer's blocks so no two mutations on the same
 // customer interleave (no overdraft, atomic hold placement).
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
-	cur := normalizeUnit(currency)
+	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -809,8 +811,8 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 
 func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params WithdrawParams) (*models.MoneyTransaction, error) {
 	now := s.now()
-	cur := normalizeUnit(params.Currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(params.Currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
