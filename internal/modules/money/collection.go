@@ -23,7 +23,7 @@ type CollectionAdapter interface {
 }
 
 // ScopedCharger validates merchant/customer/payment-method scope before
-// dispatching an off-session invoice or top-up charge to a rail adapter.
+// dispatching an off-session invoice collection charge to a rail adapter.
 type ScopedCharger struct {
 	db       *db.DB
 	adapters map[string]CollectionAdapter

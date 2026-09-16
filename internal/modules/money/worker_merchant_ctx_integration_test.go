@@ -16,7 +16,7 @@ import (
 
 // #673: InvoiceWorker runs from River with NO merchant in
 // context — before the fix every run died in merchant.Require (ErrNoMerchant)
-// and arrears were never collected, top-ups never happened. These tests run the
+// and arrears were never collected. These tests run the
 // workers exactly as River does (plain context.Background()) and assert real
 // money effects for a seeded merchant.
 

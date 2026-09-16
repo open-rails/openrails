@@ -130,6 +130,7 @@ func TestSelfService_PermissionlessPrincipalReachesMountedSelfRoutes(t *testing.
 		{"balance", http.MethodGet, "/v1/me/balance"},
 		{"tier", http.MethodGet, "/v1/me/tier?group=premium"},
 		{"transactions", http.MethodGet, "/v1/me/transactions"},
+		{"collection-payment-method", http.MethodPut, "/v1/me/collection-payment-method"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

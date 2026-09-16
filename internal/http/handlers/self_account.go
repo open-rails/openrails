@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -8,12 +9,14 @@ import (
 	"github.com/google/uuid"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // Self-service money surface: the authenticated merchant_subject reads its own
-// balance and transaction history.
+// balance and transaction history and chooses its invoice collection method.
 //
 // The payer is resolved exactly like the rest of /v1/me
 // (identity.CustomerIDFromString over the acting subject — see
@@ -62,6 +65,55 @@ func GetMyBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(selfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})
+}
+
+type collectionPaymentMethodRequest struct {
+	Currency        string `json:"currency"`
+	PaymentMethodID string `json:"payment_method_id"`
+}
+
+type collectionPaymentMethodResponse struct {
+	Currency        string `json:"currency"`
+	PaymentMethodID string `json:"payment_method_id"`
+}
+
+// SetMyCollectionPaymentMethod (PUT .../collection-payment-method) selects the
+// payer's saved method for automatic invoice collection in one currency.
+func SetMyCollectionPaymentMethod(r *httprequest.Request) {
+	payer, ok := selfAccountPayer(r)
+	if !ok {
+		return
+	}
+	var req collectionPaymentMethodRequest
+	if !r.BindJSON(&req) {
+		return
+	}
+	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	if !ok {
+		return
+	}
+	methodID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
+		return
+	}
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	if err := svc.SetInvoiceCollectionPaymentMethod(r.Request.Context(), payer, currency, methodID); err != nil {
+		switch {
+		case errors.Is(err, money.ErrCollectionPaymentMethodInvalid):
+			r.ErrorJSON(http.StatusBadRequest, "payment method is not eligible for invoice collection")
+		case errors.Is(err, money.ErrBillingUnitRequired), strings.Contains(err.Error(), "unknown currency"):
+			r.ErrorJSON(http.StatusBadRequest, err.Error())
+		default:
+			r.ErrorJSON(http.StatusInternalServerError, "failed to set collection payment method")
+		}
+		return
+	}
+	r.SuccessJSON(collectionPaymentMethodResponse{Currency: currency, PaymentMethodID: api.FormatPaymentMethodID(methodID)})
 }
 
 // GetMyAccountTransactions (GET /v1/me/transactions?currency=&limit=&offset=)

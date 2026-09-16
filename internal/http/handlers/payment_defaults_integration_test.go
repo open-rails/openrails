@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -57,6 +58,20 @@ func readDefaultMethods(t *testing.T, fx *findingsFixture, customer uuid.UUID, h
 	return out
 }
 
+func setDefaultMethodHTTP(t *testing.T, fx *findingsFixture, customer uuid.UUID, currency, methodID string) (int, map[string]string) {
+	t.Helper()
+	body := `{"currency":"` + currency + `","payment_method_id":"` + methodID + `"}`
+	req := httptest.NewRequest(http.MethodPut, "/v1/me/collection-payment-method", strings.NewReader(body)).WithContext(fx.ctx)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	hr := httprequest.NewHTTP(rec, req, fx.rt)
+	hr.SetUserContext(billingauth.UserContext{UserID: customer.String()})
+	SetMyCollectionPaymentMethod(hr)
+	out := map[string]string{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &out)
+	return rec.Code, out
+}
+
 func TestSavedMethodCollectionDefaultsAreCurrencyAndCustomerScoped(t *testing.T) {
 	fx := newPaymentDefaultsFixture(t)
 	payer := identity.CustomerID(fx.customer)
@@ -68,13 +83,20 @@ func TestSavedMethodCollectionDefaultsAreCurrencyAndCustomerScoped(t *testing.T)
 	}
 	subID := fx.seedActiveSubscription("provider-default-" + uuid.NewString())
 	fx.exec(`UPDATE openrails.subscriptions SET payment_method_id=$1 WHERE id=$2`, subscriptionMethod.ID, subID)
-	require.NoError(t, fx.rt.MoneyService.SetInvoiceCollectionPaymentMethod(fx.ctx, payer, "USD", usd.ID))
-	require.NoError(t, fx.rt.MoneyService.SetInvoiceCollectionPaymentMethod(fx.ctx, payer, "EUR", eur.ID))
+	code, body := setDefaultMethodHTTP(t, fx, fx.customer, "usd", api.FormatPaymentMethodID(usd.ID))
+	require.Equal(t, http.StatusOK, code, body)
+	require.Equal(t, map[string]string{"currency": "USD", "payment_method_id": api.FormatPaymentMethodID(usd.ID)}, body)
+	code, body = setDefaultMethodHTTP(t, fx, fx.customer, "EUR", eur.ID.String())
+	require.Equal(t, http.StatusOK, code, body)
 	otherCustomer := uuid.New()
 	fx.exec(`INSERT INTO openrails.customers(id,merchant_id) VALUES($1,$2)`, otherCustomer, fx.merchant)
 	other := seedDefaultMethod(t, fx, otherCustomer)
 	require.NoError(t, fx.rt.MoneyService.SetInvoiceCollectionPaymentMethod(fx.ctx, identity.CustomerID(otherCustomer), "JPY", other.ID))
 	require.ErrorIs(t, fx.rt.MoneyService.SetInvoiceCollectionPaymentMethod(fx.ctx, payer, "JPY", other.ID), money.ErrCollectionPaymentMethodInvalid)
+	code, body = setDefaultMethodHTTP(t, fx, fx.customer, "JPY", api.FormatPaymentMethodID(other.ID))
+	require.Equal(t, http.StatusBadRequest, code, "another customer's method is refused over HTTP: %v", body)
+	code, _ = setDefaultMethodHTTP(t, fx, fx.customer, "USD", "not-a-method")
+	require.Equal(t, http.StatusBadRequest, code)
 	for _, handler := range []func(*httprequest.Request){ListPaymentMethods, GetAdminUserPaymentMethods, GetAdminUserBillingProfile} {
 		got := readDefaultMethods(t, fx, fx.customer, handler)
 		require.Len(t, got, 3)
@@ -90,6 +112,8 @@ func TestSavedMethodCollectionDefaultsAreCurrencyAndCustomerScoped(t *testing.T)
 	require.NoError(t, foreign.rt.MoneyService.SetInvoiceCollectionPaymentMethod(foreign.ctx, identity.CustomerID(foreign.customer), "USD", foreignMethod.ID))
 	require.Empty(t, readDefaultMethods(t, fx, foreign.customer, ListPaymentMethods))
 	require.ErrorIs(t, fx.rt.MoneyService.SetInvoiceCollectionPaymentMethod(fx.ctx, payer, "USD", foreignMethod.ID), money.ErrCollectionPaymentMethodInvalid)
+	code, _ = setDefaultMethodHTTP(t, fx, fx.customer, "USD", api.FormatPaymentMethodID(foreignMethod.ID))
+	require.Equal(t, http.StatusBadRequest, code, "another merchant's method is refused over HTTP")
 	// Use the real local delete used by durable provider-delete finalization.
 	// Its FK must clear USD without touching EUR or the provider subscription.
 	require.NoError(t, fx.rt.PaymentMethodService.Delete(fx.ctx, usd.ID))

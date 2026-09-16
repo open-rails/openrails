@@ -202,9 +202,11 @@ POST /v1/platform/merchants/{id}/restore
 POST /v1/solana/recurring/enroll
 POST /v1/webhooks/{provider}
 POST /v1/webhooks/{provider}/{account_id}
+PUT /v1/customers/{customer_id}/collection-payment-method
 PUT /v1/customers/{customer_id}/payment-methods/{id}
 PUT /v1/customers/{customer_id}/spend-delegations
 PUT /v1/customers/{customer_id}/spend-delegations:upsert
+PUT /v1/me/collection-payment-method
 PUT /v1/me/payment-methods/{id}
 PUT /v1/me/subscriptions/{id}/payment-method
 PUT /v1/merchant/api-host

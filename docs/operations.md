@@ -605,7 +605,7 @@ in any mode):
 | Card/vault save, tier change, resume, refund | yes | yes | no |
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
-| Auto-top-ups, arrears collection, Solana pulls | yes | no | no |
+| Invoice collection, Solana pulls | yes | no | no |
 | Catalog provider-object writes (`push-merchant-catalog`) | yes | deferred | deferred |
 | Provider reads (query APIs, catalog verification) | yes | yes | yes |
 | Webhook ingestion + local serving | yes | yes | yes |

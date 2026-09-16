@@ -28,7 +28,7 @@ func wirePinStripeRails() railresolve.FixedSet {
 	}
 }
 
-// TestStripeCollectInvoice_WirePinsCentsAmount: an arrears/topup charge of
+// TestStripeCollectInvoice_WirePinsCentsAmount: an arrears collection charge of
 // 19_990_000 micros reaches this adapter as Cents(1999) and MUST hit the wire
 // as amount=1999 on POST /v1/invoiceitems — never 19990000 (micros) and never
 // 19 (major units).

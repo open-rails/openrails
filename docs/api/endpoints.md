@@ -112,6 +112,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 |---|---|---|
 | GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (amounts in micros). Query: `currency` |
 | GET | `/v1/me/transactions` | Ledger transactions, newest first. Query: `currency`, `limit`, `offset` |
+| PUT | `/v1/me/collection-payment-method` | Choose the saved method for automatic invoice collection in one currency. Body: `currency`, `payment_method_id`. The method must belong to the payer and support saved-method charges; otherwise `400` |
 | GET | `/v1/me/status` | Aggregated premium status: `has_active_subscription`, enriched `subscription`, `next_renewal_at`, `entitlements` |
 | GET | `/v1/me/usage` | Usage breakdown for the token's subject |
 | GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The payer's admin view of every delegation it granted stays on `GET /v1/customers/{id}/spend-delegations` |
@@ -172,15 +173,14 @@ Saved-method lists and merchant customer profiles include
 `collection_default_currencies` on each method that is the current invoice
 collection choice for those billing currencies (for example, `["EUR", "USD"]`).
 An absent or empty list indicates no collection-default badge for that method.
-This reads the existing policy: an explicit invoice collection method wins;
-otherwise the configured top-up method remains the existing fallback. It does
-not change provider-managed subscription defaults or select a checkout method.
+Only the explicit choice set through `PUT /v1/me/collection-payment-method`
+counts; no other saved method is inferred. It does not change provider-managed
+subscription defaults or select a checkout method.
 
 The admin payment-method card labels each currency separately. Refresh payment
 methods invalidates both the customer profile and saved-method query caches.
 Completed customer-initiated deletion removes the local method and clears its
-settings references through foreign keys; when an explicit choice is removed,
-an existing top-up fallback can become the displayed collection choice.
+collection choice through foreign keys; no replacement method is selected.
 
 ### Checkout (delegated)
 
@@ -217,6 +217,7 @@ merchant-admin principal (`merchant:*`) on top of the `customer:*` grants.
 | GET | `/v1/customers/{customer_id}/payments` | `customer:balance:read` |
 | GET | `/v1/customers/{customer_id}/invoices` | `customer:balance:read` |
 | GET | `/v1/customers/{customer_id}/invoices/{id}` | `customer:balance:read` |
+| PUT | `/v1/customers/{customer_id}/collection-payment-method` | `customer:billing:update` — invoice collection method per currency |
 | GET/POST | `/v1/customers/{customer_id}/payment-methods` | `customer:payment-methods:update` |
 | PUT/DELETE | `/v1/customers/{customer_id}/payment-methods/{id}` | `customer:payment-methods:update` |
 | POST | `/v1/customers/{customer_id}/billing-portal` | `customer:payment-methods:update` (Stripe rail only) |

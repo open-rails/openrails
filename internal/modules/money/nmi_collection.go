@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// NMICollectionAdapter collects invoices and top-ups from NMI customer
+// NMICollectionAdapter collects invoices from NMI customer
 // vault payment methods through the #297 charge seam: every collection is a
 // merchant-initiated unscheduled credential-on-file charge carrying the
 // instrument's stored-credential replay reference.

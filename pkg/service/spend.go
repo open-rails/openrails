@@ -457,7 +457,7 @@ func (s *Service) GetCreditLimit(ctx context.Context, payer identity.CustomerID,
 }
 
 // GetCreditAccountSettings returns a payer's stored account settings
-// (billing mode prepaid|arrears and expiry default) for the
+// (billing mode, credit limit and collection method) for the
 // customer billing-account admin surface (issue #242). RLS-scoped.
 func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	ctx, release, pinErr := s.pin(ctx)

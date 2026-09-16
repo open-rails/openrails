@@ -72,6 +72,7 @@ GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gate
 GET  /v1/me/invoices[/:id]                itemized statements
 GET  /v1/me/payments                      one-off payment history
 GET  /v1/me/entitlements/active           active entitlements
+PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}: invoice collection method
 GET  /v1/me/subscriptions[/:id]           own subscriptions (enriched with product/price)
 POST /v1/me/subscriptions/:id/cancel      body {"feedback": "..."} → 202 {"status":"queued"}
 POST /v1/me/subscriptions/:id/resume      cancelled Stripe subscriptions → 202
@@ -290,7 +291,7 @@ own slug/id addresses the merchant's treasury and additionally requires `merchan
 |---|---|
 | none | `/v1/me/*` as the token's own subject |
 | `customer:balance:read` | read balance, transactions, usage, payments, invoices |
-| `customer:billing:update` | set billing mode and spend caps (`PUT .../settings`) |
+| `customer:billing:update` | choose the invoice collection method (`PUT .../collection-payment-method`) |
 | `customer:payment-methods:update` | manage payment methods + billing portal |
 | `customer:checkout:create` | pre-pay / load credits (`POST .../checkout`) |
 | `customer:spend-delegations:read` | read the spend-delegation policy |

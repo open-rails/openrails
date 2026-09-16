@@ -52,6 +52,7 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	// Customer money self-service.
 	group.Handle(http.MethodGet, "/balance", h(httphandlers.GetMyBalance))
 	group.Handle(http.MethodGet, "/transactions", h(httphandlers.GetMyAccountTransactions))
+	group.Handle(http.MethodPut, "/collection-payment-method", h(httphandlers.SetMyCollectionPaymentMethod))
 	group.Handle(http.MethodGet, "/status", h(httphandlers.GetMyBillingStatus))
 
 	// Usage breakdown (#289) + invoices (#303), scoped to the token's subject.
@@ -157,6 +158,12 @@ func RegisterCustomerTreasuryRoutes(rr router.Router, rt *app.Runtime, delegated
 	group.Handle(http.MethodGet, "/:customer_id/payments", h(httphandlers.GetUserPayments), read)
 	group.Handle(http.MethodGet, "/:customer_id/invoices", h(httphandlers.GetMyInvoices), read)
 	group.Handle(http.MethodGet, "/:customer_id/invoices/:id", h(httphandlers.GetMyInvoice), read)
+
+	// Choose the payer's automatic invoice collection method per currency.
+	group.Handle(http.MethodPut, "/:customer_id/collection-payment-method",
+		h(httphandlers.SetMyCollectionPaymentMethod),
+		middleware.RequirePermission(controlplane.PermCustomerBillingUpdate),
+	)
 
 	// Manage the payer's saved payment methods and optional provider portal.
 	pmPerm := middleware.RequirePermission(controlplane.PermCustomerPaymentMethodsUpdate)

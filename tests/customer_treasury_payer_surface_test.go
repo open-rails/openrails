@@ -126,6 +126,14 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 		require.Equal(t, http.StatusOK, resp.status, "GET %s: %s", p, resp.body)
 	}
 
+	// --- PUT collection-payment-method: gated by customer:billing:update and
+	// refuses a method the customer payer does not own. ---
+	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/collection-payment-method"), map[string]any{
+		"currency": currency, "payment_method_id": uuid.NewString(),
+	})
+	require.Equal(t, http.StatusBadRequest, resp.status, resp.body)
+	require.Contains(t, resp.body, "not eligible for invoice collection")
+
 	// --- PUT + GET spend-delegations: the customer's balance-sharing policy. ---
 	invoker := uuid.NewString()
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/spend-delegations"), map[string]any{
@@ -157,6 +165,7 @@ func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 		method, path string
 		body         any
 	}{
+		{http.MethodPut, "/collection-payment-method", map[string]any{"currency": "USD", "payment_method_id": uuid.NewString()}},
 		{http.MethodGet, "/payment-methods", nil},
 		{http.MethodPost, "/checkout", map[string]any{"payment": map[string]any{"rail": "stripe"}}},
 		{http.MethodPut, "/spend-delegations", map[string]any{"delegations": []any{}}},
