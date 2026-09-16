@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -31,13 +32,13 @@ func (h *hookCharger) Prepare(_ context.Context, req money.ChargeRequest) (money
 	}), nil
 }
 
-// TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment proves the
-// #674 hardening: the live operation pointer refuses API mutations, but if the
-// invoice is still mutated under the operation between the successful provider
-// charge and the snapshot CAS (0 rows), the charge is NEVER silently dropped —
-// a settled invoice_payments row and the owed_payment ledger transfer are
-// recorded (unapplied to amount_due) for repair.
-func TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment(t *testing.T) {
+// TestChargeOutstanding_MutatedInvoiceUnderLiveOperationFailsClosed: the live
+// operation pointer refuses every API mutation, so only raw surgery can change
+// an invoice between the successful provider charge and its settlement. When
+// that happens the charge is NEVER dropped and NEVER applied blindly: nothing
+// is written, the receipt stays on the operation, the invoice keeps pointing
+// at it (no further collection) and an operator must repair it.
+func TestChargeOutstanding_MutatedInvoiceUnderLiveOperationFailsClosed(t *testing.T) {
 	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
 	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
@@ -60,34 +61,38 @@ func TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment(t *testin
 	runner := collectionRunner(dbi, ch, nil)
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
-	require.Equal(t, 1, n, "the provider charge happened and must be counted")
+	require.Zero(t, n)
 	require.Len(t, ch.charges, 1)
 	op := latestCollectionIntent(t, pool, ctx, inv.ID)
 	require.Equal(t, op.ID.String(), ch.charges[0].IdempotencyKey, "provider identity = the durable operation, not the mutable amount snapshot")
-	key := "invoice_collection:" + inv.ID.String() + ":attempt:0"
-	require.Equal(t, key, op.IdempotencyKey)
+	require.Equal(t, "invoice_collection:"+inv.ID.String()+":attempt:0", op.IdempotencyKey)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
+	require.Contains(t, string(op.ResultEvidence), "tx_"+op.ID.String(), "the receipt is retained")
+	require.Contains(t, *op.LastFailureReason, "needs repair")
 
 	var settled int
-	var recorded int64
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*), COALESCE(SUM(amount), 0)::bigint
-		FROM openrails.invoice_payments
-		WHERE invoice_id = $1 AND status = 'settled'`, inv.ID).Scan(&settled, &recorded))
-	require.Equal(t, 1, settled, "CAS miss after a successful charge must still record the payment")
-	require.Equal(t, int64(5_000_000), recorded)
-
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, inv.ID).Scan(&settled))
+	require.Zero(t, settled, "nothing is recorded against an invoice that no longer matches the frozen snapshot")
 	var transfers int
-	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM openrails.ledger_transfers
-		WHERE customer_id = $1 AND transfer_type = 'owed_payment'
-		  AND source = 'invoice_charge' AND source_id = $2`, payer.UUID(), key).Scan(&transfers))
-	require.Equal(t, 1, transfers)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id = $1 AND transfer_type = 'owed_payment'`, payer.UUID()).Scan(&transfers))
+	require.Zero(t, transfers)
+	var pointer *uuid.UUID
+	require.NoError(t, pool.QueryRow(ctx, `SELECT collection_intent_id FROM openrails.invoices WHERE id = $1`, inv.ID).Scan(&pointer))
+	require.NotNil(t, pointer, "the invoice stays claimed until an operator repairs it")
+	require.Equal(t, op.ID, *pointer)
 
+	// Neither the verifier nor the sweep moves money: the verifier re-derives
+	// the same repair need, the sweep sees a claimed invoice.
+	dueNow(t, pool, ctx, op.ID)
+	_, err = runner.RunVerifyOnce(ctx)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, pool, ctx, inv.ID).Status)
 	n, err = svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
-	require.Equal(t, 0, n)
+	require.Zero(t, n)
 	require.Len(t, ch.charges, 1)
+	_, err = runner.Resolve(ctx, op.ID, intents.Resolution{ProviderReference: "tx_" + op.ID.String(), Actor: "ops", Reason: "portal"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected, "a retained receipt is the verifier's, not re-resolvable")
 }
 
 // TestChargeOutstanding_AttemptKeyAdvancesAfterRecordedAttempt proves the durable
