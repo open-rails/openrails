@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/stretchr/testify/require"
@@ -48,15 +49,16 @@ func (fx *upgradeAdoptFixture) positiveProration() {
 
 func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
+	ddl := dbtest.SharedSuperuserPGXPool(t)
 	fx.positiveProration()
 	fx.newProduct.EntitlementsSpec = map[string]*int{"upgraded_access": nil}
 	// Reject only this successor insert, after the old-subscription UPDATE.
 	// The failed transaction must preserve old access and all provider receipts.
 	constraint := "test_upgrade_" + fx.newPrice.ID.String()[:8]
-	_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE openrails.subscriptions ADD CONSTRAINT %s CHECK (price_id <> '%s'::uuid)`, constraint, fx.newPrice.ID))
+	_, err := ddl.Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE openrails.subscriptions ADD CONSTRAINT %s CHECK (price_id <> '%s'::uuid)`, constraint, fx.newPrice.ID))
 	require.NoError(t, err)
 	remove := func() {
-		_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `ALTER TABLE openrails.subscriptions DROP CONSTRAINT IF EXISTS `+constraint)
+		_, err := ddl.Exec(fx.ctx, `ALTER TABLE openrails.subscriptions DROP CONSTRAINT IF EXISTS `+constraint)
 		require.NoError(t, err)
 	}
 	t.Cleanup(remove)
@@ -92,7 +94,7 @@ func TestUpgradeReceiptsRestartAfterLocalRollback(t *testing.T) {
 	require.NoError(t, err)
 	var payload NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(result.Payload, &payload))
-	require.Equal(t, payload.PeriodEnd, *next.CurrentPeriodEndsAt)
+	require.True(t, payload.PeriodEnd.Equal(*next.CurrentPeriodEndsAt), "recovered period preserves the frozen instant")
 	var amount int64
 	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT count(*),min(amount) FROM openrails.payments WHERE subscription_id=$1`, next.ID).Scan(&count, &amount))
 	require.Equal(t, 1, count)
@@ -159,6 +161,7 @@ func TestUpgradeDefinitiveProrationRefusalQueuesSuccessorCancellation(t *testing
 
 func TestUpgradeSuccessorReceiptResumesOnlyUnsentProration(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
+	ddl := dbtest.SharedSuperuserPGXPool(t)
 	fx.positiveProration()
 	runner := fx.svc.Intents.(*intents.Runner)
 	runner.Registry = intents.NewRegistry() // a worker rolling to the new handler
@@ -166,10 +169,10 @@ func TestUpgradeSuccessorReceiptResumesOnlyUnsentProration(t *testing.T) {
 	require.ErrorIs(t, err, ErrCheckoutProcessing)
 	in := fx.operation(t)
 	constraint := "test_step_" + in.ID.String()[:8]
-	_, err = fx.db.Qx(fx.ctx).Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE openrails.rail_intents ADD CONSTRAINT %s CHECK (id <> '%s'::uuid OR NOT (coalesce(result_evidence,'{}') ? 'proration'))`, constraint, in.ID))
+	_, err = ddl.Exec(fx.ctx, fmt.Sprintf(`ALTER TABLE openrails.rail_intents ADD CONSTRAINT %s CHECK (id <> '%s'::uuid OR NOT (coalesce(result_evidence,'{}') ? 'proration'))`, constraint, in.ID))
 	require.NoError(t, err)
 	remove := func() {
-		_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `ALTER TABLE openrails.rail_intents DROP CONSTRAINT IF EXISTS `+constraint)
+		_, err := ddl.Exec(fx.ctx, `ALTER TABLE openrails.rail_intents DROP CONSTRAINT IF EXISTS `+constraint)
 		require.NoError(t, err)
 	}
 	t.Cleanup(remove)
