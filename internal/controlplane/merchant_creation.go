@@ -23,6 +23,19 @@ import (
 // in-process check does not evaluate.
 var ErrMerchantSlugReserved = errors.New("controlplane: merchant slug is reserved")
 
+// ReservedMerchantSlugs is the deployment's reserved namespace:
+// merchant.ReservedHostedSlugs plus MerchantCreationConfig.ReservedSlugs.
+func (c *ControlPlane) ReservedMerchantSlugs() []string {
+	out := make([]string, 0, len(merchant.ReservedHostedSlugs))
+	out = append(out, merchant.ReservedHostedSlugs...)
+	if c != nil && c.merchantCreation != nil {
+		for _, r := range c.merchantCreation.ReservedSlugs {
+			out = append(out, merchant.NormalizeSlug(r))
+		}
+	}
+	return out
+}
+
 // ErrMerchantCreationRefused is the typed refusal from the deployment's
 // admission (cost) gate — the ak#263 WithInstanceAdmission seam.
 var ErrMerchantCreationRefused = errors.New("controlplane: merchant creation refused")
@@ -39,13 +52,8 @@ func (c *ControlPlane) EnforceMerchantCreationPolicy(ctx context.Context, slug, 
 		return nil
 	}
 	slug = merchant.NormalizeSlug(slug)
-	for _, r := range merchant.ReservedHostedSlugs {
+	for _, r := range c.ReservedMerchantSlugs() {
 		if slug == r {
-			return fmt.Errorf("%w: %q", ErrMerchantSlugReserved, slug)
-		}
-	}
-	for _, r := range c.merchantCreation.ReservedSlugs {
-		if slug == strings.ToLower(strings.TrimSpace(r)) {
 			return fmt.Errorf("%w: %q", ErrMerchantSlugReserved, slug)
 		}
 	}

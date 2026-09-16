@@ -172,23 +172,32 @@ still runs the full gate.
 
 Typed refusals: `embcp.ErrEmailUnverified`, `embcp.ErrVaultedPaymentMethodRequired`.
 
-### Dormant-merchant sweep (never-used names go back in the pool)
+### Merchant retirement (never-used names go back in the pool)
 
-`embcp.SweepDormantMerchants(ctx, app, cfg)` runs one pass of the or#914
-dormancy policy: merchants past `cfg.TTL` with NO provider, money, catalog or
-customers (probed per merchant under `MerchantTx`) are warned in
-`openrails.merchant_dormancy_notices`; once a notice is older than
-`cfg.WarningLead`, an ARMED pass (`cfg.Armed`, default off = dry run) locks
-and rechecks the merchant, then commits its billing tombstone and retirement
-marker before deleting the captured group UUID with `ReleaseSlug: true`.
-Incomplete group deletion is retried by UUID on the next pass, so it cannot delete
-a new claimant of the released name. Committed retirement and committed merchant
-purge cannot be restored. Notices withdraw on any
-activity. Host wiring: run it on a cadence (openrails-saas: a River worker),
-arm it behind the host's own destructive setting, and deliver the warning to
-the owner if a sender exists — the persisted notice row is the watermark
-either way. Reserved slugs and merchants without a group binding are never
-swept.
+Core provides the mechanism; dormancy policy (warning cadence, notice state,
+arming) belongs to the host. openrails-saas owns its hosted policy and notices.
+
+- `embcp.ListMerchantRetirementCandidates(ctx, app, req)` pages live,
+  group-bound merchants created before `req.CreatedBefore`, oldest first,
+  excluding reserved slugs (`merchant.ReservedHostedSlugs` plus
+  `MerchantCreationConfig.ReservedSlugs`). Each candidate carries `Used`, probed
+  under the merchant's own RLS scope.
+- `embcp.RetireUnusedMerchant(ctx, app, merchantID, groupID)` locks the merchant
+  row, refuses a missing/retired merchant, a different group UUID, a reserved
+  slug or any activity, and otherwise commits the irreversible tombstone before
+  deleting exactly that AuthKit group with `ReleaseSlug: true`. Refusals are
+  returned in the result.
+- `embcp.CompletePendingMerchantRetirements(ctx, app, limit)` retries committed
+  retirements whose group release failed, by UUID, so a released name reclaimed
+  in between is never deleted.
+
+Activity is any customer (and everything owned through customers), payment or
+subscription history including tombstones, ledger account, provider connection
+(PSP, custodian, stored secret, applied webhook, rail intent), undelivered host
+event, outbound webhook or catalog definition. Every blocker references the
+merchant row, so the retirement lock serializes concurrent writes. Retired
+merchants cannot be restored. Self-hosted deployments need no host state to use
+these operations.
 
 ## Merchant manifest anatomy
 

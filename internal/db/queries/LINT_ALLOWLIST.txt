@@ -39,7 +39,6 @@ DEBT internal/reconcile/declared_import.go
 DEBT internal/controlplane/api_key.go
 DEBT internal/controlplane/customer.go
 DEBT internal/merchants/delete.go
-DEBT internal/merchants/dormancy.go
 DEBT internal/merchants/group_resolution.go
 DEBT internal/merchants/host_config.go
 DEBT internal/merchants/lifecycle.go

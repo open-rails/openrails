@@ -6,7 +6,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -17,20 +16,13 @@ import (
 	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
-// TestMerchantCreationPolicyAndDormancySweep is the or#914 items-3+5 proof,
-// end-to-end over the exported host surface against real Postgres + the real
-// in-process authkit core:
-//
-//   - item 3: MerchantCreationAdmission — verified email always; a free
-//     allowance of OWNED merchants; beyond it a vaulted payment method (via
-//     the host seam / SubjectHasVaultedPaymentMethod over openrails' own
-//     vault) unlocks more;
-//   - item 5: SweepDormantMerchants — never-used merchants past TTL are
-//     warned in openrails.merchant_dormancy_notices, active/young/reserved
-//     merchants are untouched, an armed pass past the lead deletes the group
-//     WITH the slug released plus a directory soft-delete, and a merchant
-//     that regains activity has its notice withdrawn.
-func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
+// TestMerchantCreationPolicy is the or#914 item-3 proof, end-to-end over the
+// exported host surface against real Postgres + the real in-process authkit
+// core: MerchantCreationAdmission requires a verified email always, allows a
+// free allowance of OWNED merchants, and beyond it requires a vaulted payment
+// method (via the host seam / SubjectHasVaultedPaymentMethod over openrails'
+// own vault).
+func TestMerchantCreationPolicy(t *testing.T) {
 	ctx := context.Background()
 	dsn := dbtest.SharedPostgresDSN(t)
 	cfg := hostedTestConfig(t, dsn, "https://or914b.openrails.test")
@@ -169,120 +161,5 @@ func TestMerchantCreationPolicyAndDormancySweep(t *testing.T) {
 		has, err = embcp.SubjectHasVaultedPaymentMethod(ctx, e.App(), vaultMerchant, subject)
 		require.NoError(t, err)
 		require.False(t, has, "a parked method is not a usable card on file")
-	})
-
-	t.Run("item 5: warn, hold, delete-with-release, withdraw", func(t *testing.T) {
-		owner, err := core.CreateUser(ctx, "dorm-"+sfx+"@example.test", "dorm"+sfx)
-		require.NoError(t, err)
-		vaulted[owner.ID] = true
-		_, err = pool.Exec(ctx, `UPDATE profiles.users SET email_verified = true WHERE id = $1::uuid`, owner.ID)
-		require.NoError(t, err)
-
-		mk := func(slug string) embcp.ProvisionMerchantResult {
-			t.Helper()
-			res, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{Slug: slug})
-			require.NoError(t, err)
-			return *res
-		}
-		backdate := func(id string, d time.Duration) {
-			t.Helper()
-			_, err := pool.Exec(ctx,
-				`UPDATE openrails.merchants SET created_at = now() - make_interval(hours => $2) WHERE id = $1::uuid`,
-				id, int(d.Hours()))
-			require.NoError(t, err)
-		}
-
-		neverUsed := mk("dorm-a-" + sfx)
-		young := mk("dorm-b-" + sfx)
-		active := mk("dorm-c-" + sfx)
-		regains := mk("dorm-d-" + sfx)
-		ttl := 30 * 24 * time.Hour
-		backdate(neverUsed.MerchantID.String(), ttl+24*time.Hour)
-		backdate(active.MerchantID.String(), ttl+24*time.Hour)
-		backdate(regains.MerchantID.String(), ttl+24*time.Hour)
-		_ = young // stays at now(): under TTL
-		// "active" has a customer — ANY setup/usage disqualifies.
-		seedScoped(t, active.MerchantID.String(),
-			`INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1::uuid, 'test', $2)`,
-			active.MerchantID.String(), uuid.NewString())
-
-		noticeCount := func(merchantID string) int {
-			t.Helper()
-			tx, err := pool.Begin(ctx)
-			require.NoError(t, err)
-			defer func() { _ = tx.Rollback(ctx) }()
-			_, err = tx.Exec(ctx, `SELECT set_config('app.merchant_id', $1, true)`, merchantID)
-			require.NoError(t, err)
-			var n int
-			require.NoError(t, tx.QueryRow(ctx,
-				`SELECT count(*) FROM openrails.merchant_dormancy_notices WHERE merchant_id = $1::uuid`,
-				merchantID).Scan(&n))
-			return n
-		}
-
-		cfgSweep := embcp.DormancySweepConfig{TTL: ttl, WarningLead: 7 * 24 * time.Hour}
-		res, err := embcp.SweepDormantMerchants(ctx, e.App(), cfgSweep)
-		require.NoError(t, err)
-		require.GreaterOrEqual(t, res.Warned, 2, "neverUsed + regains get first warnings")
-		require.Equal(t, 0, res.Deleted)
-		require.GreaterOrEqual(t, res.SkippedActive, 1, "the merchant with a customer is not dormant")
-
-		require.Equal(t, 1, noticeCount(neverUsed.MerchantID.String()))
-		require.Equal(t, 1, noticeCount(regains.MerchantID.String()))
-		require.Equal(t, 0, noticeCount(young.MerchantID.String()))
-		require.Equal(t, 0, noticeCount(active.MerchantID.String()))
-
-		// Lead not served: even an ARMED pass deletes nothing.
-		res, err = embcp.SweepDormantMerchants(ctx, e.App(), embcp.DormancySweepConfig{
-			TTL: ttl, WarningLead: cfgSweep.WarningLead, Armed: true,
-		})
-		require.NoError(t, err)
-		require.Equal(t, 0, res.Deleted)
-
-		// Serve the lead; an UNARMED pass still only reports would-delete.
-		seedScoped(t, neverUsed.MerchantID.String(),
-			`UPDATE openrails.merchant_dormancy_notices SET first_warned_at = now() - interval '8 days'
-			  WHERE merchant_id = $1::uuid`, neverUsed.MerchantID.String())
-		res, err = embcp.SweepDormantMerchants(ctx, e.App(), cfgSweep)
-		require.NoError(t, err)
-		require.Equal(t, 0, res.Deleted)
-		require.GreaterOrEqual(t, res.WouldDelete, 1)
-
-		// "regains" shows activity -> its notice is withdrawn.
-		seedScoped(t, regains.MerchantID.String(),
-			`INSERT INTO openrails.customers (merchant_id, issuer, id) VALUES ($1::uuid, 'test', $2)`,
-			regains.MerchantID.String(), uuid.NewString())
-
-		// ARMED: neverUsed is deleted — group gone, slug RELEASED, row
-		// soft-deleted, notice cleaned; regains' notice withdrawn.
-		res, err = embcp.SweepDormantMerchants(ctx, e.App(), embcp.DormancySweepConfig{
-			TTL: ttl, WarningLead: cfgSweep.WarningLead, Armed: true,
-		})
-		require.NoError(t, err)
-		require.Equal(t, 1, res.Deleted)
-		require.GreaterOrEqual(t, res.Withdrawn, 1)
-
-		_, err = core.GroupInstanceForSlug(ctx, embcp.MerchantGroup("dorm-a-"+sfx))
-		require.ErrorIs(t, err, authkit.ErrGroupNotFound, "released, not tombstoned")
-		var status string
-		var deleted bool
-		require.NoError(t, pool.QueryRow(ctx,
-			`SELECT status, deleted_at IS NOT NULL FROM openrails.merchants WHERE id = $1::uuid`,
-			neverUsed.MerchantID.String()).Scan(&status, &deleted))
-		require.Equal(t, "deleted", status)
-		require.True(t, deleted)
-		require.Equal(t, 0, noticeCount(neverUsed.MerchantID.String()))
-
-		// The released name is claimable again, as a NEW merchant.
-		re, err := embcp.ProvisionMerchant(ctx, e.App(), embcp.ProvisionMerchantRequest{
-			Slug: "dorm-a-" + sfx, OwnerUserID: owner.ID,
-		})
-		require.NoError(t, err)
-		require.True(t, re.Created)
-		require.NotEqual(t, neverUsed.MerchantID.String(), re.MerchantID.String())
-
-		// Config discipline: a non-positive TTL/lead refuses the pass.
-		_, err = embcp.SweepDormantMerchants(ctx, e.App(), embcp.DormancySweepConfig{TTL: 0, WarningLead: time.Hour})
-		require.Error(t, err)
 	})
 }
