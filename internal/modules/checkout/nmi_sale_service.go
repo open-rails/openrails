@@ -180,11 +180,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		if createdPaymentMethod && resolvedMethod != nil && s.RailPaymentMethodService != nil {
 			_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 		}
-		reason := "payment failed"
-		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
-			reason = "payment failed: " + *intent.LastFailureReason
-		}
-		failErr := errors.New(reason)
+		failErr := terminalCheckoutError(intent, "payment failed")
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, failErr)
 		return nil, failErr
 	default:

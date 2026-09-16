@@ -914,7 +914,10 @@ func (s *CheckoutSessionService) validateNMIInput(ctx context.Context, payment *
 			return fmt.Errorf("%w: payment method service unavailable", ErrCheckoutSessionValidation)
 		}
 		if err := s.paymentMethodService.ValidateOwnership(ctx, pmID, user.ID); err != nil {
-			return fmt.Errorf("%w: payment method not authorized", ErrCheckoutSessionValidation)
+			if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) || errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied) {
+				return fmt.Errorf("%w: %w", ErrPaymentMethodStale, err)
+			}
+			return fmt.Errorf("validate payment method ownership: %w", err)
 		}
 	}
 	return nil
