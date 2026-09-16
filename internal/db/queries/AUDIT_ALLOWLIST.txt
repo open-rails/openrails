@@ -55,7 +55,6 @@ unbounded-many CountOpenCatalogDriftByKind                 # or#837 scan of all 
 unbounded-many ListStuckRailIntents                        # or#837 scan of all live intents
 unbounded-many ListWebhookExpectedRails                    # or#837 aggregate over all live subscriptions
 unbounded-many ListMoneyAccountPairs                       # or#837 aggregate over all ledger transfers
-unbounded-many ListBelowThresholdMoneyAccounts             # or#837 scan of all ledger accounts
 unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all open invoices
 
 # Unbounded fan-out: the caller's list is bounded, each element's row set is not.
