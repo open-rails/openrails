@@ -163,7 +163,8 @@ func TestInvoiceCollection_NMIReceiptRequiresExactReadToMatch(t *testing.T) {
 }
 
 // TestInvoiceCollection_SettledReceiptIsUniquePerMerchant: the schema refuses
-// a second settled attempt naming the same provider transaction.
+// a second settled attempt naming the same provider transaction on the same
+// account (off-rail manual references stay free to repeat across customers).
 func TestInvoiceCollection_SettledReceiptIsUniquePerMerchant(t *testing.T) {
 	e := newCollectionEnv(t, string(models.RailNMI))
 	charger := &fakeCharger{}
