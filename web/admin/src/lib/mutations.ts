@@ -283,7 +283,7 @@ export const adminMutations = {
         reason,
         revokeAccess,
       }: {
-        amount: number
+        amount: string
         reason: string
         revokeAccess: boolean
       }) => refundPayment(paymentId, amount, reason, revokeAccess),

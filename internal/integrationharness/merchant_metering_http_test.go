@@ -104,7 +104,7 @@ func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
 		"price": map[string]any{
 			"model":    pricing.ModelPerUnit,
 			"currency": "USD",
-			"per_unit": map[string]any{"unit_amount": 25},
+			"per_unit": map[string]any{"unit_amount": "25"},
 		},
 	}
 	missingProduct := cloneJSONMap(t, rateCard)
@@ -135,7 +135,7 @@ VALUES ($1, $2)`, customerID, dbtest.TestMerchantID.UUID())
 		"price": map[string]any{
 			"model":    pricing.ModelPerUnit,
 			"currency": "USD",
-			"per_unit": map[string]any{"unit_amount": 20},
+			"per_unit": map[string]any{"unit_amount": "20"},
 		},
 	})
 	require.Equal(t, http.StatusOK, status, string(body))

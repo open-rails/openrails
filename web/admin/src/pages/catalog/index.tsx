@@ -690,7 +690,7 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
     },
     onSubmit: async ({ value }) => {
       const unitAmount = nativeAmountFromInput(value.amount, value.currency)
-      if (unitAmount === null || unitAmount <= 0) return
+      if (unitAmount === null || BigInt(unitAmount) <= 0n) return
       try {
         await createPrice.mutateAsync({
           product_id: value.productId,
@@ -780,10 +780,12 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                   validators={{
                     onBlurListenTo: ["currency"],
                     onBlur: ({ value, fieldApi }) =>
-                      (nativeAmountFromInput(
-                        value,
-                        fieldApi.form.getFieldValue("currency")
-                      ) ?? 0) > 0
+                      BigInt(
+                        nativeAmountFromInput(
+                          value,
+                          fieldApi.form.getFieldValue("currency")
+                        ) ?? "0"
+                      ) > 0n
                         ? undefined
                         : "Enter an amount greater than zero",
                   }}
@@ -912,7 +914,7 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                   disabled={
                     isSubmitting ||
                     !productId ||
-                    (nativeAmountFromInput(amount, currency) ?? 0) <= 0
+                    BigInt(nativeAmountFromInput(amount, currency) ?? "0") <= 0n
                   }
                 >
                   {isSubmitting ? "Creating…" : "Create price"}

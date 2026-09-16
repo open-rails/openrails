@@ -20,8 +20,8 @@ type TierChangeResponse struct {
 	// For Stripe upgrades AmountDueNow is the local Model B estimate (Stripe
 	// finalizes the exact proration on its side), so treat it as approximate.
 	Currency         string     `json:"currency,omitempty"`
-	AmountDueNow     int64      `json:"amount_due_now"`
-	NextChargeAmount int64      `json:"next_charge_amount"`
+	AmountDueNow     int64      `json:"amount_due_now,string"`
+	NextChargeAmount int64      `json:"next_charge_amount,string"`
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
 }
 
@@ -31,8 +31,8 @@ type TierChangePreviewResponse struct {
 	PriceID          string     `json:"price_id"`
 	Rail             string     `json:"rail"`
 	Currency         string     `json:"currency"`
-	AmountDueNow     int64      `json:"amount_due_now"`     // cents charged immediately (0 for downgrade)
-	NextChargeAmount int64      `json:"next_charge_amount"` // cents at next renewal (new plan price)
+	AmountDueNow     int64      `json:"amount_due_now,string"`     // native units charged immediately (0 for downgrade)
+	NextChargeAmount int64      `json:"next_charge_amount,string"` // native units at next renewal (new plan price)
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
 	Effective        string     `json:"effective"`   // "now" (upgrade) | "period_end" (downgrade)
 	IsEstimate       bool       `json:"is_estimate"` // true when the rail finalizes the exact amount (Stripe upgrades)

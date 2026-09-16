@@ -15,11 +15,11 @@ export interface CopilotEvidence {
 export interface CreatePriceDraft {
   product_id: string
   key: string
-  unit_amount: number
+  unit_amount: string
   currency: string
   access_duration_hours?: number
   auto_renew: boolean
-  trial_unit_amount?: number
+  trial_unit_amount?: string
   trial_duration_hours?: number
   providers?: string[]
 }
@@ -33,8 +33,8 @@ export interface PriceChangeDraft {
   draft_id: string
   drafted_by: string
   price_key: string
-  current_amount: number
-  new_amount: number
+  current_amount: string
+  new_amount: string
   currency: string
   direction: "increase" | "decrease" | "unchanged"
   migration_mode: "grandfather" | "migrate"

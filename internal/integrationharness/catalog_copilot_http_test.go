@@ -261,7 +261,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 				CreatePrice   struct {
 					ProductID  string `json:"product_id"`
 					Key        string `json:"key"`
-					UnitAmount int64  `json:"unit_amount"`
+					UnitAmount int64  `json:"unit_amount,string"`
 					Currency   string `json:"currency"`
 				} `json:"create_price"`
 			} `json:"price_change"`
@@ -285,7 +285,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		status, priceBody := requestJSON(t, http.MethodGet, draftSurface.BaseURL+"/v1/merchant/catalog/prices/by-key/"+incPriceKey, draftToken, nil)
 		require.Equal(t, http.StatusOK, status)
 		var live struct {
-			UnitAmount int64 `json:"unit_amount"`
+			UnitAmount int64 `json:"unit_amount,string"`
 		}
 		require.NoError(t, json.Unmarshal(priceBody, &live))
 		require.EqualValues(t, 10_000_000, live.UnitAmount, "drafting must never mutate the live price")

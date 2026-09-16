@@ -35,7 +35,7 @@ const price = (
   key: id,
   product_id: productId,
   archived,
-  unit_amount: 10_000_000,
+  unit_amount: "10000000",
   currency,
   auto_renew: autoRenew,
   created_at: "2026-01-01T00:00:00Z",
@@ -93,7 +93,7 @@ describe("tierChangeOptions", () => {
       price: {
         ...price("pro-monthly", "pro"),
         access_duration_hours: 720,
-        unit_amount: 20_000_000,
+        unit_amount: "20000000",
       },
     }
 
@@ -120,10 +120,7 @@ describe("adminTierChangeBlockReason", () => {
       { status: "cancelled" as const },
       "Only active or past-due subscriptions can change tier",
     ],
-    [
-      { scheduledPriceId: "price-next" },
-      "A tier change is already scheduled",
-    ],
+    [{ scheduledPriceId: "price-next" }, "A tier change is already scheduled"],
     [{ hasPendingReprice: true }, "A price change is already scheduled"],
     [{ rail: "ccbill" }, "CCBill tier changes require customer self-service"],
     [
@@ -131,6 +128,8 @@ describe("adminTierChangeBlockReason", () => {
       "Solana tier changes require the customer's wallet signature",
     ],
   ])("blocks unavailable admin workflows", (override, reason) => {
-    expect(adminTierChangeBlockReason({ ...available, ...override })).toBe(reason)
+    expect(adminTierChangeBlockReason({ ...available, ...override })).toBe(
+      reason
+    )
   })
 })

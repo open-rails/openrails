@@ -98,7 +98,7 @@ export function PriceChangeWizard({
     defaultValues: priceChangeFormValues(price, draft),
     onSubmit: async ({ value }) => {
       const newAmount = nativeAmountFromInput(value.amountInput, price.currency)
-      if (!newAmount || newAmount <= 0) return
+      if (newAmount === null || BigInt(newAmount) <= 0n) return
 
       try {
         const created = await changePrice.mutateAsync({
@@ -282,7 +282,7 @@ export function PriceChangeWizard({
                               value,
                               price.currency
                             )
-                            if (!amount || amount <= 0) {
+                            if (amount === null || BigInt(amount) <= 0n) {
                               return "Enter an amount greater than zero."
                             }
                             return undefined
@@ -468,7 +468,7 @@ export function PriceChangeWizard({
                         disabled={
                           !values.amountInput ||
                           direction === "unchanged" ||
-                          newAmount <= 0
+                          BigInt(newAmount) <= 0n
                         }
                         onClick={enterStep2}
                       >
