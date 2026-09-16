@@ -16,9 +16,9 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/pricing"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {

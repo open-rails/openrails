@@ -11,16 +11,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // or#868 B2: AccrueOwed and the metered-rating watermark opened `s.db.RunInTx`
 // under the comment "Privileged (no-GUC) transaction with explicit merchant_id
 // predicates". There is no privileged pool. They worked ONLY where an HTTP
 // request had already pinned a merchant connection (MerchantDBConnMW) and
-// pgxBegin inherited its session GUC. Off that path — pkg/service.FinalizeInvoice,
+// pgxBegin inherited its session GUC. Off that path — internal/service.FinalizeInvoice,
 // MoneyService.SweepUsage, and both embedded seams, which hosts call directly —
 // the transaction carried no app.merchant_id and the INSERTs were denied 42501,
 // so metered/arrears billing was inoperable on the embedded seam.

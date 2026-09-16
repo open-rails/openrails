@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	authkit "github.com/open-rails/authkit"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -22,10 +23,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	embcp "github.com/open-rails/openrails/internal/operator"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
 

@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // SpendgatePolicyLoader resolves policy and delegation windows inside the
@@ -66,7 +66,7 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 // spend the payer's money without an explicit grant" guarantee.
 //
 // ONE HOME. The admit path (Load) and the invoker's own spend-window read
-// (pkg/service.InvokerSpendWindows, or#930) resolve the same windows here, so a
+// (internal/service.InvokerSpendWindows, or#930) resolve the same windows here, so a
 // user can never be shown a window the gate does not enforce, or denied on one
 // it does not show.
 //

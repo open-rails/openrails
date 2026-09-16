@@ -11,7 +11,7 @@ import (
 // matrix pricing, allowances) and the #639/#640 variable credit-purchase shape,
 // plus their validation. The pure charge-model engine and the declarative price
 // types live in the leaf package pkg/pricing, so internal/modules/money can share
-// them without an import cycle through pkg/service. The aliases below keep the
+// them without an import cycle through internal/service. The aliases below keep the
 // catalog API stable.
 //
 // Naming follows OpenMeter's catalog vocabulary (value_property, group_by,

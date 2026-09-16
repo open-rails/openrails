@@ -13,8 +13,8 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	manifest "github.com/open-rails/openrails/pkg/catalog"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
 
