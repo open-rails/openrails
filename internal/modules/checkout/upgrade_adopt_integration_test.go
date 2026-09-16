@@ -242,7 +242,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	newPrice := &models.Price{
 		ID: newPriceID, ProductID: newProductID, Amount: 5_000_000, Currency: "USD",
 		AutoRenew: true, AccessDurationHours: &hours,
-		PSPLinks: map[string]map[string]string{"nmi": {models.RailKeyRail: "nmi", models.RailKeyPlanID: planID, models.RailKeyPSPID: pspID.String()}},
+		PSPLinks: map[string]map[string]string{"nmi": {models.RailKeyRail: "nmi", models.RailKeyPlanID: planID, "psp_id": pspID.String()}},
 	}
 	newProduct := &models.Product{ID: newProductID, Key: "upg-new-" + sfx, DisplayName: "Upgrade New"}
 
