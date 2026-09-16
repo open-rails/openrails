@@ -74,7 +74,7 @@ func TestServiceAdmit_HTTP_EndToEnd(t *testing.T) {
 		return map[string]any{
 			"customer_id": payerID.String(), "invoker": "user:a", "invoker_type": "payer",
 			"currency": money.DefaultCurrency, "estimated_amount": strconv.FormatInt(amount, 10), "request_id": reqID,
-			"expires_at": time.Now().Add(time.Hour).Unix(),
+			"expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano),
 		}
 	}
 	type admitResp struct {

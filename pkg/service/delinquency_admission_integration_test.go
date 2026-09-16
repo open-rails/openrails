@@ -40,8 +40,8 @@ func TestAdmitRefusesADelinquentPayerWithItsOwnDenyCode(t *testing.T) {
 	admitted, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 1_000_000,
-		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
-		SourceID:      uuid.NewString(), Source: "usage",
+		ExpiresAt: time.Now().Add(time.Hour),
+		SourceID:  uuid.NewString(), Source: "usage",
 	})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed, "a funded payer with no overdue debt is admitted")
@@ -54,8 +54,8 @@ func TestAdmitRefusesADelinquentPayerWithItsOwnDenyCode(t *testing.T) {
 	admitted, err = svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 1_000_000,
-		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
-		SourceID:      uuid.NewString(), Source: "usage",
+		ExpiresAt: time.Now().Add(time.Hour),
+		SourceID:  uuid.NewString(), Source: "usage",
 	})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed, "an unevaluated payer is admitted; the gate does not improvise a cutoff")
@@ -69,8 +69,8 @@ func TestAdmitRefusesADelinquentPayerWithItsOwnDenyCode(t *testing.T) {
 	denied, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 1_000_000,
-		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
-		SourceID:      uuid.NewString(), Source: "usage",
+		ExpiresAt: time.Now().Add(time.Hour),
+		SourceID:  uuid.NewString(), Source: "usage",
 	})
 	require.NoError(t, err)
 	require.False(t, denied.Allowed, "past grace, new spend is refused — that is what stops the bill growing")
@@ -92,8 +92,8 @@ func TestAdmitRefusesADelinquentPayerWithItsOwnDenyCode(t *testing.T) {
 	admitted, err = svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 1_000_000,
-		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
-		SourceID:      uuid.NewString(), Source: "usage",
+		ExpiresAt: time.Now().Add(time.Hour),
+		SourceID:  uuid.NewString(), Source: "usage",
 	})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed, "a customer who has settled must be spending again")
@@ -158,8 +158,8 @@ func TestAdmitRefusesWhenOutstandingOwedEatsTheCreditLine(t *testing.T) {
 	admitted, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 1_000_000,
-		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
-		SourceID:      uuid.NewString(), Source: "usage",
+		ExpiresAt: time.Now().Add(time.Hour),
+		SourceID:  uuid.NewString(), Source: "usage",
 	})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed)
@@ -177,8 +177,8 @@ func TestAdmitRefusesWhenOutstandingOwedEatsTheCreditLine(t *testing.T) {
 	denied, err := svc.Admit(ctx, billingservice.AdmitInput{
 		CustomerID: payer, Invoker: "user:" + payer.UUID().String(), InvokerType: "payer",
 		Currency: money.DefaultCurrency, EstimatedAmount: 1_000_000,
-		ExpiresAtUnix: time.Now().Add(time.Hour).Unix(),
-		SourceID:      uuid.NewString(), Source: "usage",
+		ExpiresAt: time.Now().Add(time.Hour),
+		SourceID:  uuid.NewString(), Source: "usage",
 	})
 	require.NoError(t, err)
 	require.False(t, denied.Allowed, "unpaid arrears past the credit line must refuse new spend")

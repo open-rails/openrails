@@ -1450,11 +1450,11 @@ func paymentMethodFromModel(pm *models.PaymentMethod) PaymentMethod {
 		pspID = pm.PspID.String()
 	}
 	result := PaymentMethod{
-		ID:      api.FormatPaymentMethodID(pm.ID),
-		Type:    "card",
-		Rail:    string(pm.Rail),
-		PSPID:   pspID,
-		Created: api.ToUnix(pm.CreatedAt),
+		ID:        api.FormatPaymentMethodID(pm.ID),
+		Type:      "card",
+		Rail:      string(pm.Rail),
+		PSPID:     pspID,
+		CreatedAt: pm.CreatedAt,
 	}
 	if pm.LastFour != nil || pm.CardType != nil {
 		result.Card = &CardDetails{
@@ -1485,17 +1485,15 @@ func notificationFromModel(n *models.NotificationQueue) Notification {
 
 func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *CheckoutSession {
 	result := &CheckoutSession{
-		ID:       resp.ID,
-		Status:   resp.Status,
-		Mode:     resp.Mode,
-		PriceID:  resp.PriceID,
-		Amount:   resp.Amount,
-		Currency: resp.Currency,
-		Created:  resp.CreatedAt.Unix(),
-		Metadata: resp.Metadata,
-	}
-	if resp.ExpiresAt != nil {
-		result.ExpiresAt = resp.ExpiresAt.Unix()
+		ID:        resp.ID,
+		Status:    resp.Status,
+		Mode:      resp.Mode,
+		PriceID:   resp.PriceID,
+		Amount:    resp.Amount,
+		Currency:  resp.Currency,
+		CreatedAt: resp.CreatedAt,
+		ExpiresAt: resp.ExpiresAt,
+		Metadata:  resp.Metadata,
 	}
 	if resp.PaymentID != nil {
 		result.PaymentID = resp.PaymentID

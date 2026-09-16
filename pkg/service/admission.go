@@ -45,14 +45,14 @@ type AdmitInput struct {
 	AccrualRateDeltaPerHour int64
 	Source                  string
 	SourceID                string
-	// ExpiresAtUnix is the deadline of the job this admit covers — REQUIRED
-	// when EstimatedAmount places a hold; the hold lives exactly that long
-	// unless captured, released or extended.
-	ExpiresAtUnix int64
+	// ExpiresAt is the deadline of the job this admit covers — REQUIRED when
+	// EstimatedAmount places a hold; the hold lives exactly that long unless
+	// captured, released or extended. Zero declares none.
+	ExpiresAt time.Time
 }
 
 // ErrHoldDeadlineRequired is returned by Admit when EstimatedAmount places a
-// hold and no ExpiresAtUnix was declared.
+// hold and no ExpiresAt was declared.
 var ErrHoldDeadlineRequired = admission.ErrHoldDeadlineRequired
 
 // ErrHoldDeadlinePassed is returned by Admit/ExtendHold when the declared
@@ -117,10 +117,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	// default of ours (xs-007 row 33): the Admitter refuses a hold that
 	// declares none (ErrHoldDeadlineRequired). A job that outlives its
 	// estimate re-declares through ExtendHold.
-	var exp time.Time
-	if in.ExpiresAtUnix > 0 {
-		exp = time.Unix(in.ExpiresAtUnix, 0).UTC()
-	}
+	exp := in.ExpiresAt.UTC()
 	source := in.Source
 	if source == "" {
 		source = "admit"

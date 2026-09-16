@@ -1228,8 +1228,8 @@ func exampleUsageRateCardCount(m catalog.Manifest) int {
 
 // holdDeadline is the declared deadline every hold-placing admit must carry
 // (xs-007 row 33): an hour from now, as a job would declare.
-func holdDeadline() *int64 {
-	v := time.Now().Add(time.Hour).Unix()
+func holdDeadline() *time.Time {
+	v := time.Now().Add(time.Hour)
 	return &v
 }
 
