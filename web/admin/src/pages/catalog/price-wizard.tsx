@@ -20,7 +20,11 @@ import { Label } from "@/components/ui/label"
 import type { PriceChangeDraft } from "@/lib/api/copilot"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import type { CatalogPrice } from "@/lib/api/types"
-import { formatMicros, microsFromInput } from "@/lib/format"
+import {
+  formatNativeAmount,
+  nativeAmountFromInput,
+  nativeAmountToInput,
+} from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
@@ -42,7 +46,10 @@ const priceChangeFormValues = (
   price: CatalogPrice,
   draft?: PriceChangeDraft
 ) => ({
-  amountInput: String((draft?.new_amount ?? price.unit_amount) / 1_000_000),
+  amountInput: nativeAmountToInput(
+    draft?.new_amount ?? price.unit_amount,
+    price.currency
+  ),
   mode: (draft?.migration_mode ?? "grandfather") as MigrationMode,
   effectiveAt: draft?.reprice
     ? toDateInputValue(new Date(draft.reprice.effective_at))
@@ -90,7 +97,7 @@ export function PriceChangeWizard({
   const form = useForm({
     defaultValues: priceChangeFormValues(price, draft),
     onSubmit: async ({ value }) => {
-      const newAmount = microsFromInput(value.amountInput)
+      const newAmount = nativeAmountFromInput(value.amountInput, price.currency)
       if (!newAmount || newAmount <= 0) return
 
       try {
@@ -148,7 +155,10 @@ export function PriceChangeWizard({
   }
 
   const enterStep2 = () => {
-    const amount = microsFromInput(form.state.values.amountInput)
+    const amount = nativeAmountFromInput(
+      form.state.values.amountInput,
+      price.currency
+    )
     const direction = detectDirection(
       amount ?? price.unit_amount,
       price.unit_amount
@@ -207,7 +217,8 @@ export function PriceChangeWizard({
           >
             {([values, isSubmitting]) => {
               const newAmount =
-                microsFromInput(values.amountInput) ?? price.unit_amount
+                nativeAmountFromInput(values.amountInput, price.currency) ??
+                price.unit_amount
               const direction = detectDirection(newAmount, price.unit_amount)
               const minDate = minEffectiveDate(direction, now, noticeWindowDays)
               const dateValid =
@@ -247,7 +258,10 @@ export function PriceChangeWizard({
                             Current amount
                           </p>
                           <p className="font-medium">
-                            {formatMicros(price.unit_amount, price.currency)}
+                            {formatNativeAmount(
+                              price.unit_amount,
+                              price.currency
+                            )}
                           </p>
                         </div>
                         <div>
@@ -264,7 +278,10 @@ export function PriceChangeWizard({
                         name="amountInput"
                         validators={{
                           onBlur: ({ value }) => {
-                            const amount = microsFromInput(value)
+                            const amount = nativeAmountFromInput(
+                              value,
+                              price.currency
+                            )
                             if (!amount || amount <= 0) {
                               return "Enter an amount greater than zero."
                             }

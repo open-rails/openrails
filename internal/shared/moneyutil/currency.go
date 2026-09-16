@@ -2,6 +2,7 @@ package moneyutil
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -73,6 +74,32 @@ func CurrencyCodes() []string {
 	return out
 }
 
+// FormatAmount renders native units exactly at the currency's registered scale,
+// trimming trailing zeros down to the rail minor unit: "19.99 USD",
+// "0.000001 USD", "500 JPY". An unregistered currency is named, never scaled.
+func FormatAmount(amount int64, currency string) string {
+	cur, ok := LookupCurrency(currency)
+	if !ok {
+		return fmt.Sprintf("%d units of unregistered currency %q", amount, currency)
+	}
+	whole, fraction, _ := strings.Cut(formatDecimal(amount, pow10(cur.Decimals), cur.Decimals), ".")
+	digits := min(max(len(strings.TrimRight(fraction, "0")), cur.MinorDecimals), cur.Decimals)
+	if digits > 0 {
+		whole += "." + fraction[:digits]
+	}
+	return whole + " " + cur.Code
+}
+
+// DescribeNativeScales lists native units per major unit for prose (LLM
+// prompts): "EUR 1000000, JPY 10000, USD 1000000".
+func DescribeNativeScales() string {
+	parts := make([]string, 0, len(currencies))
+	for _, code := range CurrencyCodes() {
+		parts = append(parts, fmt.Sprintf("%s %d", code, pow10(currencies[code].Decimals)))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // NativeToRailMinor is THE internal->provider amount converter (#671): it
 // converts an internal native amount (10^Decimals units per major unit) into
 // the provider/rail minor unit (10^MinorDecimals per major unit — cents for
@@ -89,9 +116,14 @@ func NativeToRailMinor(currency string, amount int64) (Cents, error) {
 		return 0, nil
 	}
 	if div < 0 {
-		return Cents(amount * -div), nil
+		value, err := multiplyNative(amount, -div)
+		return Cents(value), err
 	}
-	return Cents((amount + div - 1) / div), nil
+	quotient := amount / div
+	if amount%div != 0 {
+		quotient++
+	}
+	return Cents(quotient), nil
 }
 
 // NativeToRailMinorExact is NativeToRailMinor's no-rounding sibling: the
@@ -106,7 +138,8 @@ func NativeToRailMinorExact(currency string, amount int64) (Cents, error) {
 		return 0, err
 	}
 	if div < 0 {
-		return Cents(amount * -div), nil
+		value, err := multiplyNative(amount, -div)
+		return Cents(value), err
 	}
 	if amount%div != 0 {
 		return 0, fmt.Errorf("amount %d internal units is not representable in %s %s",
@@ -125,7 +158,7 @@ func RailMinorToNative(currency string, minor Cents) (int64, error) {
 	if div < 0 {
 		return int64(minor) / -div, nil
 	}
-	return int64(minor) * div, nil
+	return multiplyNative(int64(minor), div)
 }
 
 // minorUnitName names a currency's rail minor unit for error messages: "whole
@@ -147,12 +180,27 @@ func nativeDivisor(currency string) (int64, error) {
 		return 0, fmt.Errorf("money: unknown currency %q", currency)
 	}
 	shift := cur.NativeShift()
-	pow := int64(1)
-	for range max(shift, -shift) {
-		pow *= 10
-	}
+	pow := pow10(max(shift, -shift))
 	if shift < 0 {
 		return -pow, nil
 	}
 	return pow, nil
+}
+
+func pow10(n int) int64 {
+	pow := int64(1)
+	for range n {
+		pow *= 10
+	}
+	return pow
+}
+
+func multiplyNative(amount, factor int64) (int64, error) {
+	if factor <= 0 {
+		return 0, fmt.Errorf("invalid currency scale factor")
+	}
+	if amount > math.MaxInt64/factor || amount < math.MinInt64/factor {
+		return 0, fmt.Errorf("money amount exceeds int64 precision")
+	}
+	return amount * factor, nil
 }

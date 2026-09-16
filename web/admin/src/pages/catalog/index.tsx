@@ -49,10 +49,12 @@ import { getBootstrap } from "@/lib/api/client"
 import { DIALOG_FORM, DIALOG_WIDE } from "@/lib/dialog-width"
 import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import {
+  currencyScale,
   formatDate,
-  formatMicros,
-  microsFromInput,
+  formatNativeAmount,
+  nativeAmountFromInput,
   shortId,
+  supportedCurrencies,
 } from "@/lib/format"
 import { toastApiError } from "@/lib/toast"
 import { adminMutations } from "@/lib/mutations"
@@ -628,7 +630,7 @@ function PriceRow({
       </TableCell>
       <TableCell className="font-medium">{productName}</TableCell>
       <TableCell className="tabular-nums">
-        {formatMicros(price.unit_amount, price.currency)}
+        {formatNativeAmount(price.unit_amount, price.currency)}
       </TableCell>
       <TableCell>{priceIntervalLabel(price)}</TableCell>
       <TableCell>
@@ -687,10 +689,12 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
       autoRenew: false,
     },
     onSubmit: async ({ value }) => {
+      const unitAmount = nativeAmountFromInput(value.amount, value.currency)
+      if (unitAmount === null || unitAmount <= 0) return
       try {
         await createPrice.mutateAsync({
           product_id: value.productId,
-          unit_amount: microsFromInput(value.amount) ?? 0,
+          unit_amount: unitAmount,
           currency: value.currency,
           ...(value.durationHours
             ? { access_duration_hours: Number(value.durationHours) }
@@ -774,8 +778,12 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                 <form.Field
                   name="amount"
                   validators={{
-                    onBlur: ({ value }) =>
-                      microsFromInput(value)
+                    onBlurListenTo: ["currency"],
+                    onBlur: ({ value, fieldApi }) =>
+                      (nativeAmountFromInput(
+                        value,
+                        fieldApi.form.getFieldValue("currency")
+                      ) ?? 0) > 0
                         ? undefined
                         : "Enter an amount greater than zero",
                   }}
@@ -798,7 +806,15 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                     </div>
                   )}
                 </form.Field>
-                <form.Field name="currency">
+                <form.Field
+                  name="currency"
+                  validators={{
+                    onChange: ({ value }) =>
+                      currencyScale(value) === undefined
+                        ? `Use ${supportedCurrencies.join(", ")}`
+                        : undefined,
+                  }}
+                >
                   {(field) => (
                     <Input
                       id="pr-cur"
@@ -885,15 +901,18 @@ function PriceDialog({ products }: { products: CatalogProduct[] }) {
                 [
                   state.values.productId,
                   state.values.amount,
+                  state.values.currency,
                   state.isSubmitting,
                 ] as const
               }
             >
-              {([productId, amount, isSubmitting]) => (
+              {([productId, amount, currency, isSubmitting]) => (
                 <Button
                   type="submit"
                   disabled={
-                    isSubmitting || !productId || !microsFromInput(amount)
+                    isSubmitting ||
+                    !productId ||
+                    (nativeAmountFromInput(amount, currency) ?? 0) <= 0
                   }
                 >
                   {isSubmitting ? "Creating…" : "Create price"}

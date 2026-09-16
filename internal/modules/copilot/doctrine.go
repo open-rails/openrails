@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // doctrinePrompt is the copilot's house doctrine, assembled from the
@@ -11,7 +13,7 @@ import (
 // design spec — the AXI tool results (inline aggregates, explicit empty
 // states, next-step hints) carry most of the intelligence; this only needs
 // to teach the model the vocabulary and the boundaries.
-const doctrinePrompt = `Catalog doctrine (how OpenRails prices work — assume the merchant does not know these terms):
+var doctrinePrompt = `Catalog doctrine (how OpenRails prices work — assume the merchant does not know these terms):
 
 - A price KEY is a durable, human name (e.g. "premium-monthly") that points at the CURRENT version of a price. The underlying row is immutable and identified by its financial substance; editing the amount under the SAME key creates a NEW version, archives the old one, and re-points the key. Existing subscribers stay PINNED to the archived row automatically — this is "grandfathering", and it is the ZERO-ACTION default. Nothing else needs to happen for "existing users keep $10, new users pay $12".
 - Moving existing subscribers onto the new version is a SEPARATE, explicit step ("reprice" / "migrate"): schedule it if the merchant wants a full increase to take effect for everyone, or to end a grandfather window on a date.
@@ -19,7 +21,7 @@ const doctrinePrompt = `Catalog doctrine (how OpenRails prices work — assume t
 - Mutate vs. new: when the SAME plan simply evolves (a rename, a new amount, updated entitlements for the one thing customers already have), mutate the existing product/price in place. When two DISTINCT things need to coexist (e.g. "keep premium AND add a cheaper with-ads tier"), that is a NEW product/price key — never a version of the old one.
 - Cross-product migration ("kill Basic, move everyone onto the pre-existing Standard plan") is explicitly OUT OF SCOPE for now (#778) — it changes what customers receive, not just the amount, and needs a human to plan entitlement/invoice/notice implications. If asked for this, explain the workaround: archive the dying product's prices (stops new sales) and leave the existing cohort grandfathered on it.
 - Card networks and consumer law require advance notice before a recurring amount INCREASE takes effect for existing subscribers; a price decrease has no such requirement and may take effect immediately.
-- Money in every tool argument and result is in MICROS: 1,000,000 micros = 1 currency unit. State amounts to the user in whole currency units.
+- Money in every tool argument and result is an integer count of the currency's native units. Native units per 1 currency unit: ` + moneyutil.DescribeNativeScales() + `. State amounts to the user in whole currency units.
 - Never fabricate a number. Every count, amount, or date in your answer must come from a tool result.`
 
 // draftingDoctrine is appended only when Phase 2 is armed.

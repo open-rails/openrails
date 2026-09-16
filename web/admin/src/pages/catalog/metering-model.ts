@@ -10,7 +10,13 @@ import type {
   DefaultUsageRateCardRequest,
   UsageMeterRequest,
 } from "@/lib/api/endpoints"
-import { formatMicros, microsFromInput } from "@/lib/format"
+import {
+  currencyScale,
+  formatNativeAmount,
+  nativeAmountFromInput,
+  nativeAmountToInput,
+  supportedCurrencies,
+} from "@/lib/format"
 
 export interface KeyValueRow {
   key: string
@@ -161,20 +167,21 @@ export function rateCardFormValues(
     : allowance?.included !== undefined
       ? "included"
       : "none"
+  const currency = price?.currency ?? "USD"
   return {
     productId: card?.product_id ?? "",
     model: price?.model ?? "per_unit",
-    currency: price?.currency ?? "USD",
-    unitAmount: microsToInput(price?.per_unit?.unit_amount),
+    currency,
+    unitAmount: moneyToInput(currency, price?.per_unit?.unit_amount),
     divideBy: integerToInput(price?.per_unit?.divide_by, "1"),
     round: price?.per_unit?.round ?? "half_up",
-    maximumAmount: microsToInput(price?.per_unit?.maximum_amount),
+    maximumAmount: moneyToInput(currency, price?.per_unit?.maximum_amount),
     matrixEnabled: Boolean(matrix),
     matrixDimension: matrix?.dimension ?? "",
     matrixCells: Object.entries(matrix?.cells ?? {}).map(([key, cell]) => ({
       key,
-      unitAmount: microsToInput(cell.unit_amount),
-      maximumAmount: microsToInput(cell.maximum_amount),
+      unitAmount: moneyToInput(currency, cell.unit_amount),
+      maximumAmount: moneyToInput(currency, cell.maximum_amount),
       included: integerToInput(cell.included),
     })),
     tierMode: price?.tiered?.mode ?? "graduated",
@@ -182,10 +189,10 @@ export function rateCardFormValues(
       price?.tiered?.tiers ?? [{ up_to: null, unit_amount: 0, flat_amount: 0 }]
     ).map((tier) => ({
       upTo: tier.up_to === null ? "" : String(tier.up_to),
-      unitAmount: microsToInput(tier.unit_amount),
-      flatAmount: microsToInput(tier.flat_amount),
+      unitAmount: moneyToInput(currency, tier.unit_amount),
+      flatAmount: moneyToInput(currency, tier.flat_amount),
     })),
-    packageAmount: microsToInput(price?.package?.amount),
+    packageAmount: moneyToInput(currency, price?.package?.amount),
     packageSize: integerToInput(price?.package?.package_size, "1"),
     freeUnits: integerToInput(price?.package?.free_units),
     filters: Object.entries(card?.filter ?? {}).map(([key, values]) => ({
@@ -215,8 +222,11 @@ export function buildRateCardRequest(
 ): DefaultUsageRateCardRequest {
   if (!values.productId) rateCardError("rate-product", "Select a product.")
   const currency = values.currency.trim().toUpperCase()
-  if (!/^[A-Z]{3}$/.test(currency)) {
-    rateCardError("rate-currency", "Enter a three-letter ISO currency.")
+  if (currencyScale(currency) === undefined) {
+    rateCardError(
+      "rate-currency",
+      `Use a supported currency: ${supportedCurrencies.join(", ")}.`
+    )
   }
 
   const price = buildPrice(values, currency)
@@ -249,6 +259,7 @@ function buildPrice(
       "rate-divide-by"
     )
     const maximumAmount = optionalMoney(
+      currency,
       values.maximumAmount,
       "Maximum amount",
       "rate-maximum"
@@ -281,18 +292,21 @@ function buildPrice(
         }
         cells[key] = {
           unit_amount: requiredMoney(
+            currency,
             row.unitAmount,
             `Price for ${key}`,
             `${fieldPrefix}-unit-price`,
             true
           ),
           ...(optionalMoney(
+            currency,
             row.maximumAmount,
             `Maximum for ${key}`,
             `${fieldPrefix}-maximum`
           ) > 0
             ? {
                 maximum_amount: optionalMoney(
+                  currency,
                   row.maximumAmount,
                   `Maximum for ${key}`,
                   `${fieldPrefix}-maximum`
@@ -330,6 +344,7 @@ function buildPrice(
       currency,
       per_unit: {
         unit_amount: requiredMoney(
+          currency,
           values.unitAmount,
           "Unit price",
           "rate-unit-amount",
@@ -370,12 +385,14 @@ function buildPrice(
               `tier-${index}-limit`
             ),
         unit_amount: requiredMoney(
+          currency,
           row.unitAmount,
           `Tier ${index + 1} unit price`,
           `tier-${index}-unit-price`,
           true
         ),
         flat_amount: optionalMoney(
+          currency,
           row.flatAmount,
           `Tier ${index + 1} flat amount`,
           `tier-${index}-flat-amount`
@@ -399,6 +416,7 @@ function buildPrice(
     currency,
     package: {
       amount: requiredMoney(
+        currency,
         values.packageAmount,
         "Package price",
         "package-amount"
@@ -483,12 +501,13 @@ function filterRowsToMap(rows: KeyValueRow[]): Record<string, string[]> {
 }
 
 function requiredMoney(
+  currency: string,
   value: string,
   label: string,
   fieldId: string,
   allowZero = false
 ): number {
-  const amount = microsFromInput(value)
+  const amount = nativeAmountFromInput(value, currency)
   if (amount === null || amount < 0 || (!allowZero && amount === 0)) {
     rateCardError(
       fieldId,
@@ -498,9 +517,14 @@ function requiredMoney(
   return amount
 }
 
-function optionalMoney(value: string, label: string, fieldId: string): number {
+function optionalMoney(
+  currency: string,
+  value: string,
+  label: string,
+  fieldId: string
+): number {
   if (!value.trim()) return 0
-  return requiredMoney(value, label, fieldId, true)
+  return requiredMoney(currency, value, label, fieldId, true)
 }
 
 function positiveInteger(
@@ -528,9 +552,8 @@ function rateCardError(fieldId: string, message: string): never {
   throw new RateCardFormError(fieldId, message)
 }
 
-function microsToInput(value?: number): string {
-  if (!value) return ""
-  return String(value / 1_000_000)
+function moneyToInput(currency: string, value?: number): string {
+  return value ? nativeAmountToInput(value, currency) : ""
 }
 
 function integerToInput(value?: number, fallback = ""): string {
@@ -544,13 +567,13 @@ export function summarizeRateCard(card?: DefaultUsageRateCard): string {
     if (price.per_unit.matrix) {
       return `${Object.keys(price.per_unit.matrix.cells).length} matrix rates · ${price.currency}`
     }
-    return `${formatMicros(price.per_unit.unit_amount ?? 0, price.currency)} per ${price.per_unit.divide_by || 1} units`
+    return `${formatNativeAmount(price.per_unit.unit_amount ?? 0, price.currency)} per ${price.per_unit.divide_by || 1} units`
   }
   if (price.model === "tiered" && price.tiered) {
     return `${price.tiered.tiers.length} ${price.tiered.mode} tiers · ${price.currency}`
   }
   if (price.model === "package" && price.package) {
-    return `${formatMicros(price.package.amount, price.currency)} per ${price.package.package_size.toLocaleString()} units`
+    return `${formatNativeAmount(price.package.amount, price.currency)} per ${price.package.package_size.toLocaleString()} units`
   }
   return `Unsupported price · ${price.currency}`
 }

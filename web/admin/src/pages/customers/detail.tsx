@@ -44,9 +44,9 @@ import {
 } from "@/components/ui/table"
 import {
   formatDate,
-  formatMicros,
+  formatNativeAmount,
   formatUnits,
-  microsFromInput,
+  nativeAmountFromInput,
   shortId,
 } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -239,7 +239,7 @@ export function CustomerDetailPage() {
                           <StatusBadge status={p.status} />
                         </TableCell>
                         <TableCell className="tabular-nums">
-                          {formatMicros(p.amount, p.currency)}
+                          {formatNativeAmount(p.amount, p.currency)}
                         </TableCell>
                         <TableCell>{p.rail}</TableCell>
                         <TableCell className="tabular-nums">
@@ -785,15 +785,26 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
     ...adminQueries.allPrices(),
     enabled: open,
   })
+  const receivedAmount = (value: string, priceId: string) =>
+    nativeAmountFromInput(
+      value,
+      prices?.items.find((price) => price.id === priceId)?.currency ?? ""
+    )
   const form = useForm({
     defaultValues: { priceId: "", transactionId: "", amount: "" },
     onSubmit: async ({ value }) => {
+      const amount = value.amount
+        ? receivedAmount(value.amount, value.priceId)
+        : undefined
+      if (amount === null || (amount !== undefined && amount < 0)) {
+        toast.error("Enter a non-negative amount in the price's currency")
+        return
+      }
       try {
-        const micros = value.amount ? microsFromInput(value.amount) : null
         const result = await recordPayment.mutateAsync({
           price_id: value.priceId,
           transaction_id: value.transactionId.trim(),
-          ...(micros !== null && value.amount ? { amount: micros } : {}),
+          ...(amount !== undefined ? { amount } : {}),
         })
         toast.success(
           result.status === "exists"
@@ -866,7 +877,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                     <SelectContent>
                       {(prices?.items ?? []).map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          {formatMicros(p.unit_amount, p.currency)}
+                          {formatNativeAmount(p.unit_amount, p.currency)}
                           {p.auto_renew ? " · recurring" : ""} ({shortId(p.id)})
                         </SelectItem>
                       ))}
@@ -908,9 +919,13 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
             <form.Field
               name="amount"
               validators={{
-                onChange: ({ value }) => {
+                onChangeListenTo: ["priceId"],
+                onChange: ({ value, fieldApi }) => {
                   if (!value) return undefined
-                  const amount = microsFromInput(value)
+                  const amount = receivedAmount(
+                    value,
+                    fieldApi.form.getFieldValue("priceId")
+                  )
                   return amount !== null && amount >= 0
                     ? undefined
                     : "Enter a non-negative amount"

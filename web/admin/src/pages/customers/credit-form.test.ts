@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { microsFromInput } from "@/lib/format"
+import { nativeAmountFromInput } from "@/lib/format"
 import type { CreditGrant } from "@/lib/api/credit-types"
 import {
   canRevokeCredit,
@@ -51,9 +51,11 @@ describe("credit grant form", () => {
       description: "support",
       expires_at: undefined,
     })
-    expect(microsFromInput("9007199254.740991")).toBe(Number.MAX_SAFE_INTEGER)
-    expect(microsFromInput(".25")).toBe(250000)
-    expect(microsFromInput("-0.25")).toBe(-250000)
+    expect(nativeAmountFromInput("9007199254.740991", "USD")).toBe(
+      Number.MAX_SAFE_INTEGER
+    )
+    expect(nativeAmountFromInput(".25", "USD")).toBe(250000)
+    expect(nativeAmountFromInput("-0.25", "USD")).toBe(-250000)
   })
   it.each([
     "",

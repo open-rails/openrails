@@ -23,7 +23,13 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { PaymentObject } from "@/lib/api/types"
-import { formatMicros, formatUnix, shortId } from "@/lib/format"
+import {
+  currencyScale,
+  formatNativeAmount,
+  formatUnix,
+  shortId,
+  unitsToDecimal,
+} from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
@@ -36,7 +42,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     header: "Amount",
     cell: ({ row }) => (
       <span className="font-medium tabular-nums">
-        {formatMicros(row.original.amount, row.original.currency)}
+        {formatNativeAmount(row.original.amount, row.original.currency)}
       </span>
     ),
   },
@@ -59,7 +65,10 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     cell: ({ row }) =>
       row.original.amount_refunded ? (
         <span className="text-muted-foreground tabular-nums">
-          {formatMicros(row.original.amount_refunded, row.original.currency)}
+          {formatNativeAmount(
+            row.original.amount_refunded,
+            row.original.currency
+          )}
         </span>
       ) : (
         <span className="text-muted-foreground">—</span>
@@ -74,6 +83,16 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     ),
   },
 ]
+
+// csvAmount exports an exact major-unit decimal; an amount that cannot be
+// represented exactly aborts the export rather than writing a wrong figure.
+function csvAmount(amount: number, currency: string): string {
+  const scale = currencyScale(currency)
+  const decimal = scale === undefined ? null : unitsToDecimal(amount, scale)
+  if (decimal === null)
+    throw new Error(`${currency} amount ${amount} cannot be exported exactly`)
+  return decimal
+}
 
 function csvEscape(v: unknown): string {
   const s = v == null ? "" : String(v)
@@ -147,8 +166,8 @@ export function PaymentsPage() {
           "id",
           "type",
           "status",
-          "amount_micros",
-          "amount_refunded_micros",
+          "amount",
+          "amount_refunded",
           "currency",
           "rail",
           "user",
@@ -160,8 +179,8 @@ export function PaymentsPage() {
             r.id,
             r.object,
             r.status,
-            r.amount,
-            r.amount_refunded,
+            csvAmount(r.amount, r.currency),
+            csvAmount(r.amount_refunded, r.currency),
             r.currency,
             r.rail,
             r.user,

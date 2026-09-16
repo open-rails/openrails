@@ -169,10 +169,10 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		require.Len(t, res.Evidence, 1)
 		require.Equal(t, "list_catalog", res.Evidence[0].Tool)
 		require.Contains(t, res.Evidence[0].Summary, priceKey)
-		require.Contains(t, res.Evidence[0].Summary, "$12.000000 USD")
+		require.Contains(t, res.Evidence[0].Summary, "12.00 USD")
 		// 0 active on the CURRENT ($12) row, 1 grandfathered on the archived
 		// ($10) row — real counts from the seeded subscription above.
-		require.Regexp(t, priceKey+` \| \$12\.000000 USD \| monthly \| 0 \| 1`, res.Evidence[0].Summary)
+		require.Regexp(t, priceKey+` \| 12\.00 USD \| monthly \| 0 \| 1`, res.Evidence[0].Summary)
 	})
 
 	t.Run("price_history is most-recent-first with per-version subscriber counts", func(t *testing.T) {
@@ -183,10 +183,10 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		var res copilotAskResp
 		require.NoError(t, json.Unmarshal(body, &res))
 		summary := res.Evidence[0].Summary
-		require.Contains(t, summary, "$12.000000 USD")
-		require.Contains(t, summary, "$10.000000 USD")
-		twelveIdx := strings.Index(summary, "$12.000000 USD")
-		tenIdx := strings.Index(summary, "$10.000000 USD")
+		require.Contains(t, summary, "12.00 USD")
+		require.Contains(t, summary, "10.00 USD")
+		twelveIdx := strings.Index(summary, "12.00 USD")
+		tenIdx := strings.Index(summary, "10.00 USD")
 		require.Less(t, twelveIdx, tenIdx, "current ($12) must appear before the prior ($10) version")
 	})
 

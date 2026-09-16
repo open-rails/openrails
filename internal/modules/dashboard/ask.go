@@ -13,6 +13,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/modules/metrics"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -258,7 +259,7 @@ Rules:
 - If the schema cannot answer the question, say plainly what is missing (the schema's descriptions state what does not exist) — do not answer with unrelated numbers.
 - You have at most %d queries per question — plan deliberately; prefer one query with a group-by over many single queries.
 - If a tool call returns validation errors, fix ALL of them in the next call.
-- Money values in results are micros (1,000,000 micros = 1 currency unit); state amounts in whole currency units with the currency.
+- Money values (unit "micros") in results are integer native units of their currency, not always millionths. Native units per 1 currency unit: %s. State amounts in whole currency units with the currency.
 - Answer concisely with the numbers you retrieved. The UI shows every query result as a table next to your answer, so summarize and interpret — do not repeat whole tables in prose.`,
-		askToolName, now.Format("2006-01-02"), schemaJSON, askMaxToolCalls)
+		askToolName, now.Format("2006-01-02"), schemaJSON, askMaxToolCalls, moneyutil.DescribeNativeScales())
 }

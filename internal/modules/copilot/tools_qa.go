@@ -128,7 +128,7 @@ func renderCatalogRows(rows []catalogRow) string {
 	table := make([][]string, 0, len(rows))
 	for _, r := range rows {
 		table = append(table, []string{
-			r.ProductKey, r.PriceKey, moneyutil.FormatDisplay(moneyutil.Micros(r.Amount), r.Currency), r.Interval,
+			r.ProductKey, r.PriceKey, moneyutil.FormatAmount(r.Amount, r.Currency), r.Interval,
 			itoa(r.ActiveSubs), itoa(r.Grandfathered),
 		})
 	}
@@ -147,7 +147,7 @@ const toolListCatalog = "list_catalog"
 func toolDefListCatalog() dashboard.ToolDef {
 	return dashboard.ToolDef{
 		Name:        toolListCatalog,
-		Description: "List every active product and its current (live) prices, 3-4 fields each, with the active-subscriber count and grandfathered (still on a prior version) count already computed inline — never call another tool to learn the blast radius of a price. Optionally scope to one product. Amounts are in MICROS (1,000,000 micros = 1 currency unit). Idempotent, safe to retry.",
+		Description: "List every active product and its current (live) prices, 3-4 fields each, with the active-subscriber count and grandfathered (still on a prior version) count already computed inline — never call another tool to learn the blast radius of a price. Optionally scope to one product. Amounts are rendered in whole currency units. Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
 			"type": "object",
 			"properties": {
@@ -235,7 +235,7 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 	lines := []string{
 		fmt.Sprintf("price_key: %s", price.Key),
 		fmt.Sprintf("product: %s (%s)", product.DisplayName, product.Key),
-		fmt.Sprintf("amount: %s", moneyutil.FormatDisplay(moneyutil.Micros(price.Amount), price.Currency)),
+		fmt.Sprintf("amount: %s", moneyutil.FormatAmount(price.Amount, price.Currency)),
 		fmt.Sprintf("interval: %s", priceIntervalLabel(price.AccessDurationHours, price.AutoRenew)),
 		fmt.Sprintf("active_subscribers: %d", active),
 		fmt.Sprintf("grandfathered (on prior versions): %d", grand),
@@ -293,7 +293,7 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 			current = "current"
 		}
 		table = append(table, []string{
-			m.EffectiveAt.Format("2006-01-02"), moneyutil.FormatDisplay(moneyutil.Micros(price.Amount), price.Currency),
+			m.EffectiveAt.Format("2006-01-02"), moneyutil.FormatAmount(price.Amount, price.Currency),
 			current, itoa(active),
 		})
 	}

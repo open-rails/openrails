@@ -44,10 +44,32 @@ describe("invoice console rendering", () => {
     const html = render(<InvoiceDetail invoice={invoice([])} />)
     expect(html).toContain('href="/invoices"')
     expect(html).toContain('href="/customers/customer-1"')
-    expect(html).toContain("12 JPY")
-    expect(html).toContain("10 JPY")
-    expect(html).not.toContain("0.12 JPY")
+    expect(html).toContain("¥12")
+    expect(html).toContain("¥10")
+    expect(html).not.toContain("¥0.12")
     expect(html).not.toContain("Void invoice")
+  })
+  it("renders full int64 invoice amounts without number rounding", () => {
+    const html = render(
+      <InvoiceDetail
+        invoice={{
+          ...invoice([]),
+          currency: "USD",
+          unit_decimals: 6,
+          total_amount: "9223372036854775807",
+          subtotal_amount: "9223372036854775807",
+          amount_paid: "9007199254740993",
+          amount_due: "9214364837600034814",
+          line_items: [
+            { event_type: "usage", amount: "9223372036854775807", count: 1 },
+          ],
+        }}
+      />
+    )
+    expect(html).toContain("$9,223,372,036,854.775807")
+    expect(html).toContain("$9,007,199,254.740993")
+    expect(html).toContain("$9,214,364,837,600.034814")
+    expect(html).not.toContain("exceeds the exact display range")
   })
   it("renders only the actions returned for the permission and state", () => {
     const html = render(

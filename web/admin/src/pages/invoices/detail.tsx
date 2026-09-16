@@ -166,11 +166,7 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
               <CardTitle>{label}</CardTitle>
             </CardHeader>
             <CardContent className="text-xl">
-              {formatUnits(
-                Number(value),
-                invoice.currency,
-                invoice.unit_decimals
-              )}
+              {formatUnits(value, invoice.currency, invoice.unit_decimals)}
             </CardContent>
           </Card>
         ))}

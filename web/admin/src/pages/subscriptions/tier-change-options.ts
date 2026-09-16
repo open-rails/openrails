@@ -4,7 +4,7 @@ import type {
   Rail,
   SubscriptionStatus,
 } from "@/lib/api/types"
-import { formatMicros } from "@/lib/format"
+import { formatNativeAmount } from "@/lib/format"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 
 export interface TierChangeOption {
@@ -18,7 +18,7 @@ export function tierChangeOptionLabel(option: TierChangeOption): string {
   return [
     option.product.display_name,
     option.direction,
-    `${formatMicros(price.unit_amount, price.currency)} ${priceIntervalLabel(price)}`,
+    `${formatNativeAmount(price.unit_amount, price.currency)} ${priceIntervalLabel(price)}`,
     price.key,
   ].join(" · ")
 }
@@ -39,7 +39,8 @@ export function adminTierChangeBlockReason({
   }
   if (scheduledPriceId) return "A tier change is already scheduled"
   if (hasPendingReprice) return "A price change is already scheduled"
-  if (rail === "ccbill") return "CCBill tier changes require customer self-service"
+  if (rail === "ccbill")
+    return "CCBill tier changes require customer self-service"
   if (rail === "solana") {
     return "Solana tier changes require the customer's wallet signature"
   }

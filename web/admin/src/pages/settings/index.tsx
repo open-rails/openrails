@@ -38,7 +38,11 @@ import type {
   PaymentProviderConfig,
   PaymentProviderDefinition,
 } from "@/lib/api/types"
-import { formatDate, formatMicros, microsFromInput } from "@/lib/format"
+import {
+  formatDate,
+  formatNativeAmount,
+  nativeAmountFromInput,
+} from "@/lib/format"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
@@ -1043,7 +1047,7 @@ function CustomerControlsTab() {
     defaultValues: { newLimit: "" },
     onSubmit: async ({ value }) => {
       if (!result) return
-      const amount = microsFromInput(value.newLimit)
+      const amount = nativeAmountFromInput(value.newLimit, result.currency)
       if (amount === null || amount < 0) return
       try {
         await updateCreditLimit.mutateAsync({
@@ -1192,7 +1196,7 @@ function CustomerControlsTab() {
               label="Credit limit"
               value={
                 result.creditLimit
-                  ? formatMicros(result.creditLimit, result.currency)
+                  ? formatNativeAmount(result.creditLimit, result.currency)
                   : "Off"
               }
             />
@@ -1212,7 +1216,7 @@ function CustomerControlsTab() {
                 name="newLimit"
                 validators={{
                   onChange: ({ value }) => {
-                    const amount = microsFromInput(value)
+                    const amount = nativeAmountFromInput(value, result.currency)
                     return value !== "" && amount !== null && amount >= 0
                       ? undefined
                       : "Enter a valid amount"
