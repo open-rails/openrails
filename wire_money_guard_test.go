@@ -62,21 +62,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/http/handlers/self_account.go:selfAccountSettingsRequest.LowBalanceThreshold low_balance_threshold":                                    pendingBalance,
 	"internal/http/handlers/self_account.go:selfAccountSettingsResponse.AutoTopupAmount auto_topup_amount":                                           pendingBalance,
 	"internal/http/handlers/self_account.go:selfAccountSettingsResponse.LowBalanceThreshold low_balance_threshold":                                   pendingBalance,
-	"internal/http/handlers/self_account.go:selfBalanceResponse.BalanceAmount balance_amount":                                                        pendingBalance,
-	"internal/http/handlers/service_credits.go:adminGrantCreditsRequest.Amount amount":                                                               pendingBalance,
-	"internal/http/handlers/service_credits.go:serviceTxnResponse.Amount amount":                                                                     pendingBalance,
-	"internal/http/handlers/service_delinquency.go:serviceDelinquencyResponse.OverdueAmount overdue_amount":                                          pendingBalance,
-	"internal/modules/money/credit_grants.go:CreditGrant.Amount amount":                                                                              pendingBalance,
-	"internal/modules/money/credit_grants.go:CreditGrant.ExpiredAmount expired_amount":                                                               pendingBalance,
-	"internal/modules/money/credit_grants.go:CreditGrant.RemainingAmount remaining_amount":                                                           pendingBalance,
-	"internal/modules/money/credit_grants.go:CreditGrant.RevokedAmount revoked_amount":                                                               pendingBalance,
-	"internal/modules/money/credit_grants.go:CreditGrant.SpentAmount spent_amount":                                                                   pendingBalance,
-	"pkg/service/spend.go:UsageRow.TotalAmount total_amount":                                                                                         pendingBalance,
-	"internal/http/handlers/solana_supported_tokens.go:TokenBalance.Units units":                                                                     pendingSolanaUnits,
-	"internal/http/handlers/solana_supported_tokens.go:TokenQuote.Units units":                                                                       pendingSolanaUnits,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetCurrencyRevenue.SettledAmount settled_amount_micros":                                          pendingFleet,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetMRR.MonthlyAmount monthly_amount_micros":                                                      pendingFleet,
-	"pkg/embedded/controlplane/fleet_timeseries.go:FleetWeeklyVolume.SettledAmount settled_amount_micros":                                            pendingFleet,
 	"pkg/api/response.go:CreditGrantSpecObject.Amount amount":                                                                                        deletedByCatalogCut,
 	"pkg/catalog/manifest.go:CreditGrant.Amount amount":                                                                                              deletedByCatalogCut,
 	"pkg/catalog/manifest.go:UsageLimitWindow.Amount amount":                                                                                         deletedByCatalogCut,
@@ -109,8 +94,6 @@ const (
 	pendingPayment          = "pending #983: payment and refund"
 	pendingRateCard         = "pending #983: rate card (also catalog_rate_cards JSONB)"
 	pendingBalance          = "pending #983: balance, ledger, grant and delinquency"
-	pendingSolanaUnits      = "pending #983: Solana token base units"
-	pendingFleet            = "pending #983: fleet analytics encoded by the SaaS host"
 	deletedByCatalogCut     = "deleted with catalog credit/usage-limit features (#1008 PR438)"
 	notMoneyCount           = "not HTTP: merchant counts"
 	notHTTPToolArgs         = "not HTTP: LLM tool-call arguments"

@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,7 +172,7 @@ type serviceTxnResponse struct {
 	CustomerID      uuid.UUID `json:"customer_id"`
 	Invoker         string    `json:"invoker"`
 	Currency        string    `json:"currency"`
-	Amount          int64     `json:"amount"`
+	Amount          int64     `json:"amount,string"`
 	TransactionType string    `json:"transaction_type"`
 	Status          string    `json:"status"`
 	Source          string    `json:"source"`
@@ -401,7 +402,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 type adminGrantCreditsRequest struct {
 	Invoker     string  `json:"invoker"`
 	Currency    string  `json:"currency"`
-	Amount      int64   `json:"amount" binding:"required"`
+	Amount      int64   `json:"amount,string" binding:"required"`
 	Source      string  `json:"source"`
 	SourceID    string  `json:"source_id" binding:"required"`
 	ExpiresAt   *int64  `json:"expires_at"`
@@ -681,7 +682,7 @@ func ServiceGetInvokerCredits(r *httprequest.Request) {
 	}
 	r.SuccessJSON(map[string]any{
 		"currency":     balance.Currency,
-		"balance":      balance.Balance,
-		"held_balance": balance.HeldBalance,
+		"balance":      strconv.FormatInt(balance.Balance, 10),
+		"held_balance": strconv.FormatInt(balance.HeldBalance, 10),
 	})
 }

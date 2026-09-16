@@ -28,11 +28,11 @@ type CreditGrant struct {
 	ID                uuid.UUID  `json:"id"`
 	CustomerID        uuid.UUID  `json:"customer_id"`
 	Currency          string     `json:"currency"`
-	Amount            int64      `json:"amount"`
-	SpentAmount       int64      `json:"spent_amount"`
-	RemainingAmount   int64      `json:"remaining_amount"`
-	RevokedAmount     int64      `json:"revoked_amount"`
-	ExpiredAmount     int64      `json:"expired_amount"`
+	Amount            int64      `json:"amount,string"`
+	SpentAmount       int64      `json:"spent_amount,string"`
+	RemainingAmount   int64      `json:"remaining_amount,string"`
+	RevokedAmount     int64      `json:"revoked_amount,string"`
+	ExpiredAmount     int64      `json:"expired_amount,string"`
 	State             string     `json:"state"`
 	SourceType        string     `json:"source_type"`
 	SourceID          string     `json:"source_id"`

@@ -80,7 +80,7 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result), rec.Body.String())
 		return rec.Code, result
 	}
-	input := map[string]any{"currency": "USD", "amount": 1000000, "source_id": uuid.NewString(), "description": "support credit"}
+	input := map[string]any{"currency": "USD", "amount": "1000000", "source_id": uuid.NewString(), "description": "support credit"}
 	code, body := request(http.MethodPost, path, "viewer", mid, input)
 	require.Equal(t, 403, code, body)
 	code, body = request(http.MethodPost, path, "owner", mid, input)
@@ -134,7 +134,7 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	code, ledger := request(http.MethodGet, fmt.Sprintf("/v1/merchant/customers/%s/credit-transactions?currency=USD&limit=1", customer.UUID()), "viewer", mid, nil)
 	require.Equal(t, 200, code, ledger)
 	require.EqualValues(t, 2, ledger["total"])
-	require.EqualValues(t, -1000000, ledger["transactions"].([]any)[0].(map[string]any)["amount"])
+	require.Equal(t, "-1000000", ledger["transactions"].([]any)[0].(map[string]any)["amount"])
 	// Registry scales are authoritative: native JPY differs from USD; custom
 	// credits have their own scale and must not run invoice/owed calculations.
 	for _, unit := range []struct {
@@ -145,16 +145,16 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 			_, err = admin.Exec(ctx, `INSERT INTO openrails.custom_credit_types(id,merchant_id,name,decimals,active) VALUES(uuidv7(),$1,$2,2,true)`, mid, strings.TrimPrefix(unit.code, "test/"))
 			require.NoError(t, err)
 		}
-		code, body = request(http.MethodPost, path, "owner", mid, map[string]any{"currency": unit.code, "amount": 125, "source_id": uuid.NewString()})
+		code, body = request(http.MethodPost, path, "owner", mid, map[string]any{"currency": unit.code, "amount": "125", "source_id": uuid.NewString()})
 		require.Equal(t, 200, code, body)
 		code, page = request(http.MethodGet, path+"?currency="+url.QueryEscape(unit.code), "viewer", mid, nil)
 		require.Equal(t, 200, code, page)
 		require.EqualValues(t, unit.decimals, page["unit_decimals"])
-		require.EqualValues(t, 125, page["grants"].([]any)[0].(map[string]any)["amount"])
+		require.Equal(t, "125", page["grants"].([]any)[0].(map[string]any)["amount"])
 		code, invokerBalance := request(http.MethodGet, fmt.Sprintf("/v1/merchant/invokers/%s/credits?currency=%s", customer.UUID(), url.QueryEscape(unit.code)), "owner", mid, nil)
 		require.Equal(t, 200, code, invokerBalance)
 		require.Equal(t, unit.code, invokerBalance["currency"])
-		require.EqualValues(t, 125, invokerBalance["balance"])
+		require.Equal(t, "125", invokerBalance["balance"])
 	}
 	code, profile := request(http.MethodGet, fmt.Sprintf("/v1/merchant/customers/%s", customer.UUID()), "viewer", mid, nil)
 	require.Equal(t, 200, code, profile)
