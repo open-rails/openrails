@@ -4838,3 +4838,7 @@ CREATE POLICY merchant_isolation ON openrails.price_psp_bindings
     USING (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid)
     WITH CHECK (merchant_id = nullif(current_setting('app.merchant_id', true), '')::uuid);
 GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO openrails_app;
+
+-- One unresolved upgrade owns the predecessor's provider mutation sequence.
+CREATE UNIQUE INDEX uq_rail_intents_upgrade_predecessor ON openrails.rail_intents(merchant_id, subscription_id)
+WHERE intent_type='nmi_upgrade' AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable');

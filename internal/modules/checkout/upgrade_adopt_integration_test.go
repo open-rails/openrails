@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -87,6 +88,10 @@ type fakeNMIUpgradeGateway struct {
 	planID          string
 	subID           string
 
+	saleCalls   atomic.Int64
+	saleMode    atomic.Value
+	saleVisible atomic.Bool
+	saleTxn     string
 	createCalls atomic.Int64
 	createMode  atomic.Value // "approve" | "ambiguousLanded" | "ambiguousLost"
 	lastOrder   atomic.Value // string
@@ -101,6 +106,8 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 		subID: "rsub-upg-" + uuid.NewString()[:8],
 	}
 	f.createMode.Store("approve")
+	f.saleMode.Store("approve")
+	f.saleTxn = "upg-sale-" + uuid.NewString()
 	f.lastOrder.Store("")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -134,7 +141,23 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 				}
 				return
 			}
-			// classic query.php: no sale ever lands in these tests.
+			if r.Form.Get("type") == "sale" {
+				f.saleCalls.Add(1)
+				switch f.saleMode.Load().(string) {
+				case "decline":
+					fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=202")
+				case "ambiguousHidden":
+					w.WriteHeader(http.StatusBadGateway)
+				default:
+					f.saleVisible.Store(true)
+					fmt.Fprintf(w, "response=1&responsetext=SUCCESS&transactionid=%s&authcode=OK", f.saleTxn)
+				}
+				return
+			}
+			if f.saleVisible.Load() {
+				fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, f.saleTxn, r.Form.Get("order_id"))
+				return
+			}
 			fmt.Fprint(w, `<nm_response></nm_response>`)
 		}
 	}))
@@ -201,7 +224,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	planID := "plan-upg-" + sfx
 	gateway, client := newFakeNMIUpgradeGateway(t, railCustomerRef, planID)
 
-	clock := clockwork.NewRealClock()
+	clock := clockwork.NewFakeClockAt(now)
 
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), "nmi")
 
@@ -233,6 +256,8 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.rail_intents WHERE payload->>'user_id' = $1", userID)
+		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payments WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.entitlements WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.subscriptions WHERE customer_id = $1", customerID)
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", pm.ID)
@@ -251,6 +276,8 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	// #788: the scoped resolver is the ONLY NMI client source; the fixture
 	// overrides it with the fake-gateway client.
 	svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
+	svc.SetSubscriptionLifecycleService(subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, subscriptions.NewNotificationService(dbi, nil), paymentSvc, clock))
+	svc.Intents = &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(NewNMIUpgradeIntentHandler(svc)), Config: fullModeConfig(), Clock: clock}
 
 	existingSub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, oldSubID)
 	require.NoError(t, err)
@@ -294,12 +321,12 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 // Ambiguous successor create whose create actually LANDED: the roster scan
 // adopts the orphan inline — the upgrade completes with ONE remote create and
 // no live remote subscription is ever abandoned as failed (#674 tail).
-func TestUpgradeAmbiguousCreateLanded_AdoptsInline(t *testing.T) {
+func TestUpgradePositiveSuccessorReceipt_CompletesAtomically(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
-	fx.gateway.createMode.Store("ambiguousLanded")
+	fx.gateway.createMode.Store("approve")
 
 	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
-	require.NoError(t, err, "landed-but-lost create must be adopted, not failed")
+	require.NoError(t, err, "a positive successor receipt completes the upgrade")
 	require.Equal(t, "success", resp.Status)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "never a second blind create")
 

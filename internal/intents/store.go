@@ -527,3 +527,12 @@ func uuidPtrOrNil(id uuid.UUID) *uuid.UUID {
 	}
 	return &id
 }
+
+// GetByIdempotencyKey reads the immutable operation for a request replay.
+func (s *Store) GetByIdempotencyKey(ctx context.Context, key string) (gen.OpenrailsRailIntent, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
+	return s.db.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
+}

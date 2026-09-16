@@ -106,6 +106,7 @@ var allowedWriteCallers = map[string]string{
 	// --- the sanctioned executors: intent handlers -----------------------
 	"internal/modules/checkout/nmi_sale_intent.go:Execute":         "nmi_sale intent handler",
 	"internal/modules/checkout/nmi_subscription_intent.go:Execute": "nmi_subscription_create intent handler",
+	"internal/modules/checkout/nmi_upgrade_intent.go:advance":      "durable per-step upgrade handler",
 	"internal/intents/manual_rebill.go:Execute":                    "manual_rebill intent handler",
 	"internal/intents/refund.go:Execute":                           "nmi_refund intent handler",
 	"internal/intents/nmi_delete.go:Execute":                       "nmi_delete_subscription intent handler",
@@ -114,7 +115,6 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/nmi_payment_method_update.go:Execute":        "nmi_payment_method_update intent handler — the only stored-card replacement writer",
 
 	// --- the checkout upgrade saga: reactive, compensating ----------------
-	"internal/modules/checkout/service.go:processUpgrade":          "upgrade proration sale + successor create: order ids content-derived, pre/post verify, ambiguity ⇒ roster-scan adopt-or-processing (#674 tail); full saga assessed and declined (completed.md #674)",
 	"internal/modules/checkout/service.go:compensateFailedUpgrade": "upgrade compensation refund; intent migration deferred",
 	"internal/modules/checkout/service.go:cancelNMISubscription":   "upgrade/cancel rollback of a just-created remote sub (reactive compensation)",
 
