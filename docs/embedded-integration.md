@@ -475,3 +475,10 @@ dunning, the intents ledger), [billing-policies.md](billing-policies.md)
 [rate-limiting.md](rate-limiting.md),
 [auth.md](auth.md) (the full one-credential-per-trust-domain rationale),
 [self-hosting-mode1.md](self-hosting-mode1.md).
+
+
+Merchant team and API-key routes are mounted only when their control-plane
+managers are attached. A plain embedded billing runtime has no placeholder
+management routes; the host continues to own its identity/team UI. Standalone
+and SaaS deployments with a control plane retain the same permission-gated
+management endpoints.

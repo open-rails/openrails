@@ -23,7 +23,7 @@ import (
 
 // MerchantAPIKeyManager is the control-plane surface behind the self-serve
 // API-key routes. Implemented by *controlplane.ControlPlane; nil (an embedded
-// host without a control plane) leaves the routes answering 501.
+// host without a control plane) omits these routes at registration.
 type MerchantAPIKeyManager interface {
 	MintMerchantAPIKey(ctx context.Context, mid merchant.ID, name, role, actorUserID string) (controlplane.MerchantAPIKey, string, error)
 	ListMerchantAPIKeys(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantAPIKey, error)
@@ -50,10 +50,6 @@ func apiKeyMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
 	return mid, true
 }
 
-func apiKeyServiceUnavailable(r *httprequest.Request) {
-	r.ErrorJSON(http.StatusNotImplemented, "API-key management requires the OpenRails control plane (not attached on this deployment)")
-}
-
 // MerchantCreateAPIKey handles POST /v1/merchant/api-keys {name, role} → 201
 // {id, name, role, prefix, created_at, secret}. The secret is shown exactly
 // once — it is never stored and never retrievable again. role must be one of
@@ -61,10 +57,6 @@ func apiKeyServiceUnavailable(r *httprequest.Request) {
 // choice for LLM agents), support, or owner.
 func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			apiKeyServiceUnavailable(r)
-			return
-		}
 		mid, ok := apiKeyMerchantScope(r)
 		if !ok {
 			return
@@ -146,10 +138,6 @@ func MerchantCreateAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) 
 // WITHOUT secret material.
 func MerchantListAPIKeys(svc MerchantAPIKeyManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			apiKeyServiceUnavailable(r)
-			return
-		}
 		mid, ok := apiKeyMerchantScope(r)
 		if !ok {
 			return
@@ -171,10 +159,6 @@ func MerchantListAPIKeys(svc MerchantAPIKeyManager) func(*httprequest.Request) {
 // key, scoped to the caller's merchant (cross-merchant ids 404).
 func MerchantRevokeAPIKey(svc MerchantAPIKeyManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			apiKeyServiceUnavailable(r)
-			return
-		}
 		mid, ok := apiKeyMerchantScope(r)
 		if !ok {
 			return

@@ -23,7 +23,7 @@ import (
 
 // MerchantTeamManager is the control-plane surface behind the team routes.
 // Implemented by *controlplane.ControlPlane; nil (an embedded host without a
-// control plane) leaves the routes answering 501.
+// control plane) omits these routes at registration.
 type MerchantTeamManager interface {
 	ListMerchantTeam(ctx context.Context, mid merchant.ID) ([]controlplane.MerchantTeamMember, error)
 	InviteMerchantTeamMember(ctx context.Context, mid merchant.ID, email, role, actorUserID string) (controlplane.MerchantTeamInviteResult, error)
@@ -32,10 +32,6 @@ type MerchantTeamManager interface {
 	RevokeMerchantTeamInvite(ctx context.Context, mid merchant.ID, linkID string) (bool, error)
 	ChangeMerchantTeamRole(ctx context.Context, mid merchant.ID, targetUserID, newRole, actorUserID string) error
 	RemoveMerchantTeamMember(ctx context.Context, mid merchant.ID, targetUserID, actorUserID string) error
-}
-
-func teamServiceUnavailable(r *httprequest.Request) {
-	r.ErrorJSON(http.StatusNotImplemented, "team management requires the OpenRails control plane (not attached on this deployment)")
 }
 
 func teamMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
@@ -51,10 +47,6 @@ func teamMerchantScope(r *httprequest.Request) (merchant.ID, bool) {
 // (user, role) — owner first — WITHOUT the synthetic bootstrap actor.
 func MerchantListTeam(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			teamServiceUnavailable(r)
-			return
-		}
 		mid, ok := teamMerchantScope(r)
 		if !ok {
 			return
@@ -74,10 +66,6 @@ func MerchantListTeam(svc MerchantTeamManager) func(*httprequest.Request) {
 // when the deployment permits self-registration, else 409.
 func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			teamServiceUnavailable(r)
-			return
-		}
 		mid, ok := teamMerchantScope(r)
 		if !ok {
 			return
@@ -129,10 +117,6 @@ func MerchantInviteTeamMember(svc MerchantTeamManager) func(*httprequest.Request
 // deployment can mint new-user links at all.
 func MerchantListTeamInvites(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			teamServiceUnavailable(r)
-			return
-		}
 		mid, ok := teamMerchantScope(r)
 		if !ok {
 			return
@@ -150,10 +134,6 @@ func MerchantListTeamInvites(svc MerchantTeamManager) func(*httprequest.Request)
 // the invite link, scoped to the caller's merchant (cross-merchant ids 404).
 func MerchantRevokeTeamInvite(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			teamServiceUnavailable(r)
-			return
-		}
 		mid, ok := teamMerchantScope(r)
 		if !ok {
 			return
@@ -177,10 +157,6 @@ func MerchantRevokeTeamInvite(svc MerchantTeamManager) func(*httprequest.Request
 // the member's role. Demoting the last owner is a corrective 400.
 func MerchantChangeTeamRole(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			teamServiceUnavailable(r)
-			return
-		}
 		mid, ok := teamMerchantScope(r)
 		if !ok {
 			return
@@ -219,10 +195,6 @@ func MerchantChangeTeamRole(svc MerchantTeamManager) func(*httprequest.Request) 
 // the member. Removing the last owner is a corrective 400.
 func MerchantRemoveTeamMember(svc MerchantTeamManager) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		if svc == nil {
-			teamServiceUnavailable(r)
-			return
-		}
 		mid, ok := teamMerchantScope(r)
 		if !ok {
 			return
