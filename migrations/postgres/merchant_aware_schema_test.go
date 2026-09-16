@@ -18,7 +18,7 @@ import (
 // `COMMENT ON TABLE ... 'RLS-exempt by design: ...'` marker, and the exempt set
 // is additionally asserted by name below so widening it requires review here.
 var rlsExemptTables = []string{
-	"merchants",     // the tenant directory itself — the scope, not a scoped row
+	"merchants",    // the tenant directory itself — the scope, not a scoped row
 	"worker_state", // per-worker-kind process health
 	// #836 instance-level operator kill switch for destructive convergence.
 	// Deliberately readable from the no-GUC background connections it polices

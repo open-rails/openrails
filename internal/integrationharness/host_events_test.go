@@ -54,7 +54,7 @@ func TestHostEventsReplayAcrossEmbeddedAndHTTPClients(t *testing.T) {
 	require.Equal(t, payment, first[0].Payment.PaymentID)
 	require.EqualValues(t, 7000000, first[0].Payment.Amount)
 	require.Equal(t, "USD", first[0].Payment.Currency)
-	require.Equal(t, settledAt, first[0].OccurredAt)
+	require.True(t, settledAt.Equal(first[0].OccurredAt))
 	require.Nil(t, first[0].Delinquency)
 	replay, err := local.ListHostEvents(ctx, options)
 	require.NoError(t, err)

@@ -55,8 +55,10 @@ func TestWorkerStateConcurrentHealthAndCursorPreserveFields(t *testing.T) {
 		if row.WorkerKind == kind {
 			require.Nil(t, row.CursorMerchantID)
 			require.NotNil(t, row.CursorUpdatedAt)
-			require.Equal(t, &now, row.LastSuccessAt)
-			require.Equal(t, &now, row.LastErrorAt)
+			require.NotNil(t, row.LastSuccessAt)
+			require.True(t, now.Equal(*row.LastSuccessAt))
+			require.NotNil(t, row.LastErrorAt)
+			require.True(t, now.Equal(*row.LastErrorAt))
 			require.EqualValues(t, 1, row.ConsecutiveFailures)
 			require.Equal(t, &period, row.ExpectedPeriodSeconds)
 			return
