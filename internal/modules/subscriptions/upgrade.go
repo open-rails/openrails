@@ -51,9 +51,7 @@ func (s *SubscriptionLifecycleService) CompleteUpgradeTx(ctx context.Context, tx
 		}
 	}
 	if payment != nil {
-		if err := payments.NewPaymentService(txDB, s.Clock()).Create(ctx, payment); err != nil {
-			return err
-		}
+		return payments.NewPaymentService(txDB, s.Clock()).Create(ctx, payment)
 	}
-	return s.grantSubscriptionCreditsTx(ctx, txDB, next, models.CreditGrantCadenceOnce, "subscription_initial")
+	return nil
 }

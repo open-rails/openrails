@@ -163,10 +163,7 @@ SELECT coalesce((EXISTS (SELECT 1 FROM openrails.customers WHERE merchant_id = $
 	OR EXISTS (SELECT 1 FROM openrails.products WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM openrails.catalog_meters WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM openrails.catalog_rate_cards WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.billing_policies WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.custom_credit_types WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.catalog_usage_limits WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM openrails.catalog_credit_balances WHERE merchant_id = $1::uuid)), false)::boolean AS used
+	OR EXISTS (SELECT 1 FROM openrails.billing_policies WHERE merchant_id = $1::uuid)), false)::boolean AS used
 `
 
 // Retirement blockers: obligations, money history
