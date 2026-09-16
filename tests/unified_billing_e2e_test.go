@@ -67,6 +67,9 @@ type billingE2EHarness struct {
 	// money_transactions/money_blocks tables are gone).
 	ms  *money.MoneyService
 	ctx context.Context
+	// holdDeadline is one declared job deadline for every admit: a replay must
+	// carry the same terms, and the deadline is one of them (or#891).
+	holdDeadline time.Time
 }
 
 func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHarness {
@@ -89,12 +92,13 @@ func newBillingE2EHarness(t *testing.T, suite *TestContainerSuite) *billingE2EHa
 	router := middleware.ChainHTTP(mux, middleware.ResolveMerchantHTTP(middleware.StaticMerchant(dbtest.TestMerchantID)))
 
 	return &billingE2EHarness{
-		t:          t,
-		suite:      suite,
-		router:     router,
-		creditType: creditTypeName,
-		ms:         money.NewMoneyService(suite.App.Runtime.DB),
-		ctx:        suite.MerchantCtx(),
+		t:            t,
+		suite:        suite,
+		router:       router,
+		creditType:   creditTypeName,
+		ms:           money.NewMoneyService(suite.App.Runtime.DB),
+		ctx:          suite.MerchantCtx(),
+		holdDeadline: time.Now().Add(15 * time.Minute).UTC(),
 	}
 }
 
@@ -152,7 +156,7 @@ func (h *billingE2EHarness) admit(userID, source, requestID string, amount int64
 		"estimated_amount": strconv.FormatInt(amount, 10),
 		"request_id":       requestID,
 		"source":           source,
-		"expires_at":       time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339Nano),
+		"expires_at":       h.holdDeadline.Format(time.RFC3339Nano),
 	}}})
 	if w.Code != http.StatusOK {
 		return w
