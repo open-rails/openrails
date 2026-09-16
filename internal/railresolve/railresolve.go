@@ -88,15 +88,17 @@ func (s *MerchantsSource) testMode() bool {
 	return s.Config != nil && s.Config.IsTestMode()
 }
 
+// Armed is true only when the active account resolves with every required
+// scoped secret: a PSP declared without credentials (Runtime.DeclarePSP, an
+// import attribution) is an identity, not an armed rail.
 func (s *MerchantsSource) Armed(ctx context.Context, rail string) (bool, error) {
-	_, _, ok, err := s.scope(ctx, rail, "")
-	if err != nil {
+	if _, err := s.RailConfig(ctx, rail, ""); err != nil {
 		if errors.Is(err, ErrRailNotArmed) {
 			return false, nil
 		}
 		return false, err
 	}
-	return ok, nil
+	return true, nil
 }
 
 // scope resolves the merchant + account row. ok=false (nil err) means "no

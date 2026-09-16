@@ -126,17 +126,30 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 	}
 
 	// An explicitly named PSP is resolved and used as named — no eligibility
-	// sweep, no fallback. The caller asked for this processor.
+	// sweep, no fallback. The caller asked for this processor. It must still
+	// be armed: a declared account without credentials is an identity for
+	// attribution, and naming it is refused here rather than failing at the
+	// provider call.
 	if selector := strings.ToLower(strings.TrimSpace(in.Selector)); selector != "" {
 		target, err := targets.resolveRailTarget(ctx, selector)
 		if err != nil {
 			return nil, err
 		}
-		return &RoutingDecision{
+		decision := &RoutingDecision{
 			Target:     target,
 			Policy:     models.CheckoutRoutingPolicyExplicit,
 			Candidates: []RoutingCandidate{{Selector: target.PSP, Rail: target.Rail, PSPID: targetPSPID(target)}},
-		}, nil
+		}
+		if _, err := targets.railSource().RailConfig(ctx, target.Rail, targetAccountID(target)); err != nil {
+			decision.Target = railTarget{}
+			if errors.Is(err, railresolve.ErrRailNotArmed) {
+				decision.Candidates[0].Skip = models.CheckoutRoutingSkipNotArmed
+				return decision, fmt.Errorf("%w: payment provider %q is not armed", ErrNoRoutableProcessor, selector)
+			}
+			decision.Candidates[0].Skip = models.CheckoutRoutingSkipResolveFailed
+			return decision, fmt.Errorf("resolve payment provider %q: %w", selector, err)
+		}
+		return decision, nil
 	}
 
 	order, policy, rule, err := s.routingOrder(ctx, in)
@@ -161,6 +174,13 @@ func (s *CheckoutSessionService) Route(ctx context.Context, in RoutingInput) (*R
 		return decision, ErrNoRoutableProcessor
 	}
 	return decision, nil
+}
+
+func targetAccountID(target railTarget) string {
+	if target.Scope == nil {
+		return ""
+	}
+	return target.Scope.AccountID
 }
 
 func targetPSPID(target railTarget) uuid.UUID {
@@ -274,11 +294,7 @@ func (s *CheckoutSessionService) evaluateCandidate(ctx context.Context, targets 
 			return skipped, models.CheckoutRoutingSkipResolveFailed
 		}
 	}
-	accountID := ""
-	if target.Scope != nil {
-		accountID = target.Scope.AccountID
-	}
-	providerConfig, err := targets.railSource().RailConfig(ctx, target.Rail, accountID)
+	providerConfig, err := targets.railSource().RailConfig(ctx, target.Rail, targetAccountID(target))
 	if err != nil {
 		if errors.Is(err, railresolve.ErrRailNotArmed) {
 			return target, models.CheckoutRoutingSkipNotArmed

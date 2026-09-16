@@ -227,7 +227,7 @@ func (a *nmiAdapter) Verify(ctx context.Context, ids map[string]string, local *p
 	client, _, ok := a.nmiClient(ctx)
 	if !ok || client == nil {
 		// No readable account is not agreement: signal sync_disabled.
-		return nil, false, fmt.Errorf("nmi is not configured")
+		return nil, false, fmt.Errorf("nmi is not configured: %w", errProviderNotArmed)
 	}
 	planID := strings.TrimSpace(ids[models.RailKeyPlanID])
 	if planID == "" {

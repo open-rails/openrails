@@ -123,7 +123,11 @@ billing data over this seam:
    operator-declared PSP rows through `embed.Runtime.UpsertMerchantConfig`
    (or manifest boot), then push the catalog — including *retired* historical
    price points, so every legacy subscription resolves a price. Resolve the
-   `psps` row ids to stamp on imported rows.
+   `psps` row ids to stamp on imported rows. A PSP declared without
+   credentials (`Runtime.DeclarePSP`) is an identity for attribution and price
+   links only: it is never armed, so checkout discovery does not advertise it,
+   a checkout naming it is refused as unroutable, and links to it are stored
+   as operator-owned with `sync_status: sync_disabled`.
 3. **Fix the horizon.** Derive `as_of` from the legacy dump itself (e.g. the
    max source `updated_at`) or declare it explicitly; never default to
    wall-clock.

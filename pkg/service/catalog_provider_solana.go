@@ -409,7 +409,7 @@ func isSolanaRecurringToken(symbol string) bool {
 // sync_disabled (nil,false,nil). Account gone -> missing=true.
 func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *priceVerifyContext) ([]DriftField, bool, error) {
 	if a.svc == nil || a.svc.rt == nil || a.svc.rt.SolanaRPCResolver == nil {
-		return nil, false, fmt.Errorf("solana is not configured")
+		return nil, false, fmt.Errorf("solana is not configured: %w", errProviderNotArmed)
 	}
 	pdaStr := strings.TrimSpace(ids[solanaKeyPlanPDA])
 	if pdaStr == "" {
