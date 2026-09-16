@@ -12,8 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// NMICollectionAdapter collects invoices from NMI customer
-// vault payment methods through the #297 charge seam: every collection is a
+// NMICollectionAdapter collects invoices from NMI customer vault payment
+// methods through the #297 charge seam: every collection is a
 // merchant-initiated unscheduled credential-on-file charge carrying the
 // instrument's stored-credential replay reference.
 type NMICollectionAdapter struct {
@@ -24,43 +24,31 @@ func NewNMICollectionAdapter(client *nmi.NMIClient) *NMICollectionAdapter {
 	return &NMICollectionAdapter{Charger: nmidirect.New(client)}
 }
 
-func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error) {
-	if a == nil || a.Charger == nil {
-		return ChargeResult{}, fmt.Errorf("nmi collection adapter not initialized")
-	}
-	if strings.TrimSpace(method.RailCustomerRef) == "" {
-		return ChargeResult{}, fmt.Errorf("nmi payment method missing customer vault id")
-	}
-	if req.AmountCents <= 0 {
-		return ChargeResult{}, fmt.Errorf("amount_cents must be positive")
-	}
-	rail := normalizeRail(method.Rail)
-	// or#864: NO default. This is the last statement before a card is charged;
-	// a guessed currency here mints a real charge in a currency nobody
-	// established. Registry-validated (CUR-8), not merely non-blank.
+func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
+	// or#864: NO default. A guessed currency here mints a real charge in a
+	// currency nobody established; the gate answers before anything else.
 	currency := normalizeCurrency(req.Currency)
 	if err := moneyutil.ValidateCurrency(currency); err != nil {
-		return ChargeResult{}, fmt.Errorf("nmi collection: refusing to charge without an established currency: %w", err)
+		return nil, fmt.Errorf("nmi collection: refusing to charge without an established currency: %w", err)
 	}
+	if a == nil || a.Charger == nil || a.Charger.Client == nil {
+		return nil, fmt.Errorf("nmi collection adapter not initialized")
+	}
+	if a.Charger.Client.ReadOnly {
+		return nil, fmt.Errorf("nmi client is read-only (mode=readonly)")
+	}
+	if strings.TrimSpace(method.RailCustomerRef) == "" {
+		return nil, fmt.Errorf("nmi payment method missing customer vault id")
+	}
+	if req.AmountCents <= 0 {
+		return nil, fmt.Errorf("amount_cents must be positive")
+	}
+	rail := normalizeRail(method.Rail)
 	description := strings.TrimSpace(req.Description)
 	if description == "" {
 		description = "OpenRails invoice collection"
 	}
-
-	// NMI requires every subsequent CIT/MIT to reference the approved initial
-	// transaction. Replay it whenever captured; historical rows without it use
-	// the charger's observable best-effort merchant+used fallback so collection
-	// remains available while still surfacing the compliance exception.
-	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
-	if priorRef == "" {
-		priorRef = strings.TrimSpace(method.InitialTransactionID)
-	}
-	credentialContext := charge.UnscheduledMIT(priorRef)
-	if priorRef == "" {
-		credentialContext = charge.LegacyUnanchoredUnscheduledMIT()
-	}
-
-	res, err := a.Charger.Charge(ctx, charge.Request{
+	request := charge.Request{
 		Instrument: charge.Instrument{
 			PaymentMethodID: method.ID,
 			Rail:            rail,
@@ -70,25 +58,35 @@ func (a *NMICollectionAdapter) ChargeSavedMethod(ctx context.Context, method gen
 		AmountMinor: req.AmountCents,
 		Currency:    currency,
 		Description: description,
-		OrderRef:    nmiWireOrderRef(req.IdempotencyKey),
-		Context:     credentialContext,
-	})
-	if err != nil {
-		return ChargeResult{}, err
+		OrderRef:    strings.TrimSpace(req.IdempotencyKey),
+		Context:     unscheduledMITContext(method),
 	}
-	return ChargeResult{
-		Rail:                        rail,
-		TransactionID:               res.TransactionID,
-		Declined:                    res.Declined,
-		FailureCode:                 res.FailureCode,
-		FailureMessage:              res.FailureMessage,
-		CapturedStoredCredentialRef: res.CapturedRef,
-	}, nil
+	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
+		res, err := a.Charger.Charge(ctx, request)
+		if err != nil {
+			return ChargeResult{}, err
+		}
+		return ChargeResult{
+			Rail:                        rail,
+			TransactionID:               res.TransactionID,
+			Declined:                    res.Declined,
+			FailureCode:                 res.FailureCode,
+			FailureMessage:              res.FailureMessage,
+			CapturedStoredCredentialRef: res.CapturedRef,
+		}, nil
+	}), nil
 }
 
-// nmiWireOrderRef compacts the invoice idempotency key into NMI's 50-char
-// order-id budget ("invoice:<uuid>:attempt:N" is 54+). Deterministic and
-// readable; the LOCAL idempotency identity is untouched.
-func nmiWireOrderRef(idempotencyKey string) string {
-	return strings.NewReplacer("invoice:", "inv:", ":attempt:", ":a").Replace(strings.TrimSpace(idempotencyKey))
+// unscheduledMITContext replays the approved initial transaction NMI requires
+// on every subsequent CIT/MIT; historical rows without one use the charger's
+// observable best-effort merchant+used fallback.
+func unscheduledMITContext(method gen.OpenrailsPaymentMethod) charge.Context {
+	priorRef := strings.TrimSpace(method.StoredCredentialUnscheduledRef)
+	if priorRef == "" {
+		priorRef = strings.TrimSpace(method.InitialTransactionID)
+	}
+	if priorRef == "" {
+		return charge.LegacyUnanchoredUnscheduledMIT()
+	}
+	return charge.UnscheduledMIT(priorRef)
 }

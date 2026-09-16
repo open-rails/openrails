@@ -573,8 +573,8 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 		if invoiceRow.Status != "open" && invoiceRow.Status != "past_due" {
 			return fmt.Errorf("invoice is not payable")
 		}
-		if derefStr(invoiceRow.LastCollectionFailureCode) == collectionAttemptInProgress {
-			return fmt.Errorf("invoice collection is in progress")
+		if invoiceRow.CollectionIntentID != nil {
+			return ErrInvoiceRetryInProgress
 		}
 		if amount > invoiceRow.AmountDue {
 			return ErrInvoicePaymentExceedsDue

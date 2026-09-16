@@ -37,7 +37,7 @@ func chargeRequestWithCurrency(currency string) ChargeRequest {
 func TestNMICollectionRefusesUnestablishedCurrency(t *testing.T) {
 	t.Parallel()
 
-	// A charger whose client is nil: reaching it is itself the failure signal.
+	// An unconfigured adapter: the currency gate must answer before it does.
 	adapter := &NMICollectionAdapter{Charger: nmidirect.New((*nmi.NMIClient)(nil))}
 	method := gen.OpenrailsPaymentMethod{
 		ID:              uuid.New(),
@@ -46,7 +46,7 @@ func TestNMICollectionRefusesUnestablishedCurrency(t *testing.T) {
 	}
 
 	for _, currency := range []string{"", "   ", "XXX", "usdd"} {
-		_, err := adapter.ChargeSavedMethod(context.Background(), method, chargeRequestWithCurrency(currency))
+		_, err := adapter.Prepare(context.Background(), method, chargeRequestWithCurrency(currency))
 		if err == nil {
 			t.Fatalf("currency %q: charge must be refused", currency)
 		}
@@ -55,10 +55,10 @@ func TestNMICollectionRefusesUnestablishedCurrency(t *testing.T) {
 		}
 	}
 
-	// Control: a registered currency passes the gate and reaches the (nil)
-	// client — proving the gate is what refused above, not an earlier check.
-	_, err := adapter.ChargeSavedMethod(context.Background(), method, chargeRequestWithCurrency("usd"))
-	if err == nil || strings.Contains(err.Error(), "established currency") {
+	// Control: a registered currency passes the gate and is armed for the
+	// (nil) client — proving the gate is what refused above.
+	adapter = &NMICollectionAdapter{Charger: nmidirect.New(&nmi.NMIClient{})}
+	if _, err := adapter.Prepare(context.Background(), method, chargeRequestWithCurrency("usd")); err != nil {
 		t.Fatalf("a registered currency must pass the gate, got %v", err)
 	}
 }
@@ -74,7 +74,7 @@ func TestCustodianProxyCollectionRefusesUnestablishedCurrency(t *testing.T) {
 	}
 
 	for _, currency := range []string{"", "   ", "XXX"} {
-		_, err := adapter.ChargeSavedMethod(context.Background(), method, chargeRequestWithCurrency(currency))
+		_, err := adapter.Prepare(context.Background(), method, chargeRequestWithCurrency(currency))
 		if err == nil {
 			t.Fatalf("currency %q: charge must be refused", currency)
 		}
@@ -83,8 +83,7 @@ func TestCustodianProxyCollectionRefusesUnestablishedCurrency(t *testing.T) {
 		}
 	}
 
-	_, err := adapter.ChargeSavedMethod(context.Background(), method, chargeRequestWithCurrency("USD"))
-	if err == nil || strings.Contains(err.Error(), "established currency") {
+	if _, err := adapter.Prepare(context.Background(), method, chargeRequestWithCurrency("USD")); err != nil {
 		t.Fatalf("a registered currency must pass the gate, got %v", err)
 	}
 }
@@ -99,7 +98,7 @@ func TestScopedChargerRefusesUnestablishedCurrency(t *testing.T) {
 
 	charger := NewScopedCharger(&db.DB{}, map[string]CollectionAdapter{})
 	for _, currency := range []string{"", "  ", "XXX", "EURO"} {
-		_, err := charger.ChargeSavedMethod(context.Background(), chargeRequestWithCurrency(currency))
+		_, err := charger.Prepare(context.Background(), chargeRequestWithCurrency(currency))
 		if err == nil {
 			t.Fatalf("currency %q: charge must be refused", currency)
 		}

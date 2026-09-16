@@ -55,8 +55,10 @@ type Invoice struct {
 	NextCollectionAttemptAt      *time.Time `json:"next_collection_attempt_at,omitempty"`
 	LastCollectionFailureCode    *string    `json:"last_collection_failure_code,omitempty"`
 	LastCollectionFailureMessage *string    `json:"last_collection_failure_message,omitempty"`
-	CreatedAt                    time.Time  `json:"created_at"`
-	UpdatedAt                    time.Time  `json:"updated_at"`
+	// CollectionIntentID is the live invoice_collection operation, if any.
+	CollectionIntentID *uuid.UUID `json:"collection_intent_id,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // InvoicePaymentAttempt is one provider collection attempt against an invoice.

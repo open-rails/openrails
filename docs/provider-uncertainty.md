@@ -47,9 +47,46 @@ operation and in the mutation log. NMI subscription enrollment follows the
 upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.
 
-There is no evidence-free invoice unpark/force-resend method. The original
-attempt and its amount remain durable until a receipt resolves it. No
-automatic compensating cancel or refund is triggered by uncertainty.
+Invoice collection is an `invoice_collection` operation on the same ledger:
+one per attempt, enqueued atomically with its `invoice_payments` row and the
+invoice's `collection_intent_id` pointer, which blocks every competing
+collection, void, uncollectible and out-of-band payment until the operation
+ends. The operation id is the provider identity (NMI order id, Stripe
+idempotency-key root), so a client retry key, a restart or a resumed lease
+never mints a second identity. A pre-submission failure (unarmed account,
+missing secret, parked instrument) parks the operation without consuming an
+attempt. After the write-ahead fence every adapter error is a possible
+submission: NMI-family operations converge only from the order-reference
+search or an exact receipt; Stripe replays the same idempotent sequence
+through the executor while Stripe still holds the key (23h) and then waits
+for operator resolution. The Stripe sequence creates the invoice first,
+excluding the customer's pending items, and attaches its line by invoice id,
+so nothing it creates can be swept into another invoice; a parsed refusal
+becomes definitive only after every draft/open invoice and pending item
+stamped with the operation key has been deleted or voided (a failed cleanup
+keeps the outcome unknown). A confirmed charge whose local settlement fails
+keeps its transaction id on the operation and settles from it after restart;
+an invoice that no longer accepts the frozen snapshot fails closed (nothing
+written, pointer kept) until an operator repairs it.
+`intents resolve --receipt` accepts an NMI transaction only when the Query
+API returns it as the successful sale for the operation's own order
+reference and, for a vaulted instrument, the exact read shows an approved
+sale of the frozen amount and currency on that vault; for Stripe the invoice
+must carry the operation key and be paid for the frozen amount.
+`--not-executed` refuses while the provider shows the operation's charge (for
+Stripe it first deletes/voids the operation's unpaid objects and refuses on a
+paid one), then fails the attempt without a decline and makes the invoice due
+again. A `pending` operation that never crossed its submission fence (an
+account that never armed) has no verifier; `intents resolve --not-executed`
+releases it on the strength of the absent fence, and refuses one that carries
+the fence. There is no evidence-free unpark/force-resend method. No automatic
+compensating cancel or refund is triggered by uncertainty.
+
+A manual rebill confirmed after dunning parked or the customer cancelled the
+subscription still records its payment exactly once: a parked (`unknown`) or
+active subscription renews from the confirmed charge; a terminally cancelled
+one gets the completed payment row without reactivation, flagged for refund
+review.
 
 Local HTTP/PostgreSQL fixtures qualify response loss, delayed receipt
 visibility, restart, expiry, positive receipt finalization and one-time local

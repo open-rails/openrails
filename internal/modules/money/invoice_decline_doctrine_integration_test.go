@@ -43,15 +43,17 @@ type codeDeclineCharger struct {
 	charges []money.ChargeRequest
 }
 
-func (c *codeDeclineCharger) ChargeSavedMethod(_ context.Context, req money.ChargeRequest) (money.ChargeResult, error) {
-	c.charges = append(c.charges, req)
-	code, message := c.code, c.message
-	if message == "" {
-		message = "declined"
-	}
-	return money.ChargeResult{
-		Rail: c.rail, Declined: true, FailureCode: &code, FailureMessage: &message,
-	}, nil
+func (c *codeDeclineCharger) Prepare(_ context.Context, req money.ChargeRequest) (money.PreparedCharge, error) {
+	return money.PreparedChargeFunc(func(context.Context) (money.ChargeResult, error) {
+		c.charges = append(c.charges, req)
+		code, message := c.code, c.message
+		if message == "" {
+			message = "declined"
+		}
+		return money.ChargeResult{
+			Rail: c.rail, Declined: true, FailureCode: &code, FailureMessage: &message,
+		}, nil
+	}), nil
 }
 
 // declineDoctrineEnv seeds an arrears payer with a saved NMI method and an
@@ -65,7 +67,7 @@ func declineDoctrineEnv(t *testing.T, cycle time.Duration, clock *clockwork.Fake
 ) {
 	t.Helper()
 	_, dbi, pool, payer, currency, ctx := moneyInEnvWithDB(t)
-	cleanupInvoices(t, pool, ctx, payer)
+	cleanupCollection(t, pool, ctx, payer)
 	svc := money.NewMoneyService(dbi, clock)
 
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
@@ -194,11 +196,11 @@ func cleanupNotifications(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 // resume collection.
 func TestInvoiceDecline_Bucket2_StopsChargingKeepsInvoiceOpenAndNotifies(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
-	svc, _, pool, payer, currency, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
+	svc, dbi, pool, payer, currency, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
 	cleanupNotifications(t, pool, ctx, payer)
 
 	charger := &codeDeclineCharger{rail: "nmi", code: "223", message: "expired card"}
-	n, err := svc.ChargeOutstanding(ctx, charger, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Len(t, charger.charges, 1)
@@ -218,7 +220,7 @@ func TestInvoiceDecline_Bucket2_StopsChargingKeepsInvoiceOpenAndNotifies(t *test
 	// however many times it runs.
 	for i := 0; i < 3; i++ {
 		clock.Advance(48 * time.Hour)
-		n, err = svc.ChargeOutstanding(ctx, charger, 0)
+		n, err = svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 		require.NoError(t, err)
 		require.Zero(t, n)
 	}
@@ -242,7 +244,7 @@ func TestInvoiceDecline_Bucket2_StopsChargingKeepsInvoiceOpenAndNotifies(t *test
 	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, fixed))
 
 	good := &fakeCharger{}
-	n, err = svc.ChargeOutstanding(ctx, good, 0)
+	n, err = svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, good, nil, clock), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n, "a fixed payment method resumes the stopped invoice")
 	require.Len(t, good.charges, 1)
@@ -260,11 +262,11 @@ func TestInvoiceDecline_Bucket2_StopsChargingKeepsInvoiceOpenAndNotifies(t *test
 // like insufficient funds that ran out of retries.
 func TestInvoiceDecline_Bucket3_MarksUncollectibleWithoutCancellingAnything(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
-	svc, _, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
+	svc, dbi, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
 	cleanupNotifications(t, pool, ctx, payer)
 
 	charger := &codeDeclineCharger{rail: "nmi", code: "261", message: "stop all recurring payments"}
-	n, err := svc.ChargeOutstanding(ctx, charger, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Len(t, charger.charges, 1)
@@ -278,7 +280,7 @@ func TestInvoiceDecline_Bucket3_MarksUncollectibleWithoutCancellingAnything(t *t
 		"terminal without burning the schedule — the mandate is gone, retrying cannot help")
 
 	clock.Advance(30 * 24 * time.Hour)
-	n, err = svc.ChargeOutstanding(ctx, charger, 0)
+	n, err = svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Len(t, charger.charges, 1)
@@ -302,11 +304,11 @@ func TestInvoiceDecline_Bucket3_MarksUncollectibleWithoutCancellingAnything(t *t
 func TestInvoiceDecline_Bucket1_RetriesOnTheInvoicesOwnCycle(t *testing.T) {
 	t.Run("weekly statement retries on the weekly offsets", func(t *testing.T) {
 		clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
-		svc, _, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 7*24*time.Hour, clock)
+		svc, dbi, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 7*24*time.Hour, clock)
 		cleanupNotifications(t, pool, ctx, payer)
 
 		charger := &codeDeclineCharger{rail: "nmi", code: "202", message: "insufficient funds"}
-		_, err := svc.ChargeOutstanding(ctx, charger, 0)
+		_, err := svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 		require.NoError(t, err)
 
 		row, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
@@ -324,7 +326,7 @@ func TestInvoiceDecline_Bucket1_RetriesOnTheInvoicesOwnCycle(t *testing.T) {
 		// Its schedule is the weekly one end to end: 2 retries, then terminal.
 		for i := 0; i < 2; i++ {
 			clock.Advance(row.NextCollectionAttemptAt.Sub(clock.Now()) + time.Minute)
-			_, err = svc.ChargeOutstanding(ctx, charger, 0)
+			_, err = svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 			require.NoError(t, err)
 			row, err = svc.GetInvoiceByID(ctx, payer, invoiceID)
 			require.NoError(t, err)
@@ -342,11 +344,11 @@ func TestInvoiceDecline_Bucket1_RetriesOnTheInvoicesOwnCycle(t *testing.T) {
 
 	t.Run("monthly statement retries on the monthly offsets", func(t *testing.T) {
 		clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
-		svc, _, pool, payer, _, invoiceID, _, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
+		svc, dbi, pool, payer, _, invoiceID, _, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
 		cleanupNotifications(t, pool, ctx, payer)
 
 		charger := &codeDeclineCharger{rail: "nmi", code: "202", message: "insufficient funds"}
-		_, err := svc.ChargeOutstanding(ctx, charger, 0)
+		_, err := svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 		require.NoError(t, err)
 
 		row, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
@@ -364,13 +366,13 @@ func TestInvoiceDecline_Bucket1_RetriesOnTheInvoicesOwnCycle(t *testing.T) {
 // nothing to resolve it.
 func TestInvoiceDecline_UnknownCodeRetries(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
-	svc, _, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
+	svc, dbi, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
 	cleanupNotifications(t, pool, ctx, payer)
 
 	// A code no published NMI table names, in the wire form the charge path
 	// actually records (#733 no-fabrication).
 	charger := &codeDeclineCharger{rail: "nmi", code: "nmi_response_997", message: "who knows"}
-	_, err := svc.ChargeOutstanding(ctx, charger, 0)
+	_, err := svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 	require.NoError(t, err)
 
 	row, err := svc.GetInvoiceByID(ctx, payer, invoiceID)
@@ -381,7 +383,7 @@ func TestInvoiceDecline_UnknownCodeRetries(t *testing.T) {
 
 	// And it really does retry: advancing to the scheduled moment charges again.
 	clock.Advance(row.NextCollectionAttemptAt.Sub(clock.Now()) + time.Minute)
-	_, err = svc.ChargeOutstanding(ctx, charger, 0)
+	_, err = svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 	require.NoError(t, err)
 	require.Len(t, charger.charges, 2)
 }
@@ -392,11 +394,11 @@ func TestInvoiceDecline_UnknownCodeRetries(t *testing.T) {
 // refusing to act on a code we cannot read is the correct answer, not a gap.
 func TestInvoiceDecline_CCBillEveryCodeRetries(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second))
-	svc, _, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
+	svc, dbi, pool, payer, _, invoiceID, subID, ctx := declineDoctrineEnv(t, 30*24*time.Hour, clock)
 	cleanupNotifications(t, pool, ctx, payer)
 
 	charger := &codeDeclineCharger{rail: "ccbill", code: "declined_stop_all_recurring_payments"}
-	_, err := svc.ChargeOutstanding(ctx, charger, 0)
+	_, err := svc.ChargeOutstanding(ctx, collectionRunnerClock(dbi, charger, nil, clock), 0)
 	require.NoError(t, err)
 
 	row, err := svc.GetInvoiceByID(ctx, payer, invoiceID)

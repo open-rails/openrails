@@ -9,6 +9,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -61,14 +62,13 @@ func (InvoiceArgs) Kind() string { return KindInvoice }
 
 type InvoiceWorker struct {
 	river.WorkerDefaults[InvoiceArgs]
-	DB      *db.DB
-	Money   *money.MoneyService
-	Charger money.Charger
-	// Verifier resolves collection_outcome_unknown invoices by provider READ
-	// before each collection pass (#828). nil skips resolution (the park holds).
-	Verifier money.CollectionVerifier
-	Config   *config.Config
-	Clock    clockwork.Clock
+	DB    *db.DB
+	Money *money.MoneyService
+	// Intents runs the invoice_collection operations; nil skips collection.
+	// Unknown outcomes are the scheduled intent verifier's, not this worker's.
+	Intents *intents.Runner
+	Config  *config.Config
+	Clock   clockwork.Clock
 }
 
 func (InvoiceWorker) Kind() string { return KindInvoice }
@@ -126,26 +126,12 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 		} else if n > 0 {
 			logger.WithField("invoices", n).Info("invoices marked past_due")
 		}
-		// #828: resolve parked collection_outcome_unknown invoices by provider
-		// READ before charging. Runs under every mode (verification is read-only
-		// plus local repair, same posture as the intent verifier); a failure must
-		// not block the rest of the pass.
-		if w.Verifier != nil {
-			if stats, err := w.Money.ResolveUnknownInvoiceCollections(ctx, w.Verifier); err != nil {
-				logger.WithError(err).Warn("invoice unknown-outcome resolution failed; parked invoices retry next pass")
-			} else if stats.Examined > 0 {
-				logger.WithFields(log.Fields{
-					"examined": stats.Examined, "settled": stats.Settled,
-					"skipped": stats.Skipped,
-				}).Info("invoice unknown-outcome resolution pass complete")
-			}
-		}
 		if w.Config != nil && w.Config.IsLimitedMode() {
 			logger.Warn("limited mode: skipping invoice collection charges (#345)")
 			return nil
 		}
-		if w.Charger == nil {
-			logger.Debug("invoice charger not configured; skipping collection")
+		if w.Intents == nil {
+			logger.Debug("invoice collection runner not configured; skipping collection")
 			return nil
 		}
 		threshold := settings.CollectionThresholdAmount
@@ -155,7 +141,7 @@ func (w InvoiceWorker) workMerchant(ctx context.Context, job *river.Job[InvoiceA
 		if job.Args.CollectionThresholdAmount > 0 {
 			threshold = job.Args.CollectionThresholdAmount
 		}
-		n, err := w.Money.ChargeOutstanding(ctx, w.Charger, threshold)
+		n, err := w.Money.ChargeOutstanding(ctx, w.Intents, threshold)
 		if err != nil {
 			return err
 		}

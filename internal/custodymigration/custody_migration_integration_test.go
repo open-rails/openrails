@@ -511,7 +511,7 @@ func TestRemappedInstrumentChargesThroughTheSurvivorGateway(t *testing.T) {
 	require.IsType(t, &money.CustodianProxyCollectionAdapter{}, adapter,
 		"the INSTRUMENT decides the transport (or#879) — nothing else changed")
 
-	out, err := adapter.ChargeSavedMethod(fx.ctx, remapped, money.ChargeRequest{
+	prepared, err := adapter.Prepare(fx.ctx, remapped, money.ChargeRequest{
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		PaymentMethodID: methodID,
 		AmountCents:     1999,
@@ -519,6 +519,8 @@ func TestRemappedInstrumentChargesThroughTheSurvivorGateway(t *testing.T) {
 		IdempotencyKey:  "invoice:or297:attempt:0",
 		Description:     "post-remap collection",
 	})
+	require.NoError(t, err)
+	out, err := prepared.Submit(fx.ctx)
 	require.NoError(t, err)
 	require.False(t, out.Declined)
 	require.Equal(t, bt.txnID, out.TransactionID)
