@@ -826,7 +826,7 @@ export const adminMutations = {
       }: {
         customerId: string
         currency: string
-        amount: number
+        amount: string
       }) => setCreditLimit(customerId, currency, amount),
     }),
   lookupCustomerControls: () =>

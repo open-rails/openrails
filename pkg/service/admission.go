@@ -183,16 +183,9 @@ type SpendLimitWindowInput = openrails.BudgetWindowInput
 
 // InvokerSpendLimitInput configures one hierarchical budget-scope policy (#473).
 // Scope is "subject" | "role" | "invoker" | "invoker_tier"; ScopeKey is the
-// role uuid, invoker string, or invoker-tier key, empty for scope=subject.
-// Provenance (or#911) is the caller's opaque reference for what authorized the
-// grant (e.g. a signed-document digest); stored on the grant, returned on
-// reads, never interpreted.
-type InvokerSpendLimitInput struct {
-	Scope      string                  `json:"scope"`
-	ScopeKey   string                  `json:"scope_key,omitempty"`
-	Windows    []SpendLimitWindowInput `json:"windows"`
-	Provenance string                  `json:"provenance,omitempty"`
-}
+// role uuid, invoker string, or invoker-tier key, empty for scope=subject. It is
+// the shared Client/HTTP delegation wire type.
+type InvokerSpendLimitInput = openrails.SpendDelegationInput
 
 // ErrInvalidInvokerSpendLimit identifies caller-owned spend-delegation input
 // errors so HTTP and embedded transports can map the shared service result to
@@ -320,11 +313,11 @@ type InvokerSpendWindow struct {
 	Scope         string    `json:"scope"`
 	Key           string    `json:"key"`
 	WindowSeconds int64     `json:"window_seconds"`
-	Limit         int64     `json:"limit"`
+	Limit         int64     `json:"limit,string"`
 	Currency      string    `json:"currency"`
-	Used          int64     `json:"used"`
-	Reserved      int64     `json:"reserved"`
-	Remaining     int64     `json:"remaining"`
+	Used          int64     `json:"used,string"`
+	Reserved      int64     `json:"reserved,string"`
+	Remaining     int64     `json:"remaining,string"`
 	ResetsAt      time.Time `json:"resets_at"`
 }
 
@@ -449,11 +442,7 @@ func (s *Service) InvokerSpendLimits(ctx context.Context, payer identity.Custome
 	}
 	out := make([]InvokerSpendLimitInput, 0, len(rows))
 	for _, r := range rows {
-		w := make([]SpendLimitWindowInput, 0, len(r.Windows))
-		for _, ww := range r.Windows {
-			w = append(w, SpendLimitWindowInput{Key: ww.Key, WindowSeconds: ww.WindowSeconds, Limit: ww.Limit, Currency: ww.Currency})
-		}
-		out = append(out, InvokerSpendLimitInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: w, Provenance: r.Provenance})
+		out = append(out, InvokerSpendLimitInput{Scope: r.Scope, ScopeKey: r.ScopeKey, Windows: spendLimitWindowInputs(r.Windows), Provenance: r.Provenance})
 	}
 	return out, nil
 }

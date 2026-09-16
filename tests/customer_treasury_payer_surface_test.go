@@ -140,7 +140,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 		"delegations": []map[string]any{{
 			"scope":     "invoker",
 			"scope_key": invoker,
-			"windows":   []map[string]any{{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": currency}},
+			"windows":   []map[string]any{{"key": "day", "window_seconds": 86400, "limit": "1000", "currency": currency}},
 		}},
 	})
 	require.Equal(t, http.StatusOK, resp.status, resp.body)

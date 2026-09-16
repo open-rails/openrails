@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -17,24 +16,9 @@ import (
 // the accounting admission already keeps, not a second one.
 
 type selfSpendLimitsDocument struct {
-	Currency string            `json:"currency"`
-	Invoker  string            `json:"invoker"`
-	Windows  []selfSpendWindow `json:"windows"`
-}
-
-// selfSpendWindow is one window. Windows are estimate-based, so Used already
-// includes in-flight reservations and Reserved names that part — what a release
-// would hand back. ResetsAt is the window's real fixed boundary.
-type selfSpendWindow struct {
-	Scope         string    `json:"scope"`
-	Key           string    `json:"key"`
-	WindowSeconds int64     `json:"window_seconds"`
-	Limit         int64     `json:"limit"`
-	Currency      string    `json:"currency"`
-	Used          int64     `json:"used"`
-	Reserved      int64     `json:"reserved"`
-	Remaining     int64     `json:"remaining"`
-	ResetsAt      time.Time `json:"resets_at"`
+	Currency string                              `json:"currency"`
+	Invoker  string                              `json:"invoker"`
+	Windows  []billingservice.InvokerSpendWindow `json:"windows"`
 }
 
 // GetMySpendLimits (GET /v1/me/spend-limits?currency=) returns the spend windows
@@ -93,15 +77,7 @@ func GetMySpendLimits(r *httprequest.Request) {
 		return
 	}
 
-	out := make([]selfSpendWindow, 0, len(windows))
-	for _, w := range windows {
-		out = append(out, selfSpendWindow{
-			Scope: w.Scope, Key: w.Key, WindowSeconds: w.WindowSeconds, Limit: w.Limit,
-			Currency: w.Currency, Used: w.Used, Reserved: w.Reserved, Remaining: w.Remaining,
-			ResetsAt: w.ResetsAt,
-		})
-	}
-	r.SuccessJSON(selfSpendLimitsDocument{Currency: currency, Invoker: invoker, Windows: out})
+	r.SuccessJSON(selfSpendLimitsDocument{Currency: currency, Invoker: invoker, Windows: windows})
 }
 
 // addressedSpendScope names the first cross-subject addressing parameter present

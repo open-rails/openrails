@@ -339,11 +339,7 @@ func (c *Client) RecordUsage(ctx context.Context, report UsageReport) error {
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
 func (c *Client) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
-	body := map[string]any{
-		"customer_id":         strings.TrimSpace(customerID),
-		"currency":            normalizeCurrency(currency),
-		"credit_limit_amount": creditLimit,
-	}
+	body := CreditLimitRequest{CustomerID: strings.TrimSpace(customerID), Currency: normalizeCurrency(currency), CreditLimitAmount: creditLimit}
 	return c.do(ctx, http.MethodPut, "/v1/merchant/credit-limit", body, nil)
 }
 
@@ -353,7 +349,7 @@ func (c *Client) GetCreditLimit(ctx context.Context, customerID, currency string
 	q.Set("customer_id", strings.TrimSpace(customerID))
 	q.Set("currency", normalizeCurrency(currency))
 	var resp struct {
-		CreditLimitAmount int64 `json:"credit_limit_amount"`
+		CreditLimitAmount int64 `json:"credit_limit_amount,string"`
 	}
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credit-limit?"+q.Encode(), nil, &resp); err != nil {
 		return 0, err

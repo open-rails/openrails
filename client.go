@@ -349,7 +349,7 @@ type UsageRollupRow struct {
 	Key         string `json:"key"`
 	Currency    string `json:"currency"`
 	EventCount  int64  `json:"event_count"`
-	TotalAmount int64  `json:"total_amount"`
+	TotalAmount int64  `json:"total_amount,string"`
 }
 
 // BudgetWindowInput is a caller-supplied fixed budget window sent to
@@ -357,7 +357,7 @@ type UsageRollupRow struct {
 type BudgetWindowInput struct {
 	Key           string `json:"key"`
 	WindowSeconds int64  `json:"window_seconds"`
-	Limit         int64  `json:"limit"`
+	Limit         int64  `json:"limit,string"`
 	Currency      string `json:"currency,omitempty"`
 }
 
@@ -374,13 +374,13 @@ type MerchantProfileInput struct {
 // standalone policy sync jobs.
 type MerchantSettings struct {
 	Profile                    *MerchantProfileInput  `json:"profile,omitempty"`
-	InvoiceCollectionThreshold *int64                 `json:"collection_threshold,omitempty"`
-	InvoiceMonthlyFloor        *int64                 `json:"monthly_floor,omitempty"`
+	InvoiceCollectionThreshold *int64                 `json:"collection_threshold,omitempty,string"`
+	InvoiceMonthlyFloor        *int64                 `json:"monthly_floor,omitempty,string"`
 	InvoiceBillingBoundary     string                 `json:"billing_period_boundary,omitempty"`
 	AlertEmail                 *string                `json:"alert_email,omitempty"`
 	RepriceNoticeWindowDays    *int                   `json:"reprice_notice_window_days,omitempty"`
 	ArrearsGraceDays           *int                   `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor    *int64                 `json:"arrears_delinquency_floor,omitempty"`
+	ArrearsDelinquencyFloor    *int64                 `json:"arrears_delinquency_floor,omitempty,string"`
 	CheckoutRouting            *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
@@ -402,20 +402,20 @@ type BillingPolicyInput struct {
 	Kind string `json:"kind"`
 	// OutstandingCapAmount (micros) is the credit line for kind=outstanding_cap.
 	// Zero defers to the payer's own arrears credit limit.
-	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty"`
+	OutstandingCapAmount int64 `json:"outstanding_cap_amount,omitempty,string"`
 	// SpendWindows are the rolling NEW-spend ceilings for kind=window_spend_cap.
 	SpendWindows []BudgetWindowInput `json:"spend_windows,omitempty"`
 	// AccrualRateCapPerHour (kind=accrual_rate_cap) caps the measured accrual
 	// rate in micros PER HOUR — the cloud quota. AccrualRateWindowSeconds is the
 	// measurement lookback (default 3600).
-	AccrualRateCapPerHour    int64 `json:"accrual_rate_cap_per_hour,omitempty"`
+	AccrualRateCapPerHour    int64 `json:"accrual_rate_cap_per_hour,omitempty,string"`
 	AccrualRateWindowSeconds int64 `json:"accrual_rate_window_seconds,omitempty"`
 	// CollectionThresholdAmount / DelinquencyGraceDays / DelinquencyAmountFloor
 	// override the merchant-wide invoice policy for payers bound here; nil defers
 	// to it. All three ride on any kind.
-	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty"`
+	CollectionThresholdAmount *int64 `json:"collection_threshold_amount,omitempty,string"`
 	DelinquencyGraceDays      *int   `json:"delinquency_grace_days,omitempty"`
-	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty"`
+	DelinquencyAmountFloor    *int64 `json:"delinquency_amount_floor,omitempty,string"`
 	// CollectionCycleBoundary is declarable and REFUSED: statement periods must
 	// tile a payer's lifetime, and rebinding is a live lever, so the boundary
 	// stays merchant-wide. Declaring it here fails with that reason.
@@ -504,12 +504,7 @@ type WastedSpendResponse struct {
 // SpendLimitWindow is one fixed money-budget window in a hierarchical
 // budget-scope policy (#473) — same shape as BudgetWindowInput
 // (pkg/service.SpendLimitWindowInput on the wire).
-type SpendLimitWindow struct {
-	Key           string `json:"key"`
-	WindowSeconds int64  `json:"window_seconds"`
-	Limit         int64  `json:"limit"`
-	Currency      string `json:"currency,omitempty"`
-}
+type SpendLimitWindow = BudgetWindowInput
 
 // SpendDelegationInput is one payer-owned spend delegation. Machine clients use
 // the merchant service surface; customers manage the same policy through their
@@ -527,13 +522,13 @@ type SpendDelegationInput struct {
 type ResourceRevenueDailyRow struct {
 	Date     string `json:"date"`
 	Currency string `json:"currency"`
-	Amount   int64  `json:"amount"`
+	Amount   int64  `json:"amount,string"`
 }
 
 // ResourceRevenueResponse is the per-resource revenue rollup (#410).
 type ResourceRevenueResponse struct {
 	Currency      string                    `json:"currency"`
-	RevenueAmount int64                     `json:"revenue_amount"`
+	RevenueAmount int64                     `json:"revenue_amount,string"`
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
 }
 
@@ -593,4 +588,11 @@ type AdmitBatchVerdict struct {
 // the original decision even when a replay's state is expired or terminal.
 func (v AdmitBatchVerdict) Allowed() bool {
 	return v.Status == 200 && v.Result.Active()
+}
+
+// CreditLimitRequest carries an exact native-currency arrears limit.
+type CreditLimitRequest struct {
+	CustomerID        string `json:"customer_id"`
+	Currency          string `json:"currency"`
+	CreditLimitAmount int64  `json:"credit_limit_amount,string"`
 }

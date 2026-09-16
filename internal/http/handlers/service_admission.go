@@ -282,11 +282,7 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 	r.JSON(http.StatusOK, res)
 }
 
-type serviceCreditLimitRequest struct {
-	CustomerID        string `json:"customer_id"`
-	Currency          string `json:"currency"`
-	CreditLimitAmount int64  `json:"credit_limit_amount"`
-}
+type serviceCreditLimitRequest = openrails.CreditLimitRequest
 
 // ServiceSetCreditLimit sets the admin/operator arrears credit line for a payer
 // (#489): under billing_mode=arrears the balance may go NEGATIVE up to the limit;
@@ -351,7 +347,7 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(map[string]any{"currency": currency, "credit_limit_amount": v})
+	r.SuccessJSON(openrails.CreditLimitRequest{CustomerID: payer.String(), Currency: currency, CreditLimitAmount: v})
 }
 
 // ServiceGetMerchantSettings returns the complete declarative policy document.

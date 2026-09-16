@@ -90,9 +90,9 @@ API (mode 2), `PUT /v1/merchant/settings`:
 ```json
 {
   "billing_policies": [
-    { "name": "api_line", "kind": "outstanding_cap", "outstanding_cap_amount": 200000000 },
+    { "name": "api_line", "kind": "outstanding_cap", "outstanding_cap_amount": "200000000" },
     { "name": "cloud_monthly", "kind": "window_spend_cap",
-      "spend_windows": [{ "key": "monthly", "window_seconds": 2592000, "limit": 2000000000 }] }
+      "spend_windows": [{ "key": "monthly", "window_seconds": 2592000, "limit": "2000000000" }] }
   ],
   "billing_policy_bindings": [
     { "policy": "api_line" },

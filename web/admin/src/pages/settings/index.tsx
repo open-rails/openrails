@@ -39,9 +39,10 @@ import type {
   PaymentProviderDefinition,
 } from "@/lib/api/types"
 import {
+  amountFromInput,
+  currencyScale,
   formatDate,
   formatNativeAmount,
-  nativeAmountFromInput,
 } from "@/lib/format"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
@@ -1038,7 +1039,7 @@ function CustomerControlsTab() {
   const [result, setResult] = React.useState<{
     customerID: string
     currency: string
-    creditLimit: number
+    creditLimit: string
     trustLevel: string
   }>()
   const lookupControls = useMutation(adminMutations.lookupCustomerControls())
@@ -1047,8 +1048,10 @@ function CustomerControlsTab() {
     defaultValues: { newLimit: "" },
     onSubmit: async ({ value }) => {
       if (!result) return
-      const amount = nativeAmountFromInput(value.newLimit, result.currency)
-      if (amount === null || amount < 0) return
+      const scale = currencyScale(result.currency)
+      const amount =
+        scale === undefined ? null : amountFromInput(value.newLimit, scale)
+      if (amount === null || amount.startsWith("-")) return
       try {
         await updateCreditLimit.mutateAsync({
           customerId: result.customerID,
@@ -1195,7 +1198,7 @@ function CustomerControlsTab() {
             <SettingDetail
               label="Credit limit"
               value={
-                result.creditLimit
+                result.creditLimit !== "0"
                   ? formatNativeAmount(result.creditLimit, result.currency)
                   : "Off"
               }
@@ -1216,8 +1219,12 @@ function CustomerControlsTab() {
                 name="newLimit"
                 validators={{
                   onChange: ({ value }) => {
-                    const amount = nativeAmountFromInput(value, result.currency)
-                    return value !== "" && amount !== null && amount >= 0
+                    const scale = currencyScale(result.currency)
+                    const amount =
+                      scale === undefined ? null : amountFromInput(value, scale)
+                    return value !== "" &&
+                      amount !== null &&
+                      !amount.startsWith("-")
                       ? undefined
                       : "Enter a valid amount"
                   },

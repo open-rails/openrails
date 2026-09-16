@@ -281,7 +281,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 	for _, x := range rows {
 		total += x.Amount
 	}
-	r.SuccessJSON(map[string]any{"currency": currency, "revenue_amount": total, "daily": rows})
+	r.SuccessJSON(openrails.ResourceRevenueResponse{Currency: currency, RevenueAmount: total, Daily: rows})
 }
 
 // ServiceUsageRollup returns per-dimension-value spend for a customer over a

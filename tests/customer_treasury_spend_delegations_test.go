@@ -342,21 +342,21 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 			"scope":     "invoker",
 			"scope_key": invokerKey,
 			"windows": []map[string]any{
-				{"key": "day", "window_seconds": 86400, "limit": 1200, "currency": "USD"},
+				{"key": "day", "window_seconds": 86400, "limit": "1200", "currency": "USD"},
 			},
 		},
 		{
 			"scope":     "role",
 			"scope_key": roleKey,
 			"windows": []map[string]any{
-				{"key": "week", "window_seconds": 604800, "limit": 9000, "currency": "USD"},
+				{"key": "week", "window_seconds": 604800, "limit": "9000", "currency": "USD"},
 			},
 		},
 		{
 			"scope":     "invoker_tier",
 			"scope_key": trustLevelKey,
 			"windows": []map[string]any{
-				{"key": "month", "window_seconds": 2592000, "limit": 15000, "currency": "USD"},
+				{"key": "month", "window_seconds": 2592000, "limit": "15000", "currency": "USD"},
 			},
 		},
 	}}
@@ -371,7 +371,7 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 		"scope":     "invoker",
 		"scope_key": invokerKey,
 		"windows": []map[string]any{
-			{"key": "day", "window_seconds": 86400, "limit": 321, "currency": "USD"},
+			{"key": "day", "window_seconds": 86400, "limit": "321", "currency": "USD"},
 		},
 	})
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
@@ -395,7 +395,7 @@ func TestCustomerTreasurySpendDelegationsHTTPFullReplacement(t *testing.T) {
 			"scope":     "role",
 			"scope_key": roleKey,
 			"windows": []map[string]any{
-				{"key": "day", "window_seconds": 86400, "limit": 500, "currency": "USD"},
+				{"key": "day", "window_seconds": 86400, "limit": "500", "currency": "USD"},
 			},
 		},
 	}}
@@ -451,14 +451,14 @@ func TestCustomerTreasurySpendDelegationDeleteAndProvenance(t *testing.T) {
 			"scope_key":  invokerKey,
 			"provenance": digest,
 			"windows": []map[string]any{
-				{"key": "hour", "window_seconds": 3600, "limit": 1000, "currency": "USD"},
+				{"key": "hour", "window_seconds": 3600, "limit": "1000", "currency": "USD"},
 			},
 		},
 		{
 			"scope":     "role",
 			"scope_key": roleKey,
 			"windows": []map[string]any{
-				{"key": "day", "window_seconds": 86400, "limit": 5000, "currency": "USD"},
+				{"key": "day", "window_seconds": 86400, "limit": "5000", "currency": "USD"},
 			},
 		},
 	}}

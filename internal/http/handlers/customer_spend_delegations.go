@@ -4,14 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/admission"
@@ -25,18 +24,10 @@ type customerSpendDelegationsDocument struct {
 	Delegations []customerSpendDelegation `json:"delegations"`
 }
 
-type customerSpendDelegation struct {
-	Scope    string `json:"scope"`
-	ScopeKey string `json:"scope_key"`
-	// CustomerID is request-only: supplying it is rejected (the payer comes from
-	// the path scope). Never emitted.
-	CustomerID string                      `json:"customer_id,omitempty"`
-	Windows    []models.BudgetWindowPolicy `json:"windows"`
-	// Provenance is the caller's opaque reference for what authorized this
-	// grant (or#911), e.g. a signed-document digest. Stored on the grant and
-	// returned on reads; OpenRails never interprets it.
-	Provenance string `json:"provenance,omitempty"`
-}
+// customerSpendDelegation is the shared Client wire type with strict decoding.
+// A per-delegation customer_id is an unknown field: the payer comes from the
+// path scope.
+type customerSpendDelegation openrails.SpendDelegationInput
 
 // UnmarshalJSON keeps the delegation wire shape strict. or#893 deleted the
 // role_id alias for scope_key — one representation, {scope:"role",
@@ -49,7 +40,10 @@ func (d *customerSpendDelegation) UnmarshalJSON(raw []byte) error {
 	var out declared
 	if err := decoder.Decode(&out); err != nil {
 		if strings.Contains(err.Error(), `unknown field "role_id"`) {
-			return retiredWireKeyError(`role_id was removed (or#893): address a role delegation as {"scope":"role","scope_key":"<role uuid>"}`)
+			return wireKeyError(`role_id was removed (or#893): address a role delegation as {"scope":"role","scope_key":"<role uuid>"}`)
+		}
+		if strings.Contains(err.Error(), `unknown field "customer_id"`) {
+			return wireKeyError("delegations[].customer_id is not allowed; the payer is taken from the path scope")
 		}
 		return err
 	}
@@ -57,15 +51,15 @@ func (d *customerSpendDelegation) UnmarshalJSON(raw []byte) error {
 	return nil
 }
 
-// retiredWireKeyError is a decode failure whose text is written for the caller:
-// the retired key and the shape that replaced it. httprequest surfaces it
+// wireKeyError is a decode failure whose text is written for the caller:
+// the refused key and the shape to use instead. httprequest surfaces it
 // verbatim (ClientSafeBindError) instead of collapsing it to invalid_request.
-type retiredWireKeyError string
+type wireKeyError string
 
-func (e retiredWireKeyError) Error() string                 { return string(e) }
-func (e retiredWireKeyError) ClientSafeBindMessage() string { return string(e) }
+func (e wireKeyError) Error() string                 { return string(e) }
+func (e wireKeyError) ClientSafeBindMessage() string { return string(e) }
 
-var _ httprequest.ClientSafeBindError = retiredWireKeyError("")
+var _ httprequest.ClientSafeBindError = wireKeyError("")
 
 // GetCustomerSpendDelegations returns the customer policy for sharing the
 // customer's own payable balance. The payer is the typed treasury payer bound
@@ -149,7 +143,7 @@ func PutCustomerSpendDelegation(r *httprequest.Request) {
 		customerSpendDelegationWriteError(r, err, "spend delegation upsert failed")
 		return
 	}
-	r.SuccessJSON(customerSpendDelegationFromInput(next[0]))
+	r.SuccessJSON(customerSpendDelegation(next[0]))
 }
 
 // ServicePutCustomerSpendDelegations is the merchant-machine counterpart of
@@ -200,7 +194,7 @@ func ServicePutCustomerSpendDelegation(r *httprequest.Request) {
 		customerSpendDelegationWriteError(r, err, "spend delegation upsert failed")
 		return
 	}
-	r.SuccessJSON(customerSpendDelegationFromInput(next[0]))
+	r.SuccessJSON(customerSpendDelegation(next[0]))
 }
 
 // DeleteCustomerSpendDelegation revokes exactly ONE addressed delegation
@@ -302,19 +296,8 @@ func customerTreasuryStore(r *httprequest.Request) (*admission.InvokerSpendLimit
 
 func validateCustomerSpendDelegations(in []customerSpendDelegation) ([]billingservice.InvokerSpendLimitInput, error) {
 	out := make([]billingservice.InvokerSpendLimitInput, 0, len(in))
-	for i, row := range in {
-		if strings.TrimSpace(row.CustomerID) != "" {
-			return nil, fmt.Errorf("delegations[%d].customer_id is not allowed", i)
-		}
-		windows := make([]billingservice.SpendLimitWindowInput, 0, len(row.Windows))
-		for _, window := range row.Windows {
-			windows = append(windows, billingservice.SpendLimitWindowInput{
-				Key: window.Key, WindowSeconds: window.WindowSeconds, Limit: window.Limit, Currency: window.Currency,
-			})
-		}
-		out = append(out, billingservice.InvokerSpendLimitInput{
-			Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows, Provenance: row.Provenance,
-		})
+	for _, row := range in {
+		out = append(out, billingservice.InvokerSpendLimitInput(row))
 	}
 	return billingservice.ValidateInvokerSpendLimitInputs(out)
 }
@@ -331,8 +314,14 @@ func customerSpendDelegationsFromRows(rows []admission.InvokerSpendLimit) []cust
 }
 
 func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) customerSpendDelegation {
+	windows := make([]openrails.SpendLimitWindow, 0, len(row.Windows))
+	for _, window := range row.Windows {
+		windows = append(windows, openrails.SpendLimitWindow{
+			Key: window.Key, WindowSeconds: window.WindowSeconds, Limit: window.Limit, Currency: window.Currency,
+		})
+	}
 	return customerSpendDelegation{
-		Scope: budgets.NormalizeScope(row.Scope), ScopeKey: row.ScopeKey, Windows: row.Windows,
+		Scope: budgets.NormalizeScope(row.Scope), ScopeKey: row.ScopeKey, Windows: windows,
 		Provenance: row.Provenance,
 	}
 }
@@ -340,21 +329,9 @@ func customerSpendDelegationFromRow(row admission.InvokerSpendLimit) customerSpe
 func customerSpendDelegationsFromInputs(rows []billingservice.InvokerSpendLimitInput) []customerSpendDelegation {
 	out := make([]customerSpendDelegation, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, customerSpendDelegationFromInput(row))
+		out = append(out, customerSpendDelegation(row))
 	}
 	return out
-}
-
-func customerSpendDelegationFromInput(row billingservice.InvokerSpendLimitInput) customerSpendDelegation {
-	windows := make([]models.BudgetWindowPolicy, 0, len(row.Windows))
-	for _, window := range row.Windows {
-		windows = append(windows, models.BudgetWindowPolicy{
-			Key: window.Key, WindowSeconds: window.WindowSeconds, Limit: window.Limit, Currency: window.Currency,
-		})
-	}
-	return customerSpendDelegation{
-		Scope: row.Scope, ScopeKey: row.ScopeKey, Windows: windows, Provenance: row.Provenance,
-	}
 }
 
 func spendDelegationKey(scope, scopeKey string) string {

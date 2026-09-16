@@ -264,7 +264,7 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 		"delegations": [{
 			"scope": "invoker",
 			"scope_key": "22222222-2222-2222-2222-222222222222",
-			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
+			"windows": [{"key": "day", "window_seconds": 86400, "limit": "1000", "currency": "USD"}]
 		}]
 	}`
 	w := doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations", "delegated.jwt.token", body)
@@ -276,7 +276,7 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 			"scope": "invoker",
 			"scope_key": "22222222-2222-2222-2222-222222222222",
 			"customer_id": "11111111-1111-1111-1111-111111111111",
-			"windows": [{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": "USD"}]
+			"windows": [{"key": "day", "window_seconds": 86400, "limit": "1000", "currency": "USD"}]
 		}]
 	}`
 	w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations", "delegated.jwt.token", body)
@@ -284,9 +284,9 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 	require.Contains(t, w.Body.String(), "customer_id")
 
 	for _, body := range []string{
-		`{"scope":"invoker","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"USD"}]}`,
+		`{"scope":"invoker","windows":[{"key":"day","window_seconds":86400,"limit":"1000","currency":"USD"}]}`,
 		`{"scope":"invoker","scope_key":"invoker-1","windows":[]}`,
-		`{"scope":"invoker","scope_key":"invoker-1","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"BTC"}]}`,
+		`{"scope":"invoker","scope_key":"invoker-1","windows":[{"key":"day","window_seconds":86400,"limit":"1000","currency":"BTC"}]}`,
 	} {
 		w = doSelfBearerBody(e, http.MethodPut, "/v1/customers/acme-merchant/spend-delegations:upsert", "delegated.jwt.token", body)
 		require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
@@ -299,7 +299,7 @@ func TestCustomerTreasurySpendDelegationsRejectBodyCustomerID(t *testing.T) {
 		"/v1/customers/acme-merchant/spend-delegations",
 		"/v1/customers/acme-merchant/spend-delegations:upsert",
 	} {
-		body := `{"scope":"role","role_id":"22222222-2222-2222-2222-222222222222","windows":[{"key":"day","window_seconds":86400,"limit":1000,"currency":"USD"}]}`
+		body := `{"scope":"role","role_id":"22222222-2222-2222-2222-222222222222","windows":[{"key":"day","window_seconds":86400,"limit":"1000","currency":"USD"}]}`
 		if !strings.HasSuffix(path, ":upsert") {
 			body = `{"delegations":[` + body + `]}`
 		}

@@ -94,7 +94,7 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 		"scope":     "invoker",
 		"scope_key": delegate,
 		"windows": []map[string]any{
-			{"key": "day", "window_seconds": 86400, "limit": 1000, "currency": money.DefaultCurrency},
+			{"key": "day", "window_seconds": 86400, "limit": "1000", "currency": money.DefaultCurrency},
 		},
 	}}}
 	resp := requestCustomerTreasuryJSON(t, treasurySrv, http.MethodPut,
