@@ -77,7 +77,7 @@ that a merchant id is derived from the authenticated principal, never from reque
 |---|---|---|---|---|
 | TEN-1 | Every merchant-owned table has `ENABLE` **and** `FORCE ROW LEVEL SECURITY` plus a `merchant_isolation` policy with both `USING` and `WITH CHECK`. | `0001_schema.up.sql`, per table | **DB** + **T** | `go test -tags integration ./internal/invariantaudit -run TestTEN1` — verified 2026-07-28 as `openrails_app`: zero tables ENABLEd without FORCE, zero policies missing a clause, zero `merchant_id`-bearing tables without RLS |
 | TEN-2 | Unset GUC ⇒ policy is NULL ⇒ **zero rows, and no error**. RLS fails closed — and fails *silently*, which is why §10 GAP-17's class exists. | policy text; `db_pgx.go:18-28` | **DB** + **T** | `go test -tags integration ./internal/invariantaudit -run TestTEN2` — asserts the emptiness, the absence of an error, and that a GUC-bearing tx sees the row |
-| TEN-3 | Exactly **three** tables are RLS-exempt by design, each documented in-schema: `merchants`, `worker_health`, `destructive_action_switch` (or#836 — the kill switch must be readable before any merchant is resolved). | the `RLS-exempt by design:` table COMMENTs in `0001_schema.up.sql`; the `destructive_action_switch` table COMMENT | **DB** + **T** | `TestTEN1_AllTablesUnderRLSExceptDocumentedExemptions` pins the set in both directions. The optional NMI probe verdict cache is removed; each sandbox arm requires fresh qualification |
+| TEN-3 | Exactly **three** tables are RLS-exempt by design, each documented in-schema: `merchants`, `worker_state`, `destructive_action_switch` (or#836 — the kill switch must be readable before any merchant is resolved). | the `RLS-exempt by design:` table COMMENTs in `0001_schema.up.sql`; the `destructive_action_switch` table COMMENT | **DB** + **T** | `TestTEN1_AllTablesUnderRLSExceptDocumentedExemptions` pins the set in both directions. The optional NMI probe verdict cache is removed; each sandbox arm requires fresh qualification |
 | TEN-4 | `merchant_id` is `uuid NOT NULL` everywhere and must never be defaulted, back-filled, or derived from the GUC. | `merchant_aware_schema_test.go:100-120` | **T** | `go test ./migrations/postgres` |
 | TEN-5 | The merchant id comes from resolved context; `merchant.Require` errors rather than defaulting. There is no default merchant and the schema seeds none. | `pkg/merchant/merchant.go:50-54,103-112`; `merchant_aware_schema_test.go:86-98` | APP + T | `grep -rn 'json:"merchant_id' --include=*.go internal pkg \| grep -v /gen/` → no API request struct |
 | TEN-6 | `MerchantTx` pins the GUC **transaction-locally** so it cannot leak onto a pooled connection; a zero merchant id is rejected. | `internal/db/db_pgx.go:144-177` | APP | `grep -rn "set_config" internal/db` |
@@ -224,7 +224,7 @@ obeys (`internal/reconcile/never_rollbackable.go`).
 | **P — provider mirror** | `payments`, `subscriptions`, `payment_methods`, `rail_customer_accounts`, `solana_subscriptions`, `checkout_sessions`, refund/dispute mirrors, `rail_refresh_watermarks` | Freely restored; `reconcile pull` is the repair. Six of the eight PSP-tagged tables live here, so **per-PSP scope is native**. |
 | **D — derived** | `entitlements`, product access, credit-lot spendability | **Never restored, always recomputed.** `Converge` rebuilds each effect from the append-only grant log. A restored effect can silently disagree with its grant; a re-derived one cannot. |
 | **C — definitions and policy** | `products`, `prices`, rate cards, meters, `psps`, `merchant_webhooks`, spend limits, `merchant_destructive_policy`, … | Merchant-scoped only, **never PSP-scoped**. No external authority — convergence pushes this outward, so corruption here propagates instead of self-correcting. |
-| **X — outside the transaction** | the `river_*` set (host-chosen schema, `public` by default), Redis holds and leases, `profiles.*` (AuthKit), Vault secrets, `worker_health` | Not rollbackable with the schema. Jobs are **quiesced** for the duration, never rewound; Redis holds self-heal. |
+| **X — outside the transaction** | the `river_*` set (host-chosen schema, `public` by default), Redis holds and leases, `profiles.*` (AuthKit), Vault secrets, `worker_state` | Not rollbackable with the schema. Jobs are **quiesced** for the duration, never rewound; Redis holds self-heal. |
 
 | # | Invariant | Status |
 |---|---|---|
@@ -299,7 +299,7 @@ Run these as `openrails_app`, not as a superuser — and read the next paragraph
 Read-only checks that should pass at any time:
 
 ```sql
--- TEN-1/TEN-3: tables without RLS (expect exactly merchants, worker_health, destructive_action_switch)
+-- TEN-1/TEN-3: tables without RLS (expect exactly merchants, worker_state, destructive_action_switch)
 SELECT relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
  WHERE n.nspname='openrails' AND c.relkind='r' AND NOT c.relrowsecurity;
 

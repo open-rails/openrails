@@ -1296,8 +1296,10 @@ ALTER TABLE openrails.webhook_health_daily ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.webhook_health_daily TO openrails_app;
 
-CREATE TABLE openrails.worker_health (
+CREATE TABLE openrails.worker_state (
     worker_kind text NOT NULL,
+    cursor_merchant_id uuid,
+    cursor_updated_at timestamp with time zone,
     registered_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     expected_period_seconds bigint,
     last_success_at timestamp with time zone,
@@ -1308,35 +1310,21 @@ CREATE TABLE openrails.worker_health (
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
-COMMENT ON TABLE openrails.worker_health IS '#689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table. RLS-exempt by design: process health per worker kind, not tenant data.';
+COMMENT ON TABLE openrails.worker_state IS 'RLS-exempt by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.';
 
-COMMENT ON COLUMN openrails.worker_health.registered_at IS 'First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.';
+COMMENT ON COLUMN openrails.worker_state.registered_at IS 'First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.';
 
-COMMENT ON COLUMN openrails.worker_health.expected_period_seconds IS 'Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).';
+COMMENT ON COLUMN openrails.worker_state.expected_period_seconds IS 'Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).';
 
-COMMENT ON COLUMN openrails.worker_health.last_error IS 'Most recent work error, truncated by the writer.';
+COMMENT ON COLUMN openrails.worker_state.last_error IS 'Most recent work error, truncated by the writer.';
 
-COMMENT ON COLUMN openrails.worker_health.last_alerted_at IS 'When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).';
+COMMENT ON COLUMN openrails.worker_state.last_alerted_at IS 'When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).';
 
-ALTER TABLE ONLY openrails.worker_health
-    ADD CONSTRAINT worker_health_pkey PRIMARY KEY (worker_kind);
+ALTER TABLE ONLY openrails.worker_state
+    ADD CONSTRAINT worker_state_pkey PRIMARY KEY (worker_kind);
 
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_health TO openrails_app;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_state TO openrails_app;
 
-CREATE TABLE openrails.worker_sweep_cursors (
-    worker_kind text NOT NULL,
-    cursor_merchant_id uuid,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-COMMENT ON TABLE openrails.worker_sweep_cursors IS 'RLS-exempt by design: or#837 resume point for capped fan-out sweeps — the last merchant id a bounded pass handled. A cap without a cursor re-serves the same head every tick and starves the tail; a cursor without a cap is the unbounded enumeration this replaced. Operator-global process state, no tenant data (see worker_health).';
-
-COMMENT ON COLUMN openrails.worker_sweep_cursors.cursor_merchant_id IS 'Exclusive lower bound for the next pass. NULL = the previous pass drained its work queue, so the next one starts from the beginning.';
-
-ALTER TABLE ONLY openrails.worker_sweep_cursors
-    ADD CONSTRAINT worker_sweep_cursors_pkey PRIMARY KEY (worker_kind);
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.worker_sweep_cursors TO openrails_app;
 
 CREATE TABLE openrails.admission_denials_hourly (
     merchant_id uuid NOT NULL,

@@ -24,7 +24,7 @@ import (
 )
 
 // #689/#895 end-to-end through a REAL River client: the middleware records every
-// worked job's outcome in openrails.worker_health, and ProgressMonitor — which
+// worked job's outcome in openrails.worker_state, and ProgressMonitor — which
 // is NOT a River job (#895) — routes unhealthy kinds to the existing
 // repair-alert channel (notification_queue system alerts). The failure mode of
 // #673 (a worker failing 100% of its runs since birth) becomes a durable alert
@@ -89,7 +89,7 @@ func cleanupWorkerHealth(t *testing.T, dbi *db.DB, kinds ...string) {
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, kind := range kinds {
-			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.worker_health WHERE worker_kind = $1`, kind)
+			_, _ = dbi.Qx(ctx).Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind = $1`, kind)
 		}
 		mctx := dbtest.WithTestMerchant(ctx)
 		_ = dbi.RunInMerchantConn(mctx, func(ctx context.Context) error {
@@ -165,9 +165,9 @@ func workerHealthRow(t *testing.T, dbi *db.DB, kind string) (lastSuccess, lastEr
 	t.Helper()
 	ctx := context.Background()
 	err := dbi.Qx(ctx).QueryRow(ctx,
-		`SELECT last_success_at, last_error_at, last_error, consecutive_failures FROM openrails.worker_health WHERE worker_kind = $1`, kind).
+		`SELECT last_success_at, last_error_at, last_error, consecutive_failures FROM openrails.worker_state WHERE worker_kind = $1`, kind).
 		Scan(&lastSuccess, &lastError, &lastErrMsg, &streak)
-	require.NoError(t, err, "worker_health row for %s", kind)
+	require.NoError(t, err, "worker_state row for %s", kind)
 	return
 }
 
@@ -351,7 +351,7 @@ func TestWorkerHealth_NeverSucceededMerchantRequire(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, monitor.RaiseAlerts(ctx, report))
 	_, execErr := dbi.Qx(ctx).Exec(ctx,
-		`UPDATE openrails.worker_health SET registered_at = now() - interval '1 hour' WHERE worker_kind = $1`, whNoMerchKind)
+		`UPDATE openrails.worker_state SET registered_at = now() - interval '1 hour' WHERE worker_kind = $1`, whNoMerchKind)
 	require.NoError(t, execErr)
 
 	report, err = monitor.Check(ctx)
@@ -401,7 +401,7 @@ func TestWorkerHealth_AlertFanoutReachesEveryMerchantUnderRLS(t *testing.T) {
 	cleanupNewFanoutSystemCustomers(t, super, kind)
 
 	monitor := &ProgressMonitor{DB: appDB}
-	err = monitor.raiseAlert(ctx, gen.OpenrailsWorkerHealth{WorkerKind: kind}, "stale", time.Now().UTC(), ProgressReport{})
+	err = monitor.raiseAlert(ctx, gen.OpenrailsWorkerState{WorkerKind: kind}, "stale", time.Now().UTC(), ProgressReport{})
 	require.NoError(t, err)
 
 	for _, merchantID := range []merchant.ID{merchantA, merchantB} {
@@ -460,7 +460,7 @@ func TestWorkerHealth_AlertFanoutReportsPartialFailure(t *testing.T) {
 
 	// A merchant-specific storage refusal must not erase successful deliveries
 	// to other merchants. Shared subject UUIDs are legal and cannot model this.
-	constraint := "test_worker_health_" + strings.ReplaceAll(suffix, "-", "")
+	constraint := "test_worker_state_" + strings.ReplaceAll(suffix, "-", "")
 	_, err := super.Pool().Exec(ctx, fmt.Sprintf(
 		`ALTER TABLE openrails.notification_queue ADD CONSTRAINT %s CHECK (merchant_id <> '%s'::uuid) NOT VALID`,
 		pgx.Identifier{constraint}.Sanitize(), merchantB.String()))
@@ -472,7 +472,7 @@ func TestWorkerHealth_AlertFanoutReportsPartialFailure(t *testing.T) {
 	})
 
 	monitor := &ProgressMonitor{DB: appDB}
-	row := gen.OpenrailsWorkerHealth{WorkerKind: kind, RegisteredAt: time.Now().Add(-time.Hour).UTC()}
+	row := gen.OpenrailsWorkerState{WorkerKind: kind, RegisteredAt: time.Now().Add(-time.Hour).UTC()}
 	now := time.Now().UTC()
 	err = monitor.raiseAlert(ctx, row, "stale", now, ProgressReport{})
 	require.Error(t, err)

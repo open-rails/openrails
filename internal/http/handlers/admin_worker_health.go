@@ -10,7 +10,7 @@ import (
 
 // workerHealthItem is the view of one registered River worker kind (#689).
 //
-// #SEC-22: worker_health is deliberately RLS-exempt and has NO merchant column
+// #SEC-22: worker_state is deliberately RLS-exempt and has NO merchant column
 // — every merchant's rows sit in it. last_error is the verbatim Go error string
 // of some merchant's job and routinely embeds slugs, subscription/customer
 // UUIDs and PSP account ids, so the TEXT is platform-only. The merchant tier
@@ -31,7 +31,7 @@ type workerHealthItem struct {
 // GetAdminWorkerHealth lists every registered worker kind with its last
 // success/error/streak (#689) — the "expected N runs, got 0" dashboard.
 // MERCHANT tier: error text withheld (#SEC-22). Orchestration-free read:
-// handler -> gen directly (worker_health is an operator-global control-plane
+// handler -> gen directly (worker_state is an operator-global control-plane
 // table, no merchant scope).
 func GetAdminWorkerHealth(r *httprequest.Request) { listWorkerHealth(r, false) }
 
@@ -53,7 +53,7 @@ func listWorkerHealth(r *httprequest.Request, withErrorText bool) {
 	r.SuccessJSON(items)
 }
 
-func workerHealthItemFromGen(row gen.OpenrailsWorkerHealth, withErrorText bool) workerHealthItem {
+func workerHealthItemFromGen(row gen.OpenrailsWorkerState, withErrorText bool) workerHealthItem {
 	item := workerHealthItem{
 		WorkerKind:            row.WorkerKind,
 		RegisteredAt:          row.RegisteredAt,

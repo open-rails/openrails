@@ -16,13 +16,13 @@ SELECT merchant_id FROM openrails.retention_work_merchant_ids(
     sqlc.arg(merchant_limit)::int);
 
 -- name: GetSweepCursor :one
-SELECT cursor_merchant_id FROM openrails.worker_sweep_cursors
+SELECT cursor_merchant_id FROM openrails.worker_state
 WHERE worker_kind = sqlc.arg(worker_kind)::text;
 
 -- NULL parks the cursor at the start of the ring: the pass drained its queue.
 -- name: SaveSweepCursor :exec
-INSERT INTO openrails.worker_sweep_cursors (worker_kind, cursor_merchant_id, updated_at)
+INSERT INTO openrails.worker_state (worker_kind, cursor_merchant_id, cursor_updated_at)
 VALUES (sqlc.arg(worker_kind)::text, sqlc.narg(cursor_merchant_id)::uuid, now())
 ON CONFLICT (worker_kind) DO UPDATE
     SET cursor_merchant_id = EXCLUDED.cursor_merchant_id,
-        updated_at = EXCLUDED.updated_at;
+        cursor_updated_at = EXCLUDED.cursor_updated_at;

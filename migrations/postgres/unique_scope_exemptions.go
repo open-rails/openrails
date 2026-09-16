@@ -28,7 +28,7 @@ var CrossMerchantUniqueExemptions = map[string]string{
 	"merchants_slug_key":               "slug is the global tenant address (ID-10)",
 	"uq_merchants_api_host_live":       "api_host routes unauthenticated webhooks; it must be globally unique (ID-10)",
 	"uq_merchants_permission_group_id": "org<->merchant is 1:1 across the whole install (GAP-9)",
-	"worker_health_pkey":               "RLS-exempt: per-worker-kind process health",
+	"worker_state_pkey":               "RLS-exempt: per-worker-kind process health",
 	"destructive_action_switch_pkey":   "RLS-exempt: instance-level operator kill switch",
 	"schema_migrations_pkey":           "migration ledger",
 

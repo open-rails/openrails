@@ -126,7 +126,7 @@ func planFindings(q Query, st *Structure, plan planNode, cat *Catalog) []Finding
 			return
 		}
 		if !cat.MerchantScoped[n.RelationName] {
-			return // control-plane table (merchants, worker_health)
+			return // control-plane table (merchants, worker_state)
 		}
 		seen[n.RelationName] = true
 		out = append(out, Finding{

@@ -18,7 +18,7 @@ import (
 
 // #689/#895: per-worker health bookkeeping. The middleware is attached to every
 // OpenRails worker at registration (internal/app.addTrackedWorker) and upserts
-// openrails.worker_health per job completion. The ALERT EVALUATOR that reads
+// openrails.worker_state per job completion. The ALERT EVALUATOR that reads
 // these rows lives in progress.go and is deliberately NOT a River job (#895).
 
 // maxWorkerHealthErrorLen bounds last_error (runes, so truncation never splits
@@ -136,7 +136,7 @@ func truncateRunes(s string, n int) string {
 // workerHealthAlertIdempotencyKey identifies one alerting incident. Retry-
 // volatile health details are deliberately excluded so a partial merchant
 // fan-out retries only the deliveries that did not already persist.
-func workerHealthAlertIdempotencyKey(row gen.OpenrailsWorkerHealth, reason string) string {
+func workerHealthAlertIdempotencyKey(row gen.OpenrailsWorkerState, reason string) string {
 	lastSuccessAt := ""
 	if row.LastSuccessAt != nil {
 		lastSuccessAt = row.LastSuccessAt.UTC().Format(time.RFC3339Nano)

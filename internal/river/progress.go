@@ -25,10 +25,10 @@ import (
 // stalled River stalled its own detector and could only report health in the
 // cases where health was never in doubt. ProgressMonitor is a plain goroutine
 // owned by OpenRails: it reads River's OWN `river_job` table plus the
-// openrails.worker_health rows and decides whether the periodic fleet is
+// openrails.worker_state rows and decides whether the periodic fleet is
 // progressing, without needing a job to run to find out.
 //
-// river_job is the primary signal deliberately. worker_health.last_success_at
+// river_job is the primary signal deliberately. worker_state.last_success_at
 // is written by WorkerHealthMiddleware, so a fleet running without that
 // middleware reports never_succeeded for every kind forever. river_job is written by
 // River itself, so it stays truthful regardless of how the host wired things.
@@ -47,7 +47,7 @@ const (
 	// ProgressBacklog: work is queued past its due time and piling up.
 	ProgressBacklog = "river_backlog"
 
-	// Per-kind verdicts (evaluated against worker_health, secondary detail).
+	// Per-kind verdicts (evaluated against worker_state, secondary detail).
 	ProgressConsecutiveFailures = "consecutive_failures"
 	ProgressNeverSucceeded      = "never_succeeded"
 	ProgressStale               = "stale"
@@ -69,7 +69,7 @@ type KindProgress struct {
 	// LastEnqueuedAt/LastCompletedAt come from river_job (River's own writes).
 	LastEnqueuedAt  *time.Time
 	LastCompletedAt *time.Time
-	// LastSuccessAt comes from openrails.worker_health (middleware bookkeeping).
+	// LastSuccessAt comes from openrails.worker_state (middleware bookkeeping).
 	LastSuccessAt *time.Time
 	Overdue       int64
 	// Reason is "" when healthy.
@@ -117,7 +117,7 @@ type ProgressMonitor struct {
 	// Pool reads River's own tables. River's schema is configurable and its
 	// tables are not part of OpenRails' sqlc schema, so this is a raw read (see
 	// internal/db/queries/EXEMPTIONS.md). Nil disables the river_job signal and
-	// the monitor falls back to worker_health only.
+	// the monitor falls back to worker_state only.
 	Pool        *pgxpool.Pool
 	RiverSchema string
 	Clock       clockwork.Clock
@@ -240,7 +240,7 @@ func (m *ProgressMonitor) Run(ctx context.Context) {
 
 // Check evaluates the fleet. It seeds a health row per registered kind first,
 // so a kind that has never run once is a visible row rather than an absence,
-// then reads River's own river_job watermarks and the worker_health rows.
+// then reads River's own river_job watermarks and the worker_state rows.
 func (m *ProgressMonitor) Check(ctx context.Context) (ProgressReport, error) {
 	if m == nil || m.DB == nil {
 		return ProgressReport{}, fmt.Errorf("river progress: DB is required")
@@ -284,7 +284,7 @@ func (m *ProgressMonitor) Check(ctx context.Context) (ProgressReport, error) {
 	}
 
 	report := ProgressReport{CheckedAt: now, ShortestPeriod: shortest}
-	byKind := make(map[string]gen.OpenrailsWorkerHealth, len(rows))
+	byKind := make(map[string]gen.OpenrailsWorkerState, len(rows))
 	for _, row := range rows {
 		byKind[row.WorkerKind] = row
 	}
@@ -418,9 +418,9 @@ func laterOf(a, b *time.Time) *time.Time {
 
 // evaluateKindProgress returns "" when the kind is healthy, else the reason.
 // Progress evidence is taken from river_job FIRST (River's own writes) and only
-// then from worker_health.last_success_at, so a deployment whose middleware is
+// then from worker_state.last_success_at, so a deployment whose middleware is
 // missing reports the truth instead of never_succeeded for everything.
-func evaluateKindProgress(row gen.OpenrailsWorkerHealth, kp KindProgress, now time.Time, failureThreshold, staleMultiplier int, minStale time.Duration) string {
+func evaluateKindProgress(row gen.OpenrailsWorkerState, kp KindProgress, now time.Time, failureThreshold, staleMultiplier int, minStale time.Duration) string {
 	if int(row.ConsecutiveFailures) >= failureThreshold {
 		return ProgressConsecutiveFailures
 	}
@@ -447,7 +447,7 @@ func evaluateKindProgress(row gen.OpenrailsWorkerHealth, kp KindProgress, now ti
 
 // workerAlertDue dedupes: alert on first trip, on a fresh incident (progress
 // happened since the last alert), or on the re-alert pacing while it persists.
-func workerAlertDue(row gen.OpenrailsWorkerHealth, now time.Time, reAlertEvery time.Duration) bool {
+func workerAlertDue(row gen.OpenrailsWorkerState, now time.Time, reAlertEvery time.Duration) bool {
 	if row.LastAlertedAt == nil {
 		return true
 	}
@@ -469,7 +469,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 	if err != nil {
 		return fmt.Errorf("river progress: list worker health: %w", err)
 	}
-	byKind := make(map[string]gen.OpenrailsWorkerHealth, len(rows))
+	byKind := make(map[string]gen.OpenrailsWorkerState, len(rows))
 	for _, row := range rows {
 		byKind[row.WorkerKind] = row
 	}
@@ -503,7 +503,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 		}
 		row, ok := byKind[kp.Kind]
 		if !ok {
-			row = gen.OpenrailsWorkerHealth{WorkerKind: kp.Kind}
+			row = gen.OpenrailsWorkerState{WorkerKind: kp.Kind}
 		}
 		if !workerAlertDue(row, report.CheckedAt, m.reAlertEvery()) {
 			continue
@@ -535,7 +535,7 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 // fleet stall gets the same durable, deduped alert row every other kind gets.
 const fleetHealthKind = "openrails.river_fleet"
 
-func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.OpenrailsWorkerHealth, reason string, now time.Time, report ProgressReport) error {
+func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.OpenrailsWorkerState, reason string, now time.Time, report ProgressReport) error {
 	// Cross-merchant read on purpose: the alert fans out to every active
 	// merchant, so this must be the explicit directory accessor, not a
 	// merchant-scoped handle (or#861/or#877 — a bare RLS context reads nothing).

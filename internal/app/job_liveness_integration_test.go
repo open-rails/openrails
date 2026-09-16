@@ -99,7 +99,7 @@ func lvCleanup(t *testing.T, rt *Runtime, kinds ...string) {
 		ctx := context.Background()
 		for _, kind := range kinds {
 			_, _ = rt.DB.Pool().Exec(ctx, `DELETE FROM public.river_job WHERE kind = $1`, kind)
-			_, _ = rt.DB.Pool().Exec(ctx, `DELETE FROM openrails.worker_health WHERE worker_kind = $1`, kind)
+			_, _ = rt.DB.Pool().Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind = $1`, kind)
 		}
 	}
 	clean()
@@ -233,8 +233,8 @@ func TestJobLiveness_NoProgressIsReaped_ProgressIsNot(t *testing.T) {
 	var lastErr string
 	var streak int32
 	require.NoError(t, rt.DB.Pool().QueryRow(ctx,
-		`SELECT coalesce(last_error, ''), consecutive_failures FROM openrails.worker_health WHERE worker_kind = $1`, lvWedgedKind).
+		`SELECT coalesce(last_error, ''), consecutive_failures FROM openrails.worker_state WHERE worker_kind = $1`, lvWedgedKind).
 		Scan(&lastErr, &streak))
 	require.EqualValues(t, 1, streak)
-	require.True(t, strings.Contains(lastErr, "reaped for no observed progress"), "worker_health.last_error = %q", lastErr)
+	require.True(t, strings.Contains(lastErr, "reaped for no observed progress"), "worker_state.last_error = %q", lastErr)
 }

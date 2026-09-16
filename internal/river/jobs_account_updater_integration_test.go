@@ -211,11 +211,11 @@ func newAUFixture(t *testing.T) *auFixture {
 	}
 	// The cursor is deployment-global; other packages' fixtures must not decide
 	// where this pass starts.
-	_, err := fx.super.Exec(ctx, "DELETE FROM openrails.worker_sweep_cursors WHERE worker_kind = $1", KindAccountUpdaterBatch)
+	_, err := fx.super.Exec(ctx, "DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindAccountUpdaterBatch)
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		_, _ = fx.super.Exec(context.Background(),
-			"DELETE FROM openrails.worker_sweep_cursors WHERE worker_kind = $1", KindAccountUpdaterBatch)
+			"DELETE FROM openrails.worker_state WHERE worker_kind = $1", KindAccountUpdaterBatch)
 	})
 	return fx
 }
@@ -690,7 +690,7 @@ func TestAccountUpdaterCappedPassResumesWhereItLeftOff(t *testing.T) {
 
 	var cursor *uuid.UUID
 	require.NoError(t, fx.super.QueryRow(fx.ctx,
-		"SELECT cursor_merchant_id FROM openrails.worker_sweep_cursors WHERE worker_kind = $1",
+		"SELECT cursor_merchant_id FROM openrails.worker_state WHERE worker_kind = $1",
 		KindAccountUpdaterBatch).Scan(&cursor))
 	require.NotNil(t, cursor, "a capped pass must leave a resume point")
 	require.Equal(t, first.SubmitMerchants[len(first.SubmitMerchants)-1], *cursor)

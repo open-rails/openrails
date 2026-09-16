@@ -1465,9 +1465,11 @@ type OpenrailsWebhookHealthDaily struct {
 	Drift      int64
 }
 
-// #689 per-River-worker-kind health: last success/error + failure streak, written by the worker middleware. Operator-global control-plane table. RLS-exempt by design: process health per worker kind, not tenant data.
-type OpenrailsWorkerHealth struct {
-	WorkerKind string
+// RLS-exempt by design: operator-global worker health and fair sweep progress. Health and cursor writers update only their own fields. NULL cursor starts at the beginning; otherwise restart resumes after cursor_merchant_id.
+type OpenrailsWorkerState struct {
+	WorkerKind       string
+	CursorMerchantID *uuid.UUID
+	CursorUpdatedAt  *time.Time
 	// First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.
 	RegisteredAt time.Time
 	// Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).
@@ -1480,14 +1482,6 @@ type OpenrailsWorkerHealth struct {
 	// When the health checker last raised a repair alert for this kind (dedup/re-alert pacing).
 	LastAlertedAt *time.Time
 	UpdatedAt     time.Time
-}
-
-// RLS-exempt by design: or#837 resume point for capped fan-out sweeps — the last merchant id a bounded pass handled. A cap without a cursor re-serves the same head every tick and starves the tail; a cursor without a cap is the unbounded enumeration this replaced. Operator-global process state, no tenant data (see worker_health).
-type OpenrailsWorkerSweepCursor struct {
-	WorkerKind string
-	// Exclusive lower bound for the next pass. NULL = the previous pass drained its work queue, so the next one starts from the beginning.
-	CursorMerchantID *uuid.UUID
-	UpdatedAt        time.Time
 }
 
 type ProfilesUser struct {

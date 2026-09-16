@@ -97,11 +97,11 @@ func TestCatalogSweepCoverageAndFailureHealth(t *testing.T) {
 	require.Equal(t, len(ids)-2, resolved, "healthy merchants must still finish, including the second page")
 	var lastSuccess *time.Time
 	var failures int
-	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_health WHERE worker_kind=$1`, KindCatalogReconciliationPull).Scan(&lastSuccess, &failures))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_state WHERE worker_kind=$1`, KindCatalogReconciliationPull).Scan(&lastSuccess, &failures))
 	require.Nil(t, lastSuccess)
 	require.Equal(t, 1, failures)
 	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.worker_health WHERE worker_kind=$1`, KindCatalogReconciliationPull)
+		_, _ = admin.Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind=$1`, KindCatalogReconciliationPull)
 	})
 }
 
@@ -130,11 +130,11 @@ func TestStripeWebhookSweepCoverageAndFailure(t *testing.T) {
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	var lastSuccess *time.Time
 	var failures int
-	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_health WHERE worker_kind=$1`, KindStripeWebhookReconcile).Scan(&lastSuccess, &failures))
+	require.NoError(t, admin.QueryRow(ctx, `SELECT last_success_at,consecutive_failures FROM openrails.worker_state WHERE worker_kind=$1`, KindStripeWebhookReconcile).Scan(&lastSuccess, &failures))
 	require.Nil(t, lastSuccess)
 	require.Equal(t, 1, failures)
 	t.Cleanup(func() {
-		_, _ = admin.Exec(ctx, `DELETE FROM openrails.worker_health WHERE worker_kind=$1`, KindStripeWebhookReconcile)
+		_, _ = admin.Exec(ctx, `DELETE FROM openrails.worker_state WHERE worker_kind=$1`, KindStripeWebhookReconcile)
 	})
 	for _, id := range ids {
 		require.True(t, secrets.seen[merchant.ID(id)], "merchant %s must be reached beyond the first page", id)

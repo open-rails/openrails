@@ -13,7 +13,7 @@ import (
 )
 
 const getSweepCursor = `-- name: GetSweepCursor :one
-SELECT cursor_merchant_id FROM openrails.worker_sweep_cursors
+SELECT cursor_merchant_id FROM openrails.worker_state
 WHERE worker_kind = $1::text
 `
 
@@ -83,11 +83,11 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 }
 
 const saveSweepCursor = `-- name: SaveSweepCursor :exec
-INSERT INTO openrails.worker_sweep_cursors (worker_kind, cursor_merchant_id, updated_at)
+INSERT INTO openrails.worker_state (worker_kind, cursor_merchant_id, cursor_updated_at)
 VALUES ($1::text, $2::uuid, now())
 ON CONFLICT (worker_kind) DO UPDATE
     SET cursor_merchant_id = EXCLUDED.cursor_merchant_id,
-        updated_at = EXCLUDED.updated_at
+        cursor_updated_at = EXCLUDED.cursor_updated_at
 `
 
 type SaveSweepCursorParams struct {

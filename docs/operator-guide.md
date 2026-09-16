@@ -92,7 +92,7 @@ OpenRails' workers converge state around that:
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
 | Cleanup / invoices / alerts / digests | 1 h – daily | expired-data cleanup, invoice collection + finalization, metric alert eval, findings digest |
-| Worker health check | 5 min | seeds `openrails.worker_health`, raises repair alerts when a kind stops completing |
+| Worker health check | 5 min | seeds `openrails.worker_state`, raises repair alerts when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
 (readiness; `?verbose=1` adds per-dependency detail — DB, configured Redis,
@@ -234,7 +234,7 @@ checkout_routing:
   evidence; `openrails intents-log` is the durable audit trail of provider
   mutations. Provider Refresh logs a per-pass heartbeat and per-merchant
   reconcile summary.
-- **Worker health**: `openrails.worker_health` rows per job kind; the 5-minute
+- **Worker health**: `openrails.worker_state` rows per job kind; the 5-minute
   checker raises durable repair alerts when a periodic kind stops completing.
 - **Alerting**: metric-threshold alert evaluation every 15 minutes and a daily
   low-severity findings digest, delivered through the notification queue.

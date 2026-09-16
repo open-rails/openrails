@@ -545,7 +545,7 @@ up. "start" = RunOnStart.
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
 | Invoice period finalize / monthly-floor sweep | daily / 30 d |
 
-The health checker seeds `openrails.worker_health` and raises durable repair
+The health checker seeds `openrails.worker_state` and raises durable repair
 alerts when a periodic kind stops completing.
 
 No job runs under a clock (xs-007). River's one-minute `JobTimeout` default is
