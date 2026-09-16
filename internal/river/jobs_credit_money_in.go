@@ -9,7 +9,6 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/progress"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -43,89 +42,6 @@ func forEachActiveMerchant(ctx context.Context, dbi *db.DB, logger *log.Entry, f
 		}
 	}
 	return errors.Join(errs...)
-}
-
-// These workers drive the money-in + reconciliation flows (#239/#241/#243).
-// The auto-top-up and arrears workers need a money.Charger (off-session rail
-// charge); when it is not configured the worker logs and no-ops so it is safe
-// to register before the rail wiring lands.
-
-// --- Prepaid auto-top-up (#239) ---
-
-const KindAutoTopup = "openrails.auto_topup"
-
-type AutoTopupArgs struct{}
-
-func (AutoTopupArgs) Kind() string { return KindAutoTopup }
-
-type AutoTopupWorker struct {
-	river.WorkerDefaults[AutoTopupArgs]
-	DB     *db.DB
-	Money  *money.MoneyService
-	Config *config.Config
-	// Intents is the write-through provider-intent runner (#674): each due
-	// episode posts a durable topup_charge intent (keyed off the persisted
-	// last_topup_at anchor) and executes it inline; anything ambiguous or
-	// parked drains via the scheduled executor/verifier. The charge itself
-	// runs inside the topup_charge handler.
-	Intents  *intents.Runner
-	Cooldown time.Duration
-}
-
-func (AutoTopupWorker) Kind() string { return KindAutoTopup }
-
-func (w AutoTopupWorker) Work(ctx context.Context, _ *river.Job[AutoTopupArgs]) error {
-	logger := log.WithContext(ctx).WithField("worker", KindAutoTopup)
-	if w.Config != nil && w.Config.IsLimitedMode() {
-		logger.Warn("limited mode: skipping auto-top-up charges (#345)")
-		return nil
-	}
-	if w.Money == nil || w.Intents == nil {
-		logger.Debug("auto-top-up intent runner not configured; skipping")
-		return nil
-	}
-	cooldown := w.Cooldown
-	if cooldown <= 0 {
-		cooldown = time.Hour
-	}
-	// #673: the scan requires a merchant in context; fan out per merchant.
-	return forEachActiveMerchant(ctx, w.DB, logger, func(ctx context.Context) error {
-		candidates, err := w.Money.ListDueAutoTopups(ctx, cooldown)
-		if err != nil {
-			return err
-		}
-		done := 0
-		for _, c := range candidates {
-			intent, err := w.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
-				MerchantID: c.MerchantID,
-				Provider:   c.Rail,
-				PspID:      c.PspID,
-				IntentType: intents.TypeTopupCharge,
-				Payload: intents.TopupChargePayload{
-					CustomerID:      c.CustomerID,
-					Currency:        c.Currency,
-					AmountNative:    c.AmountNative,
-					PaymentMethodID: c.PaymentMethodID,
-					EpisodeAnchor:   c.EpisodeAnchor,
-				},
-				IdempotencyKey: intents.TopupChargeIdempotencyKey(c.CustomerID, c.Currency, c.EpisodeAnchor),
-				NextAttemptAt:  time.Now().UTC(),
-				Origin:         intents.OriginSystem,
-				OriginReason:   "prepaid auto-top-up (balance below threshold)",
-			})
-			if err != nil {
-				logger.WithError(err).WithField("customer_id", c.CustomerID).Error("auto-topup: post intent failed")
-				continue
-			}
-			if intent.Status == intents.StatusSucceeded {
-				done++
-			}
-		}
-		if done > 0 {
-			logger.WithField("topups", done).Info("auto top-ups completed")
-		}
-		return nil
-	})
 }
 
 // --- Invoices and arrears collection (#241/#301/#303) ---

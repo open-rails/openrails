@@ -98,7 +98,6 @@ internal/river/jobs_catalog_reconciliation.go|now := time.Now().UTC()|infrastruc
 internal/river/jobs_cleanup.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_converge_sweep.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_credit_expiry.go|clock = clockwork.NewRealClock()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
-internal/river/jobs_credit_money_in.go|NextAttemptAt:  time.Now().UTC(),|infrastructure_time|Queue scheduling and provider retry backoff use physical time|1
 internal/river/jobs_credit_money_in.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
 internal/river/jobs_delinquency.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/river/jobs_dunning.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

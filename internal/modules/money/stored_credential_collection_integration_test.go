@@ -92,9 +92,10 @@ func TestChargeOutstanding_StoredCredentialMITFallbacks(t *testing.T) {
 	}
 
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 2_000_000))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "297-anchor-"+uuid.NewString()[:8], 150*10_000)
 	require.NoError(t, err)

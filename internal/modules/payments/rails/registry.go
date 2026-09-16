@@ -60,7 +60,7 @@ type Descriptor struct {
 	HasRemoteCustomer bool
 
 	// SupportsChargeSavedMethod: invoice collection may charge a saved method
-	// on this rail (prepaid auto-top-up #239, arrears settlement #241).
+	// on this rail (arrears settlement #241).
 	SupportsChargeSavedMethod bool
 
 	// SupportsCatalogTrial: the rail can honour a catalog first phase

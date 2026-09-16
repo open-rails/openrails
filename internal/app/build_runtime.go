@@ -215,7 +215,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	railConfigs := railresolve.NewMerchantsSource(cfg, merchantsFn)
 	// #725/#730/#788: the ONE store-armed per-merchant credential builder
-	// (arrears/top-up adapters, manual-rebill + cancel NMI clients).
+	// (invoice collection adapters, manual-rebill + cancel NMI clients).
 	collectionResolver := &money.MerchantCollectionAdapterBuilder{
 		Config:      cfg,
 		DB:          database,

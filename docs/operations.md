@@ -115,7 +115,7 @@ Every outbound provider mutation flows through the ledger: deferred NMI
 deletes, NMI/Stripe refunds, dunning `manual_rebill` charges, CCBill
 cancels, catalog archive ops (`stripe_archive_product`/`stripe_archive_price`/
 `solana_sunset_plan`), payment-method swaps, vault deletes, checkout NMI
-sales, auto-top-up charges, and Solana recurring pulls. NMI deliberately has
+sales and Solana recurring pulls. NMI deliberately has
 NO catalog-archive write path (plan edits affect live subscribers).
 
 Execution is **effectively-once**, never assumed exactly-once. Per class:
@@ -537,7 +537,7 @@ up. "start" = RunOnStart.
 | Provider-intent executor | 1 min + start |
 | Provider-intent verifier · admission-denial flush · worker health check (health check + start) | 5 min |
 | Notification email sweep | 10 min |
-| Convergence sweep (+ start) · auto-top-up · arrears delinquency evaluation | 15 min |
+| Convergence sweep (+ start) · arrears delinquency evaluation | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Plan-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
@@ -605,7 +605,7 @@ in any mode):
 | Card/vault save, tier change, resume, refund | yes | yes | no |
 | User/admin cancel → rail-side delete | yes | yes | no — intent parks for replay |
 | Dunning charges + window-expiry cancellations | yes | no — runs dry, intents park | no |
-| Auto-top-ups, arrears collection, Solana pulls | yes | no | no |
+| Invoice collection, Solana pulls | yes | no | no |
 | Catalog provider-object writes (`push-merchant-catalog`) | yes | deferred | deferred |
 | Provider reads (query APIs, catalog verification) | yes | yes | yes |
 | Webhook ingestion + local serving | yes | yes | yes |

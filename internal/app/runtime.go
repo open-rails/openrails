@@ -156,7 +156,7 @@ type Runtime struct {
 	// EnsureMerchantsService / the standalone server alongside Merchants.
 	MerchantSecretPing func(ctx context.Context) error
 	// CollectionResolver is the ONE #725/#788 store-armed per-merchant
-	// credential resolver (arrears/top-up adapters + NMI clients for rebills,
+	// credential resolver (invoice collection adapters + NMI clients for rebills,
 	// cancels, refunds and admin actions).
 	CollectionResolver money.CollectionPlane
 	// RailConfigs is the ONE Layer-C rail resolution seam (#788): every

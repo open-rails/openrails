@@ -32,11 +32,12 @@ func TestInvoiceRecovery_SelectsSeparateMethodAndSettles(t *testing.T) {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
-	autoTopupMethod := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
+	initialMethod := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &autoTopupMethod,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, initialMethod))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "recovery-success", 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -49,13 +50,12 @@ func TestInvoiceRecovery_SelectsSeparateMethodAndSettles(t *testing.T) {
 	collectionMethod := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, collectionMethod))
 
-	var storedAutoTopup, storedCollection *string
+	var storedCollection string
 	require.NoError(t, pool.QueryRow(ctx, `
-		SELECT auto_topup_payment_method_id::text, collection_payment_method_id::text
+		SELECT collection_payment_method_id::text
 		FROM openrails.money_settings
-		WHERE customer_id = $1 AND currency = $2`, payer.UUID(), currency).Scan(&storedAutoTopup, &storedCollection))
-	require.Equal(t, autoTopupMethod.String(), *storedAutoTopup)
-	require.Equal(t, collectionMethod.String(), *storedCollection)
+		WHERE customer_id = $1 AND currency = $2`, payer.UUID(), currency).Scan(&storedCollection))
+	require.Equal(t, collectionMethod.String(), storedCollection)
 
 	succeeded := &fakeCharger{}
 	retried, err := svc.RetryInvoiceCollection(ctx, succeeded, payer, invoice.ID)
@@ -84,9 +84,10 @@ func TestInvoiceRecovery_IdempotentRetryBindsMethodAndReplays(t *testing.T) {
 	defaultMethod := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	boundMethod := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &defaultMethod,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, defaultMethod))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "recovery-idempotent", 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -133,9 +134,10 @@ func TestInvoiceRecovery_AmbiguousOutcomeBlocksFurtherRetries(t *testing.T) {
 	})
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "recovery-ambiguous", 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -183,9 +185,10 @@ func TestInvoiceRecovery_CleanFailureRestoresPriorDunningState(t *testing.T) {
 	})
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "recovery-clean-error", 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -220,9 +223,10 @@ func TestInvoiceRecovery_BackgroundAmbiguityBlocksAnotherSweep(t *testing.T) {
 	})
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "background-ambiguous", 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -253,9 +257,10 @@ func TestInvoiceRecovery_ActiveClaimRejectsCompetingInvoiceMutations(t *testing.
 	})
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "active-claim-guards", 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())

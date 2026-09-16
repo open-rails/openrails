@@ -67,10 +67,13 @@ func TestSelfHandler_EmbeddedPathsMountedWithoutSelfPermissions(t *testing.T) {
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 
-	w = doSelf(self, http.MethodPut, "/billing/v1/me/settings")
+	w = doSelf(self, http.MethodPut, "/billing/v1/me/collection-payment-method")
+	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 	require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
-	require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())
+
+	w = doSelf(self, http.MethodPut, "/billing/v1/me/settings")
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 
 	w = doSelf(self, http.MethodGet, "/billing/v1/merchant/subscriptions")
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())

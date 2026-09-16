@@ -44,7 +44,7 @@ func (s *Service) normalizeMerchantSettings(ctx context.Context, in openrails.Me
 		profile = &models.MerchantProfileConfiguration{DisplayName: strings.TrimSpace(in.Profile.DisplayName), LogoURL: strings.TrimSpace(in.Profile.LogoURL), FromEmail: strings.TrimSpace(in.Profile.FromEmail), SupportURL: strings.TrimSpace(in.Profile.SupportURL), SignupURL: strings.TrimSpace(in.Profile.SignupURL)}
 	}
 	doc.config, err = applyMerchantConfiguration(models.MerchantConfiguration{}, MerchantConfiguration{
-		Profile: profile, AutoTopupSafety: in.AutoTopupSafety, InvoiceCollectionThreshold: in.InvoiceCollectionThreshold,
+		Profile: profile, InvoiceCollectionThreshold: in.InvoiceCollectionThreshold,
 		InvoiceMonthlyFloor: in.InvoiceMonthlyFloor, InvoiceBillingBoundary: in.InvoiceBillingBoundary, AlertEmail: in.AlertEmail,
 		RepriceNoticeWindowDays: in.RepriceNoticeWindowDays, ArrearsGraceDays: in.ArrearsGraceDays,
 		ArrearsDelinquencyFloor: in.ArrearsDelinquencyFloor, CheckoutRouting: in.CheckoutRouting,
@@ -165,8 +165,8 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.Mercha
 			return err
 		}
 		out = openrails.MerchantSettings{
-			AutoTopupSafety: cfg.AutoTopupSafety, InvoiceCollectionThreshold: cfg.InvoiceCollectionThreshold,
-			InvoiceMonthlyFloor: cfg.InvoiceMonthlyFloor, InvoiceBillingBoundary: cfg.InvoiceBillingBoundary, AlertEmail: cfg.AlertEmail,
+			InvoiceCollectionThreshold: cfg.InvoiceCollectionThreshold,
+			InvoiceMonthlyFloor:        cfg.InvoiceMonthlyFloor, InvoiceBillingBoundary: cfg.InvoiceBillingBoundary, AlertEmail: cfg.AlertEmail,
 			RepriceNoticeWindowDays: cfg.RepriceNoticeWindowDays, ArrearsGraceDays: cfg.ArrearsGraceDays,
 			ArrearsDelinquencyFloor: cfg.ArrearsDelinquencyFloor, CheckoutRouting: cfg.CheckoutRouting,
 		}

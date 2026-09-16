@@ -133,7 +133,7 @@ func TestHostPrincipal_AccountRoutesMountedWithoutPermissions(t *testing.T) {
 
 	func() {
 		defer func() { _ = recover() }()
-		w := doHostSelf(router, http.MethodPut, "/v1/me/settings")
+		w := doHostSelf(router, http.MethodPut, "/v1/me/collection-payment-method")
 		require.NotEqual(t, http.StatusUnauthorized, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusForbidden, w.Code, w.Body.String())
 		require.NotEqual(t, http.StatusNotFound, w.Code, w.Body.String())

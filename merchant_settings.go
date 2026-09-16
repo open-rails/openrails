@@ -27,12 +27,3 @@ type CheckoutRoutingMatch struct {
 func (m CheckoutRoutingMatch) IsCatchAll() bool {
 	return m.Currency == "" && m.Product == "" && m.Price == "" && m.Mode == "" && m.Country == ""
 }
-
-// AutoTopupSafetyPolicy bounds submitted episodes per customer and currency.
-// Windows are rolling24h,7d,30d; omitted policy uses3,10,30 and3 declines.
-type AutoTopupSafetyPolicy struct {
-	MaxDaily              int `json:"max_daily" yaml:"max_daily" koanf:"max_daily"`
-	MaxWeekly             int `json:"max_weekly" yaml:"max_weekly" koanf:"max_weekly"`
-	MaxMonthly            int `json:"max_monthly" yaml:"max_monthly" koanf:"max_monthly"`
-	DeclinesBeforeDisable int `json:"declines_before_disable" yaml:"declines_before_disable" koanf:"declines_before_disable"`
-}

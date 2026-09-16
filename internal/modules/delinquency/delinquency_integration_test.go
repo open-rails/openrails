@@ -108,9 +108,10 @@ func (e *env) accrueAndBill(t *testing.T, amount int64) uuid.UUID {
 	t.Helper()
 	pm := e.seedCard(t)
 	_, err := e.money.UpsertAccountSettings(e.ctx, e.payer, e.currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, e.money.SetInvoiceCollectionPaymentMethod(e.ctx, e.payer, e.currency, pm))
 	accruedAt := e.clock.Now().UTC()
 	_, err = e.money.AccrueOwed(e.ctx, e.payer, e.currency, "usage", "or878-"+uuid.NewString(), amount)
 	require.NoError(t, err)

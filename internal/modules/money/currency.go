@@ -33,7 +33,7 @@ func NormalizeCurrency(c string) string {
 }
 
 // RequireBillingCurrency enforces the #474/#475 invariant at the billing layer:
-// billing (invoice/owed/charge/auto-topup/account-settings) is external-currency-
+// billing (invoice/owed/charge/account-settings) is external-currency-
 // only, so a qualified custom-credit code (merchant/name, #475) is REJECTED here.
 // Ledger primitives (Deposit/Withdraw/Hold) keep using the looser ValidateCurrency.
 func RequireBillingCurrency(code string) error {

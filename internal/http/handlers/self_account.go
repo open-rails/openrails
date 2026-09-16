@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -9,14 +10,13 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // Self-service money surface: the authenticated merchant_subject reads its own
-// balance and transaction history, and can set only self-imposed spend caps plus
-// auto-top-up preferences. Platform-owned policy fields are intentionally not
-// accepted on this surface.
+// balance and transaction history and chooses its invoice collection method.
 //
 // The payer is resolved exactly like the rest of /v1/me
 // (identity.CustomerIDFromString over the acting subject — see
@@ -67,29 +67,24 @@ func GetMyBalance(r *httprequest.Request) {
 	r.SuccessJSON(selfBalanceResponse{Currency: snap.Currency, BalanceAmount: snap.BalanceAmount})
 }
 
-type selfAccountSettingsRequest struct {
-	Currency               string  `json:"currency"`
-	LowBalanceThreshold    *int64  `json:"low_balance_threshold"`
-	AutoTopupEnabled       *bool   `json:"auto_topup_enabled"`
-	AutoTopupAmount        *int64  `json:"auto_topup_amount"`
-	AutoTopupPaymentMethod *string `json:"auto_topup_payment_method_id"`
+type collectionPaymentMethodRequest struct {
+	Currency        string `json:"currency"`
+	PaymentMethodID string `json:"payment_method_id"`
 }
 
-type selfAccountSettingsResponse struct {
-	AutoTopupFailures      int64      `json:"auto_topup_failures"`
-	Currency               string     `json:"currency"`
-	LowBalanceThreshold    *int64     `json:"low_balance_threshold,omitempty"`
-	AutoTopupEnabled       bool       `json:"auto_topup_enabled"`
-	AutoTopupAmount        *int64     `json:"auto_topup_amount,omitempty"`
-	AutoTopupPaymentMethod *uuid.UUID `json:"auto_topup_payment_method_id,omitempty"`
+type collectionPaymentMethodResponse struct {
+	Currency        string `json:"currency"`
+	PaymentMethodID string `json:"payment_method_id"`
 }
 
-func SetMyCreditAccountSettings(r *httprequest.Request) {
+// SetMyCollectionPaymentMethod (PUT .../collection-payment-method) selects the
+// payer's saved method for automatic invoice collection in one currency.
+func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
-	var req selfAccountSettingsRequest
+	var req collectionPaymentMethodRequest
 	if !r.BindJSON(&req) {
 		return
 	}
@@ -97,52 +92,29 @@ func SetMyCreditAccountSettings(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-
-	in := money.AccountSettingsInput{
-		LowBalanceThreshold: req.LowBalanceThreshold,
-		AutoTopupEnabled:    req.AutoTopupEnabled,
-		AutoTopupAmount:     req.AutoTopupAmount,
+	if err := money.RequireBillingCurrency(currency); err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return
 	}
-	if req.AutoTopupPaymentMethod != nil {
-		pm, perr := uuid.Parse(strings.TrimSpace(*req.AutoTopupPaymentMethod))
-		if perr != nil {
-			r.ErrorJSON(http.StatusBadRequest, "invalid auto_topup_payment_method_id")
-			return
-		}
-		if r.State.PaymentMethodService == nil {
-			r.ErrorJSON(http.StatusInternalServerError, "payment method service unavailable")
-			return
-		}
-		user := r.GetUser()
-		if err := r.State.PaymentMethodService.ValidateOwnership(r.Request.Context(), pm, user.ID); err != nil {
-			r.ErrorJSON(http.StatusBadRequest, "auto_topup_payment_method_id does not belong to this customer")
-			return
-		}
-		in.AutoTopupPaymentMethod = &pm
+	methodID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
+		return
 	}
-
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	if err := svc.SetCreditAccountSettings(r.Request.Context(), payer, currency, in); err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+	if err := svc.SetInvoiceCollectionPaymentMethod(r.Request.Context(), payer, currency, methodID); err != nil {
+		if errors.Is(err, money.ErrCollectionPaymentMethodInvalid) {
+			r.ErrorJSON(http.StatusBadRequest, "payment method is not eligible for invoice collection")
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to set collection payment method")
 		return
 	}
-	settings, err := svc.GetCreditAccountSettings(r.Request.Context(), payer, currency)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
-	r.SuccessJSON(selfAccountSettingsResponse{
-		Currency:               settings.Currency,
-		AutoTopupFailures:      settings.AutoTopupFailures,
-		LowBalanceThreshold:    settings.LowBalanceThreshold,
-		AutoTopupEnabled:       settings.AutoTopupEnabled,
-		AutoTopupAmount:        settings.AutoTopupAmount,
-		AutoTopupPaymentMethod: settings.AutoTopupPaymentMethod,
-	})
+	r.SuccessJSON(collectionPaymentMethodResponse{Currency: currency, PaymentMethodID: api.FormatPaymentMethodID(methodID)})
 }
 
 // GetMyAccountTransactions (GET /v1/me/transactions?currency=&limit=&offset=)

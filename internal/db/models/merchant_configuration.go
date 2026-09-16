@@ -7,8 +7,6 @@ import "github.com/open-rails/openrails"
 type MerchantConfiguration struct {
 	Profile MerchantProfileConfiguration `json:"profile,omitempty"`
 
-	AutoTopupSafety *AutoTopupSafetyPolicy `json:"auto_topup_safety,omitempty"`
-
 	// Invoice settings are merchant-owned billing cadence and collection knobs.
 	// Missing values use money service defaults.
 	InvoiceCollectionThreshold *int64 `json:"collection_threshold,omitempty"`
@@ -62,5 +60,3 @@ type MerchantProfileConfiguration struct {
 	// emails link to. "" ⇒ no CTA rendered.
 	SignupURL string `json:"signup_url,omitempty"`
 }
-
-type AutoTopupSafetyPolicy = openrails.AutoTopupSafetyPolicy

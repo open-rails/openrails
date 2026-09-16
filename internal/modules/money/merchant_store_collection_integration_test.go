@@ -49,9 +49,10 @@ func storeArmedCharger(dbi *db.DB, msvc *merchants.Service, boot map[string]mone
 func seedArrearsInvoice(t *testing.T, svc *money.MoneyService, ctx context.Context, payer identity.CustomerID, pm uuid.UUID) uuid.UUID {
 	t.Helper()
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	require.NoError(t, svc.SetCreditLimit(ctx, payer, money.DefaultCurrency, 50_000))
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "store-collection-"+uuid.NewString()[:8], 50_000)
 	require.NoError(t, err)

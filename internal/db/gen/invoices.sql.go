@@ -780,7 +780,7 @@ func (q *Queries) InsertPendingInvoiceItem(ctx context.Context, arg InsertPendin
 const listChargeableOpenInvoices = `-- name: ListChargeableOpenInvoices :many
 SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
        i.collection_failure_count, i.collection_failed_at,
-       COALESCE(s.collection_payment_method_id, s.auto_topup_payment_method_id)::uuid AS collection_payment_method_id
+       s.collection_payment_method_id::uuid AS collection_payment_method_id
 FROM openrails.invoices i
 JOIN openrails.money_settings s
   ON s.merchant_id = i.merchant_id
@@ -790,7 +790,7 @@ WHERE i.merchant_id = $1
   AND i.status IN ('open', 'past_due')
   AND i.amount_due > 0
   AND i.collection_method = 'charge_automatically'
-  AND COALESCE(s.collection_payment_method_id, s.auto_topup_payment_method_id) IS NOT NULL
+  AND s.collection_payment_method_id IS NOT NULL
   AND i.last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
   AND i.last_collection_failure_code IS DISTINCT FROM 'collection_outcome_unknown'
   AND (i.due_at IS NULL OR i.due_at <= $2::timestamptz)

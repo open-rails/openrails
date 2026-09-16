@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// #725/#788: the arrears/top-up collection plane arms rail credentials PER
+// #725/#788: the invoice collection plane arms rail credentials PER
 // MERCHANT from the merchant-secrets store AT CHARGE TIME — the ONE Layer-C
 // resolution seam (there is no boot-config plane anymore, #788). A merchant
 // that declares a rail account resolves that rail from the store ONLY —

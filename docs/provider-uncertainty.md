@@ -13,7 +13,7 @@ mutation. A captured provider receipt survives local finalization failure in
 the existing intent result evidence. Local effects are retried against that
 same receipt. Query unavailability or delayed visibility never authorizes a
 new sale. NMI processor communication/duplicate response codes 420, 421 and 430
-also require verification rather than release/resend. Top-up and non-idempotent refund receipt rules follow the same rule.
+also require verification rather than release/resend. Non-idempotent refund receipt rules follow the same rule.
 
 Known pre-submission refusal (unconfigured/read-only provider, failed local
 prerequisite) parks the intent without consuming an attempt. It can be retried

@@ -234,20 +234,8 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	if err := addTrackedWorker(r, workers, &riverjobs.MerchantSecretCleanupWorker{DB: r.DB, Merchants: r.Merchants}); err != nil {
 		return fmt.Errorf("add merchant secret cleanup worker: %w", err)
 	}
-	// Credit money-in + reconciliation workers (#239/#241/#243/#508). The
-	// auto-top-up and invoice workers share the configured off-session charger;
-	// when it is nil they log-and-skip until rail wiring is attached.
-	// LowBalanceAlertWorker (#240) is NOT registered: no money.Alerter
-	// implementation exists in the runtime, so registration was a permanent
-	// no-op (#673) — re-add it together with the notification wiring.
-	if err := addTrackedWorker(r, workers, &riverjobs.AutoTopupWorker{
-		DB:      r.DB,
-		Money:   r.MoneyService,
-		Config:  r.Config,
-		Intents: r.intentRunner(intentRegistry, clock),
-	}); err != nil {
-		return fmt.Errorf("add auto-topup worker: %w", err)
-	}
+	// Invoice collection and reconciliation workers. Collection waits until
+	// an off-session charger is configured.
 	if err := addTrackedWorker(r, workers, &riverjobs.InvoiceWorker{
 		DB:       r.DB,
 		Money:    r.MoneyService,
@@ -318,7 +306,7 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 // provider intent executor/verifier (#358): deferred NMI deletes (phase A),
 // NMI/Stripe refunds (phase B), manual rebills (phase C), catalog archive
 // ops — Stripe product/price archives + Solana plan sunsets (phase D) — and
-// the #674 write-through kinds (checkout NMI sales, auto-top-up charges,
+// the #674 write-through kinds (checkout NMI sales,
 // Solana recurring pulls).
 func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 	// #730/#788: every provider intent arms per merchant from the armed rail
@@ -361,7 +349,6 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		registry.Register(intents.NewNMIPaymentMethodDeleteHandler(r.DB, r.RailPaymentMethodService))
 		registry.Register(intents.NewNMIPaymentMethodUpdateHandler(r.DB, r.RailPaymentMethodService, intents.NewStore(r.DB), clock))
 	}
-	registry.Register(intents.NewTopupChargeHandler(r.DB, r.MoneyCharger, r.CollectionResolver, clock))
 	// Solana recurring pull (#674): the handler wraps the crank state machine
 	// with the pre-submit signature write-ahead + chain-read verification. The
 	// core worker here carries NO Intents runner (the handler IS the execution
@@ -715,18 +702,6 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		15*time.Minute,
 		func() (river.JobArgs, *river.InsertOpts) {
 			return riverjobs.DelinquencyArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
-			}
-		},
-		&river.PeriodicJobOpts{RunOnStart: false},
-	))
-
-	// Every 15 minutes: prepaid auto-top-up (#239).
-	jobs = append(jobs, r.healthPeriodic(
-		15*time.Minute,
-		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.AutoTopupArgs{}, &river.InsertOpts{
 				Queue:      riverjobs.QueueBilling,
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 15 * time.Minute},
 			}

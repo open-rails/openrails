@@ -3,7 +3,7 @@
 // # River is a REQUIRED dependency (#895)
 //
 // OpenRails' River periodic fleet is not auxiliary — it is where the money
-// moves: subscription_converge, credit_expiry, auto_topup, invoice,
+// moves: subscription_converge, credit_expiry, invoice,
 // credit_reconcile, stripe_webhook_reconcile, provider_intent_execute,
 // ledger_integrity, the Solana cranks. With River absent every read API keeps
 // answering correctly and the money silently stops: subscriptions never renew,

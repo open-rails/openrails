@@ -71,7 +71,7 @@ modes"](operations.md#operating-modes-the-safety-levers).
 | Real money can move | yes | yes | no |
 | User checkout / charge / refund / cancel | yes | yes | no (fails loudly) |
 | Dunning charges + expiry cancellations | yes | dry-run, intents parked | no |
-| Auto-top-ups, arrears collection, Solana pulls | yes | no | no |
+| Invoice collection, Solana pulls | yes | no | no |
 | Catalog provider-object writes | yes | deferred | deferred |
 | Provider reads + webhook ingestion | yes | yes | yes |
 

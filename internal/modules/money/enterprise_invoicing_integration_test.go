@@ -136,9 +136,10 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 	// collection_method, not a missing method.
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_terms_"+uuid.NewString()[:8])
 	_, err = svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 
 	_, err = svc.AccrueOwed(ctx, payer, money.DefaultCurrency, "usage", "th798-terms-"+uuid.NewString()[:8], 9_007_199_254_740_993)
 	require.NoError(t, err)

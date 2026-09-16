@@ -43,9 +43,10 @@ func TestChargeOutstanding_CASMissAfterSuccessfulCharge_RecordsPayment(t *testin
 	})
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "cas-miss", 5_000_000)
 	require.NoError(t, err)
 	inv, err := svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
@@ -105,9 +106,10 @@ func TestChargeOutstanding_AttemptKeyAdvancesAfterRecordedAttempt(t *testing.T) 
 	})
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &pm,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, money.DefaultCurrency, pm))
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "attempt-key", 5_000_000)
 	require.NoError(t, err)
 	inv, err := svc.FinalizeInvoice(ctx, payer, cur, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))

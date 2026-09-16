@@ -18,7 +18,7 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 // fullModeConfig is the operating mode every intent Runner in this package must
 // state. or#865 made the origin x mode gate fail CLOSED: a Runner with no
 // ModeView cannot tell which mode it is in, so it parks every intent instead of
-// executing it. A top-up fixture that expects the charge to happen has to say
+// executing it. A collection fixture that expects the charge to happen has to say
 // "full" out loud — silence is a wiring bug, not a default.
 func fullModeConfig() *config.Config {
 	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}

@@ -6,13 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	safecast "github.com/ccoveille/go-safecast/v2"
-
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -29,15 +25,13 @@ const (
 )
 
 // DefaultAccountSettings returns the implicit policy for an payer that has no
-// explicit settings row: prepaid, 365-day default expiry. Used by
+// explicit settings row: prepaid. Used by
 // GetAccountSettings and the enforcement path so an unconfigured account "just
 // works" (prepaid, balance-gated only).
 func DefaultAccountSettings(payer identity.CustomerID) *models.MoneyAccount {
-	hours := 365 * 24
 	return &models.MoneyAccount{
-		CustomerID:               payer.UUID(),
-		BillingMode:              BillingModePrepaid,
-		DefaultCreditExpiryHours: &hours,
+		CustomerID:  payer.UUID(),
+		BillingMode: BillingModePrepaid,
 	}
 }
 
@@ -54,7 +48,7 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	cur := normalizeCurrency(currency)
-	// Account settings / owed / auto-topup are billing-layer (#475 invariant):
+	// Account settings / owed are billing-layer (#475 invariant):
 	// custom credit units are never billed in.
 	if err := RequireBillingCurrency(cur); err != nil {
 		return nil, err
@@ -82,16 +76,11 @@ func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.Cu
 // AccountSettingsInput is the upsert payload for an payer's spend policy. Only
 // non-nil fields are written; nil fields keep their default / existing value.
 type AccountSettingsInput struct {
-	BillingMode              *string
-	LowBalanceThreshold      *int64
-	AutoTopupEnabled         *bool
-	AutoTopupAmount          *int64
-	AutoTopupPaymentMethod   *uuid.UUID
-	DefaultCreditExpiryHours *int
+	BillingMode *string
 }
 
 // UpsertAccountSettings creates or updates the spend policy for (payer,
-// currency). Validates the billing mode and alert threshold.
+// currency). Validates the billing mode.
 func (s *MoneyService) UpsertAccountSettings(ctx context.Context, payer identity.CustomerID, currency string, in AccountSettingsInput) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -143,25 +132,9 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	if err != nil {
 		return nil, err
 	}
-	wasEnabled := cur.AutoTopupEnabled
 	// Apply overrides onto the current/default view.
 	if in.BillingMode != nil {
 		cur.BillingMode = *in.BillingMode
-	}
-	if in.LowBalanceThreshold != nil {
-		cur.LowBalanceThreshold = nilIfNeg(in.LowBalanceThreshold)
-	}
-	if in.AutoTopupEnabled != nil {
-		cur.AutoTopupEnabled = *in.AutoTopupEnabled
-	}
-	if in.AutoTopupAmount != nil {
-		cur.AutoTopupAmount = nilIfNeg(in.AutoTopupAmount)
-	}
-	if in.AutoTopupPaymentMethod != nil {
-		cur.AutoTopupPaymentMethod = in.AutoTopupPaymentMethod
-	}
-	if in.DefaultCreditExpiryHours != nil {
-		cur.DefaultCreditExpiryHours = in.DefaultCreditExpiryHours
 	}
 
 	cur.MerchantID = tenantID
@@ -171,47 +144,20 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	if err := RequireBillingCurrency(cur.Currency); err != nil {
 		return nil, err
 	}
-	if cur.AutoTopupAmount != nil {
-		if _, err := moneyutil.NativeToRailMinorExact(cur.Currency, *cur.AutoTopupAmount); err != nil {
-			return nil, fmt.Errorf("auto_topup_amount must be exactly representable at rail precision: %w", err)
-		}
-	}
 	cur.UpdatedAt = now
 	if cur.CreatedAt.IsZero() {
 		cur.CreatedAt = now
 	}
 
-	var expiry *int32
-	if cur.DefaultCreditExpiryHours != nil {
-		v, _ := safecast.Convert[int32](*cur.DefaultCreditExpiryHours)
-		expiry = &v
-	}
 	if err := s.db.Gen(ctx).UpsertMoneyAccountSettings(ctx, gen.UpsertMoneyAccountSettingsParams{
-		MerchantID:               cur.MerchantID,
-		CustomerID:               cur.CustomerID,
-		Currency:                 cur.Currency,
-		BillingMode:              cur.BillingMode,
-		LowBalanceThreshold:      cur.LowBalanceThreshold,
-		AutoTopupEnabled:         cur.AutoTopupEnabled,
-		AutoTopupAmount:          cur.AutoTopupAmount,
-		AutoTopupPaymentMethodID: cur.AutoTopupPaymentMethod,
-		DefaultCreditExpiryHours: expiry,
-		CreatedAt:                cur.CreatedAt,
-		UpdatedAt:                cur.UpdatedAt,
+		MerchantID:  cur.MerchantID,
+		CustomerID:  cur.CustomerID,
+		Currency:    cur.Currency,
+		BillingMode: cur.BillingMode,
+		CreatedAt:   cur.CreatedAt,
+		UpdatedAt:   cur.UpdatedAt,
 	}); err != nil {
 		return nil, err
 	}
-	if in.AutoTopupEnabled != nil && *in.AutoTopupEnabled && !wasEnabled {
-		if err := s.db.Gen(ctx).ResetAutoTopupFailures(ctx, gen.ResetAutoTopupFailuresParams{MerchantID: tenantID, CustomerID: payer.UUID(), Currency: cur.Currency}); err != nil {
-			return nil, err
-		}
-	}
 	return s.GetAccountSettings(ctx, payer, currency)
-}
-
-func nilIfNeg(v *int64) *int64 {
-	if v == nil || *v < 0 {
-		return nil
-	}
-	return v
 }

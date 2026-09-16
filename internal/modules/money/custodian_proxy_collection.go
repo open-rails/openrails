@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// CustodianProxyCollectionAdapter collects invoices and top-ups from
+// CustodianProxyCollectionAdapter collects invoices from
 // custodian-held instruments (#795) through the #297 charge seam: a
 // merchant-initiated unscheduled CoF charge, detokenized through the
 // custodian's proxy into the PSP's own NMI gateway. Same anchor semantics as

@@ -57,9 +57,10 @@ func seedUnknownParkedInvoice(t *testing.T, svc *money.MoneyService, pool *pgxpo
 	t.Helper()
 	method := seedPaymentMethod(t, pool, ctx, payer, rail)
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "verify-"+uuid.NewString()[:8], 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -180,9 +181,10 @@ func TestInvoiceVerify_CrashMidClaimConverges(t *testing.T) {
 	cleanupInvoices(t, pool, ctx, payer)
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "crash-claim", 5_000_000)
 	require.NoError(t, err)
 	invoice, err := svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -283,9 +285,10 @@ func TestInvoiceVerify_AmbiguityDoesNotAbortBatch(t *testing.T) {
 	for _, payer := range []identity.CustomerID{payerA, payerB} {
 		method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 		_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-			BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+			BillingMode: strptr(money.BillingModeArrears),
 		})
 		require.NoError(t, err)
+		require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 		_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "batch-isolation", 5_000_000)
 		require.NoError(t, err)
 		_, err = svc.FinalizeInvoice(ctx, payer, currency, time.Now().Add(-time.Hour), time.Now())
@@ -328,9 +331,10 @@ func TestInvoiceVerify_ScheduleParityAndTerminal(t *testing.T) {
 
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	_, err := svc.UpsertAccountSettings(ctx, payer, currency, money.AccountSettingsInput{
-		BillingMode: strptr(money.BillingModeArrears), AutoTopupPaymentMethod: &method,
+		BillingMode: strptr(money.BillingModeArrears),
 	})
 	require.NoError(t, err)
+	require.NoError(t, svc.SetInvoiceCollectionPaymentMethod(ctx, payer, currency, method))
 	_, err = svc.AccrueOwed(ctx, payer, currency, "usage", "parity-terminal", 5_000_000)
 	require.NoError(t, err)
 	// The accrual lands AT clock-now; the finalize window is [from, to) so the

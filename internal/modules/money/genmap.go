@@ -80,28 +80,16 @@ func moneyTransactionFromTransfer(r gen.OpenrailsLedgerTransfer) *models.MoneyTr
 }
 
 func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
-	var expiry *int
-	if r.DefaultCreditExpiryHours != nil {
-		v := int(*r.DefaultCreditExpiryHours)
-		expiry = &v
-	}
 	return &models.MoneyAccount{
-		MerchantID:               r.MerchantID,
-		CustomerID:               r.CustomerID,
-		Currency:                 r.Currency,
-		BillingMode:              r.BillingMode,
-		LowBalanceThreshold:      r.LowBalanceThreshold,
-		AutoTopupEnabled:         r.AutoTopupEnabled,
-		AutoTopupFailures:        r.AutoTopupFailures,
-		AutoTopupAmount:          r.AutoTopupAmount,
-		AutoTopupPaymentMethod:   r.AutoTopupPaymentMethodID,
-		CollectionPaymentMethod:  r.CollectionPaymentMethodID,
-		DefaultCreditExpiryHours: expiry,
-		CreditLimitAmount:        r.CreditLimitAmount,
-		LastTopupAt:              r.LastTopupAt,
-		TrustLevel:               r.Tier,
-		CreatedAt:                r.CreatedAt,
-		UpdatedAt:                r.UpdatedAt,
+		MerchantID:              r.MerchantID,
+		CustomerID:              r.CustomerID,
+		Currency:                r.Currency,
+		BillingMode:             r.BillingMode,
+		CollectionPaymentMethod: r.CollectionPaymentMethodID,
+		CreditLimitAmount:       r.CreditLimitAmount,
+		TrustLevel:              r.Tier,
+		CreatedAt:               r.CreatedAt,
+		UpdatedAt:               r.UpdatedAt,
 	}
 }
 

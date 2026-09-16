@@ -68,17 +68,10 @@ ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
 -- name: UpsertMoneyAccountSettings :exec
 INSERT INTO openrails.money_settings (
     merchant_id, customer_id, currency, billing_mode,
-    low_balance_threshold, auto_topup_enabled, auto_topup_amount,
-    auto_topup_payment_method_id, default_credit_expiry_hours,
     created_at, updated_at
-) VALUES ($1, $2, sqlc.arg(currency), $3, $4, $5, $6, $7, $8, $9, $10)
+) VALUES ($1, $2, sqlc.arg(currency), $3, $4, $5)
 ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     billing_mode = EXCLUDED.billing_mode,
-    low_balance_threshold = EXCLUDED.low_balance_threshold,
-    auto_topup_enabled = EXCLUDED.auto_topup_enabled,
-    auto_topup_amount = EXCLUDED.auto_topup_amount,
-    auto_topup_payment_method_id = EXCLUDED.auto_topup_payment_method_id,
-    default_credit_expiry_hours = EXCLUDED.default_credit_expiry_hours,
     updated_at = EXCLUDED.updated_at;
 
 -- name: SetMoneyAccountCreditLimit :exec
@@ -103,27 +96,3 @@ UPDATE openrails.money_settings
 SET tier = sqlc.arg(tier)::text, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
--- name: ListBelowThresholdMoneyAccounts :many
--- Money-in workers (#239/#240): accounts whose DERIVED available balance
--- (#512 ledger customer_balance) is under their configured low-balance
--- threshold. Both request and provider reservations reduce available funds.
-WITH avail AS (
-    SELECT s.merchant_id, s.customer_id, s.currency,
-           s.low_balance_threshold, s.auto_topup_enabled, s.auto_topup_amount,
-           s.auto_topup_payment_method_id, s.last_topup_at,
-           COALESCE((
-               SELECT (a.credits_posted - a.debits_posted)
-                    - openrails.financial_held_amount(a.merchant_id, a.customer_id, a.currency, sqlc.arg(as_of)::timestamptz)
-               FROM openrails.ledger_accounts a
-               WHERE a.merchant_id = s.merchant_id AND a.customer_id = s.customer_id
-                 AND a.currency = s.currency AND a.account_type = 'customer_balance'
-           ), 0)::bigint AS available
-    FROM openrails.money_settings s
-    WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.low_balance_threshold IS NOT NULL
-)
-SELECT merchant_id, customer_id, currency, available,
-       COALESCE(low_balance_threshold, 0)::bigint AS threshold,
-       auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id,
-       last_topup_at
-FROM avail
-WHERE available < low_balance_threshold;

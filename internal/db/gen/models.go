@@ -160,17 +160,6 @@ type OpenrailsAdmissionOperation struct {
 	ReleasedAt         *time.Time
 }
 
-type OpenrailsAutoTopupEpisode struct {
-	IntentID     uuid.UUID
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
-	Currency     string
-	ReservedAt   time.Time
-	AmountNative int64
-	Receipt      []byte
-	FinalizedAt  *time.Time
-}
-
 // or#897: the merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
 type OpenrailsBillingPolicy struct {
 	ID         uuid.UUID
@@ -803,23 +792,14 @@ type OpenrailsMoneySetting struct {
 	MerchantID  uuid.UUID
 	CustomerID  uuid.UUID
 	BillingMode string
-	// Optional low-balance trigger in the row currency internal precision.
-	LowBalanceThreshold      *int64
-	AutoTopupEnabled         bool
-	AutoTopupAmount          *int64
-	AutoTopupPaymentMethodID *uuid.UUID
-	// per-account default credit-grant expiry in HOURS; NULL = no default.
-	DefaultCreditExpiryHours *int32
-	LastTopupAt              *time.Time
-	CreatedAt                time.Time
-	UpdatedAt                time.Time
-	Tier                     *string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	Tier        *string
 	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
 	CreditLimitAmount         int64
 	CollectionPaymentMethodID *uuid.UUID
-	AutoTopupFailures         int64
 }
 
 // Recipient-scoped customer and merchant notifications. read_at records inbox state; financial acknowledgments belong to host_outbox.
