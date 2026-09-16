@@ -191,10 +191,11 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 	logger := log.WithContext(ctx).WithField("worker", KindCleanupExpiredData)
 
 	directory := w.DB.GenDirectory()
-	cursor, err := directory.GetSweepCursor(ctx, KindCleanupExpiredData)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return nil, result, fmt.Errorf("cleanup expired data: load sweep cursor: %w", err)
+	cursorRow, err := loadSweepCursor(ctx, directory, KindCleanupExpiredData)
+	if err != nil {
+		return nil, result, fmt.Errorf("cleanup expired data: %w", err)
 	}
+	cursor := cursorRow.CursorMerchantID
 
 	dueWork := func(after *uuid.UUID, limit int32) ([]*uuid.UUID, error) {
 		return directory.ListRetentionWorkMerchants(ctx, gen.ListRetentionWorkMerchantsParams{
@@ -257,12 +258,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		}
 	}
 
-	if serr := directory.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{
-		WorkerKind: KindCleanupExpiredData, CursorMerchantID: nextCursor,
-	}); serr != nil {
-		// A lost cursor costs fairness on the next pass, not correctness.
-		logger.WithError(serr).Warn("Cleanup: could not persist sweep cursor")
-	}
+	saveSweepCursor(ctx, directory, KindCleanupExpiredData, cursorRow, nextCursor, logger)
 
 	opsmetric.Emit(ctx, opsmetric.MetricRetentionSweep, log.Fields{
 		"worker":                    KindCleanupExpiredData,

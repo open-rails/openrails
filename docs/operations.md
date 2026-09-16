@@ -546,7 +546,14 @@ up. "start" = RunOnStart.
 | Invoice period finalize / monthly-floor sweep | daily / 30 d |
 
 The health checker seeds `openrails.worker_state` and raises durable repair
-alerts when a periodic kind stops completing.
+alerts when a periodic kind stops completing. Its per-kind rows are written
+monotonically: job completions of one kind reach the row in any order, so a
+late write can only add what is newer (timestamps never move back, the error
+text is the newest failure's, a success resets the failure streak only when no
+newer failure is recorded, and a failure counts only when no newer success is
+recorded — the streak can over-count after reordering, never under-count). The
+fair-sweep cursor is a ring position, saved by compare-and-swap on the version
+the pass read, so a pass finishing after a newer one keeps the newer position.
 
 No job runs under a clock (xs-007). River's one-minute `JobTimeout` default is
 overridden to "never" on every OpenRails worker; a running job is cancelled
