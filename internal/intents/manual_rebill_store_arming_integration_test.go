@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -76,16 +76,16 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 	return rowID
 }
 
-func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, gatewayURL string) *money.MerchantCollectionAdapterBuilder {
-	return &money.MerchantCollectionAdapterBuilder{
+func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, gatewayURL string) *railresolve.NMIArmer {
+	return &railresolve.NMIArmer{
 		Config:      cfg,
 		DB:          dbi,
 		MerchantsFn: func() *merchants.Service { return svc },
-		Endpoints:   money.CollectionEndpoints{NMIDirectPostURL: gatewayURL, NMIQueryURL: gatewayURL},
+		Endpoints:   railresolve.NMIEndpoints{DirectPostURL: gatewayURL, QueryURL: gatewayURL},
 	}
 }
 
-func storeArmedRebillRunner(fx rebillFixture, resolver money.NMIClientResolver, cfg *config.Config) *Runner {
+func storeArmedRebillRunner(fx rebillFixture, resolver NMIClientResolver, cfg *config.Config) *Runner {
 	h := NewManualRebillHandler(fx.db, cfg, resolver, nil)
 	return &Runner{Store: fx.store, Registry: NewRegistry(h), Config: cfg}
 }
