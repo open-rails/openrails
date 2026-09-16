@@ -4,7 +4,7 @@ import type {
   InvoiceRetryResponse,
   MerchantInvoice,
 } from "@/lib/api/invoice-types"
-import { unitsFromInput } from "@/lib/format"
+import { amountFromInput } from "@/lib/format"
 
 export const invoiceActionLabels: Record<InvoiceAction, string> = {
   void: "Void invoice",
@@ -40,19 +40,17 @@ export function invoiceResultMessage(
 }
 export function invoicePaymentAmount(
   input: string,
-  amountDue: number,
+  amountDue: string,
   decimals: number
 ) {
-  const amount = unitsFromInput(input.trim(), decimals)
+  const amount = amountFromInput(input.trim(), decimals)
   if (amount === null)
     throw new Error(
       `Enter a positive amount with up to ${decimals} decimal places.`
     )
   if (
-    amount === null ||
-    !Number.isSafeInteger(amount) ||
-    amount <= 0 ||
-    amount > amountDue
+    BigInt(amount) <= 0n ||
+    BigInt(amount) > BigInt(amountDue)
   )
     throw new Error(
       "Payment must be positive and no greater than the unpaid balance."

@@ -27,10 +27,10 @@ export interface MerchantInvoice {
   due_at?: string
   paid_at?: string
   finalized_at?: string
-  total_amount: number
-  subtotal_amount: number
-  amount_paid: number
-  amount_due: number
+  total_amount: string
+  subtotal_amount: string
+  amount_paid: string
+  amount_due: string
   collection_method: string
   collection_failure_count: number
   last_collection_failure_code?: string
@@ -41,7 +41,7 @@ export interface MerchantInvoice {
   memo?: string
   line_items: {
     event_type: string
-    amount: number
+    amount: string
     count: number
     dimensions?: Record<string, number>
   }[]
@@ -58,7 +58,7 @@ export interface InvoicePayment {
   invoice_id: string
   unit_decimals: number
   currency: string
-  amount: number
+  amount: string
   status: string
   payment_method_id?: string
   rail?: string

@@ -21,21 +21,23 @@ export function formatMicros(amount: number, currency: string): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 6 })} ${currency}`
 }
 
-export function unitsFromInput(major: string, decimals: number): number | null {
+// Canonical monetary wire input: an exact signed int64 decimal string.
+export function amountFromInput(major: string, decimals: number): string | null {
   if (!Number.isInteger(decimals) || decimals < 0 || decimals > 18) return null
   const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(major.trim())
-  if (!match || (!match[2] && !match[3]) || (match[3]?.length ?? 0) > decimals)
-    return null
-  const value =
-    BigInt(match[2] || "0") * 10n ** BigInt(decimals) +
+  if (!match || (!match[2] && !match[3]) || (match[3]?.length ?? 0) > decimals) return null
+  const value = BigInt(match[2] || "0") * 10n ** BigInt(decimals) +
     BigInt((match[3] || "").padEnd(decimals, "0") || "0")
   const signed = match[1] === "-" ? -value : value
-  if (
-    signed > BigInt(Number.MAX_SAFE_INTEGER) ||
-    signed < BigInt(Number.MIN_SAFE_INTEGER)
-  )
-    return null
-  return Number(signed)
+  if (signed < -(1n << 63n) || signed > (1n << 63n) - 1n) return null
+  return signed.toString()
+}
+
+export function unitsFromInput(major: string, decimals: number): number | null {
+  const exact = amountFromInput(major, decimals)
+  if (exact === null) return null
+  const amount = Number(exact)
+  return Number.isSafeInteger(amount) ? amount : null
 }
 
 export function microsFromInput(major: string): number | null {
@@ -44,12 +46,12 @@ export function microsFromInput(major: string): number | null {
 
 // Format using the server's unit scale without rounding through floating point.
 export function formatUnits(
-  amount: number,
+  amount: number | string,
   currency: string,
   decimals: number
 ): string {
   if (
-    !Number.isSafeInteger(amount) ||
+    (typeof amount === "number" ? !Number.isSafeInteger(amount) : !/^-?\d+$/.test(amount)) ||
     !Number.isInteger(decimals) ||
     decimals < 0 ||
     decimals > 18

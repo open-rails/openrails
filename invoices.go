@@ -19,7 +19,7 @@ const (
 // instants. Monetary amounts use the currency precision given by UnitDecimals.
 type InvoiceLineItemDTO struct {
 	EventType  string           `json:"event_type"`
-	Amount     int64            `json:"amount"`
+	Amount     int64            `json:"amount,string"`
 	Count      int64            `json:"count"`
 	Dimensions map[string]int64 `json:"dimensions,omitempty"`
 }
@@ -30,17 +30,17 @@ type InvoiceDTO struct {
 	InvoiceNumber             *string              `json:"invoice_number,omitempty"`
 	PeriodFrom                time.Time            `json:"period_from"`
 	PeriodTo                  time.Time            `json:"period_to"`
-	UsageTotal                int64                `json:"usage_total"`
-	DepositsTotal             int64                `json:"deposits_total"`
-	OwedAccrued               int64                `json:"owed_accrued"`
-	OwedPaid                  int64                `json:"owed_paid"`
-	ClosingBalance            int64                `json:"closing_balance"`
-	SubtotalAmount            int64                `json:"subtotal_amount"`
-	TotalAmount               int64                `json:"total_amount"`
-	AmountPaid                int64                `json:"amount_paid"`
-	AmountDue                 int64                `json:"amount_due"`
+	UsageTotal                int64                `json:"usage_total,string"`
+	DepositsTotal             int64                `json:"deposits_total,string"`
+	OwedAccrued               int64                `json:"owed_accrued,string"`
+	OwedPaid                  int64                `json:"owed_paid,string"`
+	ClosingBalance            int64                `json:"closing_balance,string"`
+	SubtotalAmount            int64                `json:"subtotal_amount,string"`
+	TotalAmount               int64                `json:"total_amount,string"`
+	AmountPaid                int64                `json:"amount_paid,string"`
+	AmountDue                 int64                `json:"amount_due,string"`
 	LineItems                 []InvoiceLineItemDTO `json:"line_items"`
-	MoneyMovements            map[string]int64     `json:"money_movements,omitempty"`
+	MoneyMovements            AmountMap            `json:"money_movements,omitempty"`
 	PONumber                  *string              `json:"po_number,omitempty"`
 	Tax                       map[string]any       `json:"tax,omitempty"`
 	BillingContacts           []InvoiceContactDTO  `json:"billing_contacts,omitempty"`
@@ -65,7 +65,7 @@ type InvoicePaymentAttemptDTO struct {
 	ID              uuid.UUID  `json:"id"`
 	InvoiceID       uuid.UUID  `json:"invoice_id"`
 	Currency        string     `json:"currency"`
-	Amount          int64      `json:"amount"`
+	Amount          int64      `json:"amount,string"`
 	Status          string     `json:"status"`
 	PaymentMethodID *uuid.UUID `json:"payment_method_id,omitempty"`
 	Rail            *string    `json:"rail,omitempty"`
@@ -120,6 +120,6 @@ type MerchantInvoiceFilter struct {
 // RecordInvoicePaymentRequest records money received outside automatic collection.
 // Reference is the immutable idempotency identity of that remittance.
 type RecordInvoicePaymentRequest struct {
-	Amount    int64  `json:"amount"`
+	Amount    int64  `json:"amount,string"`
 	Reference string `json:"reference"`
 }
