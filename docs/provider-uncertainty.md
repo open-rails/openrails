@@ -59,15 +59,28 @@ attempt. After the write-ahead fence every adapter error is a possible
 submission: NMI-family operations converge only from the order-reference
 search or an exact receipt; Stripe replays the same idempotent sequence
 through the executor while Stripe still holds the key (23h) and then waits
-for operator resolution. A confirmed charge whose local settlement fails
-keeps its transaction id on the operation and settles from it after restart.
-`intents resolve --receipt` accepts an NMI transaction that is an approved sale
-of the frozen amount on the instrument's vault, or a Stripe invoice stamped
-with the operation key and paid for the frozen amount; `--not-executed`
-fails the attempt without a decline and makes the invoice due again (an
-unpaid Stripe invoice the sequence left behind is not voided automatically).
-There is no evidence-free unpark/force-resend method. No automatic compensating
-cancel or refund is triggered by uncertainty.
+for operator resolution. The Stripe sequence creates the invoice first,
+excluding the customer's pending items, and attaches its line by invoice id,
+so nothing it creates can be swept into another invoice; a parsed refusal
+becomes definitive only after every draft/open invoice and pending item
+stamped with the operation key has been deleted or voided (a failed cleanup
+keeps the outcome unknown). A confirmed charge whose local settlement fails
+keeps its transaction id on the operation and settles from it after restart;
+an invoice that no longer accepts the frozen snapshot fails closed (nothing
+written, pointer kept) until an operator repairs it.
+`intents resolve --receipt` accepts an NMI transaction only when the Query
+API returns it as the successful sale for the operation's own order
+reference and, for a vaulted instrument, the exact read shows an approved
+sale of the frozen amount and currency on that vault; for Stripe the invoice
+must carry the operation key and be paid for the frozen amount.
+`--not-executed` refuses while the provider shows the operation's charge (for
+Stripe it first deletes/voids the operation's unpaid objects and refuses on a
+paid one), then fails the attempt without a decline and makes the invoice due
+again. A `pending` operation that never crossed its submission fence (an
+account that never armed) has no verifier; `intents resolve --not-executed`
+releases it on the strength of the absent fence, and refuses one that carries
+the fence. There is no evidence-free unpark/force-resend method. No automatic
+compensating cancel or refund is triggered by uncertainty.
 
 A manual rebill confirmed after dunning parked or the customer cancelled the
 subscription still records its payment exactly once: a parked (`unknown`) or
