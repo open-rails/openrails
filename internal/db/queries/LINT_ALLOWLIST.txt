@@ -54,5 +54,5 @@ DEBT internal/modules/solana/solanasubs/subscription_repo.go
 DEBT internal/river/jobs_ledger_integrity.go
 DEBT internal/river/jobs_provider_refresh.go
 DEBT internal/river/jobs_stripe_webhooks.go
-DEBT pkg/service/catalog_sidecars.go
+DEBT internal/service/catalog_sidecars.go
 DEBT internal/operator/admission.go

@@ -16,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/catalog"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // #781: server-side notice-window enforcement, end to end over real HTTP —

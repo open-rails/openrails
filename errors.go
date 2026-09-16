@@ -34,7 +34,7 @@ var (
 	// "idempotency_key_reused"): the key already committed and THIS retry
 	// carries different charging terms (or#891). A caller bug, not an engine
 	// fault — retrying it unchanged will refuse again. The engine-side twin is
-	// pkg/service.ErrIdempotencyKeyReused; the StatusError's Message carries the
+	// internal/service.ErrIdempotencyKeyReused; the StatusError's Message carries the
 	// detail (which field, committed vs retried).
 	ErrIdempotencyKeyReused = errors.New("idempotency_key_reused")
 )

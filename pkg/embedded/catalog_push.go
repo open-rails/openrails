@@ -18,9 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/railresolve"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/merchant"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // CatalogPushOptions configures PushMerchantCatalog.

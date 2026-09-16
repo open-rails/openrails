@@ -11,8 +11,8 @@ import (
 
 	"github.com/google/uuid"
 
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // ProductAction is the per-product change a plan records.

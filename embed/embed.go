@@ -20,8 +20,8 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/http/inprocess"
+	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/service"
 )
 
 // Options configures the embedded runtime. It wraps pkg/embedded.Options
@@ -170,7 +170,7 @@ func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, 
 	return client, nil
 }
 
-// Service exposes the underlying pkg/service facade for host code that wants
+// Service exposes the underlying internal/service facade for host code that wants
 // engine-native types (identity.CustomerID etc.) instead of wire types.
 func (r *Runtime) Service() *service.Service { return r.svc }
 

@@ -6,7 +6,7 @@ import (
 
 	"github.com/google/uuid"
 
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
