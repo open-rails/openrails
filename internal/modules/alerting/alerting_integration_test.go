@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -150,4 +151,64 @@ func countNotifications(t *testing.T, pool *pgxpool.Pool, mid uuid.UUID) int {
 	require.NoError(t, pool.QueryRow(context.Background(),
 		`SELECT count(*) FROM openrails.merchant_notifications WHERE merchant_id=$1`, mid).Scan(&n))
 	return n
+}
+
+func TestFindingDeliveryRetainsWebhookFormatsRetriesAndBell(t *testing.T) {
+	pool, appDB := rlsSetup(t)
+	mid, other := uuid.New(), uuid.New()
+	seedMerchant(t, pool, mid)
+	seedMerchant(t, pool, other)
+	exec(t, pool, `INSERT INTO openrails.merchant_configurations (merchant_id, config) VALUES ($1, $2)`, mid, []byte(`{"alert_email":"ops@example.com"}`))
+	email := &fakeEmail{enabled: true}
+	svc := newService(t, appDB, email)
+	generic, discord, slack, disabled := newWebhookRecorder(t, 2), newWebhookRecorder(t, 0), newWebhookRecorder(t, 0), newWebhookRecorder(t, 0)
+	inConn(t, appDB, mid, func(ctx context.Context) {
+		for format, sink := range map[alerting.WebhookFormat]*webhookRecorder{alerting.FormatGeneric: generic, alerting.FormatDiscord: discord, alerting.FormatSlack: slack} {
+			_, err := svc.CreateWebhook(ctx, alerting.CreateWebhookInput{Name: string(format), URL: sink.server.URL, Format: format})
+			require.NoError(t, err)
+		}
+		off := false
+		_, err := svc.CreateWebhook(ctx, alerting.CreateWebhookInput{Name: "disabled", URL: disabled.server.URL, Enabled: &off})
+		require.NoError(t, err)
+	})
+	findingStore := &reconcile.PGStore{DB: appDB}
+	inConn(t, appDB, mid, func(ctx context.Context) {
+		run, err := findingStore.CreateRun(ctx, reconcile.ModeAdvisory, []reconcile.Provider{reconcile.ProviderNMI}, nil, nil)
+		require.NoError(t, err)
+		for _, severity := range []reconcile.Severity{reconcile.SeverityLow, reconcile.SeverityCritical} {
+			rec, err := findingStore.UpsertFinding(ctx, run, reconcile.Finding{Provider: reconcile.ProviderNMI, Type: reconcile.FindingChargebackActiveSub, SubjectKey: uuid.NewString(), Severity: severity, Status: reconcile.FindingStatusRequiresReview})
+			require.NoError(t, err)
+			require.NoError(t, svc.NotifyFinding(ctx, rec))
+			rec, err = findingStore.GetFinding(ctx, rec.ID)
+			require.NoError(t, err)
+			require.NoError(t, svc.NotifyFinding(ctx, rec))
+		}
+		notes, err := svc.ListNotifications(ctx, true)
+		require.NoError(t, err)
+		require.Len(t, notes, 2, "low findings retain one deduplicated console notification")
+		read, err := svc.MarkNotificationRead(ctx, notes[0].ID)
+		require.NoError(t, err)
+		require.True(t, read)
+		unread, err := svc.UnreadCount(ctx)
+		require.NoError(t, err)
+		require.EqualValues(t, 1, unread)
+	})
+	require.Equal(t, 1, email.count(), "only the critical finding emails")
+	require.Equal(t, 3, generic.callCount(), "two failures retry before successful delivery")
+	require.Equal(t, 1, discord.callCount())
+	require.Equal(t, 1, slack.callCount())
+	require.Zero(t, disabled.callCount())
+	require.Contains(t, generic.lastBody(), "title")
+	require.NotContains(t, generic.lastBody(), "rule_id")
+	require.Contains(t, discord.lastBody(), "content")
+	require.Contains(t, slack.lastBody(), "text")
+	require.Equal(t, 2, countNotifications(t, pool, mid))
+	inConn(t, appDB, other, func(ctx context.Context) {
+		hooks, err := svc.ListWebhooks(ctx)
+		require.NoError(t, err)
+		require.Empty(t, hooks)
+		notes, err := svc.ListNotifications(ctx, false)
+		require.NoError(t, err)
+		require.Empty(t, notes)
+	})
 }

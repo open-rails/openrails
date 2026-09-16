@@ -47,4 +47,3 @@ WHERE id = $1;
 
 -- name: CountUnreadMerchantNotifications :one
 SELECT count(*) FROM openrails.merchant_notifications WHERE read_at IS NULL;
-

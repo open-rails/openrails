@@ -50,6 +50,14 @@ func TestWebhookCredentialHTTPWorkflow(t *testing.T) {
 	rt.AlertService = alerting.NewService(alerting.Deps{DB: rt.DB, Secrets: rt.Merchants.Secrets(), Outbound: httpx.Policy{Allow: httpx.AllowLoopback}, WebhookBackoff: time.Millisecond})
 	rawURL := sink.URL + "/hook/path-secret?token=query-secret"
 	base := surface.BaseURL + "/v1/merchant"
+	for _, route := range []string{"/alerts/templates", "/alerts/rules"} {
+		status, _ := requestJSON(t, http.MethodGet, base+route, surface.Token, nil)
+		require.Equal(t, http.StatusNotFound, status, "deferred alert route must be absent")
+	}
+	var removedTables int
+	require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM information_schema.tables WHERE table_schema='openrails' AND table_name IN ('alert_rules','finding_digest_state')`).Scan(&removedTables))
+	require.Zero(t, removedTables)
+
 	status, raw := requestJSON(t, http.MethodPost, base+"/webhooks", surface.Token, map[string]any{"name": "synthetic sink", "url": rawURL, "format": "slack"})
 	require.Equal(t, 201, status, string(raw))
 	require.NotContains(t, string(raw), "path-secret")

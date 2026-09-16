@@ -78,7 +78,7 @@ export function SettingsPage() {
           <TabsTrigger value="team" className={LINE_TAB}>
             Team
           </TabsTrigger>
-          <TabsTrigger value="alerts" className={LINE_TAB}>
+          <TabsTrigger value="notifications" className={LINE_TAB}>
             Notifications
           </TabsTrigger>
           <TabsTrigger value="providers" className={LINE_TAB}>
@@ -98,7 +98,7 @@ export function SettingsPage() {
       <TabsContent value="team">
         <TeamTab />
       </TabsContent>
-      <TabsContent value="alerts">
+      <TabsContent value="notifications">
         <NotificationsTab />
       </TabsContent>
       <TabsContent value="providers">

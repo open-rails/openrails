@@ -126,8 +126,7 @@ type Runtime struct {
 	// Phase 2 draft_* tools are additionally gated on
 	// llm.catalog_drafting_enabled — see copilot.Service.DraftingConfigured).
 	CopilotService *copilot.Service
-	// AlertService is the #736 metric-threshold alerting engine (rules,
-	// webhooks, notifications, the evaluator).
+	// AlertService delivers immediate merchant notifications and manages webhooks.
 	AlertService *alerting.Service
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.

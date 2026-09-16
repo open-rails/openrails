@@ -2,8 +2,6 @@ import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Add01Icon,
   Delete02Icon,
-  Mail01Icon,
-  WebhookIcon,
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { toast } from "sonner"
