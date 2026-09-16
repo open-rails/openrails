@@ -126,7 +126,7 @@ func (h *billingE2EHarness) deposit(userID string, amount int64) {
 		"invoker":     userID,
 		"credit_type": h.creditType,
 		"currency":    money.DefaultCurrency,
-		"amount":      amount,
+		"amount":      strconv.FormatInt(amount, 10),
 		"source":      "e2e_deposit",
 		"source_id":   srcID.String(),
 	})
@@ -211,8 +211,8 @@ func (h *billingE2EHarness) balance(userID string) balanceView {
 	w := h.do(http.MethodGet, "/v1/merchant/credits/balance?customer_id="+personalOwnerID(userID).String()+"&currency="+money.DefaultCurrency, nil)
 	require.Equal(h.t, http.StatusOK, w.Code, "balance body: %s", w.Body.String())
 	var payload struct {
-		BalanceAmount int64 `json:"balance_amount"`
-		HeldAmount    int64 `json:"held_amount"`
+		BalanceAmount int64 `json:"balance_amount,string"`
+		HeldAmount    int64 `json:"held_amount,string"`
 	}
 	require.NoError(h.t, json.Unmarshal(w.Body.Bytes(), &payload))
 	return balanceView{Balance: payload.BalanceAmount, HeldBalance: payload.HeldAmount}

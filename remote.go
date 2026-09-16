@@ -183,22 +183,9 @@ func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
 	}
-	body := map[string]any{
-		"customer_id": customerIDString(req.CustomerID),
-		"invoker":     req.Invoker,
-		"currency":    currency,
-		"amount":      req.Amount,
-		"source":      req.Source,
-		"source_id":   req.SourceID,
-	}
-	if req.ExpiresAt != nil {
-		body["expires_at"] = req.ExpiresAt.Unix()
-	}
-	if strings.TrimSpace(req.Description) != "" {
-		body["description"] = req.Description
-	}
+	req.Currency = currency
 	var out CreditTransaction
-	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/deposit", body, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/credits/deposit", req, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -616,13 +603,6 @@ func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency st
 // reject missing values consistently.
 func normalizeCurrency(currency string) string {
 	return strings.TrimSpace(currency)
-}
-
-func customerIDString(payer *CustomerID) string {
-	if payer == nil || payer.IsZero() {
-		return ""
-	}
-	return payer.UUID().String()
 }
 
 // statusErrorFromBody decodes the one canonical error envelope. Foreign proxy

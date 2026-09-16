@@ -85,7 +85,7 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	require.Equal(t, 403, code, body)
 	code, body = request(http.MethodPost, path, "owner", mid, input)
 	require.Equal(t, 200, code, body)
-	grant, ok := body["ID"].(string)
+	grant, ok := body["id"].(string)
 	require.True(t, ok, "creation response: %v", body)
 	code, page := request(http.MethodGet, path+"?currency=USD&limit=1", "viewer", mid, nil)
 	require.Equal(t, 200, code, page)

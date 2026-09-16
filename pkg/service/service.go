@@ -78,29 +78,7 @@ type CaptureHoldRequest struct {
 	SourceID   string
 }
 
-type CreditTransaction struct {
-	ID              uuid.UUID
-	CustomerID      uuid.UUID
-	Invoker         string
-	Currency        string
-	Amount          int64
-	BalanceAfter    *int64
-	TransactionType string
-	Status          string
-	Authorized      *int64
-	Captured        *int64
-	Source          string
-	SourceID        *string
-	ExpiresAt       *time.Time
-	Description     *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	// Replayed reports that this write's idempotency key had ALREADY committed,
-	// so nothing moved in this call — the transaction described here is the
-	// movement that landed earlier (or#892). This is the applied-vs-replayed
-	// answer consumers were building their own claim tables to get.
-	Replayed bool
-}
+type CreditTransaction = openrails.CreditTransaction
 
 type WithdrawCreditsRequest struct {
 	CustomerID *identity.CustomerID

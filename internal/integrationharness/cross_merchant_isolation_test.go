@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,8 +29,8 @@ import (
 type serviceBalanceSnapshot struct {
 	CustomerID      string `json:"customer_id"`
 	Currency        string `json:"currency"`
-	BalanceAmount   int64  `json:"balance_amount"`
-	AvailableAmount int64  `json:"available_amount"`
+	BalanceAmount   int64  `json:"balance_amount,string"`
+	AvailableAmount int64  `json:"available_amount,string"`
 }
 
 type adminBillingProfileSnapshot struct {
@@ -75,7 +76,7 @@ func TestAPIKeyCrossMerchantIsolationHTTP(t *testing.T) {
 			"customer_id": payer,
 			"invoker":     "iso-test-invoker",
 			"currency":    "usd",
-			"amount":      amount,
+			"amount":      strconv.FormatInt(amount, 10),
 			"source":      "iso-test",
 			"source_id":   uuid.NewString(),
 		})
@@ -426,7 +427,7 @@ func depositCredits(t *testing.T, baseURL, token, payer string, amount int64) {
 		"customer_id": payer,
 		"invoker":     "iso-test-invoker",
 		"currency":    "usd",
-		"amount":      amount,
+		"amount":      strconv.FormatInt(amount, 10),
 		"source":      "iso-test",
 		"source_id":   uuid.NewString(),
 	})

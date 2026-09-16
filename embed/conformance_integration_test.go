@@ -161,7 +161,7 @@ type obsProductAccess struct {
 // results must be require.Equal.
 type scriptResult struct {
 	Deposit obsTxn
-	Balance openrails.BalanceResponse
+	Balance obsAccount
 	Account obsAccount
 	HoldOK  bool
 
@@ -338,7 +338,8 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	// 4) Balance + account snapshot (after all money movement).
 	bal, err := c.Balance(ctx, payerID)
 	require.NoError(t, err, "%s balance", env.side)
-	r.Balance = *bal
+	require.Equal(t, payerID, bal.CustomerID)
+	r.Balance = observeAccount(bal, payerID)
 
 	acct, err := c.GetCreditAccount(ctx, payerID, env.currency)
 	require.NoError(t, err, "%s get-credit-account", env.side)

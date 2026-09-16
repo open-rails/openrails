@@ -69,7 +69,7 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 		"customer_id": subject.String(),
 		"invoker":     subject.String(),
 		"currency":    "USD",
-		"amount":      12345,
+		"amount":      "12345",
 		"source":      "embedded_mount_test",
 		"source_id":   sourceID.String(),
 	})

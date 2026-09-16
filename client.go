@@ -183,6 +183,9 @@ const SelfIssuer = "openrails:self"
 // CustomerID is the OpenRails customer UUID a charge is billed to.
 type CustomerID uuid.UUID
 
+func (id CustomerID) MarshalText() ([]byte, error)     { return uuid.UUID(id).MarshalText() }
+func (id *CustomerID) UnmarshalText(data []byte) error { return (*uuid.UUID)(id).UnmarshalText(data) }
+
 func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
 func (id CustomerID) String() string  { return uuid.UUID(id).String() }
 func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
@@ -190,13 +193,13 @@ func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
 // promotions, money-in settlement). Amount is in the currency's native integer unit.
 type DepositCreditsRequest struct {
-	CustomerID *CustomerID
-	Invoker    string
-	Currency   string
+	CustomerID *CustomerID `json:"customer_id"`
+	Invoker    string      `json:"invoker"`
+	Currency   string      `json:"currency"`
 	// Amount is the deposit size in the currency's internal precision (micros for USD).
-	Amount int64
+	Amount int64 `json:"amount,string"`
 	// Source identifies the system of record for this deposit (e.g. "stripe", "manual").
-	Source string
+	Source string `json:"source"`
 	// SourceID is the idempotency key for the deposit. REQUIRED, and it must be
 	// REPRODUCIBLE by the caller across retries of the same logical deposit —
 	// deriving it from the operation's own identity is the only way it survives
@@ -211,38 +214,37 @@ type DepositCreditsRequest struct {
 	// retry that relabels its source cannot double-credit. An IDENTICAL replay
 	// is answered with the EXISTING grant (Replayed=true); a replay whose
 	// amount, unit or expiry differs is refused with ErrIdempotencyKeyReused (HTTP 409).
-	SourceID    string
-	ExpiresAt   *time.Time
-	Description string
+	SourceID    string     `json:"source_id"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	Description string     `json:"description"`
 }
 
-// CreditTransaction is the ledger row returned by capture/withdraw/deposit.
-// Field names match the wire exactly (the handler serializes
-// pkg/service.CreditTransaction with Go field names, no json tags). The
-// customer field is CustomerID, matching the service struct's Go field name.
+// CreditTransaction is the canonical ledger receipt shared by both transports.
+// Field names are snake_case, amounts are decimal strings in the currency's
+// native integer precision, and timestamps are RFC3339 instants.
 type CreditTransaction struct {
-	ID              uuid.UUID
-	CustomerID      uuid.UUID
-	Invoker         string
-	Currency        string
-	Amount          int64
-	BalanceAfter    *int64
-	TransactionType string
-	Status          string
-	Authorized      *int64
-	Captured        *int64
-	Source          string
-	SourceID        *string
-	ExpiresAt       *time.Time
-	Description     *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID              uuid.UUID  `json:"id"`
+	CustomerID      uuid.UUID  `json:"customer_id"`
+	Invoker         string     `json:"invoker"`
+	Currency        string     `json:"currency"`
+	Amount          int64      `json:"amount,string"`
+	BalanceAfter    *int64     `json:"balance_after,string"`
+	TransactionType string     `json:"transaction_type"`
+	Status          string     `json:"status"`
+	Authorized      *int64     `json:"authorized,string"`
+	Captured        *int64     `json:"captured,string"`
+	Source          string     `json:"source"`
+	SourceID        *string    `json:"source_id"`
+	ExpiresAt       *time.Time `json:"expires_at"`
+	Description     *string    `json:"description"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 	// Replayed reports that this write's idempotency key had ALREADY committed,
 	// so nothing moved in THIS call — the row described here is the movement
 	// that landed earlier (or#892). Serialized by the engine on both transports;
 	// a consumer that needs applied-vs-replayed reads it here instead of keeping
 	// its own claim table.
-	Replayed bool
+	Replayed bool `json:"replayed"`
 }
 
 // AdmitRequest is one item in POST /v1/merchant/admissions. It checks payer money
@@ -325,14 +327,7 @@ type CaptureUsage struct {
 // BalanceResponse is the GET /v1/merchant/credits/balance snapshot (handler
 // serviceBalanceResponse). NOTE: the wire field for the owed amount is
 // outstanding_owed_amount.
-type BalanceResponse struct {
-	Currency              string `json:"currency"`
-	BillingMode           string `json:"billing_mode"`
-	BalanceAmount         int64  `json:"balance_amount"`
-	HeldAmount            int64  `json:"held_amount"`
-	AvailableAmount       int64  `json:"available_amount"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
-}
+type BalanceResponse = CreditAccount
 
 // CreditAccount is the OpenRails service balance/policy snapshot for one
 // customer + currency pair. All amounts are in the currency's internal
@@ -342,13 +337,13 @@ type CreditAccount struct {
 	Currency    string `json:"currency"`
 	BillingMode string `json:"billing_mode"`
 	// BalanceAmount is the total prepaid credit balance (excluding holds).
-	BalanceAmount int64 `json:"balance_amount"`
+	BalanceAmount int64 `json:"balance_amount,string"`
 	// HeldAmount is the sum of outstanding authorization holds not yet captured or released.
-	HeldAmount int64 `json:"held_amount"`
+	HeldAmount int64 `json:"held_amount,string"`
 	// AvailableAmount is BalanceAmount minus HeldAmount — the credit available for new admits.
-	AvailableAmount int64 `json:"available_amount"`
+	AvailableAmount int64 `json:"available_amount,string"`
 	// OutstandingOwedAmount is the unpaid postpaid balance (postpaid billing mode only).
-	OutstandingOwedAmount int64 `json:"outstanding_owed_amount"`
+	OutstandingOwedAmount int64 `json:"outstanding_owed_amount,string"`
 }
 
 // UsageRollupRow is one grouped spend bucket from OpenRails.

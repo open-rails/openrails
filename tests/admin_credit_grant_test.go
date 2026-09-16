@@ -56,7 +56,7 @@ func TestAdminCreditGrant_OnceOnlyAndChangedAmountConflict(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var first struct {
 		ID       uuid.UUID
-		Amount   int64
+		Amount   int64 `json:"amount,string"`
 		Replayed bool
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &first))
@@ -68,7 +68,7 @@ func TestAdminCreditGrant_OnceOnlyAndChangedAmountConflict(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var again struct {
 		ID       uuid.UUID
-		Amount   int64
+		Amount   int64 `json:"amount,string"`
 		Replayed bool
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &again))
@@ -109,7 +109,7 @@ func TestAdminCreditGrant_OnceOnlyAndChangedAmountConflict(t *testing.T) {
 	require.Equal(t, http.StatusOK, lw.Code, lw.Body.String())
 	var looked struct {
 		ID       uuid.UUID
-		Amount   int64
+		Amount   int64 `json:"amount,string"`
 		Replayed bool
 	}
 	require.NoError(t, json.Unmarshal(lw.Body.Bytes(), &looked))

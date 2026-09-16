@@ -27,19 +27,7 @@ func serviceIdempotencyConflict(r *httprequest.Request, err error) bool {
 	return true
 }
 
-type serviceDepositRequest struct {
-	CustomerID string `json:"customer_id"`
-	Invoker    string `json:"invoker"`
-	Currency   string `json:"currency"`
-	Amount     int64  `json:"amount" binding:"required"`
-	Source     string `json:"source" binding:"required"`
-	// SourceID is the caller's reproducible idempotency key (or#906: any
-	// non-empty string, no longer restricted to a UUID — the structural key
-	// openrails.uq_grants_credit_deposit_once enforces is text).
-	SourceID    string  `json:"source_id" binding:"required"`
-	ExpiresAt   *int64  `json:"expires_at"`
-	Description *string `json:"description"`
-}
+type serviceDepositRequest = openrails.DepositCreditsRequest
 
 type serviceCaptureRequest = openrails.CaptureRequest
 
@@ -123,15 +111,7 @@ func requireMerchantRoutePrincipal(r *httprequest.Request) bool {
 
 // serviceBalanceResponse is the customer balance snapshot served by
 // GET /v1/merchant/credits/balance (issue #235/#247).
-type serviceBalanceResponse struct {
-	CustomerID            uuid.UUID `json:"customer_id"`
-	Currency              string    `json:"currency"`
-	BillingMode           string    `json:"billing_mode"`
-	BalanceAmount         int64     `json:"balance_amount"`
-	HeldAmount            int64     `json:"held_amount"`
-	AvailableAmount       int64     `json:"available_amount"`
-	OutstandingOwedAmount int64     `json:"outstanding_owed_amount"`
-}
+type serviceBalanceResponse = openrails.CreditAccount
 
 // ServiceGetCreditsBalance returns the customer's REAL balance snapshot (issue
 // #235/#247): available = balance - held, plus outstanding owed + billing mode.
@@ -164,7 +144,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		CustomerID:            snap.CustomerID,
+		CustomerID:            snap.CustomerID.String(),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceAmount:         snap.BalanceAmount,
@@ -375,16 +355,16 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		return
 	}
 
-	tenantSubjectID, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
+	if req.Amount <= 0 {
+		r.ErrorJSON(http.StatusBadRequest, "amount must be > 0")
 		return
 	}
-	if tenantSubjectID == nil {
+	if req.CustomerID == nil || req.CustomerID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
-	if !requireServiceCustomerScope(r, *tenantSubjectID) {
+	tenantSubjectID := billingidentity.CustomerID(req.CustomerID.UUID())
+	if !requireServiceCustomerScope(r, tenantSubjectID) {
 		return
 	}
 	currency, ok := serviceRequiredCurrency(r, req.Currency)
@@ -392,10 +372,9 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		return
 	}
 
-	var expiresAt *time.Time
-	if req.ExpiresAt != nil {
-		v := time.Unix(*req.ExpiresAt, 0).UTC()
-		expiresAt = &v
+	var description *string
+	if req.Description != "" {
+		description = &req.Description
 	}
 
 	depositKey, err := billingservice.NewDepositIdempotencyKey(req.Source, req.SourceID)
@@ -404,13 +383,13 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		return
 	}
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
-		CustomerID:  tenantSubjectID,
+		CustomerID:  &tenantSubjectID,
 		Invoker:     invoker,
 		Currency:    currency,
 		Amount:      req.Amount,
 		Key:         depositKey,
-		ExpiresAt:   expiresAt,
-		Description: req.Description,
+		ExpiresAt:   req.ExpiresAt,
+		Description: description,
 	})
 	if err != nil {
 		// #483: an unknown/invalid currency is a client error (parity with local), not a 500.
