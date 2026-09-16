@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -68,9 +69,9 @@ func derefInt(v *int64) int64 {
 	return *v
 }
 
-var (
-	ErrInsufficientCredits = errors.New("insufficient_credits")
-)
+// ErrInsufficientCredits is the public sentinel, so embedded host transactions
+// and Client calls classify a capacity refusal identically.
+var ErrInsufficientCredits = openrails.ErrInsufficientCredits
 
 type MoneyService struct {
 	db    *db.DB

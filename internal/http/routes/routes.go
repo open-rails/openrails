@@ -273,6 +273,15 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	admissions.Handle(http.MethodPost, "/:id/release", h(httphandlers.ServiceReleaseHold), admissionMW...)
 	admissions.Handle(http.MethodPost, "/:id/extend", h(httphandlers.ServiceExtendHold), admissionMW...)
 
+	// #1004 provider obligations: spend authority for writes (settlement is
+	// OpenRails-rated), usage authority for reads.
+	operations := group.Group("/provider-operations")
+	operations.Handle(http.MethodPost, "", h(httphandlers.ServiceOpenOperationAuthorization), admissionMW...)
+	operations.Handle(http.MethodGet, "/:operation_id", h(httphandlers.ServiceGetOperationAuthorization), usageReadMW...)
+	operations.Handle(http.MethodPost, "/:operation_id/release", h(httphandlers.ServiceReleaseOperationAuthorization), admissionMW...)
+	operations.Handle(http.MethodPost, "/:operation_id/observations", h(httphandlers.ServiceRecordProviderBillingObservation), admissionMW...)
+	operations.Handle(http.MethodGet, "/:operation_id/qualification", h(httphandlers.ServiceGetProviderBillingQualification), usageReadMW...)
+
 	usage := group.Group("/usage")
 	usage.Handle(http.MethodPost, "/report", h(httphandlers.ServiceRecordUsage), admissionMW...)
 	usage.Handle(http.MethodPost, "/rollup", h(httphandlers.ServiceUsageRollup), usageReadMW...)

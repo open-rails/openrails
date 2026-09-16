@@ -255,6 +255,11 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/admissions/{id}/extend` | `merchant:admissions:create` | Re-declare a live hold's deadline: `{ expires_at }` (unix seconds). A hold lives exactly as long as its admit declared (`expires_at` is required with `estimated_amount`); a still-running job extends before that or loses it. 404 `hold_not_found` when nothing live exists — re-admit, a lapsed hold is never resurrected |
 | POST | `/v1/merchant/wasted-spend` | `merchant:admissions:create` | Report wasted spend against admissions |
 | POST | `/v1/merchant/usage/report` | `merchant:admissions:create` | Record usage events |
+| POST | `/v1/merchant/provider-operations` | `merchant:admissions:create` | Open a durable provider-operation authorization (#1004): `{ operation_id, payer, record_owner, authorized_usd_micros, claim_reference, authorization_body, authorization_body_sha256 }`. Exact replay → `replayed=true`; a changed field → 409 `operation_authorization_conflict` with `param`; 402 `insufficient_credits` |
+| GET | `/v1/merchant/provider-operations/{operation_id}` | `merchant:usage:read` | Read one authorization; 404 `operation_authorization_not_found`. Path-escape the id |
+| POST | `/v1/merchant/provider-operations/{operation_id}/release` | `merchant:admissions:create` | Release after proven provider non-creation: `{ release_reference }`. 409 `operation_authorization_has_billing_evidence` once any evidence exists |
+| POST | `/v1/merchant/provider-operations/{operation_id}/observations` | `merchant:admissions:create` | Append immutable provider billing evidence (lifecycle facts, raw body, typed records or refusal); unknown fields are refused. OpenRails qualifies, rates and settles; there is no caller-rated amount. Encoded body ≤ 768 KiB |
+| GET | `/v1/merchant/provider-operations/{operation_id}/qualification` | `merchant:usage:read` | Qualification state with its authorization; 404 `provider_billing_qualification_not_found` |
 | POST | `/v1/merchant/usage/rollup` | `merchant:usage:read` | Usage rollup query |
 | POST | `/v1/merchant/usage/resource-revenue` | `merchant:usage:read` | Resource-revenue query |
 | GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
