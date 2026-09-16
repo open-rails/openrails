@@ -3368,6 +3368,8 @@ CREATE INDEX ix_invoice_payments_invoice ON openrails.invoice_payments USING btr
 
 CREATE UNIQUE INDEX uq_invoice_payments_ledger_transfer ON openrails.invoice_payments USING btree (merchant_id, ledger_transfer_id) WHERE (ledger_transfer_id IS NOT NULL);
 
+CREATE UNIQUE INDEX uq_invoice_payments_settled_rail_payment ON openrails.invoice_payments USING btree (merchant_id, rail, rail_payment_id) WHERE ((status = 'settled'::text) AND (rail_payment_id IS NOT NULL));
+
 CREATE UNIQUE INDEX ux_invoice_payments_attempt_key ON openrails.invoice_payments USING btree (merchant_id, invoice_id, idempotency_key) WHERE (idempotency_key IS NOT NULL);
 
 ALTER TABLE ONLY openrails.invoice_payments
