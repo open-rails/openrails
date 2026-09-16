@@ -64,7 +64,7 @@ admin responses are never replayed by global middleware.
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
 | GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
 | GET | `/v1/prices` | optional | List prices. Query: `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
-| GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`redirect`/`wallet`, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear |
+| GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`redirect`/`wallet`, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear. When a Solana PSP is armed, `solana` carries `{network, chain, preferred_token, tokens[]}` (the same acceptance policy as `/v1/solana/config`) |
 | GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
 | GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }` |
 
@@ -236,6 +236,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | POST | `/v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` | Batch entitlement lookup by external subject |
+| PUT | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:update` | Materialize or touch the customer record (`Client.EnsureCustomer`); returns `{id, created_at, last_seen_at}` |
 | GET | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:read` | Active entitlements for a customer. Query: `at` (RFC3339) for point-in-time |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:update` | Replace the customer's full spend-delegation policy |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` | Upsert one delegation |
@@ -247,7 +248,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/checkout-sessions/{id}` | `merchant:customer-settings:read` | Read a checkout owned by query customer_id |
 | POST | `/v1/merchant/checkout-sessions/{id}/confirm` | `merchant:checkout:create` | Confirm the checkout for the supplied customer_id |
 | GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for query price_id; no provider request |
-| GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs and their public browser values for the credential's merchant |
+| GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant |
 | GET | `/v1/merchant/customers/{customer_id}/effective-tier` | `merchant:customer-settings:read` | Active tier for query group; null when none |
 | POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (unix seconds): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
 | POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }`. Idempotent on the path `{id}` unconditionally (or#907); an identical retry answers `Replayed: true`, a changed amount is refused 409 `idempotency_key_reused` |
@@ -274,7 +275,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/credits/balance` | `merchant:customer-settings:read` | Credit balance |
 | POST | `/v1/merchant/credits/deposit` | `merchant:customer-settings:update` | Deposit/grant credits: `{ customer_id, invoker, currency, amount, source, source_id, expires_at?, description? }`. `source_id` (any non-empty string) is REQUIRED and is the caller's reproducible idempotency key: once-only per `(customer_id, source_id)` is a database fact; `source` is a label, NOT part of the key. Identical replay → same grant with `Replayed=true`; replay with a different `amount` → 409 `idempotency_key_reused` |
 | GET | `/v1/merchant/credits/deposit` | `merchant:customer-settings:read` | What did this deposit key do (or#906): `?customer_id=&source_id=` → the committed grant (id, amount, created_at, `Replayed=true`); 404 `deposit_not_found` when the key never committed |
-| POST | `/v1/import/billing` | `merchant:billing:import` | Bulk DeclaredBilling book import (subscriptions/payments/payment methods wholesale) — a distinct owner-level grant |
+| POST | `/v1/import/billing` | `merchant:billing:import` | Declared billing facts (`Client.ImportBilling`): customers, payment methods, subscriptions, transactions and admin comps (`admin_grants`), idempotent by source id — a distinct owner-level grant |
 
 ## 5. Merchant admin (human) routes
 
@@ -531,7 +532,8 @@ The list is merchant-scoped and bounded (`limit` defaults to 100, maximum 1000).
 after idempotent host processing commits, then fetch again; a UUID high-water
 mark can miss transactions that commit late. Acknowledgment is idempotent and
 independent of customer and merchant notification read state. A payment event
-contains the original payment UUID, amount, currency, merchant and settlement
+contains the original payment UUID, its payer (`customer_id`), `price_id`, the
+renewed `subscription_id` when any, amount, currency, merchant and settlement
 time, preserving the fee-attribution coordinate.
 
 `include_acknowledged=true` includes retained acknowledged rows; `payment_id`

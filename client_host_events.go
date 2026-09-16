@@ -20,10 +20,16 @@ const (
 	HostEventDelinquencyCleared HostEventType = "delinquency.cleared"
 )
 
+// PaymentSettledEvent is one successful rail payment. CustomerID and PriceID
+// come from the authoritative payment row so a host can route the settlement
+// without a second read; SubscriptionID is set for renewal payments.
 type PaymentSettledEvent struct {
-	PaymentID uuid.UUID `json:"payment_id"`
-	Amount    int64     `json:"amount,string"`
-	Currency  string    `json:"currency"`
+	PaymentID      uuid.UUID  `json:"payment_id"`
+	CustomerID     uuid.UUID  `json:"customer_id"`
+	PriceID        uuid.UUID  `json:"price_id"`
+	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
+	Amount         int64      `json:"amount,string"`
+	Currency       string     `json:"currency"`
 }
 
 type DelinquencyHostEvent struct {

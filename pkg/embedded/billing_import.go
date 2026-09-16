@@ -21,6 +21,7 @@ type (
 	DunningEvidence       = billingimport.DunningEvidence
 	DeclaredTransaction   = billingimport.DeclaredTransaction
 	DeclaredSubscription  = billingimport.DeclaredSubscription
+	DeclaredAdminGrant    = billingimport.DeclaredAdminGrant
 	DeclaredBilling       = billingimport.DeclaredBilling
 	// PSPRef names the PSP a declared row belongs to — by psps row id or by the
 	// merchant's manifest PSP key. Required attribution (or#893).

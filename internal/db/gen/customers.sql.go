@@ -44,7 +44,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
   last_seen_at = now()
-RETURNING id
+RETURNING id, merchant_id, issuer, created_at, last_seen_at
 `
 
 type EnsureCustomerParams struct {
@@ -57,11 +57,17 @@ type EnsureCustomerParams struct {
 // the same person can have independent billing relationships with merchants.
 // Refresh only the selected merchant's row. Issuer is audit metadata and does
 // not participate in identity; callers without an issuer preserve its value.
-func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (uuid.UUID, error) {
+func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) (OpenrailsCustomer, error) {
 	row := q.db.QueryRow(ctx, ensureCustomer, arg.ID, arg.MerchantID, arg.Issuer)
-	var id uuid.UUID
-	err := row.Scan(&id)
-	return id, err
+	var i OpenrailsCustomer
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Issuer,
+		&i.CreatedAt,
+		&i.LastSeenAt,
+	)
+	return i, err
 }
 
 const ensureCustomerRow = `-- name: EnsureCustomerRow :exec
