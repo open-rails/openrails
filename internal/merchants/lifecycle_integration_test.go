@@ -652,7 +652,7 @@ func TestWebhookRouting_ResolvesThenCallerVerifies(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, inv.ID)
 	require.NoError(t, svc.Delete(ctx, tn.ID, DeleteOptions{
-		ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &inv.TotalRows}))
+		ConfirmPhrase: PurgeConfirmPhrase(tn.Slug), ExpectRows: &inv.TotalRows, InventoryID: inv.ID}))
 	_, err = svc.ResolveBySlug(ctx, "acme")
 	require.ErrorIs(t, err, ErrMerchantRouteUnresolved)
 }

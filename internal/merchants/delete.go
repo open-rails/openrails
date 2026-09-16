@@ -292,6 +292,10 @@ type DeleteOptions struct {
 	// row count they believe they are destroying. It must match what the purge
 	// discovers, or nothing is written.
 	ExpectRows *int
+	// InventoryID identifies the exact completed purge inventory the operator
+	// reviewed. A matching total alone is insufficient: a different set of
+	// rows can have the same total.
+	InventoryID string
 	// Actor is who asked for it; recorded on the destructive run.
 	Actor string
 }
@@ -308,7 +312,7 @@ func (e *ErrPurgeNotConfirmed) Error() string {
 	return fmt.Sprintf(
 		"refusing to purge merchant %s: this destroys %d rows across every merchant-owned table and is NOT reversible — "+
 			"the purge inventory is not a backup, and only Postgres PITR can bring the merchant back. "+
-			"To proceed, take a fresh inventory and pass ConfirmPhrase=%q with ExpectRows=%d",
+			"To proceed, take a fresh inventory and pass its InventoryID, ConfirmPhrase=%q with ExpectRows=%d",
 		e.Slug, e.TotalRows, e.Want, e.TotalRows)
 }
 
@@ -464,11 +468,19 @@ func (s *Service) Delete(ctx context.Context, id merchant.ID, opts DeleteOptions
 		// inventory-before-purge: an inventory for the merchant's CURRENT row
 		// count. A stale one proves nothing about what is about to be destroyed.
 		var matching int
+		countsJSON, err := json.Marshal(counts)
+		if err != nil {
+			return fmt.Errorf("merchants: marshal current purge counts: %w", err)
+		}
+		if _, err := uuid.Parse(opts.InventoryID); err != nil {
+			return &ErrPurgeInventoryStale{Slug: m.Slug, TotalRows: total}
+		}
 		if err := tx.QueryRow(ctx, `
 			SELECT count(*) FROM openrails.maintenance_runs
-			 WHERE merchant_id = $1::uuid AND kind='purge_inventory' AND status = 'completed'
-			   AND inventory_total_rows = $2::bigint
-		`, id.String(), int64(total)).Scan(&matching); err != nil {
+			 WHERE id = $1::uuid AND merchant_id = $2::uuid AND kind='purge_inventory' AND status = 'completed'
+			   AND inventory_total_rows = $3::bigint
+			   AND inventory_manifest->'row_counts' = $4::jsonb
+		`, opts.InventoryID, id.String(), int64(total), string(countsJSON)).Scan(&matching); err != nil {
 			return fmt.Errorf("merchants: check inventory-before-purge: %w", err)
 		}
 		if matching == 0 {

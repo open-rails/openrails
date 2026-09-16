@@ -155,7 +155,7 @@ func TestVaultPurgeCleanupSurvivesFailureAndRestart(t *testing.T) {
 	inventory, err := f.service.TakePurgeInventory(ctx, f.id)
 	require.NoError(t, err)
 	f.failDeletes.Store(true)
-	err = f.service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, Actor: "test"})
+	err = f.service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, InventoryID: inventory.ID, Actor: "test"})
 	require.ErrorIs(t, err, merchants.ErrSecretCleanupPending)
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	var run uuid.UUID
@@ -224,7 +224,7 @@ func TestVaultPurgeIncludesWriteCommittedAfterInventory(t *testing.T) {
 	service.WithDestructivePolicy(purgeAllowed{})
 	purged := make(chan error, 1)
 	go func() {
-		purged <- service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows})
+		purged <- service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, InventoryID: inventory.ID})
 	}()
 	// Wait for the purge's inventory to read the root while the new write is
 	// blocked. The retry must use a fresh listing, not only captured names.
@@ -259,7 +259,7 @@ func TestVaultCleanupCannotRunBeforeDatabaseCommit(t *testing.T) {
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	_, err = admin.Exec(ctx, `DELETE FROM openrails.maintenance_runs WHERE merchant_id=$1 AND kind='purge_inventory'`, f.id.UUID())
 	require.NoError(t, err)
-	err = f.service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows})
+	err = f.service.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, InventoryID: inventory.ID})
 	var stale *merchants.ErrPurgeInventoryStale
 	require.ErrorAs(t, err, &stale)
 	got, err := f.store.Secrets.Get(ctx, f.id, name)
@@ -317,7 +317,7 @@ func TestManifestManagedWebhookPurge(t *testing.T) {
 			svc.WithDestructivePolicy(purgeAllowed{})
 			inventory, err := svc.TakePurgeInventory(ctx, f.id)
 			require.NoError(t, err)
-			require.NoError(t, svc.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, Actor: "test"}))
+			require.NoError(t, svc.Delete(ctx, f.id, merchants.DeleteOptions{ConfirmPhrase: merchants.PurgeConfirmPhrase(f.slug), ExpectRows: &inventory.TotalRows, InventoryID: inventory.ID, Actor: "test"}))
 			_, err = composed.Secrets.Get(ctx, f.id, name)
 			require.ErrorIs(t, err, merchants.ErrSecretNotFound)
 			provider, err := manifest.Get(ctx, f.id, providerName)

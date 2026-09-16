@@ -195,7 +195,7 @@ func TestMerchantPurgeRefusesUntilTheBlastRadiusIsSeenAndTyped(t *testing.T) {
 
 		total := fresh.TotalRows
 		require.NoError(t, svc.Delete(ctx, mid, DeleteOptions{
-			ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &total, Actor: "or858-operator"}))
+			ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &total, InventoryID: fresh.ID, Actor: "or858-operator"}))
 		require.Equal(t, 0, rowsLeft(t))
 
 		var status string
@@ -277,7 +277,7 @@ func TestMerchantPurgeRefusesWhenRetainedHistoryPinsRows(t *testing.T) {
 	require.Equal(t, 1, inv.TotalRows)
 
 	err = svc.Delete(ctx, mid, DeleteOptions{
-		ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &inv.TotalRows, Actor: "or858-test"})
+		ConfirmPhrase: PurgeConfirmPhrase(slug), ExpectRows: &inv.TotalRows, InventoryID: inv.ID, Actor: "or858-test"})
 	var blocked *ErrPurgeBlockedByRetainedHistory
 	require.ErrorAs(t, err, &blocked, "a pinned purge must refuse with an explanation, got %v", err)
 	require.Contains(t, err.Error(), "NOTHING was deleted")
