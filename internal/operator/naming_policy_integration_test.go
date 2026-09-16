@@ -1,6 +1,6 @@
 //go:build integration
 
-package controlplane_test
+package operator_test
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/auth/policy"
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 func TestNamingPolicyForwarding(t *testing.T) {

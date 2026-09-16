@@ -16,7 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // #757 merchant self-serve API keys over the REAL standalone server + AuthKit

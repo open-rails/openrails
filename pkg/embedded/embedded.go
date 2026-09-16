@@ -139,6 +139,7 @@ func New(ctx context.Context, opts Options) (*Embedded, error) {
 		return nil, fmt.Errorf("initialize merchant services: %w", err)
 	}
 
+	application.ConsoleAssets = opts.ConsoleAssets
 	e := &Embedded{app: application, consoleAssets: opts.ConsoleAssets}
 	if opts.StripeTransport != nil {
 		stripeapi.SetBaseTransport(opts.StripeTransport)

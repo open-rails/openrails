@@ -1,6 +1,6 @@
 //go:build integration
 
-package controlplane_test
+package operator_test
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // TestRunBootstrap_ExternalShapeAndExplicitMintOnly is #747's regression

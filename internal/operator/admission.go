@@ -1,4 +1,4 @@
-package controlplane
+package operator
 
 // or#914 item 3: the hosted-SaaS MayCreateInstance predicate — the host cost
 // gate behind ak#263's WithInstanceAdmission seam, composed from openrails'

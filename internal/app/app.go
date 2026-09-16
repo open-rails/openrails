@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io/fs"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,6 +32,9 @@ type App struct {
 	// SetControlPlane (#469) and recovers it with a type assertion (see
 	// pkg/embedded/controlplane).
 	ControlPlane any
+	// ConsoleAssets is the host-built admin console SPA (#754), served by the
+	// standalone surface when admin_console is enabled.
+	ConsoleAssets fs.FS
 
 	stopRedisMonitor context.CancelFunc
 	// controlPlanePool is an OpenRails-owned pgx pool backing the control plane,
@@ -229,3 +233,8 @@ func monitorRedis(client *redis.Client, switchable *cache.SwitchableCache, fallb
 
 	return cancel
 }
+
+// HostGraph returns the application graph behind a public runtime handle
+// (*embed.Runtime). Package embed registers it at init so operator packages
+// reach the graph without the runtime exporting internal types.
+var HostGraph func(runtime any) *App

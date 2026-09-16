@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // Cross-merchant isolation suite (#534 Phase 2): a credential scoped to merchant A

@@ -20,8 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/migrate"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/embedded"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 func main() {

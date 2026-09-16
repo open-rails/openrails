@@ -13,7 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/merchant"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )

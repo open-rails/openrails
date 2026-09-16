@@ -6,7 +6,7 @@ import (
 	"net/http"
 
 	server "github.com/open-rails/openrails/internal/http"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	"github.com/open-rails/openrails/internal/operator"
 )
 
 // StandaloneHandler returns the full standalone HTTP surface for the embedded
@@ -36,23 +36,10 @@ func StandaloneServer(e *Embedded) (*server.Server, error) {
 	if a == nil {
 		return nil, fmt.Errorf("embedded billing: not initialized")
 	}
-	cfg := a.Config
-	if embcp.Get(a) == nil {
-		if err := embcp.Attach(context.Background(), a, cfg, nil); err != nil {
+	if operator.Get(a) == nil {
+		if err := operator.Attach(context.Background(), a, a.Config, nil); err != nil {
 			return nil, fmt.Errorf("attach control plane: %w", err)
 		}
 	}
-	authenticator := embcp.Get(a).UserAuthenticator()
-	if authenticator == nil {
-		return nil, fmt.Errorf("control plane verifier unavailable")
-	}
-	return server.New(server.Dependencies{
-		Config:        a.Config,
-		Cache:         a.Cache,
-		Runtime:       a.Runtime,
-		Redis:         a.RedisClient,
-		Authenticator: authenticator,
-		ControlPlane:  embcp.Get(a),
-		ConsoleAssets: e.consoleAssets,
-	})
+	return operator.StandaloneServer(a)
 }
