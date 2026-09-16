@@ -111,6 +111,18 @@ func runErrorScript(t *testing.T, ctx context.Context, h *integrationharness.Har
 		_, err := h.Pool().Exec(ctx, sql, args...)
 		require.NoError(t, err)
 	}
+	// Other tests in this package assert the shared merchant's checkout config;
+	// leave no PSP behind.
+	t.Cleanup(func() {
+		for _, sql := range []string{
+			`DELETE FROM openrails.subscriptions WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
+			`DELETE FROM openrails.payment_methods WHERE merchant_id=$1 AND psp_id IN ($2,$3)`,
+			`DELETE FROM openrails.psps WHERE merchant_id=$1 AND id IN ($2,$3)`,
+		} {
+			_, err := h.Pool().Exec(context.Background(), sql, mid, nmi, stripe)
+			require.NoError(t, err)
+		}
+	})
 	exec(`INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
 	exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Parity plan')`, product, mid, product.String())
 	exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,auto_renew,access_duration_hours) VALUES($1,$2,$3,$4,1000000,'USD',true,720)`, price, mid, product, price.String())
