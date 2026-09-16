@@ -703,6 +703,11 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 		}
 		expectedMerchant = pinned
 	}
+	if !expectedMerchant.IsZero() {
+		// The local transport uses this explicit host-selected binding; HTTP
+		// servers resolve authority independently and verify the header.
+		ctx = merchant.WithID(ctx, expectedMerchant)
+	}
 	var raw []byte
 	if body != nil {
 		var merr error

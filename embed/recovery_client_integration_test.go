@@ -9,10 +9,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,9 +24,20 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	remote := h.StartStandalone("USD")
 	host := h.StartEmbeddedHost("USD")
+	// A SaaS process serves several merchants using distinct bound clients.
+	multi, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
+		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
+	}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, multi.Close(context.Background())) })
+	multiClient, err := multi.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
+	require.NoError(t, err)
+	require.NoError(t, multiClient.Verify(ctx))
+
 	local, err := host.Runtime().Client()
 	require.NoError(t, err)
-	for name, client := range map[string]*openrails.Client{"embedded": local, "hosted_http": host.Client(), "standalone": remote.Client()} {
+	for name, client := range map[string]*openrails.Client{"embedded": local, "hosted_http": host.Client(), "standalone": remote.Client(), "multi_merchant": multiClient} {
 		t.Run(name, func(t *testing.T) {
 			customer, product, price, psp, method, sub := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
 			mid := dbtest.TestMerchantID.UUID()
