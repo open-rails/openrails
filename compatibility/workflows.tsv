@@ -14,9 +14,9 @@ metered_billing	standalone	./embed	TestMeteringClientRatesIntoInvoice/standalone
 metered_billing	standalone	./embed	TestInvoiceClientWorkflowAcrossTransports/standalone	retained	Receivable seeded by accrual, not usage
 metered_billing	saas	-	-	gap	No SaaS metering workflow in core or openrails-saas
 merchant_isolation	embedded	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients
-merchant_isolation	embedded	./pkg/service	TestAdmissionClientRecoveryAndCaptureReceipt/embedded	retained	Other merchant cannot capture, release or extend a hold
+merchant_isolation	embedded	./internal/service	TestAdmissionClientRecoveryAndCaptureReceipt/embedded	retained	Other merchant cannot capture, release or extend a hold
 merchant_isolation	standalone	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients
-merchant_isolation	standalone	./pkg/service	TestAdmissionClientRecoveryAndCaptureReceipt/remote	retained	Other merchant cannot capture, release or extend a hold
+merchant_isolation	standalone	./internal/service	TestAdmissionClientRecoveryAndCaptureReceipt/remote	retained	Other merchant cannot capture, release or extend a hold
 merchant_isolation	saas	-	-	gap	openrails-saas host resolution test does not prove content isolation and is not run here
 signed_delegation	embedded	./internal/integrationharness	TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant	retained	Host AuthKit bearer tokens through the embedded mount; not DPoP
 signed_delegation	standalone	./internal/integrationharness	TestDelegationHTTPWorkflow	retained	Issuer-signed DPoP tokens; one merchant
