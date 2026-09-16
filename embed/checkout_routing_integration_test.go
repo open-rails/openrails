@@ -16,7 +16,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
@@ -50,7 +49,10 @@ func bootRoutingFixture(
 ) routingFixture {
 	t.Helper()
 
-	cfg := sandboxModeConfig(dsn, config.MerchantSourceManifest)
+	// Routing exercises account selection only; no provider call is made.
+	// Use the ordinary manifest posture so fake credentials do not trigger
+	// the separate sandbox qualification gate.
+	cfg := manifestModeConfig(dsn)
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

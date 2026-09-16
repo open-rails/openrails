@@ -60,8 +60,10 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
+	server := nmiProbeArmTestServer(t, "1")
+	t.Cleanup(server.Close)
 
-	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, NMIProbeV5BaseURL: server.URL}))
 
 	var merchantID string
 	require.NoError(t, pool.QueryRow(ctx, `SELECT id::text FROM openrails.merchants WHERE slug = 'host-three'`).Scan(&merchantID))
@@ -126,7 +128,7 @@ func TestReconcileMerchantManifestDeclaresOneCustodianForTwoPSPs(t *testing.T) {
 	}
 
 	// Re-applying is idempotent: still one custodian, still both references.
-	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, Overwrite: true}))
+	require.NoError(t, ReconcileMerchantManifestData(ctx, sandboxModeReconcileConfig(), cp, custodyManifest(t), MerchantManifestReconcileOptions{Insert: true, Overwrite: true, NMIProbeV5BaseURL: server.URL}))
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.custodians WHERE merchant_id = $1::uuid`, merchantID).Scan(&count))
 	require.Equal(t, 1, count)
