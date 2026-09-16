@@ -664,7 +664,7 @@ func (q *Queries) GetRailIntent(ctx context.Context, id uuid.UUID) (OpenrailsRai
 }
 
 const getRailIntentByIdempotencyKey = `-- name: GetRailIntentByIdempotencyKey :one
-SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, custodian_id FROM openrails.rail_intents
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
 WHERE merchant_id = $1::uuid AND idempotency_key = $2::text
 `
 
@@ -701,6 +701,7 @@ func (q *Queries) GetRailIntentByIdempotencyKey(ctx context.Context, arg GetRail
 		&i.UpdatedAt,
 		&i.PspID,
 		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
 		&i.CustodianID,
 	)
 	return i, err
