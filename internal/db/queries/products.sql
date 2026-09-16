@@ -32,12 +32,12 @@ SELECT * FROM openrails.products;
 
 -- name: CountProductsFiltered :one
 SELECT count(*) FROM openrails.products
-WHERE (NOT sqlc.arg(active_only)::boolean OR NOT archived)
+WHERE (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)));
 
 -- name: ListProductsFiltered :many
 SELECT * FROM openrails.products
-WHERE (NOT sqlc.arg(active_only)::boolean OR NOT archived)
+WHERE (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)))
 ORDER BY created_at DESC, id DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
