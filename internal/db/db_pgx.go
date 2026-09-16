@@ -72,7 +72,7 @@ func (d *DB) Gen(ctx context.Context) *gen.Queries {
 // and read as "the cross-merchant accessor"; there is no such thing. There is
 // ONE pool and ONE role — dropping the app.merchant_id GUC does not escape RLS,
 // it FAILS it. Under the production openrails_app role a base-pool read of any
-// policy-bearing table (everything except merchants, probe_verdicts,
+// policy-bearing table (everything except merchants,
 // worker_health and destructive_action_switch) matches `merchant_id = NULL` and
 // returns ZERO ROWS AND NO ERROR. That false belief is what made the #732
 // destructive-rate ceiling, both armed-merchant scans, the #816 re-driver and

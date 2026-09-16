@@ -105,10 +105,8 @@ func TestUpsertPaymentProviderConfigArmsSimulatedNMIUnderTestMode(t *testing.T) 
 	require.Equal(t, 1, countNMIAccounts(t, svc, "arm-348-sim"))
 }
 
-// TestUpsertPaymentProviderConfigProbeIndeterminateNeverRefuses preserves
-// #348's original fail-open posture: a probe error is indeterminate and only
-// warns — it must never refuse the arm.
-func TestUpsertPaymentProviderConfigProbeIndeterminateNeverRefuses(t *testing.T) {
+// An inconclusive sandbox probe cannot authorize an account.
+func TestUpsertPaymentProviderConfigProbeIndeterminateRefuses(t *testing.T) {
 	pool := newTestPool(t)
 	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "test")
 	require.NoError(t, err)
@@ -125,15 +123,12 @@ func TestUpsertPaymentProviderConfigProbeIndeterminateNeverRefuses(t *testing.T)
 		AccountID:   "arm-348-indeterminate",
 		Credentials: map[string]string{"security_key": "unclear-security-key"},
 	})
-	require.NoError(t, err, "an indeterminate probe must warn, not refuse (#348)")
-	require.Equal(t, 1, countNMIAccounts(t, svc, "arm-348-indeterminate"))
+	require.ErrorContains(t, err, "qualification failed")
+	require.Zero(t, countNMIAccounts(t, svc, "arm-348-indeterminate"))
 }
 
-// TestUpsertPaymentProviderConfigCooldownRespected proves the #348 cache is
-// consulted: a second arm attempt for the SAME credentials — even with the
-// fake gateway closed (so an accidental re-probe would only warn, never
-// refuse) — still refuses, proving the refusal came from cache.
-func TestUpsertPaymentProviderConfigCooldownRespected(t *testing.T) {
+// Every arm requires fresh qualification, even after a previous conclusive result.
+func TestUpsertPaymentProviderConfigRequiresFreshProbe(t *testing.T) {
 	pool := newTestPool(t)
 	svc, err := NewService(db.WrapPool(pool, ""), NewMemorySecretStore(), "test")
 	require.NoError(t, err)
@@ -141,12 +136,12 @@ func TestUpsertPaymentProviderConfigCooldownRespected(t *testing.T) {
 	svc.nmiProbeV5BaseURL = server.URL
 
 	ctx := context.Background()
-	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-cooldown-348", PermissionGroupID: "group-probe-cooldown-348"})
+	tn, _, err := svc.Provision(ctx, ProvisionRequest{Slug: "probe-qualification-348", PermissionGroupID: "group-probe-qualification-348"})
 	require.NoError(t, err)
 
 	req := UpsertPaymentProviderConfigRequest{
-		AccountID:   "arm-348-cooldown",
-		Credentials: map[string]string{"security_key": "live-cooldown-key"},
+		AccountID:   "arm-348-qualification",
+		Credentials: map[string]string{"security_key": "live-qualification-key"},
 	}
 	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", req)
 	require.Error(t, err)
@@ -155,8 +150,8 @@ func TestUpsertPaymentProviderConfigCooldownRespected(t *testing.T) {
 	server.Close() // any re-probe now fails as a transport error (indeterminate)
 
 	_, err = svc.UpsertPaymentProviderConfig(ctx, tn.ID, "nmi", req)
-	require.Error(t, err, "a fresh live verdict within the cooldown must refuse from cache")
-	require.Contains(t, err.Error(), "cached probe verdict")
+	require.Error(t, err, "a transport failure must refuse the arm")
+	require.Contains(t, err.Error(), "qualification failed")
 }
 
 // TestUpsertPaymentProviderConfigSkipsTestModeProbeOutsideTestMode proves

@@ -627,11 +627,9 @@ credential guarantees attach — a live Stripe key (`sk_live_`/`rk_live_`)
 refuses to boot; each NMI account is probed when armed with one auth on the
 canonical non-issued test PAN (only a simulator approves it — a decline
 proves a live account and refuses the arm); CCBill uses the sandbox API host;
-Solana derives devnet. NMI probe verdicts cache for 12h in
-`openrails.probe_verdicts`, keyed by sha256 of the key: a fresh `live`
-verdict refuses from cache without re-probing (a crash loop costs one
-declined auth total), a fresh `simulated` verdict skips the probe, a rotated
-key or stale verdict re-probes, and cache failures degrade to probing.
+Solana derives devnet. Each NMI arm requires a fresh probe; unavailable,
+indeterminate or live responses refuse the arm. No persistent verdict cache can
+substitute for qualification. Production mode does not run the sandbox probe.
 Sandbox is allowed in every environment (#762) — what keeps it honest is
 rail-credential validation (the live-key refusal and the NMI live-gateway
 probe, which ask the credential itself), not the environment string.

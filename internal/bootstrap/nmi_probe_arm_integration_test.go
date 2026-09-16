@@ -114,12 +114,8 @@ func TestReconcileMerchantManifestArmsSimulatedNMIUnderTestMode(t *testing.T) {
 	require.Equal(t, 1, count, "a simulated (sandbox) account arms normally")
 }
 
-// TestReconcileMerchantManifestNMIProbeIndeterminateNeverRefuses preserves
-// #348's original fail-open posture exactly: a probe error (bad credentials,
-// gateway-level rejection) is indeterminate and only warns — it must NEVER
-// refuse the boot/arm, because network or credential noise is not evidence
-// of a live account.
-func TestReconcileMerchantManifestNMIProbeIndeterminateNeverRefuses(t *testing.T) {
+// Inconclusive qualification refuses manifest arming without a PSP row.
+func TestReconcileMerchantManifestNMIProbeIndeterminateRefuses(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
@@ -132,28 +128,23 @@ func TestReconcileMerchantManifestNMIProbeIndeterminateNeverRefuses(t *testing.T
 		Insert:            true,
 		NMIProbeV5BaseURL: server.URL,
 	})
-	require.NoError(t, err, "an indeterminate probe must warn, not refuse (#348)")
+	require.ErrorContains(t, err, "qualification failed")
 
 	var count int
 	require.NoError(t, pool.QueryRow(ctx, `
 		SELECT count(*) FROM openrails.psps WHERE rail = 'nmi' AND account_id = '100002'
 	`).Scan(&count))
-	require.Equal(t, 1, count)
+	require.Zero(t, count)
 }
 
-// TestReconcileMerchantManifestNMIProbeCooldownRespected proves the #348
-// cooldown cache is actually consulted: after a first refusal caches the
-// 'live' verdict, a second reconcile pass — even with the fake gateway
-// closed (so any accidental re-probe would be a network failure, which only
-// warns rather than refusing) — must STILL refuse, proving the refusal came
-// from cache rather than a fresh probe.
-func TestReconcileMerchantManifestNMIProbeCooldownRespected(t *testing.T) {
+// A second arm must qualify again even after a previous conclusive result.
+func TestReconcileMerchantManifestNMIProbeRequiresFreshProbe(t *testing.T) {
 	ctx := context.Background()
 	pool := newMerchantManifestTestPool(t)
 	cp := newMerchantManifestControlPlane(t, pool)
 
 	server := nmiProbeArmTestServer(t, "2") // declined -> LIVE account
-	manifest := nmiManifestWithSecurityKey("live-security-key-cooldown")
+	manifest := nmiManifestWithSecurityKey("live-security-key-qualification")
 
 	err := ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{
 		Insert:            true,
@@ -162,14 +153,14 @@ func TestReconcileMerchantManifestNMIProbeCooldownRespected(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "PRODUCTION NMI credentials")
 
-	server.Close() // any re-probe now fails as a transport error (indeterminate, would only warn)
+	server.Close() // the fresh qualification attempt must fail closed
 
 	err = ReconcileMerchantManifestData(ctx, testModeReconcileConfig(), cp, manifest, MerchantManifestReconcileOptions{
 		Insert:            true,
 		NMIProbeV5BaseURL: server.URL,
 	})
-	require.Error(t, err, "a fresh live verdict within the cooldown must refuse from cache, without re-probing the (now-unreachable) gateway")
-	require.Contains(t, err.Error(), "cached probe verdict")
+	require.Error(t, err, "an unreachable gateway cannot qualify an account")
+	require.Contains(t, err.Error(), "qualification failed")
 }
 
 // TestReconcileMerchantManifestNMIProbeSkippedOutsideTestMode proves

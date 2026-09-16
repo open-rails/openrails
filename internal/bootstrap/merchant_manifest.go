@@ -1723,7 +1723,7 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	// used to probe, with no replacement — refusing an armed live NMI account
 	// under test_mode). Runs before anything below persists the account row.
 	if rail == string(models.RailNMI) && cfg != nil && cfg.IsTestMode() {
-		if err := probeNMIAccountBeforeArm(ctx, database, secretStore, merchantID, rail, environment, accountID, opts.NMIProbeV5BaseURL); err != nil {
+		if err := probeNMIAccountBeforeArm(ctx, secretStore, merchantID, rail, environment, accountID, opts.NMIProbeV5BaseURL); err != nil {
 			return err
 		}
 	}
@@ -1830,22 +1830,9 @@ func reconcileManifestPSP(ctx context.Context, cfg *config.Config, database *db.
 	return reconcileStripeWebhook()
 }
 
-// probeNMIAccountBeforeArm reinstates #348 at the manifest arm boundary: a
-// test_mode deployment must never arm an NMI account whose credentials
-// actually belong to a LIVE gateway — every charge through it would move
-// real money while the operator believes the account is sandboxed. It reads
-// the account's EFFECTIVE security_key (whatever this reconcile pass just
-// wrote, or — under seed-once — whatever was already stored) and, cache-first
-// (internal/integrations/nmi.CheckTestModeArm, #348's cooldown), probes the
-// live gateway with the documented non-issued test card.
-//
-// Posture, preserved exactly from #348's original boot probe: only a
-// conclusive "live" verdict refuses. A probe error (offline dev, bad
-// credentials, transport failure — nmi.ArmDecision.ProbeErr) is
-// indeterminate and only warns; it is NEVER fail-closed, because network or
-// credential noise is not evidence of a live account. Production deployments
-// (test_mode=false) never reach this at all — probing charges a real card.
-func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore merchants.MerchantSecretStore, merchantID merchant.ID, rail, environment, accountID, probeV5BaseURL string) error {
+// probeNMIAccountBeforeArm requires fresh sandbox qualification for the effective
+// credential before a manifest may arm an NMI account.
+func probeNMIAccountBeforeArm(ctx context.Context, secretStore merchants.MerchantSecretStore, merchantID merchant.ID, rail, environment, accountID, probeV5BaseURL string) error {
 	name, err := merchants.PSPSecretName(rail, environment, accountID, "security_key")
 	if err != nil {
 		return err
@@ -1863,39 +1850,15 @@ func probeNMIAccountBeforeArm(ctx context.Context, database *db.DB, secretStore 
 	}
 	client, err := nmi.NewClient(accountID, &config.NMIProviderSettings{SecurityKey: securityKey}, true)
 	if err != nil {
-		return nil // never stricter than #348: a client that fails to construct cannot be probed
+		return fmt.Errorf("construct NMI sandbox qualification client: %w", err)
 	}
 	if probeV5BaseURL != "" {
 		client.V5BaseURL = probeV5BaseURL
 	}
-	// Scoped by merchant + rail + environment + account so a cached verdict
-	// never answers for a different merchant's account (#348's original cache
-	// had exactly one deployment-wide credential set to consider; this one
-	// has many).
-	cacheKey := merchantID.String() + ":" + name
-	// probe_verdicts is one of the four RLS-EXEMPT tables (with merchants,
-	// worker_health and destructive_action_switch), so the base pool genuinely
-	// answers here — unlike the sites or#824's sweep found. The cache key
-	// carries the merchant, so scope is not lost.
-	decision := nmi.CheckTestModeArm(ctx, database.GenDirectory(), client, cacheKey)
-	if decision.ProbeErr != nil {
-		log.WithError(decision.ProbeErr).WithFields(log.Fields{
-			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,
-		}).Warnf("⚠️  PSP %s:%s: could not verify the NMI account is a sandbox account; proceeding, but confirm the credentials before relying on test_mode (#348)", rail, accountID)
-		return nil
+	if err := nmi.CheckTestModeArm(ctx, client); err != nil {
+		return fmt.Errorf("PSP %s:%s:%s: %w", rail, environment, accountID, err)
 	}
-	if !decision.Refuse {
-		log.WithFields(log.Fields{
-			"merchant_id": merchantID.String(), "rail": rail, "account_id": accountID,
-		}).Info("PSP: NMI account verified as simulating (test env, #348)")
-		return nil
-	}
-	if decision.Cached {
-		return fmt.Errorf("PSP %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — cached probe verdict 'live' from %s (within the %s cooldown; not re-probing); refusing to arm (use the sandbox account credentials, rotate the key, or unset test_mode) (#348)",
-			rail, environment, accountID, decision.CheckedAt.UTC().Format(time.RFC3339), nmi.ProbeVerdictCooldown)
-	}
-	return fmt.Errorf("PSP %s:%s:%s: PRODUCTION NMI credentials detected while test_mode is enabled — the account did not simulate the test-card probe, so real charges could occur; refusing to arm (use the sandbox account credentials, or unset test_mode) (#348)",
-		rail, environment, accountID)
+	return nil
 }
 
 // manifestProviderSignerEvidence validates the Solana signer and returns signer

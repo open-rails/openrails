@@ -33,7 +33,7 @@ import (
 //	R2 (unscoped read, or#877): on the UNSCOPED part of a Work path — the code
 //	   that runs before/outside any RunInMerchantConn/RunInMerchantScope/
 //	   MerchantTx closure — the only sanctioned sqlc accessor is GenDirectory()
-//	   (the four policy-free tables plus the SECURITY DEFINER work queues).
+//	   (the three policy-free tables plus the SECURITY DEFINER work queues).
 //	   A `.Gen(ctx)` / `.Qx(ctx)` out there is the or#877 B4/B6 shape: a worker
 //	   that DOES scope some of its work, and reads its work list on the bare
 //	   context first, so the scoped part never has anything to do.
@@ -82,7 +82,7 @@ Fix it one of two ways:
   * enumerate the merchants with work through a SECURITY DEFINER work queue
     (migrations 0021/0022/0023 — ids only) and run each merchant's pass inside
     db.RunInMerchantScope; or
-  * if the worker genuinely touches only merchants / probe_verdicts /
+  * if the worker genuinely touches only merchants /
     worker_health / destructive_action_switch, add it to
     workersWithoutMerchantScope WITH the reason.`, strings.Join(report.unscopedWorkers, "\n  "))
 	}
@@ -99,7 +99,7 @@ merchant_id = NULL, so the scoped part never has anything to do and the pass
 reports success.
 
 Outside a merchant scope the only sanctioned accessor is DB.GenDirectory():
-the four policy-free tables (merchants, probe_verdicts, worker_health,
+the three policy-free tables (merchants, worker_health,
 destructive_action_switch) and the SECURITY DEFINER work queues, which RAISE
 instead of silently answering nothing.`, strings.Join(report.unscopedReads, "\n  "))
 	}
