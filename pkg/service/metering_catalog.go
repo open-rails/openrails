@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"github.com/open-rails/openrails"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/pricing"
 )
 
 var (
