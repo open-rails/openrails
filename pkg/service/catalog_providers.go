@@ -327,7 +327,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	remoteWritesDisabled := s.rt != nil && s.rt.Config != nil && s.rt.Config.IsLimitedMode()
 	// Provider objects key on the RECURRING cadence (nil for one-off / finite
 	// windows — those settle as one-time charges; the access window is OpenRails-side).
-	reqCycle := req.RecurringCycleDays()
+	reqCycle := priceRequestCycleDays(req)
 	pctx := autoCreateContext{
 		PriceID:              priceID,
 		ProductID:            req.ProductID,

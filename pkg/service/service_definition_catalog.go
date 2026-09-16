@@ -412,7 +412,7 @@ func priceDeterministicID(productID uuid.UUID, amount int64, currency string, ac
 // RecurringCycleDays returns the recurring billing cadence in WHOLE DAYS for an
 // auto-renewing request, or nil for a one-off/durable price (#622). The window
 // is in hours; providers bill in days, so the cadence is hours/24.
-func (req CreatePriceRequest) RecurringCycleDays() *int {
+func priceRequestCycleDays(req CreatePriceRequest) *int {
 	if !req.AutoRenew || req.AccessDurationHours == nil {
 		return nil
 	}
