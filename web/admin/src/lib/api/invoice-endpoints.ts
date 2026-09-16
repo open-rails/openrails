@@ -49,7 +49,7 @@ export const putInvoiceProfile = (
 export interface InvoiceActionRequest {
   id: string
   action: InvoiceAction
-  amount?: number
+  amount?: string
   reference?: string
   paymentMethodId?: string
   idempotencyKey?: string

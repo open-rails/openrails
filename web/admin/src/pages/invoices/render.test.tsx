@@ -21,13 +21,13 @@ const invoice = (
   status: "open",
   period_from: "2026-09-01T00:00:00Z",
   period_to: "2026-10-01T00:00:00Z",
-  total_amount: 120000,
-  subtotal_amount: 120000,
-  amount_paid: 20000,
-  amount_due: 100000,
+  total_amount: "120000",
+  subtotal_amount: "120000",
+  amount_paid: "20000",
+  amount_due: "100000",
   collection_method: "send_invoice",
   collection_failure_count: 0,
-  line_items: [{ event_type: "usage", amount: 120000, count: 1 }],
+  line_items: [{ event_type: "usage", amount: "120000", count: 1 }],
   available_actions: actions,
 })
 function render(node: React.ReactNode) {

@@ -14,15 +14,20 @@ import type {
 
 describe("invoice support models", () => {
   it("uses the invoice's native scale for remittance", () => {
-    expect(invoicePaymentAmount("12", 120000, 4)).toBe(120000)
-    expect(invoicePaymentAmount("2", 120000, 4)).toBe(20000)
-    expect(invoicePaymentAmount("12", 12000000, 6)).toBe(12000000)
-    expect(() => invoicePaymentAmount("0.00001", 120000, 4)).toThrow()
-    expect(() => invoicePaymentAmount("13", 120000, 4)).toThrow()
-    expect(() => invoicePaymentAmount("0", 120000, 4)).toThrow()
+    expect(invoicePaymentAmount("12", "120000", 4)).toBe("120000")
+    expect(invoicePaymentAmount("2", "120000", 4)).toBe("20000")
+    expect(invoicePaymentAmount("12", "12000000", 6)).toBe("12000000")
+    expect(() => invoicePaymentAmount("0.00001", "120000", 4)).toThrow()
+    expect(() => invoicePaymentAmount("13", "120000", 4)).toThrow()
+    expect(() => invoicePaymentAmount("0", "120000", 4)).toThrow()
     expect(() =>
-      invoicePaymentAmount("9007199254740993", Number.MAX_SAFE_INTEGER, 6)
+      invoicePaymentAmount("9007199254740993", String(Number.MAX_SAFE_INTEGER), 6)
     ).toThrow()
+  })
+  it("preserves full int64 remittance precision", () => {
+    expect(invoicePaymentAmount("9007199254.740993", "9223372036854775807", 6)).toBe("9007199254740993")
+    expect(invoicePaymentAmount("9223372036854.775807", "9223372036854775807", 6)).toBe("9223372036854775807")
+    expect(() => invoicePaymentAmount("9223372036854.775808", "9223372036854775807", 6)).toThrow()
   })
   it("preserves profile tax facts and validates terms and contacts", () => {
     const original: InvoiceProfile = {

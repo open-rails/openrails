@@ -178,9 +178,9 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	}
 	status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/void", reader, "", nil)
 	require.Equal(t, 403, status, string(body))
-	status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/payments", owner, "", map[string]any{"amount": 1000000, "reference": "bank-one"})
+	status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/payments", owner, "", map[string]any{"amount": "1000000", "reference": "bank-one"})
 	require.Equal(t, 200, status, string(body))
-	status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/payments", owner, "", map[string]any{"amount": 1000000, "reference": "bank-one"})
+	status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/payments", owner, "", map[string]any{"amount": "1000000", "reference": "bank-one"})
 	require.Equal(t, 409, status, string(body))
 	for range 2 {
 		status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/void", owner, "", nil)
@@ -190,7 +190,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	owed, err := rt.MoneyService.GetOutstandingOwed(ctx, customer, "USD")
 	require.NoError(t, err)
 	require.Zero(t, owed)
-	status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/payments", owner, "", map[string]any{"amount": 1000000, "reference": "bank-two"})
+	status, body = invoiceRequest(t, http.MethodPost, invoicePath+"/payments", owner, "", map[string]any{"amount": "1000000", "reference": "bank-two"})
 	require.Equal(t, 409, status, string(body))
 
 	// JPY stores 10^4 native units per yen. Manual settlement stays native;
@@ -203,7 +203,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	require.NoError(t, json.Unmarshal(body, &read))
 	require.Equal(t, 4, read.UnitDecimals)
 	require.EqualValues(t, 120000, read.TotalAmount)
-	status, body = invoiceRequest(t, http.MethodPost, yenPath+"/payments", owner, "", map[string]any{"amount": 20000, "reference": "JPY-bank"})
+	status, body = invoiceRequest(t, http.MethodPost, yenPath+"/payments", owner, "", map[string]any{"amount": "20000", "reference": "JPY-bank"})
 	require.Equal(t, 200, status, string(body))
 	require.NoError(t, json.Unmarshal(body, &read))
 	require.EqualValues(t, 100000, read.AmountDue)
@@ -237,7 +237,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	require.Equal(t, 200, status, string(body))
 	require.Contains(t, string(body), `"total":2`)
 	require.Contains(t, string(body), `"unit_decimals":4`)
-	require.Contains(t, string(body), `"amount":20000`)
+	require.Contains(t, string(body), `"amount":"20000"`)
 
 	blockedCustomer := makeCustomer(dbtest.TestMerchantID, "USD")
 	blocked := issue(dbtest.TestMerchantID, blockedCustomer, "USD", 2000000)
@@ -259,7 +259,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 		status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/"+action, owner, "", nil)
 		require.Equal(t, 409, status, string(body))
 	}
-	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/payments", owner, "", map[string]any{"amount": 1000000, "reference": "unknown-bank"})
+	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/payments", owner, "", map[string]any{"amount": "1000000", "reference": "unknown-bank"})
 	require.Equal(t, 409, status, string(body))
 	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "new-key", map[string]any{"payment_method_id": blockedMethod})
 	require.Equal(t, 409, status, string(body))
