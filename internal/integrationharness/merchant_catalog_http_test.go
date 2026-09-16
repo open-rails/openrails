@@ -1496,7 +1496,7 @@ func (a httpCatalogApplier) DeactivateProduct(_ context.Context, id uuid.UUID) (
 func (a httpCatalogApplier) ListPricesByProduct(_ context.Context, productID uuid.UUID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
 	q := url.Values{"product_id": []string{productID.String()}}
 	if activeOnly {
-		q.Set("active_only", "true")
+		q.Set("archived", "false")
 	}
 	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/prices?"+q.Encode(), a.token, nil)
 	if status != http.StatusOK {

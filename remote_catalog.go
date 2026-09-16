@@ -22,12 +22,14 @@ type ProductFilter struct {
 	ActiveOnly bool
 	TierGroup  string
 }
+// PriceFilter selects prices. Archived nil lists every price; false lists
+// live prices only; true lists archived prices only.
 type PriceFilter struct {
 	PageOptions
-	ProductID  *uuid.UUID
-	ActiveOnly bool
-	Currency   string
-	Type       string
+	ProductID *uuid.UUID
+	Archived  *bool
+	Currency  string
+	Type      string
 }
 
 func (c *Client) CreateProduct(ctx context.Context, request CreateProductRequest) (*CatalogProduct, error) {
@@ -91,7 +93,9 @@ func (c *Client) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, 
 }
 func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPage[CatalogPrice], error) {
 	q := pageQuery(filter.PageOptions)
-	q.Set("active_only", strconv.FormatBool(filter.ActiveOnly))
+	if filter.Archived != nil {
+		q.Set("archived", strconv.FormatBool(*filter.Archived))
+	}
 	q.Set("currency", filter.Currency)
 	q.Set("type", filter.Type)
 	if filter.ProductID != nil {

@@ -446,7 +446,7 @@ func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, 
 		"subjects": subjects,
 	}
 	if !at.IsZero() {
-		body["at"] = at.UTC().Format(time.RFC3339)
+		body["at"] = at.UTC().Format(time.RFC3339Nano)
 	}
 	var out map[string][]EntitlementRecord
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/entitlements:batch", body, &out); err != nil {
@@ -501,7 +501,7 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 	}
 	base := "/v1/merchant/entitlements/" + url.PathEscape(entitlement) + "/customers?limit=1000"
 	if !at.IsZero() {
-		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339))
+		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339Nano))
 	}
 	var all []string
 	cursor := ""

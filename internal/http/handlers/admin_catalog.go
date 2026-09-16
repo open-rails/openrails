@@ -238,8 +238,10 @@ func AdminListPrices(r *httprequest.Request) {
 		}
 		filter.ProductID = &id
 	}
-	if v := strings.TrimSpace(r.Query("active_only")); v != "" {
-		archived := !parseBool(v)
+	// archived=false lists live prices, archived=true archived ones; absent
+	// lists both.
+	if v := strings.TrimSpace(r.Query("archived")); v != "" {
+		archived := parseBool(v)
 		filter.Archived = &archived
 	}
 	limit := parseIntDefault(r.Query("limit"), 100)
