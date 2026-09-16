@@ -22,6 +22,14 @@ as out of range and rejected as input. No compatibility
 parser accepts numeric money on these finalized routes during the pre-v1 cut.
 Remaining unconverted endpoints are tracked in #983 and are not frozen yet.
 
+`testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
+time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
+(`web/admin/src/lib/api/wire-fixtures.test.ts`) both decode them.
+`wire_money_guard_test.go` fails when a monetary int64 field in a wire package
+is a JSON number unless it is listed, with its reason, as a pending #983 gap.
+Map-literal responses, metrics cells and finding evidence are outside that
+static guard.
+
 ## Admin console browser support
 
 The exact display path (`web/admin/src/lib/format.ts`) depends on:
