@@ -101,6 +101,7 @@ var pendingNumericMoney = map[string]string{
 	"pkg/service/spend.go:CreditAccountSnapshot.OutstandingOwedAmount outstanding_owed_amount":                                                       notHTTPInternalRow,
 	"pkg/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                        notHTTPStoredPayload,
 	"pkg/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                                    notHTTPStoredPayload,
+	"internal/modules/money/invoice_collection_intent.go:InvoiceCollectionPayload.Amount amount":                                                     notHTTPIntentPayload,
 }
 
 const (
@@ -119,6 +120,7 @@ const (
 	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
 	notHTTPInternalRow      = "not HTTP: internal rows converted by pkg/service"
 	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
+	notHTTPIntentPayload    = "not HTTP: frozen rail_intents payload; the pinned provider wire is asserted separately"
 )
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {
