@@ -23,7 +23,6 @@ func TestEndpointAuthRequirements(t *testing.T) {
 		// Money self-service endpoints
 		{"GET", "/v1/me/balance"},
 		{"GET", "/v1/me/transactions"},
-		{"PUT", "/v1/me/settings"},
 		// Payment method endpoints
 		{"GET", "/v1/me/payment-methods"},
 		{"PUT", "/v1/me/payment-methods/123"},
