@@ -3,9 +3,10 @@ package routes
 import (
 	"context"
 	"errors"
-	"github.com/open-rails/authkit/verify"
 	"net/http"
 	"strings"
+
+	"github.com/open-rails/authkit/verify"
 
 	"github.com/open-rails/openrails/internal/app"
 	authpolicy "github.com/open-rails/openrails/internal/auth/policy"
@@ -37,14 +38,13 @@ type Options struct {
 
 	// APIKeys is the #757 merchant self-serve API-key manager (mint/list/revoke
 	// through AuthKit core). Implemented by *controlplane.ControlPlane. Nil
-	// (an embedded host without a control plane) keeps the /api-keys routes
-	// mounted but answering 501.
+	// (an embedded host without a control plane) omits the /api-keys routes.
 	APIKeys httphandlers.MerchantAPIKeyManager
 
 	// Team is the #760 merchant team manager (roster, invites, role changes,
 	// removal via AuthKit group membership). Implemented by
 	// *controlplane.ControlPlane. Nil (an embedded host without a control plane)
-	// keeps the /team routes mounted but answering 501.
+	// omits the /team routes.
 	Team httphandlers.MerchantTeamManager
 
 	// AdminLimiter is the #111 per-human-admin operation limiter. It runs after
@@ -803,11 +803,13 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	// string AuthKit's own mint authorization checks; only the merchant owner
 	// (merchant:*) holds it in the fixed #567 catalog. No MerchantDBConnMW:
 	// these handlers touch only the control plane, never the runtime DB.
-	credentialsManage := opts.merchantActionPermissionMW(controlplane.PermMerchantCredentialsManage)
-	apiKeys := rr.Group("/api-keys")
-	apiKeys.Handle(http.MethodPost, "", h(httphandlers.MerchantCreateAPIKey(opts.APIKeys)), credentialsManage)
-	apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
-	apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
+	if opts.APIKeys != nil {
+		credentialsManage := opts.merchantActionPermissionMW(controlplane.PermMerchantCredentialsManage)
+		apiKeys := rr.Group("/api-keys")
+		apiKeys.Handle(http.MethodPost, "", h(httphandlers.MerchantCreateAPIKey(opts.APIKeys)), credentialsManage)
+		apiKeys.Handle(http.MethodGet, "", h(httphandlers.MerchantListAPIKeys(opts.APIKeys)), credentialsManage)
+		apiKeys.Handle(http.MethodDelete, "/:id", h(httphandlers.MerchantRevokeAPIKey(opts.APIKeys)), credentialsManage)
+	}
 
 	// #850 merchant api_host (#734 Host routing): read + assign the merchant's
 	// canonical API host. Reads gate on merchant:settings:read; the write on
@@ -827,15 +829,17 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	// surface is owner-only (mirrors #757). No MerchantDBConnMW: control plane
 	// only. `/team/invites` (literal) and `/team/:user_id` never collide — they
 	// differ by segment shape/method.
-	membersRead := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersRead)
-	membersManage := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersManage)
-	team := rr.Group("/team")
-	team.Handle(http.MethodGet, "", h(httphandlers.MerchantListTeam(opts.Team)), membersRead)
-	team.Handle(http.MethodGet, "/invites", h(httphandlers.MerchantListTeamInvites(opts.Team)), membersRead)
-	team.Handle(http.MethodPost, "/invites", h(httphandlers.MerchantInviteTeamMember(opts.Team)), membersManage)
-	team.Handle(http.MethodDelete, "/invites/:id", h(httphandlers.MerchantRevokeTeamInvite(opts.Team)), membersManage)
-	team.Handle(http.MethodPatch, "/:user_id", h(httphandlers.MerchantChangeTeamRole(opts.Team)), membersManage)
-	team.Handle(http.MethodDelete, "/:user_id", h(httphandlers.MerchantRemoveTeamMember(opts.Team)), membersManage)
+	if opts.Team != nil {
+		membersRead := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersRead)
+		membersManage := opts.merchantActionPermissionMW(controlplane.PermMerchantMembersManage)
+		team := rr.Group("/team")
+		team.Handle(http.MethodGet, "", h(httphandlers.MerchantListTeam(opts.Team)), membersRead)
+		team.Handle(http.MethodGet, "/invites", h(httphandlers.MerchantListTeamInvites(opts.Team)), membersRead)
+		team.Handle(http.MethodPost, "/invites", h(httphandlers.MerchantInviteTeamMember(opts.Team)), membersManage)
+		team.Handle(http.MethodDelete, "/invites/:id", h(httphandlers.MerchantRevokeTeamInvite(opts.Team)), membersManage)
+		team.Handle(http.MethodPatch, "/:user_id", h(httphandlers.MerchantChangeTeamRole(opts.Team)), membersManage)
+		team.Handle(http.MethodDelete, "/:user_id", h(httphandlers.MerchantRemoveTeamMember(opts.Team)), membersManage)
+	}
 
 	// Outbound notification destinations and the merchant notification bell.
 	settingsWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)}, dbMW...)
