@@ -443,7 +443,7 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	r.ErrProductAccessBadID = observeErr(t, env.side+" product access bad product id", err)
 
 	// 11) Merchant settings sync: install profile, a named billing policy + its
-	// tier binding, the trust-level schedule, and the delegated wasted-spend
+	// tier binding and the delegated wasted-spend
 	// window through the single settings document.
 	require.NoError(t, c.SetMerchantSettings(ctx, openrails.MerchantSettings{
 		Profile: &openrails.MerchantProfileInput{
@@ -452,10 +452,6 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 			FromEmail:   "billing@example.com",
 			SupportURL:  "https://example.com/support",
 		},
-		TrustLevelSchedules: []openrails.MerchantTrustLevelSchedule{{
-			Currency: money.DefaultCurrency,
-			Schedule: []openrails.TrustLevelScheduleRung{{TrustLevel: "conf", MinCumulativePaidAmount: 0}},
-		}},
 		BillingPolicies: []openrails.BillingPolicyInput{{
 			Name: "conf_window",
 			Kind: "window_spend_cap",

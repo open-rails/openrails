@@ -137,16 +137,6 @@ FROM openrails.grants g
 WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(grant_id)::uuid
   AND g.kind = 'credit' AND g.event = 'grant';
 
--- SumCreditGrants: cumulative credits granted to a customer in one currency (the
--- "amount paid / trust signal" that graduates the tier). Replaces SumMoneyDeposits.
--- name: SumCreditGrants :one
-SELECT COALESCE(SUM(amount), 0)::bigint
-FROM openrails.grants
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND customer_id = sqlc.arg(customer_id)::uuid
-  AND currency = sqlc.arg(currency)::text
-  AND kind = 'credit' AND event = 'grant';
-
 -- name: EntitlementExistsForGrant :one
 SELECT EXISTS (
     SELECT 1 FROM openrails.entitlements

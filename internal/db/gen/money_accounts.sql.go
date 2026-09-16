@@ -12,36 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const autoGraduateMoneyAccountTier = `-- name: AutoGraduateMoneyAccountTier :exec
-UPDATE openrails.money_settings
-SET tier = $3::text, tier_source = 'auto', updated_at = $4
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
-  AND tier_source <> 'admin'
-`
-
-type AutoGraduateMoneyAccountTierParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Tier       string
-	Now        time.Time
-	Currency   string
-}
-
-// Auto-graduation write (#476): set tier_source='auto' and the new tier ONLY
-// when the current source is not 'admin' (an admin override always wins). The
-// caller computes the monotonic target tier; this guards against clobbering an
-// admin override at the DB level so a race cannot.
-func (q *Queries) AutoGraduateMoneyAccountTier(ctx context.Context, arg AutoGraduateMoneyAccountTierParams) error {
-	_, err := q.db.Exec(ctx, autoGraduateMoneyAccountTier,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Tier,
-		arg.Now,
-		arg.Currency,
-	)
-	return err
-}
-
 const getAdmissionCapacity = `-- name: GetAdmissionCapacity :one
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
@@ -108,7 +78,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id, auto_topup_failures FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id, auto_topup_failures FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -135,7 +105,6 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tier,
-		&i.TierSource,
 		&i.Currency,
 		&i.CreditLimitAmount,
 		&i.CollectionPaymentMethodID,
@@ -286,7 +255,7 @@ func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUI
 }
 
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
-SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id, auto_topup_failures FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id, auto_topup_failures FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency
 `
@@ -318,7 +287,6 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Tier,
-			&i.TierSource,
 			&i.Currency,
 			&i.CreditLimitAmount,
 			&i.CollectionPaymentMethodID,
@@ -335,7 +303,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, tier_source, currency, credit_limit_amount, collection_payment_method_id, auto_topup_failures FROM openrails.money_settings
+SELECT merchant_id, customer_id, billing_mode, low_balance_threshold, auto_topup_enabled, auto_topup_amount, auto_topup_payment_method_id, default_credit_expiry_hours, last_topup_at, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id, auto_topup_failures FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -362,7 +330,6 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Tier,
-		&i.TierSource,
 		&i.Currency,
 		&i.CreditLimitAmount,
 		&i.CollectionPaymentMethodID,
@@ -432,27 +399,24 @@ func (q *Queries) SetMoneyAccountCreditLimit(ctx context.Context, arg SetMoneyAc
 
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec
 UPDATE openrails.money_settings
-SET tier = $3::text, tier_source = $4::text, updated_at = $5
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
+SET tier = $3::text, updated_at = $4
+WHERE merchant_id = $1 AND customer_id = $2 AND currency = $5
 `
 
 type SetMoneyAccountTierParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Tier       string
-	TierSource string
 	Now        time.Time
 	Currency   string
 }
 
-// Sets the tier AND its source (#476). 'admin' = an explicit override that
-// auto-graduation must not overwrite; 'auto' = schedule-driven.
+// Sets the host-assigned account tier.
 func (q *Queries) SetMoneyAccountTier(ctx context.Context, arg SetMoneyAccountTierParams) error {
 	_, err := q.db.Exec(ctx, setMoneyAccountTier,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Tier,
-		arg.TierSource,
 		arg.Now,
 		arg.Currency,
 	)

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -17,8 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -26,10 +23,9 @@ import (
 var ErrInvalidMerchantSettings = errors.New("invalid merchant settings")
 
 type merchantSettingsDocument struct {
-	config    models.MerchantConfiguration
-	policies  map[string]models.BillingPolicy
-	schedules []openrails.MerchantTrustLevelSchedule
-	bindings  []openrails.BillingPolicyBindingInput
+	config   models.MerchantConfiguration
+	policies map[string]models.BillingPolicy
+	bindings []openrails.BillingPolicyBindingInput
 }
 
 // normalizeMerchantSettings validates the complete declaration before any write.
@@ -83,41 +79,11 @@ func (s *Service) normalizeMerchantSettings(ctx context.Context, in openrails.Me
 		bound[binding.Tier] = true
 		doc.bindings = append(doc.bindings, binding)
 	}
-	currencies := make(map[string]bool)
-	for _, schedule := range in.TrustLevelSchedules {
-		currency, err := s.resolveCurrency(ctx, schedule.Currency)
-		if err != nil {
-			return doc, err
-		}
-		if err := moneyutil.ValidateCurrency(currency); err != nil {
-			return doc, err
-		}
-		if currencies[currency] {
-			return doc, fmt.Errorf("duplicate trust schedule for %q", currency)
-		}
-		currencies[currency] = true
-		schedule.Currency = currency
-		schedule.Schedule = append([]openrails.TrustLevelScheduleRung{}, schedule.Schedule...)
-		levels := make(map[string]bool)
-		thresholds := make(map[int64]bool)
-		for i := range schedule.Schedule {
-			rung := &schedule.Schedule[i]
-			rung.TrustLevel = strings.TrimSpace(rung.TrustLevel)
-			if rung.TrustLevel == "" || rung.MinCumulativePaidAmount < 0 || levels[rung.TrustLevel] || thresholds[rung.MinCumulativePaidAmount] {
-				return doc, fmt.Errorf("invalid or duplicate trust schedule rung")
-			}
-			levels[rung.TrustLevel], thresholds[rung.MinCumulativePaidAmount] = true, true
-		}
-		sort.Slice(schedule.Schedule, func(i, j int) bool {
-			return schedule.Schedule[i].MinCumulativePaidAmount < schedule.Schedule[j].MinCumulativePaidAmount
-		})
-		doc.schedules = append(doc.schedules, schedule)
-	}
 	return doc, nil
 }
 
 // SetMerchantSettings atomically replaces the declarative merchant document.
-// Customer-specific schedules and policy bindings remain runtime state. A policy
+// Customer-specific policy bindings remain runtime state. A policy
 // referenced by such a binding cannot be removed by replacing the document.
 func (s *Service) SetMerchantSettings(ctx context.Context, in openrails.MerchantSettings) error {
 	ctx, release, err := s.pin(ctx)
@@ -153,19 +119,6 @@ func (s *Service) SetMerchantSettings(ctx context.Context, in openrails.Merchant
 		}
 		if err := merchantconfig.NewStore(database).Upsert(ctx, doc.config); err != nil {
 			return err
-		}
-		if err := q.DeleteDefaultTrustLevelSchedules(ctx, mid.UUID()); err != nil {
-			return err
-		}
-		now := s.now()
-		for _, schedule := range doc.schedules {
-			rungs, err := json.Marshal(schedule.Schedule)
-			if err != nil {
-				return err
-			}
-			if err := q.UpsertTierScheduleDefault(ctx, gen.UpsertTierScheduleDefaultParams{ID: uuidutil.NewV7(), MerchantID: mid.UUID(), Currency: schedule.Currency, Rungs: rungs, CreatedAt: now, UpdatedAt: now}); err != nil {
-				return err
-			}
 		}
 		if err := q.DeleteDeclarativeBillingPolicyBindings(ctx, mid.UUID()); err != nil {
 			return err
@@ -230,23 +183,6 @@ func (s *Service) GetMerchantSettings(ctx context.Context) (out openrails.Mercha
 		out.BillingPolicyBindings, err = view.ListBillingPolicyBindings(ctx)
 		if err != nil {
 			return err
-		}
-		for after := ""; ; {
-			schedules, err := q.ListDefaultTrustLevelSchedules(ctx, gen.ListDefaultTrustLevelSchedulesParams{MerchantID: mid.UUID(), AfterCurrency: after})
-			if err != nil {
-				return err
-			}
-			for _, row := range schedules {
-				schedule := openrails.MerchantTrustLevelSchedule{Currency: row.Currency}
-				if err := json.Unmarshal(row.Rungs, &schedule.Schedule); err != nil {
-					return err
-				}
-				out.TrustLevelSchedules = append(out.TrustLevelSchedules, schedule)
-				after = row.Currency
-			}
-			if len(schedules) < 100 {
-				break
-			}
 		}
 		return nil
 	})

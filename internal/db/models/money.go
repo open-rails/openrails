@@ -72,9 +72,6 @@ type MoneyAccount struct {
 	LastTopupAt       *time.Time `json:"last_topup_at,omitempty"`
 
 	TrustLevel *string `json:"trust_level,omitempty"`
-	// TrustLevelSource is "auto" (schedule-driven graduation, #476) or "admin" (an
-	// explicit override that auto-graduation must not overwrite).
-	TrustLevelSource string `json:"trust_level_source,omitempty"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

@@ -2992,47 +2992,6 @@ ALTER TABLE openrails.reprice_batches ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.reprice_batches TO openrails_app;
 
-CREATE TABLE openrails.tier_schedules (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid,
-    currency text NOT NULL,
-    rungs jsonb DEFAULT '[]'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT tier_schedules_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
-);
-
-ALTER TABLE ONLY openrails.tier_schedules FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.tier_schedules IS 'Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. Platform-owned (subjects cannot edit). OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.';
-
-COMMENT ON COLUMN openrails.tier_schedules.customer_id IS 'NULL = merchant-wide default schedule for this currency; non-NULL = per-customer override taking precedence for that customer/currency.';
-
-COMMENT ON COLUMN openrails.tier_schedules.currency IS 'Currency whose cumulative paid amount is compared to this ladder.';
-
-COMMENT ON COLUMN openrails.tier_schedules.rungs IS 'Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer''s tier = highest rung whose min_cumulative_paid_amount <= same-currency cumulative_paid.';
-
-ALTER TABLE ONLY openrails.tier_schedules
-    ADD CONSTRAINT tier_schedules_pkey PRIMARY KEY (id);
-
-CREATE INDEX idx_tier_schedules_merchant_id ON openrails.tier_schedules USING btree (merchant_id);
-
-CREATE UNIQUE INDEX uq_tier_schedules_customer ON openrails.tier_schedules USING btree (merchant_id, customer_id, currency) WHERE (customer_id IS NOT NULL);
-
-CREATE UNIQUE INDEX uq_tier_schedules_merchant_default ON openrails.tier_schedules USING btree (merchant_id, currency) WHERE (customer_id IS NULL);
-
-ALTER TABLE ONLY openrails.tier_schedules
-    ADD CONSTRAINT tier_schedules_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
-
-ALTER TABLE ONLY openrails.tier_schedules
-    ADD CONSTRAINT tier_schedules_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.tier_schedules USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.tier_schedules ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.tier_schedules TO openrails_app;
 
 CREATE TABLE openrails.usage_events (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -3846,7 +3805,6 @@ CREATE TABLE openrails.money_settings (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     tier text,
-    tier_source text DEFAULT 'auto'::text NOT NULL,
     currency text NOT NULL,
     credit_limit_amount bigint DEFAULT 0 NOT NULL,
     collection_payment_method_id uuid,
@@ -3854,8 +3812,7 @@ CREATE TABLE openrails.money_settings (
     CONSTRAINT money_settings_auto_topup_failures_check CHECK ((auto_topup_failures >= 0)),
     CONSTRAINT money_settings_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
     CONSTRAINT money_settings_credit_limit_amount_nonneg_chk CHECK ((credit_limit_amount >= 0)),
-    CONSTRAINT money_settings_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
-    CONSTRAINT money_settings_tier_source_chk CHECK ((tier_source = ANY (ARRAY['auto'::text, 'admin'::text])))
+    CONSTRAINT money_settings_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
 );
 
 ALTER TABLE ONLY openrails.money_settings FORCE ROW LEVEL SECURITY;
@@ -3866,7 +3823,6 @@ COMMENT ON COLUMN openrails.money_settings.low_balance_threshold IS 'Optional lo
 
 COMMENT ON COLUMN openrails.money_settings.default_credit_expiry_hours IS 'per-account default credit-grant expiry in HOURS; NULL = no default.';
 
-COMMENT ON COLUMN openrails.money_settings.tier_source IS 'auto = tier maintained by tier_schedule auto-graduation; admin = explicit override that auto-graduation must not overwrite.';
 
 COMMENT ON COLUMN openrails.money_settings.currency IS 'System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.';
 

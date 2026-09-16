@@ -66,10 +66,8 @@ type AdmissionClient interface {
 	// ErrNotFound when nothing live exists to extend (captured, released, or
 	// lapsed): re-admit; a lapsed hold is never resurrected.
 	ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error
-	// GetTrustLevel returns the payer's current trust level (#477) for one currency:
-	// the value OpenRails auto-maintains from same-currency cumulative paid spend
-	// against the persisted schedule (#476), or a manual admin override. Empty
-	// means the host treats it as the lowest/default trust level.
+	// GetTrustLevel returns the host-assigned account level for one currency.
+	// Empty means the host treats it as the lowest/default trust level.
 	GetTrustLevel(ctx context.Context, customerID, currency string) (string, error)
 	// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
 	// accrue toward their flat cutoff; direct payer credentials use trust-level
@@ -375,29 +373,22 @@ type MerchantProfileInput struct {
 // MerchantSettings is the merchant-owned admission/policy document installed by
 // standalone policy sync jobs.
 type MerchantSettings struct {
-	Profile                    *MerchantProfileInput        `json:"profile,omitempty"`
-	AutoTopupSafety            *AutoTopupSafetyPolicy       `json:"auto_topup_safety,omitempty"`
-	InvoiceCollectionThreshold *int64                       `json:"collection_threshold,omitempty"`
-	InvoiceMonthlyFloor        *int64                       `json:"monthly_floor,omitempty"`
-	InvoiceBillingBoundary     string                       `json:"billing_period_boundary,omitempty"`
-	AlertEmail                 *string                      `json:"alert_email,omitempty"`
-	RepriceNoticeWindowDays    *int                         `json:"reprice_notice_window_days,omitempty"`
-	ArrearsGraceDays           *int                         `json:"arrears_grace_days,omitempty"`
-	ArrearsDelinquencyFloor    *int64                       `json:"arrears_delinquency_floor,omitempty"`
-	CheckoutRouting            *[]CheckoutRoutingRule       `json:"checkout_routing,omitempty"`
-	TrustLevelSchedules        []MerchantTrustLevelSchedule `json:"trust_level_schedules,omitempty"`
+	Profile                    *MerchantProfileInput  `json:"profile,omitempty"`
+	AutoTopupSafety            *AutoTopupSafetyPolicy `json:"auto_topup_safety,omitempty"`
+	InvoiceCollectionThreshold *int64                 `json:"collection_threshold,omitempty"`
+	InvoiceMonthlyFloor        *int64                 `json:"monthly_floor,omitempty"`
+	InvoiceBillingBoundary     string                 `json:"billing_period_boundary,omitempty"`
+	AlertEmail                 *string                `json:"alert_email,omitempty"`
+	RepriceNoticeWindowDays    *int                   `json:"reprice_notice_window_days,omitempty"`
+	ArrearsGraceDays           *int                   `json:"arrears_grace_days,omitempty"`
+	ArrearsDelinquencyFloor    *int64                 `json:"arrears_delinquency_floor,omitempty"`
+	CheckoutRouting            *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 	// BillingPolicies / BillingPolicyBindings are the or#897 registry: named
 	// policies and the rungs that decide who gets which. They REPLACE the retired
 	// trust_level_spend_limits field, which could only ever mean "window cap".
 	BillingPolicies                   []BillingPolicyInput        `json:"billing_policies,omitempty"`
 	BillingPolicyBindings             []BillingPolicyBindingInput `json:"billing_policy_bindings,omitempty"`
 	DelegatedInvokerWastedSpendLimits []BudgetWindowInput         `json:"delegated_invoker_wasted_spend_limits,omitempty"`
-}
-
-// MerchantTrustLevelSchedule is one currency's trust-level ladder.
-type MerchantTrustLevelSchedule struct {
-	Currency string                   `json:"currency"`
-	Schedule []TrustLevelScheduleRung `json:"schedule"`
 }
 
 // BillingPolicyInput declares one named billing policy (or#897). The policy says
@@ -509,16 +500,6 @@ type WastedSpendResponse struct {
 	PolicyChargedAmount  int64  `json:"policy_charged_amount,omitempty"`
 	Action               string `json:"action"`
 	Duplicate            bool   `json:"duplicate,omitempty"`
-}
-
-// TrustLevelScheduleRung is one rung of the persisted same-currency trust-level
-// ladder set via merchant settings (#476): a payer reaches TrustLevel once its
-// cumulative paid spend in the schedule currency is at least
-// MinCumulativePaidAmount. Order ascending by MinCumulativePaidAmount (the
-// server sorts defensively regardless).
-type TrustLevelScheduleRung struct {
-	TrustLevel              string `json:"trust_level"`
-	MinCumulativePaidAmount int64  `json:"min_cumulative_paid_amount"`
 }
 
 // SpendLimitWindow is one fixed money-budget window in a hierarchical

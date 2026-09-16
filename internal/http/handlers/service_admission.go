@@ -213,10 +213,9 @@ func ServiceAdmitBatch(r *httprequest.Request) {
 	r.JSON(http.StatusOK, map[string]any{"items": verdicts})
 }
 
-// ServiceGetTrustLevel returns the payer's current trust level (#477): the value
-// OpenRails auto-maintains from cumulative paid spend against the persisted
-// trust-level schedule (#476). customer_id is a query param; the merchant is
-// pinned from the API key. Empty trust_level means the payer has never graduated
+// ServiceGetTrustLevel returns the payer's host-assigned trust level for one
+// currency. customer_id is a query param; the merchant is
+// pinned from the API key. Empty trust_level means the host has not assigned a level
 // (caller treats it as the lowest/default). Operator API key, credits:read.
 func ServiceGetTrustLevel(r *httprequest.Request) {
 	payer, err := parseServiceCustomerID(r.Query("customer_id"))

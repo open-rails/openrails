@@ -100,7 +100,6 @@ func settingsFromGen(r gen.OpenrailsMoneySetting) *models.MoneyAccount {
 		CreditLimitAmount:        r.CreditLimitAmount,
 		LastTopupAt:              r.LastTopupAt,
 		TrustLevel:               r.Tier,
-		TrustLevelSource:         r.TierSource,
 		CreatedAt:                r.CreatedAt,
 		UpdatedAt:                r.UpdatedAt,
 	}

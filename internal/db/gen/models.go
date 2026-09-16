@@ -841,8 +841,6 @@ type OpenrailsMoneySetting struct {
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
 	Tier                     *string
-	// auto = tier maintained by tier_schedule auto-graduation; admin = explicit override that auto-graduation must not overwrite.
-	TierSource string
 	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
@@ -1433,20 +1431,6 @@ type OpenrailsSubscriptionStatusTransition struct {
 	// cancel_type on the subscription at transition time (meaningful for to_status=cancelled).
 	CancelType *string
 	OccurredAt time.Time
-}
-
-// Persisted tier ladder (#476): rungs declared once per merchant and currency, or as a per-customer/currency override. Platform-owned (subjects cannot edit). OpenRails auto-maintains money_settings.tier from same-currency cumulative paid spend unless tier_source=admin.
-type OpenrailsTierSchedule struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	// NULL = merchant-wide default schedule for this currency; non-NULL = per-customer override taking precedence for that customer/currency.
-	CustomerID *uuid.UUID
-	// Currency whose cumulative paid amount is compared to this ladder.
-	Currency string
-	// Ordered JSONB array of {tier, min_cumulative_paid_amount}; a payer's tier = highest rung whose min_cumulative_paid_amount <= same-currency cumulative_paid.
-	Rungs     []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 // Append-only multi-dimensional metered usage (issue #289). Source of truth for usage reporting + #303 invoice line items. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path (#298) never reads this table.
