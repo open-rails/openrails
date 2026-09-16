@@ -302,7 +302,10 @@ func TestDashboardWidgetGenerate(t *testing.T) {
 	require.True(t, svc.NLConfigured())
 
 	t.Run("generate needs the dashboard write grant", func(t *testing.T) {
-		readOnly := surface.MintAPIKey(dbtest.TestMerchantSlug, "gen-ro-"+uuid.NewString(), []string{controlplane.PermMerchantMetricsRead})
+		// metrics:read + catalog:read maps onto the viewer role, which lacks
+		// dashboard:update (support carries it).
+		readOnly := surface.MintAPIKey(dbtest.TestMerchantSlug, "gen-ro-"+uuid.NewString(),
+			[]string{controlplane.PermMerchantMetricsRead, controlplane.PermMerchantCatalogRead})
 		status, _ := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/dashboard/widgets/generate", readOnly,
 			map[string]string{"prompt": "anything"})
 		require.Equal(t, http.StatusForbidden, status)
