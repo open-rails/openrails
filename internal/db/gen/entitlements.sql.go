@@ -277,6 +277,55 @@ func (q *Queries) GetEntitlementByID(ctx context.Context, id uuid.UUID) (Openrai
 	return i, err
 }
 
+const getLatestEntitlementBySource = `-- name: GetLatestEntitlementBySource :one
+SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id FROM openrails.entitlements
+WHERE merchant_id = $1::uuid
+  AND customer_id = $2::uuid
+  AND entitlement = $3::text
+  AND source_type = $4::text AND source_id = $5::uuid
+  AND deleted_at IS NULL
+ORDER BY (revoked_at IS NULL) DESC, end_at DESC NULLS FIRST, start_at ASC, id ASC
+LIMIT 1
+`
+
+type GetLatestEntitlementBySourceParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+	SourceType  string
+	SourceID    uuid.UUID
+}
+
+func (q *Queries) GetLatestEntitlementBySource(ctx context.Context, arg GetLatestEntitlementBySourceParams) (OpenrailsEntitlement, error) {
+	row := q.db.QueryRow(ctx, getLatestEntitlementBySource,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Entitlement,
+		arg.SourceType,
+		arg.SourceID,
+	)
+	var i OpenrailsEntitlement
+	err := row.Scan(
+		&i.ID,
+		&i.Entitlement,
+		&i.StartAt,
+		&i.EndAt,
+		&i.SourceID,
+		&i.SourceType,
+		&i.RevokedAt,
+		&i.RevokeReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.Period,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.GrantID,
+		&i.DestructiveRunID,
+	)
+	return i, err
+}
+
 const getLatestFiniteActiveEntitlement = `-- name: GetLatestFiniteActiveEntitlement :one
 SELECT id, entitlement, start_at, end_at, source_id, source_type, revoked_at, revoke_reason, created_at, updated_at, deleted_at, period, merchant_id, customer_id, grant_id, destructive_run_id FROM openrails.entitlements ent
 WHERE ent.merchant_id = $1
@@ -795,6 +844,43 @@ func (q *Queries) ListExtendableSubscriptionEntitlements(ctx context.Context, ar
 	return items, nil
 }
 
+const materializeEntitlement = `-- name: MaterializeEntitlement :exec
+INSERT INTO openrails.entitlements (
+    merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id, grant_id
+) VALUES (
+    $1::uuid, $2::uuid, $3::text,
+    $4::timestamptz, $5::timestamptz,
+    $6::text, $7::uuid, $8::uuid
+)
+ON CONFLICT (merchant_id, grant_id, entitlement) WHERE grant_id IS NOT NULL AND deleted_at IS NULL DO NOTHING
+`
+
+type MaterializeEntitlementParams struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Entitlement string
+	StartAt     time.Time
+	EndAt       *time.Time
+	SourceType  string
+	SourceID    *uuid.UUID
+	GrantID     *uuid.UUID
+}
+
+// Concurrent replay of one immutable grant cannot duplicate its projection.
+func (q *Queries) MaterializeEntitlement(ctx context.Context, arg MaterializeEntitlementParams) error {
+	_, err := q.db.Exec(ctx, materializeEntitlement,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Entitlement,
+		arg.StartAt,
+		arg.EndAt,
+		arg.SourceType,
+		arg.SourceID,
+		arg.GrantID,
+	)
+	return err
+}
+
 const resolveEffectiveTier = `-- name: ResolveEffectiveTier :one
 SELECT p.id AS product_id,
        p.key AS product_key,
@@ -870,16 +956,6 @@ WHERE ent.deleted_at IS NULL
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
       AND e.end_at IS NOT NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM openrails.entitlements o
-          WHERE o.merchant_id = e.merchant_id
-            AND o.customer_id = e.customer_id
-            AND o.entitlement = e.entitlement
-            AND o.id <> e.id
-            AND o.revoked_at IS NULL
-            AND o.deleted_at IS NULL
-            AND o.period && tstzrange(e.start_at, 'infinity'::timestamptz, '[)')
-      )
     ORDER BY e.customer_id, e.entitlement, e.end_at DESC
 )
 `
@@ -892,9 +968,8 @@ type ResumeEntitlementsBySubscriptionParams struct {
 // #691 resume: re-open the LATEST live window per (customer, entitlement) of a
 // resumed auto-renew subscription (end_at = NULL), undoing an advance-written
 // cancel closure. This also repairs the historical split-commit case after the
-// bounded window has elapsed. Only the latest window per timeline (older bounded
-// windows are history), and only when no other live window would overlap [start, infinity)
-// — the GIST no-overlap constraint stays intact.
+// bounded window has elapsed. Older bounded windows remain historical. Other
+// sources may overlap and cannot prevent this source from resuming.
 func (q *Queries) ResumeEntitlementsBySubscription(ctx context.Context, arg ResumeEntitlementsBySubscriptionParams) error {
 	_, err := q.db.Exec(ctx, resumeEntitlementsBySubscription, arg.SourceID, arg.Now)
 	return err

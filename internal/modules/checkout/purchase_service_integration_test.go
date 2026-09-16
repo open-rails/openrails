@@ -300,3 +300,46 @@ func checkoutFixtureCtx(t *testing.T, qx gen.DBTX, rail string) context.Context 
 	psp := dbtest.EnsureTestPSP(base, t, qx, dbtest.TestMerchantID.UUID(), rail)
 	return db.WithPSPID(base, psp)
 }
+
+// A paid purchase is still recorded when another independent source already
+// supplies indefinite access. Refunding/revoking that source leaves the purchase.
+func TestRegisterPurchase_PreservesSourceUnderIndefiniteAccess(t *testing.T) {
+	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
+	pool := dbi.Pool()
+	ctx := checkoutFixtureCtx(t, pool, "stripe")
+	now := time.Now().UTC().Truncate(time.Second)
+	clock := clockwork.NewFakeClockAt(now)
+	userID := uuid.NewString()
+	dbtest.EnsureCustomerIDPgx(ctx, t, pool, userID)
+	productID, priceID, adminSource := uuid.New(), uuid.New(), uuid.New()
+	hours := 24
+	feature := "purchase-union-" + uuid.NewString()
+	product := &models.Product{ID: productID, Key: uuid.NewString(), DisplayName: "Paid access", EntitlementsSpec: map[string]*int{feature: &hours}}
+	price := &models.Price{ID: priceID, ProductID: productID, Amount: 1000, Currency: "USD"}
+	insertProductAndPrice(ctx, t, pool, product, price)
+	entSvc := entitlements.NewEntitlementService(dbi, clock)
+	_, err := entSvc.PushNewEntitlement(ctx, entitlements.PushNewEntitlementParams{UserID: userID, Entitlement: feature,
+		Indefinite: true, SourceType: models.EntitlementSourceAdmin, SourceID: adminSource})
+	require.NoError(t, err)
+	purchaseSvc := NewCheckoutPurchaseService(catalog.NewPriceService(dbi), catalog.NewProductService(dbi),
+		payments.NewPaymentService(dbi, clock), entSvc, nil, clock)
+	req := &payments.RegisterPurchaseRequest{UserID: userID, PriceID: priceID, Rail: string(models.RailStripe),
+		TransactionID: uuid.NewString(), Amount: 1000, Currency: "USD"}
+	first, err := purchaseSvc.RegisterPurchase(ctx, req)
+	require.NoError(t, err)
+	replay, err := purchaseSvc.RegisterPurchase(ctx, req)
+	require.NoError(t, err)
+	require.Equal(t, first.PaymentID, replay.PaymentID)
+	var sources int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(DISTINCT source_id) FROM openrails.entitlements WHERE customer_id=$1 AND entitlement=$2`, userID, feature).Scan(&sources))
+	require.Equal(t, 2, sources)
+	st := models.EntitlementSourceAdmin
+	require.NoError(t, entSvc.RevokeExistingEntitlement(ctx, entitlements.RevokeExistingEntitlementParams{
+		UserID: userID, Entitlement: feature, SourceType: &st, SourceID: &adminSource, Reason: models.EntitlementRevokeRefund}))
+	access, err := entSvc.IsEntitled(ctx, userID, feature, now.Add(time.Hour))
+	require.NoError(t, err)
+	require.True(t, access)
+	access, err = entSvc.IsEntitled(ctx, userID, feature, now.Add(25*time.Hour))
+	require.NoError(t, err)
+	require.False(t, access)
+}

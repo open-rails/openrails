@@ -134,8 +134,8 @@ All outbound provider mutations post a durable intent first, then execute.
 
 | # | Invariant | Enforced at | Str |
 |---|---|---|---|
-| ID-1 | **Entitlement windows for one `(merchant, customer, entitlement)` may not overlap** — GiST EXCLUDE over a generated `tstzrange`, filtered to live rows. | `entitlements_customer_no_overlap` | **DB** |
-| ID-2 | At most one open-ended live entitlement per `(merchant, customer, entitlement)`. | `:1423` | **DB** |
+| ID-1 | Entitlement coverage is the union of independent source intervals; revoking one source preserves the others. | Source-scoped materialization and revocation; existence-based access reads | APP |
+| ID-2 | At most one non-deleted entitlement projection per `(merchant, grant, entitlement)`; independent indefinite sources may overlap. | `uq_entitlements_grant_feature` | **DB** |
 | ID-3 | One live subscription per `(merchant, customer, product)`, and one per `(customer, tier_group)`, with `tier_group` denormalized by a BEFORE trigger. | `:1006,:1008`; trigger `:175-184` | **DB** |
 | ID-4 | One customer per `(merchant, subject)`; one rail-customer per `(merchant, customer, rail)`. | `:691,:2324,:2326` | **DB** |
 | ID-5 | Price financial substance is unique per product. | `:744` | **DB** |

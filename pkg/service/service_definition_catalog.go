@@ -185,6 +185,14 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	return s.catalogProduct(ctx, p)
 }
 
+// ErrProductTierGroupInUse reports a product identity conflict with live subscriptions.
+var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
+
+// UpdateProductRequest is a field-selective patch. Nil scalar pointers (including
+// JSON null) leave fields unchanged; an empty description clears it. Definitions
+// change only with their Set flag: true plus nil sets SQL NULL, true plus an empty
+// map sets an empty definition, and false omits the field regardless of its value.
+// Same-field concurrent patches use last-committed-write wins.
 type UpdateProductRequest struct {
 	DisplayName      *string         `json:"display_name,omitempty"`
 	Description      *string         `json:"description,omitempty"`

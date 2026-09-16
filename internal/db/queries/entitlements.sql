@@ -182,9 +182,8 @@ WHERE ent.id = $1
 -- #691 resume: re-open the LATEST live window per (customer, entitlement) of a
 -- resumed auto-renew subscription (end_at = NULL), undoing an advance-written
 -- cancel closure. This also repairs the historical split-commit case after the
--- bounded window has elapsed. Only the latest window per timeline (older bounded
--- windows are history), and only when no other live window would overlap [start, infinity)
--- — the GIST no-overlap constraint stays intact.
+-- bounded window has elapsed. Older bounded windows remain historical. Other
+-- sources may overlap and cannot prevent this source from resuming.
 UPDATE openrails.entitlements ent SET
     end_at = NULL,
     updated_at = sqlc.arg(now)::timestamptz
@@ -197,16 +196,6 @@ WHERE ent.deleted_at IS NULL
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
       AND e.end_at IS NOT NULL
-      AND NOT EXISTS (
-          SELECT 1 FROM openrails.entitlements o
-          WHERE o.merchant_id = e.merchant_id
-            AND o.customer_id = e.customer_id
-            AND o.entitlement = e.entitlement
-            AND o.id <> e.id
-            AND o.revoked_at IS NULL
-            AND o.deleted_at IS NULL
-            AND o.period && tstzrange(e.start_at, 'infinity'::timestamptz, '[)')
-      )
     ORDER BY e.customer_id, e.entitlement, e.end_at DESC
 );
 
@@ -404,3 +393,24 @@ SELECT EXISTS (
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
 ) AS standing;
+
+-- name: MaterializeEntitlement :exec
+-- Concurrent replay of one immutable grant cannot duplicate its projection.
+INSERT INTO openrails.entitlements (
+    merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id, grant_id
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(entitlement)::text,
+    sqlc.arg(start_at)::timestamptz, sqlc.narg(end_at)::timestamptz,
+    sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.narg(grant_id)::uuid
+)
+ON CONFLICT (merchant_id, grant_id, entitlement) WHERE grant_id IS NOT NULL AND deleted_at IS NULL DO NOTHING;
+
+-- name: GetLatestEntitlementBySource :one
+SELECT * FROM openrails.entitlements
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND customer_id = sqlc.arg(customer_id)::uuid
+  AND entitlement = sqlc.arg(entitlement)::text
+  AND source_type = sqlc.arg(source_type)::text AND source_id = sqlc.arg(source_id)::uuid
+  AND deleted_at IS NULL
+ORDER BY (revoked_at IS NULL) DESC, end_at DESC NULLS FIRST, start_at ASC, id ASC
+LIMIT 1;

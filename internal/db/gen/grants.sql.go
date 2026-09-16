@@ -99,44 +99,6 @@ func (q *Queries) EntitlementExistsForGrant(ctx context.Context, arg Entitlement
 	return exists, err
 }
 
-const entitlementWindowOverlaps = `-- name: EntitlementWindowOverlaps :one
-SELECT EXISTS (
-    SELECT 1 FROM openrails.entitlements e
-    WHERE e.merchant_id = $1::uuid
-      AND e.customer_id = $2::uuid
-      AND e.entitlement = $3::text
-      AND e.revoked_at IS NULL
-      AND e.deleted_at IS NULL
-      AND e.period && tstzrange($4::timestamptz, $5::timestamptz, '[)')
-) AS overlaps
-`
-
-type EntitlementWindowOverlapsParams struct {
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	Entitlement string
-	LowerBound  time.Time
-	UpperBound  time.Time
-}
-
-// #631 overlap precheck for derive-1: does the customer already hold a LIVE
-// (non-revoked, non-deleted) entitlement for this feature whose window overlaps
-// [lower, upper)? derive-1 SKIPs the grant when true, so it never trips the
-// entitlements_customer_no_overlap exclusion constraint. Half-open [) semantics
-// match the constraint (abutting monthly windows do NOT overlap).
-func (q *Queries) EntitlementWindowOverlaps(ctx context.Context, arg EntitlementWindowOverlapsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, entitlementWindowOverlaps,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Entitlement,
-		arg.LowerBound,
-		arg.UpperBound,
-	)
-	var overlaps bool
-	err := row.Scan(&overlaps)
-	return overlaps, err
-}
-
 const getCreditGrantBySourceID = `-- name: GetCreditGrantBySourceID :one
 SELECT id, merchant_id, customer_id, product_id, kind, source_type, source_id, payment_id, event, supersedes_id, spec_snapshot, starts_at, ends_at, amount, currency, reason, created_at FROM openrails.grants
 WHERE merchant_id = $1::uuid
@@ -763,18 +725,8 @@ WHERE g.merchant_id = $1::uuid
               AND e2.source_id::text = g.source_id
               AND e2.end_at IS NULL
               AND e2.revoked_at IS NULL AND e2.deleted_at IS NULL))
-          -- #695 absent-by-overlap: a LIVE window (any source) overlapping the
-          -- grant's own [starts_at, ends_at) means MaterializeGrant deliberately
-          -- projected NO window for it (the grant is provenance-only; the window
-          -- is overlap-constrained). Mirrors derive-2's overlap no-op — detection
-          -- and repair must agree or the sweep never converges.
-          AND NOT EXISTS (
-            SELECT 1 FROM openrails.entitlements e3
-            WHERE e3.merchant_id = g.merchant_id
-              AND e3.customer_id = g.customer_id
-              AND e3.entitlement = feat
-              AND e3.revoked_at IS NULL AND e3.deleted_at IS NULL
-              AND e3.period && tstzrange(g.starts_at, COALESCE(g.ends_at, 'infinity'::timestamptz), '[)'))))
+    ))
+
     OR
     (g.kind = 'credit' AND NOT EXISTS (
         SELECT 1 FROM openrails.ledger_transfers lt

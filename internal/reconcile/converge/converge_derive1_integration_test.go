@@ -119,14 +119,9 @@ func TestConverge_DeriveGrantMissing_Subscription(t *testing.T) {
 	}))
 }
 
-// #631/#695 derive-1 overlap policy: when the customer already holds a LIVE
-// entitlement for the feature whose window overlaps the subscription period,
-// derive-1 STILL records the grant (provenance — detection keys on it) but
-// derive-2 projects NO window (absent-by-overlap; the exclusion constraint is
-// never tripped). The second sweep is findings-free: the recorded grant makes
-// derive.subscription.missing converge and grant_effect.missing mirrors the
-// overlap no-op.
-func TestConverge_DeriveSubscription_OverlapRecordsGrantWithoutWindow(t *testing.T) {
+// An overlapping subscription still owns its full grant and projection. The
+// second sweep is findings-free because both source facts and effects exist.
+func TestConverge_DeriveSubscription_OverlapPreservesSourceWindow(t *testing.T) {
 	appDB := startReconcilePostgres(t)
 	merchantID := dbtest.TestMerchantID.UUID()
 	baseCtx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
@@ -170,7 +165,7 @@ func TestConverge_DeriveSubscription_OverlapRecordsGrantWithoutWindow(t *testing
 	})
 
 	// Sweep 1: the grant is recorded (provenance, frozen [start,end) window on the
-	// grant row) but NO entitlement window materializes for it.
+	// grant row) and its own entitlement window materializes.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
@@ -190,12 +185,12 @@ func TestConverge_DeriveSubscription_OverlapRecordsGrantWithoutWindow(t *testing
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND grant_id IS NOT NULL`,
 			merchantID, customer).Scan(&entN))
-		require.Equal(t, 0, entN, "no window materialized for the overlapped grant (constraint never tripped)")
+		require.Equal(t, 1, entN, "the overlapping grant retains its own full source window")
 		return nil
 	}))
 
 	// Sweep 2: converged — the recorded grant quiets derive.subscription.missing
-	// and grant_effect.missing treats the window as deliberately absent-by-overlap.
+	// and grant_effect.missing sees the complete source-owned projection.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &customer})
 		require.NoError(t, err)
@@ -283,11 +278,11 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		var entN int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust).Scan(&entN))
-		require.Equal(t, 1, entN, "no bounded window added — the standing window is the only projection")
+		require.Equal(t, 2, entN, "the bounded source and standing source both retain their windows")
 	}
 
 	// Sweep 1: ONE auto-fixed derive.subscription.missing — the cancelled sub's
-	// grant is recorded with its frozen historical window, NO window materializes.
+	// grant is recorded and materializes its own frozen historical window.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
 		require.NoError(t, err)
@@ -308,8 +303,7 @@ func TestConverge_DeriveFlap_StandingWindowPlusCancelledSub(t *testing.T) {
 		return nil
 	}))
 
-	// Sweeps 2..3: ZERO findings — the flap is dead. grant_effect.missing treats
-	// the window-less grant as deliberately absent-by-overlap.
+	// Sweeps 2..3: zero findings; every grant has its source-owned projection.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		for i := 0; i < 2; i++ {
 			res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
@@ -395,7 +389,7 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 	})
 
 	// Sweep 1: derive.wallet.missing auto-fixes (grant recorded, payment-linked,
-	// NO window); derive.grant.missing surfaces once alongside it (detections ran
+	// its own window); derive.grant.missing surfaces once alongside it (detections ran
 	// before the repair recorded the grant).
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
@@ -412,12 +406,12 @@ func TestConverge_DeriveFlap_StandingWindowPlusWalletPayment(t *testing.T) {
 		var entN int
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2`, merchantID, cust).Scan(&entN))
-		require.Equal(t, 1, entN, "no window materialized — the standing window is the only projection")
+		require.Equal(t, 2, entN, "the paid wallet window is preserved alongside standing access")
 		return nil
 	}))
 
 	// Sweep 2: ZERO findings — wallet flap dead, grant.missing satisfied by the
-	// recorded grant, grant_effect.missing quiet on the window-less grant.
+	// recorded grant, grant_effect.missing quiet on the projected grant.
 	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
 		res, err := e.Converge(ctx, Scope{Merchant: dbtest.TestMerchantID, Customer: &cust})
 		require.NoError(t, err)
@@ -863,13 +857,12 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 			merchantID, custIndef).Scan(&endAt))
 		require.Nil(t, endAt, "indefinite comp → open-ended entitlement")
 
-		// #695 blocked comp: window fully inside the existing live window — the
-		// grant is STILL recorded (provenance) with created=0 (no window), and a
-		// re-run is an idempotent sourceID skip.
+		// A contained comp has its own revocable window even when another source
+		// already supplies access. Re-running its source remains idempotent.
 		insideEnd := end.Add(-24 * time.Hour)
 		created, existed, err = gl.GrantAdmin(ctx, custBounded, "comp-blocked", []string{"premium"}, start.Add(24*time.Hour), &insideEnd)
 		require.NoError(t, err)
-		require.Equal(t, 0, created, "overlapped comp materializes no window")
+		require.Equal(t, 1, created, "overlapped comp retains its own revocable source window")
 		require.False(t, existed)
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.grants WHERE merchant_id=$1 AND customer_id=$2 AND source_type='admin' AND source_id='comp-blocked' AND event='grant'`,
@@ -878,7 +871,7 @@ func TestGrantAdmin_MaterializesEntitlement(t *testing.T) {
 		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
 			`SELECT count(*) FROM openrails.entitlements WHERE merchant_id=$1 AND customer_id=$2 AND entitlement='premium' AND revoked_at IS NULL`,
 			merchantID, custBounded).Scan(&n))
-		require.Equal(t, 1, n, "no second window (constraint never tripped)")
+		require.Equal(t, 2, n, "both independent source windows materialize")
 		created, existed, err = gl.GrantAdmin(ctx, custBounded, "comp-blocked", []string{"premium"}, start.Add(24*time.Hour), &insideEnd)
 		require.NoError(t, err)
 		require.Equal(t, 0, created)

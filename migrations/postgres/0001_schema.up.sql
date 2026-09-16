@@ -973,7 +973,29 @@ CREATE FUNCTION openrails.subscriptions_set_tier_group() RETURNS trigger
 BEGIN
     SELECT prod.tier_group INTO NEW.tier_group
     FROM openrails.products AS prod
-    WHERE prod.id = NEW.product_id;
+    WHERE prod.id = NEW.product_id AND prod.merchant_id = NEW.merchant_id
+    FOR SHARE;
+    RETURN NEW;
+END;
+$$;
+
+-- Product identity cannot change underneath live billing or paid access.
+-- The product UPDATE owns the row lock; subscription inserts/reactivations take
+-- FOR SHARE on that same row before copying tier_group, serializing both orders.
+CREATE FUNCTION openrails.products_guard_tier_group() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF NEW.tier_group IS DISTINCT FROM OLD.tier_group AND EXISTS (
+        SELECT 1 FROM openrails.subscriptions s
+        WHERE s.merchant_id = OLD.merchant_id AND s.product_id = OLD.id
+          AND s.deleted_at IS NULL
+          AND (s.status IN ('active', 'pending', 'past_due', 'unknown')
+               OR COALESCE(s.current_period_ends_at, s.ended_at) > now())
+    ) THEN
+        RAISE EXCEPTION 'product tier group cannot change while subscriptions are live'
+            USING ERRCODE = '23514', CONSTRAINT = 'products_live_subscription_tier_group';
+    END IF;
     RETURN NEW;
 END;
 $$;
@@ -3666,7 +3688,7 @@ COMMENT ON COLUMN openrails.subscriptions.product_id IS 'Denormalized product ID
 
 COMMENT ON COLUMN openrails.subscriptions.scheduled_price_id IS 'Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.';
 
-COMMENT ON COLUMN openrails.subscriptions.tier_group IS 'Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_customer_tier_group_active, which enforces one active/pending subscription per (customer, tier group).';
+COMMENT ON COLUMN openrails.subscriptions.tier_group IS 'Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_customer_tier_group_active, which enforces one active/pending/past_due/unknown subscription per (customer, tier group). Regrouping is prohibited while the product has live subscriptions.';
 
 COMMENT ON COLUMN openrails.subscriptions.psp_id IS 'PSP that produced this remote subscription mirror row. Required (or#893).';
 
@@ -3723,11 +3745,14 @@ CREATE INDEX ix_subscriptions_renewal_by_payment_method ON openrails.subscriptio
 
 CREATE UNIQUE INDEX uq_subscriptions_customer_product_lifecycle ON openrails.subscriptions USING btree (merchant_id, customer_id, product_id) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status])) AND (deleted_at IS NULL));
 
-CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON openrails.subscriptions USING btree (merchant_id, customer_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status])) AND (tier_group IS NOT NULL) AND (deleted_at IS NULL));
+CREATE UNIQUE INDEX uq_subscriptions_customer_tier_group_active ON openrails.subscriptions USING btree (merchant_id, customer_id, tier_group) WHERE ((status = ANY (ARRAY['active'::openrails.subscription_status, 'pending'::openrails.subscription_status, 'past_due'::openrails.subscription_status, 'unknown'::openrails.subscription_status])) AND (tier_group IS NOT NULL) AND (deleted_at IS NULL));
 
 CREATE UNIQUE INDEX uq_subscriptions_merchant_psp_subscription_id ON openrails.subscriptions USING btree (merchant_id, rail, psp_id, rail_subscription_id) WHERE ((rail_subscription_id <> ''::text) AND (deleted_at IS NULL));
 
-CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.subscriptions_set_tier_group();
+CREATE TRIGGER trg_products_guard_tier_group BEFORE UPDATE OF tier_group ON openrails.products
+    FOR EACH ROW EXECUTE FUNCTION openrails.products_guard_tier_group();
+
+CREATE TRIGGER trg_subscriptions_set_tier_group BEFORE INSERT OR UPDATE OF product_id, tier_group, status, deleted_at ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.subscriptions_set_tier_group();
 
 CREATE TRIGGER trg_subscriptions_status_transition AFTER INSERT OR UPDATE OF status ON openrails.subscriptions FOR EACH ROW EXECUTE FUNCTION openrails.subscriptions_record_status_transition();
 
@@ -4513,8 +4538,7 @@ ALTER TABLE ONLY openrails.entitlements FORCE ROW LEVEL SECURITY;
 
 COMMENT ON COLUMN openrails.entitlements.customer_id IS 'OpenRails payable tenant subject for this entitlement window.';
 
-ALTER TABLE ONLY openrails.entitlements
-    ADD CONSTRAINT entitlements_customer_no_overlap EXCLUDE USING gist (merchant_id WITH =, customer_id WITH =, entitlement WITH =, period WITH &&) WHERE (((customer_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL)));
+-- Source-owned intervals may overlap. Reads derive their union by existence.
 
 ALTER TABLE ONLY openrails.entitlements
     ADD CONSTRAINT entitlements_pkey PRIMARY KEY (id);
@@ -4541,7 +4565,8 @@ CREATE INDEX idx_entitlements_source ON openrails.entitlements USING btree (sour
 
 CREATE INDEX idx_entitlements_subscription_source_live ON openrails.entitlements USING btree (source_id, entitlement, end_at) WHERE ((source_type = 'subscription'::text) AND (revoked_at IS NULL) AND (deleted_at IS NULL));
 
-CREATE UNIQUE INDEX uq_entitlements_customer_active ON openrails.entitlements USING btree (merchant_id, customer_id, entitlement) WHERE ((customer_id IS NOT NULL) AND (revoked_at IS NULL) AND (deleted_at IS NULL) AND (end_at IS NULL));
+CREATE UNIQUE INDEX uq_entitlements_grant_feature ON openrails.entitlements (merchant_id, grant_id, entitlement)
+    WHERE grant_id IS NOT NULL AND deleted_at IS NULL;
 
 ALTER TABLE ONLY openrails.entitlements
     ADD CONSTRAINT entitlements_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id);
