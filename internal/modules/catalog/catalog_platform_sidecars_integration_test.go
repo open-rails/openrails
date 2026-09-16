@@ -104,7 +104,7 @@ func TestCatalogBenefitAndMeteringSidecars_AppRoleRLS(t *testing.T) {
 		require.NoError(t, err)
 		_, err = tx.Exec(ctx,
 			`INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
-			 VALUES ($1, $2, 1, $3, 'in_arrears', '{"model":"per_unit","per_unit":{"unit_amount":100000,"divide_by":100}}'::jsonb)`,
+			 VALUES ($1, $2, 1, $3, 'in_arrears', '{"model":"per_unit","per_unit":{"unit_amount":"100000","divide_by":100}}'::jsonb)`,
 			tA.UUID(), productA, meterKey,
 		)
 		return err

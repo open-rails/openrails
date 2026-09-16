@@ -794,7 +794,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
       const amount = value.amount
         ? receivedAmount(value.amount, value.priceId)
         : undefined
-      if (amount === null || (amount !== undefined && amount < 0)) {
+      if (amount === null || amount?.startsWith("-")) {
         toast.error("Enter a non-negative amount in the price's currency")
         return
       }
@@ -924,7 +924,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                     value,
                     fieldApi.form.getFieldValue("priceId")
                   )
-                  return amount !== null && amount >= 0
+                  return amount !== null && !amount.startsWith("-")
                     ? undefined
                     : "Enter a non-negative amount"
                 },

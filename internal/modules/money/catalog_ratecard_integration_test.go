@@ -51,12 +51,12 @@ VALUES
     ($1, $2, 1, $4, 'in_arrears', '{"region":["eu"]}'::jsonb, '{
       "model":"per_unit",
       "currency":"USD",
-      "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1}}}}
+      "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":"8930","maximum_amount":"6000000","included":1}}}}
     }'::jsonb),
     ($1, $3, 1, $5, 'in_arrears', '{}'::jsonb, '{
       "model":"per_unit",
       "currency":"USD",
-      "per_unit":{"unit_amount":10000,"divide_by":1073741824}
+      "per_unit":{"unit_amount":"10000","divide_by":1073741824}
     }'::jsonb)`,
 		merchantID, dropletProductID, bandwidthProductID, dropletMeter, bandwidthMeter)
 	require.NoError(t, err)
@@ -168,8 +168,8 @@ VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
   "tiered":{
     "mode":"graduated",
     "tiers":[
-      {"up_to":2000,"unit_amount":10000},
-      {"unit_amount":7500}
+      {"up_to":2000,"unit_amount":"10000"},
+      {"unit_amount":"7500"}
     ]
   }
 }'::jsonb)`, merchantID, productID)
@@ -257,7 +257,7 @@ VALUES ($1, $2, 'droplet.usage', 'seconds', 'sum', '{"size_slug":"metadata.size_
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears', '{
   "model":"per_unit","currency":"USD",
-  "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000,"included":1000}}}}
+  "per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":"8930","maximum_amount":"6000000","included":1000}}}}
 }'::jsonb)`, merchantID, productID, meterKey)
 	require.NoError(t, err)
 
@@ -304,7 +304,7 @@ ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit`, merchantID)
 	_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_purchase_prices (merchant_id, product_id, ordinal, credit_key, currency, input_min, price)
 VALUES ($1, $2, 1, 'image-credit', 'USD', 1000000, '{
-  "model":"tiered","tiered":{"mode":"graduated","tiers":[{"up_to":2000,"unit_amount":10000},{"unit_amount":7500}]}
+  "model":"tiered","tiered":{"mode":"graduated","tiers":[{"up_to":2000,"unit_amount":"10000"},{"unit_amount":"7500"}]}
 }'::jsonb)`, merchantID, productID)
 	require.NoError(t, err)
 
@@ -366,7 +366,7 @@ ON CONFLICT (merchant_id, key) DO UPDATE SET unit = EXCLUDED.unit`, merchantID)
 		_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_credit_purchase_prices (merchant_id, product_id, ordinal, credit_key, currency, price)
 VALUES ($1, $2, 1, 'image-credit', 'USD', $3::jsonb)`, merchantID, productID,
-			`{"model":"per_unit","per_unit":{"unit_amount":10000,"divide_by":3,"round":"`+c.mode+`"}}`)
+			`{"model":"per_unit","per_unit":{"unit_amount":"10000","divide_by":3,"round":"`+c.mode+`"}}`)
 		require.NoError(t, err)
 
 		quote, err := svc.QuoteCatalogCreditPurchase(ctx, money.CatalogCreditPurchaseQuoteInput{

@@ -57,7 +57,7 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 			Price: json.RawMessage(`{
 				"model":"per_unit",
 				"currency":"USD",
-				"per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000}}}}
+				"per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":"8930","maximum_amount":"6000000"}}}}
 			}`),
 		}},
 		CreditBalances: []CatalogCreditBalanceSpec{{
@@ -71,7 +71,7 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 			Currency:   "USD",
 			InputMin:   1_000_000,
 			PSPs:       []string{"stripe"},
-			Price:      json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":10000}}`),
+			Price:      json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":"10000"}}`),
 		}},
 	}))
 
@@ -141,7 +141,7 @@ VALUES ($1, $2, 'Gem Top-up', $3)`, productID, productKey, merchantID)
 			Ordinal:    1,
 			CreditKey:  "gems",
 			Currency:   "USD",
-			Price:      json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":10000}}`),
+			Price:      json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":"10000"}}`),
 		}},
 	}))
 

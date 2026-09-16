@@ -215,7 +215,7 @@ curl -X POST https://openrails.example/v1/merchant/admissions \
 # Settle at real cost…
 curl -X POST https://openrails.example/v1/merchant/admissions/req-789/capture \
   -H "Authorization: Bearer openrails_st_..." \
-  -d '{"amount":43000,"event_type":"chat.completion"}'
+  -d '{"amount":"43000","event_type":"chat.completion"}'
 
 # …or release the hold when the work failed
 curl -X POST https://openrails.example/v1/merchant/admissions/req-789/release \

@@ -88,7 +88,7 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	require.Equal(t, canonical, productUnit)
 	require.NoError(t, svc.SyncCatalogSidecars(a, SyncCatalogSidecarsRequest{
 		CreditBalances:  []CatalogCreditBalanceSpec{{Key: "tokens", Unit: old + "/tokens"}},
-		CreditPurchases: []CatalogCreditPurchasePriceSpec{{ProductKey: productKey, Ordinal: 1, CreditKey: "tokens", Currency: "USD", Price: json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":10000}}`)}},
+		CreditPurchases: []CatalogCreditPurchasePriceSpec{{ProductKey: productKey, Ordinal: 1, CreditKey: "tokens", Currency: "USD", Price: json.RawMessage(`{"model":"per_unit","per_unit":{"unit_amount":"10000"}}`)}},
 	}))
 	scale, err := svc.CreditUnitDecimals(a, old+"/tokens")
 	require.NoError(t, err)

@@ -5,8 +5,10 @@ checkout-session, capture, admission, usage-report, wasted-spend, invoice,
 merchant settings/billing policy, spend delegation and self spend-window,
 credit-limit, usage-rollup and resource-revenue, credit grant and credit
 transaction, self balance and usage, invoker credit balance, delinquency,
-Solana token base-unit and fleet analytics DTOs encode monetary values as
-decimal JSON strings. Invoice movement maps use the same representation. A JavaScript
+Solana token base-unit, fleet analytics, catalog price and copilot price
+draft, public price, payment and refund, subscription price/payment, tier-change
+and rate-card DTOs encode monetary values as decimal JSON strings. Rate cards
+keep the same representation in `catalog_rate_cards.price`. Invoice movement maps use the same representation. A JavaScript
 consumer must use BigInt or an exact decimal library for arithmetic; converting
 to Number before parsing loses values above 2^53.
 
@@ -22,7 +24,9 @@ and pinned by a Go test). It formats exact decimal strings with BigInt/Intl, inc
 values beyond JavaScript's safe integer range; numeric money above 2^53 is shown
 as out of range and rejected as input. No compatibility
 parser accepts numeric money on these finalized routes during the pre-v1 cut.
-Remaining unconverted endpoints are tracked in #983 and are not frozen yet.
+Remaining numeric money (catalog publish manifests, the admin customer billing
+profile, metrics cells, finding evidence and event payloads) is tracked in #983
+and not frozen yet.
 
 `testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
 time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
