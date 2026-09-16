@@ -442,8 +442,7 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		}
 		drift, missing, verifyErr := adapter.Verify(verifyCtx, ids, local)
 		if verifyErr != nil {
-			lower := strings.ToLower(verifyErr.Error())
-			if strings.Contains(lower, "is not configured") {
+			if errors.Is(verifyErr, errProviderNotArmed) {
 				state.SyncStatus = SyncStatusSyncDisabled
 			} else {
 				state.Status = ProviderStatusError

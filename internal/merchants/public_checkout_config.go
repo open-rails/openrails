@@ -193,9 +193,10 @@ func publicSettingValue(settings map[string]any, key string) string {
 // PublicCheckoutPSPs lists the merchant's ARMED PSPs for environment with each
 // one's public browser config. Armed means exactly what checkout means by it:
 // a non-archived openrails.psps row for this merchant, rail and environment
-// (the same rows resolveRailTarget resolves through). A rail with no such row
-// is absent from the result, so it is never advertised as available.
-func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, environment string) ([]PublicPSPConfig, error) {
+// whose full credential shape resolves — armed reports that, with the same
+// resolver checkout routes through. A PSP declared without credentials (an
+// import attribution) is an identity, never advertised as available.
+func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
 	scopes, err := s.activePSPScopes(ctx, id, environment)
 	if err != nil {
 		return nil, err
@@ -213,6 +214,20 @@ func (s *Service) PublicCheckoutPSPs(ctx context.Context, id merchant.ID, enviro
 	}
 	out := make([]PublicPSPConfig, 0, len(scopes))
 	for _, scope := range scopes {
+		if armed != nil {
+			ok, err := armed(ctx, scope)
+			if err != nil {
+				return nil, fmt.Errorf("resolve %s account %s: %w", scope.Rail, scope.AccountID, err)
+			}
+			if !ok {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"merchant_id": id.String(),
+					"rail":        scope.Rail,
+					"psp":         scope.Key,
+				}).Info("public checkout config: declared PSP is not armed")
+				continue
+			}
+		}
 		var custodian *CustodianScope
 		if scope.CustodianID != nil {
 			if c, ok := byID[*scope.CustodianID]; ok {
