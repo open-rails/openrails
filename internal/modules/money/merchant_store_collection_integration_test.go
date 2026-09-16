@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -63,12 +65,7 @@ func seedArrearsInvoice(t *testing.T, svc *money.MoneyService, ctx context.Conte
 
 func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	cleanupCollection(t, pool, ctx, payer)
 	msvc := merchantsServiceForTest(t, dbi)
 	sfx := uuid.NewString()[:8]
 	storeKey := "sk_test_store_only_" + sfx
@@ -102,7 +99,7 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 	// NO boot adapters at all: only store resolution can arm this charge.
 	ch := storeArmedCharger(dbi, msvc, nil, money.CollectionEndpoints{StripeBaseURL: server.URL})
 
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, calls, 4)
@@ -115,12 +112,7 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 
 func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	cleanupCollection(t, pool, ctx, payer)
 	msvc := merchantsServiceForTest(t, dbi)
 	sfx := uuid.NewString()[:8]
 	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), "gw-store-"+sfx, map[string]string{
@@ -150,7 +142,7 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 
 	ch := storeArmedCharger(dbi, msvc, nil, money.CollectionEndpoints{NMIDirectPostURL: server.URL})
 
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	select {
@@ -182,12 +174,7 @@ func TestChargeOutstanding_StoreOnlyNMICredentials_ChargesThroughStore(t *testin
 
 func TestChargeOutstanding_DeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	cleanupCollection(t, pool, ctx, payer)
 	msvc := merchantsServiceForTest(t, dbi)
 	sfx := uuid.NewString()[:8]
 	// Declared account row, NO secrets: never boot fallback, the charge errors.
@@ -195,35 +182,45 @@ func TestChargeOutstanding_DeclaredAccountMissingSecret_FailsClosed(t *testing.T
 
 	pm := seedPaymentMethodWithRailCustomerRef(t, pool, ctx, payer, string(models.RailStripe), "pm_fail_closed_"+sfx)
 	seedRailCustomer(t, pool, ctx, payer, string(models.RailStripe), "cus_fail_closed_"+sfx)
-	seedArrearsInvoice(t, svc, ctx, payer, pm)
+	invID := seedArrearsInvoice(t, svc, ctx, payer, pm)
 
 	boot := &fakeCollectionAdapter{}
 	ch := storeArmedCharger(dbi, msvc, map[string]money.CollectionAdapter{
 		string(models.RailStripe): boot,
 	}, money.CollectionEndpoints{})
 
-	_, err := svc.ChargeOutstanding(ctx, ch, 0)
-	require.Error(t, err, "a declared account with a missing secret must fail the charge closed")
-	require.Contains(t, err.Error(), "missing")
+	// A declared account with a missing secret fails closed BEFORE any
+	// submission: the operation parks with the reason, nothing is charged, and
+	// no boot-plane adapter is consulted.
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	require.NoError(t, err)
+	require.Zero(t, n)
 	require.Empty(t, boot.charges, "fail-closed must never fall back to the boot-plane adapter")
+	op := latestCollectionIntent(t, pool, ctx, invID)
+	require.Equal(t, intents.StatusPending, op.Status)
+	require.Contains(t, *op.LastFailureReason, "missing")
 }
 
-// Actual NMI Direct Post acceptance with a lost response, then an empty Query
-// result and eventual receipt, must settle one local invoice without a resend.
+// Actual NMI Direct Post acceptance with an uncertain processor response, then
+// an empty Query result and eventual receipt, must settle one local invoice
+// without a resend — through the store-armed plane the production runtime
+// wires as both charger and verifier.
 func TestInvoiceCollection_DelayedNMIReceiptNeverResubmits(t *testing.T) {
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	cleanupInvoices(t, pool, ctx, payer)
+	cleanupCollection(t, pool, ctx, payer)
 	msvc := merchantsServiceForTest(t, dbi)
 	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), "gw-delayed-"+uuid.NewString()[:8], map[string]string{"security_key": "synthetic-key"})
 	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
 	invoiceID := seedArrearsInvoice(t, svc, ctx, payer, method)
 	var sends atomic.Int32
 	var visible atomic.Bool
+	var orderIDs sync.Map
 	transaction := "invoice-delayed-" + uuid.NewString()
 	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.NoError(t, r.ParseForm())
 		if r.Form.Get("type") == "sale" {
 			sends.Add(1)
+			orderIDs.Store(r.Form.Get("orderid"), true)
 			fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
 			return
 		}
@@ -237,29 +234,42 @@ func TestInvoiceCollection_DelayedNMIReceiptNeverResubmits(t *testing.T) {
 	plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: dbi, MerchantsFn: func() *merchants.Service { return msvc }, Endpoints: money.CollectionEndpoints{NMIDirectPostURL: gateway.URL, NMIQueryURL: gateway.URL}}
 	charger := money.NewScopedCharger(dbi, nil)
 	charger.SetAdapterResolver(plane)
-	_, err := svc.ChargeOutstanding(ctx, charger, 0)
-	require.ErrorIs(t, err, money.ErrInvoiceRetryOutcomeUnknown)
-	require.EqualValues(t, 1, sends.Load())
-	_, err = pool.Exec(ctx, "UPDATE openrails.invoices SET updated_at=updated_at-interval '30 minutes' WHERE id=$1", invoiceID)
+	runner := collectionRunner(dbi, charger, plane)
+	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
+	require.Zero(t, n)
+	require.EqualValues(t, 1, sends.Load())
+	op := latestCollectionIntent(t, pool, ctx, invoiceID)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
+	_, sent := orderIDs.Load(op.ID.String())
+	require.True(t, sent, "the wire order id is the operation id")
+
+	// Restart: an empty search keeps the operation unknown; the sweep skips it.
 	restarted := money.NewMoneyService(dbi)
-	stats, err := restarted.ResolveUnknownInvoiceCollections(ctx, plane)
+	dueNow(t, pool, ctx, op.ID)
+	_, err = collectionRunner(dbi, charger, plane).RunVerifyOnce(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, stats.Skipped)
-	_, err = restarted.ChargeOutstanding(ctx, charger, 0)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, pool, ctx, invoiceID).Status)
+	_, err = restarted.ChargeOutstanding(ctx, collectionRunner(dbi, charger, plane), 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, sends.Load())
+
 	visible.Store(true)
-	stats, err = restarted.ResolveUnknownInvoiceCollections(ctx, plane)
+	dueNow(t, pool, ctx, op.ID)
+	_, err = collectionRunner(dbi, charger, plane).RunVerifyOnce(ctx)
 	require.NoError(t, err)
-	require.Equal(t, 1, stats.Settled)
+	require.Equal(t, intents.StatusSucceeded, latestCollectionIntent(t, pool, ctx, invoiceID).Status)
 	invoice, err := restarted.GetInvoiceByID(ctx, payer, invoiceID)
 	require.NoError(t, err)
 	require.Equal(t, "paid", invoice.Status)
-	_, err = restarted.ResolveUnknownInvoiceCollections(ctx, plane)
-	require.NoError(t, err)
-	_, err = restarted.ChargeOutstanding(ctx, charger, 0)
+	require.Nil(t, invoice.CollectionIntentID)
+	_, err = restarted.ChargeOutstanding(ctx, collectionRunner(dbi, charger, plane), 0)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, sends.Load())
-	require.Equal(t, 1, owedPaymentTransfers(t, pool, ctx, payer))
+	var transfers int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id = $1 AND transfer_type = 'owed_payment'`, payer.UUID()).Scan(&transfers))
+	require.Equal(t, 1, transfers)
+	var railPaymentID string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, invoiceID).Scan(&railPaymentID))
+	require.Equal(t, transaction, railPaymentID)
 }

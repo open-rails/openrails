@@ -68,7 +68,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 	}
 
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	cleanupInvoiceRows(t, pool, ctx, payer)
+	cleanupCollection(t, pool, ctx, payer)
 
 	// The REAL NMI client, pointed at the REAL sandbox Direct Post endpoint (no URL
 	// override). The nmi.NewClient testMode=true mirrors the TEST_MODE=sandbox
@@ -124,7 +124,7 @@ func TestChargeOutstanding_NMISandbox_CollectsRealCharge(t *testing.T) {
 
 	// ACT: collect the open invoice through the real path. A non-nil error here is
 	// a genuine provider/transport failure — fail loud, never silently skip.
-	n, err := svc.ChargeOutstanding(ctx, charger, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, charger, nil), 0)
 	require.NoError(t, err, "real NMI sandbox collection failed (configured but broken: fail loud, do not skip)")
 	if n != 1 {
 		var failureCode, failureMessage string

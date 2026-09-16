@@ -58,7 +58,10 @@ type InvoiceDTO struct {
 	CollectionFailedAt        *time.Time           `json:"collection_failed_at,omitempty"`
 	NextCollectionAttemptAt   *time.Time           `json:"next_collection_attempt_at,omitempty"`
 	LastCollectionFailureCode *string              `json:"last_collection_failure_code,omitempty"`
-	CreatedAt                 time.Time            `json:"created_at"`
+	// CollectionIntentID names the live collection operation (`openrails
+	// intents`); no competing collection or admin mutation runs while set.
+	CollectionIntentID *uuid.UUID `json:"collection_intent_id,omitempty"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 type InvoicePaymentAttemptDTO struct {

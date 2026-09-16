@@ -17,13 +17,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// CollectionAdapter charges a rail-specific saved payment method.
+// CollectionAdapter arms a rail-specific saved-method charge. Prepare performs
+// only local validation and request building; the returned PreparedCharge's
+// Submit is the provider submission.
 type CollectionAdapter interface {
-	ChargeSavedMethod(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (ChargeResult, error)
+	Prepare(ctx context.Context, method gen.OpenrailsPaymentMethod, req ChargeRequest) (PreparedCharge, error)
 }
 
-// ScopedCharger validates merchant/customer/payment-method scope before
-// dispatching an off-session invoice collection charge to a rail adapter.
+// ScopedCharger validates merchant/customer/payment-method scope and resolves
+// the store-armed adapter before an off-session invoice collection charge.
 type ScopedCharger struct {
 	db       *db.DB
 	adapters map[string]CollectionAdapter
@@ -44,38 +46,39 @@ func NewScopedCharger(database *db.DB, adapters map[string]CollectionAdapter) *S
 
 // SetAdapterResolver arms per-merchant store resolution (#725/#788). Once
 // armed it is the ONLY source of collection adapters: a merchant with no
-// declared account on the rail has nothing to charge with, and or#893 made
-// that refusal loud rather than a silent fall-through to boot-config
-// credentials.
+// declared account on the rail has nothing to charge with (or#893).
 func (c *ScopedCharger) SetAdapterResolver(r CollectionAdapterResolver) {
 	if c != nil {
 		c.resolver = r
 	}
 }
 
-func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest) (ChargeResult, error) {
+// Prepare is the ONE dispatch point for every off-session collection charge.
+// Nothing here reaches the provider.
+func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (PreparedCharge, error) {
 	if c == nil || c.db == nil {
-		return ChargeResult{}, fmt.Errorf("scoped charger not initialized")
+		return nil, fmt.Errorf("scoped charger not initialized")
 	}
 	if req.PaymentMethodID == uuid.Nil {
-		return ChargeResult{}, fmt.Errorf("payment_method_id required")
+		return nil, fmt.Errorf("payment_method_id required")
 	}
 	if req.Payer.IsZero() {
-		return ChargeResult{}, fmt.Errorf("payer required")
+		return nil, fmt.Errorf("payer required")
 	}
-	// or#864: the ONE dispatch point for every off-session collection charge.
-	// A rail adapter must never have to decide what an absent currency means —
-	// the answer is always "refuse", and it is decided here, once, before any
-	// credential is resolved.
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, fmt.Errorf("idempotency_key required")
+	}
+	// or#864: an absent currency is refused here, once, before any credential
+	// is resolved. Registry-validated, not merely non-blank.
 	req.Currency = normalizeCurrency(req.Currency)
 	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
-		return ChargeResult{}, fmt.Errorf("refusing to charge without an established currency: %w", err)
+		return nil, fmt.Errorf("refusing to charge without an established currency: %w", err)
 	}
 	merchantID := req.MerchantID
 	if merchantID == uuid.Nil {
 		tid, err := merchant.Require(ctx)
 		if err != nil {
-			return ChargeResult{}, err
+			return nil, err
 		}
 		merchantID = tid.UUID()
 		req.MerchantID = merchantID
@@ -83,72 +86,69 @@ func (c *ScopedCharger) ChargeSavedMethod(ctx context.Context, req ChargeRequest
 
 	method, err := c.db.Gen(ctx).GetPaymentMethodByID(ctx, req.PaymentMethodID)
 	if err != nil {
-		return ChargeResult{}, fmt.Errorf("load payment method: %w", err)
+		return nil, fmt.Errorf("load payment method: %w", err)
 	}
 	if method.MerchantID != merchantID {
-		return ChargeResult{}, fmt.Errorf("payment method belongs to another merchant")
+		return nil, fmt.Errorf("payment method belongs to another merchant")
 	}
 	if method.CustomerID != req.Payer.UUID() {
-		return ChargeResult{}, fmt.Errorf("payment method belongs to another customer")
+		return nil, fmt.Errorf("payment method belongs to another customer")
 	}
 
 	rail := normalizeRail(method.Rail)
 	if rail == "" {
-		return ChargeResult{}, fmt.Errorf("payment method rail required")
+		return nil, fmt.Errorf("payment method rail required")
 	}
-	// Registry-backed exclusion (#669): known rails that can't charge a saved
-	// method fail explicitly; unknown rail strings fall to adapter-not-found.
 	if d, ok := rails.Lookup(models.Rail(rail)); ok && !d.SupportsChargeSavedMethod {
-		return ChargeResult{}, fmt.Errorf("rail %q does not support invoice collection", rail)
+		return nil, fmt.Errorf("rail %q does not support invoice collection", rail)
 	}
 
-	// #725/#788 + or#893: store-armed per-merchant credentials are the ONLY
-	// source once a resolver is armed. There is no boot-plane fallback: an
-	// instrument names the PSP that vaulted it (psp_id is required now), so
-	// "this merchant declares no account" and "there is a chargeable instrument"
-	// cannot both be true — mode-1 boot arms real psps rows from the manifest
-	// (#723/#788). Falling back to boot-config credentials when the store
-	// declines was a fail-OPEN credential path: it charged through whatever
-	// account the process happened to be booted with, not the one that holds
-	// the card. A merchant with no armed PSP refuses, loudly.
+	// Store-armed per-merchant credentials are the ONLY source once a resolver
+	// is armed; there is no boot-plane fallback (a fail-open credential path).
 	adapter := c.adapters[rail]
 	if c.resolver != nil {
 		stored, ok, rerr := c.resolver.ResolveCollectionAdapter(ctx, method)
 		if rerr != nil {
-			return ChargeResult{}, fmt.Errorf("resolve merchant %s collection credentials: %w", rail, rerr)
+			return nil, fmt.Errorf("resolve merchant %s collection credentials: %w", rail, rerr)
 		}
 		if !ok {
-			return ChargeResult{}, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"merchant %s has no armed PSP on rail %q: payment method %s cannot be charged until that account is declared and its credentials are stored",
 				merchantID, rail, method.ID)
 		}
 		adapter = stored
 	}
 	if adapter == nil {
-		return ChargeResult{}, fmt.Errorf("no invoice collection adapter configured for rail %q", rail)
+		return nil, fmt.Errorf("no invoice collection adapter configured for rail %q", rail)
 	}
-	res, err := adapter.ChargeSavedMethod(ctx, method, req)
+	inner, err := adapter.Prepare(ctx, method, req)
 	if err != nil {
-		return ChargeResult{}, err
+		return nil, err
 	}
-	if strings.TrimSpace(res.Rail) == "" {
-		res.Rail = rail
-	}
-	// #297: a successful charge on an instrument with no stored-credential
-	// replay reference anchors its unscheduled sequence — persist write-once.
-	// Best-effort: the charge itself succeeded and must never fail on this.
-	if ref := strings.TrimSpace(res.CapturedStoredCredentialRef); ref != "" && !res.Declined {
-		if _, cerr := c.db.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
-			MerchantID: merchantID,
-			ID:         method.ID,
-			Agreement:  string(charge.AgreementUnscheduled),
-			Ref:        ref,
-		}); cerr != nil {
-			log.WithContext(ctx).WithError(cerr).WithField("payment_method_id", method.ID).
-				Warn("failed to persist captured stored-credential reference (#297); next charge re-captures")
+	return PreparedChargeFunc(func(ctx context.Context) (ChargeResult, error) {
+		res, err := inner.Submit(ctx)
+		if err != nil {
+			return ChargeResult{}, err
 		}
-	}
-	return res, nil
+		if strings.TrimSpace(res.Rail) == "" {
+			res.Rail = rail
+		}
+		// #297: a successful charge on an instrument with no stored-credential
+		// replay reference anchors its unscheduled sequence, write-once.
+		// Best-effort: the charge itself succeeded and must never fail on this.
+		if ref := strings.TrimSpace(res.CapturedStoredCredentialRef); ref != "" && !res.Declined {
+			if _, cerr := c.db.Gen(ctx).CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{
+				MerchantID: merchantID,
+				ID:         method.ID,
+				Agreement:  string(charge.AgreementUnscheduled),
+				Ref:        ref,
+			}); cerr != nil {
+				log.WithContext(ctx).WithError(cerr).WithField("payment_method_id", method.ID).
+					Warn("failed to persist captured stored-credential reference (#297); next charge re-captures")
+			}
+		}
+		return res, nil
+	}), nil
 }
 
 func normalizeRail(rail string) string {

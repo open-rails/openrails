@@ -93,9 +93,7 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
   )
   const history = useQuery(invoiceQueries.payments(invoice.id, 20, offset))
   const actions = allowedInvoiceActions(invoice)
-  const pending =
-    invoice.last_collection_failure_code === "collection_attempt_in_progress" ||
-    invoice.last_collection_failure_code === "collection_outcome_unknown"
+  const pending = Boolean(invoice.collection_intent_id)
   async function submit() {
     if (!action || mutation.isPending) return
     setError(null)
@@ -275,8 +273,10 @@ export function InvoiceDetail({ invoice }: { invoice: MerchantInvoice }) {
           )}
           {pending && (
             <p role="status" className="text-sm">
-              A collection is in progress or its result is uncertain.
-              Reconciliation must resolve it before another support action.
+              Collection operation {invoice.collection_intent_id} is in progress
+              or unresolved. It must finish or be resolved with{" "}
+              <code>openrails intents resolve</code> before another support
+              action.
             </p>
           )}
           <div className="flex flex-wrap gap-2">
