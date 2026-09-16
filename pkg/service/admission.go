@@ -1262,44 +1262,7 @@ func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]BillingPolic
 	return out, nil
 }
 
-// TrustLevelScheduleRung is one rung of a persisted same-currency trust-level
-// ladder (#476): a payer reaches TrustLevel once its cumulative paid spend in
-// the schedule currency is at least MinCumulativePaidAmount.
-type TrustLevelScheduleRung = openrails.TrustLevelScheduleRung
-
-// SetTrustLevelSchedule persists the merchant's trust-level SCHEDULE (#476): the
-// host declares the same-currency ladder ONCE and OpenRails then AUTO-maintains
-// each payer's trust level from cumulative spend (no host cranking). A zero
-// payer sets the merchant-wide default schedule; a non-zero payer sets a
-// per-subject override. owner=platform.
-func (s *Service) SetTrustLevelSchedule(ctx context.Context, payer identity.CustomerID, currency string, schedule []TrustLevelScheduleRung) error {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
-	}
-	cur, err := s.resolveCurrency(ctx, currency)
-	if err != nil {
-		return err
-	}
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return err
-	}
-	moneySvc := money.NewMoneyService(s.rt.DB)
-	rungs := make([]money.TrustLevelThreshold, 0, len(schedule))
-	for _, r := range schedule {
-		rungs = append(rungs, money.TrustLevelThreshold{TrustLevel: r.TrustLevel, MinPaidAmount: r.MinCumulativePaidAmount})
-	}
-	return moneySvc.SetTrustLevelSchedule(ctx, payer, cur, rungs)
-}
-
-// GetTrustLevel returns the payer's current trust level (#477) for one currency:
-// the value OpenRails auto-maintains from same-currency cumulative paid spend
-// against the persisted trust-level schedule (#476), or a manual admin override.
+// GetTrustLevel returns the payer's host-assigned trust level for one currency:
 // Empty means the caller treats it as the lowest/default trust level.
 func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, currency string) (string, error) {
 	ctx, release, pinErr := s.pin(ctx)

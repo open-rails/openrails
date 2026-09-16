@@ -5,7 +5,7 @@
 `Client.GetMerchantSettings` and `Client.SetMerchantSettings` in every deployment.
 
 GET includes profile, invoice/arrears policy, checkout routing, auto-top-up safety,
-trust-level schedules, named billing policies, default/tier bindings and delegated
+named billing policies, default/tier bindings and delegated
 wasted-spend limits. Sending an unchanged GET result preserves the declaration.
 Omitted fields in PUT reset to their defaults; empty lists remove declarations.
 Unknown fields and null/non-object documents are rejected. The server returns complete
@@ -17,7 +17,7 @@ observe a complete document before or after a concurrent replacement. Financial
 policy resolution reads PostgreSQL directly so another runtime does not retain
 an old process-local cached cap.
 
-Per-customer trust schedules and policy bindings are runtime segmentation, outside
+Per-customer policy bindings are runtime segmentation, outside
 this declaration. PUT rejects customer bindings and preserves existing runtime
 rows. Removing a named policy still referenced by a customer is refused, preserving
 the entire previous document. This contract contains no global consumer or wallet

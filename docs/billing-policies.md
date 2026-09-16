@@ -147,3 +147,5 @@ rebinding is a live runtime lever, so a mid-cycle change would bill a stretch
 twice or never. It stays merchant-wide as `invoice.billing_period_boundary`.
 
 All amounts are micros.
+
+Trust levels are assigned by the host or supplied explicitly with an admission request. Deposits do not promote accounts. Automatic cumulative-paid-spend schedules and the `trust_level_schedules` merchant setting are unavailable; explicit customer/tier policy bindings and role limits remain.

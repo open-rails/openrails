@@ -30,7 +30,6 @@ func TestMerchantSettingsAtomicDocument(t *testing.T) {
 		InvoiceCollectionThreshold: &amount, InvoiceMonthlyFloor: &amount, InvoiceBillingBoundary: "calendar_month",
 		AlertEmail: &email, RepriceNoticeWindowDays: &days, ArrearsGraceDays: &days, ArrearsDelinquencyFloor: &amount,
 		CheckoutRouting:                   &routing,
-		TrustLevelSchedules:               []openrails.MerchantTrustLevelSchedule{{Currency: "USD", Schedule: []openrails.TrustLevelScheduleRung{{TrustLevel: "gold", MinCumulativePaidAmount: 1_000_000}}}},
 		BillingPolicies:                   []openrails.BillingPolicyInput{{Name: "gold", Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000}},
 		BillingPolicyBindings:             []openrails.BillingPolicyBindingInput{{PolicyName: "gold"}},
 		DelegatedInvokerWastedSpendLimits: []openrails.BudgetWindowInput{{Key: "short", WindowSeconds: 300, Limit: 500_000, Currency: "USD"}},
@@ -56,7 +55,6 @@ CREATE TRIGGER issue999_fail_binding BEFORE INSERT ON openrails.billing_policy_b
 		t.Run([]string{"embedded", "remote"}[i], func(t *testing.T) {
 			require.NoError(t, client.SetMerchantSettings(ctx, document))
 			got, before := read(client)
-			require.Equal(t, document.TrustLevelSchedules, got.TrustLevelSchedules)
 			require.Equal(t, document.AutoTopupSafety, got.AutoTopupSafety)
 			require.Equal(t, document.InvoiceCollectionThreshold, got.InvoiceCollectionThreshold)
 			require.Equal(t, document.CheckoutRouting, got.CheckoutRouting)
