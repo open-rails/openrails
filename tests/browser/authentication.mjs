@@ -5,7 +5,7 @@ const browser = await chromium.launch({ headless: true, args: ['--no-proxy-serve
 try {
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   const page = await context.newPage();
-  await page.goto(config.issuer);
+  await navigateFixture(page, config.issuer);
   const delegation = await page.evaluate(async (cfg) => {
     const b64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
     const encode = value => b64(new TextEncoder().encode(JSON.stringify(value)));
@@ -39,7 +39,7 @@ try {
 
   await context.addCookies([{ name: 'session', value: 'approved', domain: '.merchant.test', path: '/', secure: true, httpOnly: true, sameSite: 'None' }]);
   for (const origin of [config.cookie, config.sibling, config.attacker]) {
-    await page.goto(origin);
+    await navigateFixture(page, origin);
     for (const body of [undefined, '{}']) {
       const status = await page.evaluate(async ({ target, body }) => {
         try { return (await fetch(target, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'text/plain' }, body })).status; } catch { return null; }
@@ -47,9 +47,25 @@ try {
       assert.equal(status, origin === config.cookie ? 204 : null, `${origin} body=${body}`);
     }
   }
-  await page.goto(config.cookie);
+  await navigateFixture(page, config.cookie);
   const receipt = await page.evaluate(async () => (await fetch('/receipt')).json());
   assert.deepEqual(receipt, { mutations: 2, attached: 6, denied: 4 });
   console.log(JSON.stringify({ delegation, cookie: 'same-origin accepted; same-site sibling and cross-site attached-cookie POSTs refused; JSON and bodyless checked', mutations: receipt.mutations }));
   await context.close();
 } finally { await browser.close(); }
+
+// Chromium can report ERR_NETWORK_CHANGED when the runner's network changes.
+// Retry only static fixture GET navigation. Authentication, sender-proof replay,
+// cookie-bearing POSTs and their exact mutation counts are never retried.
+async function navigateFixture(page, target) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.goto(target);
+      return;
+    } catch (error) {
+      if (attempt === 2 || !String(error.message).includes('net::ERR_NETWORK_CHANGED')) throw error;
+      console.warn('Retrying fixture GET navigation after Chromium ERR_NETWORK_CHANGED');
+      await page.waitForTimeout(100);
+    }
+  }
+}
