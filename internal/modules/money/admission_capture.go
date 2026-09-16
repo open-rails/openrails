@@ -9,11 +9,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // CaptureAdmission commits the actual charge, immutable capture terms, and any

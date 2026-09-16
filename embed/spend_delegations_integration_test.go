@@ -11,9 +11,9 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // Regression: the transcribed SetCustomerSpendDelegations bypasses the
