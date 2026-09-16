@@ -500,15 +500,8 @@ func (w *DunningWorker) processSubscription(
 
 	switch intent.Status {
 	case intents.StatusSucceeded:
-		// The handler's finalize renews the membership; if the renewal raced
-		// or this is a durable success from an earlier crashed pass (enqueue
-		// conflict), repair the local lifecycle here.
-		txnID := manualRebillEvidenceString(intent, "transaction_id")
-		if refreshed, rerr := w.DB.Gen(ctx).GetSubscriptionByID(ctx, sub.ID); rerr == nil &&
-			models.SubscriptionStatus(refreshed.Status) == models.StatusPastDue && txnID != "" {
-			logEntry.Warn("Dunning: repairing local lifecycle from durable successful rebill intent")
-			return w.applySuccessfulRebill(ctx, logEntry, sub, lifecycle, priceSvc, rail, txnID), nil
-		}
+		// The handler's finalize owns the renewal: a succeeded intent has its
+		// payment, period and access effects committed exactly once.
 		logEntry.Info("Dunning: rebill successful")
 		return dunningOutcomeSucceeded, nil
 
@@ -682,41 +675,6 @@ func (w *DunningWorker) parkStaleSubscription(
 		"window":     window.String(),
 	}).Warn("Dunning: rebill is older than the staleness window; charge skipped and subscription PARKED as unknown (access intact) for provider verification")
 	return dunningOutcomeWindowExpired
-}
-
-func (w *DunningWorker) applySuccessfulRebill(
-	ctx context.Context,
-	logEntry *log.Entry,
-	sub *models.Subscription,
-	lifecycle dunningLifecycle,
-	priceSvc *catalog.PriceService,
-	rail models.Rail,
-	transactionID string,
-) dunningOutcome {
-	var amount int64
-	currency := subscriptions.CurrencyUSD
-	if sub.Price != nil {
-		amount = sub.Price.Amount
-		currency = sub.Price.Currency
-	} else if p, err := priceSvc.GetByID(ctx, sub.PriceID); err == nil {
-		amount = p.Amount
-		currency = p.Currency
-	}
-
-	// Success: renew membership window and persist payment in the lifecycle flow.
-	if err := lifecycle.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
-		Rail:               rail,
-		RailSubscriptionID: sub.RailSubscriptionID,
-		TransactionID:      transactionID,
-		Amount:             amount,
-		Currency:           currency,
-	}); err != nil {
-		logEntry.WithError(err).Error("renew membership after successful rebill")
-		return dunningOutcomeFailed
-	}
-
-	logEntry.Info("Dunning: rebill successful")
-	return dunningOutcomeSucceeded
 }
 
 func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Subscription, now time.Time) (bool, error) {

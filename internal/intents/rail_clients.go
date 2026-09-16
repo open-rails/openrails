@@ -6,20 +6,28 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
+
+// NMIClientResolver arms the store-scoped NMI client for one intent merchant
+// (the #725 credential plane; satisfied by money.MerchantCollectionAdapterBuilder).
+// ok=false with nil err = no declared NMI account; err = declared but not
+// armable (fail closed).
+type NMIClientResolver interface {
+	ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error)
+}
 
 // resolveIntentNMIClient arms the intent merchant's NMI client from the armed
 // rail state (#788 Layer C): the stamped provenance account when present,
 // else the merchant's pull scope. ok=false = no declared NMI account; err =
 // declared but not armable (fail closed — the caller parks, never charges).
-func resolveIntentNMIClient(ctx context.Context, r money.NMIClientResolver, intent gen.OpenrailsRailIntent) (*nmi.NMIClient, bool, error) {
+func resolveIntentNMIClient(ctx context.Context, r NMIClientResolver, intent gen.OpenrailsRailIntent) (*nmi.NMIClient, bool, error) {
 	if r == nil {
 		return nil, false, errors.New("nmi client resolver is not configured")
 	}
