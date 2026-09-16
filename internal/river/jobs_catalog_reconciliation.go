@@ -138,7 +138,8 @@ func (w CatalogReconciliationPullWorker) reconcileMerchant(ctx context.Context) 
 		log.WithContext(ctx).Info("CatalogReconciliation: no readable stripe or nmi account; skipping")
 		return nil
 	}
-	report, err := catalog.RunDriftPass(ctx, w.DB, sources, time.Now().UTC())
+	now := time.Now().UTC()
+	report, err := catalog.RunDriftPass(ctx, w.DB, sources, now)
 	if err != nil {
 		return fmt.Errorf("catalog reconciliation: %w", err)
 	}

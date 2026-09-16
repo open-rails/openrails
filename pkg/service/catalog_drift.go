@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -131,6 +132,16 @@ func driftEventFromGen(r gen.OpenrailsCatalogDriftEvent) CatalogDriftEventView {
 	return view
 }
 
+func driftPageInt32(v int) int32 {
+	if v < 0 {
+		return 0
+	}
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(v)
+}
+
 func nilIfEmptyText(s string) *string {
 	if s == "" {
 		return nil
@@ -180,7 +191,7 @@ func (s *Service) ListCatalogDrift(ctx context.Context, filter CatalogDriftFilte
 		return nil, 0, fmt.Errorf("count drift events: %w", err)
 	}
 	rows, err := q.ListOpenCatalogDriftFiltered(ctx, gen.ListOpenCatalogDriftFilteredParams{
-		Rail: provider, Kind: kind, ResourceType: resourceType, Column1: int32(limit), Column2: int32(offset),
+		Rail: provider, Kind: kind, ResourceType: resourceType, Column1: driftPageInt32(limit), Column2: driftPageInt32(offset),
 	})
 	if err != nil {
 		return nil, 0, fmt.Errorf("list drift events: %w", err)
