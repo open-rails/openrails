@@ -114,10 +114,6 @@ var allowedWriteCallers = map[string]string{
 	"internal/intents/nmi_payment_method_delete.go:Execute":        "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
 	"internal/intents/nmi_payment_method_update.go:Execute":        "nmi_payment_method_update intent handler — the only stored-card replacement writer",
 
-	// --- the checkout upgrade saga: reactive, compensating ----------------
-	"internal/modules/checkout/service.go:compensateFailedUpgrade": "upgrade compensation refund; intent migration deferred",
-	"internal/modules/checkout/service.go:cancelNMISubscription":   "upgrade/cancel rollback of a just-created remote sub (reactive compensation)",
-
 	// --- reactive user/admin cancels ------------------------------------
 	"internal/modules/subscriptions/admin_service.go:cancelWithNMI":         "reactive admin cancel; deferred deletes route through intents, immediate ones are user/admin-reactive",
 	"internal/modules/subscriptions/user_service.go:CancelUserSubscription": "reactive user cancel (see admin_service note)",

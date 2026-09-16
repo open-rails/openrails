@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/api"
 )
 
 const TypeNMIUpgrade = "nmi_upgrade"
@@ -30,6 +32,7 @@ func NMIUpgradeIdempotencyKey(key string) string {
 // NMIUpgradePayload freezes the complete commercial decision before either
 // provider submission. Replays never recalculate proration or the billing date.
 type NMIUpgradePayload struct {
+	RequestedPrice            string             `json:"requested_price"`
 	PSP                       string             `json:"psp"`
 	UserID                    string             `json:"user_id"`
 	Email                     string             `json:"email"`
@@ -334,6 +337,9 @@ func (s *CheckoutService) resumeUpgrade(ctx context.Context, prior gen.Openrails
 	if prior.Status == intents.StatusSucceeded || prior.Status == intents.StatusFailedTerminal {
 		return upgradeResponse(prior)
 	}
+	if s.Intents == nil {
+		return nil, ErrCheckoutProcessing
+	}
 	var p NMIUpgradePayload
 	if err := json.Unmarshal(prior.Payload, &p); err != nil {
 		return nil, err
@@ -368,4 +374,58 @@ func upgradeResponse(in gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
 	default:
 		return nil, ErrCheckoutProcessing
 	}
+}
+
+// Replays precede mutable catalog and predecessor-status admission. Once the
+// upgrade commits, its predecessor is cancelled and its price may be archived.
+func (s *CheckoutService) replayTierUpgrade(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
+	if strings.TrimSpace(req.IdempotencyKey) == "" || s.SubscriptionService == nil {
+		return nil, false, nil
+	}
+	store := intents.NewStore(s.SubscriptionService.Database())
+	in, err := store.GetByIdempotencyKey(ctx, NMIUpgradeIdempotencyKey(req.IdempotencyKey))
+	if db.IsNotFound(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	var p NMIUpgradePayload
+	if err = json.Unmarshal(in.Payload, &p); err != nil {
+		return nil, true, err
+	}
+	if user == nil || p.UserID != user.ID {
+		return nil, true, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "upgrade not found"}
+	}
+	price := strings.TrimSpace(req.PriceID)
+	if (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.OldSubscriptionID) || (price != p.RequestedPrice && price != p.PriceID.String() && price != api.FormatPriceID(p.PriceID)) {
+		return nil, true, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "upgrade idempotency key belongs to a different request"}
+	}
+	if _, err = s.resumeUpgrade(ctx, in); err != nil {
+		return nil, true, err
+	}
+	in, err = store.Get(ctx, in.ID)
+	if err != nil {
+		return nil, true, err
+	}
+	response, err := s.upgradeTierResponse(in)
+	return response, true, err
+}
+
+func (s *CheckoutService) upgradeTierResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
+	response, err := upgradeResponse(in)
+	if err != nil {
+		return nil, err
+	}
+	var p NMIUpgradePayload
+	if err := json.Unmarshal(in.Payload, &p); err != nil {
+		return nil, err
+	}
+	result := s.mapCheckoutToTierChangeResponse(response, &models.Price{ID: p.PriceID}, "upgrade")
+	result.Payment.Rail = in.Rail
+	result.Currency = p.Currency
+	result.AmountDueNow = p.ProrationAmount
+	result.NextChargeAmount = p.RecurringAmount
+	result.NextChargeDate = &p.PeriodEnd
+	return result, nil
 }

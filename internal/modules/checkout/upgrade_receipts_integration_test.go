@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"testing"
 
 	"github.com/google/uuid"
@@ -190,4 +191,45 @@ func TestUpgradeSuccessorReceiptResumesOnlyUnsentProration(t *testing.T) {
 	var payload NMIUpgradePayload
 	require.NoError(t, json.Unmarshal(fx.operation(t).Payload, &payload))
 	require.EqualValues(t, 60_000_000, payload.ProrationAmount)
+}
+
+func TestUpgradePublicReplayUsesFrozenReceiptAfterCatalogArchive(t *testing.T) {
+	fx := newUpgradeAdoptFixture(t)
+	fx.positiveProration()
+	first, err := fx.upgrade(t)
+	require.NoError(t, err)
+	_, err = fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.prices SET archived=true WHERE id=$1`, fx.newPrice.ID)
+	require.NoError(t, err)
+	request := &TierChangeRequest{SubscriptionID: fx.existingSub.ID, PriceID: fx.newPrice.ID.String(), IdempotencyKey: fx.req.IdempotencyKey}
+	replayed, err := fx.svc.TierChange(fx.ctx, request, fx.user)
+	require.NoError(t, err, "the cancelled predecessor and archived price cannot strand a committed receipt")
+	require.Equal(t, "succeeded", replayed.Status)
+	require.NotNil(t, first.SubscriptionID)
+	require.NotNil(t, replayed.SubscriptionID)
+	require.EqualValues(t, 60_000_000, replayed.AmountDueNow)
+	require.EqualValues(t, 60_000_000, replayed.NextChargeAmount)
+	require.Equal(t, "USD", replayed.Currency)
+	require.Equal(t, "nmi", replayed.Payment.Rail)
+	require.Equal(t, first.TransactionID, replayed.Payment.TransactionID)
+	_, err = fx.svc.TierChange(fx.ctx, request, &UserIdentity{ID: uuid.NewString()})
+	var refused *TierChangeError
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, http.StatusNotFound, refused.HTTPStatus)
+	request.PriceID = uuid.NewString()
+	_, err = fx.svc.TierChange(fx.ctx, request, fx.user)
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, http.StatusConflict, refused.HTTPStatus)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
+}
+
+func TestUpgradeUnresolvedPredecessorRejectsASecondRequest(t *testing.T) {
+	fx := newUpgradeAdoptFixture(t)
+	fx.gateway.createMode.Store("ambiguousLanded")
+	_, err := fx.upgrade(t)
+	require.ErrorIs(t, err, ErrCheckoutProcessing)
+	fx.req.IdempotencyKey = uuid.NewString()
+	_, err = fx.upgrade(t)
+	require.Error(t, err)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "a second request cannot bypass the first operation's unresolved submission")
 }

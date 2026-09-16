@@ -1050,13 +1050,6 @@ func nmiSubscriptionAttemptStatusFromPayment(attempt *models.Payment) string {
 	return strings.ToLower(strings.TrimSpace(attempt.Status))
 }
 
-// upgradeIdempotencyResult stores the cached result of a successful upgrade for idempotency replay
-type upgradeIdempotencyResult struct {
-	SubscriptionID         string `json:"subscription_id"`
-	ProrationTransactionID string `json:"proration_transaction_id,omitempty"`
-	Message                string `json:"message"`
-}
-
 // processNMISale handles NMI one-time sale (card purchase)
 func (s *CheckoutService) processNMISale(
 	ctx context.Context,
@@ -1578,11 +1571,22 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	if s.Intents == nil || s.Lifecycle == nil {
 		return nil, errors.New("durable upgrade service unavailable")
 	}
+	if target.Scope == nil || target.Scope.ID != existingSub.PspID {
+		return nil, errors.New("upgrade must use the predecessor's PSP account")
+	}
+	ctx = db.WithPSPID(ctx, existingSub.PspID)
 	key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(req, user.ID, existingSub.ID, newPrice.ID))
 	// Replays use the original durable payload, even if pricing or time changed.
 	database := s.SubscriptionService.Database()
 	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key)
 	if err == nil {
+		var frozen NMIUpgradePayload
+		if err := json.Unmarshal(prior.Payload, &frozen); err != nil {
+			return nil, err
+		}
+		if frozen.UserID != user.ID || frozen.OldSubscriptionID != existingSub.ID || frozen.PriceID != newPrice.ID {
+			return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "upgrade idempotency key belongs to a different request"}
+		}
 		return s.resumeUpgrade(ctx, prior)
 	}
 	if !db.IsNotFound(err) {
@@ -1626,7 +1630,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	}
 	end := now.Add(time.Duration(hours) * time.Hour)
 	startDate, _ := buildNMIFutureStartDate(end, now)
-	payload := NMIUpgradePayload{PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Credits: models.CloneCreditsSpec(newProduct.CreditsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
+	payload := NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Credits: models.CloneCreditsSpec(newProduct.CreditsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
 	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"})
 	if err != nil {
 		return nil, err
@@ -1807,22 +1811,12 @@ func CalculateModelBUpgradeCharge(
 	return firstChargeMicros, cycleHours, nil
 }
 
-// cancelNMISubscription cancels a subscription at NMI
-func (s *CheckoutService) cancelNMISubscription(ctx context.Context, sub *models.Subscription, provider string) error {
-	client, err := s.resolveNMIClient(ctx, provider)
-	if err != nil {
-		return fmt.Errorf("NMI provider '%s' is not configured: %w", provider, err)
-	}
-
-	if err := client.DeleteRecurringSubscription(ctx, sub.RailSubscriptionID); err != nil {
-		return err
-	}
-	return nil
-}
-
 // TierChange processes a subscription tier change (upgrade or downgrade).
 // This is the unified entry point that routes to rail-specific implementations.
 func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
+	if response, found, err := s.replayTierUpgrade(ctx, req, user); found || err != nil {
+		return response, err
+	}
 	// 1. Parse and validate price (#774: price_id accepts a price_key too)
 	newPrice, err := catalog.ResolveReference(ctx, s.PriceService, req.PriceID)
 	if err != nil {
@@ -2414,7 +2408,14 @@ func (s *CheckoutService) processTierChangeNMI(
 		return nil, err
 	}
 
-	// Map CheckoutResponse to TierChangeResponse
+	if action == "upgrade" {
+		key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(checkoutReq, user.ID, existingSub.ID, newPrice.ID))
+		in, err := intents.NewStore(s.SubscriptionService.Database()).GetByIdempotencyKey(ctx, key)
+		if err != nil {
+			return nil, err
+		}
+		return s.upgradeTierResponse(in)
+	}
 	return s.mapCheckoutToTierChangeResponse(checkoutResp, newPrice, action), nil
 }
 

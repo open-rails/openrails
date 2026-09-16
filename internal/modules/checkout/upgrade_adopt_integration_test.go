@@ -291,7 +291,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	newPrice := &models.Price{
 		ID: newPriceID, ProductID: newProductID, Amount: 5_000_000, Currency: "USD",
 		AutoRenew: true, AccessDurationHours: &hours,
-		PSPLinks: map[string]map[string]string{"nmi": {models.RailKeyRail: "nmi", models.RailKeyPlanID: planID}},
+		PSPLinks: map[string]map[string]string{"nmi": {models.RailKeyRail: "nmi", models.RailKeyPlanID: planID, models.RailKeyPSPID: pspID.String()}},
 	}
 	newProduct := &models.Product{ID: newProductID, Key: "upg-new-" + sfx, DisplayName: "Upgrade New"}
 
@@ -318,9 +318,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	}
 }
 
-// Ambiguous successor create whose create actually LANDED: the roster scan
-// adopts the orphan inline — the upgrade completes with ONE remote create and
-// no live remote subscription is ever abandoned as failed (#674 tail).
+// A positive successor receipt completes the upgrade with one remote create.
 func TestUpgradePositiveSuccessorReceipt_CompletesAtomically(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("approve")
