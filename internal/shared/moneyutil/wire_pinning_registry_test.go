@@ -41,13 +41,14 @@ var converters = []string{
 // pinnedBoundaries: file -> the wire-pinning test that covers it (known micros
 // in ⇒ exact integer on the wire).
 var pinnedBoundaries = map[string]string{
-	"internal/integrations/nmi/payments.go":      "internal/integrations/nmi/payments_wire_test.go",
-	"internal/integrations/nmi/v5.go":            "internal/integrations/nmi/payments_wire_test.go",
-	"internal/integrations/nmi/subscriptions.go": "internal/integrations/nmi/recurring_plan_test.go",
-	"internal/modules/webhooks/nmi.go":           "internal/modules/webhooks/nmi_test.go",
-	"internal/modules/webhooks/ccbill.go":        "internal/modules/webhooks/ccbill_wire_pinning_test.go",
-	"pkg/service/catalog_provider_stripe.go":     "internal/modules/subscriptions/stripe_wire_pinning_test.go",
-	"pkg/service/catalog_provider_nmi.go":        "internal/integrations/nmi/recurring_plan_test.go",
+	"internal/modules/checkout/nmi_upgrade_intent.go": "internal/modules/checkout/upgrade_receipts_integration_test.go",
+	"internal/integrations/nmi/payments.go":           "internal/integrations/nmi/payments_wire_test.go",
+	"internal/integrations/nmi/v5.go":                 "internal/integrations/nmi/payments_wire_test.go",
+	"internal/integrations/nmi/subscriptions.go":      "internal/integrations/nmi/recurring_plan_test.go",
+	"internal/modules/webhooks/nmi.go":                "internal/modules/webhooks/nmi_test.go",
+	"internal/modules/webhooks/ccbill.go":             "internal/modules/webhooks/ccbill_wire_pinning_test.go",
+	"pkg/service/catalog_provider_stripe.go":          "internal/modules/subscriptions/stripe_wire_pinning_test.go",
+	"pkg/service/catalog_provider_nmi.go":             "internal/integrations/nmi/recurring_plan_test.go",
 }
 
 // deferredBoundaries: file -> why it has no wire-pinning test yet. Recorded so

@@ -39,15 +39,17 @@ type fakeNMIUpgradeGateway struct {
 	planID          string
 	subID           string
 
-	saleCalls   atomic.Int64
-	saleMode    atomic.Value
-	saleVisible atomic.Bool
-	saleTxn     string
-	createCalls atomic.Int64
-	createMode  atomic.Value // "approve" | "ambiguousLanded" | "ambiguousLost"
-	lastOrder   atomic.Value // string
-	subExists   atomic.Bool
-	subDeletes  atomic.Int64
+	saleAmount      atomic.Value
+	recurringAmount atomic.Value
+	saleCalls       atomic.Int64
+	saleMode        atomic.Value
+	saleVisible     atomic.Bool
+	saleTxn         string
+	createCalls     atomic.Int64
+	createMode      atomic.Value // "approve" | "ambiguousLanded" | "ambiguousLost"
+	lastOrder       atomic.Value // string
+	subExists       atomic.Bool
+	subDeletes      atomic.Int64
 }
 
 func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fakeNMIUpgradeGateway, *nmi.NMIClient) {
@@ -77,6 +79,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 			_ = r.ParseForm()
 			if r.Form.Get("recurring") == "add_subscription" {
 				f.createCalls.Add(1)
+				f.recurringAmount.Store(r.Form.Get("amount"))
 				f.lastOrder.Store(r.Form.Get("orderid"))
 				switch f.createMode.Load().(string) {
 				case "ambiguousLanded":
@@ -94,6 +97,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 			}
 			if r.Form.Get("type") == "sale" {
 				f.saleCalls.Add(1)
+				f.saleAmount.Store(r.Form.Get("amount"))
 				switch f.saleMode.Load().(string) {
 				case "decline":
 					fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=202")

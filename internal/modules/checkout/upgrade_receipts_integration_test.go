@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -234,4 +235,36 @@ func TestUpgradeUnresolvedPredecessorRejectsASecondRequest(t *testing.T) {
 	_, err = fx.upgrade(t)
 	require.Error(t, err)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "a second request cannot bypass the first operation's unresolved submission")
+}
+
+func TestUpgradeWireAmountsUseFrozenMicros(t *testing.T) {
+	fx := newUpgradeAdoptFixture(t)
+	key := NMIUpgradeIdempotencyKey(fx.svc.getUpgradeIdempotencyKey(fx.req, fx.user.ID, fx.existingSub.ID, fx.newPrice.ID))
+	// A sub-cent price has no exact USD rail amount: refused before any
+	// durable operation or provider request.
+	fx.newPrice.Amount = 60_125_000
+	_, err := fx.upgrade(t)
+	require.ErrorContains(t, err, "not representable")
+	_, err = intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, key)
+	require.True(t, db.IsNotFound(err), "no operation is frozen for an unrepresentable amount: %v", err)
+	require.Zero(t, fx.gateway.createCalls.Load())
+	require.Zero(t, fx.gateway.saleCalls.Load())
+
+	// 696 of 720 hours remain on the $50.00 predecessor: credit ceil($48.3333)
+	// = $48.34, so the legs differ and a swapped mapping cannot pass.
+	fx.newPrice.Amount = 60_120_000
+	_, err = fx.upgrade(t)
+	require.NoError(t, err)
+	var payload NMIUpgradePayload
+	require.NoError(t, json.Unmarshal(fx.operation(t).Payload, &payload))
+	require.EqualValues(t, 60_120_000, payload.RecurringAmount)
+	require.EqualValues(t, 11_780_000, payload.ProrationAmount)
+	require.Equal(t, "60.12", fx.gateway.recurringAmount.Load(), "60,120,000 USD micros enrolls a $60.12 recurring schedule")
+	require.Equal(t, "11.78", fx.gateway.saleAmount.Load(), "11,780,000 USD micros submits an $11.78 proration sale")
+
+	fx.newPrice.Amount = 999_000_000
+	_, err = fx.upgrade(t)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
+	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 }
