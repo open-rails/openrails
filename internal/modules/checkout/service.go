@@ -1669,7 +1669,10 @@ func (s *CheckoutService) processUpgrade(
 			// Reconciliation below may adopt already-recorded receipts; an empty
 			// provider search remains processing and requires operator/provider
 			// reconciliation before another write is permitted.
-			retryAfterFailure = true
+			// Only an explicitly processing failure means an earlier provider
+			// boundary was crossed. Validation/configuration failures are known
+			// clean and remain retryable by the caller.
+			retryAfterFailure = strings.Contains(strings.TrimSpace(idempRec.Error), ErrCheckoutProcessing.Error())
 		}
 	}
 
