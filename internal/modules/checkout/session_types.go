@@ -84,11 +84,14 @@ type CheckoutSessionResponse struct {
 	Status         string                         `json:"status"`
 	Mode           string                         `json:"mode"`
 	PriceID        string                         `json:"price_id"`
+	Amount         int64                          `json:"amount,string"`
+	Currency       string                         `json:"currency"`
 	URL            string                         `json:"url,omitempty"`
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`
 	PaymentID      *string                        `json:"payment_id,omitempty"`
 	SubscriptionID *string                        `json:"subscription_id,omitempty"`
 	ExpiresAt      *time.Time                     `json:"expires_at,omitempty"`
+	CreatedAt      time.Time                      `json:"created_at"`
 	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`
 	Message        string                         `json:"message,omitempty"`
 	Metadata       map[string]string              `json:"metadata,omitempty"`

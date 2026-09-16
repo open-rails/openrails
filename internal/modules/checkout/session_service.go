@@ -1776,15 +1776,18 @@ func addField(fields map[string]any, key, value string) {
 
 func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSession) *CheckoutSessionResponse {
 	resp := &CheckoutSessionResponse{
-		Object:  "checkout_session",
-		ID:      api.FormatCheckoutSessionID(session.ID),
-		Status:  string(session.Status),
-		Mode:    string(session.Mode),
-		PriceID: api.FormatPriceID(session.PriceID),
+		Object:   "checkout_session",
+		ID:       api.FormatCheckoutSessionID(session.ID),
+		Status:   string(session.Status),
+		Mode:     string(session.Mode),
+		PriceID:  api.FormatPriceID(session.PriceID),
+		Amount:   session.Amount,
+		Currency: session.Currency,
 		Payment: CheckoutSessionPaymentResponse{
 			Rail: string(session.Rail),
 		},
 		ExpiresAt: session.ExpiresAt,
+		CreatedAt: session.CreatedAt,
 	}
 	if len(session.Metadata) > 0 {
 		resp.Metadata = session.Metadata
