@@ -605,13 +605,6 @@ func normalizeCurrency(currency string) string {
 	return strings.TrimSpace(currency)
 }
 
-func customerIDString(payer *CustomerID) string {
-	if payer == nil || payer.IsZero() {
-		return ""
-	}
-	return payer.UUID().String()
-}
-
 // statusErrorFromBody decodes the one canonical error envelope. Foreign proxy
 // responses retain a bounded diagnostic excerpt but never gain a machine code.
 func statusErrorFromBody(status int, raw []byte) error {

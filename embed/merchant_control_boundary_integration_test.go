@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -106,7 +107,7 @@ func postDepositCredits(t *testing.T, baseURL, token string, customer uuid.UUID,
 		"customer_id": customer.String(),
 		"invoker":     "or502-boundary-test",
 		"currency":    "USD",
-		"amount":      amount,
+		"amount":      strconv.FormatInt(amount, 10),
 		"source":      "or502",
 		"source_id":   uuid.NewString(),
 	})
