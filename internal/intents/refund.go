@@ -182,19 +182,31 @@ func (r refundReservations) recordReceipt(ctx context.Context, p RefundPayload, 
 
 // recoverReceipt never guesses ownership from an amount or subscription counter.
 // A lost response without an exact stored receipt requires operator verification.
-func (r refundReservations) recoverReceipt(ctx context.Context, p RefundPayload) Outcome {
-	reservation, err := r.payments().GetByID(ctx, p.ReservationID)
+func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.OpenrailsRailIntent, p RefundPayload) Outcome {
+	ref, err := r.knownReceipt(ctx, intent, p)
 	if err != nil {
 		return Ambiguous("load refund receipt: " + err.Error())
 	}
-	ref, _ := reservation.Metadata["provider_refund_id"].(string)
 	if ref == "" {
-		return Ambiguous("refund response has no exact operation receipt; operator must verify before completion or resend")
+		return Ambiguous("refund response has no exact operation receipt; operator must resolve it with the exact provider refund or provider-confirmed non-execution")
 	}
 	if err := r.finalize(ctx, p, ref); err != nil {
-		return Ambiguous("refund receipt persisted but local finalization failed: " + err.Error())
+		return AmbiguousWithEvidence("refund receipt retained but local finalization failed: "+err.Error(), map[string]any{"provider_refund_id": ref})
 	}
 	return Succeeded(map[string]any{"provider_refund_id": ref, "recovered_receipt": true})
+}
+
+// knownReceipt returns the exact provider refund id captured on the
+// reservation or, when that local write failed, on the operation evidence.
+func (r refundReservations) knownReceipt(ctx context.Context, intent gen.OpenrailsRailIntent, p RefundPayload) (string, error) {
+	reservation, err := r.payments().GetByID(ctx, p.ReservationID)
+	if err != nil {
+		return "", err
+	}
+	if ref, _ := reservation.Metadata["provider_refund_id"].(string); ref != "" {
+		return ref, nil
+	}
+	return EvidenceString(intent, "provider_refund_id"), nil
 }
 
 // release cancels the reservation after a terminal provider refusal.
@@ -266,13 +278,18 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 	}
 
 	if intent.Attempts > 1 {
-		return h.recoverReceipt(ctx, p)
+		return h.recoverReceipt(ctx, intent, p)
 	}
 
 	result, err := client.Refund(ctx, nmi.RefundParams{TransactionID: p.ProviderTarget, Amount: p.AmountCents})
 	if err != nil {
 		if errors.Is(err, nmi.ErrProviderReadOnly) {
 			return Parked("nmi provider writes blocked (mode=readonly)")
+		}
+		if nmi.RequiresVerification(err) {
+			// Processor communication/duplicate responses do not prove the
+			// refund did not land; releasing the reservation could refund twice.
+			return Ambiguous("nmi refund outcome unknown: " + err.Error())
 		}
 		var pmErr *nmi.CustomerVaultError
 		if errors.As(err, &pmErr) {
@@ -287,7 +304,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 	}
 
 	if err := h.finalize(ctx, p, result.TransactionID); err != nil {
-		return Ambiguous("refunded at provider, but local finalize failed: " + err.Error())
+		return AmbiguousWithEvidence("refunded at provider, but local finalize failed: "+err.Error(), map[string]any{"provider_refund_id": result.TransactionID})
 	}
 	return Succeeded(map[string]any{"provider_refund_id": result.TransactionID})
 }
@@ -300,7 +317,42 @@ func (h *NMIRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailI
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	return h.recoverReceipt(ctx, p)
+	return h.recoverReceipt(ctx, intent, p)
+}
+
+// Resolve accepts an exact refund transaction the provider confirms is an
+// approved refund of the reserved amount on the original sale's vault, or
+// provider-confirmed non-execution, which releases the reservation. It never
+// re-sends the refund.
+func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution Resolution) (Outcome, error) {
+	p, err := decodeRefundPayload(intent)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if resolution.Step != "" {
+		return Outcome{}, fmt.Errorf("%w: a refund has no steps", ErrResolutionInvalid)
+	}
+	ref, err := h.knownReceipt(ctx, intent, p)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if ref != "" {
+		return Outcome{}, RejectResolution("operation already holds refund receipt %s; its verifier completes it", ref)
+	}
+	if resolution.NotExecuted {
+		return h.terminally(ctx, p, "provider confirmed the refund was not executed", nil), nil
+	}
+	client, ok, err := resolveIntentNMIClient(ctx, h.Resolver, intent)
+	if err != nil || !ok || client == nil {
+		return Outcome{}, fmt.Errorf("nmi rail is not armed for provider %q: %v", intent.Rail, err)
+	}
+	if err := client.ConfirmRefund(ctx, p.ProviderTarget, resolution.ProviderReference, p.AmountCents); err != nil {
+		return Outcome{}, RejectResolution("%v", err)
+	}
+	if err := h.finalize(ctx, p, resolution.ProviderReference); err != nil {
+		return AmbiguousWithEvidence("confirmed refund retained but local finalization failed: "+err.Error(), map[string]any{"provider_refund_id": resolution.ProviderReference}), nil
+	}
+	return Succeeded(map[string]any{"provider_refund_id": resolution.ProviderReference}), nil
 }
 
 // ============================================================================

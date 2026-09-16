@@ -70,6 +70,15 @@ func newFakeNMISubGateway(t *testing.T, railCustomerRef, planID string) (*fakeNM
 	f.createMode.Store("approve")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions/") {
+			if !strings.HasSuffix(r.URL.Path, "/subscriptions/"+f.subID) || !f.subExists.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}`, f.subID, f.railCustomerRef, f.planID)
+			return
+		}
 		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions") {
 			// v5 roster
 			if f.subExists.Load() {
@@ -245,48 +254,54 @@ func TestNMISubscriptionIntent_HappyPathAndReplay(t *testing.T) {
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "replay never re-creates")
 }
 
-// THE orphan case (#674): timeout after NMI created the subscription. The old
-// flow marked the attempt failed and told the user to retry with a NEW key —
-// leaving a live remote subscription billing every cycle with no local row.
-// Now: the intent parks ambiguous; the verifier re-finds the orphan via the
-// vault+plan roster scan (and the first charge via the order-id sale search)
-// and completes the local registration.
-func TestNMISubscriptionIntent_OrphanedRemoteCreateIsRepaired(t *testing.T) {
+// THE orphan case (#674): timeout after NMI created the subscription. The
+// roster shows a subscription on the same vault and plan, but the roster does
+// not carry the enrollment's order reference, so that similarity is only an
+// operator candidate. The operation stays unknown across restart until the
+// exact subscription id, read back on vault and plan, resolves it; the create
+// is never re-sent and registration happens once.
+func TestNMISubscriptionIntent_OrphanedRemoteCreateNeedsExactReceipt(t *testing.T) {
 	fx := newSubIntentFixture(t)
 	fx.gateway.createMode.Store("ambiguous500")
 
 	intent := fx.enqueueAndExecute(t)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status, "lost response is never a decline")
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
-	_, ok := fx.localSub(t)
-	require.False(t, ok, "nothing registered yet")
 
-	fx.gateway.subExists.Store(false)
-	fx.gateway.charged.Store(false)
+	fx.runner.Store = intents.NewStore(fx.db)
 	fx.runner.Clock = clockwork.NewFakeClockAt(time.Now().UTC().Add(2 * time.Minute))
 	_, err := fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
 	pending, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
 	require.NoError(t, err)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status, "roster similarity is not a receipt")
+	require.Contains(t, string(pending.ResultEvidence), fx.gateway.subID, "the candidate is surfaced for the operator")
+	_, ok := fx.localSub(t)
+	require.False(t, ok)
 	resumed := pending
 	resumed.Attempts = 2
 	outcome := fx.runner.Registry.Lookup(TypeNMISubscriptionCreate).Execute(fx.ctx, resumed)
 	require.Equal(t, intents.OutcomeAmbiguous, outcome.Class)
-	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
-	fx.gateway.subExists.Store(true)
-	fx.gateway.charged.Store(true)
-	fx.runner.Clock = clockwork.NewFakeClockAt(time.Now().UTC().Add(20 * time.Minute))
+
+	_, err = fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "wrong"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected, "the enrollment charge contradicts non-execution")
+	_, err = fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{ProviderReference: "rsub-missing", Actor: "ops", Reason: "wrong"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected)
+	resolved, err := fx.runner.Resolve(fx.ctx, intent.ID, intents.Resolution{ProviderReference: fx.gateway.subID, Actor: "ops@example.test", Reason: "NMI subscription detail shows order"})
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, resolved.Status)
+	sub, ok := fx.localSub(t)
+	require.True(t, ok, "resolved remote subscription registered locally")
+	require.Equal(t, models.StatusActive, sub.Status)
+
+	replay := fx.enqueueAndExecute(t)
+	require.Equal(t, intents.StatusSucceeded, replay.Status)
 	_, err = fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
-
-	final, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusSucceeded, final.Status)
-	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "repair never re-creates")
-	sub, ok := fx.localSub(t)
-	require.True(t, ok, "orphaned remote subscription registered locally")
-	require.Equal(t, models.StatusActive, sub.Status)
+	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "resolution never re-creates")
+	var count int
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT count(*) FROM openrails.subscriptions WHERE rail_subscription_id=$1`, fx.gateway.subID).Scan(&count))
+	require.Equal(t, 1, count)
 }
 
 func TestNMISubscriptionIntent_ImmediateActivationIsOneMembership(t *testing.T) {

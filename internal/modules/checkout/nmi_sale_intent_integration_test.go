@@ -49,6 +49,7 @@ type fakeNMISaleGateway struct {
 	unavailable atomic.Bool
 	lastOrder   atomic.Value // string: order id of the last sale attempt
 	saleForm    atomic.Value // url.Values: last classic sale form
+	vault       atomic.Value // string: customer vault reported by the exact transaction read
 	txnID       string
 }
 
@@ -59,6 +60,16 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 	f.lastOrder.Store("")
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
+			vault, _ := f.vault.Load().(string)
+			if !strings.HasSuffix(r.URL.Path, "/payments/"+f.txnID) || !f.charged.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"5.00","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"5.00"}]}`, f.txnID, vault, f.txnID)
+			return
+		}
 		if strings.HasSuffix(r.URL.Path, "/payments/sale") {
 			f.saleCalls.Add(1)
 			var body struct {

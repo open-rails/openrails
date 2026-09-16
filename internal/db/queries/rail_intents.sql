@@ -150,6 +150,26 @@ FROM due
 WHERE pi.id = due.id
 RETURNING pi.*;
 
+-- Claims ONE unknown operation for operator resolution. Like the verifier
+-- claim, status and attempts are unchanged; the lease excludes a concurrent
+-- verifier or resolver.
+-- name: ClaimUnknownRailIntentByID :one
+UPDATE openrails.rail_intents
+SET claimed_until = sqlc.arg(lease_until)::timestamptz,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND status = 'unknown_needs_verify'
+  AND (claimed_until IS NULL OR claimed_until <= sqlc.arg(now)::timestamptz)
+RETURNING *;
+
+-- Releases a resolver lease after rejected evidence, leaving the operation
+-- exactly as it was.
+-- name: ReleaseUnknownRailIntentClaim :execrows
+UPDATE openrails.rail_intents
+SET claimed_until = NULL,
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND status = 'unknown_needs_verify';
+
 -- Renews a live claim while its handler runs (xs-007 row 32): the executor
 -- beats this every lease/4, so claimed_until measures SILENCE from a dead
 -- executor rather than how long a provider call may take. Renewal is refused

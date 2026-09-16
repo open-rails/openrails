@@ -48,16 +48,28 @@ func newFakeNMIRefundGateway(t *testing.T, originalTxn string) (*fakeNMIRefundGa
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet:
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/payments/txn_refund_1"):
+			f.queryCalls.Add(1)
+			if !f.refunded.Load() {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
+				return
+			}
+			fmt.Fprint(w, `{"object":"transaction","id":"txn_refund_1","response":"1","amount":"5.00","customer_vault_id":"vault-refund","actions":[{"id":"txn_refund_1","type":"refund","success":true,"amount":"5.00"}]}`)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/payments/"+f.psid):
 			f.queryCalls.Add(1)
 			if f.refunded.Load() {
-				fmt.Fprintf(w, `{"object":"transaction","id":"%s","actions":[
+				fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"10.00","customer_vault_id":"vault-refund","actions":[
 					{"id":"%s","type":"sale","success":true,"amount":"10.00"},
 					{"id":"txn_refund_1","type":"refund","success":true,"amount":"5.00"}
 				]}`, f.psid, f.psid)
 			} else {
-				fmt.Fprintf(w, `{"object":"transaction","id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"10.00"}]}`, f.psid, f.psid)
+				fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"10.00","customer_vault_id":"vault-refund","actions":[{"id":"%s","type":"sale","success":true,"amount":"10.00"}]}`, f.psid, f.psid)
 			}
+		case r.Method == http.MethodGet:
+			f.queryCalls.Add(1)
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/refund"):
 			f.refundCalls.Add(1)
 			if st := f.refundStatus.Load(); st != 0 {
@@ -267,7 +279,7 @@ func TestNMIRefundLostResponseNeedsExactReceipt(t *testing.T) {
 			got := fx.intentByID(t, row.ID)
 			assert.Equal(t, StatusUnknownNeedsVerify, got.Status)
 			require.NotNil(t, got.LastFailureReason)
-			assert.Contains(t, *got.LastFailureReason, "operator must verify")
+			assert.Contains(t, *got.LastFailureReason, "operator must resolve")
 			status, _, _ := fx.reservation(t)
 			assert.Equal(t, "pending", status)
 			assert.EqualValues(t, 1, fake.refundCalls.Load())
@@ -383,6 +395,11 @@ type fakeStripeServer struct {
 	created      atomic.Bool
 	gotIdemKey   atomic.Value // string
 	gotMetadata  atomic.Value // string
+	// dedupe emulates Stripe idempotency: a failed create still lands once
+	// and every replay of its key returns that refund.
+	dedupe        atomic.Bool
+	listHidden    atomic.Bool
+	refundObjects atomic.Int64
 }
 
 func newFakeStripeServer(t *testing.T) *fakeStripeServer {
@@ -395,6 +412,10 @@ func newFakeStripeServer(t *testing.T) *fakeStripeServer {
 			_ = r.ParseForm()
 			f.gotIdemKey.Store(r.Header.Get("Idempotency-Key"))
 			f.gotMetadata.Store(r.Form.Get("metadata[openrails_idempotency_key]"))
+			if f.dedupe.Load() && !f.created.Load() {
+				f.refundObjects.Add(1)
+				f.created.Store(true)
+			}
 			if st := f.createStatus.Load(); st != 0 {
 				w.WriteHeader(int(st))
 				fmt.Fprint(w, `{"error": {"message": "boom"}}`)
@@ -404,7 +425,7 @@ func newFakeStripeServer(t *testing.T) *fakeStripeServer {
 			fmt.Fprintf(w, `{"id": "re_1", "amount": 500, "status": "succeeded", "charge": "ch_1", "metadata": {"openrails_idempotency_key": %q}}`, f.gotMetadata.Load())
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/refunds":
 			f.lists.Add(1)
-			if f.created.Load() {
+			if f.created.Load() && !f.listHidden.Load() {
 				fmt.Fprintf(w, `{"data": [{"id": "re_1", "amount": 500, "status": "succeeded", "charge": "ch_1", "metadata": {"openrails_idempotency_key": %q}}]}`, f.gotMetadata.Load())
 			} else {
 				fmt.Fprint(w, `{"data": []}`)

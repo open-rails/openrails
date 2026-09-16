@@ -417,6 +417,39 @@ func (h *CustodianSaleIntentHandler) Verify(ctx context.Context, intent gen.Open
 	return h.finalize(ctx, intent.MerchantID, cfg, p, orderID, txnID, true)
 }
 
+// Resolve accepts only provider-confirmed non-execution for a custodian sale.
+// Receipts converge through the exact order-reference search.
+func (h *CustodianSaleIntentHandler) Resolve(ctx context.Context, intent gen.OpenrailsRailIntent, resolution intents.Resolution) (intents.Outcome, error) {
+	p, err := decodeCustodianSalePayload(intent)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if resolution.Step != "" {
+		return intents.Outcome{}, fmt.Errorf("%w: a sale has no steps", intents.ErrResolutionInvalid)
+	}
+	if receipt := intents.EvidenceString(intent, "transaction_id"); receipt != "" {
+		return intents.Outcome{}, intents.RejectResolution("operation already holds receipt %s; its verifier completes registration", receipt)
+	}
+	if !resolution.NotExecuted {
+		return intents.Outcome{}, intents.RejectResolution("custodian sale receipts converge through the exact order-reference search, not an operator reference")
+	}
+	if h.Sale.DisableGatewayVerify {
+		return intents.Outcome{}, intents.RejectResolution("gateway reads are disabled; non-execution cannot be checked against the order reference")
+	}
+	cfg, err := h.Sale.resolveConfig(ctx)
+	if err != nil {
+		return intents.Outcome{}, fmt.Errorf("custodian checkout not armed: %w", err)
+	}
+	client, err := h.gatewayQueryClient(cfg)
+	if err != nil {
+		return intents.Outcome{}, err
+	}
+	if err := refuseContradictedNonExecution(ctx, client, nmiSaleIntentOrderID(intent.ID, p.E2ERunID)); err != nil {
+		return intents.Outcome{}, err
+	}
+	return intents.TerminalWithEvidence("provider confirmed the custodian sale was not executed", nil), nil
+}
+
 // priorAnchor finds an existing instrument by the custodian's PAN fingerprint
 // and returns its unscheduled stored-credential anchor (+ the instrument row).
 func (h *CustodianSaleIntentHandler) priorAnchor(ctx context.Context, merchantID uuid.UUID, fingerprint string) (string, *gen.OpenrailsPaymentMethod) {
