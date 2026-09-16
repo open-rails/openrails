@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -201,10 +202,7 @@ func MutateAdminInvoice(action billingservice.InvoiceAdminAction) func(*httprequ
 		if !ok {
 			return
 		}
-		var body struct {
-			Amount    int64  `json:"amount"`
-			Reference string `json:"reference"`
-		}
+		var body openrails.RecordInvoicePaymentRequest
 		if action == billingservice.InvoiceAdminRecordPayment {
 			if !r.BindJSON(&body) {
 				return
@@ -319,6 +317,19 @@ func PutAdminInvoiceProfile(r *httprequest.Request) {
 	}
 	svc, ok := newAdminBillingService(r)
 	if !ok {
+		return
+	}
+	if r.Header("If-None-Match") == "*" {
+		created, err := svc.EnsureCustomerInvoiceProfile(r.Request.Context(), payer, body)
+		if err != nil {
+			writeInvoiceAdminError(r, err)
+			return
+		}
+		if !created {
+			r.ErrorJSON(http.StatusPreconditionFailed, "invoice profile already exists")
+			return
+		}
+		r.JSON(http.StatusCreated, body)
 		return
 	}
 	if err := svc.SetCustomerInvoiceProfile(r.Request.Context(), payer, body); err != nil {

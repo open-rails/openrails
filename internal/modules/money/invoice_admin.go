@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails"
 	"slices"
 	"strings"
-	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
@@ -17,13 +17,7 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type MerchantInvoiceFilter struct {
-	CustomerID *uuid.UUID
-	Currency   *string
-	Status     *string
-	PeriodFrom *time.Time
-	PeriodTo   *time.Time
-}
+type MerchantInvoiceFilter = openrails.MerchantInvoiceFilter
 
 func (s *MoneyService) ListMerchantInvoices(ctx context.Context, filter MerchantInvoiceFilter, limit, offset int) ([]models.Invoice, int64, error) {
 	if limit < 1 || limit > 100 || offset < 0 || offset > 2147483647 {
@@ -78,7 +72,7 @@ func (s *MoneyService) GetMerchantInvoice(ctx context.Context, id uuid.UUID) (*m
 	return invoice, err
 }
 
-type InvoiceAdminAction string
+type InvoiceAdminAction = openrails.InvoiceAdminAction
 
 const (
 	InvoiceAdminVoid            InvoiceAdminAction = "void"

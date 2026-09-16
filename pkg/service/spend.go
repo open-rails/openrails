@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails"
 	"time"
 
 	"github.com/google/uuid"
@@ -144,86 +145,22 @@ func (s *Service) GetUsage(ctx context.Context, payer identity.CustomerID, curre
 // (event_type = kind, e.g. "minimum_spend_trueup"). It mirrors
 // models.InvoiceLineItem on the public facade so HTTP/library callers don't
 // import the internal models/credits packages.
-type InvoiceLineItemDTO struct {
-	EventType  string           `json:"event_type"`
-	Amount     int64            `json:"amount"`
-	Count      int64            `json:"count"`
-	Dimensions map[string]int64 `json:"dimensions,omitempty"`
-}
+type InvoiceLineItemDTO = openrails.InvoiceLineItemDTO
 
 // InvoiceDTO is the public view of a finalized monthly itemized invoice (issue
 // #303), served by the customer-facing GET /v1/me/invoices[/:id] routes. It is
 // a public projection of models.Invoice so callers don't import internal types.
-type InvoiceDTO struct {
-	ID                        uuid.UUID            `json:"id"`
-	Currency                  string               `json:"currency"`
-	InvoiceNumber             *string              `json:"invoice_number,omitempty"`
-	PeriodFrom                time.Time            `json:"period_from"`
-	PeriodTo                  time.Time            `json:"period_to"`
-	UsageTotal                int64                `json:"usage_total"`
-	DepositsTotal             int64                `json:"deposits_total"`
-	OwedAccrued               int64                `json:"owed_accrued"`
-	OwedPaid                  int64                `json:"owed_paid"`
-	ClosingBalance            int64                `json:"closing_balance"`
-	SubtotalAmount            int64                `json:"subtotal_amount"`
-	TotalAmount               int64                `json:"total_amount"`
-	AmountPaid                int64                `json:"amount_paid"`
-	AmountDue                 int64                `json:"amount_due"`
-	LineItems                 []InvoiceLineItemDTO `json:"line_items"`
-	MoneyMovements            map[string]int64     `json:"money_movements,omitempty"`
-	PONumber                  *string              `json:"po_number,omitempty"`
-	Tax                       map[string]any       `json:"tax,omitempty"`
-	BillingContacts           []InvoiceContactDTO  `json:"billing_contacts,omitempty"`
-	Memo                      *string              `json:"memo,omitempty"`
-	Status                    string               `json:"status"`
-	CollectionMethod          string               `json:"collection_method"`
-	IssuedAt                  *time.Time           `json:"issued_at,omitempty"`
-	DueAt                     *time.Time           `json:"due_at,omitempty"`
-	PaidAt                    *time.Time           `json:"paid_at,omitempty"`
-	VoidedAt                  *time.Time           `json:"voided_at,omitempty"`
-	UncollectibleAt           *time.Time           `json:"uncollectible_at,omitempty"`
-	FinalizedAt               *time.Time           `json:"finalized_at,omitempty"`
-	ExternalInvoiceID         *string              `json:"external_invoice_id,omitempty"`
-	CollectionFailureCount    int32                `json:"collection_failure_count"`
-	CollectionFailedAt        *time.Time           `json:"collection_failed_at,omitempty"`
-	NextCollectionAttemptAt   *time.Time           `json:"next_collection_attempt_at,omitempty"`
-	LastCollectionFailureCode *string              `json:"last_collection_failure_code,omitempty"`
-	CreatedAt                 time.Time            `json:"created_at"`
-}
+type InvoiceDTO = openrails.InvoiceDTO
 
 // InvoicePaymentAttemptDTO is one automatic collection attempt for an invoice.
-type InvoicePaymentAttemptDTO struct {
-	ID              uuid.UUID  `json:"id"`
-	InvoiceID       uuid.UUID  `json:"invoice_id"`
-	Currency        string     `json:"currency"`
-	Amount          int64      `json:"amount"`
-	Status          string     `json:"status"`
-	PaymentMethodID *uuid.UUID `json:"payment_method_id,omitempty"`
-	Rail            *string    `json:"rail,omitempty"`
-	RailPaymentID   *string    `json:"rail_payment_id,omitempty"`
-	FailureCode     *string    `json:"failure_code,omitempty"`
-	FailureReason   *string    `json:"failure_reason,omitempty"`
-	AttemptedAt     time.Time  `json:"attempted_at"`
-	SettledAt       *time.Time `json:"settled_at,omitempty"`
-}
+type InvoicePaymentAttemptDTO = openrails.InvoicePaymentAttemptDTO
 
-type InvoiceCollectionRetryRequest struct {
-	InvoiceID       uuid.UUID `json:"invoice_id"`
-	IdempotencyKey  string    `json:"-"`
-	PaymentMethodID uuid.UUID `json:"payment_method_id"`
-}
+type InvoiceCollectionRetryRequest = openrails.InvoiceCollectionRetryRequest
 
-type InvoiceCollectionRetryResult struct {
-	Invoice  InvoiceDTO               `json:"invoice"`
-	Attempt  InvoicePaymentAttemptDTO `json:"attempt"`
-	Replayed bool                     `json:"replayed"`
-}
+type InvoiceCollectionRetryResult = openrails.InvoiceCollectionRetryResult
 
 // InvoiceContactDTO is one billing contact on an invoice document (#798).
-type InvoiceContactDTO struct {
-	Name  string `json:"name,omitempty"`
-	Email string `json:"email"`
-}
+type InvoiceContactDTO = openrails.InvoiceContactDTO
 
 func contactsToDTO(contacts []models.InvoiceContact) []InvoiceContactDTO {
 	if len(contacts) == 0 {
