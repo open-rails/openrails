@@ -47,9 +47,33 @@ operation and in the mutation log. NMI subscription enrollment follows the
 upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.
 
-There is no evidence-free invoice unpark/force-resend method. The original
-attempt and its amount remain durable until a receipt resolves it. No
-automatic compensating cancel or refund is triggered by uncertainty.
+Invoice collection is an `invoice_collection` operation on the same ledger:
+one per attempt, enqueued atomically with its `invoice_payments` row and the
+invoice's `collection_intent_id` pointer, which blocks every competing
+collection, void, uncollectible and out-of-band payment until the operation
+ends. The operation id is the provider identity (NMI order id, Stripe
+idempotency-key root), so a client retry key, a restart or a resumed lease
+never mints a second identity. A pre-submission failure (unarmed account,
+missing secret, parked instrument) parks the operation without consuming an
+attempt. After the write-ahead fence every adapter error is a possible
+submission: NMI-family operations converge only from the order-reference
+search or an exact receipt; Stripe replays the same idempotent sequence
+through the executor while Stripe still holds the key (23h) and then waits
+for operator resolution. A confirmed charge whose local settlement fails
+keeps its transaction id on the operation and settles from it after restart.
+`intents resolve --receipt` accepts an NMI transaction that is an approved sale
+of the frozen amount on the instrument's vault, or a Stripe invoice stamped
+with the operation key and paid for the frozen amount; `--not-executed`
+fails the attempt without a decline and makes the invoice due again (an
+unpaid Stripe invoice the sequence left behind is not voided automatically).
+There is no evidence-free unpark/force-resend method. No automatic compensating
+cancel or refund is triggered by uncertainty.
+
+A manual rebill confirmed after dunning parked or the customer cancelled the
+subscription still records its payment exactly once: a parked (`unknown`) or
+active subscription renews from the confirmed charge; a terminally cancelled
+one gets the completed payment row without reactivation, flagged for refund
+review.
 
 Local HTTP/PostgreSQL fixtures qualify response loss, delayed receipt
 visibility, restart, expiry, positive receipt finalization and one-time local

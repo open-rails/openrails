@@ -177,7 +177,14 @@ func (p StripeInvoiceCollectionParams) invoiceValues() url.Values {
 	return values
 }
 
+// StripeCollectionKeyMetadata carries the operation's provider identity on the
+// Stripe invoice so an operator-supplied receipt can be matched exactly.
+const StripeCollectionKeyMetadata = "openrails_collection_key"
+
 func addStripeCollectionMetadata(values url.Values, p StripeInvoiceCollectionParams) {
+	if key := strings.TrimSpace(p.IdempotencyKey); key != "" {
+		values.Set("metadata["+StripeCollectionKeyMetadata+"]", key)
+	}
 	if invoiceID := strings.TrimSpace(p.OpenRailsInvoiceID); invoiceID != "" {
 		values.Set("metadata[openrails_invoice_id]", invoiceID)
 	}
@@ -244,8 +251,112 @@ type stripeCollectionInvoice struct {
 	ID            string `json:"id"`
 	Status        string `json:"status"`
 	AmountPaid    int64  `json:"amount_paid"`
+	Currency      string `json:"currency"`
 	PaymentIntent string `json:"payment_intent"`
 	Charge        string `json:"charge"`
+	Metadata      map[string]string
+}
+
+// StripeCollectionReceipt is one Stripe invoice read back for reconciliation.
+type StripeCollectionReceipt struct {
+	InvoiceID       string
+	Status          string
+	AmountPaid      int64
+	Currency        string
+	ChargeID        string
+	PaymentIntentID string
+	// CollectionKey is the operation identity stamped at creation.
+	CollectionKey string
+}
+
+func (i stripeCollectionInvoice) receipt() StripeCollectionReceipt {
+	r := StripeCollectionReceipt{InvoiceID: i.ID, Status: i.Status, AmountPaid: i.AmountPaid, Currency: i.Currency,
+		ChargeID: strings.TrimSpace(i.Charge), PaymentIntentID: strings.TrimSpace(i.PaymentIntent)}
+	r.CollectionKey = strings.TrimSpace(i.Metadata[StripeCollectionKeyMetadata])
+	return r
+}
+
+// GetCollectionInvoice reads one Stripe invoice by its exact id. found=false
+// on 404.
+func (s *StripeService) GetCollectionInvoice(ctx context.Context, invoiceID string) (StripeCollectionReceipt, bool, error) {
+	invoiceID = strings.TrimSpace(invoiceID)
+	if invoiceID == "" {
+		return StripeCollectionReceipt{}, false, errors.New("stripe invoice id is required")
+	}
+	body, status, err := s.stripeGet(ctx, "/v1/invoices/"+url.PathEscape(invoiceID), nil)
+	if err != nil {
+		return StripeCollectionReceipt{}, false, err
+	}
+	if status == http.StatusNotFound {
+		return StripeCollectionReceipt{}, false, nil
+	}
+	if status >= 400 {
+		return StripeCollectionReceipt{}, false, parseStripeAPIError(status, body)
+	}
+	inv, err := parseStripeCollectionInvoice(body)
+	if err != nil {
+		return StripeCollectionReceipt{}, false, err
+	}
+	return inv.receipt(), true, nil
+}
+
+// FindCollectionInvoiceByKey scans the customer's most recent invoices for
+// the one stamped with the operation key. A bounded list read, not a search
+// index: absence means "not among the last 100", never proof of non-execution.
+func (s *StripeService) FindCollectionInvoiceByKey(ctx context.Context, customerID, key string) (StripeCollectionReceipt, bool, error) {
+	customerID, key = strings.TrimSpace(customerID), strings.TrimSpace(key)
+	if customerID == "" || key == "" {
+		return StripeCollectionReceipt{}, false, errors.New("stripe customer id and collection key are required")
+	}
+	body, status, err := s.stripeGet(ctx, "/v1/invoices", url.Values{"customer": {customerID}, "limit": {"100"}})
+	if err != nil {
+		return StripeCollectionReceipt{}, false, err
+	}
+	if status >= 400 {
+		return StripeCollectionReceipt{}, false, parseStripeAPIError(status, body)
+	}
+	var list struct {
+		Data []json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(body, &list); err != nil {
+		return StripeCollectionReceipt{}, false, fmt.Errorf("parse stripe invoice list: %w", err)
+	}
+	for _, raw := range list.Data {
+		inv, err := parseStripeCollectionInvoice(raw)
+		if err != nil {
+			return StripeCollectionReceipt{}, false, err
+		}
+		if r := inv.receipt(); r.CollectionKey == key {
+			return r, true, nil
+		}
+	}
+	return StripeCollectionReceipt{}, false, nil
+}
+
+func (s *StripeService) stripeGet(ctx context.Context, path string, query url.Values) ([]byte, int, error) {
+	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
+	if err != nil {
+		return nil, 0, err
+	}
+	target := s.stripeBaseURL() + path
+	if len(query) > 0 {
+		target += "?" + query.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+secretKey)
+	resp, err := stripeapi.Client(s.Config, 0).Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read stripe response: %w", err)
+	}
+	return body, resp.StatusCode, nil
 }
 
 func parseStripeCollectionInvoice(body []byte) (stripeCollectionInvoice, error) {
@@ -257,6 +368,10 @@ func parseStripeCollectionInvoice(body []byte) (stripeCollectionInvoice, error) 
 	out.ID = rawString(raw["id"])
 	out.Status = rawString(raw["status"])
 	out.AmountPaid = rawInt64(raw["amount_paid"])
+	out.Currency = strings.ToUpper(rawString(raw["currency"]))
+	if len(raw["metadata"]) > 0 {
+		_ = json.Unmarshal(raw["metadata"], &out.Metadata)
+	}
 	out.PaymentIntent = rawID(raw["payment_intent"])
 	out.Charge = rawID(raw["charge"])
 	if out.Charge == "" {
