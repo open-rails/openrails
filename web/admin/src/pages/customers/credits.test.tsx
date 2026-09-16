@@ -36,11 +36,11 @@ function seed(client: QueryClient, allowed: boolean) {
           id: "grant-private-alpha",
           customer_id: "customer-a",
           currency: "USD",
-          amount: 1000000,
-          remaining_amount: 700000,
-          spent_amount: 300000,
-          expired_amount: 0,
-          revoked_amount: 0,
+          amount: "1000000",
+          remaining_amount: "9223372036854775807",
+          spent_amount: "300000",
+          expired_amount: "0",
+          revoked_amount: "0",
           state: "active",
           source_type: "admin",
           source_id: "test",
@@ -71,6 +71,7 @@ describe("customer credit support", () => {
     const html = renderCredits(client)
     expect(html).toContain("read-only credit access")
     expect(html).toContain("grant-private-alpha")
+    expect(html.replace(/\D/g, "")).toContain("9223372036854775807")
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Grant credit<\/button>/)
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Revoke<\/button>/)
     expect(html).toContain("Transaction ledger")

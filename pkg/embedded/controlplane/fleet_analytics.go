@@ -21,7 +21,7 @@ type FleetMerchantFunnel struct {
 type FleetCurrencyRevenue struct {
 	Currency      string `json:"currency"`
 	Payments      int64  `json:"payments"`
-	SettledAmount int64  `json:"settled_amount_micros"`
+	SettledAmount int64  `json:"settled_amount_micros,string"`
 }
 
 // FleetRailHealth is one rail's completed/failed/chargeback split across the
@@ -38,7 +38,7 @@ type FleetRailHealth struct {
 type FleetMRR struct {
 	Currency      string `json:"currency"`
 	Subscriptions int64  `json:"subscriptions"`
-	MonthlyAmount int64  `json:"monthly_amount_micros"`
+	MonthlyAmount int64  `json:"monthly_amount_micros,string"`
 }
 
 // FleetSnapshot is one operator snapshot of the hosted fleet.

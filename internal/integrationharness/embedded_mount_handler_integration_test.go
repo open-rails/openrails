@@ -81,7 +81,7 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var balance struct {
 		Currency      string `json:"currency"`
-		BalanceAmount int64  `json:"balance_amount"`
+		BalanceAmount int64  `json:"balance_amount,string"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &balance), w.Body.String())
 	require.Equal(t, "USD", balance.Currency)

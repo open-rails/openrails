@@ -41,7 +41,7 @@ func selfAccountPayer(r *httprequest.Request) (identity.CustomerID, bool) {
 
 type selfBalanceResponse struct {
 	Currency      string `json:"currency"`
-	BalanceAmount int64  `json:"balance_amount"`
+	BalanceAmount int64  `json:"balance_amount,string"`
 }
 
 func GetMyBalance(r *httprequest.Request) {
