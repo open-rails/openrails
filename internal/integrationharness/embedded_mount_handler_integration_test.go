@@ -56,7 +56,7 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		MountPrefix:            "/api/openrails",
 		RouteSets:              []embedded.RouteSet{embedded.RouteSetMerchantAPI, embedded.RouteSetCustomer},
 		Gate:                   httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),

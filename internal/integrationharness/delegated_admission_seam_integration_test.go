@@ -138,7 +138,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		MountPrefix:            "/billing",
 		RouteSets:              []embedded.RouteSet{embedded.RouteSetMerchantAPI, embedded.RouteSetCustomer},
 		Gate:                   httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),
@@ -199,7 +199,7 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 		orauthkit.WithPermissionResolver(grant),
 	)
 	require.NoError(t, err)
-	noSlugHandler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	noSlugHandler, err := rt.Handler(embedded.MountOptions{
 		MountPrefix:            "/billing",
 		RouteSets:              []embedded.RouteSet{embedded.RouteSetCustomer},
 		DelegatedAuthenticator: unslugged,

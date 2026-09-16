@@ -103,7 +103,7 @@ func bootRoutingFixture(
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	buyerHandler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	buyerHandler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetCustomer},
 		Authenticator:          userAuthn,
 		DelegatedAuthenticator: delegated,
@@ -112,7 +112,7 @@ func bootRoutingFixture(
 	buyerServer := httptest.NewServer(buyerHandler)
 	t.Cleanup(buyerServer.Close)
 
-	merchantHandler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	merchantHandler, err := rt.Handler(embedded.MountOptions{
 		RouteSets: []embed.RouteSet{embed.RouteSetPaymentProviders, embed.RouteSetMerchantAPI},
 		Gate:      allowAllGate{id: id},
 	})

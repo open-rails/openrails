@@ -151,6 +151,7 @@ rt, err := embed.New(ctx, embed.Options{
         Config:  cfg,
         PGXPool: pool, // share your app's pgx/v5 pool; nil = engine opens its own from Config.DB
         Redis:   rdb,  // optional — Redis-backed rate limits; omit for in-memory
+        River:   embedded.RiverManagedByOpenRails(), // required; or RiverFromHost below
     },
     RunWorkers: true,
 })
@@ -164,41 +165,45 @@ defer rt.Close(ctx)
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
+| `River` | `embedded.RiverOwnership` | Required. `RiverManagedByOpenRails()` or `RiverFromHost(bind)`; construction refuses without it. |
 | `RunWorkers` | `bool` | Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
 | `embed.WithAdminConsole(fs.FS)` | variadic `embed.Option` | Host-built admin console SPA (see §6). |
 
-**Runtime surface**: `rt.Client()` (unified SDK client), `rt.Service()` (engine-native
-facade, typed IDs), `rt.Embedded()` (the underlying `*embedded.Embedded` for advanced
-wiring), `rt.ActiveRouteSets()` (route groups of the mounted surface),
-`rt.RunWorkers(ctx)`, `rt.Close(ctx)`.
+**Runtime surface**: `rt.Client()` (the shared `*openrails.Client`),
+`rt.UpsertMerchantConfig`, `rt.Handler(MountOptions)`, `rt.SelfHandler`,
+`rt.StandaloneHandler()`, `rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`,
+`rt.HasExternalRiverClient()`, `rt.DeclarePSP`, `rt.ActiveRouteSets()`,
+`rt.RunWorkers(ctx)`, `rt.Close(ctx)`. `rt.Embedded()` remains only for
+control-plane wiring that still takes the application graph.
 
-**Shared-River pattern** (advanced): a host that already runs its own
-[River](https://riverqueue.com) client keeps `RunWorkers: false` and folds OpenRails'
-workers + periodic jobs into it — one client, one `public.river_*` table set (River
-tables always live in `public`, never the billing schema):
+**Host-owned River**: a host that runs its own [River](https://riverqueue.com)
+client declares `RiverFromHost`. OpenRails registers its workers on the shared
+registry before your client is built and adds its periodic jobs to the client you
+return; you start and stop that client:
 
 ```go
-emb := rt.Embedded()
-workers := river.NewWorkers()
-river.AddWorkerSafely(workers, &MyAppWorker{})
-periodic, register, err := embedded.FoldIntoRiver(ctx, emb, workers)
-
-client, err := river.NewClient(driver, &river.Config{
-    Workers:    workers,
-    Middleware: []rivertype.Middleware{emb.WorkerMiddleware()}, // worker-health rows
-    Queues: map[string]river.QueueConfig{
-        river.QueueDefault:    {MaxWorkers: 10},
-        embedded.QueueBilling: {MaxWorkers: 5}, // MUST be configured or billing jobs never drain
-    },
-})
-if err := register(client); err != nil { ... } // adds periodic jobs + SetRiverClient
-client.Start(ctx)
+var jobs *river.Client[pgx.Tx]
+rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+    Config: cfg, PGXPool: pool,
+    River: embedded.RiverFromHost(func(ctx context.Context, fleet *embedded.RiverFleet) (*river.Client[pgx.Tx], error) {
+        river.AddWorker(fleet.Workers, &MyAppWorker{})
+        jobs, err = river.NewClient(riverpgxv5.New(pool), &river.Config{
+            Workers: fleet.Workers,
+            Schema:  fleet.Schema, // never the billing schema
+            Queues: map[string]river.QueueConfig{
+                river.QueueDefault: {MaxWorkers: 10},
+                fleet.QueueBilling: {MaxWorkers: 5}, // required or billing jobs never drain
+            },
+        })
+        return jobs, err // unstarted
+    }),
+}})
+if err != nil { log.Fatal(err) }
+if err := jobs.Start(ctx); err != nil { log.Fatal(err) }
 ```
 
-Once injected, OpenRails enqueues through your client and never builds its own;
-`RunWorkers` becomes a no-op. The three-call form
-(`AddWorkersTo` / `GetPeriodicJobs` / `SetRiverClient`) exists for hosts that need
-finer control.
+`RunWorkers` is a no-op for a host-owned client. `rt.CheckJobProgress(ctx)` gives
+the live fleet verdict for a health endpoint.
 
 **No job clock.** Your `river.Config.JobTimeout` (River's default is one minute)
 does not apply to OpenRails' workers: each declares `Timeout() = -1` and ends
@@ -357,7 +362,7 @@ Mount everything as one framework-neutral `net/http` handler (gin hosts use
 `gin.WrapH`, chi `Mount`, …):
 
 ```go
-handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+handler, err := rt.Handler(embedded.MountOptions{
     MountPrefix:            "/billing", // routes arrive at /billing/v1/*
     Authenticator:          myAuth,
     DelegatedAuthenticator: myDelegatedAuth,

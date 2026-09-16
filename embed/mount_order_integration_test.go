@@ -45,7 +45,7 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 	noAuth := billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	})
-	handler, err := embedded.MountHandler(rt.Embedded(), embedded.MountOptions{
+	handler, err := rt.Handler(embedded.MountOptions{
 		RouteSets:     []embedded.RouteSet{embedded.RouteSetCheckout},
 		Authenticator: noAuth,
 	})
