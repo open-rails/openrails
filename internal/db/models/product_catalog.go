@@ -19,9 +19,6 @@ type Product struct {
 	// Entitlements configuration: map entitlement name -> duration HOURS (nil or 0 means indefinite)
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
 
-	// Credits configuration: bundled promo credits for subscriptions
-	CreditsSpec CreditsSpec `json:"credits_spec,omitempty"`
-
 	// Tier configuration for upgrade/downgrade relationships
 	// Products in the same TierGroup are mutually exclusive - user must upgrade/downgrade between them
 	// TierRank determines direction: higher rank = more premium (upgrade), lower rank = downgrade
@@ -42,48 +39,6 @@ type Product struct {
 // (shown in the public catalog).
 func (p *Product) IsPurchasable() bool { return !p.Archived }
 
-// CreditsSpec defines bundled credit/currency balance grants for a product — the
-// other half of "what you get" alongside entitlements (#472). Each entry deposits
-// a balance on purchase / subscription event.
-//
-// Keys are grant labels (scope idempotency). Amount is in the minor units of Unit.
-type CreditsSpec map[string]CreditGrantSpec
-
-type CreditGrantCadence string
-
-const (
-	CreditGrantCadenceOnce       CreditGrantCadence = "once"
-	CreditGrantCadencePerRenewal CreditGrantCadence = "per_renewal"
-)
-
-type CreditGrantSpec struct {
-	// Unit is the currency code of the granted balance (#472). Required.
-	// Built-ins use ISO codes; custom units use credit:<registry UUID>.
-	Unit   string `json:"unit,omitempty"`
-	Amount int64  `json:"amount"`
-	// ExpiryHours: balance expires now+N hours. null/omitted => NEVER expires
-	// (#857); explicit 0 says the same thing out loud. Expiry destroys customer
-	// money, so it only ever happens because a merchant asked for it — there is
-	// no implicit clock. Negative is rejected at validation.
-	ExpiryHours *int               `json:"expiry_hours,omitempty"`
-	Cadence     CreditGrantCadence `json:"cadence,omitempty"` // once|per_renewal (default once)
-}
-
-// UnitCode returns the grant's currency/custom-credit unit code.
-func (g CreditGrantSpec) UnitCode() string {
-	return g.Unit
-}
-
-// EffectiveExpiryHours resolves grant expiry in hours. 0 means NEVER expires,
-// and an omitted expiry_hours resolves to exactly that (#857) — an unstated
-// default must never be the reason a paid balance is destroyed.
-func (g CreditGrantSpec) EffectiveExpiryHours() int {
-	if g.ExpiryHours != nil {
-		return *g.ExpiryHours
-	}
-	return 0
-}
-
 func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
 	if len(spec) == 0 {
 		return nil
@@ -96,22 +51,6 @@ func CloneEntitlementsSpec(spec map[string]*int) map[string]*int {
 		}
 		v := *value
 		out[key] = &v
-	}
-	return out
-}
-
-func CloneCreditsSpec(spec CreditsSpec) CreditsSpec {
-	if len(spec) == 0 {
-		return nil
-	}
-	out := make(CreditsSpec, len(spec))
-	for key, value := range spec {
-		cloned := value
-		if value.ExpiryHours != nil {
-			v := *value.ExpiryHours
-			cloned.ExpiryHours = &v
-		}
-		out[key] = cloned
 	}
 	return out
 }

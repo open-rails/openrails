@@ -198,8 +198,6 @@ func (w *DunningWorker) Work(ctx context.Context, job *river.Job[DunningArgs]) e
 	if lifecycle == nil {
 		concrete := subscriptions.NewSubscriptionLifecycleService(w.DB, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, w.Clock)
 		concrete.SetConfig(w.Config)
-		moneySvc := money.NewMoneyService(w.DB, w.Clock)
-		concrete.SetCreditGranter(moneySvc)
 		if w.DeferDelete != nil {
 			// Terminal cancellations (window expiry, retry exhaustion) schedule
 			// the remote NMI delete through the shared mechanism (#344).

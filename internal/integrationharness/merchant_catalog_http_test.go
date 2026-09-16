@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/internal/testauth"
 	"io"
 	"net/http"
 	"net/url"
@@ -17,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/testauth"
+
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -25,11 +26,9 @@ import (
 	openrails "github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -67,6 +66,18 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 	require.NoError(t, json.Unmarshal(createBody, &created))
 	require.NotEmpty(t, created.ID)
 	require.Equal(t, productKey, created.Key)
+
+	for _, retired := range []string{"credits_spec", "set_credits"} {
+		status, body := requestJSON(t, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+created.ID, catalogToken, map[string]any{retired: true})
+		require.Equal(t, http.StatusBadRequest, status, string(body))
+	}
+	for _, retired := range []string{"credits", "includes", "usage_limits"} {
+		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", catalogToken, map[string]any{
+			"catalog": map[string]any{"version": 1, "products": []any{map[string]any{"key": "retired", "display_name": "Retired", retired: []any{}}}},
+			"insert":  true,
+		})
+		require.Equal(t, http.StatusBadRequest, status, string(body))
+	}
 
 	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, catalogToken, nil)
 	require.Equal(t, http.StatusOK, getStatus, string(getBody))
@@ -434,14 +445,11 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
 	meterKey := "droplet-seconds-" + suffix
 	dropletKey := "droplet-" + suffix
-	topupKey := "image-credit-topup-" + suffix
 	mid := dbtest.TestMerchantID.UUID()
 	t.Cleanup(func() {
 		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = $2", mid, meterKey)
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_credit_purchase_prices WHERE merchant_id = $1 AND product_id IN (SELECT id FROM openrails.products WHERE merchant_id = $1 AND key = $2)", mid, topupKey)
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_credit_balances WHERE merchant_id = $1 AND key = $2", mid, "image-credit")
 		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = $2", mid, meterKey)
-		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1 AND key = ANY($2::text[])", mid, []string{dropletKey, topupKey})
+		_, _ = h.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE merchant_id = $1 AND key = ANY($2::text[])", mid, []string{dropletKey})
 	})
 
 	manifest := catalog.Manifest{
@@ -453,7 +461,6 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 			Aggregation:   "sum",
 			GroupBy:       map[string]string{"size_slug": "$.size_slug"},
 		}},
-		CreditBalances: []catalog.CreditBalance{{Key: "image-credit", Unit: "image-credit"}},
 		Products: []catalog.Product{
 			{
 				Key:         dropletKey,
@@ -469,19 +476,6 @@ func TestCatalogPublishRateCardsHTTP(t *testing.T) {
 							}},
 						},
 					},
-				}},
-			},
-			{
-				Key:         topupKey,
-				DisplayName: "Image Credit Top-up",
-				Credits:     []catalog.CreditGrant{{Key: "image-credit"}},
-				Prices: []catalog.Price{{
-					Currency: "USD",
-					Model:    "tiered",
-					Tiered: &catalog.TieredPrice{Mode: "graduated", Tiers: []catalog.RateTier{
-						{UpTo: ptrI64(2000), UnitAmount: 10000},
-						{UnitAmount: 7500},
-					}},
 				}},
 			},
 		},
@@ -502,15 +496,6 @@ JOIN openrails.products p ON p.id = rc.product_id
 WHERE p.merchant_id = $1 AND p.key = $2`, mid, dropletKey).Scan(&model, &rcMeter))
 	require.Equal(t, "per_unit", model)
 	require.Equal(t, meterKey, rcMeter)
-
-	// The credit-purchase sidecar persisted.
-	var creditType string
-	require.NoError(t, h.Pool().QueryRow(ctx, `
-SELECT cpp.credit_key
-FROM openrails.catalog_credit_purchase_prices cpp
-JOIN openrails.products p ON p.id = cpp.product_id
-WHERE p.merchant_id = $1 AND p.key = $2`, mid, topupKey).Scan(&creditType))
-	require.Equal(t, "image-credit", creditType)
 
 	// The rate-card meter persisted with its aggregation.
 	var agg string
@@ -617,14 +602,12 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 
 	productKey := "native-lifecycle-" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	manifest := catalog.Manifest{
-		Version:        catalog.SupportedVersion,
-		CreditBalances: []catalog.CreditBalance{{Key: "native-lifecycle-usd", Unit: "USD"}},
+		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  "Native Lifecycle Product",
 			Description:  "published catalog anchor for native lifecycle proof",
 			Entitlements: []string{"native-lifecycle-premium"},
-			Credits:      []catalog.CreditGrant{{Key: "native-lifecycle-usd", Currency: "USD", Amount: ptrI64(10_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: 10_000,
 				Currency:   "USD",
@@ -768,495 +751,6 @@ WHERE merchant_id = $1 AND product_id = $2 AND meter_key = $3 AND payment_term =
 	require.Equal(t, int64(1_050_000), inv.AmountDue)
 }
 
-func TestNativeCatalogBundleIncludesHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	standalone := h.StartStandalone("usd")
-
-	token := standalone.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-bundle-includes-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
-	childKey := "movie-" + suffix
-	bundleKey := "movie-bundle-" + suffix
-	manifest := catalog.Manifest{
-		Version: catalog.SupportedVersion,
-		Products: []catalog.Product{
-			// One-off purchases (no tier_group): membership tiers require a
-			// recurring price (pkg/catalog validation), and this test's subject
-			// is Includes propagation, not tiers.
-			{
-				Key:         childKey,
-				DisplayName: "Included Movie",
-				Prices: []catalog.Price{{
-					UnitAmount: 4_990_000,
-					Currency:   "USD",
-					Duration:   "indefinite",
-					PSPs:       []string{},
-				}},
-			},
-			{
-				Key:         bundleKey,
-				DisplayName: "Movie Bundle",
-				Includes:    []string{childKey},
-				Prices: []catalog.Price{{
-					UnitAmount: 9_990_000,
-					Currency:   "USD",
-					Duration:   "indefinite",
-					PSPs:       []string{},
-				}},
-			},
-		},
-	}
-	require.NoError(t, manifest.Validate())
-	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
-	require.Equal(t, http.StatusOK, status, string(body))
-
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+bundleKey, token, nil)
-	require.Equal(t, http.StatusOK, status, string(body))
-	var bundle billingservice.CatalogProduct
-	require.NoError(t, json.Unmarshal(body, &bundle))
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+childKey, token, nil)
-	require.Equal(t, http.StatusOK, status, string(body))
-	var child billingservice.CatalogProduct
-	require.NoError(t, json.Unmarshal(body, &child))
-
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	pool := dbi.Pool()
-	customer := uuid.New()
-	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customer.String())
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customer)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customer)
-	})
-	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
-	g, err := grantLedger.Grant(ctx, grants.GrantInput{
-		Customer: customer,
-		Product:  &bundle.ID,
-		Kind:     grants.Ownership,
-		Source:   grants.Purchase,
-		SourceID: "pay_" + suffix,
-	})
-	require.NoError(t, err)
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
-	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customer, child.ID))
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
-	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customer, child.ID))
-}
-
-func TestNativeCatalogUsageLimitBindingHTTP(t *testing.T) {
-	ctx := context.Background()
-	h := New(t, ctx)
-	standalone := h.StartStandalone("usd")
-
-	token := standalone.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-usage-limit-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
-	productKey := "claude-plan-" + suffix
-	limitKey := "claude-5x-" + suffix
-	product20Key := "claude-plan-20x-" + suffix
-	limit20Key := "claude-20x-" + suffix
-	measure := "claude-code"
-	manifest := catalog.Manifest{
-		Version: catalog.SupportedVersion,
-		UsageLimits: []catalog.UsageLimit{
-			{
-				Key:     limitKey,
-				Measure: measure,
-				Windows: []catalog.UsageLimitWindow{{
-					Window: "1h",
-					Amount: 100,
-				}},
-			},
-			{
-				Key:     limit20Key,
-				Measure: measure,
-				Windows: []catalog.UsageLimitWindow{{
-					Window: "1h",
-					Amount: 400,
-				}},
-			},
-		},
-		Products: []catalog.Product{
-			{
-				Key:         productKey,
-				DisplayName: "Claude 5x Plan",
-				TierGroup:   "claude-code",
-				TierRank:    intPtr(1),
-				UsageLimits: []string{limitKey},
-				Prices: []catalog.Price{{
-					UnitAmount: 20_000_000,
-					Currency:   "USD",
-					Duration:   "30d",
-					AutoRenew:  true,
-					PSPs:       []string{},
-				}},
-			},
-			{
-				Key:         product20Key,
-				DisplayName: "Claude 20x Plan",
-				TierGroup:   "claude-code",
-				TierRank:    intPtr(2),
-				UsageLimits: []string{limit20Key},
-				Prices: []catalog.Price{{
-					UnitAmount: 80_000_000,
-					Currency:   "USD",
-					Duration:   "30d",
-					AutoRenew:  true,
-					PSPs:       []string{},
-				}},
-			},
-		},
-	}
-	require.NoError(t, manifest.Validate())
-	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
-	require.Equal(t, http.StatusOK, status, string(body))
-
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, token, nil)
-	require.Equal(t, http.StatusOK, status, string(body))
-	var product billingservice.CatalogProduct
-	require.NoError(t, json.Unmarshal(body, &product))
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/catalog/products/by-key/"+product20Key, token, nil)
-	require.Equal(t, http.StatusOK, status, string(body))
-	var product20 billingservice.CatalogProduct
-	require.NoError(t, json.Unmarshal(body, &product20))
-
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	pool := dbi.Pool()
-	customer := openrails.CustomerID(uuid.New())
-	customerID := customer.UUID()
-	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customerID.String())
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.product_usage_limit_bindings WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
-	})
-	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
-	g, err := grantLedger.Grant(ctx, grants.GrantInput{
-		Customer: customerID,
-		Product:  &product.ID,
-		Kind:     grants.Entitlement,
-		Source:   grants.Purchase,
-		SourceID: uuid.NewString(),
-		Spec:     &grants.Spec{Entitlements: []string{"claude-code"}},
-	})
-	require.NoError(t, err)
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
-	require.Equal(t, 1, productUsageLimitBindingCount(t, ctx, pool, customerID, limitKey, false))
-
-	client := standalone.Client()
-	depositSourceID := uuid.NewString()
-	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &customer,
-		Invoker:    customerID.String(),
-		Currency:   "USD",
-		Amount:     1_000,
-		Source:     "catalog-usage-limit",
-		SourceID:   depositSourceID,
-	})
-	require.NoError(t, err)
-
-	firstID := "usage-limit-first-" + uuid.NewString()
-	verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-		CustomerID:      customerID.String(),
-		Invoker:         customerID.String(),
-		InvokerType:     string(identity.InvokerTypePayer),
-		Resource:        measure,
-		Currency:        "USD",
-		EstimatedAmount: 60,
-		ExpiresAt:       holdDeadline(),
-		RequestID:       firstID,
-		Source:          "catalog-usage-limit",
-	}})
-	require.NoError(t, err)
-	require.Len(t, verdicts, 1)
-	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-
-	secondID := "usage-limit-second-" + uuid.NewString()
-	verdicts, err = client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-		CustomerID:      customerID.String(),
-		Invoker:         customerID.String(),
-		InvokerType:     string(identity.InvokerTypePayer),
-		Resource:        measure,
-		Currency:        "USD",
-		EstimatedAmount: 50,
-		ExpiresAt:       holdDeadline(),
-		RequestID:       secondID,
-		Source:          "catalog-usage-limit",
-	}})
-	require.NoError(t, err)
-	require.Len(t, verdicts, 1)
-	require.False(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-
-	_, err = grantLedger.Revoke(ctx, g.ID, "refund")
-	require.NoError(t, err)
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, g))
-	require.Equal(t, 1, productUsageLimitBindingCount(t, ctx, pool, customerID, limitKey, true))
-	require.Equal(t, 0, productUsageLimitBindingCount(t, ctx, pool, customerID, limitKey, false))
-
-	g20, err := grantLedger.Grant(ctx, grants.GrantInput{
-		Customer: customerID,
-		Product:  &product20.ID,
-		Kind:     grants.Entitlement,
-		Source:   grants.Purchase,
-		SourceID: uuid.NewString(),
-		Spec:     &grants.Spec{Entitlements: []string{"claude-code-20x"}},
-	})
-	require.NoError(t, err)
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, g20))
-	require.Equal(t, 1, productUsageLimitBindingCount(t, ctx, pool, customerID, limit20Key, false))
-
-	upgradeID := "usage-limit-20x-" + uuid.NewString()
-	verdicts, err = client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-		CustomerID:      customerID.String(),
-		Invoker:         customerID.String(),
-		InvokerType:     string(identity.InvokerTypePayer),
-		Resource:        measure,
-		Currency:        "USD",
-		EstimatedAmount: 150,
-		ExpiresAt:       holdDeadline(),
-		RequestID:       upgradeID,
-		Source:          "catalog-usage-limit",
-	}})
-	require.NoError(t, err)
-	require.Len(t, verdicts, 1)
-	require.True(t, verdicts[0].Allowed(), "%+v", verdicts[0])
-}
-
-func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
-	ctx := dbtest.WithTestMerchant(context.Background())
-	h := New(t, ctx)
-	standalone := h.StartStandalone("usd")
-	token := standalone.MintAPIKey(
-		dbtest.TestMerchantSlug,
-		"catalog-product-use-cases-"+uuid.NewString(),
-		[]string{controlplane.PermMerchantCatalogRead, controlplane.PermMerchantCatalogUpdate},
-	)
-
-	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")
-	tierGroup := "saas-" + suffix
-	premiumGroup := "premium-" + suffix
-	premiumKey := "premium-" + suffix
-	basicKey := "basic-" + suffix
-	proKey := "pro-" + suffix
-	aiSlug := "ai-credits-" + suffix
-	apiSlug := "api-credits-" + suffix
-	movieKey := "movie-" + suffix
-	aiUnitName := "ai-image-credit-" + suffix
-	apiUnitName := "fal-api-credit-" + suffix
-	aiUnit := dbtest.TestMerchantSlug + "/" + aiUnitName
-	apiUnit := dbtest.TestMerchantSlug + "/" + apiUnitName
-
-	manifest := catalog.Manifest{
-		Version: catalog.SupportedVersion,
-		CreditBalances: []catalog.CreditBalance{
-			{Key: "ai-image-gen", Unit: aiUnit},
-			{Key: "fal-api", Unit: apiUnit},
-		},
-		Products: []catalog.Product{
-			{
-				Key:          premiumKey,
-				DisplayName:  "Premium",
-				TierGroup:    premiumGroup,
-				Entitlements: []string{"premium"},
-				Prices: []catalog.Price{{
-					UnitAmount: 9_990_000,
-					Currency:   "USD",
-					Duration:   "30d",
-					AutoRenew:  true,
-				}},
-			},
-			{
-				Key:         basicKey,
-				DisplayName: "Basic",
-				TierGroup:   tierGroup,
-				TierRank:    intPtr(1),
-				Prices: []catalog.Price{{
-					UnitAmount: 19_990_000,
-					Currency:   "USD",
-					Duration:   "30d",
-					AutoRenew:  true,
-				}},
-			},
-			{
-				Key:         proKey,
-				DisplayName: "Pro",
-				TierGroup:   tierGroup,
-				TierRank:    intPtr(2),
-				Prices: []catalog.Price{{
-					UnitAmount: 49_990_000,
-					Currency:   "USD",
-					Duration:   "30d",
-					AutoRenew:  true,
-					Trial:      &catalog.PriceTrial{UnitAmount: 0, Duration: "7d"},
-				}},
-			},
-			{
-				Key:         aiSlug,
-				DisplayName: "AI Image Credits",
-				Credits:     []catalog.CreditGrant{{Key: "ai-image-gen", Unit: aiUnit, Amount: ptrI64(100)}},
-				Prices:      []catalog.Price{{UnitAmount: 5_000_000, Currency: "USD", Duration: "indefinite"}},
-			},
-			{
-				Key:         apiSlug,
-				DisplayName: "fal.ai API Credits",
-				Credits:     []catalog.CreditGrant{{Key: "fal-api", Unit: apiUnit, Amount: ptrI64(2_000)}},
-				Prices:      []catalog.Price{{UnitAmount: 20_000_000, Currency: "USD", Duration: "indefinite"}},
-			},
-			{
-				Key:         movieKey,
-				DisplayName: "Catalog Movie",
-				Prices:      []catalog.Price{{UnitAmount: 4_990_000, Currency: "USD", Duration: "indefinite"}},
-			},
-		},
-	}
-	require.NoError(t, manifest.Validate())
-	status, body := requestJSON(t, http.MethodPost, standalone.BaseURL+"/v1/merchant/catalog/publish", token, map[string]any{
-		"catalog": manifest,
-		"insert":  true,
-	})
-	require.Equal(t, http.StatusOK, status, string(body))
-
-	applier := httpCatalogApplier{t: t, baseURL: standalone.BaseURL, token: token}
-	premium := mustCatalogProduct(t, ctx, applier, premiumKey)
-	basic := mustCatalogProduct(t, ctx, applier, basicKey)
-	pro := mustCatalogProduct(t, ctx, applier, proKey)
-	aiProduct := mustCatalogProduct(t, ctx, applier, aiSlug)
-	apiProduct := mustCatalogProduct(t, ctx, applier, apiSlug)
-	movie := mustCatalogProduct(t, ctx, applier, movieKey)
-
-	require.Contains(t, premium.EntitlementsSpec, "premium")
-	require.Equal(t, tierGroup, *basic.TierGroup)
-	require.Equal(t, 1, basic.TierRank)
-	require.Equal(t, tierGroup, *pro.TierGroup)
-	require.Equal(t, 2, pro.TierRank)
-
-	proPrices, err := applier.ListPricesByProduct(ctx, pro.ID, true)
-	require.NoError(t, err)
-	require.Len(t, proPrices, 1)
-	require.True(t, proPrices[0].AutoRenew)
-	require.NotNil(t, proPrices[0].AccessDurationHours)
-	require.Equal(t, 720, *proPrices[0].AccessDurationHours)
-	require.NotNil(t, proPrices[0].TrialUnitAmount)
-	require.Equal(t, int64(0), *proPrices[0].TrialUnitAmount)
-	require.NotNil(t, proPrices[0].TrialDurationHours)
-	require.Equal(t, 168, *proPrices[0].TrialDurationHours)
-
-	moviePrices, err := applier.ListPricesByProduct(ctx, movie.ID, true)
-	require.NoError(t, err)
-	require.Len(t, moviePrices, 1)
-	require.Nil(t, moviePrices[0].AccessDurationHours)
-	require.False(t, moviePrices[0].AutoRenew)
-
-	dbi := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID())
-	pool := dbi.Pool()
-	customerID := uuid.New()
-	customer := identity.CustomerID(customerID)
-	dbtest.EnsureCustomerIDPgx(ctx, t, pool, customerID.String())
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2 AND event <> 'grant'", dbtest.TestMerchantID.UUID(), customerID)
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.grants WHERE merchant_id = $1 AND customer_id = $2", dbtest.TestMerchantID.UUID(), customerID)
-	})
-
-	// No manual custom-credit definition: the catalog publish auto-defined the
-	// custom_credit_types rows from the declared credit-balance units (#706) —
-	// the grants below fail unit resolution if it didn't.
-	moneySvc := money.NewMoneyService(dbi)
-	// Product specifications retain these registry identities until the isolated
-	// test database is dropped; deleting them would leave dangling product specs.
-	storedSpec := func(id uuid.UUID) models.CreditsSpec {
-		row, err := gen.New(pool).GetProductByID(ctx, id)
-		require.NoError(t, err)
-		var spec models.CreditsSpec
-		require.NoError(t, json.Unmarshal(row.CreditsSpec, &spec))
-		return spec
-	}
-
-	require.NoError(t, moneySvc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
-		Payer:     customer,
-		PaymentID: uuid.New(),
-		Spec:      storedSpec(aiProduct.ID),
-		Source:    "catalog-ai-credit-purchase",
-	}))
-	require.NoError(t, moneySvc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
-		Payer:     customer,
-		PaymentID: uuid.New(),
-		Spec:      storedSpec(apiProduct.ID),
-		Source:    "catalog-api-credit-purchase",
-	}))
-
-	client := standalone.Client()
-	aiBalance, err := client.GetCreditAccount(ctx, customerID.String(), aiUnit)
-	require.NoError(t, err)
-	require.Equal(t, int64(100), aiBalance.BalanceAmount)
-	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
-	_, csErr := grantLedger.CreditSpend(ctx, customerID, storedSpec(aiProduct.ID)["ai-image-gen"].Unit, 40, customerID.String(), "ai-image-generation", ledger.Coord{Operation: ledger.OpSpend, Source: "catalog-ai-image-generation", SourceID: uuid.NewString()})
-	require.NoError(t, csErr)
-	aiBalance, err = client.GetCreditAccount(ctx, customerID.String(), aiUnit)
-	require.NoError(t, err)
-	require.Equal(t, int64(60), aiBalance.BalanceAmount)
-	apiBalance, err := client.GetCreditAccount(ctx, customerID.String(), apiUnit)
-	require.NoError(t, err)
-	require.Equal(t, int64(2_000), apiBalance.BalanceAmount)
-
-	pastEnd := time.Now().Add(-24 * time.Hour)
-	firstSub, err := grantLedger.Grant(ctx, grants.GrantInput{
-		Customer: customerID,
-		Product:  &premium.ID,
-		Kind:     grants.Entitlement,
-		Source:   grants.Subscription,
-		SourceID: uuid.NewString(),
-		Spec:     &grants.Spec{Entitlements: []string{"premium"}},
-		StartsAt: time.Now().Add(-48 * time.Hour),
-		EndsAt:   &pastEnd,
-	})
-	require.NoError(t, err)
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, firstSub))
-	futureEnd := time.Now().Add(30 * 24 * time.Hour)
-	renewal, err := grantLedger.Grant(ctx, grants.GrantInput{
-		Customer: customerID,
-		Product:  &premium.ID,
-		Kind:     grants.Entitlement,
-		Source:   grants.Subscription,
-		SourceID: uuid.NewString(),
-		Spec:     &grants.Spec{Entitlements: []string{"premium"}},
-		StartsAt: time.Now().Add(-time.Hour),
-		EndsAt:   &futureEnd,
-	})
-	require.NoError(t, err)
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, renewal))
-	status, body = requestJSON(t, http.MethodGet, standalone.BaseURL+"/v1/merchant/customers/"+customerID.String()+"/entitlements", token, nil)
-	require.Equal(t, http.StatusOK, status, string(body))
-	var entitlementRows []struct {
-		Entitlement string `json:"entitlement"`
-	}
-	require.NoError(t, json.Unmarshal(body, &entitlementRows))
-	require.Len(t, entitlementRows, 1)
-	require.Equal(t, "premium", entitlementRows[0].Entitlement)
-
-	ownership, err := grantLedger.Grant(ctx, grants.GrantInput{
-		Customer: customerID,
-		Product:  &movie.ID,
-		Kind:     grants.Ownership,
-		Source:   grants.Purchase,
-		SourceID: uuid.NewString(),
-	})
-	require.NoError(t, err)
-	require.NoError(t, grantLedger.MaterializeGrant(ctx, ownership))
-	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customerID, movie.ID))
-}
-
 func liveOwnershipGrantCount(t *testing.T, ctx context.Context, pool interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, customer, product uuid.UUID) int {
@@ -1275,21 +769,6 @@ WHERE g.merchant_id = $1
         AND t.supersedes_id = g.id
         AND t.event IN ('revoke', 'expire', 'supersede')
   )`, dbtest.TestMerchantID.UUID(), customer, product).Scan(&n))
-	return n
-}
-
-func productUsageLimitBindingCount(t *testing.T, ctx context.Context, pool interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
-}, customer uuid.UUID, key string, revoked bool) int {
-	t.Helper()
-	cond := "revoked_at IS NULL"
-	if revoked {
-		cond = "revoked_at IS NOT NULL"
-	}
-	var n int
-	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.product_usage_limit_bindings WHERE merchant_id = $1 AND customer_id = $2 AND usage_limit_key = $3 AND `+cond,
-		dbtest.TestMerchantID.UUID(), customer, key).Scan(&n))
 	return n
 }
 
@@ -1565,11 +1044,9 @@ type exampleCatalogFile struct {
 }
 
 type exampleCatalogEntry struct {
-	Merchant       string                  `yaml:"merchant"`
-	Products       []catalog.Product       `yaml:"products"`
-	Meters         []catalog.Meter         `yaml:"meters"`
-	CreditBalances []catalog.CreditBalance `yaml:"credit_balances"`
-	UsageLimits    []catalog.UsageLimit    `yaml:"usage_limits"`
+	Merchant string            `yaml:"merchant"`
+	Products []catalog.Product `yaml:"products"`
+	Meters   []catalog.Meter   `yaml:"meters"`
 }
 
 func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
@@ -1599,22 +1076,10 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 		entry.Meters[i].Key += suffix
 		meterKeys[old] = entry.Meters[i].Key
 	}
-	limitKeys := map[string]string{}
-	for i := range entry.UsageLimits {
-		old := entry.UsageLimits[i].Key
-		entry.UsageLimits[i].Key += suffix
-		limitKeys[old] = entry.UsageLimits[i].Key
-	}
 	for i := range entry.Products {
 		entry.Products[i].Key += suffix
 		if entry.Products[i].TierGroup != "" {
 			entry.Products[i].TierGroup += suffix
-		}
-		for j := range entry.Products[i].UsageLimits {
-			entry.Products[i].UsageLimits[j] = limitKeys[entry.Products[i].UsageLimits[j]]
-		}
-		for j := range entry.Products[i].Includes {
-			entry.Products[i].Includes[j] += suffix
 		}
 		for j := range entry.Products[i].Prices {
 			entry.Products[i].Prices[j].PSPs = nil
@@ -1627,10 +1092,9 @@ func loadExampleCatalogForHTTP(t *testing.T) catalog.Manifest {
 		}
 	}
 	m := catalog.Manifest{
-		Version:     file.Version,
-		Products:    entry.Products,
-		Meters:      entry.Meters,
-		UsageLimits: entry.UsageLimits,
+		Version:  file.Version,
+		Products: entry.Products,
+		Meters:   entry.Meters,
 	}
 	require.NoError(t, m.Validate())
 	return m
@@ -1699,26 +1163,9 @@ WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUI
 	require.Equal(t, expectedPrices, n)
 
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM openrails.catalog_usage_limits WHERE merchant_id = $1 AND key = ANY($2::text[])`,
-		dbtest.TestMerchantID.UUID(), exampleUsageLimitKeys(m)).Scan(&n))
-	require.Equal(t, len(m.UsageLimits), n)
-
-	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM openrails.catalog_meters WHERE merchant_id = $1 AND key = ANY($2::text[])`,
 		dbtest.TestMerchantID.UUID(), exampleMeterKeys(m)).Scan(&n))
 	require.Equal(t, len(m.Meters), n)
-
-	require.NoError(t, pool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.product_includes pi
-JOIN openrails.products p ON p.id = pi.product_id
-WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
-	require.Equal(t, exampleIncludesCount(m), n)
-
-	require.NoError(t, pool.QueryRow(ctx, `
-SELECT count(*) FROM openrails.product_usage_limits pul
-JOIN openrails.products p ON p.id = pul.product_id
-WHERE p.merchant_id = $1 AND p.key = ANY($2::text[])`, dbtest.TestMerchantID.UUID(), keys).Scan(&n))
-	require.Equal(t, exampleProductUsageLimitCount(m), n)
 
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT count(*) FROM openrails.catalog_rate_cards WHERE merchant_id = $1 AND meter_key = ANY($2::text[])`,
@@ -1756,36 +1203,12 @@ func exampleFreeTrialPriceCount(m catalog.Manifest) int {
 	return n
 }
 
-func exampleUsageLimitKeys(m catalog.Manifest) []string {
-	keys := make([]string, 0, len(m.UsageLimits))
-	for _, limit := range m.UsageLimits {
-		keys = append(keys, limit.Key)
-	}
-	return keys
-}
-
 func exampleMeterKeys(m catalog.Manifest) []string {
 	keys := make([]string, 0, len(m.Meters))
 	for _, meter := range m.Meters {
 		keys = append(keys, meter.Key)
 	}
 	return keys
-}
-
-func exampleIncludesCount(m catalog.Manifest) int {
-	var n int
-	for _, p := range m.Products {
-		n += len(p.Includes)
-	}
-	return n
-}
-
-func exampleProductUsageLimitCount(m catalog.Manifest) int {
-	var n int
-	for _, p := range m.Products {
-		n += len(p.UsageLimits)
-	}
-	return n
 }
 
 // exampleUsageRateCardCount counts the usage rate cards in the published

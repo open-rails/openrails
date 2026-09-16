@@ -8,21 +8,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/stretchr/testify/require"
 )
-
-type countingSubscriptionCreditGranter struct {
-	calls int
-}
-
-func (g *countingSubscriptionCreditGranter) GrantSubscriptionCreditsTx(context.Context, *gen.Queries, SubscriptionCreditGrantParams) error {
-	g.calls++
-	return nil
-}
 
 func seedPendingSubscriptionWithPayment(t *testing.T, f *failopenFixture, procSubID, txnID string) uuid.UUID {
 	t.Helper()
@@ -164,20 +154,15 @@ func TestCreateMembership_RejectsRecordedPaymentForNonBillableSubscription(t *te
 				cancelType := models.CancelTypeExpired
 				_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
 					SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4,
-					    cancelled_at=$3, cancel_type=$5,
-					    credits_spec_snapshot='{"welcome":{"unit":"USD","amount":25,"cadence":"once"}}'::jsonb
+					    cancelled_at=$3, cancel_type=$5
 					WHERE id=$1`, subID, tt.status, periodStart, periodEnd, cancelType)
 				require.NoError(t, err)
 			} else {
 				_, err := f.pool.Exec(ctx, `UPDATE openrails.subscriptions
-					SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4,
-					    credits_spec_snapshot='{"welcome":{"unit":"USD","amount":25,"cadence":"once"}}'::jsonb
+					SET status=$2, current_period_starts_at=$3, current_period_ends_at=$4
 					WHERE id=$1`, subID, tt.status, periodStart, periodEnd)
 				require.NoError(t, err)
 			}
-
-			credits := &countingSubscriptionCreditGranter{}
-			f.lifecycle.SetCreditGranter(credits)
 			sub, err := f.lifecycle.CreateMembership(ctx, &CreateMembershipParams{
 				UserID:        f.userID,
 				PriceID:       f.priceID,
@@ -186,7 +171,6 @@ func TestCreateMembership_RejectsRecordedPaymentForNonBillableSubscription(t *te
 			})
 			require.Nil(t, sub)
 			require.ErrorContains(t, err, "status \""+string(tt.status)+"\"")
-			require.Zero(t, credits.calls, "a rejected replay must not grant subscription credits")
 			require.Equal(t, tt.status, f.loadSub(t, subID).Status)
 		})
 	}

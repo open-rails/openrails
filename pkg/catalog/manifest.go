@@ -18,21 +18,14 @@
 // so apply can fan out explicitly across Stripe, NMI, CCBill and Solana.
 package catalog
 
-import (
-	"bytes"
-	"encoding/json"
-)
-
 // Manifest is the root of a catalog-as-code document.
 //
 // Every price declares its own `currency` and `providers` explicitly — there
 // are no catalog/product-level defaults.
 type Manifest struct {
-	Version        int             `json:"version" yaml:"version"`
-	Products       []Product       `json:"products,omitempty" yaml:"products,omitempty"`
-	Meters         []Meter         `json:"meters,omitempty" yaml:"meters,omitempty"`
-	CreditBalances []CreditBalance `json:"credit_balances,omitempty" yaml:"credit_balances,omitempty"`
-	UsageLimits    []UsageLimit    `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
+	Version  int       `json:"version" yaml:"version"`
+	Products []Product `json:"products,omitempty" yaml:"products,omitempty"`
+	Meters   []Meter   `json:"meters,omitempty" yaml:"meters,omitempty"`
 
 	TierGroups []TierGroup `json:"-" yaml:"-"`
 }
@@ -52,17 +45,6 @@ type Meter struct {
 	GroupBy       map[string]string `json:"group_by,omitempty" yaml:"group_by,omitempty"`
 }
 
-type UsageLimit struct {
-	Key     string             `json:"key" yaml:"key"`
-	Measure string             `json:"measure" yaml:"measure"`
-	Windows []UsageLimitWindow `json:"windows" yaml:"windows"`
-}
-
-type UsageLimitWindow struct {
-	Window string `json:"window" yaml:"window"`
-	Amount int64  `json:"amount" yaml:"amount"`
-}
-
 // TierGroup is a named grouping of products (e.g. a subscription plan family).
 type TierGroup struct {
 	Key         string    `json:"key" yaml:"key"`
@@ -79,60 +61,16 @@ type Product struct {
 	TierRank    *int   `json:"tier_rank,omitempty" yaml:"tier_rank,omitempty"`
 	// Archived maps to status=archived. Omitted/false = active (matches the
 	// merchant-manifest PSP `archived` key).
-	Archived     bool          `json:"archived,omitempty" yaml:"archived,omitempty"`
-	Entitlements []string      `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
-	Credits      []CreditGrant `json:"credits,omitempty" yaml:"credits,omitempty"`
-	UsageLimits  []string      `json:"usage_limits,omitempty" yaml:"usage_limits,omitempty"`
-	Includes     []string      `json:"includes,omitempty" yaml:"includes,omitempty"`
+	Archived     bool     `json:"archived,omitempty" yaml:"archived,omitempty"`
+	Entitlements []string `json:"entitlements,omitempty" yaml:"entitlements,omitempty"`
 
 	Prices []Price `json:"prices,omitempty" yaml:"prices,omitempty"`
 
-	// Rate-card model (#638): metered usage / flat-fee rate cards and a variable
-	// credit top-up (#639/#640). A usage product declares no billing cadence — its
+	// Metered usage and flat-fee rate cards. A usage product declares no billing cadence — its
 	// cap/allowance window is the invoice period (calendar-month via the merchant
 	// invoice boundary), so collection cadence is a billing-policy concern (#643),
 	// not catalog (#642).
 	RateCards []RateCard `json:"rate_cards,omitempty" yaml:"rate_cards,omitempty"`
-}
-
-type CreditBalance struct {
-	Key  string `json:"key" yaml:"key"`
-	Unit string `json:"unit" yaml:"unit"`
-	// ExpiresDefault is the DECLARED expiry every grant into this balance
-	// inherits unless it declares its own `expires` (e.g. "365d"). Omitting it
-	// means balances in this bucket never expire — OpenRails supplies no
-	// implicit clock of its own (#857).
-	ExpiresDefault string `json:"expires_default,omitempty" yaml:"expires_default,omitempty"`
-}
-
-// CreditGrant is one product-bundled deposit into a declared credit balance.
-// Expiry comes from `expires` here, else the balance's `expires_default`, else
-// nowhere — and "nowhere" means the granted balance never expires (#857).
-type CreditGrant struct {
-	Key string `json:"key" yaml:"key"`
-	// Unit is resolved from the referenced CreditBalance during validation.
-	Unit string `json:"-" yaml:"-"`
-	// Currency is internal state; catalog v1 does not declare it on grants.
-	Currency string `json:"-" yaml:"-"`
-	Amount   *int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
-	// ExpiryHours is resolved from Expires or the balance default.
-	ExpiryHours *int   `json:"-" yaml:"-"`
-	Expires     string `json:"expires,omitempty" yaml:"expires,omitempty"`
-	Cadence     string `json:"cadence,omitempty" yaml:"cadence,omitempty"`
-}
-
-// UnmarshalJSON keeps the HTTP catalog manifest as strict as the YAML parser.
-func (g *CreditGrant) UnmarshalJSON(raw []byte) error {
-	type manifestCreditGrant CreditGrant
-
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	var declared manifestCreditGrant
-	if err := decoder.Decode(&declared); err != nil {
-		return err
-	}
-	*g = CreditGrant(declared)
-	return nil
 }
 
 func (p Product) tierRank() int {
@@ -208,18 +146,6 @@ type Price struct {
 	//   trial: {unit_amount: 19950000, duration: 30d}  # $19.95 (micros) first 30d, then UnitAmount recurring
 	//   trial: {unit_amount: 0, duration: 7d}           # free 7-day trial, then UnitAmount recurring
 	Trial *PriceTrial `json:"trial,omitempty" yaml:"trial,omitempty"`
-
-	// Variable credit top-up offer fields. Fixed catalog prices keep using the
-	// UnitAmount/Duration shape above. Rounding is declared where it applies —
-	// per_unit.round — not here (or#823: a top-level `round:` was validated and
-	// then never carried into the price, so it is retired and now fails to load).
-	InputMin int64         `json:"input_min,omitempty" yaml:"input_min,omitempty"`
-	InputMax int64         `json:"input_max,omitempty" yaml:"input_max,omitempty"`
-	Model    string        `json:"model,omitempty" yaml:"model,omitempty"`
-	Flat     *FlatPrice    `json:"flat,omitempty" yaml:"flat,omitempty"`
-	PerUnit  *PerUnitPrice `json:"per_unit,omitempty" yaml:"per_unit,omitempty"`
-	Tiered   *TieredPrice  `json:"tiered,omitempty" yaml:"tiered,omitempty"`
-	Package  *PackagePrice `json:"package,omitempty" yaml:"package,omitempty"`
 }
 
 // PriceTrial is the trial first phase for a Price (#622): a first phase at its
@@ -228,25 +154,4 @@ type Price struct {
 type PriceTrial struct {
 	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // first-phase price in micros (0 = free trial)
 	Duration   string `json:"duration" yaml:"duration"`       // first-phase length
-}
-
-func (p Price) ratePrice() RatePrice {
-	return RatePrice{
-		Model:    p.Model,
-		Currency: p.Currency,
-		Flat:     p.Flat,
-		PerUnit:  p.PerUnit,
-		Tiered:   p.Tiered,
-		Package:  p.Package,
-	}
-}
-
-func (p Price) withRatePrice(rp RatePrice) Price {
-	p.Model = rp.Model
-	p.Currency = rp.Currency
-	p.Flat = rp.Flat
-	p.PerUnit = rp.PerUnit
-	p.Tiered = rp.Tiered
-	p.Package = rp.Package
-	return p
 }

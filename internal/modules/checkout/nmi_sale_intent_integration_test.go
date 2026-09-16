@@ -27,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
@@ -164,20 +163,6 @@ type saleIntentFixture struct {
 	productID  uuid.UUID
 	priceID    uuid.UUID
 	ctx        context.Context
-}
-
-type failOncePurchaseCredits struct {
-	delegate purchaseCreditGranter
-	err      error
-}
-
-func (f *failOncePurchaseCredits) GrantPurchaseCredits(ctx context.Context, params money.GrantPurchaseCreditsParams) error {
-	if f.err != nil {
-		err := f.err
-		f.err = nil
-		return err
-	}
-	return f.delegate.GrantPurchaseCredits(ctx, params)
 }
 
 type failOnceProductAccess struct {
@@ -317,48 +302,6 @@ func TestNMISaleIntent_WriteThroughHappyPathAndReplay(t *testing.T) {
 	require.Equal(t, intent.ID, replay.ID)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load(), "replay never re-charges")
 	require.Equal(t, 1, fx.paymentCount(t))
-}
-
-func TestNMISaleIntent_PurchaseCreditFailureRetriesWithoutRecharging(t *testing.T) {
-	fx := newSaleIntentFixture(t)
-	credits := models.CreditsSpec{
-		"welcome": {Unit: money.DefaultCurrency, Amount: 25, Cadence: models.CreditGrantCadenceOnce},
-	}
-	creditsJSON, err := json.Marshal(credits)
-	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.products SET credits_spec=$2 WHERE id=$1`, fx.productID, creditsJSON)
-	require.NoError(t, err)
-
-	injected := errors.New("injected purchase credit failure")
-	moneyService := money.NewMoneyService(fx.db)
-	fx.purchase.SetMoneyService(&failOncePurchaseCredits{delegate: moneyService, err: injected})
-	key := "sale-credit-retry-" + uuid.NewString()[:8]
-	intent := fx.enqueueAndExecute(t, key)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, intent.Status, "an incomplete credit effect must not complete the sale intent")
-	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
-	require.Equal(t, 1, fx.paymentCount(t), "the provider charge remains durably recorded for retry")
-
-	fx.gateway.unavailable.Store(true) // captured receipt must survive unavailable search
-	fx.advanceClock(2 * time.Minute)
-	_, err = fx.runner.RunVerifyOnce(fx.ctx)
-	require.NoError(t, err)
-	final, err := intents.NewStore(fx.db).Get(fx.ctx, intent.ID)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusSucceeded, final.Status)
-	require.EqualValues(t, 1, fx.gateway.saleCalls.Load(), "effect retry must verify the existing charge, never charge again")
-	require.Equal(t, 1, fx.paymentCount(t))
-
-	balance, err := moneyService.GetBalance(fx.ctx, fx.customerID.String(), money.DefaultCurrency)
-	require.NoError(t, err)
-	require.Equal(t, int64(25), balance.Balance)
-	cached, err := saleResultFromIntent(final)
-	require.NoError(t, err)
-	grantSourceID := "openrails:purchase_credit_grant:" + cached.PaymentID.String() + ":welcome"
-	var grants int
-	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
-		`SELECT count(*) FROM openrails.grants WHERE customer_id=$1 AND kind='credit' AND source_id=$2`,
-		fx.customerID, grantSourceID).Scan(&grants))
-	require.Equal(t, 1, grants, "the retried purchase credit must be fulfilled exactly once")
 }
 
 func TestNMISaleIntent_ProductAccessFailureRetriesWithoutRecharging(t *testing.T) {

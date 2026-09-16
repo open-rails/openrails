@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -51,8 +53,8 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 	if err := params.Key.RequireOperation(OpSpend); err != nil {
 		return nil, err
 	}
-	cur := normalizeUnit(params.Currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(params.Currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -138,8 +140,8 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 	if err := params.Key.RequireOperation(OpCapture); err != nil {
 		return nil, err
 	}
-	cur := normalizeUnit(params.Currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(params.Currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -244,7 +246,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		return 0, 0, false, fmt.Errorf("spend: idempotency key required")
 	}
 	now := s.now()
-	cur := normalizeUnit(currency)
+	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, 0, false, err
@@ -285,9 +287,6 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	fromOwed := amount - fromBalance
 
 	if fromOwed > 0 {
-		if IsQualifiedUnit(cur) {
-			return 0, 0, false, ErrInsufficientCredits
-		}
 		if preAuthorized {
 			// Pre-authorized capture never re-gates: the remainder becomes
 			// owed/overdraft regardless of the credit line. Ensure a settings row

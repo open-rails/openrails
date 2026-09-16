@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -66,6 +67,6 @@ func (s *Service) CreditUnitDecimals(ctx context.Context, currency string) (int,
 	if err != nil {
 		return 0, err
 	}
-	decimals, _, err := s.moneyService().ResolveUnit(ctx, code)
+	decimals, err := money.CurrencyDecimals(code)
 	return decimals, err
 }

@@ -102,7 +102,6 @@ const (
 	// streamExpr classifies a payment's revenue stream.
 	streamExpr = `CASE
 		WHEN p.subscription_id IS NOT NULL THEN 'subscription'
-		WHEN p.credits_spec_snapshot IS NOT NULL AND p.credits_spec_snapshot::text NOT IN ('{}', 'null') THEN 'usage'
 		ELSE 'one_time' END`
 
 	// saleRows / mirror rows: a sale row has refunded_payment_id NULL; refund and

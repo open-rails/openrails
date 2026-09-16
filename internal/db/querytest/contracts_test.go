@@ -52,11 +52,11 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		Key:              "query-contract-" + productID.String(),
 		DisplayName:      "Query Contract Premium",
 		EntitlementsSpec: []byte(`["premium"]`),
-		CreditsSpec:      []byte(`{}`),
-		TierGroup:        strptr("premium"),
-		TierRank:         10,
-		CreatedAt:        now,
-		UpdatedAt:        now,
+
+		TierGroup: strptr("premium"),
+		TierRank:  10,
+		CreatedAt: now,
+		UpdatedAt: now,
 	})
 	require.NoError(t, err)
 
@@ -89,17 +89,17 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		PriceID:                  &priceID,
 		MerchantID:               merchantID,
 		EntitlementsSpecSnapshot: []byte(`["premium"]`),
-		CreditsSpecSnapshot:      []byte(`{}`),
-		Status:                   "active",
-		StartedAt:                now,
-		CurrentPeriodStartsAt:    &now,
-		CurrentPeriodEndsAt:      timeptr(now.Add(30 * 24 * time.Hour)),
-		Rail:                     "ccbill",
-		RailSubscriptionID:       "sub_" + subscriptionID.String(),
-		GatewayResponse:          []byte(`{}`),
-		CreatedAt:                now,
-		UpdatedAt:                now,
-		PspID:                    account.ID,
+
+		Status:                "active",
+		StartedAt:             now,
+		CurrentPeriodStartsAt: &now,
+		CurrentPeriodEndsAt:   timeptr(now.Add(30 * 24 * time.Hour)),
+		Rail:                  "ccbill",
+		RailSubscriptionID:    "sub_" + subscriptionID.String(),
+		GatewayResponse:       []byte(`{}`),
+		CreatedAt:             now,
+		UpdatedAt:             now,
+		PspID:                 account.ID,
 	})
 	require.NoError(t, err)
 

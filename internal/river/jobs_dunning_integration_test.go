@@ -4,7 +4,6 @@ package riverjobs
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +49,6 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 
 	// The grant spec key is just a label now (#472: money has no credit_type);
 	// Unit "USD" deposits into the USD money balance.
-	grantLabel := "test_credits_" + uuid.New().String()
 	productID := uuid.New()
 	priceID := uuid.New()
 	paymentMethodID := uuid.New()
@@ -60,9 +58,6 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	billingDays := 720
 	billingDays32 := int32(billingDays)
 
-	creditsSpecJSON, err := json.Marshal(models.CreditsSpec{
-		grantLabel: {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal},
-	})
 	require.NoError(t, err)
 	description := "Test"
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
@@ -71,7 +66,6 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		DisplayName: "Test Product",
 		MerchantID:  dbtest.TestMerchantID.UUID(),
 		Description: &description,
-		CreditsSpec: creditsSpecJSON,
 		Archived:    false,
 		CreatedAt:   now,
 		UpdatedAt:   now,
@@ -220,7 +214,6 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
-	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: a merchant in the Go context is
 	// not enough — the pass must run on a merchant-scoped CONNECTION, or every
@@ -246,7 +239,7 @@ func TestDunningWorker_RebillSuccess_GrantsCreditsOnce(t *testing.T) {
 		bal, e = moneySvc.GetBalanceForCustomer(sctx, identity.CustomerID(tenantSubjectID), "USD")
 		return e
 	}))
-	require.Equal(t, int64(100), bal.Balance, "renewal granted the 100 USD credit lot exactly once")
+	require.Equal(t, int64(0), bal.Balance, "subscription renewals do not create bundled balances")
 }
 
 // TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent pins the
@@ -376,7 +369,6 @@ func TestDunningWorker_ConflictRepairFromDurableSuccessfulIntent(t *testing.T) {
 	paymentSvc := payments.NewPaymentService(dbi, nil)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entitlementSvc, notifSvc, paymentSvc, nil)
 	moneySvc := money.NewMoneyService(dbi, nil)
-	lifecycle.SetCreditGranter(moneySvc)
 
 	// Same shape as the production Work loop: read AND repair on a
 	// merchant-scoped connection. On the bare context subscriptions' FORCEd RLS

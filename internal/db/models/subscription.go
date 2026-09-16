@@ -51,7 +51,6 @@ type Subscription struct {
 	ScheduledPriceID *uuid.UUID `json:"scheduled_price_id,omitempty"`
 
 	EntitlementsSpecSnapshot map[string]*int `json:"entitlements_spec_snapshot,omitempty"`
-	CreditsSpecSnapshot      CreditsSpec     `json:"credits_spec_snapshot,omitempty"`
 
 	Status                SubscriptionStatus `json:"status"`
 	StartedAt             time.Time          `json:"started_at"`

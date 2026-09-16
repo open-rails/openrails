@@ -21,39 +21,6 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-type CreditGrantCadence string
-
-const (
-	CreditGrantCadenceOnce       CreditGrantCadence = "once"
-	CreditGrantCadencePerRenewal CreditGrantCadence = "per_renewal"
-)
-
-type CreditGrantSpec struct {
-	Unit        string             `json:"unit,omitempty"`
-	Amount      int64              `json:"amount"`
-	ExpiryHours *int               `json:"expiry_hours,omitempty"`
-	Cadence     CreditGrantCadence `json:"cadence,omitempty"`
-}
-
-type CreditsSpec map[string]CreditGrantSpec
-
-func toModelCreditsSpec(in CreditsSpec) models.CreditsSpec {
-	if in == nil {
-		return nil
-	}
-	out := make(models.CreditsSpec, len(in))
-	for k, v := range in {
-		cadence := models.CreditGrantCadence(v.Cadence)
-		out[k] = models.CreditGrantSpec{
-			Unit:        v.Unit,
-			Amount:      v.Amount,
-			ExpiryHours: v.ExpiryHours,
-			Cadence:     cadence,
-		}
-	}
-	return out
-}
-
 // ProviderStatus is the per-provider attachment state surfaced in admin
 // responses. Issue #208 defines these four values.
 type ProviderStatus = openrails.ProviderStatus
@@ -102,7 +69,6 @@ type CatalogProduct struct {
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	CreditsSpec      CreditsSpec     `json:"credits_spec,omitempty"`
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	TierRank         int             `json:"tier_rank"`
 	Archived         bool            `json:"archived"`
@@ -115,7 +81,6 @@ type CreateProductRequest struct {
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
-	CreditsSpec      CreditsSpec     `json:"credits_spec,omitempty"`
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	TierRank         int             `json:"tier_rank,omitempty"`
 	// Archived creates the product retired. Supports migrating historical
@@ -149,10 +114,6 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if err != nil {
 		return nil, err
 	}
-	storedCredits, err := s.storedCatalogCredits(ctx, req.CreditsSpec)
-	if err != nil {
-		return nil, err
-	}
 	p := &models.Product{
 		// #662: the product id is a pure function of its immutable natural key
 		// (merchant_id, key) — same logical product → same id in every DB.
@@ -162,7 +123,6 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
-		CreditsSpec:      storedCredits,
 		TierGroup:        req.TierGroup,
 		TierRank:         req.TierRank,
 		Archived:         req.Archived,
@@ -172,7 +132,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	if err := products.Create(ctx, p); err != nil {
 		return nil, err
 	}
-	return s.catalogProduct(ctx, p)
+	return productToCatalogProduct(p), nil
 }
 
 // ErrProductTierGroupInUse reports a product identity conflict with live subscriptions.
@@ -188,8 +148,6 @@ type UpdateProductRequest struct {
 	Description      *string         `json:"description,omitempty"`
 	EntitlementsSpec map[string]*int `json:"entitlements_spec,omitempty"`
 	SetEntitlements  bool            `json:"set_entitlements,omitempty"`
-	CreditsSpec      CreditsSpec     `json:"credits_spec,omitempty"`
-	SetCredits       bool            `json:"set_credits,omitempty"`
 	TierGroup        *string         `json:"tier_group,omitempty"`
 	SetTierGroup     bool            `json:"set_tier_group,omitempty"`
 	TierRank         *int            `json:"tier_rank,omitempty"`
@@ -217,20 +175,11 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	if productID == uuid.Nil {
 		return nil, fmt.Errorf("product_id required")
 	}
-	var storedCredits models.CreditsSpec
-	if req.SetCredits {
-		storedCredits, err = s.storedCatalogCredits(ctx, req.CreditsSpec)
-		if err != nil {
-			return nil, err
-		}
-	}
 	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
 		EntitlementsSpec: req.EntitlementsSpec,
 		SetEntitlements:  req.SetEntitlements,
-		CreditsSpec:      storedCredits,
-		SetCredits:       req.SetCredits,
 		TierGroup:        req.TierGroup,
 		SetTierGroup:     req.SetTierGroup,
 		TierRank:         req.TierRank,
@@ -284,7 +233,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 		}
 	}
 
-	return s.catalogProduct(ctx, p)
+	return productToCatalogProduct(p), nil
 }
 
 // propagateProductActiveToStripe pushes the product's active flag to its Stripe
@@ -326,25 +275,12 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 }
 
 func productToCatalogProduct(p *models.Product) *CatalogProduct {
-	var credits CreditsSpec
-	if len(p.CreditsSpec) > 0 {
-		credits = make(CreditsSpec, len(p.CreditsSpec))
-		for k, v := range p.CreditsSpec {
-			credits[k] = CreditGrantSpec{
-				Unit:        v.Unit,
-				Amount:      v.Amount,
-				ExpiryHours: v.ExpiryHours,
-				Cadence:     CreditGrantCadence(v.Cadence),
-			}
-		}
-	}
 	return &CatalogProduct{
 		ID:               p.ID,
 		Key:              p.Key,
 		DisplayName:      p.DisplayName,
 		Description:      p.Description,
 		EntitlementsSpec: p.EntitlementsSpec,
-		CreditsSpec:      credits,
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
 		Archived:         p.Archived,

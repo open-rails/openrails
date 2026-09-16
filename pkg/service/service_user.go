@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -96,13 +97,6 @@ func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*Pa
 	products := make([]Product, 0, len(result.Products))
 	for _, p := range result.Products {
 		projected := productFromModel(p)
-		for key, spec := range projected.CreditsSpec {
-			spec.Unit, err = s.DisplayCurrency(ctx, spec.Unit)
-			if err != nil {
-				return nil, err
-			}
-			projected.CreditsSpec[key] = spec
-		}
 		products = append(products, projected)
 	}
 
@@ -1138,7 +1132,7 @@ func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string)
 	if err != nil {
 		return nil, fmt.Errorf("get credit balance: %w", err)
 	}
-	decimals, _, err := s.moneyService().ResolveUnit(ctx, bal.Currency)
+	decimals, err := money.CurrencyDecimals(bal.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -1330,7 +1324,6 @@ func productFromModel(p *catalog.PublicProductResponse) Product {
 		Name:             p.DisplayName,
 		Description:      p.Description,
 		EntitlementsSpec: p.EntitlementsSpec,
-		CreditsSpec:      creditsSpecFromModel(p.CreditsSpec),
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
@@ -1338,22 +1331,6 @@ func productFromModel(p *catalog.PublicProductResponse) Product {
 		Updated:          api.ToUnix(p.UpdatedAt),
 		Prices:           prices,
 	}
-}
-
-func creditsSpecFromModel(in models.CreditsSpec) CreditsSpec {
-	if in == nil {
-		return nil
-	}
-	out := make(CreditsSpec, len(in))
-	for k, v := range in {
-		out[k] = CreditGrantSpec{
-			Unit:        v.Unit,
-			Amount:      v.Amount,
-			ExpiryHours: v.ExpiryHours,
-			Cadence:     CreditGrantCadence(v.Cadence),
-		}
-	}
-	return out
 }
 
 func priceFromModel(p *models.Price) Price {

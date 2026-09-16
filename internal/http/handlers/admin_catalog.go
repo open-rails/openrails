@@ -72,7 +72,7 @@ func writeCatalogError(r *httprequest.Request, err error) {
 
 func AdminCreateProduct(r *httprequest.Request) {
 	var req billingservice.CreateProductRequest
-	if !r.BindJSON(&req) {
+	if !bindCatalogJSON(r, &req) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
@@ -151,7 +151,7 @@ func AdminUpdateProduct(r *httprequest.Request) {
 		return
 	}
 	var req billingservice.UpdateProductRequest
-	if !r.BindJSON(&req) {
+	if !bindCatalogJSON(r, &req) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
@@ -206,7 +206,7 @@ func AdminDeactivateProduct(r *httprequest.Request) {
 
 func AdminCreatePrice(r *httprequest.Request) {
 	var req billingservice.CreatePriceRequest
-	if !r.BindJSON(&req) {
+	if !bindCatalogJSON(r, &req) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
@@ -282,7 +282,7 @@ func AdminUpdatePrice(r *httprequest.Request) {
 		return
 	}
 	var req billingservice.UpdatePriceRequest
-	if !r.BindJSON(&req) {
+	if !bindCatalogJSON(r, &req) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)
@@ -394,7 +394,7 @@ func AdminSetPriceKey(r *httprequest.Request) {
 		return
 	}
 	var req setPriceKeyRequest
-	if !r.BindJSON(&req) {
+	if !bindCatalogJSON(r, &req) {
 		return
 	}
 	svc, ok := newAdminBillingService(r)

@@ -125,12 +125,10 @@ type simSub struct {
 // ListLapsedSubscriptionsWithEvidence's payment_opened_period leg). Omitting
 // it is the no-evidence-parking case: the row waits out PeriodGrace and then
 // parks as `unknown` instead of ever entering dunning.
-func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodStart time.Time, withInitialPayment bool, creditExpiryHours *int) simSub {
+func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodStart time.Time, withInitialPayment bool) simSub {
 	t.Helper()
 	pool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 	q := gen.New(pool)
-
-	grantLabel := "sim_credits_" + uuid.New().String()
 	entName := "sim_pro_access_" + uuid.New().String()[:8]
 	productID := uuid.New()
 	priceID := uuid.New()
@@ -139,10 +137,6 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 	userID := uuid.New().String()
 	now := periodStart
 
-	creditsSpec := models.CreditsSpec{
-		grantLabel: {Unit: "USD", Amount: 100, Cadence: models.CreditGrantCadencePerRenewal, ExpiryHours: creditExpiryHours},
-	}
-	creditsSpecJSON, err := json.Marshal(creditsSpec)
 	require.NoError(t, err)
 
 	entitlementsSpec := map[string]*int{entName: nil}
@@ -153,8 +147,8 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 	_, err = q.CreateProduct(ctx, gen.CreateProductParams{
 		ID: productID, Key: "sim_product_" + uuid.New().String(), DisplayName: "Sim Product",
 		MerchantID: dbtest.TestMerchantID.UUID(), Description: &description,
-		EntitlementsSpec: entitlementsSpecJSON, CreditsSpec: creditsSpecJSON,
-		Archived: false, CreatedAt: now, UpdatedAt: now,
+		EntitlementsSpec: entitlementsSpecJSON,
+		Archived:         false, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(t, err)
 
@@ -374,7 +368,6 @@ func newSimRigWithStep(t *testing.T, dbi *db.DB, start time.Time, stub *nmiStub,
 
 func (r *simRig) lifecycle() *subscriptions.SubscriptionLifecycleService {
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(r.dbi, r.productSvc, r.priceSvc, r.entitlementSvc, r.notifSvc, r.paymentSvc, r.clock)
-	lifecycle.SetCreditGranter(r.moneySvc)
 	return lifecycle
 }
 
@@ -481,8 +474,7 @@ func paymentCount(t *testing.T, ctx context.Context, dbi *db.DB, subID uuid.UUID
 func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t)
-	expiryHours := 35 * 24
-	sim := seedSimSubscription(t, ctx, dbi, start, true, &expiryHours)
+	sim := seedSimSubscription(t, ctx, dbi, start, true)
 	rig := newSimRig(t, dbi, start, stub)
 	scope := converge.Scope{Merchant: dbtest.TestMerchantID, Customer: &sim.customerID}
 
@@ -506,7 +498,7 @@ func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 
 		require.Equal(t, cycle, stub.count(), "cycle %d: exactly one dunning attempt", cycle)
 		require.Equal(t, cycle+1, paymentCount(t, ctx, dbi, sim.subID, payments.PaymentStatusCompletedValue), "cycle %d: signup + one completed renewal payment per cycle", cycle)
-		require.Equal(t, cycle, creditGrantCount(t, ctx, dbi, sim.subID), "cycle %d: exactly one credit grant", cycle)
+		require.Equal(t, 0, creditGrantCount(t, ctx, dbi, sim.subID), "cycle %d: exactly one credit grant", cycle)
 
 		periodEnd = wantEnd
 	}
@@ -518,7 +510,7 @@ func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 	// not. Balance must reflect only the live lots.
 	bal, err := rig.moneySvc.GetBalanceForCustomer(ctx, identity.CustomerID(sim.customerID), "USD")
 	require.NoError(t, err)
-	require.Equal(t, int64(200), bal.Balance, "the expired cycle-1 lot was clawed back; cycles 2+3 remain")
+	require.Equal(t, int64(0), bal.Balance, "subscription renewals do not create bundled balances")
 }
 
 // --- scenario 2: dunning recovery -----------------------------------------
@@ -532,7 +524,7 @@ func testHappyRenewals(t *testing.T, ctx context.Context, dbi *db.DB) {
 func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t)
-	sim := seedSimSubscription(t, ctx, dbi, start, true, nil)
+	sim := seedSimSubscription(t, ctx, dbi, start, true)
 	rig := newSimRig(t, dbi, start, stub)
 	scope := converge.Scope{Merchant: dbtest.TestMerchantID, Customer: &sim.customerID}
 	convergeToFixpoint(t, ctx, rig.engine, scope)
@@ -547,7 +539,7 @@ func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 	require.Equal(t, 2, stub.count(), "one declined attempt + one successful retry")
 	require.Equal(t, 1, paymentCount(t, ctx, dbi, sim.subID, payments.PaymentStatusFailedValue), "the declined attempt is durably recorded")
 	require.Equal(t, 2, paymentCount(t, ctx, dbi, sim.subID, payments.PaymentStatusCompletedValue), "signup + the successful renewal (not the decline)")
-	require.Equal(t, 1, creditGrantCount(t, ctx, dbi, sim.subID), "credit granted only on the successful attempt")
+	require.Equal(t, 0, creditGrantCount(t, ctx, dbi, sim.subID), "credit granted only on the successful attempt")
 
 	// Prove the cadence is fully restored: the next cycle renews normally too.
 	secondPeriodEnd := *sub.CurrentPeriodEndsAt
@@ -556,7 +548,7 @@ func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 		return s.Status == models.StatusActive && s.CurrentPeriodEndsAt != nil && s.CurrentPeriodEndsAt.After(secondPeriodEnd)
 	})
 	require.Equal(t, 3, stub.count())
-	require.Equal(t, 2, creditGrantCount(t, ctx, dbi, sim.subID))
+	require.Equal(t, 0, creditGrantCount(t, ctx, dbi, sim.subID))
 	stub.assertDrained(t)
 }
 
@@ -570,7 +562,7 @@ func testDunningRecovery(t *testing.T, ctx context.Context, dbi *db.DB) {
 func testExhaustedDunning(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t)
-	sim := seedSimSubscription(t, ctx, dbi, start, true, nil)
+	sim := seedSimSubscription(t, ctx, dbi, start, true)
 	// A 6h step (not the default 24h): this scenario walks the retry schedule
 	// all the way to its last offset (13d), where the manufactured detection
 	// lag at 24h ticks would land the 5th attempt exactly ON the 14d dunning
@@ -637,7 +629,7 @@ func testExhaustedDunning(t *testing.T, ctx context.Context, dbi *db.DB) {
 func testNoEvidenceParking(t *testing.T, ctx context.Context, dbi *db.DB) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	stub := newNMIStub(t) // never scripted: zero requests expected, ever.
-	sim := seedSimSubscription(t, ctx, dbi, start, false /* no ownership evidence */, nil)
+	sim := seedSimSubscription(t, ctx, dbi, start, false /* no ownership evidence */)
 	rig := newSimRig(t, dbi, start, stub)
 	scope := converge.Scope{Merchant: dbtest.TestMerchantID, Customer: &sim.customerID}
 	convergeToFixpoint(t, ctx, rig.engine, scope)

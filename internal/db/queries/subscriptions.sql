@@ -4,7 +4,7 @@
 -- name: CreateSubscription :execrows
 INSERT INTO openrails.subscriptions (
     id, merchant_id, customer_id, product_id, price_id, scheduled_price_id,
-    entitlements_spec_snapshot, credits_spec_snapshot, status, started_at,
+    entitlements_spec_snapshot, status, started_at,
     ended_at, current_period_starts_at, current_period_ends_at, rail,
     rail_subscription_id, user_email, payment_method_id, last_retry_at,
     retry_attempts, next_retry_at, grace_ends_at, cancel_feedback,
@@ -12,7 +12,7 @@ INSERT INTO openrails.subscriptions (
     created_at, updated_at, psp_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, $4, sqlc.narg(scheduled_price_id),
-    sqlc.narg(entitlements_spec_snapshot), sqlc.narg(credits_spec_snapshot),
+    sqlc.narg(entitlements_spec_snapshot),
     COALESCE(NULLIF(sqlc.arg(status)::text, ''), 'pending')::openrails.subscription_status,
     sqlc.arg(started_at),
     sqlc.narg(ended_at), sqlc.narg(current_period_starts_at), sqlc.narg(current_period_ends_at),
@@ -33,7 +33,6 @@ UPDATE openrails.subscriptions SET
     price_id = $2,
     product_id = $3,
     entitlements_spec_snapshot = sqlc.narg(entitlements_spec_snapshot),
-    credits_spec_snapshot = sqlc.narg(credits_spec_snapshot),
     status = sqlc.arg(status)::openrails.subscription_status,
     started_at = sqlc.arg(started_at),
     ended_at = sqlc.narg(ended_at),
