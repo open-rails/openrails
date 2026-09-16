@@ -260,7 +260,7 @@ func (e *Embedded) Service() (*service.Service, error) {
 	return service.New(e.app.Runtime)
 }
 
-// Control-plane bootstrap + accessor moved to the OPT-IN pkg/embedded/controlplane
+// Control-plane bootstrap + accessor moved to the OPT-IN embed/controlplane
 // helper (#284): the embedded CORE no longer imports internal/controlplane (or,
 // through it, AuthKit). Standalone/AuthKit hosts call
 // controlplane.RunBootstrap(ctx, e.App(), controlplane.BootstrapOptions{...}) and

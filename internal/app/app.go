@@ -30,7 +30,7 @@ type App struct {
 	// It is nil only for embedded hosts that never attach one; the standalone
 	// path ALWAYS attaches the concrete *controlplane.ControlPlane via
 	// SetControlPlane (#469) and recovers it with a type assertion (see
-	// pkg/embedded/controlplane).
+	// embed/controlplane).
 	ControlPlane any
 	// ConsoleAssets is the host-built admin console SPA (#754), served by the
 	// standalone surface when admin_console is enabled.
@@ -153,7 +153,7 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 
 	// The OpenRails-owned AuthKit control plane (#224) is no longer built here
 	// (#284): the core stays AuthKit-free. The standalone/opt-in path builds it and
-	// attaches via SetControlPlane (see pkg/embedded/controlplane.Attach).
+	// attaches via SetControlPlane (see embed/controlplane.Attach).
 
 	return app, nil
 }

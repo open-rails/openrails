@@ -15,7 +15,7 @@ import (
 )
 
 // TestRunBootstrap_ExternalShapeAndExplicitMintOnly is #747's regression
-// guard, exercised entirely through the exported pkg/embedded/controlplane
+// guard, exercised entirely through the exported embed/controlplane
 // surface (this file cannot import internal/controlplane, proving the shape
 // really is external-host-constructible):
 //
