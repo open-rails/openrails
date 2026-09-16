@@ -159,3 +159,6 @@ plans/
 
 # Local contract qualification receipts
 .reports/
+
+# Python bytecode
+__pycache__/

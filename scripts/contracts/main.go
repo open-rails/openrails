@@ -1,34 +1,78 @@
-// contracts captures or verifies the reviewed pre-v1 release contract.
+// contracts verifies or rewrites the reviewed pre-v1 release contract and runs
+// the release workflow matrix. Run it from the repository root.
 package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
-	"github.com/open-rails/openrails/internal/contractaudit"
+	"io"
 	"os"
+	"os/exec"
+	"strings"
+
+	"github.com/open-rails/openrails/internal/contractaudit"
 )
+
+const workflowReceipt = ".reports/v1-workflows.jsonl"
 
 func main() {
 	write := flag.Bool("write", false, "write the reviewed current contract")
+	workflows := flag.Bool("workflows", false, "run compatibility/workflows.tsv against disposable PostgreSQL/Redis and require every matrix cell to pass")
 	flag.Parse()
-	actual, err := contractaudit.Capture(".")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	const path = "compatibility/contract.json"
-	if *write {
-		err = os.WriteFile(path, actual, 0644)
-	} else {
-		var expected []byte
-		expected, err = os.ReadFile(path)
-		if err == nil && !bytes.Equal(expected, actual) {
-			err = fmt.Errorf("contract differs from %s", path)
+	root, err := os.OpenRoot(".")
+	if err == nil {
+		switch {
+		case *workflows:
+			err = runWorkflows(root)
+		case *write:
+			var snapshot []byte
+			if snapshot, err = contractaudit.Capture(root.FS()); err == nil {
+				err = root.WriteFile(contractaudit.SnapshotPath, snapshot, 0o644)
+			}
+		default:
+			err = contractaudit.Verify(root.FS())
 		}
+		_ = root.Close()
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func runWorkflows(root *os.Root) error {
+	raw, err := root.ReadFile(contractaudit.WorkflowManifestPath)
+	if err != nil {
+		return err
+	}
+	rows, err := contractaudit.ParseWorkflowManifest(raw)
+	if err != nil {
+		return err
+	}
+	packages, pattern, err := contractaudit.WorkflowSelection(rows)
+	if err != nil {
+		return err
+	}
+	if err := root.MkdirAll(".reports", 0o755); err != nil {
+		return err
+	}
+	receipt, err := root.Create(workflowReceipt)
+	if err != nil {
+		return err
+	}
+	defer receipt.Close()
+
+	// The terminal's interrupt reaches the script directly so it can stop the
+	// Compose services it started.
+	var output bytes.Buffer
+	cmd := exec.CommandContext(context.Background(), "bash", append([]string{"scripts/test_integration.sh", "-json", "-run", pattern}, packages...)...)
+	cmd.Stdout = io.MultiWriter(receipt, &output)
+	cmd.Stderr = os.Stderr
+	runErr := cmd.Run()
+	report, err := contractaudit.QualifyWorkflows(rows, &output, runErr)
+	fmt.Println(strings.Join(report, "\n"))
+	fmt.Println("test events:", workflowReceipt)
+	return err
 }
