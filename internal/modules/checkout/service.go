@@ -2141,53 +2141,6 @@ func (s *CheckoutService) findAdoptableUpgradeSuccessor(ctx context.Context, cli
 	}
 }
 
-// compensateFailedUpgrade rolls back rail-side state after a post-charge DB
-// failure during an NMI tier upgrade: it refunds the proration charge and cancels
-// the newly created NMI subscription so the rail matches the unchanged local
-// state. Each step is best-effort; any failure is logged at error level with a
-// structured event so operators can finish the repair manually.
-func (s *CheckoutService) compensateFailedUpgrade(
-	ctx context.Context,
-	provider string,
-	prorationTransactionID string,
-	newSubscriptionID uuid.UUID,
-	newRailSubscriptionID string,
-	userID string,
-	oldSubscriptionID *uuid.UUID,
-	rollbackNewSubscription func(),
-	cause error,
-) {
-	logEntry := log.WithError(cause).WithFields(log.Fields{
-		"user_id":                  userID,
-		"new_subscription_id":      newSubscriptionID,
-		"new_rail_subscription_id": newRailSubscriptionID,
-		"proration_transaction_id": prorationTransactionID,
-		"rail":                     provider,
-		"event":                    "upgrade_compensation",
-	})
-	if oldSubscriptionID != nil {
-		logEntry = logEntry.WithField("old_subscription_id", *oldSubscriptionID)
-	}
-	logEntry.Warn("compensating failed NMI upgrade after post-charge DB error")
-
-	// Refund the proration charge.
-	if prorationTransactionID != "" {
-		client, cerr := s.resolveNMIClient(ctx, provider)
-		if cerr != nil || client == nil {
-			logEntry.Error("manual intervention required: NMI client unavailable to refund proration")
-		} else if _, err := client.Refund(ctx, nmi.RefundParams{TransactionID: prorationTransactionID}); err != nil {
-			logEntry.WithError(err).Error("manual intervention required: failed to refund proration during upgrade compensation")
-		} else {
-			logEntry.Warn("refunded proration during upgrade compensation")
-		}
-	}
-
-	// Cancel the newly created NMI subscription.
-	if rollbackNewSubscription != nil {
-		rollbackNewSubscription()
-	}
-}
-
 // processDowngrade handles tier downgrades (scheduled for end of period)
 // Downgrade = user moving to a lower tier (lower TierRank)
 // Behavior: Keep current tier until period ends, then switch to new tier at next renewal
