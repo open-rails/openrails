@@ -184,10 +184,11 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 	}
 
 	// --- SUBMIT: new cycles.
-	cursor, err := directory.GetSweepCursor(ctx, KindAccountUpdaterBatch)
-	if err != nil && !db.IsNotFound(err) {
-		return result, fmt.Errorf("account updater: load sweep cursor: %w", err)
+	cursorRow, err := loadSweepCursor(ctx, directory, KindAccountUpdaterBatch)
+	if err != nil {
+		return result, fmt.Errorf("account updater: %w", err)
 	}
+	cursor := cursorRow.CursorMerchantID
 	batch := w.merchantBatch()
 	dueWork := func(after *uuid.UUID, limit int32) ([]*uuid.UUID, error) {
 		return directory.ListAccountUpdaterWorkMerchants(ctx, gen.ListAccountUpdaterWorkMerchantsParams{
@@ -237,12 +238,7 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 		}
 	}
 
-	if serr := directory.SaveSweepCursor(ctx, gen.SaveSweepCursorParams{
-		WorkerKind: KindAccountUpdaterBatch, CursorMerchantID: nextCursor,
-	}); serr != nil {
-		// A lost cursor costs fairness on the next pass, not correctness.
-		logger.WithError(serr).Warn("Account updater: could not persist sweep cursor")
-	}
+	saveSweepCursor(ctx, directory, KindAccountUpdaterBatch, cursorRow, nextCursor, logger)
 
 	if result.BatchesCreated > 0 || result.BatchesCompleted > 0 || result.BatchesAbandoned > 0 {
 		logger.WithFields(log.Fields{
