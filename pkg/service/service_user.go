@@ -1520,6 +1520,9 @@ func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *Checko
 		Status:   resp.Status,
 		Mode:     resp.Mode,
 		PriceID:  resp.PriceID,
+		Amount:   resp.Amount,
+		Currency: resp.Currency,
+		Created:  resp.CreatedAt.Unix(),
 		Metadata: resp.Metadata,
 	}
 	if resp.ExpiresAt != nil {
