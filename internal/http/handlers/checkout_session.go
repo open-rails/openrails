@@ -229,6 +229,10 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		writePaymentMethodError(r, pmErr)
 		return
 	}
+	if errors.Is(err, checkout.ErrPaymentMethodStale) {
+		writePaymentMethodStale(r)
+		return
+	}
 	// Pre-flight insufficient-USDC (#286): a typed, actionable user state (NOT an
 	// internal failure). Surface a clear payment-error code + the have/need amounts
 	// so the frontend can show "need $X, have $Y -> buy USDC" (MoonPay).

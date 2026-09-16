@@ -787,14 +787,7 @@ func (s *CheckoutService) processNMISubscription(
 				log.WithError(cleanupErr).WithField("vault_id", railCustomerRef).Warn("failed to cleanup payment method after subscription error")
 			}
 		}
-		reason := "failed to create subscription"
-		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
-			reason = "failed to create subscription: " + *intent.LastFailureReason
-		}
-		var failErr error = errors.New(reason)
-		if locID := terminalEvidenceLocalization(intent); locID != "" {
-			failErr = &paymentmethods.PaymentMethodError{Err: failErr, LocalizationID: locID, Message: reason}
-		}
+		failErr := terminalCheckoutError(intent, "failed to create subscription")
 		_ = s.IdempotencyService.Fail(ctx, idempOp, idempotencyKey, failErr)
 		return nil, failErr
 	default:
@@ -844,21 +837,6 @@ func nmiSubscriptionResponseFromIntent(intent gen.OpenrailsRailIntent) (*Checkou
 		}
 	}
 	return resp, nil
-}
-
-// terminalEvidenceLocalization reads the decline localization id off a
-// terminally-failed intent's evidence (for client-facing error rendering).
-func terminalEvidenceLocalization(intent gen.OpenrailsRailIntent) string {
-	if len(intent.ResultEvidence) == 0 {
-		return ""
-	}
-	var evidence struct {
-		LocalizationID string `json:"localization_id"`
-	}
-	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return ""
-	}
-	return evidence.LocalizationID
 }
 
 func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, provider string, subscriptionID uuid.UUID, providerSubscriptionID string, transactionID string, delayedStart *time.Time, orderID string, paymentMethodID *uuid.UUID, idempOp string, idempotencyKey string) (*CheckoutResponse, error) {
