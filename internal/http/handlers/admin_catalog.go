@@ -37,6 +37,8 @@ func writeCatalogError(r *httprequest.Request, err error) {
 	// Map known business errors to stable status codes + machine-readable codes.
 	msg := strings.ToLower(err.Error())
 	switch {
+	case errors.Is(err, billingservice.ErrProductTierGroupInUse):
+		r.ErrorJSON(http.StatusConflict, err.Error())
 	// or#896: a trial declared on a rail that cannot execute one is a bad
 	// DECLARATION — 400 with the limitation named, never a generic 500.
 	case errors.Is(err, billingservice.ErrTrialUnsupportedOnRail):

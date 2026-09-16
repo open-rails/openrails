@@ -404,3 +404,24 @@ SELECT EXISTS (
       AND e.revoked_at IS NULL
       AND e.deleted_at IS NULL
 ) AS standing;
+
+-- name: MaterializeEntitlement :exec
+-- Concurrent replay of one immutable grant cannot duplicate its projection.
+INSERT INTO openrails.entitlements (
+    merchant_id, customer_id, entitlement, start_at, end_at, source_type, source_id, grant_id
+) VALUES (
+    sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(entitlement)::text,
+    sqlc.arg(start_at)::timestamptz, sqlc.narg(end_at)::timestamptz,
+    sqlc.arg(source_type)::text, sqlc.narg(source_id)::uuid, sqlc.narg(grant_id)::uuid
+)
+ON CONFLICT (merchant_id, grant_id, entitlement) WHERE grant_id IS NOT NULL AND deleted_at IS NULL DO NOTHING;
+
+-- name: GetLatestEntitlementBySource :one
+SELECT * FROM openrails.entitlements
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND customer_id = sqlc.arg(customer_id)::uuid
+  AND entitlement = sqlc.arg(entitlement)::text
+  AND source_type = sqlc.arg(source_type)::text AND source_id = sqlc.arg(source_id)::uuid
+  AND deleted_at IS NULL
+ORDER BY (revoked_at IS NULL) DESC, end_at DESC NULLS FIRST, start_at ASC, id ASC
+LIMIT 1;

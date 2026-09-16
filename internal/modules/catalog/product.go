@@ -8,10 +8,14 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 )
+
+// ErrProductTierGroupInUse requires an explicit product migration instead of regrouping live subscriptions.
+var ErrProductTierGroupInUse = errors.New("product tier group cannot change while subscriptions are live")
 
 type ProductService struct {
 	db *db.DB
@@ -235,6 +239,10 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		TierRank: rank, Archived: params.Archived,
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "products_live_subscription_tier_group" {
+			return nil, ErrProductTierGroupInUse
+		}
 		return nil, err
 	}
 	return models.ProductFromGen(row)

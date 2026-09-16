@@ -262,40 +262,10 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 			if exists {
 				continue
 			}
-			// #695: derive-2 OWNS the window-or-no-window decision. The grant row is
-			// provenance and always recorded by derive-1; only the WINDOW is overlap-
-			// constrained (entitlements_customer_no_overlap GIST). A standing-source
-			// grant tries the open window first, falling back to its own bounded
-			// window; when even that overlaps a live window the effect stays
-			// deliberately ABSENT-BY-OVERLAP — no window, no error, and
-			// ListLiveGrantsMissingEffects mirrors the same overlap condition so the
-			// sweep converges instead of re-firing. ponytail: an overlapped window is
-			// dropped whole; #631-followup (O2) clips/merges partial overlaps.
+			// Keep this source's full interval even when other sources overlap it.
 			endAt := g.EndsAt
-			bounded := true
 			if standing {
-				overlapsOpen, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
-					MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f,
-					LowerBound: g.StartsAt, UpperBound: overlapUpperBound(nil),
-				})
-				if err != nil {
-					return fmt.Errorf("grants: standing overlap check %q: %w", f, err)
-				}
-				if !overlapsOpen {
-					endAt, bounded = nil, false
-				}
-			}
-			if bounded {
-				overlaps, err := l.q.EntitlementWindowOverlaps(ctx, gen.EntitlementWindowOverlapsParams{
-					MerchantID: l.merchant, CustomerID: g.CustomerID, Entitlement: f,
-					LowerBound: g.StartsAt, UpperBound: overlapUpperBound(g.EndsAt),
-				})
-				if err != nil {
-					return fmt.Errorf("grants: bounded overlap check %q: %w", f, err)
-				}
-				if overlaps {
-					continue // absent-by-overlap: another live window already projects access
-				}
+				endAt = nil
 			}
 			gid := g.ID
 			// #511: the entitlement keeps its SEMANTIC source (so source-keyed
@@ -310,7 +280,7 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 			if parsed, perr := uuid.Parse(g.SourceID); perr == nil {
 				entSourceID = parsed
 			}
-			if _, err := l.q.CreateEntitlement(ctx, gen.CreateEntitlementParams{
+			if err := l.q.MaterializeEntitlement(ctx, gen.MaterializeEntitlementParams{
 				Entitlement: f, StartAt: g.StartsAt, SourceType: entitlementSourceType(g.SourceType),
 				MerchantID: l.merchant, CustomerID: g.CustomerID, EndAt: endAt,
 				SourceID: &entSourceID, GrantID: &gid,
@@ -714,9 +684,8 @@ type customerWindow struct {
 // derive-2 to project it. The GRANT is provenance — recorded UNCONDITIONALLY
 // (#695: detection keys on grant existence, so a recorded grant is what makes
 // the sweep converge); whether a WINDOW materializes is MaterializeGrant's
-// decision alone (it no-ops on standing-satisfied and absent-by-overlap shapes),
-// so derive-1 can never trip the no-overlap exclusion constraint and a fully-
-// overlapped source converges in ONE sweep instead of re-firing forever.
+// decision alone. Every distinct source retains its whole interval; a standing
+// subscription window already represents subsequent paid periods of that source.
 // Replay guard (mirrors #691's appendCoveredPeriodGrant): a bounded window whose
 // end is not past the latest grant end recorded for (source, feature) appends
 // nothing — the grant_effect.mismatch repair re-enters here with grants already
@@ -759,16 +728,6 @@ func (l *Ledger) deriveEntitlementWindows(ctx context.Context, w customerWindow)
 		}
 	}
 	return created, nil
-}
-
-// overlapUpperBound is the EntitlementWindowOverlaps upper bound for a window: its
-// end, or a practical-infinity sentinel for an indefinite (nil-end) window — the
-// entitlement period's upper is 'infinity', so any real future window overlaps.
-func overlapUpperBound(end *time.Time) time.Time {
-	if end != nil {
-		return *end
-	}
-	return time.Date(9999, 1, 1, 0, 0, 0, 0, time.UTC)
 }
 
 // subscriptionWindow mirrors the retired migrate logic: start =

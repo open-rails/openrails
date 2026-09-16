@@ -357,7 +357,8 @@ type PushNewEntitlementParams struct {
 	Entitlement string
 
 	// NotBefore allows callers to delay the start of the new window.
-	// The final start_at is max(NotBefore, tail_end, now).
+	// Duration grants use max(NotBefore, finite tail, now); explicit fixed-end
+	// grants use NotBefore as their source start when supplied.
 	NotBefore *time.Time
 
 	// Exactly one of (Indefinite, Duration, EndAt) must be set.
@@ -369,12 +370,10 @@ type PushNewEntitlementParams struct {
 	SourceID   uuid.UUID
 }
 
-// PushNewEntitlement appends a new entitlement window to the per-(user_id, entitlement) timeline.
-// It does not mutate existing windows (end_at is immutable); it schedules the new window to start
-// after the current tail end (or now), optionally honoring NotBefore.
-//
-// If EndAt is provided and EndAt <= computed start_at, this is covered by the
-// existing canonical timeline and returns the covering row when one can be found.
+// PushNewEntitlement records a source-owned entitlement window. Duration purchases
+// append to the finite paid timeline; fixed-end and indefinite grants retain their
+// own coverage. Replay only consults the same source, so refunding another source
+// cannot erase this grant's paid access.
 func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEntitlementParams) (*models.Entitlement, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("entitlement service not initialized")
@@ -430,39 +429,55 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 			p.CustomerID = tsid
 		}
 
-		// If an indefinite entitlement exists, the timeline is terminal.
-		hasIndefinite, err := TimelineHasIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
-		if err != nil {
+		// Replay is scoped to this source. Another source's finite or standing
+		// interval must never replace this purchase/subscription's grant facts.
+		previous, err := gen.New(tx).GetLatestEntitlementBySource(ctx, gen.GetLatestEntitlementBySourceParams{
+			MerchantID: merchantID.UUID(), CustomerID: p.CustomerID,
+			Entitlement: p.Entitlement, SourceType: string(p.SourceType), SourceID: p.SourceID,
+		})
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		if hasIndefinite {
-			created, err = GetTimelineIndefinite(ctx, tx, p.CustomerID, p.Entitlement)
-			if err != nil {
-				return err
+		if err == nil && previous.RevokedAt != nil && p.SourceType == models.EntitlementSourceSubscription && p.EndAt != nil {
+			latest, lookupErr := gen.New(tx).LatestEntitlementGrantEndForSource(ctx, gen.LatestEntitlementGrantEndForSourceParams{
+				MerchantID: merchantID.UUID(), CustomerID: p.CustomerID, SourceType: string(grants.Subscription),
+				SourceID: p.SourceID.String(), Entitlement: p.Entitlement,
+			})
+			if lookupErr != nil {
+				return lookupErr
 			}
-			// #691: the covering window is THIS subscription's own STANDING window
-			// and the caller pushed a bounded paid period — the projection is
-			// already right (standing), but the paid period is still recorded as a
-			// bounded per-period grant (the ledger stays per-period; the fold is
-			// grants + closure events).
-			if p.SourceType == models.EntitlementSourceSubscription && p.EndAt != nil &&
-				created.SourceType == p.SourceType && created.SourceID != nil && *created.SourceID == p.SourceID {
+			// A newly paid period may restore the same subscription; replaying
+			// the revoked period itself must never restore its effect.
+			if !p.EndAt.After(latest) {
+				created = models.EntitlementFromGen(previous)
+				return nil
+			}
+			err = pgx.ErrNoRows
+		}
+		if err == nil && (previous.EndAt == nil || p.Duration != nil ||
+			(p.EndAt != nil && !p.EndAt.After(*previous.EndAt))) {
+			created = models.EntitlementFromGen(previous)
+			if previous.RevokedAt == nil && p.SourceType == models.EntitlementSourceSubscription && p.EndAt != nil {
 				if err := s.appendCoveredPeriodGrant(ctx, tx, merchantID.UUID(), p, now); err != nil {
 					return err
 				}
 			}
 			return nil
 		}
-
-		tailEnd, err := GetTimelineTailEnd(ctx, tx, p.CustomerID, p.Entitlement)
-		if err != nil {
-			return err
+		// Duration purchases append paid time; explicit EndAt/indefinite sources
+		// retain their own coverage and may overlap unrelated sources.
+		var tailEnd *time.Time
+		if p.Duration != nil {
+			tailEnd, err = GetTimelineTailEnd(ctx, tx, p.CustomerID, p.Entitlement)
+			if err != nil {
+				return err
+			}
 		}
 
 		start := now
 		if p.NotBefore != nil {
 			nb := p.NotBefore.UTC()
-			if nb.After(start) {
+			if p.EndAt != nil || nb.After(start) {
 				start = nb
 			}
 		}
@@ -480,16 +495,9 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		case p.EndAt != nil:
 			e := p.EndAt.UTC()
 			if !e.After(start) {
-				covered, cerr := GetTimelineCoveringWindow(ctx, tx, p.CustomerID, p.Entitlement, e)
-				if cerr != nil {
-					if errors.Is(cerr, pgx.ErrNoRows) {
-						return fmt.Errorf("requested entitlement window is already covered by timeline tail but no covering row was found")
-					}
-					return cerr
-				}
-				created = covered
-				return nil
+				return fmt.Errorf("endAt must be after entitlement start")
 			}
+
 			endAt = &e
 		}
 
@@ -497,8 +505,7 @@ func (s *EntitlementService) PushNewEntitlement(ctx context.Context, p PushNewEn
 		// the source of truth. Create the entitlement-kind grant for this window,
 		// then derive-2 (MaterializeGrant) projects the entitlement row (carrying
 		// grant_id + its preserved source_type/source_id so existing readers work).
-		// The timeline-window computation above is unchanged; the grant just carries
-		// the computed [start, end).
+		// The immutable grant carries the source's computed [start, end).
 		gl := grants.New(gen.New(tx), merchantID.UUID())
 		g, gErr := gl.Grant(ctx, grants.GrantInput{
 			Customer: p.CustomerID, Kind: grants.Entitlement,

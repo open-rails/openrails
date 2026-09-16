@@ -296,48 +296,65 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 	return items, nil
 }
 
-const updateProduct = `-- name: UpdateProduct :execrows
+const patchProduct = `-- name: PatchProduct :one
 UPDATE openrails.products SET
-    key = $2,
-    display_name = $3,
-    description = $6,
-    entitlements_spec = $7,
-    credits_spec = $8,
-    tier_group = $9,
-    tier_rank = $4,
-    archived = $5,
-    updated_at = $10
-WHERE id = $1
+    display_name = COALESCE($1::text, display_name),
+    description = CASE WHEN $2::boolean THEN NULLIF($3::text, '') ELSE description END,
+    entitlements_spec = CASE WHEN $4::boolean THEN $5::jsonb ELSE entitlements_spec END,
+    credits_spec = CASE WHEN $6::boolean THEN $7::jsonb ELSE credits_spec END,
+    tier_group = CASE WHEN $8::boolean THEN $9::text ELSE tier_group END,
+    tier_rank = COALESCE($10::int, tier_rank),
+    archived = COALESCE($11::boolean, archived),
+    updated_at = now()
+WHERE id = $12::uuid
+RETURNING id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id
 `
 
-type UpdateProductParams struct {
-	ID               uuid.UUID
-	Key              string
-	DisplayName      string
-	TierRank         int32
-	Archived         bool
+type PatchProductParams struct {
+	DisplayName      *string
+	SetDescription   bool
 	Description      *string
+	SetEntitlements  bool
 	EntitlementsSpec []byte
+	SetCredits       bool
 	CreditsSpec      []byte
+	SetTierGroup     bool
 	TierGroup        *string
-	UpdatedAt        time.Time
+	TierRank         *int32
+	Archived         *bool
+	ID               uuid.UUID
 }
 
-func (q *Queries) UpdateProduct(ctx context.Context, arg UpdateProductParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateProduct,
-		arg.ID,
-		arg.Key,
+// Every field is chosen at the write point, never copied from a stale read.
+func (q *Queries) PatchProduct(ctx context.Context, arg PatchProductParams) (OpenrailsProduct, error) {
+	row := q.db.QueryRow(ctx, patchProduct,
 		arg.DisplayName,
+		arg.SetDescription,
+		arg.Description,
+		arg.SetEntitlements,
+		arg.EntitlementsSpec,
+		arg.SetCredits,
+		arg.CreditsSpec,
+		arg.SetTierGroup,
+		arg.TierGroup,
 		arg.TierRank,
 		arg.Archived,
-		arg.Description,
-		arg.EntitlementsSpec,
-		arg.CreditsSpec,
-		arg.TierGroup,
-		arg.UpdatedAt,
+		arg.ID,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	var i OpenrailsProduct
+	err := row.Scan(
+		&i.ID,
+		&i.Key,
+		&i.DisplayName,
+		&i.Description,
+		&i.EntitlementsSpec,
+		&i.CreditsSpec,
+		&i.TierGroup,
+		&i.TierRank,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+	)
+	return i, err
 }

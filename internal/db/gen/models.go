@@ -1455,7 +1455,7 @@ type OpenrailsSubscription struct {
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_customer_tier_group_active, which enforces one active/pending subscription per (customer, tier group).
+	// Denormalized from openrails.products.tier_group (kept in sync by trigger trg_subscriptions_set_tier_group). Backs uq_subscriptions_customer_tier_group_active, which enforces one active/pending/past_due/unknown subscription per (customer, tier group). Regrouping is prohibited while the product has live subscriptions.
 	TierGroup           *string
 	DeletionScheduledAt *time.Time
 	MerchantID          uuid.UUID
