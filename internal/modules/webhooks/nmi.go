@@ -25,6 +25,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -542,7 +543,15 @@ func (s *NMIWebhookService) reconcileNMIChargebackEntry(ctx context.Context, rai
 		return nil, meta, nil
 	}
 
-	rows, err := s.DB.Gen(ctx).MatchChargebackPayments(ctx, gen.MatchChargebackPaymentsParams{
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, meta, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, meta, err
+	}
+	rows, err := s.DB.Gen(ctx).MatchChargebackPayments(ctx, gen.MatchChargebackPaymentsParams{MerchantID: mid.UUID(), PspID: pspID,
 		Rail:        string(rail),
 		AmountCents: int64(amountCents),
 		Last4:       last4,
@@ -690,7 +699,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 				}
 			} else {
 				chargebackTransactionID = nmiChargebackTransactionID(cb.ID.Trimmed(), match.PaymentTransactionID)
-				if existing, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Rail(rail), chargebackTransactionID); lookupErr == nil && existing != nil {
+				if existing, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(rail), chargebackTransactionID); lookupErr == nil && existing != nil {
 					cbMetadata["chargeback_payment_status"] = "already_recorded"
 				} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
 					reconcileErrors++
@@ -904,10 +913,9 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// Try to find subscription - refund may be for a subscription payment
 	var subscription *models.Subscription
 	if nmiSubID != "" {
-		subscription, err = s.SubscriptionService.GetByRailSubscriptionID(ctx, s.Rail, nmiSubID)
+		subscription, err = s.SubscriptionService.GetByPSPSubscriptionID(ctx, s.Rail, nmiSubID)
 		if err != nil && !db.IsNotFound(err) {
-			log.WithContext(ctx).WithError(err).WithField("rail_subscription_id", nmiSubID).
-				Warn("Failed to look up subscription for refund (by rail_subscription_id)")
+			return fmt.Errorf("resolve subscription for NMI refund: %w", err)
 		} else if db.IsNotFound(err) {
 			log.WithContext(ctx).WithField("rail_subscription_id", nmiSubID).
 				Warn("Received refund for unknown subscription (by rail_subscription_id); continuing without lifecycle actions")
@@ -942,7 +950,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	// This complements analytics/event logging and keeps reconciliation/auditing consistent.
 	if s.PaymentService != nil && subscription != nil && txnID != "" && refundAmountCents > 0 {
 		rail := models.Rail(s.Rail)
-		existingRefund, lookupErr := s.PaymentService.GetByTransactionID(ctx, rail, txnID)
+		existingRefund, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, rail, txnID)
 		switch {
 		case lookupErr == nil && existingRefund != nil:
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -958,7 +966,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 			var originalLookupErr error
 
 			if originalTxnID != "" && originalTxnID != txnID {
-				originalPayment, originalLookupErr = s.PaymentService.GetByTransactionID(ctx, rail, originalTxnID)
+				originalPayment, originalLookupErr = s.PaymentService.GetByPSPTransactionID(ctx, rail, originalTxnID)
 				if originalLookupErr != nil && !db.IsNotFound(originalLookupErr) {
 					log.WithContext(ctx).WithError(originalLookupErr).WithField("original_transaction_id", originalTxnID).
 						Warn("Failed to resolve original payment by transaction ID for refund")
@@ -1049,7 +1057,7 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, or
 	}
 	rail := models.Rail(s.Rail)
 	var original *models.Payment
-	if existing, err := s.PaymentService.GetByTransactionID(ctx, rail, txnID); err == nil && existing != nil {
+	if existing, err := s.PaymentService.GetByPSPTransactionID(ctx, rail, txnID); err == nil && existing != nil {
 		if existing.RefundedPaymentID == nil {
 			return nil // already recorded, not as a reversal — nothing to revoke
 		}
@@ -1066,7 +1074,7 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, txnID, or
 			return fmt.Errorf("unable to resolve original payment for NMI refund transaction %q", txnID)
 		}
 		var err error
-		original, err = s.PaymentService.GetByTransactionID(ctx, rail, originalTxnID)
+		original, err = s.PaymentService.GetByPSPTransactionID(ctx, rail, originalTxnID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return fmt.Errorf("original payment %q not found for NMI refund %q", originalTxnID, txnID)
@@ -1148,13 +1156,13 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 	}
 	var voidedSubscriptionID *uuid.UUID
 	if s.PaymentService != nil && txnID != "" {
-		originalPayment, paymentErr := s.PaymentService.GetByTransactionID(ctx, models.Rail(s.Rail), txnID)
+		originalPayment, paymentErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(s.Rail), txnID)
 		if paymentErr != nil && !db.IsNotFound(paymentErr) {
 			return fmt.Errorf("lookup original payment for void: %w", paymentErr)
 		}
 		if originalPayment != nil {
 			reversalID := "void:" + txnID
-			if existingVoid, lookupErr := s.PaymentService.GetByTransactionID(ctx, models.Rail(s.Rail), reversalID); lookupErr == nil && existingVoid != nil {
+			if existingVoid, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(s.Rail), reversalID); lookupErr == nil && existingVoid != nil {
 				log.WithContext(ctx).WithField("void_transaction_id", reversalID).Info("NMI void reversal already recorded")
 			} else if lookupErr != nil && !db.IsNotFound(lookupErr) {
 				return fmt.Errorf("lookup existing void reversal: %w", lookupErr)

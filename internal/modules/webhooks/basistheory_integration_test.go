@@ -70,6 +70,8 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 
 	now := time.Now().UTC().Truncate(time.Second)
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	custodianID := dbtest.EnsureTestCustodian(ctx, t, pool, dbtest.TestMerchantID.UUID())
+	fx.ctx = db.WithCustodianID(ctx, custodianID)
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   fx.methodID,
 		MerchantID:           dbtest.TestMerchantID.UUID(),
@@ -80,6 +82,7 @@ func newBTWebhookFixture(t *testing.T) *btWebhookFixture {
 		InitialTransactionID: "",
 		RebillDriver:         "openrails",
 		Custodian:            models.CustodianBasisTheory,
+		CustodianID:          &custodianID,
 		Fingerprint:          "fp_" + uuid.NewString()[:10],
 		NetworkTokenID:       fx.ntID,
 		NetworkTokenStatus:   "active",

@@ -42,6 +42,11 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 			return fmt.Errorf("create payment method %s/%s: %w", m.Rail, m.RailCustomerRef, err)
 		}
 	}
+	if m.Custodian != "" && m.Custodian != models.CustodianPSP && m.CustodianID == nil {
+		if id := db.CustodianIDFromContext(ctx); id != uuid.Nil {
+			m.CustodianID = &id
+		}
+	}
 	rows, err := r.db.Gen(ctx).CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 		ID:                   m.ID,
 		MerchantID:           tid.UUID(),
@@ -58,6 +63,7 @@ func (r *PaymentMethodRepo) Create(ctx context.Context, m *models.PaymentMethod)
 		Metadata:             meta,
 		CreatedAt:            m.CreatedAt,
 		UpdatedAt:            m.UpdatedAt,
+		CustodianID:          m.CustodianID,
 		Custodian:            m.Custodian, // "" -> DB default 'psp'
 		Fingerprint:          m.Fingerprint,
 		NetworkTokenID:       m.NetworkTokenID,
@@ -214,30 +220,42 @@ func (r *PaymentMethodRepo) ListByUserID(ctx context.Context, userID string, lim
 // CountSharingCustomerRef reports how many OTHER payment methods share this
 // rail customer-scope handle (#682 shared-vault guard — e.g. an imported
 // multi-card NMI vault whose sibling cards a whole-vault delete would destroy).
-func (r *PaymentMethodRepo) CountSharingCustomerRef(ctx context.Context, rail, customerRef string, excludeID uuid.UUID) (int64, error) {
-	return r.db.Gen(ctx).CountPaymentMethodsSharingCustomerRef(ctx, gen.CountPaymentMethodsSharingCustomerRefParams{
+func (r *PaymentMethodRepo) CountSharingCustomerRef(ctx context.Context, rail string, pspID uuid.UUID, customerRef string, excludeID uuid.UUID) (int64, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if pspID == uuid.Nil {
+		return 0, db.ErrNoPSPInContext
+	}
+	return r.db.Gen(ctx).CountPaymentMethodsSharingCustomerRef(ctx, gen.CountPaymentMethodsSharingCustomerRefParams{MerchantID: mid.UUID(), PspID: pspID,
 		Rail:            rail,
 		RailCustomerRef: customerRef,
 		ExcludeID:       excludeID,
 	})
 }
 
-func (r *PaymentMethodRepo) GetByRailMethodRef(ctx context.Context, rail, methodRef string) (*models.PaymentMethod, error) {
-	row, err := r.db.Gen(ctx).GetPaymentMethodByRailMethodRef(ctx, gen.GetPaymentMethodByRailMethodRefParams{
-		Rail:          rail,
-		RailMethodRef: methodRef,
-	})
+func (r *PaymentMethodRepo) GetByPSPMethodRef(ctx context.Context, rail, methodRef string) (*models.PaymentMethod, error) {
+	pspID, err := db.RequirePSPID(ctx)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrPaymentMethodNotFound
-		}
 		return nil, err
 	}
-	return models.PaymentMethodFromGen(row)
+	return r.GetByRailMethodRefForPSP(ctx, rail, pspID, methodRef)
 }
 
 func (r *PaymentMethodRepo) GetByRailMethodRefForPSP(ctx context.Context, rail string, pspID uuid.UUID, methodRef string) (*models.PaymentMethod, error) {
-	row, err := r.db.Gen(ctx).GetPaymentMethodByRailMethodRefForPSP(ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if pspID == uuid.Nil {
+		return nil, db.ErrNoPSPInContext
+	}
+	var cid *uuid.UUID
+	if id := db.CustodianIDFromContext(ctx); id != uuid.Nil {
+		cid = &id
+	}
+	row, err := r.db.Gen(ctx).GetPaymentMethodByRailMethodRefForPSP(ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{CustodianID: cid, MerchantID: mid.UUID(),
 		Rail:          rail,
 		PspID:         pspID,
 		RailMethodRef: methodRef,

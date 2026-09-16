@@ -395,7 +395,7 @@ func TestDunningSuccessReactivates(t *testing.T) {
 
 		// Simulate successful rebill via RenewMembership
 		// RenewMembership uses the mock clock for period calculations
-		err := lifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
+		err := lifecycleService.RenewMembership(suite.PinPSP(ctx, "nmi"), &subscriptions.RenewMembershipParams{
 			Rail:               models.RailNMI,
 			RailSubscriptionID: railSubID,
 			TransactionID:      "rebill-" + uuid.NewString(),

@@ -17,7 +17,6 @@ unbounded-many ListActiveProducts               # products: operator-declared ca
 unbounded-many ListAllProducts                  # products: operator-declared catalog
 unbounded-many ListAllActivePricesWithProduct   # prices+products: operator-declared catalog
 unbounded-many ListAllPricesWithProduct         # prices+products: operator-declared catalog
-unbounded-many ReconcileListPricesWithPSPLinks  # prices: operator-declared catalog
 unbounded-many ListPSPsForMerchant              # psps: operator-declared, units per merchant
 unbounded-many ListCustodiansForMerchant        # custodians: operator-declared, units per merchant
 unbounded-many ListPlatformMerchantRailsArmed   # psps: DISTINCT over the same small set

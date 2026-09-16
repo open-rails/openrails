@@ -215,7 +215,7 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 // membership (FailMembership owns the retry/terminal decision inline).
 func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
 	if s.PaymentService != nil && probe.DeclineTransactionID != "" {
-		existing, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(rail), probe.DeclineTransactionID)
+		existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(rail), probe.DeclineTransactionID)
 		if err != nil && !db.IsNotFound(err) {
 			return fmt.Errorf("nmi converge: lookup fetched decline payment: %w", err)
 		}
@@ -310,14 +310,14 @@ func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc 
 		return nil, sql.ErrNoRows
 	}
 
-	subscription, err := subSvc.GetByRailSubscriptionID(ctx, rail, ref)
+	subscription, err := subSvc.GetByPSPSubscriptionID(ctx, rail, ref)
 	if err == nil {
 		return subscription, nil
 	} else if !db.IsNotFound(err) {
 		return nil, fmt.Errorf("load subscription by rail subscription ID: %w", err)
 	}
 
-	subscription, err = subSvc.GetByRailMetadataValue(ctx, rail, "order_id", ref)
+	subscription, err = subSvc.GetByPSPMetadataValue(ctx, rail, "order_id", ref)
 	if err == nil {
 		return subscription, nil
 	}
@@ -326,14 +326,14 @@ func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc 
 	}
 
 	if paySvc != nil {
-		attempt, lookupErr := paySvc.GetByMetadataValue(ctx, "nmi_subscription_order_id", ref)
+		attempt, lookupErr := paySvc.GetByPSPMetadataValue(ctx, "nmi_subscription_order_id", ref)
 		if lookupErr != nil && !db.IsNotFound(lookupErr) {
 			return nil, fmt.Errorf("load NMI subscription attempt by order metadata: %w", lookupErr)
 		}
 		if lookupErr == nil && attempt != nil {
 			providerSubID := strings.TrimSpace(fmt.Sprint(attempt.Metadata["provider_subscription_id"]))
 			if providerSubID != "" {
-				return subSvc.GetByRailSubscriptionID(ctx, rail, providerSubID)
+				return subSvc.GetByPSPSubscriptionID(ctx, rail, providerSubID)
 			}
 		}
 	}

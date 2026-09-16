@@ -78,7 +78,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 		return uuid.Nil, fmt.Errorf("stripe converge: fetch %s: %w", railSubID, err)
 	}
 
-	sub, err := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID)
+	sub, err := s.SubscriptionService.GetByPSPSubscriptionID(ctx, string(models.RailStripe), railSubID)
 	if err != nil {
 		if !db.IsNotFound(err) {
 			return uuid.Nil, fmt.Errorf("stripe converge: load local subscription: %w", err)
@@ -96,7 +96,7 @@ func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) 
 			return sub.CustomerID, err
 		}
 		// Reload: the mirror facts may have moved price/cancel marks.
-		if reloaded, rerr := s.SubscriptionService.GetByRailSubscriptionID(ctx, string(models.RailStripe), railSubID); rerr == nil {
+		if reloaded, rerr := s.SubscriptionService.GetByPSPSubscriptionID(ctx, string(models.RailStripe), railSubID); rerr == nil {
 			sub = reloaded
 		}
 	}
@@ -261,7 +261,7 @@ func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context
 		if candidate == "" {
 			continue
 		}
-		existing, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, candidate)
+		existing, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, candidate)
 		if err != nil {
 			if db.IsNotFound(err) {
 				continue
@@ -273,7 +273,7 @@ func (s *StripeConvergeService) fetchedInvoicePaymentAlreadyRecorded(ctx context
 		}
 	}
 	if invoiceID := strings.TrimSpace(rec.LatestInvoiceID); invoiceID != "" {
-		existing, err := s.PaymentService.GetByMetadataValue(ctx, "stripe_invoice_id", invoiceID)
+		existing, err := s.PaymentService.GetByPSPMetadataValue(ctx, "stripe_invoice_id", invoiceID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return false, nil
@@ -304,7 +304,7 @@ func (s *StripeConvergeService) markCheckoutSessionSucceeded(ctx context.Context
 	}
 	paymentID := uuid.Nil
 	if s.PaymentService != nil && transactionID != "" {
-		if payment, err := s.PaymentService.GetByTransactionID(ctx, models.RailStripe, transactionID); err == nil {
+		if payment, err := s.PaymentService.GetByPSPTransactionID(ctx, models.RailStripe, transactionID); err == nil {
 			paymentID = payment.ID
 		}
 	}
@@ -331,7 +331,7 @@ func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, rai
 
 	if err := s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		subRepo := subscriptions.NewSubscriptionRepo(db.NewWithPgxTx(tx))
-		sub, err := subRepo.GetByRailSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
+		sub, err := subRepo.GetByPSPSubscriptionIDForUpdate(ctx, string(models.RailStripe), railSubID)
 		if err != nil {
 			if db.IsNotFound(err) {
 				return nil

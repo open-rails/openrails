@@ -71,8 +71,8 @@ func (s *PaymentService) GetByUserID(ctx context.Context, userID string) ([]*mod
 	return s.repo.GetByUserID(ctx, userID)
 }
 
-func (s *PaymentService) GetByTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
-	return s.repo.GetByTransactionID(ctx, rail, transactionID)
+func (s *PaymentService) GetByPSPTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error) {
+	return s.repo.GetByPSPTransactionID(ctx, rail, transactionID)
 }
 
 func (s *PaymentService) Update(ctx context.Context, payment *models.Payment) error {
@@ -228,11 +228,11 @@ func (s *PaymentService) ReserveProviderAttempt(ctx context.Context, payment *mo
 	if created {
 		return payment, nil
 	}
-	return s.GetByTransactionID(ctx, payment.Rail, payment.TransactionID)
+	return s.GetByPSPTransactionID(ctx, payment.Rail, payment.TransactionID)
 }
 
-func (s *PaymentService) GetByMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
-	return s.repo.GetByMetadataValue(ctx, key, value)
+func (s *PaymentService) GetByPSPMetadataValue(ctx context.Context, key, value string) (*models.Payment, error) {
+	return s.repo.GetByPSPMetadataValue(ctx, key, value)
 }
 
 func (s *PaymentService) CompleteProviderAttempt(ctx context.Context, attemptID uuid.UUID, providerTransactionID string, metadata map[string]any) (*models.Payment, error) {

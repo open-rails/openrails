@@ -23,7 +23,7 @@ func ccbillCheckoutService(t *testing.T) (context.Context, *CheckoutService) {
 	_, err = store.Put(ctx, dbtest.TestMerchantID, secretName, "merchant-salt")
 	require.NoError(t, err)
 
-	svc := &CheckoutService{Config: checkoutRailConfig(true), Rails: checkoutRailSet("static-mobius-key")}
+	svc := &CheckoutService{Config: checkoutRailConfig(false), Rails: checkoutRailSet("static-mobius-key")}
 	svc.SetMerchantSecretStore(store)
 	svc.SetPSPSecretResolver(checkoutStaticProviderSecretResolver{
 		rail:        "ccbill",

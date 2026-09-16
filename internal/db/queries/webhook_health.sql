@@ -57,14 +57,15 @@ ON CONFLICT (merchant_id, rail) DO UPDATE SET
     last_pull_at = EXCLUDED.last_pull_at,
     updated_at = now();
 
--- name: GetWebhookPullWatermark :one
--- The rail's last completed provider-refresh pull (xs-007 row 38): the
--- subscription-converge snooze hands off once a pull has covered the rail
--- since the job was born. RLS-scoped.
-SELECT last_pull_at
-FROM openrails.webhook_health
+-- name: GetPSPRefreshWatermark :one
+-- Exact account event coverage. A sibling account's refresh or a recent
+-- health stamp while catching up historical windows cannot retire this job.
+SELECT watermark_at
+FROM openrails.rail_refresh_watermarks
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND rail = sqlc.arg(rail)::text;
+  AND rail = sqlc.arg(rail)::text
+  AND psp_id = sqlc.arg(psp_id)::uuid
+  AND event_domain = 'events';
 
 -- name: ListWebhookExpectedRails :many
 -- Expectation gate for the webhook_silence template: rails that are ARMED

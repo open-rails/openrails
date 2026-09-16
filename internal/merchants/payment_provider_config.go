@@ -353,11 +353,16 @@ func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environme
 	if err != nil {
 		return gen.OpenrailsPsp{}, err
 	}
+	key := existing.Key
+	if key == nil {
+		key = &nRail
+	}
 	var row gen.OpenrailsPsp
 	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		row, err = gen.New(tx).UpsertPSP(ctx, gen.UpsertPSPParams{
 			ID:             railAcctID,
+			Key:            key,
 			MerchantID:     id.UUID(),
 			Rail:           nRail,
 			Environment:    &nEnv,

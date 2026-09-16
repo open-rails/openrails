@@ -76,7 +76,11 @@ func SnapshotPaymentCard(ctx context.Context, database *db.DB, txnIDs []string, 
 	if err != nil {
 		return fmt.Errorf("snapshot payment card: %w", err)
 	}
-	if err := database.Gen(ctx).SnapshotPaymentCards(ctx, gen.SnapshotPaymentCardsParams{
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return err
+	}
+	if err := database.Gen(ctx).SnapshotPaymentCards(ctx, gen.SnapshotPaymentCardsParams{PspID: pspID,
 		MerchantID:     merchantID.UUID(),
 		CardBrand:      card.Brand,
 		CardLast4:      card.Last4,
@@ -100,6 +104,14 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 		return nil
 	}
 
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return err
+	}
 	metadata := map[string]any{"stripe_invoice_id": invoiceID}
 	if chargeID = strings.TrimSpace(chargeID); chargeID != "" {
 		metadata["stripe_charge_id"] = chargeID
@@ -112,7 +124,7 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 		return fmt.Errorf("marshal stripe invoice payment metadata: %w", err)
 	}
 
-	if err := database.Gen(ctx).MergeStripePaymentMetadata(ctx, gen.MergeStripePaymentMetadataParams{
+	if err := database.Gen(ctx).MergeStripePaymentMetadata(ctx, gen.MergeStripePaymentMetadataParams{MerchantID: mid.UUID(), PspID: pspID,
 		Patch:         encoded,
 		TransactionID: invoiceID,
 	}); err != nil {
@@ -124,7 +136,7 @@ func LinkStripeInvoicePayment(ctx context.Context, database *db.DB, invoiceID, c
 		return nil
 	}
 
-	source, err := database.Gen(ctx).GetStripeAliasCardSnapshot(ctx, aliases)
+	source, err := database.Gen(ctx).GetStripeAliasCardSnapshot(ctx, gen.GetStripeAliasCardSnapshotParams{MerchantID: mid.UUID(), PspID: pspID, TransactionIds: aliases})
 	if db.IsNotFound(err) {
 		return nil
 	}

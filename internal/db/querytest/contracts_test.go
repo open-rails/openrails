@@ -68,7 +68,6 @@ func TestQueryContractsHighValueBillingDomains(t *testing.T) {
 		Currency:            "USD",
 		AccessDurationHours: int32ptr(30 * 24),
 		AutoRenew:           true,
-		PspLinks:            []byte(`{"ccbill":{"form":"948"}}`),
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	})

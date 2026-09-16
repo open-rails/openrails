@@ -77,6 +77,20 @@ func (s *CheckoutService) merchantProviderSecret(ctx context.Context, rail, envi
 	if err != nil {
 		return "", false, err
 	}
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		scope, err := s.capturedPSPScope(ctx, pspID)
+		if err != nil {
+			return "", false, err
+		}
+		if scope.Rail != rail || scope.Environment != environment {
+			return "", false, errors.New("captured PSP does not match requested rail/environment")
+		}
+		ref, err := scope.SecretRef(key)
+		if err != nil {
+			return "", false, err
+		}
+		return s.merchantSecretRef(ctx, ref)
+	}
 	if refResolver, ok := s.ProviderSecrets.(merchants.PSPSecretRefResolver); ok {
 		ref, found, err := refResolver.ActivePSPSecretRef(ctx, tid, rail, environment, key)
 		if err != nil || !found {
@@ -319,7 +333,7 @@ func (s *CheckoutService) resolveNMIClient(ctx context.Context, provider string)
 	if !s.scopedProviderSecretsEnabled() {
 		return nil, fmt.Errorf("merchant rail resolution is not configured")
 	}
-	target, err := s.resolveRailTarget(ctx, provider)
+	target, err := s.operationRailTarget(ctx, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -383,11 +397,17 @@ func (s *CheckoutService) resolveScopedCCBillConfig(ctx context.Context, base *c
 	// environment=test rows (ValidateRailSet enforces it), so a hardcoded
 	// "live" here can never resolve under test_mode.
 	env := s.pspEnvironment()
-	scope, ok, err := scopeResolver.ActivePSPScope(ctx, tid, string(models.RailCCBill), env)
+	var scope merchants.PSPScope
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		scope, err = s.capturedPSPScope(ctx, pspID)
+		ok = err == nil
+	} else {
+		scope, ok, err = scopeResolver.ActivePSPScope(ctx, tid, string(models.RailCCBill), env)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
+	if !ok || scope.Rail != string(models.RailCCBill) || scope.Environment != env {
 		return nil, errors.New("missing scoped merchant CCBill PSP")
 	}
 	cfg := &config.CCBillConfig{}
@@ -453,4 +473,40 @@ func (s *CheckoutService) pspKeyArchived(ctx context.Context, selector string) b
 		return false
 	}
 	return archived
+}
+
+func (s *CheckoutService) capturedPSPScope(ctx context.Context, pspID uuid.UUID) (merchants.PSPScope, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return merchants.PSPScope{}, err
+	}
+	resolver, ok := s.ProviderSecrets.(merchants.PSPIdentityScopeResolver)
+	if !ok {
+		return merchants.PSPScope{}, errors.New("immutable PSP resolver is required")
+	}
+	scope, ok, err := resolver.PSPScopeByID(ctx, mid, pspID)
+	if err != nil {
+		return scope, err
+	}
+	if !ok {
+		return scope, errors.New("captured PSP no longer exists")
+	}
+	return scope, nil
+}
+
+func (s *CheckoutService) operationRailTarget(ctx context.Context, selector string) (railTarget, error) {
+	if pspID := db.PSPIDFromContext(ctx); pspID != uuid.Nil {
+		scope, err := s.capturedPSPScope(ctx, pspID)
+		if err != nil {
+			return railTarget{}, err
+		}
+		if scope.Environment != s.pspEnvironment() {
+			return railTarget{}, errors.New("captured PSP environment mismatch")
+		}
+		if _, known := knownRails[selector]; known && selector != scope.Rail {
+			return railTarget{}, errors.New("captured PSP rail mismatch")
+		}
+		return railTarget{PSP: scope.Key, Rail: scope.Rail, Scope: &scope}, nil
+	}
+	return s.resolveRailTarget(ctx, selector)
 }

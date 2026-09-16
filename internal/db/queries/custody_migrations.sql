@@ -46,6 +46,7 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
 -- twice: the WHERE clause is the compare-and-swap.
 UPDATE openrails.payment_methods SET
     custodian = sqlc.arg(to_custodian)::text,
+    custodian_id = sqlc.arg(to_custodian_id)::uuid,
     rail_method_ref = sqlc.arg(to_rail_method_ref)::text,
     fingerprint = COALESCE(NULLIF(sqlc.arg(fingerprint)::text, ''), fingerprint),
     charge_via = COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
@@ -85,6 +86,7 @@ RETURNING *;
 -- pointing two instruments at one card.
 SELECT * FROM openrails.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND custodian_id = sqlc.arg(custodian_id)::uuid
   AND custodian = sqlc.arg(custodian)::text
   AND rail_method_ref = sqlc.arg(rail_method_ref)::text
 LIMIT 1;

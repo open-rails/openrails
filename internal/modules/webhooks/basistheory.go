@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/config"
@@ -118,6 +119,15 @@ func (s *basisTheoryWebhookService) btClient(ctx context.Context) (*basistheory.
 	})
 }
 
+func custodianScopeIDs(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return uuid.Nil, uuid.Nil, err
+	}
+	cid, err := db.RequireCustodianID(ctx)
+	return mid.UUID(), cid, err
+}
+
 func (s *basisTheoryWebhookService) gen(ctx context.Context) *gen.Queries {
 	return s.d.DB.Gen(ctx)
 }
@@ -149,12 +159,16 @@ func (s *basisTheoryWebhookService) apply(ctx context.Context, evt basistheory.E
 // expired). Park — never terminal-cancel, never delete (cancellation-last-
 // resort): subscriptions keep their access posture and the operator decides.
 func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Context, evt basistheory.Event) error {
+	mid, cid, err := custodianScopeIDs(ctx)
+	if err != nil {
+		return err
+	}
 	var data basistheory.TokenEventData
 	if err := json.Unmarshal(evt.Data, &data); err != nil || strings.TrimSpace(data.Token.ID) == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory %s event carries no token id", evt.Type))
 	}
 	reason := "bt_" + strings.ReplaceAll(evt.Type, ".", "_") // bt_token_deleted | bt_token_expired
-	rows, err := s.gen(ctx).ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{
+	rows, err := s.gen(ctx).ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{MerchantID: mid, CustodianID: cid,
 		Custodian:     models.CustodianBasisTheory,
 		RailMethodRef: data.Token.ID,
 		ParkReason:    reason,
@@ -172,6 +186,10 @@ func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Con
 
 // refreshInstrumentFromToken re-reads the token and refreshes masked metadata.
 func (s *basisTheoryWebhookService) refreshInstrumentFromToken(ctx context.Context, evt basistheory.Event) error {
+	mid, cid, err := custodianScopeIDs(ctx)
+	if err != nil {
+		return err
+	}
 	var data basistheory.TokenEventData
 	if err := json.Unmarshal(evt.Data, &data); err != nil || strings.TrimSpace(data.Token.ID) == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory token.updated event carries no token id"))
@@ -188,7 +206,7 @@ func (s *basisTheoryWebhookService) refreshInstrumentFromToken(ctx context.Conte
 		}
 		return fmt.Errorf("basistheory token.updated: fetch token: %w", err)
 	}
-	_, err = s.gen(ctx).RefreshCustodianCardMetadata(ctx, gen.RefreshCustodianCardMetadataParams{
+	_, err = s.gen(ctx).RefreshCustodianCardMetadata(ctx, gen.RefreshCustodianCardMetadataParams{MerchantID: mid, CustodianID: cid,
 		Custodian:     models.CustodianBasisTheory,
 		RailMethodRef: token.ID,
 		LastFour:      cardLast4(token.Card),
@@ -211,8 +229,12 @@ func (s *basisTheoryWebhookService) reconcileIntentConversion(ctx context.Contex
 	if err := json.Unmarshal(evt.Data, &data); err != nil || strings.TrimSpace(data.Token.ID) == "" {
 		return nil // conversion events without a token id carry nothing to reconcile
 	}
-	_, err := s.gen(ctx).GetPaymentMethodByRailMethodRef(ctx, gen.GetPaymentMethodByRailMethodRefParams{
-		Rail:          string(models.RailNMI),
+	mid, cid, err := custodianScopeIDs(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = s.gen(ctx).GetPaymentMethodForCustodianToken(ctx, gen.GetPaymentMethodForCustodianTokenParams{
+		MerchantID: mid, CustodianID: cid, Custodian: models.CustodianBasisTheory,
 		RailMethodRef: data.Token.ID,
 	})
 	if err == nil {
@@ -229,6 +251,10 @@ func (s *basisTheoryWebhookService) reconcileIntentConversion(ctx context.Contex
 // expiry is deliberately never touched (BT never rewrites the card token's
 // FPAN; that is the Account Updater's job).
 func (s *basisTheoryWebhookService) foldNetworkTokenStatus(ctx context.Context, evt basistheory.Event, forcedStatus string) error {
+	mid, cid, err := custodianScopeIDs(ctx)
+	if err != nil {
+		return err
+	}
 	var data basistheory.NetworkTokenEventData
 	if err := json.Unmarshal(evt.Data, &data); err != nil || strings.TrimSpace(data.NetworkToken.ID) == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory %s event carries no network token id", evt.Type))
@@ -251,7 +277,7 @@ func (s *basisTheoryWebhookService) foldNetworkTokenStatus(ctx context.Context, 
 	if status == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory %s: no status resolvable for network token %s", evt.Type, data.NetworkToken.ID))
 	}
-	if _, err := s.gen(ctx).SetNetworkTokenStatusByNetworkTokenID(ctx, gen.SetNetworkTokenStatusByNetworkTokenIDParams{
+	if _, err := s.gen(ctx).SetNetworkTokenStatusByNetworkTokenID(ctx, gen.SetNetworkTokenStatusByNetworkTokenIDParams{MerchantID: mid, CustodianID: cid,
 		Custodian:          models.CustodianBasisTheory,
 		NetworkTokenID:     data.NetworkToken.ID,
 		NetworkTokenStatus: status,
@@ -334,8 +360,12 @@ type AccountUpdaterFoldStats struct {
 // bucket 2) so charges fail loudly and an operator decides.
 func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basistheory.AccountUpdaterResultRow) (AccountUpdaterFoldStats, error) {
 	stats := AccountUpdaterFoldStats{Rows: len(rows), ResultCounts: map[string]int{}}
+	mid, cid, err := custodianScopeIDs(ctx)
+	if err != nil {
+		return stats, err
+	}
 	park := func(token, reason, why string) error {
-		n, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{
+		n, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{MerchantID: mid, CustodianID: cid,
 			Custodian:     models.CustodianBasisTheory,
 			RailMethodRef: token,
 			ParkReason:    reason,
@@ -361,7 +391,7 @@ func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, rows []basis
 				// In-place update (dedup): metadata refresh only, same token id.
 				newRef = row.Token
 			}
-			n, err := q.RotateCustodianMethodRef(ctx, gen.RotateCustodianMethodRefParams{
+			n, err := q.RotateCustodianMethodRef(ctx, gen.RotateCustodianMethodRefParams{MerchantID: mid, CustodianID: cid,
 				Custodian:      models.CustodianBasisTheory,
 				OldMethodRef:   row.Token,
 				NewMethodRef:   newRef,
@@ -415,7 +445,7 @@ func CloseAccountUpdaterBatch(ctx context.Context, q *gen.Queries, jobRef string
 	if jobRef == "" {
 		return nil
 	}
-	mid, err := merchant.Require(ctx)
+	mid, cid, err := custodianScopeIDs(ctx)
 	if err != nil {
 		return err
 	}
@@ -424,7 +454,8 @@ func CloseAccountUpdaterBatch(ctx context.Context, q *gen.Queries, jobRef string
 		return fmt.Errorf("account updater: encode result counts: %w", err)
 	}
 	if _, err := q.CompleteAccountUpdaterBatchByJobRef(ctx, gen.CompleteAccountUpdaterBatchByJobRefParams{
-		MerchantID:   mid.UUID(),
+		MerchantID:   mid,
+		CustodianID:  cid,
 		JobRef:       jobRef,
 		ResultCounts: counts,
 		CompletedAt:  time.Now().UTC(),

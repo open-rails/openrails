@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/config"
@@ -132,7 +133,14 @@ func (h *stripeArchiveCore) checkRelevance(ctx context.Context, intent gen.Openr
 	if err != nil {
 		return Relevance{}, err
 	}
-	if !isExtra(catalog.BuildExtrasIndex(products, prices), p) {
+	if intent.PspID == nil || *intent.PspID == uuid.Nil {
+		return Relevance{}, db.ErrNoPSPInContext
+	}
+	scopedPrices := make([]*models.Price, 0, len(prices))
+	for _, price := range prices {
+		scopedPrices = append(scopedPrices, price.ForPSP(*intent.PspID))
+	}
+	if !isExtra(catalog.BuildExtrasIndex(products, scopedPrices), p) {
 		return SupersededBy("remote object is now in the local catalog; archiving it would be wrong"), nil
 	}
 	return StillRelevant(), nil

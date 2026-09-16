@@ -55,7 +55,7 @@ type Payment struct {
 	Status     string `json:"status"`
 
 	// PspID is the PSP (openrails.psps.id)
-	// that processed this charge (#641). Nil for legacy rows / unresolved accounts.
+	// that processed this charge (#641). Nil only for off-rail manual entries.
 	PspID *uuid.UUID `json:"psp_id,omitempty"`
 
 	// Card snapshot of the payment method used for this charge, captured from

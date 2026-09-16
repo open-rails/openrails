@@ -341,7 +341,7 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if !newPrice.IsPurchasable() {
 		return nil, http.StatusBadRequest, "target price is not available"
 	}
-	newCfg := newPrice.PSPLinkForRail(models.RailSolana)
+	newCfg := newPrice.ForPSP(oldSub.PspID).PSPLinkForRail(models.RailSolana)
 	newTerms, ok := parseResolvedPlanTerms(newCfg)
 	if !ok {
 		return nil, http.StatusBadRequest, "target price is not configured for Solana recurring billing"

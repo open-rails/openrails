@@ -178,10 +178,11 @@ func TestArchiveIntentRelevanceSupersedesWhenObjectJoinsCatalog(t *testing.T) {
 	_, err := fx.db.Pool().Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "join-prod-"+uuid.NewString()[:8], tenantID)
 	require.NoError(t, err)
-	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, psp_links, merchant_id)
-	      VALUES ($1, $2, 900, 'USD', 720, true, $3, $4)`, priceID, productID,
-		[]byte(`{"stripe": {"rail": "stripe", "price_id": "`+objectID+`"}}`), tenantID)
+	_, err = fx.db.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,product_id,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES($1,$2,900,'USD',720,true,$3)`, priceID, productID, tenantID)
 	require.NoError(t, err)
+	pspID := dbtest.EnsureTestPSP(ctx, t, fx.db.Pool(), tenantID, "stripe")
+	require.NoError(t, catalog.NewPriceService(fx.db).UpdatePSPLinks(dbtest.WithTestMerchant(ctx), priceID, map[string]map[string]string{"stripe": {"rail": "stripe", "psp_id": pspID.String(), "price_id": objectID}}))
+
 	t.Cleanup(func() {
 		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM openrails.prices WHERE id = $1", priceID)
 		_, _ = fx.db.Pool().Exec(ctx, "DELETE FROM openrails.products WHERE id = $1", productID)

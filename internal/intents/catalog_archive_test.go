@@ -86,6 +86,8 @@ func stubCatalog(products []*models.Product, prices []*models.Price) catalogRows
 	}
 }
 
+var archiveTestPSPID = uuid.New()
+
 func archiveIntent(t *testing.T, intentType, objectID, markerKey string) gen.OpenrailsRailIntent {
 	t.Helper()
 	payload, err := json.Marshal(StripeArchivePayload{ObjectID: objectID, MarkerKey: markerKey})
@@ -94,6 +96,7 @@ func archiveIntent(t *testing.T, intentType, objectID, markerKey string) gen.Ope
 	}
 	return gen.OpenrailsRailIntent{
 		ID:             uuid.New(),
+		PspID:          &archiveTestPSPID,
 		Rail:           "stripe",
 		IntentType:     intentType,
 		Payload:        payload,
@@ -243,7 +246,7 @@ func TestStripeArchive_RelevanceFlipsWhenObjectJoinsCatalog(t *testing.T) {
 		linked := &models.Price{
 			ID: uuid.New(), ProductID: productID, Amount: 900, Currency: "USD", AccessDurationHours: &cycle, AutoRenew: true,
 			PSPLinks: map[string]map[string]string{
-				"stripe": {models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_x"},
+				"stripe": {models.RailKeyPSPID: archiveTestPSPID.String(), models.RailKeyRail: "stripe", models.RailKeyStripePriceID: "price_x"},
 			},
 		}
 		h.LoadCatalog = stubCatalog(nil, []*models.Price{linked})

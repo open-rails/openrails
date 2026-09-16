@@ -488,7 +488,7 @@ func (s *CheckoutPurchaseService) RegisterPurchase(ctx context.Context, req *pay
 		return nil, fmt.Errorf("failed to create payment record: %w", err)
 	}
 	if !created {
-		existingPayment, err := s.PaymentService.GetByTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
+		existingPayment, err := s.PaymentService.GetByPSPTransactionID(ctx, models.Rail(req.Rail), req.TransactionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load existing payment record: %w", err)
 		}

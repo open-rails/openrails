@@ -336,7 +336,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	appDB := dbtest.OpenMerchantDB(t, id.UUID())
 	var priceCount int
 	require.NoError(t, appDB.Pool().QueryRow(ctx,
-		`SELECT count(*) FROM openrails.prices WHERE merchant_id = $1 AND psp_links -> 'ccbill' ->> 'flex_id' = $2`,
+		`SELECT count(*) FROM openrails.price_psp_bindings WHERE merchant_id = $1 AND flex_id = $2`,
 		id.UUID(), flexID).Scan(&priceCount))
 	require.Equal(t, 1, priceCount, "publish response: %s", string(raw))
 

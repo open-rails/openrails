@@ -19,7 +19,8 @@ UPDATE openrails.account_updater_batches SET
     completed_at = $2::timestamptz,
     updated_at = now()
 WHERE merchant_id = $3
-  AND job_ref = $4
+  AND custodian_id = $4::uuid
+  AND job_ref = $5
   AND job_ref <> ''
   AND status IN ('pending', 'submitted')
 `
@@ -28,6 +29,7 @@ type CompleteAccountUpdaterBatchByJobRefParams struct {
 	ResultCounts []byte
 	CompletedAt  time.Time
 	MerchantID   uuid.UUID
+	CustodianID  uuid.UUID
 	JobRef       string
 }
 
@@ -39,6 +41,7 @@ func (q *Queries) CompleteAccountUpdaterBatchByJobRef(ctx context.Context, arg C
 		arg.ResultCounts,
 		arg.CompletedAt,
 		arg.MerchantID,
+		arg.CustodianID,
 		arg.JobRef,
 	)
 	if err != nil {
@@ -236,10 +239,11 @@ const listDueAccountUpdaterInstruments = `-- name: ListDueAccountUpdaterInstrume
 SELECT pm.id, pm.rail_method_ref, pm.expiry_date
 FROM openrails.payment_methods pm
 WHERE pm.merchant_id = $1
-  AND pm.custodian = $2
+  AND pm.custodian_id = $2::uuid
+  AND pm.custodian = $3
   AND pm.rail_method_ref <> ''
   AND (pm.account_updater_checked_at IS NULL
-       OR pm.account_updater_checked_at < $3::timestamptz)
+       OR pm.account_updater_checked_at < $4::timestamptz)
   AND EXISTS (
         SELECT 1 FROM openrails.subscriptions s
          WHERE s.payment_method_id = pm.id
@@ -247,13 +251,14 @@ WHERE pm.merchant_id = $1
            AND s.deleted_at IS NULL
            AND s.status IN ('active', 'past_due')
            AND s.current_period_ends_at IS NOT NULL
-           AND s.current_period_ends_at <= $4::timestamptz)
+           AND s.current_period_ends_at <= $5::timestamptz)
 ORDER BY pm.account_updater_checked_at NULLS FIRST, pm.id
-LIMIT $5
+LIMIT $6
 `
 
 type ListDueAccountUpdaterInstrumentsParams struct {
 	MerchantID    uuid.UUID
+	CustodianID   uuid.UUID
 	Custodian     string
 	StaleBefore   time.Time
 	RenewalBefore time.Time
@@ -273,6 +278,7 @@ type ListDueAccountUpdaterInstrumentsRow struct {
 func (q *Queries) ListDueAccountUpdaterInstruments(ctx context.Context, arg ListDueAccountUpdaterInstrumentsParams) ([]ListDueAccountUpdaterInstrumentsRow, error) {
 	rows, err := q.db.Query(ctx, listDueAccountUpdaterInstruments,
 		arg.MerchantID,
+		arg.CustodianID,
 		arg.Custodian,
 		arg.StaleBefore,
 		arg.RenewalBefore,

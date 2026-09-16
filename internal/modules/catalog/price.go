@@ -8,11 +8,13 @@ import (
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 type PriceService struct {
@@ -23,15 +25,17 @@ func NewPriceService(db *db.DB) *PriceService {
 	return &PriceService{db: db}
 }
 
-func pricePSPLinksJSONB(p *models.Price) ([]byte, error) {
-	return models.ToJSONB(p.PSPLinks)
+func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
+	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		scoped := NewPriceService(s.db.NewWithPgxTx(tx))
+		if err := scoped.createRow(ctx, price); err != nil {
+			return err
+		}
+		return scoped.UpdatePSPLinks(ctx, price.ID, price.PSPLinks)
+	})
 }
 
-func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
-	pspLinks, err := pricePSPLinksJSONB(price)
-	if err != nil {
-		return err
-	}
+func (s *PriceService) createRow(ctx context.Context, price *models.Price) error {
 	// CUR-6: the single price-INSERT chokepoint, so every price row is
 	// canonical whatever minted it (service API, catalog manifest apply,
 	// importer).
@@ -47,7 +51,6 @@ func (s *PriceService) Create(ctx context.Context, price *models.Price) error {
 		AutoRenew:           price.AutoRenew,
 		TrialUnitAmount:     price.TrialUnitAmount,
 		TrialDurationHours:  models.IntPtrTo32(price.TrialDurationHours),
-		PspLinks:            pspLinks,
 		Key:                 price.Key,
 		CreatedAt:           price.CreatedAt,
 		UpdatedAt:           price.UpdatedAt,
@@ -66,10 +69,10 @@ func (s *PriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.Price
 	if err != nil {
 		return nil, err
 	}
-	return models.PriceFromGen(row)
+	return s.db.PriceFromGen(ctx, row)
 }
 
-func pricesFromGen(rows []gen.OpenrailsPrice) ([]*models.Price, error) {
+func (s *PriceService) pricesFromGen(ctx context.Context, rows []gen.OpenrailsPrice) ([]*models.Price, error) {
 	out := make([]*models.Price, 0, len(rows))
 	for _, r := range rows {
 		p, err := models.PriceFromGen(r)
@@ -78,7 +81,7 @@ func pricesFromGen(rows []gen.OpenrailsPrice) ([]*models.Price, error) {
 		}
 		out = append(out, p)
 	}
-	return out, nil
+	return out, s.db.LoadPricePSPBindings(ctx, out, nil)
 }
 
 func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
@@ -89,7 +92,7 @@ func (s *PriceService) GetByProductID(ctx context.Context, productID uuid.UUID) 
 	if err != nil {
 		return nil, err
 	}
-	return pricesFromGen(rows)
+	return s.pricesFromGen(ctx, rows)
 }
 
 func (s *PriceService) GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error) {
@@ -97,7 +100,7 @@ func (s *PriceService) GetActiveByProductID(ctx context.Context, productID uuid.
 	if err != nil {
 		return nil, err
 	}
-	return pricesFromGen(rows)
+	return s.pricesFromGen(ctx, rows)
 }
 
 func (s *PriceService) GetAllActive(ctx context.Context) ([]*models.Price, error) {
@@ -107,13 +110,13 @@ func (s *PriceService) GetAllActive(ctx context.Context) ([]*models.Price, error
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
+		price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, price)
 	}
-	return out, nil
+	return out, s.db.LoadPricePSPBindings(ctx, out, nil)
 }
 
 func (s *PriceService) GetAll(ctx context.Context) ([]*models.Price, error) {
@@ -123,16 +126,16 @@ func (s *PriceService) GetAll(ctx context.Context) ([]*models.Price, error) {
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
+		price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, price)
 	}
-	return out, nil
+	return out, s.db.LoadPricePSPBindings(ctx, out, nil)
 }
 
-func priceWithProduct(p gen.OpenrailsPrice, prod gen.OpenrailsProduct) (*models.Price, error) {
+func (s *PriceService) priceWithProduct(ctx context.Context, p gen.OpenrailsPrice, prod gen.OpenrailsProduct) (*models.Price, error) {
 	price, err := models.PriceFromGen(p)
 	if err != nil {
 		return nil, err
@@ -189,16 +192,24 @@ func (s *PriceService) ListPaginated(ctx context.Context, filter PriceFilter, li
 	}
 	out := make([]*models.Price, 0, len(rows))
 	for _, row := range rows {
-		price, err := priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
+		price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
 		if err != nil {
 			return nil, 0, err
 		}
 		out = append(out, price)
 	}
-	return out, total, nil
+	return out, total, s.db.LoadPricePSPBindings(ctx, out, nil)
 }
 
 func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string) (*models.Price, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
 	rail = normalize.Lower(rail)
 	if rail == "" {
 		return nil, fmt.Errorf("nmi rail is required for plan %q", normalize.Trim(nmiPlanID))
@@ -206,29 +217,72 @@ func (s *PriceService) GetByNMIPlan(ctx context.Context, rail, nmiPlanID string)
 	// Archived prices must still resolve here so grandfathered subscriptions
 	// keep billing.
 	row, err := s.db.Gen(ctx).GetPriceByNMIPlan(ctx, gen.GetPriceByNMIPlanParams{
+		MerchantID: mid.UUID(), PspID: pspID,
 		Rail:   rail,
 		PlanID: nmiPlanID,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return models.PriceFromGen(row)
+	price, err := s.db.PriceFromGen(ctx, row)
+	return price.ForPSP(pspID), err
 }
 
-func (s *PriceService) GetByCCBillPriceID(ctx context.Context, ccbillPriceID string) (*models.Price, error) {
-	row, err := s.db.Gen(ctx).GetPriceWithProductByCCBillPriceID(ctx, ccbillPriceID)
+func (s *PriceService) GetByCCBillPriceID(ctx context.Context, recurringBillingOptionID, flexID string) (*models.Price, error) {
+	objectKind, ccbillPriceID := "recurring_billing_option", normalize.Trim(recurringBillingOptionID)
+	if ccbillPriceID == "" {
+		objectKind, ccbillPriceID = "flex", normalize.Trim(flexID)
+	}
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.db.Gen(ctx).GetPriceWithProductByCCBillPriceID(ctx, gen.GetPriceWithProductByCCBillPriceIDParams{ObjectKind: objectKind, MerchantID: mid.UUID(), PspID: pspID, CcbillPriceID: ccbillPriceID})
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, pgx.ErrNoRows
+	}
+	if len(rows) != 1 {
+		return nil, fmt.Errorf("ambiguous CCBill %s %q for PSP %s; supply recurring billing option identity", objectKind, ccbillPriceID, pspID)
+	}
+	row := rows[0]
+	price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.db.LoadPricePSPBindings(ctx, []*models.Price{price}, &pspID); err != nil {
+		return nil, err
+	}
+	return price, nil
 }
 
 func (s *PriceService) GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error) {
-	row, err := s.db.Gen(ctx).GetPriceWithProductByStripePriceID(ctx, stripePriceID)
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return priceWithProduct(row.OpenrailsPrice, row.OpenrailsProduct)
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.db.Gen(ctx).GetPriceWithProductByStripePriceID(ctx, gen.GetPriceWithProductByStripePriceIDParams{MerchantID: mid.UUID(), PspID: pspID, StripePriceID: stripePriceID})
+	if err != nil {
+		return nil, err
+	}
+	price, err := s.priceWithProduct(ctx, row.OpenrailsPrice, row.OpenrailsProduct)
+	if err != nil {
+		return nil, err
+	}
+	if err = s.db.LoadPricePSPBindings(ctx, []*models.Price{price}, &pspID); err != nil {
+		return nil, err
+	}
+	return price, nil
 }
 
 // Update is not supported - prices are immutable to preserve historical payment accuracy.
@@ -277,26 +331,6 @@ func (s *PriceService) SetArchived(ctx context.Context, id uuid.UUID, archived b
 	return nil
 }
 
-// UpdatePSPLinks updates the PSP link entries (external IDs, does not affect
-// historical data).
-func (s *PriceService) UpdatePSPLinks(ctx context.Context, id uuid.UUID, links map[string]map[string]string) error {
-	linksJSONB, err := models.ToJSONB(links)
-	if err != nil {
-		return err
-	}
-	rows, err := s.db.Gen(ctx).UpdatePricePSPLinks(ctx, gen.UpdatePricePSPLinksParams{
-		ID:       id,
-		PspLinks: linksJSONB,
-	})
-	if err != nil {
-		return err
-	}
-	if rows < 1 {
-		return errors.New("no rows affected")
-	}
-	return nil
-}
-
 // #774: price keys — a durable, per-merchant-unique handle that is a MOVABLE
 // POINTER to the current row of a substance-version chain. Row identity stays
 // the #662 substance UUID; these methods manage the key label + the
@@ -333,7 +367,7 @@ func (s *PriceService) GetCurrentByKey(ctx context.Context, merchantID uuid.UUID
 	if err != nil {
 		return nil, err
 	}
-	return models.PriceFromGen(row)
+	return s.db.PriceFromGen(ctx, row)
 }
 
 // ListChainByKey returns every row (archived + current) that has ever been
@@ -346,7 +380,7 @@ func (s *PriceService) ListChainByKey(ctx context.Context, merchantID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	return pricesFromGen(rows)
+	return s.pricesFromGen(ctx, rows)
 }
 
 // ListPriorVersionsByKey returns the archived members of a key's chain —
@@ -360,7 +394,7 @@ func (s *PriceService) ListPriorVersionsByKey(ctx context.Context, merchantID uu
 	if err != nil {
 		return nil, err
 	}
-	return pricesFromGen(rows)
+	return s.pricesFromGen(ctx, rows)
 }
 
 // RecordKeyMovement appends one entry to the pointer-movement history log:

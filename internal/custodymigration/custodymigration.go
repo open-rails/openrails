@@ -128,6 +128,8 @@ type VaultExport struct {
 	// SourceRail is the rail the cards were vaulted on (nmi). The rail does not
 	// change: custody moves, the gateway kind does not (or#879).
 	SourceRail string `json:"source_rail"`
+	// SourcePSPID owns every source vault reference in this export.
+	SourcePSPID uuid.UUID `json:"source_psp_id"`
 
 	// Custodian is the merchant's declared custodian KEY (custodians.key) that
 	// ingested the export.
@@ -265,6 +267,9 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 	if sourceRail == "" {
 		return res, errors.New("custody migration: Export.SourceRail is required")
 	}
+	if exp.SourcePSPID == uuid.Nil {
+		return res, errors.New("custody migration: Export.SourcePSPID is required")
+	}
 	custodianKey := strings.TrimSpace(exp.Custodian)
 	if custodianKey == "" {
 		return res, errors.New("custody migration: Export.Custodian (the declared custodian key) is required")
@@ -288,6 +293,19 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 		return res, err
 	}
 	ctx = merchant.WithID(ctx, merchantID)
+
+	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		source, err := database.Gen(ctx).GetPSP(ctx, exp.SourcePSPID)
+		if err != nil {
+			return fmt.Errorf("custody migration: source PSP: %w", err)
+		}
+		if source.MerchantID != merchantID.UUID() || source.Rail != sourceRail {
+			return errors.New("custody migration: source PSP does not match merchant and rail")
+		}
+		return nil
+	}); err != nil {
+		return res, err
+	}
 
 	// Resolve the declared targets ONCE, before any row moves: an undeclared
 	// custodian or a PSP that charges through someone else's vault is a
@@ -357,16 +375,17 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 	}
 
 	plan := &planner{
-		db:         database,
-		merchantID: merchantID,
-		batchID:    res.BatchID,
-		sourceRail: sourceRail,
-		custodian:  custodian,
-		targetPSP:  targetPSP,
-		exportedAt: exp.ExportedAt.UTC(),
-		apply:      opts.Apply,
-		seenSource: seenSource,
-		seenToken:  seenToken,
+		db:          database,
+		merchantID:  merchantID,
+		batchID:     res.BatchID,
+		sourceRail:  sourceRail,
+		sourcePSPID: exp.SourcePSPID,
+		custodian:   custodian,
+		targetPSP:   targetPSP,
+		exportedAt:  exp.ExportedAt.UTC(),
+		apply:       opts.Apply,
+		seenSource:  seenSource,
+		seenToken:   seenToken,
 	}
 
 	res.Rows = make([]RowResult, 0, len(exp.Tokens))
@@ -382,16 +401,17 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 }
 
 type planner struct {
-	db         *db.DB
-	merchantID merchant.ID
-	batchID    uuid.UUID
-	sourceRail string
-	custodian  gen.OpenrailsCustodian
-	targetPSP  *gen.OpenrailsPsp
-	exportedAt time.Time
-	apply      bool
-	seenSource map[string]int
-	seenToken  map[string]int
+	db          *db.DB
+	merchantID  merchant.ID
+	batchID     uuid.UUID
+	sourceRail  string
+	sourcePSPID uuid.UUID
+	custodian   gen.OpenrailsCustodian
+	targetPSP   *gen.OpenrailsPsp
+	exportedAt  time.Time
+	apply       bool
+	seenSource  map[string]int
+	seenToken   map[string]int
 }
 
 func sourceKey(tk ImportedToken) string {
@@ -434,6 +454,7 @@ func (p *planner) one(ctx context.Context, tk ImportedToken) (RowResult, error) 
 		if holder, herr := q.GetPaymentMethodForCustodianToken(ctx, gen.GetPaymentMethodForCustodianTokenParams{
 			MerchantID:    p.merchantID.UUID(),
 			Custodian:     p.custodianKind(),
+			CustodianID:   p.custodian.ID,
 			RailMethodRef: token,
 		}); herr == nil {
 			tokenHolder = &holder
@@ -443,7 +464,7 @@ func (p *planner) one(ctx context.Context, tk ImportedToken) (RowResult, error) 
 		if src == "" && strings.TrimSpace(tk.SourceRailMethodRef) == "" {
 			return nil
 		}
-		row, rerr := q.GetPaymentMethodByRailInstrument(ctx, gen.GetPaymentMethodByRailInstrumentParams{
+		row, rerr := q.GetPaymentMethodByRailInstrument(ctx, gen.GetPaymentMethodByRailInstrumentParams{PspID: p.sourcePSPID,
 			MerchantID:      p.merchantID.UUID(),
 			Rail:            p.sourceRail,
 			RailCustomerRef: src,
@@ -499,7 +520,7 @@ func (p *planner) one(ctx context.Context, tk ImportedToken) (RowResult, error) 
 		out.Outcome, out.Reason = OutcomeBlocked, ReasonTokenConflict
 		return out, nil
 	}
-	if existing.Custodian == p.custodianKind() {
+	if existing.CustodianID != nil && *existing.CustodianID == p.custodian.ID {
 		if existing.RailMethodRef == token {
 			out.Outcome = OutcomeAlreadyMigrated
 			return out, nil

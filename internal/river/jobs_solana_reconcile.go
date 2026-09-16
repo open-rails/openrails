@@ -89,7 +89,12 @@ func (w *SolanaReconcileWorker) Work(ctx context.Context, _ *river.Job[SolanaRec
 		progress.Mark(ctx, "solana reconcile subscription "+row.ID.String())
 		sig := *row.LastSignature
 		err := w.DB.RunInMerchantScope(ctx, merchant.ID(row.MerchantID), "solana reconcile pull", func(mctx context.Context) error {
-			_, perr := paymentRepo.GetByTransactionID(mctx, models.RailSolana, sig)
+			parent, err := w.DB.Gen(mctx).GetSubscriptionByID(mctx, row.SubscriptionID)
+			if err != nil {
+				return err
+			}
+			mctx = db.WithPSPID(mctx, parent.PspID)
+			_, perr := paymentRepo.GetByPSPTransactionID(mctx, models.RailSolana, sig)
 			if perr == nil {
 				return nil // ledger is consistent for this pull
 			}

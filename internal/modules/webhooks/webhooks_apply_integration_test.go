@@ -200,6 +200,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 		cancelledAt = &now
 	}
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailStripe))
+	ctx = db.WithPSPID(ctx, pspID)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    f.subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),
@@ -253,7 +254,7 @@ func newStripeApplyFixture(t *testing.T, ctx context.Context, dbi *db.DB, pool *
 
 func (f *stripeApplyFixture) reload(t *testing.T, ctx context.Context) *models.Subscription {
 	t.Helper()
-	sub, err := f.subSvc.GetByRailSubscriptionID(ctx, string(models.RailStripe), f.railSubID)
+	sub, err := f.subSvc.GetByPSPSubscriptionID(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), string(models.RailStripe), f.railSubID)
 	require.NoError(t, err)
 	return sub
 }
@@ -286,7 +287,7 @@ func TestStripeConvergeStaleEventsCannotRevertPastDue(t *testing.T) {
 		ID: "in_fail1", Paid: false, AmountDue: 2999, PaymentIntent: "pi_fail1", Created: now,
 	}))
 
-	_, err := f.svc.Converge(ctx, f.railSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusPastDue, f.reload(t, ctx).Status)
 	require.Equal(t, 1, f.paymentCount(t, ctx, "failed"), "fetched decline must land as the durable failed-attempt row")
@@ -294,7 +295,7 @@ func TestStripeConvergeStaleEventsCannotRevertPastDue(t *testing.T) {
 	// "Stale subscription.updated(active)" is now just another wake-up: it
 	// re-fetches the SAME truth. Any order, any count — state cannot revert.
 	for i := 0; i < 3; i++ {
-		_, err = f.svc.Converge(ctx, f.railSubID)
+		_, err = f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 		require.NoError(t, err)
 	}
 	require.Equal(t, models.StatusPastDue, f.reload(t, ctx).Status, "duplicate/stale wake-ups reverted past_due")
@@ -306,7 +307,7 @@ func TestStripeConvergeStaleEventsCannotRevertPastDue(t *testing.T) {
 	f.api.setTruth(f.railSubID, f.subscriptionTruth("active", now.Add(-25*24*time.Hour), periodEnd, &stripeInvoiceTruth{
 		ID: "in_rec1", Paid: true, AmountPaid: 2999, Charge: "ch_rec1", Created: now,
 	}))
-	_, err = f.svc.Converge(ctx, f.railSubID)
+	_, err = f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 	require.NoError(t, err)
 	sub := f.reload(t, ctx)
 	require.Equal(t, models.StatusActive, sub.Status)
@@ -333,7 +334,7 @@ func TestStripeConvergeRenewalIdempotentAnyOrder(t *testing.T) {
 
 	// Both "orders" (and duplicates) are the same operation now.
 	for i := 0; i < 2; i++ {
-		_, err := f.svc.Converge(ctx, f.railSubID)
+		_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 		require.NoError(t, err)
 		sub := f.reload(t, ctx)
 		require.Equal(t, models.StatusActive, sub.Status)
@@ -359,7 +360,7 @@ func TestStripeConvergeTerminalRowKeepsMoneyTruth(t *testing.T) {
 		ID: "in_tb1", Paid: true, AmountPaid: 2999, Charge: "ch_tb1", Created: now.Add(-time.Hour),
 	}))
 
-	_, err := f.svc.Converge(ctx, f.railSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 	require.NoError(t, err)
 
 	require.Equal(t, models.StatusCancelled, f.reload(t, ctx).Status, "terminal subscription must stay cancelled")
@@ -382,7 +383,7 @@ func TestStripeConvergeFetch404IsProviderConfirmedGone(t *testing.T) {
 	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, now.Add(5*24*time.Hour))
 	// No truth registered: the fake answers 404.
 
-	_, err := f.svc.Converge(ctx, f.railSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 	require.NoError(t, err)
 
 	sub := f.reload(t, ctx)
@@ -404,13 +405,13 @@ func TestStripeConvergeProviderDownParksAndRecovers(t *testing.T) {
 	f := newStripeApplyFixture(t, ctx, dbi, pool, models.StatusActive, nil, periodEnd)
 
 	f.api.setFailure(http.StatusInternalServerError)
-	_, err := f.svc.Converge(ctx, f.railSubID)
+	_, err := f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 	require.Error(t, err, "provider outage must fail the converge for retry")
 	require.Equal(t, models.StatusActive, f.reload(t, ctx).Status, "outage must not move local state; access intact")
 
 	f.api.setFailure(0)
 	f.api.setTruth(f.railSubID, f.subscriptionTruth("active", now.Add(-25*24*time.Hour), periodEnd, nil))
-	_, err = f.svc.Converge(ctx, f.railSubID)
+	_, err = f.svc.Converge(db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "stripe")), f.railSubID)
 	require.NoError(t, err)
 	require.Equal(t, models.StatusActive, f.reload(t, ctx).Status)
 }
@@ -539,6 +540,7 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 	originalTxnID := "orig_" + uuid.New().String()
 	refundTxnID := "refund_" + uuid.New().String()
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	ctx = db.WithPSPID(ctx, pspID)
 	original := &models.Payment{
 		ID:            uuid.New(),
 		CustomerID:    tenantSubjectID,
@@ -572,7 +574,7 @@ func TestNMIOneOffRefundReversesPayment(t *testing.T) {
 	}
 	require.NoError(t, svc.handleRefundSuccess(ctx))
 
-	reversal, err := paymentSvc.GetByTransactionID(ctx, models.RailNMI, refundTxnID)
+	reversal, err := paymentSvc.GetByPSPTransactionID(ctx, models.RailNMI, refundTxnID)
 	require.NoError(t, err, "one-off refund left no payment reversal row")
 	require.NotNil(t, reversal.RefundedPaymentID)
 	require.Equal(t, original.ID, *reversal.RefundedPaymentID)
@@ -662,6 +664,7 @@ func TestCCBillRenewalCreditGrantFailurePropagates(t *testing.T) {
 	periodEnd := now.Add(30 * 24 * time.Hour)
 	periodStart := now
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, dbtest.TestMerchantID.UUID(), string(models.RailCCBill))
+	ctx = db.WithPSPID(ctx, pspID)
 	_, err = q.CreateSubscription(ctx, gen.CreateSubscriptionParams{
 		ID:                    subID,
 		MerchantID:            dbtest.TestMerchantID.UUID(),

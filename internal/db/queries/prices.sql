@@ -3,14 +3,14 @@
 -- name: CreatePrice :execrows
 INSERT INTO openrails.prices (
     id, merchant_id, product_id, archived, amount, currency,
-    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, psp_links, key, created_at, updated_at
+    access_duration_hours, auto_renew, trial_unit_amount, trial_duration_hours, key, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2,
     sqlc.arg(archived)::boolean,
     $3, $4,
-    sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours), sqlc.narg(psp_links),
+    sqlc.narg(access_duration_hours), sqlc.arg(auto_renew)::boolean, sqlc.narg(trial_unit_amount), sqlc.narg(trial_duration_hours),
     sqlc.arg(key)::text,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     COALESCE(NULLIF(sqlc.arg(updated_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now())
@@ -74,37 +74,30 @@ ORDER BY price.created_at DESC, price.id DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
 -- name: GetPriceByNMIPlan :one
--- psp_links entries key on the PSP key with the rail recorded inside; the
--- lookup name may be either the PSP key or the rail.
-SELECT * FROM openrails.prices price
-WHERE EXISTS (
-    SELECT 1 FROM jsonb_each(price.psp_links) AS link(psp, cfg)
-    WHERE cfg ->> 'plan_id' = sqlc.arg(plan_id)::text
-      AND (link.psp = sqlc.arg(rail)::text OR cfg ->> 'rail' = sqlc.arg(rail)::text)
-)
-LIMIT 1;
+SELECT price.* FROM openrails.prices price
+JOIN openrails.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
+JOIN openrails.psps psp ON psp.merchant_id = binding.merchant_id AND psp.id = binding.psp_id
+WHERE binding.merchant_id = sqlc.arg(merchant_id)::uuid AND binding.psp_id = sqlc.arg(psp_id)::uuid
+  AND psp.rail = sqlc.arg(rail)::text AND binding.plan_id = sqlc.arg(plan_id)::text;
 
--- name: GetPriceWithProductByCCBillPriceID :one
+-- name: GetPriceWithProductByCCBillPriceID :many
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
-JOIN openrails.products prod ON prod.id = price.product_id
-WHERE EXISTS (
-    SELECT 1 FROM jsonb_each(price.psp_links) AS link(psp, cfg)
-    WHERE cfg ->> 'rail' = 'ccbill'
-      AND (cfg ->> 'flex_id' = sqlc.arg(ccbill_price_id)::text
-           OR cfg ->> 'recurring_billing_option_id' = sqlc.arg(ccbill_price_id)::text)
-)
-LIMIT 1;
+JOIN openrails.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
+JOIN openrails.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
+JOIN openrails.psps psp ON psp.merchant_id = binding.merchant_id AND psp.id = binding.psp_id
+WHERE binding.merchant_id = sqlc.arg(merchant_id)::uuid AND binding.psp_id = sqlc.arg(psp_id)::uuid
+  AND psp.rail = 'ccbill'
+  AND ((sqlc.arg(object_kind)::text = 'flex' AND binding.flex_id = sqlc.arg(ccbill_price_id)::text) OR (sqlc.arg(object_kind)::text = 'recurring_billing_option' AND binding.recurring_billing_option_id = sqlc.arg(ccbill_price_id)::text));
 
 -- name: GetPriceWithProductByStripePriceID :one
 SELECT sqlc.embed(price), sqlc.embed(prod)
 FROM openrails.prices price
-JOIN openrails.products prod ON prod.id = price.product_id
-WHERE EXISTS (
-    SELECT 1 FROM jsonb_each(price.psp_links) AS link(psp, cfg)
-    WHERE cfg ->> 'rail' = 'stripe' AND cfg ->> 'price_id' = sqlc.arg(stripe_price_id)::text
-)
-LIMIT 1;
+JOIN openrails.products prod ON prod.id = price.product_id AND prod.merchant_id = price.merchant_id
+JOIN openrails.price_psp_bindings binding ON binding.merchant_id = price.merchant_id AND binding.price_id = price.id
+JOIN openrails.psps psp ON psp.merchant_id = binding.merchant_id AND psp.id = binding.psp_id
+WHERE binding.merchant_id = sqlc.arg(merchant_id)::uuid AND binding.psp_id = sqlc.arg(psp_id)::uuid
+  AND psp.rail = 'stripe' AND binding.price_ref = sqlc.arg(stripe_price_id)::text;
 
 -- #662: a price's money/identity columns (product_id, amount, currency,
 -- access_duration_hours, auto_renew, trial_*) are IMMUTABLE — a reprice creates
@@ -116,12 +109,6 @@ LIMIT 1;
 -- name: UpdatePriceStatus :execrows
 UPDATE openrails.prices SET
     archived = sqlc.arg(archived)::boolean,
-    updated_at = now()
-WHERE id = sqlc.arg(id);
-
--- name: UpdatePricePSPLinks :execrows
-UPDATE openrails.prices SET
-    psp_links = sqlc.narg(psp_links),
     updated_at = now()
 WHERE id = sqlc.arg(id);
 

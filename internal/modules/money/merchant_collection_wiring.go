@@ -128,6 +128,7 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 		// or#879: same rail, same gateway, different transport — the card is
 		// held by the custodian, so the charge goes through its proxy. The
 		// INSTRUMENT decides this, not the rail.
+		scope.CustodianID = method.CustodianID
 		adapter, err = b.custodianProxyAdapter(ctx, svc, mid, scope)
 	default:
 		adapter, err = b.nmiAdapter(ctx, svc, mid, scope)
@@ -153,9 +154,8 @@ func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc
 		}
 		return merchants.PSPScope{
 			ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID,
-			// or#880: the custody reference travels with the stamped account —
-			// a renewal on a custodian-held card must arm the SAME vault the
-			// original sale did, not whatever the merchant declares today.
+			// Default for new custody work. Stored instruments override this
+			// with the custodian UUID captured when the instrument was created.
 			CustodianID: row.CustodianID,
 		}, true, nil
 	}

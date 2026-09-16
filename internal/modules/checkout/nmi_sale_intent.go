@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -279,7 +280,7 @@ func (h *NMISaleIntentHandler) captureStoredCredentialRef(ctx context.Context, m
 		log.WithContext(ctx).Warn("nmi sale finalize: no DB handle to persist stored-credential reference (#297)")
 		return
 	}
-	if _, err := h.Sale.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{
+	if _, err := h.Sale.RailPaymentMethodService.DB.Gen(ctx).CaptureStoredCredentialRefByRailInstrument(ctx, gen.CaptureStoredCredentialRefByRailInstrumentParams{PspID: db.PSPIDFromContext(ctx),
 		MerchantID:      merchantID,
 		Rail:            strings.ToLower(strings.TrimSpace(p.Provider)),
 		RailCustomerRef: strings.TrimSpace(p.CustomerVaultID),

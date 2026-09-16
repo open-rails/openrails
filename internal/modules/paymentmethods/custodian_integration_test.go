@@ -45,6 +45,10 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 			CreatedAt:            time.Now().UTC(),
 			UpdatedAt:            time.Now().UTC(),
 		}
+		if custodian == models.CustodianBasisTheory {
+			id := dbtest.EnsureTestCustodian(ctx, t, pool, dbtest.TestMerchantID.UUID())
+			pm.CustodianID = &id
+		}
 		require.NoError(t, repo.Create(ctx, pm))
 		t.Cleanup(func() { _ = repo.Delete(ctx, pm.ID) })
 		return pm.ID
@@ -78,12 +82,17 @@ func TestCustodianIsAlwaysStated(t *testing.T) {
 	// impossible: a direct INSERT with '' is refused.
 	rawInsert := func(custodian string) error {
 		id := uuid.New()
+		var custodianID *uuid.UUID
+		if custodian == models.CustodianBasisTheory {
+			cid := dbtest.EnsureTestCustodian(ctx, t, pool, dbtest.TestMerchantID.UUID())
+			custodianID = &cid
+		}
 		_, err := pool.Exec(ctx,
 			`INSERT INTO openrails.payment_methods
-			   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref, initial_transaction_id, custodian)
-			 VALUES ($1, $2, $3, 'nmi', $4, $5, $6, 'txn-x', $7)`,
+			   (id, merchant_id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref, initial_transaction_id, custodian, custodian_id)
+			 VALUES ($1, $2, $3, 'nmi', $4, $5, $6, 'txn-x', $7, $8)`,
 			id, dbtest.TestMerchantID.UUID(), customerID, pspID,
-			"vault-"+uuid.NewString()[:8], "bill-"+uuid.NewString()[:8], custodian)
+			"vault-"+uuid.NewString()[:8], "bill-"+uuid.NewString()[:8], custodian, custodianID)
 		if err == nil {
 			t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM openrails.payment_methods WHERE id = $1`, id) })
 		}

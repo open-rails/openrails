@@ -58,6 +58,12 @@ func (suite *TestContainerSuite) InsertProduct(ctx context.Context, p *models.Pr
 
 func (suite *TestContainerSuite) InsertPrice(ctx context.Context, p *models.Price) {
 	suite.t.Helper()
+	ctx = dbtest.WithTestMerchant(ctx)
+	for _, cfg := range p.PSPLinks {
+		if cfg[models.RailKeyPSPID] == "" {
+			cfg[models.RailKeyPSPID] = dbtest.EnsureTestPSP(ctx, suite.t, suite.MerchantPool(), dbtest.TestMerchantID.UUID(), cfg[models.RailKeyRail]).String()
+		}
+	}
 	if p.MerchantID == uuid.Nil {
 		tid, err := merchant.Require(ctx)
 		if err != nil {
@@ -189,7 +195,7 @@ func (suite *TestContainerSuite) GetPaymentByID(ctx context.Context, id uuid.UUI
 // fails the test when missing.
 func (suite *TestContainerSuite) GetPaymentByTransaction(ctx context.Context, rail models.Rail, transactionID string) *models.Payment {
 	suite.t.Helper()
-	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByTransactionID(ctx, rail, transactionID)
+	p, err := payments.NewPaymentRepo(suite.FixtureDB()).GetByPSPTransactionID(suite.PinPSP(ctx, string(rail)), rail, transactionID)
 	require.NoError(suite.t, err, "Failed to get payment by transaction %s", transactionID)
 	return p
 }
@@ -252,7 +258,7 @@ func (suite *TestContainerSuite) GetEntitlement(ctx context.Context, id uuid.UUI
 // swallowed the not-found error).
 func (suite *TestContainerSuite) GetSubscriptionByRailID(railSubID string) *models.Subscription {
 	suite.t.Helper()
-	ctx := context.Background()
+	ctx := suite.MerchantCtx()
 
 	var id uuid.UUID
 	err := suite.Pool.QueryRow(ctx,

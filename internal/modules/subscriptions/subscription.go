@@ -291,18 +291,18 @@ func (s *SubscriptionService) GetActiveSubscription(ctx context.Context, userID 
 	return s.subscriptionRepo.GetActiveSubscriptionAt(ctx, userID, s.now())
 }
 
-// GetByRailSubscriptionID finds a subscription by rail and rail_subscription_id.
-func (s *SubscriptionService) GetByRailSubscriptionID(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByRailSubscriptionID(ctx, rail, railSubscriptionID)
+// GetByPSPSubscriptionID finds a subscription by rail and rail_subscription_id.
+func (s *SubscriptionService) GetByPSPSubscriptionID(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByPSPSubscriptionID(ctx, rail, railSubscriptionID)
 }
 
-func (s *SubscriptionService) GetByRailMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
-	return s.subscriptionRepo.GetByRailMetadataValue(ctx, rail, key, value)
+func (s *SubscriptionService) GetByPSPMetadataValue(ctx context.Context, rail, key, value string) (*models.Subscription, error) {
+	return s.subscriptionRepo.GetByPSPMetadataValue(ctx, rail, key, value)
 }
 
-// GetActiveSubscriptionsByRail gets all active subscriptions for a rail
-func (s *SubscriptionService) GetActiveSubscriptionsByRail(ctx context.Context, rail string) ([]*models.Subscription, error) {
-	return s.subscriptionRepo.GetActiveSubscriptionsByRail(ctx, rail)
+// GetActiveSubscriptionsForPSP gets all active subscriptions for a rail
+func (s *SubscriptionService) GetActiveSubscriptionsForPSP(ctx context.Context, rail string) ([]*models.Subscription, error) {
+	return s.subscriptionRepo.GetActiveSubscriptionsForPSP(ctx, rail)
 }
 
 // Delete removes a subscription from the database permanently

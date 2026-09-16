@@ -2,6 +2,10 @@ package checkout
 
 import (
 	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails/pkg/api"
 )
 
 // PAN firewall (#795 B5, SAQ A): custodian-held-card checkout accepts ONLY the BT
@@ -31,6 +35,15 @@ func RejectPANShapedFields(req *CheckoutRequest) error {
 		"last_four":          req.LastFour,
 		"expiry_date":        req.ExpiryDate,
 		"card_type":          req.CardType,
+	}
+	// Typed UUID handles can contain a Luhn-valid run across their groups.
+	// Only these identifier fields receive this exemption; free-form fields
+	// and malformed handles retain the card-number scan.
+	if canonicalUUIDHandle(req.BTTokenIntentID) {
+		delete(fields, "bt_token_intent_id")
+	}
+	if canonicalUUIDHandle(strings.TrimPrefix(req.PaymentMethodID, api.PrefixPaymentMethod)) {
+		delete(fields, "payment_method_id")
 	}
 	for key, value := range req.Metadata {
 		if looksLikePAN(key) {
@@ -87,4 +100,9 @@ func luhnValid(digits []byte) bool {
 		double = !double
 	}
 	return sum%10 == 0
+}
+
+func canonicalUUIDHandle(value string) bool {
+	id, err := uuid.Parse(value)
+	return err == nil && strings.EqualFold(value, id.String())
 }

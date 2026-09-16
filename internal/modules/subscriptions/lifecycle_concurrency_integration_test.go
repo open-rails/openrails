@@ -45,6 +45,7 @@ func TestConcurrentRenewalLifecycle(t *testing.T) {
 			productID, priceID, subID := uuid.New(), uuid.New(), uuid.New()
 			paidEnd := now.Add(30 * 24 * time.Hour)
 			insertCatalogAndSub(ctx, t, database, now, 30, productID, priceID, subID, uuid.NewString(), now, paidEnd)
+			ctx = db.WithPSPID(ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "solana"))
 			railSubID := "lifecycle-" + uuid.NewString()
 			_, err := database.Pool().Exec(ctx, "UPDATE openrails.subscriptions SET rail_subscription_id=$2 WHERE id=$1", subID, railSubID)
 			require.NoError(t, err)

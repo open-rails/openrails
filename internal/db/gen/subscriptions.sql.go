@@ -653,22 +653,31 @@ func (q *Queries) GetSubscriptionByIDForUpdate(ctx context.Context, id uuid.UUID
 	return i, err
 }
 
-const getSubscriptionByRailMetadataValue = `-- name: GetSubscriptionByRailMetadataValue :one
+const getSubscriptionByPSPMetadataValue = `-- name: GetSubscriptionByPSPMetadataValue :one
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
-WHERE sub.rail = $1
-  AND sub.gateway_response ->> $2::text = $3::text
+WHERE sub.merchant_id = $2::uuid AND sub.psp_id = $3::uuid
+  AND sub.rail = $1
+  AND sub.gateway_response ->> $4::text = $5::text
   AND sub.deleted_at IS NULL
 LIMIT 1
 `
 
-type GetSubscriptionByRailMetadataValueParams struct {
-	Rail  string
-	Key   string
-	Value string
+type GetSubscriptionByPSPMetadataValueParams struct {
+	Rail       string
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	Key        string
+	Value      string
 }
 
-func (q *Queries) GetSubscriptionByRailMetadataValue(ctx context.Context, arg GetSubscriptionByRailMetadataValueParams) (OpenrailsSubscription, error) {
-	row := q.db.QueryRow(ctx, getSubscriptionByRailMetadataValue, arg.Rail, arg.Key, arg.Value)
+func (q *Queries) GetSubscriptionByPSPMetadataValue(ctx context.Context, arg GetSubscriptionByPSPMetadataValueParams) (OpenrailsSubscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByPSPMetadataValue,
+		arg.Rail,
+		arg.MerchantID,
+		arg.PspID,
+		arg.Key,
+		arg.Value,
+	)
 	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
@@ -707,20 +716,28 @@ func (q *Queries) GetSubscriptionByRailMetadataValue(ctx context.Context, arg Ge
 	return i, err
 }
 
-const getSubscriptionByRailSubID = `-- name: GetSubscriptionByRailSubID :one
+const getSubscriptionByPSPSubID = `-- name: GetSubscriptionByPSPSubID :one
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
-WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+WHERE sub.merchant_id = $3::uuid AND sub.psp_id = $4::uuid
+  AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
 LIMIT 1
 `
 
-type GetSubscriptionByRailSubIDParams struct {
+type GetSubscriptionByPSPSubIDParams struct {
 	Rail               string
 	RailSubscriptionID string
+	MerchantID         uuid.UUID
+	PspID              uuid.UUID
 }
 
-func (q *Queries) GetSubscriptionByRailSubID(ctx context.Context, arg GetSubscriptionByRailSubIDParams) (OpenrailsSubscription, error) {
-	row := q.db.QueryRow(ctx, getSubscriptionByRailSubID, arg.Rail, arg.RailSubscriptionID)
+func (q *Queries) GetSubscriptionByPSPSubID(ctx context.Context, arg GetSubscriptionByPSPSubIDParams) (OpenrailsSubscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByPSPSubID,
+		arg.Rail,
+		arg.RailSubscriptionID,
+		arg.MerchantID,
+		arg.PspID,
+	)
 	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
@@ -759,23 +776,31 @@ func (q *Queries) GetSubscriptionByRailSubID(ctx context.Context, arg GetSubscri
 	return i, err
 }
 
-const getSubscriptionByRailSubIDForUpdate = `-- name: GetSubscriptionByRailSubIDForUpdate :one
+const getSubscriptionByPSPSubIDForUpdate = `-- name: GetSubscriptionByPSPSubIDForUpdate :one
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
-WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+WHERE sub.merchant_id = $3::uuid AND sub.psp_id = $4::uuid
+  AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
 LIMIT 1
 FOR UPDATE
 `
 
-type GetSubscriptionByRailSubIDForUpdateParams struct {
+type GetSubscriptionByPSPSubIDForUpdateParams struct {
 	Rail               string
 	RailSubscriptionID string
+	MerchantID         uuid.UUID
+	PspID              uuid.UUID
 }
 
 // Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
 // UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
-func (q *Queries) GetSubscriptionByRailSubIDForUpdate(ctx context.Context, arg GetSubscriptionByRailSubIDForUpdateParams) (OpenrailsSubscription, error) {
-	row := q.db.QueryRow(ctx, getSubscriptionByRailSubIDForUpdate, arg.Rail, arg.RailSubscriptionID)
+func (q *Queries) GetSubscriptionByPSPSubIDForUpdate(ctx context.Context, arg GetSubscriptionByPSPSubIDForUpdateParams) (OpenrailsSubscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByPSPSubIDForUpdate,
+		arg.Rail,
+		arg.RailSubscriptionID,
+		arg.MerchantID,
+		arg.PspID,
+	)
 	var i OpenrailsSubscription
 	err := row.Scan(
 		&i.ID,
@@ -1057,14 +1082,21 @@ func (q *Queries) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceId
 	return items, nil
 }
 
-const listActiveSubscriptionsByRail = `-- name: ListActiveSubscriptionsByRail :many
+const listActiveSubscriptionsForPSP = `-- name: ListActiveSubscriptionsForPSP :many
 SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, credits_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id FROM openrails.subscriptions sub
-WHERE sub.rail = $1 AND sub.status = 'active'
+WHERE sub.merchant_id = $2::uuid AND sub.psp_id = $3::uuid
+  AND sub.rail = $1 AND sub.status = 'active'
   AND sub.deleted_at IS NULL
 `
 
-func (q *Queries) ListActiveSubscriptionsByRail(ctx context.Context, rail string) ([]OpenrailsSubscription, error) {
-	rows, err := q.db.Query(ctx, listActiveSubscriptionsByRail, rail)
+type ListActiveSubscriptionsForPSPParams struct {
+	Rail       string
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+}
+
+func (q *Queries) ListActiveSubscriptionsForPSP(ctx context.Context, arg ListActiveSubscriptionsForPSPParams) ([]OpenrailsSubscription, error) {
+	rows, err := q.db.Query(ctx, listActiveSubscriptionsForPSP, arg.Rail, arg.MerchantID, arg.PspID)
 	if err != nil {
 		return nil, err
 	}

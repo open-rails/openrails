@@ -211,6 +211,15 @@ func newCustodianSaleFixture(t *testing.T, networkTokens bool) *custodianSaleFix
 func (fx *custodianSaleFixture) enqueueAndExecute(t *testing.T, key string) gen.OpenrailsRailIntent {
 	t.Helper()
 	pspID := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), string(models.RailNMI))
+	var custodianID *uuid.UUID
+	require.NoError(t, fx.db.Qx(fx.ctx).QueryRow(fx.ctx, `SELECT custodian_id FROM openrails.psps WHERE id=$1`, pspID).Scan(&custodianID))
+	if custodianID == nil {
+		id := dbtest.EnsureTestCustodian(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID())
+		custodianID = &id
+		_, err := fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.psps SET custodian_id=$2 WHERE id=$1`, pspID, id)
+		require.NoError(t, err)
+	}
+	fx.ctx = db.WithCustodianID(fx.ctx, *custodianID)
 	intent, err := fx.runner.EnqueueAndExecute(fx.ctx, intents.EnqueueParams{
 		MerchantID: dbtest.TestMerchantID.UUID(),
 		Provider:   string(models.RailNMI),
@@ -429,7 +438,7 @@ func TestCustodianProxyCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.
 	charger, err := fx.svc.charger(cfg)
 	require.NoError(t, err)
 
-	method, err := fx.db.Gen(fx.ctx).GetPaymentMethodByRailMethodRef(fx.ctx, gen.GetPaymentMethodByRailMethodRefParams{
+	method, err := fx.db.Gen(fx.ctx).GetPaymentMethodByRailMethodRefForPSP(fx.ctx, gen.GetPaymentMethodByRailMethodRefForPSPParams{CustodianID: intent.CustodianID, MerchantID: dbtest.TestMerchantID.UUID(), PspID: *intent.PspID,
 		Rail:          string(models.RailNMI),
 		RailMethodRef: fx.bt.tokenID,
 	})

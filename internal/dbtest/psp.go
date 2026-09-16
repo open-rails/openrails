@@ -68,3 +68,12 @@ func testPSPAccountID(merchantID uuid.UUID, rail string) string {
 	sum := sha256.Sum256([]byte(merchantID.String() + "|" + rail))
 	return "test-" + rail + "-" + hex.EncodeToString(sum[:6])
 }
+
+// EnsureTestCustodian declares a distinct Basis Theory account for an instrument fixture.
+func EnsureTestCustodian(ctx context.Context, t testing.TB, qx gen.DBTX, merchantID uuid.UUID) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	_, err := qx.Exec(ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,environment,account_id) VALUES($1,$2,$3,'basis_theory','test',$3)`, id, merchantID, id.String())
+	require.NoError(t, err)
+	return id
+}

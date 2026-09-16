@@ -40,7 +40,7 @@ type RegisterPurchaseResult struct {
 }
 
 type paymentLookup interface {
-	GetByTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error)
+	GetByPSPTransactionID(ctx context.Context, rail models.Rail, transactionID string) (*models.Payment, error)
 }
 
 type checkoutSessionMarker interface {
@@ -701,8 +701,26 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 		return fmt.Errorf("checkout payment service is not configured")
 	}
 
+	if p.db != nil {
+		sessionID, err := uuid.Parse(pending.SessionID)
+		if err != nil {
+			return fmt.Errorf("confirmed Solana payment requires checkout session identity: %w", err)
+		}
+		session, err := p.db.Gen(ctx).GetCheckoutSessionByID(ctx, sessionID)
+		if err != nil {
+			return err
+		}
+		mid, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		if session.MerchantID != mid.UUID() || session.Rail != string(models.RailSolana) {
+			return fmt.Errorf("checkout session does not belong to Solana payment scope")
+		}
+		ctx = db.WithPSPID(ctx, session.PspID)
+	}
 	// Fast idempotency guard: skip processing if this signature is already recorded.
-	existingPayment, err := p.paymentLookup.GetByTransactionID(ctx, models.RailSolana, signature)
+	existingPayment, err := p.paymentLookup.GetByPSPTransactionID(ctx, models.RailSolana, signature)
 	if err != nil && !db.IsNotFound(err) {
 		return fmt.Errorf("failed checking existing payment by transaction id: %w", err)
 	}
@@ -773,7 +791,7 @@ func (p *SolanaPayPoller) processConfirmedPayment(ctx context.Context, txSvc *So
 	if err != nil {
 		// Race-safe idempotency: if another worker inserted first, treat as success.
 		if isDuplicatePaymentTransactionIDError(err) {
-			existingPayment, getErr := p.paymentLookup.GetByTransactionID(ctx, models.RailSolana, signature)
+			existingPayment, getErr := p.paymentLookup.GetByPSPTransactionID(ctx, models.RailSolana, signature)
 			if getErr == nil {
 				if !solanaPaymentMatchesPending(existingPayment, reference, pending) {
 					log.WithFields(log.Fields{

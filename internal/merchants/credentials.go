@@ -519,13 +519,13 @@ func (s *Service) pspSecretScopeByAccountID(ctx context.Context, id merchant.ID,
 	var evidence []byte
 	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
 		return s.database.Qx(ctx).QueryRow(ctx, `
-				SELECT rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
+				SELECT id, rail, environment, account_id, COALESCE(key, ''), evidence, custodian_id
 				  FROM openrails.psps
 				 WHERE merchant_id = $1::uuid
 				   AND rail = lower($2)
-				   AND account_id = $3
+				   AND account_id = $3 AND environment = $4
 				 LIMIT 1
-			`, id.String(), rail, strings.TrimSpace(accountID)).Scan(&scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
+			`, id.String(), rail, strings.TrimSpace(accountID), s.providerEnvironment).Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return pspSecretScope{}, false, nil
@@ -985,4 +985,25 @@ func (s *Service) CountActivePSPsForRail(ctx context.Context, id merchant.ID, ra
 		return 0, fmt.Errorf("count active PSPs %s/%s: %w", rail, environment, err)
 	}
 	return int(count), nil
+}
+
+// PSPScopeByID preserves the selected account across key renames and archive.
+func (s *Service) PSPScopeByID(ctx context.Context, id merchant.ID, pspID uuid.UUID) (PSPScope, bool, error) {
+	if s == nil || s.pool == nil || id.IsZero() || pspID == uuid.Nil {
+		return PSPScope{}, false, nil
+	}
+	var scope pspSecretScope
+	var evidence []byte
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		return s.database.Qx(ctx).QueryRow(ctx, `SELECT id,rail,environment,account_id,COALESCE(key,''),evidence,custodian_id FROM openrails.psps WHERE merchant_id=$1 AND id=$2`, id.UUID(), pspID).
+			Scan(&scope.id, &scope.rail, &scope.environment, &scope.accountID, &scope.key, &evidence, &scope.custodianID)
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return PSPScope{}, false, nil
+	}
+	if err != nil {
+		return PSPScope{}, false, err
+	}
+	scope.applyEvidence(evidence)
+	return scope.exported(), true, nil
 }

@@ -13,6 +13,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -138,10 +139,18 @@ func newPlanMigrationFixture(t *testing.T) *planMigrationFixture {
 
 	insertPrice := func(id, productID uuid.UUID, amount int64, key string, psp string) {
 		_, e := base.pool.Exec(ctx, `
-			INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, psp_links, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'USD',720,true,false,$5,$6::jsonb,$7,$7)`,
-			id, productID, base.merchantID, amount, key, psp, now)
+			INSERT INTO openrails.prices (id, product_id, merchant_id, amount, currency, access_duration_hours, auto_renew, archived, key, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,'USD',720,true,false,$5,$6,$6)`,
+			id, productID, base.merchantID, amount, key, now)
 		require.NoError(t, e)
+		var links map[string]map[string]string
+		require.NoError(t, json.Unmarshal([]byte(psp), &links))
+		for key, cfg := range links {
+			pspID := dbtest.EnsureTestPSP(ctx, t, base.pool, base.merchantID, cfg[models.RailKeyRail])
+			cfg[models.RailKeyPSPID] = pspID.String()
+			links[key] = cfg
+		}
+		require.NoError(t, base.priceSvc.UpdatePSPLinks(ctx, id, links))
 	}
 	targetPriceID := uuid.New()
 	insertPrice(targetPriceID, targetProductID, 9000000, "planmig-target-"+suffix, `{}`)

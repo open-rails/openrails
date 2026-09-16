@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -45,6 +46,7 @@ func TestCCBillCancellationWebhookAfterLocalCancelIsNoOp(t *testing.T) {
 	// The post-#696 user-cancel shape: cancelled with USER provenance, paid
 	// runway preserved, access window already bounded at the period end.
 	pspID := dbtest.EnsureTestPSP(ctx, t, pool, tenantID, "ccbill")
+	ctx = db.WithPSPID(ctx, pspID)
 	exec(`INSERT INTO openrails.subscriptions
 	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
 	         current_period_starts_at, current_period_ends_at, started_at,

@@ -14,6 +14,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -112,7 +114,7 @@ func TestRenewMembershipDuplicateTransactionIsNoOp(t *testing.T) {
 	defer suite.CleanupSubscriptionsForUser(userID)
 
 	txnID := "nmi-renew-" + uuid.New().String()[:8]
-	ctx := suite.MerchantCtx()
+	ctx := suite.PinPSP(suite.MerchantCtx(), "nmi")
 	err := suite.App.Runtime.SubscriptionLifecycleService.RenewMembership(ctx, &subscriptions.RenewMembershipParams{
 		Rail:               models.Rail("nmi"),
 		RailSubscriptionID: sub.RailSubscriptionID,
@@ -167,9 +169,6 @@ func configureSecondaryNMIProvider(t *testing.T, suite *TestContainerSuite, mock
 		models.RailKeyRail:   string(models.RailNMI),
 		models.RailKeyPlanID: provider + "-plan",
 	}
-	railsJSON, err := json.Marshal(price.PSPLinks)
-	require.NoError(t, err)
-	_, err = suite.Pool.Exec(context.Background(),
-		"UPDATE openrails.prices SET psp_links = $1 WHERE id = $2", railsJSON, price.ID)
-	require.NoError(t, err)
+	price.PSPLinks[provider][models.RailKeyRail] = string(models.RailNMI)
+	require.NoError(t, catalog.NewPriceService(suite.FixtureDB()).UpdatePSPLinks(dbtest.WithTestMerchant(context.Background()), price.ID, price.PSPLinks))
 }

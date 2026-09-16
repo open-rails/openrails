@@ -107,24 +107,27 @@ WHERE sub.customer_id = $1
 ORDER BY sub.created_at DESC
 LIMIT 1;
 
--- name: GetSubscriptionByRailSubID :one
+-- name: GetSubscriptionByPSPSubID :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
+  AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
 LIMIT 1;
 
--- name: GetSubscriptionByRailSubIDForUpdate :one
+-- name: GetSubscriptionByPSPSubIDForUpdate :one
 -- Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
 -- UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.rail = $1 AND sub.rail_subscription_id = $2
+WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
+  AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
 LIMIT 1
 FOR UPDATE;
 
--- name: GetSubscriptionByRailMetadataValue :one
+-- name: GetSubscriptionByPSPMetadataValue :one
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.rail = $1
+WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
+  AND sub.rail = $1
   AND sub.gateway_response ->> sqlc.arg(key)::text = sqlc.arg(value)::text
   AND sub.deleted_at IS NULL
 LIMIT 1;
@@ -161,9 +164,10 @@ WHERE rail = 'stripe'
   AND payment_method_id = sqlc.arg(payment_method_id)::uuid
   AND deleted_at IS NULL;
 
--- name: ListActiveSubscriptionsByRail :many
+-- name: ListActiveSubscriptionsForPSP :many
 SELECT * FROM openrails.subscriptions sub
-WHERE sub.rail = $1 AND sub.status = 'active'
+WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
+  AND sub.rail = $1 AND sub.status = 'active'
   AND sub.deleted_at IS NULL;
 
 -- #773: every active subscription pinned to one of a set of price rows — the

@@ -220,7 +220,7 @@ func (fx *subIntentFixture) enqueueAndExecute(t *testing.T) gen.OpenrailsRailInt
 
 func (fx *subIntentFixture) localSub(t *testing.T) (*models.Subscription, bool) {
 	t.Helper()
-	sub, err := fx.svc.SubscriptionService.GetByRailSubscriptionID(fx.ctx, string(models.RailNMI), fx.gateway.subID)
+	sub, err := fx.svc.SubscriptionService.GetByPSPSubscriptionID(db.WithPSPID(fx.ctx, dbtest.TestPSPID(dbtest.TestMerchantID.UUID(), "mobius")), string(models.RailNMI), fx.gateway.subID)
 	if err != nil {
 		return nil, false
 	}

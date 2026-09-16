@@ -242,7 +242,7 @@ func ImportDeclaredSubscriptions(
 			}
 		}
 
-		existing, err := q.GetSubscriptionByRailSubID(ctx, gen.GetSubscriptionByRailSubIDParams{
+		existing, err := q.GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{MerchantID: merchantID, PspID: f.PspID,
 			Rail:               f.Rail,
 			RailSubscriptionID: f.RailSubscriptionID,
 		})
@@ -468,7 +468,7 @@ func materializeDeclaredUnknown(
 	}
 	if len(rows) == 0 {
 		// Raced an insert between lookup and materialize; re-read.
-		existing, err := q.GetSubscriptionByRailSubID(ctx, gen.GetSubscriptionByRailSubIDParams{
+		existing, err := q.GetSubscriptionByPSPSubID(ctx, gen.GetSubscriptionByPSPSubIDParams{MerchantID: merchantID, PspID: f.PspID,
 			Rail:               f.Rail,
 			RailSubscriptionID: f.RailSubscriptionID,
 		})

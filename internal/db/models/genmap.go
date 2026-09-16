@@ -166,9 +166,6 @@ func PriceFromGen(p gen.OpenrailsPrice) (*Price, error) {
 		CreatedAt:           p.CreatedAt,
 		UpdatedAt:           p.UpdatedAt,
 	}
-	if err := FromJSONB(p.PspLinks, &m.PSPLinks, "prices.psp_links"); err != nil {
-		return nil, err
-	}
 	return m, nil
 }
 
@@ -268,6 +265,7 @@ func PaymentMethodFromGen(p gen.OpenrailsPaymentMethod) (*PaymentMethod, error) 
 		StoredCredentialUnscheduledRef: p.StoredCredentialUnscheduledRef,
 
 		Custodian:          p.Custodian,
+		CustodianID:        p.CustodianID,
 		Fingerprint:        p.Fingerprint,
 		NetworkTokenID:     p.NetworkTokenID,
 		NetworkTokenStatus: p.NetworkTokenStatus,

@@ -12,26 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
-const getWebhookPullWatermark = `-- name: GetWebhookPullWatermark :one
-SELECT last_pull_at
-FROM openrails.webhook_health
+const getPSPRefreshWatermark = `-- name: GetPSPRefreshWatermark :one
+SELECT watermark_at
+FROM openrails.rail_refresh_watermarks
 WHERE merchant_id = $1::uuid
   AND rail = $2::text
+  AND psp_id = $3::uuid
+  AND event_domain = 'events'
 `
 
-type GetWebhookPullWatermarkParams struct {
+type GetPSPRefreshWatermarkParams struct {
 	MerchantID uuid.UUID
 	Rail       string
+	PspID      uuid.UUID
 }
 
-// The rail's last completed provider-refresh pull (xs-007 row 38): the
-// subscription-converge snooze hands off once a pull has covered the rail
-// since the job was born. RLS-scoped.
-func (q *Queries) GetWebhookPullWatermark(ctx context.Context, arg GetWebhookPullWatermarkParams) (*time.Time, error) {
-	row := q.db.QueryRow(ctx, getWebhookPullWatermark, arg.MerchantID, arg.Rail)
-	var last_pull_at *time.Time
-	err := row.Scan(&last_pull_at)
-	return last_pull_at, err
+// Exact account event coverage. A sibling account's refresh or a recent
+// health stamp while catching up historical windows cannot retire this job.
+func (q *Queries) GetPSPRefreshWatermark(ctx context.Context, arg GetPSPRefreshWatermarkParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getPSPRefreshWatermark, arg.MerchantID, arg.Rail, arg.PspID)
+	var watermark_at time.Time
+	err := row.Scan(&watermark_at)
+	return watermark_at, err
 }
 
 const listWebhookExpectedRails = `-- name: ListWebhookExpectedRails :many

@@ -301,6 +301,7 @@ func (w *DunningWorker) processSubscription(
 	priceSvc *catalog.PriceService,
 	materialize bool,
 ) (dunningOutcome, error) {
+	ctx = db.WithPSPID(ctx, sub.PspID)
 	logEntry := log.WithContext(ctx).WithField("subscription_id", sub.ID)
 
 	railName := resolveSubscriptionRail(sub)
