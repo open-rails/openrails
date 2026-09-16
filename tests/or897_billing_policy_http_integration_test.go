@@ -108,7 +108,7 @@ func TestOr897_MerchantSettingsWire(t *testing.T) {
 			OutstandingCapAmount int64  `json:"outstanding_cap_amount,string"`
 			SpendWindows         []struct {
 				Key   string `json:"key"`
-				Limit int64  `json:"limit"`
+				Limit int64  `json:"limit,string"`
 			} `json:"spend_windows"`
 			AccrualRateCapPerHour     int64  `json:"accrual_rate_cap_per_hour,string"`
 			AccrualRateWindowSeconds  int64  `json:"accrual_rate_window_seconds"`

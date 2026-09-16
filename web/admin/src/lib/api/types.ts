@@ -575,8 +575,8 @@ export interface MerchantSettings {
     from_email?: string
     support_url?: string
   }
-  collection_threshold?: number
-  monthly_floor?: number
+  collection_threshold?: string
+  monthly_floor?: string
   billing_period_boundary?: string
   // Destination for operator alert emails (#736), top-level per the as-built
   // engine (service_admission.go). Unset ⇒ the email channel is inactive

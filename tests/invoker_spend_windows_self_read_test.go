@@ -59,11 +59,11 @@ type selfSpendWindowJSON struct {
 	Scope         string    `json:"scope"`
 	Key           string    `json:"key"`
 	WindowSeconds int64     `json:"window_seconds"`
-	Limit         int64     `json:"limit"`
+	Limit         int64     `json:"limit,string"`
 	Currency      string    `json:"currency"`
-	Used          int64     `json:"used"`
-	Reserved      int64     `json:"reserved"`
-	Remaining     int64     `json:"remaining"`
+	Used          int64     `json:"used,string"`
+	Reserved      int64     `json:"reserved,string"`
+	Remaining     int64     `json:"remaining,string"`
 	ResetsAt      time.Time `json:"resets_at"`
 }
 

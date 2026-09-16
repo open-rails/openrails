@@ -670,7 +670,7 @@ export const removeTeamMember = (userId: string) =>
   })
 
 export const getCreditLimit = (customerId: string, currency: string) =>
-  api<{ currency: string; credit_limit_amount: number }>(
+  api<{ currency: string; credit_limit_amount: string }>(
     "/merchant/credit-limit",
     {
       query: { customer_id: customerId, currency },
@@ -680,7 +680,7 @@ export const getCreditLimit = (customerId: string, currency: string) =>
 export const setCreditLimit = (
   customerId: string,
   currency: string,
-  amount: number
+  amount: string
 ) =>
   api<{ message: string }>("/merchant/credit-limit", {
     method: "PUT",
