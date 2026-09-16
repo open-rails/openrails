@@ -23,6 +23,8 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
+	"github.com/open-rails/openrails/internal/testauth"
+	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
@@ -245,6 +247,13 @@ func providerObligationWorkflow(t *testing.T, ctx context.Context, f *providerFi
 	oversized.RawBody = bytes.Repeat([]byte("x"), openrails.ProviderBillingObservationMaxBytes*3/4)
 	_, err = c.RecordProviderBillingObservation(ctx, oversized)
 	add(describeQualification("oversized observation", nil, err))
+
+	// Beyond the HTTP transport's 1 MiB body limit as well: the cap, not the
+	// transport, must answer in both deployments.
+	beyondBodyLimit := f.observation(d.OperationID, "beyond-body-limit")
+	beyondBodyLimit.RawBody = bytes.Repeat([]byte("x"), 1<<20)
+	_, err = c.RecordProviderBillingObservation(ctx, beyondBodyLimit)
+	add(describeQualification("observation beyond the HTTP body limit", nil, err))
 	return out
 }
 
@@ -292,6 +301,60 @@ func TestProviderObligationClientIsIdenticalEmbeddedAndStandalone(t *testing.T) 
 	require.Contains(t, transcript, "observation after refusal: status=409 code=provider_billing_qualification_refused param= invalid=false not_found=false conflict=true insufficient=false")
 	require.Contains(t, transcript, "account after refusal: balance=8500 held=1000 available=7500 owed=0")
 	require.Contains(t, transcript, "oversized observation: status=400 code=invalid_param param= invalid=true not_found=false conflict=false insufficient=false")
+	require.Contains(t, transcript, "observation beyond the HTTP body limit: status=400 code=invalid_param param= invalid=true not_found=false conflict=false insufficient=false")
+}
+
+// Observation writes need spend authority (merchant:admissions:create): an
+// eligible observation settles the payer's reservation in the same commit.
+// Reads need only usage authority (merchant:usage:read).
+func TestProviderObligationObservationNeedsSpendAuthority(t *testing.T) {
+	ctx := context.Background()
+	h := integrationharness.New(t, ctx)
+	surface := h.StartStandalone("USD", integrationharness.WithConfig(withProviderBillingQuiescence))
+	f := newProviderFixture(t, ctx, h, surface.Client(), 10_000)
+	a := f.authorization("authority", 1_000)
+	_, err := f.client.OpenOperationAuthorization(ctx, a)
+	require.NoError(t, err)
+	// API keys are role-based (any write maps to owner), so the narrow
+	// principals are delegated tokens carrying exactly one permission.
+	issuer := surface.RegisterDelegatedIssuer("obligation-authority-"+uuid.NewString(), dbtest.TestMerchantSlug)
+	reader := issuer.Mint(uuid.NewString(), "", "", []string{permissions.MerchantUsageRead})
+	spender := issuer.Mint(uuid.NewString(), "", "", []string{permissions.MerchantAdmissionsCreate})
+	base := surface.BaseURL + "/v1/merchant/provider-operations/" + url.PathEscape(a.OperationID)
+
+	call := func(token, method, path string, body any) (int, string) {
+		t.Helper()
+		var rdr io.Reader
+		if body != nil {
+			raw, err := json.Marshal(body)
+			require.NoError(t, err)
+			rdr = bytes.NewReader(raw)
+		}
+		request, err := http.NewRequestWithContext(ctx, method, path, rdr)
+		require.NoError(t, err)
+		require.NoError(t, testauth.Authorize(request, token))
+		request.Header.Set("Content-Type", "application/json")
+		response, err := http.DefaultClient.Do(request)
+		require.NoError(t, err)
+		out, _ := io.ReadAll(response.Body)
+		require.NoError(t, response.Body.Close())
+		return response.StatusCode, string(out)
+	}
+
+	status, body := call(reader, http.MethodPost, base+"/observations", f.observation(a.OperationID, "by-reader", 1))
+	require.Equal(t, http.StatusForbidden, status, body)
+	status, body = call(reader, http.MethodGet, base+"/qualification", nil)
+	require.Equal(t, http.StatusNotFound, status, "usage:read passes the gate; the refused write left no evidence: %s", body)
+	require.Contains(t, body, "provider_billing_qualification_not_found")
+
+	status, body = call(spender, http.MethodGet, base+"/qualification", nil)
+	require.Equal(t, http.StatusForbidden, status, body)
+	status, body = call(spender, http.MethodPost, base+"/observations", f.observation(a.OperationID, "by-spender", 1))
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"state":"pending"`)
+	status, body = call(reader, http.MethodGet, base+"/qualification", nil)
+	require.Equal(t, http.StatusOK, status, body)
+	require.Contains(t, body, `"baseline_observation_id":"by-spender"`)
 }
 
 // A caller cannot smuggle a rated or settlement amount through the wire: the

@@ -2,6 +2,7 @@ package openrails
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -58,13 +59,25 @@ func (c *Client) ReleaseOperationAuthorization(ctx context.Context, req ReleaseO
 
 // RecordProviderBillingObservation appends immutable provider evidence.
 // OpenRails qualifies it and, once eligible, rates and settles in the same commit.
+//
+// The wire body is the canonical encoding the server measures against
+// ProviderBillingObservationMaxBytes, so the cap is applied here first: an
+// oversized observation gets the server's invalid_param refusal in every
+// deployment instead of the transport's body-limit status.
 func (c *Client) RecordProviderBillingObservation(ctx context.Context, req ProviderBillingObservationRequest) (*ProviderBillingQualification, error) {
 	path, err := providerOperationPath(req.OperationID)
 	if err != nil {
 		return nil, err
 	}
+	encoded, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("openrails: marshal request: %w", err)
+	}
+	if len(encoded) > ProviderBillingObservationMaxBytes {
+		return nil, invalidErr(fmt.Sprintf("%v: provider billing observation encodes to %d bytes; limit is %d", ErrInvalid, len(encoded), ProviderBillingObservationMaxBytes))
+	}
 	var out ProviderBillingQualification
-	if err := c.do(ctx, http.MethodPost, path+"/observations", req, &out); err != nil {
+	if err := c.do(ctx, http.MethodPost, path+"/observations", json.RawMessage(encoded), &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
