@@ -228,7 +228,7 @@ func TestInvoiceDecline_Bucket2_StopsChargingKeepsInvoiceOpenAndNotifies(t *test
 	requireStoredMethodsIntact(t, pool, ctx, payer, 1)
 
 	// The customer was told what to do.
-	require.Equal(t, []string{string(models.NotificationPaymentMethodUpdateRequired)},
+	require.ElementsMatch(t, []string{string(models.NotificationInvoiceIssued), string(models.NotificationPaymentMethodUpdateRequired)},
 		notificationEventTypes(t, pool, ctx, payer))
 	data := notificationData(t, pool, ctx, payer, string(models.NotificationPaymentMethodUpdateRequired))
 	require.Equal(t, invoiceID.String(), data["invoice_id"])
@@ -287,7 +287,7 @@ func TestInvoiceDecline_Bucket3_MarksUncollectibleWithoutCancellingAnything(t *t
 	requireSubscriptionUntouched(t, pool, ctx, subID)
 	requireStoredMethodsIntact(t, pool, ctx, payer, 1)
 
-	require.Equal(t, []string{string(models.NotificationInvoiceCollectionStopped)},
+	require.ElementsMatch(t, []string{string(models.NotificationInvoiceIssued), string(models.NotificationInvoiceCollectionStopped)},
 		notificationEventTypes(t, pool, ctx, payer))
 	data := notificationData(t, pool, ctx, payer, string(models.NotificationInvoiceCollectionStopped))
 	require.Equal(t, "non_recoverable", data["reason"])
@@ -317,7 +317,7 @@ func TestInvoiceDecline_Bucket1_RetriesOnTheInvoicesOwnCycle(t *testing.T) {
 			row.NextCollectionAttemptAt.Sub(*row.CollectionFailedAt))
 		require.Equal(t, "past_due", row.Status, "bucket 1 is still dunning, which IS the past-due signal")
 
-		require.Equal(t, []string{string(models.NotificationPaymentMethodFailed)},
+		require.ElementsMatch(t, []string{string(models.NotificationInvoiceIssued), string(models.NotificationPaymentMethodFailed)},
 			notificationEventTypes(t, pool, ctx, payer))
 
 		// Its schedule is the weekly one end to end: 2 retries, then terminal.

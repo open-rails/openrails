@@ -29,3 +29,9 @@ A never-attempted open invoice is not manually retryable. Existing retry eligibi
 Invoice and ledger amounts use the currency registry's native units, exposed as `unit_decimals` on merchant invoices and payment-history entries. USD/EUR use six decimal places; JPY uses four. These are not assumed to be catalog/payment micros. Remittance input uses the invoice's same native units. Existing collection converts the unpaid native amount to the provider's minor unit at its established boundary.
 
 The JPY acceptance test proves: 120000 native units = 12 JPY; a 20000-native manual payment leaves 100000; collection dispatches 10 whole-yen units to a fake charger and records 120000 total native units paid. This verifies internal arithmetic and the charger boundary, not live provider certification.
+
+## Invoice notifications
+
+Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. The first overdue transition queues `invoice_overdue` atomically. Repeating either operation does not repeat its notification. These ordinary payer notices require no business profile, onboarding, KYC or terms-acceptance record. Collection and delinquency discover work from invoices and account policy.
+
+The enterprise onboarding routes, business profiles, repeated business reminder ladder, budget-alert thresholds and suspension-recommendation product are unavailable. Hosts own onboarding and any extra notification policy. Core invoice collection, negotiated rates, invoice profiles and delinquency remain available independently.

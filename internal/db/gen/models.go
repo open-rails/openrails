@@ -379,24 +379,6 @@ type OpenrailsCustomer struct {
 	LastSeenAt time.Time
 }
 
-// or#908 B2B onboarding record. Row presence IS the business posture (no settable flag exists); created only through the onboard chokepoint (terms acceptance required), deleted only through offboard (refused while the payer owes). Budget-alert thresholds are notify-only — alerts never cap.
-type OpenrailsCustomerBusinessProfile struct {
-	MerchantID            uuid.UUID
-	CustomerID            uuid.UUID
-	TermsVersion          string
-	TermsAcceptedAt       time.Time
-	TermsAcceptedBy       string
-	KycReference          string
-	Currency              string
-	BudgetAlertThresholds []int64
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	// or#910: when the dunning cycle last RECOMMENDED suspension (a signal — hosts enforce; OpenRails never revokes access). NULL = no open recommendation. Set once per episode, cleared when the past-due book is settled.
-	SuspensionRecommendedAt *time.Time
-	// or#910: the operator-readable reason behind the open recommendation ("invoice INV-7 unpaid 15 days past due"). Empty when no recommendation is open.
-	SuspensionReason string
-}
-
 // or#878 per-(merchant, payer, currency) arrears delinquency state: current -> grace -> delinquent, derived from overdue open receivables against the merchant's declared grace window and amount floor. A projection of invoice truth; only the transition watermarks (entered_at, transition_seq) are not recomputable. Delinquency NEVER revokes an entitlement — it refuses new spend at admission and emits a host_lifecycle_events signal; the operator owns the shutoff.
 type OpenrailsCustomerDelinquency struct {
 	MerchantID uuid.UUID

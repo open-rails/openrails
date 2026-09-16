@@ -727,14 +727,6 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	customers.Handle(http.MethodDelete, "/credits/:grant_id", h(httphandlers.RevokeAdminCreditGrant), creditsRevokeWrite...)
 	customers.Handle(http.MethodGet, "/credit-transactions", h(httphandlers.ListAdminCreditTransactions), customerRead...)
 
-	// or#908 B2B business profile: posture is a consequence of onboarding —
-	// PUT onboards (terms acceptance gate, grant-class), DELETE offboards
-	// (refused while the payer owes, destructive-class). No "set posture"
-	// route exists by design.
-	customers.Handle(http.MethodGet, "/business-profile", h(httphandlers.GetAdminBusinessProfile), customerRead...)
-	customers.Handle(http.MethodPut, "/business-profile", h(httphandlers.PutAdminBusinessProfile), grantWrite...)
-	customers.Handle(http.MethodDelete, "/business-profile", h(httphandlers.DeleteAdminBusinessProfile), revokeWrite...)
-	rr.Handle(http.MethodGet, "/business-customers", h(httphandlers.ListAdminBusinessProfiles), customerRead...)
 	// or#909 negotiated price overrides: per-customer rate cards replacing the
 	// merchant-default card for a meter (included allowance netted before
 	// overage). PUT rides the grant class; DELETE the destructive class —

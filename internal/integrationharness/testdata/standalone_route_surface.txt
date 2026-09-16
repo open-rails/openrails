@@ -3,7 +3,6 @@ DELETE /v1/customers/{customer_id}/spend-delegations/{scope}/{scope_key}
 DELETE /v1/me/payment-methods/{id}
 DELETE /v1/merchant/api-keys/{id}
 DELETE /v1/merchant/catalog/meters/{key}/rate-card
-DELETE /v1/merchant/customers/{customer_id}/business-profile
 DELETE /v1/merchant/customers/{customer_id}/credits/{grant_id}
 DELETE /v1/merchant/customers/{customer_id}/entitlements/{id}
 DELETE /v1/merchant/customers/{customer_id}/product-access/{id}
@@ -54,7 +53,6 @@ GET /v1/me/transactions
 GET /v1/me/usage
 GET /v1/merchant/api-host
 GET /v1/merchant/api-keys
-GET /v1/merchant/business-customers
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/meters
 GET /v1/merchant/catalog/meters/{key}
@@ -74,7 +72,6 @@ GET /v1/merchant/credits/balance
 GET /v1/merchant/credits/deposit
 GET /v1/merchant/customers
 GET /v1/merchant/customers/{customer_id}
-GET /v1/merchant/customers/{customer_id}/business-profile
 GET /v1/merchant/customers/{customer_id}/credit-transactions
 GET /v1/merchant/customers/{customer_id}/credits
 GET /v1/merchant/customers/{customer_id}/delinquency
@@ -212,7 +209,6 @@ PUT /v1/merchant/api-host
 PUT /v1/merchant/catalog/meters/{key}
 PUT /v1/merchant/catalog/meters/{key}/rate-card
 PUT /v1/merchant/credit-limit
-PUT /v1/merchant/customers/{customer_id}/business-profile
 PUT /v1/merchant/customers/{customer_id}/invoice-profile
 PUT /v1/merchant/customers/{customer_id}/rate-overrides/{meter_key}
 PUT /v1/merchant/customers/{customer_id}/spend-delegations

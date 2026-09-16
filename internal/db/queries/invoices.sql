@@ -206,18 +206,35 @@ WHERE merchant_id = $1
   AND last_collection_failure_code IS DISTINCT FROM 'collection_attempt_in_progress'
   AND last_collection_failure_code IS DISTINCT FROM 'collection_outcome_unknown';
 
--- name: MarkInvoicesPastDue :execrows
--- #798: net-N receivables whose due date has passed become past_due. The
--- collection path already treats open and past_due alike; this transition is
--- the host-visible dunning signal.
-UPDATE openrails.invoices
-SET status = 'past_due',
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = $1
-  AND status = 'open'
-  AND amount_due > 0
-  AND due_at IS NOT NULL
-  AND due_at < sqlc.arg(now)::timestamptz;
+-- name: MarkInvoicesPastDue :one
+-- Invoice transitions and payer notifications commit in one statement. Collection
+-- failures may already have set past_due; those invoices still need their notice.
+WITH overdue AS (
+    UPDATE openrails.invoices
+    SET status = 'past_due', updated_at = sqlc.arg(now)::timestamptz
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+      AND status = 'open' AND amount_due > 0
+      AND due_at IS NOT NULL AND due_at < sqlc.arg(now)::timestamptz
+    RETURNING merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
+), candidates AS (
+    SELECT * FROM overdue
+    UNION ALL
+    SELECT merchant_id, customer_id, id, invoice_number, amount_due, currency, due_at
+    FROM openrails.invoices
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+      AND status = 'past_due' AND amount_due > 0
+      AND due_at IS NOT NULL AND due_at < sqlc.arg(now)::timestamptz
+), notices AS (
+    INSERT INTO openrails.notification_queue (id, merchant_id, customer_id, event_type, data, seen, created_at)
+    SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'invoice_overdue',
+           jsonb_build_object('invoice_id', id,
+                              'invoice_number', COALESCE(NULLIF(invoice_number, ''), id::text),
+                              'amount_due', amount_due, 'currency', currency, 'due_at', due_at),
+           false, sqlc.arg(now)::timestamptz
+    FROM candidates
+    ON CONFLICT (id) DO NOTHING
+)
+SELECT count(*) FROM overdue;
 
 -- name: SumPendingInvoiceItemAmountBySourceInPeriod :many
 -- #798: rated charge per accrual source for the statement's per-category
