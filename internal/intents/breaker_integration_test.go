@@ -57,10 +57,11 @@ func seedBreakerMerchant(t *testing.T, n int) breakerMerchant {
 	now := time.Now().UTC()
 	for i := 0; i < n; i++ {
 		subID := uuid.New()
-		custID, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{
+		customer, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 			ID: uuid.New(), MerchantID: m.id,
 		})
 		require.NoError(t, err)
+		custID := customer.ID
 		psid := fmt.Sprintf("psid-%s-%d", sfx, i)
 		exec(`INSERT INTO openrails.subscriptions
 		        (id, price_id, product_id, status, rail, rail_subscription_id,
