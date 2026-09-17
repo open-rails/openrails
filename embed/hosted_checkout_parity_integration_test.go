@@ -61,7 +61,7 @@ func TestHostedCheckoutDocumentParity(t *testing.T) {
 			require.NoError(t, err)
 			plan, err := openrails.NewHostedCheckoutPlan(product, price)
 			require.NoError(t, err)
-			options, err := client.ListCheckoutRailOptions(ctx, priceKey)
+			options, err := client.ListCheckoutRailOptions(ctx, price.ID)
 			require.NoError(t, err)
 			require.NotEmpty(t, options)
 			document := openrails.HostedCheckoutSession{ID: "ocs_parity", Status: "created", Merchant: openrails.HostedCheckoutMerchant{DisplayName: "Parity"}, Plan: plan, ExpiresAt: expires}
