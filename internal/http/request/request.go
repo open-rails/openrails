@@ -120,27 +120,31 @@ func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) 
 }
 
 func (r *Request) AbortJSON(code int, msg string) {
-	logrus.Error(msg)
+	r.logRefusal(code, nil, msg)
 	response := api.SimpleErrorResponse(code, msg)
 	response.Error.RequestID = r.RequestID()
 	r.t.AbortJSON(code, response)
 }
 
 func (r *Request) ErrorJSON(code int, msg string) {
-	logrus.Error(msg)
+	r.logRefusal(code, nil, msg)
 	response := api.SimpleErrorResponse(code, msg)
 	response.Error.RequestID = r.RequestID()
 	r.t.WriteJSON(code, response)
 }
 
-// PreconditionFailed answers a conditional request (If-None-Match: *) whose
-// precondition did not hold. That is the outcome the caller asked to be told
-// about — an idempotent ensure finding its row already present — not a
-// failure, so unlike ErrorJSON it is not logged as an error.
-func (r *Request) PreconditionFailed(msg string) {
-	response := api.SimpleErrorResponse(http.StatusPreconditionFailed, msg)
-	response.Error.RequestID = r.RequestID()
-	r.t.WriteJSON(http.StatusPreconditionFailed, response)
+// logRefusal records a response the handler itself chose. A 4xx is the
+// contract answering as designed — not found, conflict, precondition failed,
+// refused input — so it is logged at info; only a 5xx is an error an operator
+// must act on. Before this, every expected refusal (a get-or-create probe's
+// 404, an idempotent ensure's 412) reached the log as an error.
+func (r *Request) logRefusal(code int, fields logrus.Fields, msg string) {
+	entry := logrus.WithFields(fields).WithFields(logrus.Fields{"status": code, "request_id": r.RequestID()})
+	if code >= http.StatusInternalServerError {
+		entry.Error(msg)
+		return
+	}
+	entry.Info(msg)
 }
 
 // InternalError answers 500 with a STABLE, non-leaky msg and logs the cause
@@ -160,15 +164,8 @@ func (r *Request) InternalError(msg string, cause error) {
 }
 
 func (r *Request) APIError(err *api.APIError) {
-	requestID := r.RequestID()
-	err.WithRequestID(requestID)
-	logrus.WithFields(logrus.Fields{
-		"type":       err.Type,
-		"code":       err.Code,
-		"param":      err.Param,
-		"request_id": requestID,
-		"status":     err.HTTPStatus,
-	}).Error(err.Message)
+	err.WithRequestID(r.RequestID())
+	r.logRefusal(err.HTTPStatus, logrus.Fields{"type": err.Type, "code": err.Code, "param": err.Param}, err.Message)
 	r.t.WriteJSON(err.HTTPStatus, err.ToResponse())
 }
 
