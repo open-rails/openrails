@@ -248,6 +248,26 @@ func TestNMIPaymentSourceUpdateIntent_WriteThroughHappyPathAndReplay(t *testing.
 	require.Equal(t, fx.newPM.ID, fx.localPaymentMethodID(t))
 }
 
+// Cross-account updates stop at the durable producer boundary. The fake NMI
+// must receive no write: a target vault from another PSP can never be sent
+// through the archived/source account's client (#657).
+func TestNMIPaymentSourceUpdateIntent_CrossPSPRefusesBeforeProviderCall(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	otherPSP := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "other-mobius")
+	t.Cleanup(func() {
+		_, _ = fx.db.Pool().Exec(fx.ctx, "UPDATE openrails.psps SET archived = true WHERE id = $1", otherPSP)
+	})
+	_, err := fx.db.Pool().Exec(fx.ctx, "UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2", otherPSP, fx.newPM.ID)
+	require.NoError(t, err)
+	fx.newPM.PspID = otherPSP
+
+	sub, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, fx.sub.ID)
+	require.NoError(t, err)
+	_, err = fx.through.ExecutePaymentSourceUpdate(fx.ctx, sub, fx.newPM, OriginUser, "cross-psp test")
+	require.ErrorIs(t, err, subscriptions.ErrPaymentMethodProviderAccountMismatch)
+	require.Zero(t, fx.gateway.updateCalls.Load(), "cross-PSP guard must run before any provider write")
+}
+
 // Ambiguous timeout where the update actually LANDED at NMI: the caller gets
 // processing (never success, never decline), the local row keeps the OLD link
 // until the provider is confirmed, a retried request maps onto the SAME intent

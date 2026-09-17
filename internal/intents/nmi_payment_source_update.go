@@ -359,6 +359,13 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	if sub == nil || newPM == nil {
 		return PaymentSourceUpdateOutcome{}, errors.New("subscription and payment method are required")
 	}
+	// Keep the account boundary at the durable side-effect seam. HTTP and
+	// embedded callers validate this earlier, but a direct intent producer must
+	// never route a target method through the source PSP's client. Cross-account
+	// migration is a separate, report-only card re-entry workflow (#657).
+	if err := subscriptions.ValidatePaymentMethodProviderAccount(newPM, sub); err != nil {
+		return PaymentSourceUpdateOutcome{}, err
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return PaymentSourceUpdateOutcome{}, err
