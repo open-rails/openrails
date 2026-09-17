@@ -290,7 +290,7 @@ func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 		return invalidErr("expires_at is required")
 	}
 	path := admissionActionPath(requestID, "extend")
-	body := map[string]any{"expires_at": expiresAt.Unix()}
+	body := map[string]any{"expires_at": expiresAt.UTC().Format(time.RFC3339Nano)}
 	return c.do(ctx, http.MethodPost, path, body, nil)
 }
 
@@ -340,8 +340,8 @@ func (c *Client) UsageRollup(ctx context.Context, customerID, currency string, f
 	body := map[string]any{
 		"customer_id": customerID,
 		"currency":    normalizeCurrency(currency),
-		"from":        from.UTC().Unix(),
-		"to":          to.UTC().Unix(),
+		"from":        from.UTC().Format(time.RFC3339Nano),
+		"to":          to.UTC().Format(time.RFC3339Nano),
 		"group_by":    groupBy,
 	}
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage/rollup", body, &resp); err != nil {
@@ -509,7 +509,7 @@ func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, 
 		"subjects": subjects,
 	}
 	if !at.IsZero() {
-		body["at"] = at.UTC().Format(time.RFC3339)
+		body["at"] = at.UTC().Format(time.RFC3339Nano)
 	}
 	var out map[string][]EntitlementRecord
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/entitlements:batch", body, &out); err != nil {
@@ -564,7 +564,7 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 	}
 	base := "/v1/merchant/entitlements/" + url.PathEscape(entitlement) + "/customers?limit=1000"
 	if !at.IsZero() {
-		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339))
+		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339Nano))
 	}
 	var all []string
 	cursor := ""
@@ -626,12 +626,12 @@ func (c *Client) HasProductAccess(ctx context.Context, subject, productID string
 }
 
 // ResourceRevenueDaily implements Client (handler ServiceResourceRevenue).
-func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error) {
+func (c *Client) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) (*ResourceRevenueResponse, error) {
 	body := map[string]any{
 		"resource": strings.TrimSpace(resource),
 		"currency": normalizeCurrency(currency),
-		"from":     fromUnix,
-		"to":       toUnix,
+		"from":     from.UTC().Format(time.RFC3339Nano),
+		"to":       to.UTC().Format(time.RFC3339Nano),
 	}
 	var out ResourceRevenueResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/usage/resource-revenue", body, &out); err != nil {

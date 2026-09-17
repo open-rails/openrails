@@ -19,7 +19,7 @@ type PaymentMethod struct {
 	BillingDetails              *BillingDetails             `json:"billing_details,omitempty"`
 	Card                        *CardDetails                `json:"card,omitempty"`
 	Metadata                    map[string]string           `json:"metadata,omitempty"`
-	Created                     int64                       `json:"created"`
+	CreatedAt                   time.Time                   `json:"created_at"`
 	Health                      *PaymentMethodHealth        `json:"health,omitempty"`
 	Subscriptions               []PaymentMethodSubscription `json:"subscriptions,omitempty"`
 	CollectionDefaultCurrencies []string                    `json:"collection_default_currencies,omitempty"`

@@ -28,6 +28,7 @@ the session is recorded as failed and a new session may be opened with another
 instrument.
 
 Checkout amounts use native currency units (micros for fiat) and decimal strings
-in JSON, retaining `int64` in Go. Session times currently use Unix seconds. This
-is a pre-v1 contract; remaining whole-API money/time/list qualification is tracked
+in JSON, retaining `int64` in Go. Session `created_at`/`expires_at` are RFC3339
+instants like every other wire timestamp ([errors and wire rules](errors.md)).
+This is a pre-v1 contract; remaining whole-API money/list qualification is tracked
 in #983/#1002 before the final freeze.

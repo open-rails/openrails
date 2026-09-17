@@ -45,7 +45,7 @@ func TestAdmissionDeadlineRecoveryAndZeroCapture(t *testing.T) {
 	in := billingservice.AdmitInput{CustomerID: payer, Invoker: "original", InvokerType: "payer", Currency: "USD", EstimatedAmount: 600, SourceID: uuid.NewString()}
 	_, err := svc.Admit(ctx, in)
 	require.ErrorIs(t, err, billingservice.ErrHoldDeadlineRequired)
-	in.ExpiresAtUnix = clock.Now().Add(time.Minute).Unix()
+	in.ExpiresAt = clock.Now().Add(time.Minute)
 	admitted, err := svc.Admit(ctx, in)
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed)
@@ -84,7 +84,7 @@ func TestAdmissionDeadlineRecoveryAndZeroCapture(t *testing.T) {
 	require.Zero(t, bal.HeldBalance)
 
 	in.SourceID = uuid.NewString()
-	in.ExpiresAtUnix = clock.Now().Add(time.Minute).Unix()
+	in.ExpiresAt = clock.Now().Add(time.Minute)
 	admitted, err = svc.Admit(ctx, in)
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed)
@@ -145,7 +145,7 @@ func TestZeroEstimateStillEnforcesProspectiveRateAndDelegation(t *testing.T) {
 
 func TestAdmissionCreditLineAndActualOverdraft(t *testing.T) {
 	svc, ms, clock, _, payer, ctx := admissionWorkflow(t)
-	in := billingservice.AdmitInput{CustomerID: payer, Invoker: "user", InvokerType: "payer", Currency: "USD", SourceID: uuid.NewString(), EstimatedAmount: 1500, ExpiresAtUnix: clock.Now().Add(time.Hour).Unix()}
+	in := billingservice.AdmitInput{CustomerID: payer, Invoker: "user", InvokerType: "payer", Currency: "USD", SourceID: uuid.NewString(), EstimatedAmount: 1500, ExpiresAt: clock.Now().Add(time.Hour)}
 	result, err := svc.Admit(ctx, in)
 	require.NoError(t, err)
 	require.False(t, result.Allowed)
