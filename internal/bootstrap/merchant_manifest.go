@@ -20,7 +20,7 @@ import (
 	koanfyaml "github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
-	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
@@ -63,17 +63,39 @@ func LoadMerchantConfigManifest(path string) (*BillingConfig, error) {
 // LoadMerchantConfigManifestFiles loads a merchant config YAML file plus optional
 // structured YAML overlays through koanf, then validates the merged tree.
 func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingConfig, error) {
-	k := koanf.New(".")
+	docs := make([][]byte, 0, 1+len(overlays))
 	for _, p := range append([]string{path}, overlays...) {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		if _, err := os.Stat(p); err != nil {
+		raw, err := os.ReadFile(p) // #nosec G304 -- operator-supplied manifest path
+		if err != nil {
 			return nil, fmt.Errorf("read merchant config manifest %s: %w", p, err)
 		}
-		if err := k.Load(file.Provider(p), koanfyaml.Parser()); err != nil {
-			return nil, fmt.Errorf("load merchant config manifest %s: %w", p, err)
+		docs = append(docs, raw)
+	}
+	if len(docs) == 0 {
+		return nil, fmt.Errorf("read merchant config manifest: no path given")
+	}
+	return LoadMerchantConfigManifestWithOverlays(docs[0], docs[1:]...)
+}
+
+// LoadMerchantConfigManifestWithOverlays merges the manifest with structured YAML
+// overlays (later wins) and validates the result. This is the embedded-host path
+// for operator-mounted secret files: it never consults BILLING_MERCHANTS_* env
+// or config.SecretFiles, so the host's file tree is the only overlay truth.
+func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error) {
+	k := koanf.New(".")
+	for i, doc := range append([][]byte{raw}, overlays...) {
+		if len(strings.TrimSpace(string(doc))) == 0 {
+			continue
+		}
+		if err := k.Load(rawbytes.Provider(doc), koanfyaml.Parser()); err != nil {
+			if i == 0 {
+				return nil, fmt.Errorf("load merchant config manifest: %w", err)
+			}
+			return nil, fmt.Errorf("load merchant config overlay %d: %w", i, err)
 		}
 	}
 	for _, key := range []string{"auth", "users", "groups", "roles", "permissions", "catalogs", "products"} {

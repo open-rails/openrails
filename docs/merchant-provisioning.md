@@ -272,7 +272,17 @@ custodian's own tenant id is declared once on the custodian entry. Several PSPs
 may reference the same custodian. See
 [payment-method-custody.md](payment-method-custody.md).
 
-### Env and secret-file overlays
+### Structured YAML overlays (embedded hosts)
+
+An embedded host that mounts its secrets as YAML files hands them to
+`embed.LoadMerchantConfigManifestWithOverlays(manifest, overlays...)`: each
+overlay is a YAML document in the manifest's own shape (`merchants.<slug>.psps.
+<key>.<rail>.secrets.*`), merged in order (later wins) and strict-parsed with
+the manifest. This path never reads `BILLING_MERCHANTS_*` env or secret files,
+so the mounted tree is the only overlay truth. A secret for a PSP the manifest
+does not declare fails validation rather than being ignored.
+
+### Env and secret-file overlays (standalone)
 
 Secret values should not live in the YAML. Two overlays route into the same
 manifest tree, with precedence `yaml < secret files < env`:
