@@ -28,11 +28,9 @@ import (
 // exactly the belief that produced or#862, so cross-package delegation does not
 // count — an exemption has to be written down here with its reason.
 var facadeMethodsWithoutAPin = map[string]string{
-	"GetCredits":         "returns an error unconditionally (currency is required; use GetCreditsByType) — touches nothing",
-	"GetSupportedTokens": "reads the merchant's Solana rail CONFIG off the runtime, never a table",
-	"HandleWebhook":      "the merchant is not known until the payload is authenticated; the webhook path pins after it resolves one",
-	"ReleaseHold":        "frees a Redis reservation (#513); the durable ledger is untouched",
-	"ExtendHold":         "re-declares a Redis reservation's deadline (xs-007 row 33); the durable ledger is untouched",
+	"HandleWebhook": "the merchant is not known until the payload is authenticated; the webhook path pins after it resolves one",
+	"ReleaseHold":   "frees a Redis reservation (#513); the durable ledger is untouched",
+	"ExtendHold":    "re-declares a Redis reservation's deadline (xs-007 row 33); the durable ledger is untouched",
 }
 
 var pinners = []string{"pin", "RunInMerchantConn", "RunInMerchantScope", "MerchantTx", "WithMerchantConn", "BindMerchantTx"}

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -118,7 +120,7 @@ func TestUnknownSubscriptionCheckoutGuard(t *testing.T) {
 		EntitlementService:  entSvc,
 		PurchaseService:     purchase,
 	}
-	resp, err := checkout.Checkout(ctx, &CheckoutRequest{PriceID: priceA.String(), Rail: "nmi"}, &UserIdentity{ID: userID})
+	resp, err := checkout.Checkout(ctx, &CheckoutRequest{PriceID: openrails.PriceID(priceA).String(), Rail: "nmi"}, &UserIdentity{ID: userID})
 	require.NoError(t, err)
 	require.Equal(t, "blocked", resp.Status)
 	require.Equal(t, ConflictCodeMembershipPendingVerification, resp.Code)

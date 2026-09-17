@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -80,7 +82,7 @@ func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
 	user := &UserIdentity{ID: userID}
 
 	// EUR -> USD (would undercharge).
-	req := &TierChangeRequest{PriceID: proPrice.String(), SubscriptionID: subID}
+	req := &TierChangeRequest{PriceID: openrails.PriceID(proPrice).String(), SubscriptionID: subID}
 	_, err := svc.TierChange(ctx, req, user)
 	require.ErrorIs(t, err, subscriptions.ErrRepriceCrossCurrency)
 	_, err = svc.TierChangePreview(ctx, req, user)
@@ -88,7 +90,7 @@ func TestTierChangeRefusesCrossCurrencyUpgrade(t *testing.T) {
 
 	// USD -> EUR (would overcharge): flip the subscription onto the USD plan.
 	exec(`UPDATE openrails.subscriptions SET product_id=$2, price_id=$3 WHERE id=$1`, subID, proProd, proPrice)
-	req = &TierChangeRequest{PriceID: basicPrice.String(), SubscriptionID: subID}
+	req = &TierChangeRequest{PriceID: openrails.PriceID(basicPrice).String(), SubscriptionID: subID}
 	_, err = svc.TierChange(ctx, req, user)
 	require.ErrorIs(t, err, subscriptions.ErrRepriceCrossCurrency)
 	_, err = svc.TierChangePreview(ctx, req, user)

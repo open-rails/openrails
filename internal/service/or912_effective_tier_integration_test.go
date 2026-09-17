@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -83,7 +84,7 @@ func TestOr912_ServiceResolveEffectiveTier(t *testing.T) {
 	require.Equal(t, "svc_pro_"+suffix, tier.ProductKey)
 	require.NotEmpty(t, tier.ProductID)
 
-	none, err := svc.ResolveEffectiveTier(ctx, uuid.NewString(), group)
+	none, err := svc.ResolveEffectiveTier(ctx, openrails.CustomerID(uuid.New()).String(), group)
 	require.NoError(t, err)
 	require.Nil(t, none, "no active entitlements is a nil tier, never an error — the host applies its default")
 }

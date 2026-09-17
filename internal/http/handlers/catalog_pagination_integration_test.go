@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -49,8 +51,8 @@ func TestCatalogProductFilteringAndEffectivePagination(t *testing.T) {
 		require.Equal(t, offset, page.Offset)
 		for _, p := range page.Items {
 			require.Equal(t, "target", *p.TierGroup)
-			require.False(t, seen[p.ID])
-			seen[p.ID] = true
+			require.False(t, seen[p.ID.UUID()])
+			seen[p.ID.UUID()] = true
 		}
 		offset = page.Offset + page.Limit
 		if int64(offset) >= page.Total {
@@ -96,7 +98,7 @@ func TestCatalogPricesPageAcross1000AndProductFilter(t *testing.T) {
 	fx.exec(`INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,'many-prices','Many prices')`, productID, fx.merchant)
 	fx.exec(`INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,created_at)
  SELECT uuidv7(),$1,$2,'page-price-'||i,i*10000,'USD',timestamptz '2026-01-01' FROM generate_series(1,1001) i`, fx.merchant, productID)
-	for _, filter := range []string{"", "product_id=" + productID.String() + "&"} {
+	for _, filter := range []string{"", "product_id=" + openrails.ProductID(productID).String() + "&"} {
 		zero := catalogPageRequest[billingservice.CatalogPrice](t, fx, AdminListPrices, filter+"limit=0")
 		require.Equal(t, 100, zero.Limit)
 		require.Len(t, zero.Items, 100)
@@ -108,10 +110,10 @@ func TestCatalogPricesPageAcross1000AndProductFilter(t *testing.T) {
 		seen := map[uuid.UUID]bool{}
 		for _, page := range []billingservice.CatalogPage[billingservice.CatalogPrice]{first, last} {
 			for _, p := range page.Items {
-				require.False(t, seen[p.ID])
-				seen[p.ID] = true
+				require.False(t, seen[p.ID.UUID()])
+				seen[p.ID.UUID()] = true
 				if filter != "" {
-					require.Equal(t, productID, p.ProductID)
+					require.Equal(t, openrails.ProductID(productID), p.ProductID)
 				}
 			}
 		}

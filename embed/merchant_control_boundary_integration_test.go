@@ -128,7 +128,7 @@ func postDepositCredits(t *testing.T, baseURL, token string, customer uuid.UUID,
 
 func assertBalance(t *testing.T, ctx context.Context, c *openrails.Client, customer uuid.UUID, want int64) {
 	t.Helper()
-	got, err := c.Balance(ctx, customer.String())
+	got, err := c.Balance(ctx, openrails.CustomerID(customer))
 	require.NoError(t, err)
 	require.Equal(t, want, got.BalanceAmount)
 }

@@ -2,8 +2,9 @@ package checkout
 
 import (
 	"errors"
-	"github.com/open-rails/openrails"
 	"time"
+
+	"github.com/open-rails/openrails"
 )
 
 var (
@@ -80,16 +81,16 @@ type CheckoutSessionPaymentResponse = openrails.CheckoutSessionPaymentResponse
 
 type CheckoutSessionResponse struct {
 	Object         string                         `json:"object"`
-	ID             string                         `json:"id"`
+	ID             openrails.CheckoutSessionID    `json:"id"`
 	Status         string                         `json:"status"`
 	Mode           string                         `json:"mode"`
-	PriceID        string                         `json:"price_id"`
+	PriceID        openrails.PriceID              `json:"price_id"`
 	Amount         int64                          `json:"amount,string"`
 	Currency       string                         `json:"currency"`
 	URL            string                         `json:"url,omitempty"`
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`
-	PaymentID      *string                        `json:"payment_id,omitempty"`
-	SubscriptionID *string                        `json:"subscription_id,omitempty"`
+	PaymentID      *openrails.PaymentID           `json:"payment_id,omitempty"`
+	SubscriptionID *openrails.SubscriptionID      `json:"subscription_id,omitempty"`
 	ExpiresAt      *time.Time                     `json:"expires_at,omitempty"`
 	CreatedAt      time.Time                      `json:"created_at"`
 	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`

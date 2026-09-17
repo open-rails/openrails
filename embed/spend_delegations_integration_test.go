@@ -38,7 +38,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
+	err = client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{
 		{
 			Scope:    "invoker",
 			ScopeKey: "test-invoker",
@@ -54,7 +54,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	})
 	require.NoError(t, err, "embedded SetCustomerSpendDelegations must pin the bound merchant itself")
 
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, customerID.String(), openrails.SpendDelegationInput{
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(customerID), openrails.SpendDelegationInput{
 		Scope:    "invoker",
 		ScopeKey: "test-invoker",
 		// Currency is intentionally omitted: spend limits are also valid for
@@ -71,7 +71,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	require.EqualValues(t, 123, limits["invoker\x00test-invoker"])
 	require.EqualValues(t, 9_000_000, limits["role\x00test-role"])
 
-	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
+	err = client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{
 		{
 			Scope: " role ", ScopeKey: " test-role ",
 			Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1}},
@@ -91,5 +91,5 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	require.Len(t, stored, 2, "rejected embedded duplicate document must not mutate policy")
 
 	// Replace-with-empty exercises the delete lane through the same ctx path.
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customerID.String(), nil))
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), nil))
 }

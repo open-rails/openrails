@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,12 +17,12 @@ func TestPlanMigrationLeafTypesAreNameableFromTheFacade(t *testing.T) {
 	subID := uuid.New()
 	res := PlanMigrationResult{
 		ByRail:   map[string]*RailCounts{"stripe": {Auto: 2, RequiresAction: 1, Skipped: 0}},
-		Outcomes: []PlanMigrationOutcome{{SubscriptionID: subID, Rail: "stripe", Disposition: "scheduled"}},
+		Outcomes: []PlanMigrationOutcome{{SubscriptionID: openrails.SubscriptionID(subID), Rail: "stripe", Disposition: "scheduled"}},
 	}
 	require.Equal(t, 2, res.ByRail["stripe"].Auto)
-	require.Equal(t, subID, res.Outcomes[0].SubscriptionID)
+	require.Equal(t, openrails.SubscriptionID(subID), res.Outcomes[0].SubscriptionID)
 
-	cancel := PlanMigrationCancelResult{Canceled: 1, RailReleaseRequired: []uuid.UUID{subID}, Warning: "release the schedules"}
+	cancel := PlanMigrationCancelResult{Canceled: 1, RailReleaseRequired: []openrails.SubscriptionID{openrails.SubscriptionID(subID)}, Warning: "release the schedules"}
 	require.Equal(t, 1, cancel.Canceled)
-	require.Equal(t, subID, cancel.RailReleaseRequired[0])
+	require.Equal(t, openrails.SubscriptionID(subID), cancel.RailReleaseRequired[0])
 }

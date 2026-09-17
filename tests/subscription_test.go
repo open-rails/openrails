@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	openrails "github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -316,8 +317,8 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 			assert.Equal(t, "9990000", p["amount"], "amount is an exact native-unit string")
 			assert.Equal(t, "USD", p["currency"])
 		}
-		assert.True(t, paymentIDs[api.FormatPaymentID(payment1.ID)], "Should include payment 1")
-		assert.True(t, paymentIDs[api.FormatPaymentID(payment2.ID)], "Should include payment 2")
+		assert.True(t, paymentIDs[openrails.PaymentID(payment1.ID).String()], "Should include payment 1")
+		assert.True(t, paymentIDs[openrails.PaymentID(payment2.ID).String()], "Should include payment 2")
 	})
 }
 

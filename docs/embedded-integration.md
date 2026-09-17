@@ -447,7 +447,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 
 ```go
 verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-    CustomerID:      customerID,
+    CustomerID:      openrails.CustomerID(customerID), // the host's subject UUID
     Invoker:         userID,
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline

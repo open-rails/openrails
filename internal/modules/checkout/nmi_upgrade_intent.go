@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 const TypeNMIUpgrade = "nmi_upgrade"
@@ -477,7 +477,7 @@ func (s *CheckoutService) replayTierUpgrade(ctx context.Context, req *TierChange
 		return nil, true, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "upgrade not found"}
 	}
 	price := strings.TrimSpace(req.PriceID)
-	if (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.OldSubscriptionID) || (price != p.RequestedPrice && price != p.PriceID.String() && price != api.FormatPriceID(p.PriceID)) {
+	if (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.OldSubscriptionID) || (price != p.RequestedPrice && price != openrails.PriceID(p.PriceID).String()) {
 		return nil, true, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "upgrade idempotency key belongs to a different request"}
 	}
 	if _, err = s.resumeUpgrade(ctx, in); err != nil {

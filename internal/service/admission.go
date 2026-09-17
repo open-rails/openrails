@@ -1123,7 +1123,7 @@ func (s *Service) BindBillingPolicy(ctx context.Context, in BillingPolicyBinding
 	if s == nil || s.rt == nil {
 		return fmt.Errorf("service not initialized")
 	}
-	customerRaw := strings.TrimSpace(in.CustomerID)
+	customerRaw := in.CustomerID.String()
 	name, tier, _, err := merchantconfig.NormalizeBillingPolicyBinding(in.PolicyName, in.Tier, customerRaw != "")
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrInvalidBillingPolicy, err)
@@ -1203,7 +1203,7 @@ func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]BillingPolic
 	for _, r := range rows {
 		b := BillingPolicyBindingInput{PolicyName: r.PolicyName, Tier: r.Tier}
 		if r.CustomerID != nil {
-			b.CustomerID = r.CustomerID.String()
+			b.CustomerID = openrails.CustomerID(*r.CustomerID)
 		}
 		out = append(out, b)
 	}

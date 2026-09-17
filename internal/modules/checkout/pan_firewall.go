@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails"
 )
 
 // PAN firewall (#795 B5, SAQ A): custodian-held-card checkout accepts ONLY the BT
@@ -42,7 +42,7 @@ func RejectPANShapedFields(req *CheckoutRequest) error {
 	if canonicalUUIDHandle(req.BTTokenIntentID) {
 		delete(fields, "bt_token_intent_id")
 	}
-	if canonicalUUIDHandle(strings.TrimPrefix(req.PaymentMethodID, api.PrefixPaymentMethod)) {
+	if canonicalUUIDHandle(strings.TrimPrefix(req.PaymentMethodID, openrails.PaymentMethodIDPrefix)) {
 		delete(fields, "payment_method_id")
 	}
 	for key, value := range req.Metadata {

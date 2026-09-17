@@ -81,7 +81,7 @@ CREATE TRIGGER issue999_fail_binding BEFORE INSERT ON openrails.billing_policy_b
 		t.Helper()
 		deadline := time.Now().Add(time.Hour)
 		requestID := uuid.NewString()
-		result, err := remote.Admit(ctx, openrails.AdmitRequest{CustomerID: payer.String(), Invoker: "issue999", InvokerType: "payer", Currency: "USD", Source: "issue999", RequestID: requestID, ExpiresAt: &deadline, AccrualRateDeltaPerHour: 11_000_000, EstimatedAmount: 1000})
+		result, err := remote.Admit(ctx, openrails.AdmitRequest{CustomerID: openrails.CustomerID(payer), Invoker: "issue999", InvokerType: "payer", Currency: "USD", Source: "issue999", RequestID: requestID, ExpiresAt: &deadline, AccrualRateDeltaPerHour: 11_000_000, EstimatedAmount: 1000})
 		require.NoError(t, err)
 		require.Equal(t, expected, result.Allowed)
 		if result.Allowed {

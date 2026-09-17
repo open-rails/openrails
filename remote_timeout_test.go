@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // TestWithTimeoutEnforcedWithCustomClient guards the per-call deadline: even
@@ -34,7 +36,7 @@ func TestWithTimeoutEnforcedWithCustomClient(t *testing.T) {
 	}
 
 	start := time.Now()
-	_, err := c.Balance(context.Background(), "11111111-1111-1111-1111-111111111111")
+	_, err := c.Balance(context.Background(), CustomerID(uuid.MustParse("11111111-1111-1111-1111-111111111111")))
 	elapsed := time.Since(start)
 
 	if err == nil {

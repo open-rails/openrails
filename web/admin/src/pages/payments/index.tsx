@@ -170,7 +170,7 @@ export function PaymentsPage() {
           "amount_refunded",
           "currency",
           "rail",
-          "user",
+          "customer_id",
           "transaction_id",
           "created",
         ].join(","),
@@ -183,7 +183,7 @@ export function PaymentsPage() {
             csvAmount(r.amount_refunded, r.currency),
             r.currency,
             r.rail,
-            r.user,
+            r.customer_id,
             r.transaction_id,
             new Date(r.created * 1000).toISOString(),
           ]
