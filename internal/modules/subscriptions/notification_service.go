@@ -168,9 +168,14 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	case models.NotificationPaymentMethodFailed:
 		return s.emailService.SendPaymentFailed(ctx, notification.CustomerID.String())
 	case models.NotificationOneOffPurchaseCompleted:
-		_, email, err := s.emailService.getUserEmail(ctx, notification.CustomerID.String())
-		if err != nil || email == "" {
-			log.WithContext(ctx).WithField("user_id", notification.CustomerID.String()).Warn("one-off purchase notification: no email on the profile")
+		email := notification.Data.UserEmail
+		if email == "" {
+			if _, mail, err := s.emailService.getUserEmail(ctx, notification.CustomerID.String()); err == nil {
+				email = mail
+			}
+		}
+		if email == "" {
+			log.WithContext(ctx).WithField("user_id", notification.CustomerID.String()).Warn("one-off purchase notification: no recipient email")
 			return nil
 		}
 		if notification.Data.Amount == nil {
