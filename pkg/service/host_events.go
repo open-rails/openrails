@@ -55,10 +55,11 @@ func (s *Service) ListHostEvents(ctx context.Context, options openrails.HostEven
 			OccurredAt: row.OccurredAt, AcknowledgedAt: row.DeliveredAt}
 		switch event.Type {
 		case openrails.HostEventPaymentSettled:
-			if row.PaymentID == nil || row.Amount == nil {
+			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || row.PaymentPriceID == nil {
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)
 			}
-			event.Payment = &openrails.PaymentSettledEvent{PaymentID: *row.PaymentID, Amount: *row.Amount, Currency: row.Currency}
+			event.Payment = &openrails.PaymentSettledEvent{PaymentID: *row.PaymentID, CustomerID: *row.PaymentCustomerID,
+				PriceID: *row.PaymentPriceID, SubscriptionID: row.PaymentSubscriptionID, Amount: *row.Amount, Currency: row.Currency}
 		case openrails.HostEventDelinquencyGrace, openrails.HostEventDelinquencyEntered, openrails.HostEventDelinquencyCleared:
 			// Storage predates the public wire DTO and stores money as JSON
 			// integers. Decode those fields explicitly before the Client emits

@@ -48,7 +48,7 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 	if issuer != "" {
 		issuerPtr = &issuer
 	}
-	id, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{
+	row, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		MerchantID: merchantID.UUID(),
 		Issuer:     issuerPtr,
 		ID:         subjectID,
@@ -59,7 +59,7 @@ func (c *ControlPlane) TouchCustomer(ctx context.Context, merchantID merchant.ID
 	if err := tx.Commit(ctx); err != nil {
 		return uuid.Nil, err
 	}
-	return id, nil
+	return row.ID, nil
 }
 
 // MerchantForSubject is one merchant a subject holds a customer record with

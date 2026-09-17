@@ -33,11 +33,11 @@ func TestInvokerIdentityAndPayerNaturalKey(t *testing.T) {
 		require.NoError(t, err)
 		a2, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{MerchantID: merchantID, Issuer: &issuerB, ID: subjAID})
 		require.NoError(t, err)
-		require.Equal(t, a1, a2, "same (merchant,subject) must survive issuer changes")
+		require.Equal(t, a1.ID, a2.ID, "same (merchant,subject) must survive issuer changes")
 
 		b1, err := q.EnsureCustomer(ctx, gen.EnsureCustomerParams{MerchantID: merchantID, Issuer: &issuerA, ID: subjBID})
 		require.NoError(t, err)
-		require.NotEqual(t, a1, b1, "distinct subjects -> distinct customers")
+		require.NotEqual(t, a1.ID, b1.ID, "distinct subjects -> distinct customers")
 
 		var issuer string
 		require.NoError(t, pool.QueryRow(ctx, "SELECT issuer FROM openrails.customers WHERE merchant_id=$1 AND id=$2", merchantID, subjAID).Scan(&issuer))

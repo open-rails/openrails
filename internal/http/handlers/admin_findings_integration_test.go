@@ -171,9 +171,9 @@ func newFindingsFixture(t *testing.T) *findingsFixture {
 		fx.product, "findings-prod-"+sfx, mid)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, 10000000, 'USD', 720, true, $3)`, fx.price, fx.product, mid)
-	custID, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: uuid.New(), MerchantID: mid})
+	customer, err := gen.New(pool).EnsureCustomer(ctx, gen.EnsureCustomerParams{ID: uuid.New(), MerchantID: mid})
 	require.NoError(t, err)
-	fx.customer = custID
+	fx.customer = customer.ID
 
 	t.Cleanup(func() {
 		bg := context.Background()

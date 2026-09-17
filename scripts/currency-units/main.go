@@ -1,17 +1,17 @@
-// currency-units generates the admin UI scale table from the engine registry.
+// currency-units generates the admin UI scale table from the public registry.
 package main
 
 import (
 	"encoding/json"
 	"os"
 
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails"
 )
 
 func main() {
 	units := map[string]int{}
-	for _, code := range moneyutil.CurrencyCodes() {
-		units[code], _ = moneyutil.CurrencyScale(code)
+	for _, currency := range openrails.Currencies() {
+		units[currency.Code] = currency.Decimals
 	}
 	raw, err := json.MarshalIndent(units, "", "  ")
 	if err != nil {
