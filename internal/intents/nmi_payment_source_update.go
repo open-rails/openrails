@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"strings"
 	"time"
 
@@ -76,12 +75,12 @@ type NMIPaymentSourceUpdateHandler struct {
 	DB *db.DB
 	// Resolver arms the subscription merchant's NMI client from the armed
 	// rail state at drain time (#788).
-	Resolver money.NMIClientResolver
+	Resolver NMIClientResolver
 	Clock    clockwork.Clock
 	Policy   BackoffPolicy
 }
 
-func NewNMIPaymentSourceUpdateHandler(d *db.DB, resolver money.NMIClientResolver, clock clockwork.Clock) *NMIPaymentSourceUpdateHandler {
+func NewNMIPaymentSourceUpdateHandler(d *db.DB, resolver NMIClientResolver, clock clockwork.Clock) *NMIPaymentSourceUpdateHandler {
 	return &NMIPaymentSourceUpdateHandler{DB: d, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 

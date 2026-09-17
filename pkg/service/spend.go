@@ -200,6 +200,7 @@ func invoiceToDTO(inv *models.Invoice) InvoiceDTO {
 		CollectionFailedAt:        inv.CollectionFailedAt,
 		NextCollectionAttemptAt:   inv.NextCollectionAttemptAt,
 		LastCollectionFailureCode: inv.LastCollectionFailureCode,
+		CollectionIntentID:        inv.CollectionIntentID,
 		CreatedAt:                 inv.CreatedAt,
 	}
 }
@@ -316,41 +317,10 @@ func (s *Service) SetInvoiceCollectionPaymentMethod(ctx context.Context, payer i
 	})
 }
 
-// RetryInvoiceCollection reopens a failed automatic-collection invoice and
-// immediately retries it through the configured runtime collection plane.
-func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID) (*InvoiceDTO, error) {
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	if rt.MoneyCharger == nil {
-		return nil, fmt.Errorf("invoice collection charger not configured")
-	}
-	var out *InvoiceDTO
-	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		invoice, err := s.moneyService().RetryInvoiceCollection(ctx, rt.MoneyCharger, payer, invoiceID)
-		if err != nil {
-			return err
-		}
-		dto := invoiceToDTO(invoice)
-		out = &dto
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // RetryInvoiceCollectionIdempotent retries collection with a durable client
-// key and an explicitly bound payer-owned saved method.
+// key and an explicitly bound payer-owned saved method through the
+// invoice_collection intent machine.
 func (s *Service) RetryInvoiceCollectionIdempotent(ctx context.Context, payer identity.CustomerID, request InvoiceCollectionRetryRequest) (*InvoiceCollectionRetryResult, error) {
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -360,7 +330,7 @@ func (s *Service) RetryInvoiceCollectionIdempotent(ctx context.Context, payer id
 	}
 	var out *InvoiceCollectionRetryResult
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		result, err := s.moneyService().RetryInvoiceCollectionIdempotent(ctx, rt.MoneyCharger, payer, money.InvoiceCollectionRetryRequest{
+		result, err := s.moneyService().RetryInvoiceCollection(ctx, rt.IntentRunner(), payer, money.InvoiceCollectionRetryRequest{
 			InvoiceID: request.InvoiceID, IdempotencyKey: request.IdempotencyKey, PaymentMethodID: request.PaymentMethodID,
 		})
 		if err != nil {

@@ -95,8 +95,7 @@ func InvoiceAdminActions(invoice *models.Invoice) []InvoiceAdminAction {
 	if invoice == nil {
 		return actions
 	}
-	code := derefStr(invoice.LastCollectionFailureCode)
-	if code == collectionAttemptInProgress || code == collectionOutcomeUnknown {
+	if invoice.CollectionIntentID != nil {
 		return actions
 	}
 	if invoiceCollectionRetryable(invoice) {
@@ -135,8 +134,7 @@ func (s *MoneyService) ApplyInvoiceAdminMutation(ctx context.Context, payer iden
 		if e != nil {
 			return e
 		}
-		code := derefStr(current.LastCollectionFailureCode)
-		if code == collectionAttemptInProgress || code == collectionOutcomeUnknown {
+		if current.CollectionIntentID != nil {
 			return ErrInvoiceActionNotAllowed
 		}
 		if (in.Action == InvoiceAdminVoid && current.Status == "voided") || (in.Action == InvoiceAdminUncollectible && current.Status == "uncollectible") {

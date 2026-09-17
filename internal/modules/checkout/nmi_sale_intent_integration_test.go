@@ -66,7 +66,7 @@ func newFakeNMISaleGateway(t *testing.T) (*fakeNMISaleGateway, *nmi.NMIClient) {
 				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 				return
 			}
-			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"5.00","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"5.00"}]}`, f.txnID, vault, f.txnID)
+			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"5.00","currency":"USD","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"5.00"}]}`, f.txnID, vault, f.txnID)
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/payments/sale") {

@@ -35,14 +35,16 @@ type invoiceAdminCharger struct {
 	ambiguous bool
 }
 
-func (c *invoiceAdminCharger) ChargeSavedMethod(_ context.Context, request money.ChargeRequest) (money.ChargeResult, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.calls = append(c.calls, request)
-	if c.ambiguous {
-		return money.ChargeResult{}, &nmi.TransportAmbiguousError{Err: errors.New("lost response")}
-	}
-	return money.ChargeResult{Rail: "nmi", TransactionID: "invoice-test-" + request.IdempotencyKey}, nil
+func (c *invoiceAdminCharger) Prepare(_ context.Context, request money.ChargeRequest) (money.PreparedCharge, error) {
+	return money.PreparedChargeFunc(func(context.Context) (money.ChargeResult, error) {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		c.calls = append(c.calls, request)
+		if c.ambiguous {
+			return money.ChargeResult{}, &nmi.TransportAmbiguousError{Err: errors.New("lost response")}
+		}
+		return money.ChargeResult{Rail: "nmi", TransactionID: "invoice-test-" + request.IdempotencyKey}, nil
+	}), nil
 }
 
 func invoiceRequest(t *testing.T, method, url, token, key string, body any) (int, []byte) {
@@ -248,13 +250,22 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	ambiguous := &invoiceAdminCharger{ambiguous: true}
 	rt.MoneyCharger = ambiguous
 	blockedPath := surface.BaseURL + "/v1/merchant/invoices/" + blocked.ID.String()
-	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "ambiguous-key", map[string]any{"payment_method_id": blockedMethod})
-	require.Equal(t, 409, status, string(body))
+	// A lost response answers 202 with the live attempt; the same key replays
+	// that durable state without another charge.
+	for range 2 {
+		status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "ambiguous-key", map[string]any{"payment_method_id": blockedMethod})
+		require.Equal(t, 202, status, string(body))
+		var pending billingservice.InvoiceCollectionRetryResult
+		require.NoError(t, json.Unmarshal(body, &pending))
+		require.Equal(t, "attempted", pending.Attempt.Status)
+		require.NotNil(t, pending.Invoice.CollectionIntentID)
+	}
 	require.Len(t, ambiguous.calls, 1)
 	status, body = invoiceRequest(t, http.MethodGet, blockedPath, owner, "", nil)
 	require.Equal(t, 200, status, string(body))
 	require.NoError(t, json.Unmarshal(body, &read))
 	require.Empty(t, read.AvailableActions)
+	require.NotNil(t, read.CollectionIntentID)
 	for _, action := range []string{"void", "uncollectible"} {
 		status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/"+action, owner, "", nil)
 		require.Equal(t, 409, status, string(body))

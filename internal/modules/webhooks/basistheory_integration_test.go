@@ -270,7 +270,7 @@ func TestBasisTheoryWebhook_AccountUpdaterUnparksTheInstrumentItRecovered(t *tes
 	// The PRODUCTION collection guard refuses it — this is the state that,
 	// left alone, outlives the network's own repair.
 	collect := money.NewCustodianProxyCollectionAdapter(&nmiproxy.Charger{})
-	_, err := collect.ChargeSavedMethod(fx.ctx, parked, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	_, err := collect.Prepare(fx.ctx, parked, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
 	require.ErrorContains(t, err, "is parked")
 
 	// 2. The network reissues the card; the AU job reports the new expiry
@@ -292,9 +292,8 @@ func TestBasisTheoryWebhook_AccountUpdaterUnparksTheInstrumentItRecovered(t *tes
 
 	// And the production guard no longer refuses it: the recovered card can
 	// bill again, so this customer never reaches or#870 bucket 2.
-	_, err = collect.ChargeSavedMethod(fx.ctx, row, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
-	require.Error(t, err) // the fake charger has no gateway; what matters is WHY
-	require.NotContains(t, err.Error(), "is parked", "an updater-recovered instrument is billable again")
+	_, err = collect.Prepare(fx.ctx, row, money.ChargeRequest{AmountCents: 500, Currency: "USD"})
+	require.NoError(t, err, "an updater-recovered instrument is billable again")
 }
 
 func TestBasisTheoryWebhook_UnverifiedIsRejectedNonRetryable(t *testing.T) {

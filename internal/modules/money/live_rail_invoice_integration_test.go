@@ -17,14 +17,12 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -41,7 +39,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	}
 
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	cleanupInvoiceRows(t, pool, ctx, payer)
+	cleanupCollection(t, pool, ctx, payer)
 
 	// Arm the charge path the way production arms rails (#699): self-discover
 	// the acct_… identity (the manifest resolver's GET /v1/account), seed the
@@ -95,7 +93,7 @@ func TestLiveStripeInvoiceCollectionAgainstTestAccount(t *testing.T) {
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
 	})
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 
@@ -123,7 +121,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	}
 
 	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	cleanupInvoiceRows(t, pool, ctx, payer)
+	cleanupCollection(t, pool, ctx, payer)
 
 	// Store-armed like the Stripe leg: seed the sandbox key as the test
 	// merchant's NMI rail credential, then resolve it back through checkout's
@@ -168,7 +166,7 @@ func TestLiveNMIInvoiceCollectionAgainstSandbox(t *testing.T) {
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	if n != 1 {
 		var failureCode, failureMessage string
@@ -196,16 +194,6 @@ func requireLiveRailTest(t *testing.T) {
 	if !isTruthy(os.Getenv("TEST_MODE")) && !isTruthy(os.Getenv("OPENRAILS_TEST_MODE")) {
 		t.Fatalf("TEST_MODE=sandbox is required for live rail invoice tests")
 	}
-}
-
-func cleanupInvoiceRows(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID) {
-	t.Helper()
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
 }
 
 func isTruthy(v string) bool {

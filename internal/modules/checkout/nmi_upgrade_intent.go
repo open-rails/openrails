@@ -331,7 +331,7 @@ func (h *NMIUpgradeIntentHandler) Resolve(ctx context.Context, in gen.OpenrailsR
 		if err != nil {
 			return intents.Outcome{}, err
 		}
-		if err := client.ConfirmApprovedSale(ctx, ref, p.VaultID, cents); err != nil {
+		if err := client.ConfirmApprovedSale(ctx, ref, p.VaultID, cents, p.Currency); err != nil {
 			return intents.Outcome{}, intents.RejectResolution("%v", err)
 		}
 		step.Sale = &nmi.SaleResponse{TransactionID: ref}

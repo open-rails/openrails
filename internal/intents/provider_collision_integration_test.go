@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/stretchr/testify/require"
 )
 
@@ -53,7 +53,7 @@ func TestRefundIntentKeepsArchivedAccountWithCollidingTransactions(t *testing.T)
 	defer gateway.Close()
 	cfg := fullModeConfig()
 	cfg.TestMode = config.CredentialPostureSandbox
-	resolver := &money.MerchantCollectionAdapterBuilder{DB: fx.db, Config: cfg, MerchantsFn: func() *merchants.Service { return registry }, Endpoints: money.CollectionEndpoints{NMIV5BaseURL: gateway.URL}}
+	resolver := &railresolve.NMIArmer{DB: fx.db, Config: cfg, MerchantsFn: func() *merchants.Service { return registry }, Endpoints: railresolve.NMIEndpoints{V5BaseURL: gateway.URL}}
 	runner := &Runner{Store: fx.store, Registry: NewRegistry(NewNMIRefundHandler(fx.db, resolver, nil)), Config: cfg}
 	// Queue the obligation, then change its display name and admission state.
 	intent, err := fx.store.Enqueue(ctx, fx.enqueueParams(500))

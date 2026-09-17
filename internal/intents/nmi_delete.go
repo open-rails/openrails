@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"strings"
 	"time"
 
@@ -57,12 +56,12 @@ type NMIDeleteHandler struct {
 	Config *config.Config
 	// Resolver arms the intent merchant's NMI client from the armed rail
 	// state at drain time (#788).
-	Resolver money.NMIClientResolver
+	Resolver NMIClientResolver
 	Clock    clockwork.Clock
 	Policy   BackoffPolicy
 }
 
-func NewNMIDeleteHandler(d *db.DB, cfg *config.Config, resolver money.NMIClientResolver, clock clockwork.Clock) *NMIDeleteHandler {
+func NewNMIDeleteHandler(d *db.DB, cfg *config.Config, resolver NMIClientResolver, clock clockwork.Clock) *NMIDeleteHandler {
 	return &NMIDeleteHandler{DB: d, Config: cfg, Resolver: resolver, Clock: clock, Policy: DefaultBackoff}
 }
 

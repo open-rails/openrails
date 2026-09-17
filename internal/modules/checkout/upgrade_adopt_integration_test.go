@@ -80,7 +80,7 @@ func newFakeNMIUpgradeGateway(t *testing.T, railCustomerRef, planID string) (*fa
 				fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"not found"}`)
 				return
 			}
-			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"%s","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"%s"}]}`, f.saleTxn, amount, f.railCustomerRef, f.saleTxn, amount)
+			fmt.Fprintf(w, `{"object":"transaction","id":"%s","response":"1","amount":"%s","currency":"USD","customer_vault_id":"%s","actions":[{"id":"%s","type":"sale","success":true,"amount":"%s"}]}`, f.saleTxn, amount, f.railCustomerRef, f.saleTxn, amount)
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/subscriptions"):
 			if f.subExists.Load() {
 				fmt.Fprintf(w, `{"subscriptions":[{"object":"subscription","id":"%s","customer_vault_id":"%s","delayed_condition":"active","plan":{"id":"%s"}}],"next_cursor":null,"has_more":false}`,

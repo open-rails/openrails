@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -55,8 +56,8 @@ type CollectionEndpoints struct {
 }
 
 // CollectionPlane is the runtime-facing per-merchant credential resolver
-// surface (#725/#788): store-armed collection adapters plus raw NMI clients,
-// plus the #828 in-doubt-charge provider read.
+// surface (#725/#788): store-armed collection adapters, raw NMI clients and
+// the reconciliation reads for in-doubt collection operations.
 // Satisfied by *MerchantCollectionAdapterBuilder; tests may inject fakes.
 type CollectionPlane interface {
 	CollectionAdapterResolver
@@ -64,18 +65,45 @@ type CollectionPlane interface {
 	CollectionVerifier
 }
 
-// NMIClientResolver is the raw-client NMI leg of the #725 store resolver, for
-// charge paths that need the client itself (manual dunning rebills) rather
-// than a CollectionAdapter. Same contract: ok=false with nil err = merchant
-// declares no NMI account (fails closed — no fallback plane); err = declared
-// but not armable (fail closed).
-type NMIClientResolver interface {
-	ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error)
+// CollectionVerifyResult reports one provider read for an in-doubt charge.
+type CollectionVerifyResult struct {
+	// Supported = the rail has a provider read for this question.
+	Supported bool
+	// Settled = a successful charge for the operation exists at the provider.
+	Settled           bool
+	TransactionID     string
+	ExternalInvoiceID string
 }
+
+// CollectionReceiptExpectation is the frozen operation an operator receipt
+// must match exactly.
+type CollectionReceiptExpectation struct {
+	OperationKey string
+	Amount       moneyutil.Cents
+	Currency     string
+}
+
+// CollectionVerifier answers the reconciliation reads for one collection
+// operation. Implemented by the store-armed credential plane; faked in tests.
+type CollectionVerifier interface {
+	// VerifyCollectionCharge searches for a successful charge carrying the
+	// operation key (NMI-family order reference). Supported=false for rails
+	// without such a read; an empty result is inconclusive, never non-execution.
+	VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, operationKey string) (CollectionVerifyResult, error)
+	// ConfirmCollectionReceipt reads the exact provider object an operator
+	// named and requires it to be this operation's settled charge.
+	ConfirmCollectionReceipt(ctx context.Context, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error)
+	// ConfirmCollectionNotExecuted errors while the provider shows the
+	// operation executed, or when it cannot say.
+	ConfirmCollectionNotExecuted(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) error
+}
+
+// NMIClientResolver is the raw-client NMI leg of the #725 store resolver.
+type NMIClientResolver = railresolve.NMIClientResolver
 
 // MerchantCollectionAdapterBuilder builds one merchant's collection adapter at
 // charge time. MerchantsFn is late-bound (Runtime.Merchants is wired after the
-// charger is constructed); a nil fn/service = boot plane only (#699).
+// charger is constructed); a nil fn/service = nothing armable.
 type MerchantCollectionAdapterBuilder struct {
 	Config      *config.Config
 	DB          *db.DB
@@ -83,8 +111,7 @@ type MerchantCollectionAdapterBuilder struct {
 	Endpoints   CollectionEndpoints
 }
 
-var _ CollectionAdapterResolver = (*MerchantCollectionAdapterBuilder)(nil)
-var _ NMIClientResolver = (*MerchantCollectionAdapterBuilder)(nil)
+var _ CollectionPlane = (*MerchantCollectionAdapterBuilder)(nil)
 
 func (b *MerchantCollectionAdapterBuilder) merchants() *merchants.Service {
 	if b == nil || b.MerchantsFn == nil {
@@ -97,9 +124,15 @@ func (b *MerchantCollectionAdapterBuilder) testMode() bool {
 	return b.Config != nil && b.Config.IsTestMode()
 }
 
-// environment is the deployment's PSP environment (#681).
-func (b *MerchantCollectionAdapterBuilder) environment() string {
-	return config.ExpectedProviderEnvironment(b.testMode())
+// nmiArmer is the shared store-armed NMI client plane this builder delegates
+// scope, secret and client construction to.
+func (b *MerchantCollectionAdapterBuilder) nmiArmer() *railresolve.NMIArmer {
+	if b == nil {
+		return nil
+	}
+	return &railresolve.NMIArmer{Config: b.Config, DB: b.DB, MerchantsFn: b.MerchantsFn, Endpoints: railresolve.NMIEndpoints{
+		V5BaseURL: b.Endpoints.NMIV5BaseURL, DirectPostURL: b.Endpoints.NMIDirectPostURL, QueryURL: b.Endpoints.NMIQueryURL,
+	}}
 }
 
 func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.Context, method gen.OpenrailsPaymentMethod) (CollectionAdapter, bool, error) {
@@ -139,92 +172,151 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 	return adapter, true, nil
 }
 
-// resolveScope picks the account the charge settles through: the stamped #704
+// resolveScope picks the account the charge settles through: the stamped
 // provenance account when present (archived stays addressable for existing
-// obligations, #655), else the pull scope (active for new work, else newest
-// archived for drain — the #699 resolver).
-func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, svc *merchants.Service, mid merchant.ID, rail string, stamped *uuid.UUID) (merchants.PSPScope, bool, error) {
-	if stamped != nil {
-		row, err := b.DB.Gen(ctx).GetPSP(ctx, *stamped)
-		if err != nil {
-			return merchants.PSPScope{}, false, fmt.Errorf("load stamped PSP: %w", err)
-		}
-		if !rails.SameRail(models.Rail(row.Rail), models.Rail(rail)) {
-			return merchants.PSPScope{}, false, fmt.Errorf("stamped PSP %s is on rail %s, not %s", row.ID, row.Rail, rail)
-		}
-		return merchants.PSPScope{
-			ID: row.ID, Rail: row.Rail, Environment: row.Environment, AccountID: row.AccountID,
-			// Default for new custody work. Stored instruments override this
-			// with the custodian UUID captured when the instrument was created.
-			CustodianID: row.CustodianID,
-		}, true, nil
-	}
-	return svc.PullPSPScope(ctx, mid, rail, b.environment())
+// obligations), else the pull scope.
+func (b *MerchantCollectionAdapterBuilder) resolveScope(ctx context.Context, _ *merchants.Service, mid merchant.ID, rail string, stamped *uuid.UUID) (merchants.PSPScope, bool, error) {
+	return b.nmiArmer().ResolveScope(ctx, mid, rail, stamped)
 }
 
-// ResolveNMIClient arms the store-scoped NMI client for one charge (#727 —
-// the manual-rebill leg of the ONE #725 resolver). Scope pick: the stamped
-// provenance account when present (dunning stamps the subscription's account
-// on the intent), else the NMI pull scope. Nil-receiver-safe: nil builder =
-// boot plane only.
+// ResolveNMIClient arms the store-scoped NMI client for one write: the
+// stamped provenance account when present, else the NMI pull scope.
 func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error) {
 	if b == nil {
 		return nil, false, nil
 	}
-	svc := b.merchants()
-	if svc == nil || b.DB == nil {
-		return nil, false, nil
-	}
-	mid := merchant.ID(merchantID)
-	scope, ok, err := b.resolveScope(ctx, svc, mid, string(models.RailNMI), stampedAccountID)
-	if err != nil {
-		return nil, false, err
-	}
-	if !ok {
-		return nil, false, nil // no declared NMI account → nothing armable
-	}
-	client, err := b.nmiClient(ctx, svc, mid, scope)
-	if err != nil {
-		return nil, false, err
-	}
-	return client, true, nil
+	return b.nmiArmer().ResolveNMIClient(ctx, merchantID, stampedAccountID)
 }
 
-// VerifyCollectionCharge (#828) is the invoice-side ambiguity resolver's
-// provider READ: for NMI-family rails it arms the store-scoped client and
-// asks the Query API for a successful sale carrying the wire order reference
-// — the same probe the manual-rebill intent verifier trusts for its
-// no-double-charge invariant. Custodian-proxied charges settle on the SAME NMI
-// gateway account (or#879), so one branch covers both transports. Rails
-// without a usable read (Stripe relies on its own request idempotency and
-// cannot park ambiguous mid-transport) report Supported=false.
-func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, wireOrderRef string) (CollectionVerifyResult, error) {
-	if b == nil {
-		return CollectionVerifyResult{}, nil
-	}
-	svc := b.merchants()
-	if svc == nil || b.DB == nil {
-		return CollectionVerifyResult{}, nil
-	}
-	rail := normalizeRail(method.Rail)
-	if !rails.IsNMI(models.Rail(rail)) {
-		return CollectionVerifyResult{}, nil
-	}
-	client, ok, err := b.ResolveNMIClient(ctx, method.MerchantID, &method.PspID)
-	if err != nil {
+// VerifyCollectionCharge is the invoice_collection verifier's provider READ:
+// for NMI-family rails it arms the store-scoped client and asks the Query API
+// for a successful sale carrying the operation's order reference — the same
+// probe the manual-rebill verifier trusts. Custodian-proxied charges settle on
+// the SAME NMI gateway account (or#879), so one branch covers both transports.
+// Stripe has no such read and converges through idempotent replay instead.
+func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, operationKey string) (CollectionVerifyResult, error) {
+	client, ok, err := b.nmiClientFor(ctx, method)
+	if err != nil || !ok {
 		return CollectionVerifyResult{}, err
 	}
-	if !ok {
-		return CollectionVerifyResult{}, nil
-	}
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, wireOrderRef)
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, operationKey)
 	if err != nil {
-		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", wireOrderRef, err)
+		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", operationKey, err)
 	}
 	return CollectionVerifyResult{Supported: true, Settled: found, TransactionID: txnID}, nil
 }
 
+// ConfirmCollectionReceipt reads the exact provider object an operator named.
+// NMI: the transaction must be the successful sale the Query API returns for
+// the operation's own order reference (identity), and for a vaulted
+// instrument also an approved sale of the frozen amount and currency on that
+// vault (exact read). Stripe: the invoice must carry the operation key and be
+// paid for the frozen amount.
+func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.Context, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+	providerReference = strings.TrimSpace(providerReference)
+	if normalizeRail(method.Rail) == string(models.RailStripe) {
+		service, err := b.stripeServiceFor(ctx, method)
+		if err != nil {
+			return CollectionVerifyResult{}, err
+		}
+		receipt, found, err := service.GetCollectionInvoice(ctx, providerReference)
+		if err != nil {
+			return CollectionVerifyResult{}, err
+		}
+		if !found {
+			return CollectionVerifyResult{}, fmt.Errorf("stripe invoice %s does not exist", providerReference)
+		}
+		if err := stripeReceiptMatches(receipt, expect.OperationKey, expect.Amount, expect.Currency); err != nil {
+			return CollectionVerifyResult{}, err
+		}
+		return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: stripeReceiptTransactionID(receipt), ExternalInvoiceID: receipt.InvoiceID}, nil
+	}
+	client, ok, err := b.nmiClientFor(ctx, method)
+	if err != nil {
+		return CollectionVerifyResult{}, err
+	}
+	if !ok {
+		return CollectionVerifyResult{}, fmt.Errorf("rail %q has no armed provider read", method.Rail)
+	}
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, expect.OperationKey)
+	if err != nil {
+		return CollectionVerifyResult{}, err
+	}
+	if !found || strings.TrimSpace(txnID) != providerReference {
+		return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, expect.OperationKey)
+	}
+	if vault := strings.TrimSpace(method.RailCustomerRef); vault != "" {
+		if err := client.ConfirmApprovedSale(ctx, providerReference, vault, expect.Amount, expect.Currency); err != nil {
+			return CollectionVerifyResult{}, err
+		}
+	}
+	return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txnID}, nil
+}
+
+// ConfirmCollectionNotExecuted refuses provider-confirmed non-execution while
+// the provider shows a successful charge for the operation, or when it
+// cannot say. For Stripe it also makes the non-execution definitive: every
+// invoice item, draft and open invoice stamped with the operation key is
+// deleted or voided so no later invoice can sweep them; a paid one refuses.
+func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) error {
+	if normalizeRail(method.Rail) == string(models.RailStripe) {
+		service, err := b.stripeServiceFor(ctx, method)
+		if err != nil {
+			return err
+		}
+		customerID, err := NewStripeCollectionAdapter(b.DB, service).stripeCustomerID(ctx, method)
+		if err != nil {
+			return err
+		}
+		return service.CleanupCollection(ctx, customerID, expect.OperationKey)
+	}
+	res, err := b.VerifyCollectionCharge(ctx, method, expect.OperationKey)
+	if err != nil {
+		return err
+	}
+	if !res.Supported {
+		return fmt.Errorf("rail %q has no armed provider read", method.Rail)
+	}
+	if res.Settled {
+		return fmt.Errorf("provider shows successful sale %s for order %s", res.TransactionID, expect.OperationKey)
+	}
+	return nil
+}
+
+// nmiClientFor arms the NMI client for an NMI-family instrument's stamped
+// account. ok=false for other rails or an undeclared account.
+func (b *MerchantCollectionAdapterBuilder) nmiClientFor(ctx context.Context, method gen.OpenrailsPaymentMethod) (*nmi.NMIClient, bool, error) {
+	if b == nil || b.merchants() == nil || b.DB == nil || !rails.IsNMI(models.Rail(normalizeRail(method.Rail))) {
+		return nil, false, nil
+	}
+	return b.ResolveNMIClient(ctx, method.MerchantID, &method.PspID)
+}
+
+func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context, method gen.OpenrailsPaymentMethod) (*subscriptions.StripeService, error) {
+	svc := b.merchants()
+	if b == nil || svc == nil || b.DB == nil {
+		return nil, errors.New("stripe collection plane is not armed")
+	}
+	mid := merchant.ID(method.MerchantID)
+	scope, ok, err := b.resolveScope(ctx, svc, mid, string(models.RailStripe), &method.PspID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("merchant %s declares no stripe account", mid.String())
+	}
+	return b.stripeService(ctx, svc, mid, scope)
+}
+
 func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (CollectionAdapter, error) {
+	service, err := b.stripeService(ctx, svc, mid, scope)
+	if err != nil {
+		return nil, err
+	}
+	return NewStripeCollectionAdapter(b.DB, service), nil
+}
+
+func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*subscriptions.StripeService, error) {
 	secretKey, err := b.requireSecret(ctx, svc, mid, scope, "secret_key")
 	if err != nil {
 		return nil, err
@@ -245,7 +337,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeAdapter(ctx context.Context, sv
 	if b.Endpoints.StripeBaseURL != "" {
 		service.SetBaseURLForTest(b.Endpoints.StripeBaseURL)
 	}
-	return NewStripeCollectionAdapter(b.DB, service), nil
+	return service, nil
 }
 
 // custodianProxyAdapter arms the #795 detokenizing-proxy collection adapter:
@@ -292,73 +384,13 @@ func (b *MerchantCollectionAdapterBuilder) nmiAdapter(ctx context.Context, svc *
 	return NewNMICollectionAdapter(client), nil
 }
 
-// nmiClient builds the store-armed NMI client for scope — shared by the
-// collection adapter and the #727 manual-rebill leg.
-func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
-	securityKey, err := b.requireSecret(ctx, svc, mid, scope, "security_key")
-	if err != nil {
-		return nil, err
-	}
-	// Optional on the charge plane; loaded so the client mirrors the real
-	// account posture instead of a fabricated empty.
-	webhookSecret, _, _ := b.secret(ctx, svc, mid, scope, "webhook_signing_secret")
-	client, err := nmi.NewClient(scope.AccountID, &config.NMIProviderSettings{
-		SecurityKey:   securityKey,
-		WebhookSecret: webhookSecret,
-	}, b.testMode())
-	if err != nil {
-		return nil, fmt.Errorf("build store-armed NMI client: %w", err)
-	}
-	client.ReadOnly = b.Config != nil && b.Config.IsProviderReadOnly()
-	if b.Endpoints.NMIV5BaseURL != "" {
-		client.V5BaseURL = b.Endpoints.NMIV5BaseURL
-	}
-	if b.Endpoints.NMIDirectPostURL != "" {
-		client.DirectPostURL = b.Endpoints.NMIDirectPostURL
-	}
-	if b.Endpoints.NMIQueryURL != "" {
-		client.QueryURL = b.Endpoints.NMIQueryURL
-	}
-	return client, nil
+// nmiClient builds the store-armed NMI client for scope.
+func (b *MerchantCollectionAdapterBuilder) nmiClient(ctx context.Context, _ *merchants.Service, mid merchant.ID, scope merchants.PSPScope) (*nmi.NMIClient, error) {
+	return b.nmiArmer().NMIClient(ctx, mid, scope)
 }
 
-// secret loads one scoped secret. found=false with nil err means the secret is
-// genuinely absent; backend errors surface as err.
-func (b *MerchantCollectionAdapterBuilder) secret(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope, key string) (string, bool, error) {
-	if svc.Secrets() == nil {
-		return "", false, nil
-	}
-	// or#812: honour the PSP row's rotation version floor.
-	ref, err := scope.SecretRef(key)
-	if err != nil {
-		return "", false, err
-	}
-	sec, err := merchants.ReadSecretRef(ctx, svc.Secrets(), mid, ref)
-	if errors.Is(err, merchants.ErrSecretNotFound) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, err
-	}
-	value := strings.TrimSpace(sec.Value)
-	if value == "" {
-		return "", false, nil
-	}
-	return value, true, nil
-}
-
-// requireSecret is secret plus the fail-closed contract: a declared account
-// with a missing/unreadable secret errors the charge — never boot fallback.
-func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, svc *merchants.Service, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
-	value, found, err := b.secret(ctx, svc, mid, scope, key)
-	name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
-	if err != nil {
-		return "", fmt.Errorf("merchant %s rail %s: secret %s backend failed: %w", mid.String(), scope.Rail, name, err)
-	}
-	if !found {
-		return "", fmt.Errorf("merchant %s rail %s: secret %s missing (#725: a declared account never falls back to boot rails)", mid.String(), scope.Rail, name)
-	}
-	return value, nil
+func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, _ *merchants.Service, mid merchant.ID, scope merchants.PSPScope, key string) (string, error) {
+	return b.nmiArmer().RequireSecret(ctx, mid, scope, key)
 }
 
 // requireCustodianSecret is the custody sibling: the credential is scoped to

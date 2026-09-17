@@ -510,6 +510,8 @@ type OpenrailsInvoice struct {
 	NextCollectionAttemptAt      *time.Time
 	LastCollectionFailureCode    *string
 	LastCollectionFailureMessage *string
+	// The live invoice_collection operation (rail_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation's terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.
+	CollectionIntentID *uuid.UUID
 }
 
 // Pending-accrual workspace (#726): owed accruals queue as pending rows gating arrears exposure; finalization attaches them (invoice_id, status=invoiced) so they cannot bill twice. NOT the statement itemization — that is invoices.line_items.
