@@ -224,6 +224,47 @@ export function pivotTimeSeries(
   return { data, series: keys }
 }
 
+// DonutSlice is one pie slice: the plotted Number beside the exact wire cell
+// (under exactKey) the tooltip formats, as the time-series rows do.
+export type DonutSlice = PivotSeries & {
+  value: number
+  [exact: string]: unknown
+}
+
+// donutSlices turns the result's rows into slices for the primary measure,
+// dropping zero slices.
+export function donutSlices(
+  result: MetricsResult,
+  currency?: string
+): DonutSlice[] {
+  const idx = indexColumns(result.columns)
+  const primary = idx.measures[0]
+  if (!primary) return []
+  return result.rows
+    .map((row, i) => {
+      const key = `slice-${i}`
+      const cell = row[primary.index]
+      return {
+        key,
+        label:
+          idx.dims
+            .map((d) => String(row[d.index] ?? ""))
+            .filter(Boolean)
+            .join(" · ") || primary.name,
+        measure: primary.name,
+        dimensions: idx.dims.map((d) => row[d.index]),
+        unit: primary.unit,
+        currency:
+          primary.unit === "money"
+            ? rowCurrency(row, idx, currency)
+            : undefined,
+        value: Number(cell ?? 0),
+        [exactKey(key)]: cell ?? 0,
+      }
+    })
+    .filter((slice) => slice.value !== 0)
+}
+
 // chartColor cycles the shadcn --chart-N tokens.
 export function chartColor(i: number): string {
   return `var(--chart-${(i % 5) + 1})`

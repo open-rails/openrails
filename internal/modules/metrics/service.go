@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -217,7 +217,10 @@ func (s *Service) run(ctx context.Context, plan *Plan) ([][]any, error) {
 	}
 
 	zeroFill(plan, groups)
-	rows := assemble(plan, groups)
+	rows, err := assemble(plan, groups)
+	if err != nil {
+		return nil, err
+	}
 	orderRows(plan, rows)
 	if len(rows) > plan.Limit {
 		rows = rows[:plan.Limit]
@@ -417,7 +420,7 @@ func zeroFill(plan *Plan, groups map[string]*group) {
 // FILTERs inside a broader group-by) are dropped — a combo earns a row by
 // having at least one non-zero leaf somewhere; time buckets inside a kept
 // combo still zero-fill.
-func assemble(plan *Plan, groups map[string]*group) [][]any {
+func assemble(plan *Plan, groups map[string]*group) ([][]any, error) {
 	signal := map[string]bool{}
 	if len(plan.Dims) > 0 {
 		for _, g := range groups {
@@ -442,51 +445,98 @@ func assemble(plan *Plan, groups map[string]*group) [][]any {
 			row = append(row, d)
 		}
 		for _, m := range plan.Measures {
-			row = append(row, measureValue(m, g))
+			cell, err := measureValue(m, g)
+			if err != nil {
+				return nil, err
+			}
+			row = append(row, cell)
 		}
 		rows = append(rows, row)
 	}
-	return rows
+	return rows, nil
 }
 
-// measureValue renders one cell. A money-unit ratio (an average amount) is
-// rounded to whole native units so it stays a MoneyCell; other ratios are
-// floats.
-func measureValue(m *Measure, g *group) any {
+// measureValue renders one cell. Ratios divide exactly (big.Rat): a
+// money-unit ratio (an average amount) rounds half away from zero to whole
+// native units and stays a MoneyCell, checked to fit int64; every other ratio
+// is the correctly rounded float of the exact quotient. Money and counts
+// never pass through a float.
+func measureValue(m *Measure, g *group) (any, error) {
 	if m.Class == ClassRatio {
-		num := componentValue(measureByName[m.Num], g)
-		den := componentValue(measureByName[m.Den], g)
-		if den == 0 {
-			return nil
+		quotient, ok := componentRat(measureByName[m.Num], g)
+		if !ok {
+			return nil, nil
 		}
+		den, ok := componentRat(measureByName[m.Den], g)
+		if !ok || den.Sign() == 0 {
+			return nil, nil
+		}
+		quotient.Quo(quotient, den)
 		if m.Unit == UnitMoney {
-			return MoneyCell(math.Round(num / den))
+			cell, err := moneyCellFromRat(quotient)
+			if err != nil {
+				return nil, fmt.Errorf("metrics %s: %w", m.Name, err)
+			}
+			return cell, nil
 		}
-		return num / den
+		f, _ := quotient.Float64()
+		return f, nil
 	}
 	v := g.vals[m.Name]
 	switch {
 	case m.Unit == UnitMoney:
-		return MoneyCell(v.n)
+		return MoneyCell(v.n), nil
 	case v.float:
-		return v.f
+		return v.f, nil
 	default:
-		return v.n
+		return v.n, nil
 	}
 }
 
-func componentValue(m *Measure, g *group) float64 {
+// componentRat is a ratio component as an exact rational; a nested ratio
+// with a zero denominator is absent (false).
+func componentRat(m *Measure, g *group) (*big.Rat, bool) {
 	if m == nil {
-		return 0
+		return new(big.Rat), true
 	}
 	if m.Class == ClassRatio {
-		den := componentValue(measureByName[m.Den], g)
-		if den == 0 {
-			return 0
+		num, ok := componentRat(measureByName[m.Num], g)
+		if !ok {
+			return nil, false
 		}
-		return componentValue(measureByName[m.Num], g) / den
+		den, ok := componentRat(measureByName[m.Den], g)
+		if !ok || den.Sign() == 0 {
+			return nil, false
+		}
+		return num.Quo(num, den), true
 	}
-	return g.vals[m.Name].value()
+	v := g.vals[m.Name]
+	if v.float {
+		r, ok := new(big.Rat).SetString(strconv.FormatFloat(v.f, 'f', -1, 64))
+		if !ok {
+			return nil, false
+		}
+		return r, true
+	}
+	return new(big.Rat).SetInt64(v.n), true
+}
+
+// moneyCellFromRat rounds an exact quotient half away from zero to whole
+// native units and refuses one outside int64.
+func moneyCellFromRat(q *big.Rat) (MoneyCell, error) {
+	num := new(big.Int).Set(q.Num())
+	den := q.Denom()
+	// Round half away from zero: (2|num| + den) / (2 den), sign restored.
+	twice := new(big.Int).Abs(num)
+	twice.Mul(twice, big.NewInt(2)).Add(twice, den)
+	rounded := twice.Quo(twice, new(big.Int).Mul(den, big.NewInt(2)))
+	if num.Sign() < 0 {
+		rounded.Neg(rounded)
+	}
+	if !rounded.IsInt64() {
+		return 0, fmt.Errorf("money ratio %s does not fit int64", rounded)
+	}
+	return MoneyCell(rounded.Int64()), nil
 }
 
 // orderRows sorts by the user's order terms, then time asc + dims asc for

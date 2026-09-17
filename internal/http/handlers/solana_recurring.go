@@ -17,6 +17,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -113,7 +114,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
-	r.SuccessJSON(sub)
+	r.SuccessJSON(subscriptions.SubscriptionView(sub, sub.Price, r.Clock.Now()))
 }
 
 // PrepareSolanaCancelTx builds the UNSIGNED on-chain cancel_subscription

@@ -30,11 +30,11 @@ func TestSolanaTokensNoAuth(t *testing.T) {
 
 		var response struct {
 			Tokens []struct {
-				Symbol   string  `json:"symbol"`
-				Name     string  `json:"name"`
-				Mint     string  `json:"mint"`
-				Decimals int     `json:"decimals"`
-				Price    float64 `json:"price"`
+				Symbol   string `json:"symbol"`
+				Name     string `json:"name"`
+				Mint     string `json:"mint"`
+				Decimals int    `json:"decimals"`
+				Price    string `json:"price"`
 			} `json:"tokens"`
 		}
 		err := json.Unmarshal(w.Body.Bytes(), &response)
