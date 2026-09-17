@@ -20,6 +20,23 @@ other HTTP 402 responses do not imply a low credit balance. Metadata numbers
 are decoded as `json.Number` so their integer precision is preserved. The body
 request ID takes precedence, with `X-Request-ID` as a fallback.
 
+## Payment refusals
+
+A checkout the provider refused returns HTTP 402 and `errors.Is(err,
+openrails.ErrPaymentRefused)`; nothing was charged and the customer may try again
+with another instrument in a new checkout session. The code says what happened,
+`metadata` says why:
+
+| Code | Type | Status | Meaning | Metadata |
+| --- | --- | --- | --- | --- |
+| `card_declined` | `card_error` | 402 | the provider declined the presented card | `decline_reason` (normalized: `insufficient_funds`, `expired_card`, `cvv_avs`, `card_declined`, `fraud_suspected`, ...), `failure_code` (provider's verbatim code) |
+| `payment_method_stale` | `card_error` | 402 | the saved payment method named by the request can no longer be charged for this customer and processor; collect the card again | — |
+| `payment_provider_rejected` | `api_error` | 502 | the provider rejected the charge for a gateway or merchant-configuration reason; another card will not help | `decline_reason`, `failure_code` |
+
+Classification uses only provider facts (response and localization codes), never
+provider text. The same codes are returned by payment-method creation and tier
+changes. `insufficient_credits` (402) remains the payer-balance denial.
+
 Transport failures preserve their cause: `errors.Is(err, context.Canceled)` and
 `errors.Is(err, context.DeadlineExceeded)` work in both modes. A transport failure
 is not proof that an operation was rejected or did not commit. Financial retries
