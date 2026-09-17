@@ -2,19 +2,11 @@ package handlers
 
 import (
 	"net/http"
-	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
-
-type BillingStatusResponse struct {
-	HasActiveSubscription bool                                    `json:"has_active_subscription"`
-	Subscription          *subscriptions.UserSubscriptionResponse `json:"subscription,omitempty"`
-	NextRenewalAt         *time.Time                              `json:"next_renewal_at,omitempty"`
-	Entitlements          []models.Entitlement                    `json:"entitlements,omitempty"`
-}
 
 func GetMyBillingStatus(r *httprequest.Request) {
 	user := r.GetUser()
@@ -23,36 +15,30 @@ func GetMyBillingStatus(r *httprequest.Request) {
 		return
 	}
 
-	var sub *subscriptions.UserSubscriptionResponse
-	var next *time.Time
-	var hasActive bool
+	out := openrails.BillingStatus{}
 	if r.State.UserSubscriptionService != nil {
 		resp, err := r.State.UserSubscriptionService.GetUserSubscription(r.Request.Context(), user.ID)
 		if err == nil {
-			sub = resp
+			out.Access = resp.Access
 			if resp.Subscription != nil {
-				hasActive = resp.Subscription.Status == models.StatusActive
-				if resp.Subscription.CurrentPeriodEndsAt != nil {
-					next = resp.Subscription.CurrentPeriodEndsAt
-				}
+				view := resp.View()
+				out.Subscription = &view
+				out.HasActiveSubscription = resp.Subscription.Status == models.StatusActive
+				out.NextRenewalAt = resp.Subscription.CurrentPeriodEndsAt
 			}
 		}
 	}
 
-	var ents []models.Entitlement
 	if r.State.EntitlementService != nil {
 		list, err := r.State.EntitlementService.ListByUser(r.Request.Context(), user.ID)
 		if err != nil {
 			r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve entitlements")
 			return
 		}
-		ents = list
+		for i := range list {
+			out.Entitlements = append(out.Entitlements, entitlementRecordFromModel(&list[i]))
+		}
 	}
 
-	r.SuccessJSON(BillingStatusResponse{
-		HasActiveSubscription: hasActive,
-		Subscription:          sub,
-		NextRenewalAt:         next,
-		Entitlements:          ents,
-	})
+	r.SuccessJSON(out)
 }

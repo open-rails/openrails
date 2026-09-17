@@ -38,7 +38,7 @@
     "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     "key": "pro-monthly",
     "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-    "amount": "9223372036854775807",
+    "unit_amount": "9223372036854775807",
     "currency": "USD",
     "auto_renew": true,
     "access_duration_hours": null,
@@ -51,6 +51,39 @@
     "description": "",
     "tier_rank": 0,
     "archived": false
+  },
+  "scheduled_price": {
+    "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
+    "key": "pro-annual",
+    "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "unit_amount": "9223372036854775807",
+    "currency": "USD",
+    "auto_renew": true,
+    "access_duration_hours": null,
+    "archived": false
+  },
+  "scheduled_product": {
+    "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "key": "pro",
+    "display_name": "Pro",
+    "description": "",
+    "tier_rank": 0,
+    "archived": false
+  },
+  "card": {
+    "brand": "visa",
+    "last4": "4242",
+    "exp_month": 12,
+    "exp_year": 2030
+  },
+  "cancel_portal_url": "https://support.ccbill.com/",
+  "access": {
+    "kind": "subscription",
+    "entitlement": "premium",
+    "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "rail": "nmi",
+    "start_at": "2026-09-16T00:00:00.123456789Z",
+    "end_at": "2026-09-16T00:00:00.123456789Z"
   },
   "created_at": "2026-09-16T00:00:00.123456789Z",
   "updated_at": "2026-09-16T00:00:00.123456789Z"

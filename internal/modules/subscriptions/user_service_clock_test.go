@@ -2,7 +2,6 @@ package subscriptions
 
 import (
 	"context"
-	"encoding/json"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/stretchr/testify/require"
@@ -21,15 +20,9 @@ func TestUserSubscriptionResponseUsesReadTimeForEligibility(t *testing.T) {
 	svc.enrichSubscriptionResponse(context.Background(), response)
 	check := func(want bool) {
 		t.Helper()
-		data, err := json.Marshal(response)
-		require.NoError(t, err)
-		var flags struct {
-			Resumable       bool
-			CancelScheduled bool `json:"cancel_scheduled"`
-		}
-		require.NoError(t, json.Unmarshal(data, &flags))
-		require.Equal(t, want, flags.Resumable)
-		require.Equal(t, want, flags.CancelScheduled)
+		view := response.View()
+		require.Equal(t, want, view.Resumable)
+		require.Equal(t, want, view.CancelScheduled)
 	}
 	check(true)
 	clock.Advance(2 * time.Hour)

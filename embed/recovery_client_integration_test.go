@@ -84,7 +84,7 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 			require.True(t, row.Resumable)
 			require.True(t, row.CancelScheduled)
 			require.NotNil(t, row.Price)
-			require.EqualValues(t, 1000000, row.Price.Amount)
+			require.EqualValues(t, 1000000, row.Price.UnitAmount)
 			read, err := client.GetSubscription(ctx, row.ID)
 			require.NoError(t, err)
 			require.Equal(t, row.ID, read.ID)

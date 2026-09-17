@@ -27,7 +27,18 @@ is `invalid_param`. Customer, merchant and PSP ids are plain UUIDs. Go callers
 hold `openrails.PriceID` etc.; the zero id marshals as `""` and `IsZero` tells.
 The catalog `by-key` routes, checkout `price_id` on the public (browser)
 checkout route and `plan-migrations` price references still accept a price
-key; the shared Client's typed fields do not.
+key; the shared Client's typed fields do not. The same spelling holds
+wherever a typed kind appears inside another document: the customer's own
+`/v1/me/subscriptions`, `/v1/me/status` and `/v1/me/notifications` (the
+shared `Subscription`, `BillingStatus` and `Notification` shapes, so the ids
+they list are the ids their action routes take), metrics `product_id` /
+`price_id` dimensions and filters, findings evidence and recommendation
+params, the hosted checkout document's `payment_id` / `subscription_id` /
+`saved_methods[].id` / `payment_method_id`, and entitlement or grant
+`source_id` (the source resource's own id beside `source_type`: `sub_` for
+subscription and grace sources, `pay_` for one-off and purchase sources; an
+admin source is the host's declared id verbatim). Customer filters on the
+merchant list routes are `customer_id`.
 Counts and timestamps are not money: counts remain numbers. Every timestamp on the
 wire — response fields and request parameters alike (`created_at`, `expires_at`,
 `occurred_at`, `at`, rollup `from`/`to`) — is an RFC3339 instant, including the

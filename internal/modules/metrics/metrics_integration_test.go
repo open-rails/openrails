@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -390,6 +391,17 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 
 	byBrand := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"payment_count"}, By: []string{"card_brand"}, Range: juneQ}))
 	require.Equal(t, int64(2), cell(t, byBrand, map[string]string{"card_brand": "visa"}, "payment_count"))
+
+	// Catalog ids are spelled as the catalog spells them (prod_/price_), and a
+	// filter takes exactly that spelling: the bare UUID is not an id.
+	byProduct := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"product_id", "price_id"}, Range: juneQ}))
+	product, price := openrails.ProductID(productA).String(), openrails.PriceID(pricePM).String()
+	require.Equal(t, int64(20_000_000), cell(t, byProduct, map[string]string{"product_id": product, "price_id": price}, "gross_revenue"))
+	filtered := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {price}}}))
+	require.Equal(t, int64(20_000_000), cell(t, filtered, map[string]string{}, "gross_revenue"))
+	_, ve := metrics.Validate(usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {pricePM.String()}}}))
+	require.NotNil(t, ve)
+	require.Equal(t, "invalid_filter_value", ve.Errors[0].Code)
 }
 
 func TestMetrics_ZeroFillAndCompare(t *testing.T) {

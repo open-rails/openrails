@@ -19,7 +19,7 @@ func pageQuery(options PageOptions) url.Values {
 func (c *Client) ListSubscriptions(ctx context.Context, filter SubscriptionFilter) (*Page[Subscription], error) {
 	q := pageQuery(filter.PageOptions)
 	if !filter.CustomerID.IsZero() {
-		q.Set("user_id", filter.CustomerID.String())
+		q.Set("customer_id", filter.CustomerID.String())
 	}
 	if filter.Status != "" {
 		q.Set("status", filter.Status)

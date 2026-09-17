@@ -48,13 +48,13 @@ export interface RawSubscription {
   updated_at: string
 }
 
-// RawPrice mirrors openrails.SubscriptionPrice — the price embedded on
-// subscription responses (distinct from CatalogPrice, the catalog endpoints'
-// own view: NOTE the field is "amount" here, not "unit_amount").
+// RawPrice mirrors openrails.SubscriptionPrice, the price embedded on
+// subscription responses. Money is unit_amount, an exact decimal string, as
+// on every price shape.
 export interface RawPrice {
   id: string
   product_id?: string
-  amount?: MoneyAmount
+  unit_amount?: string
   currency?: string
   archived?: boolean
   // Key (#774): the durable, movable-pointer handle for this price's
@@ -540,11 +540,59 @@ export interface FindingsListResponse {
   gauges: FindingsGauges
 }
 
+// NotificationData mirrors openrails.NotificationData: every event fills the
+// fields it has; money is an exact decimal string, ids are typed.
+export interface NotificationData {
+  reason?: string
+  message?: string
+  source?: string
+  entitlement?: string
+  ended_at?: string
+  currency?: string
+  subscription_id?: string // sub_...
+  from_price_id?: string // price_...
+  to_price_id?: string // price_...
+  to_product_id?: string // prod_...
+  to_product_name?: string
+  old_amount?: string
+  new_amount?: string
+  effective_at?: string
+  downgrade_applied?: boolean
+  new_product?: string
+  overdue_amount?: string
+  overdue_invoices?: number
+  overdue_since?: string
+  from_state?: string
+  to_state?: string
+  invoice_id?: string
+  invoice_number?: string
+  amount_due?: string
+  due_at?: string
+  failure_code?: string
+  failure_reason?: string
+  decline_outcome?: string
+  next_attempt_at?: string
+  rail?: string
+  rail_subscription_id?: string
+  transaction_id?: string
+  amount?: string
+  product_name?: string
+  payment_method?: string
+  kind?: string
+  provider?: string
+  operation?: string
+  affected_customer_id?: string
+  original_payment_id?: string // pay_...
+  error?: string
+  metadata?: Record<string, unknown>
+}
+
+// RepairAlert mirrors openrails.Notification (system_alert rows).
 export interface RepairAlert {
   id: string
-  customer_id?: string
+  customer_id: string
   event_type: string
-  data?: Record<string, unknown>
+  data: NotificationData
   seen: boolean
   created_at: string
 }

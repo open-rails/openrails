@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -194,7 +195,7 @@ func TestFindingsDuplicateOwnershipDetectorEndToEnd(t *testing.T) {
 	assert.Equal(t, "critical", item.Severity, "#690: duplicates outrank freeloaders")
 	require.NotNil(t, item.Recommendation)
 	assert.Equal(t, recommend.ActionCancelAndRefund, item.Recommendation.Action)
-	assert.Equal(t, pay2.String(), item.Recommendation.Params["refund_payment_id"], "later purchase is the refund target")
+	assert.Equal(t, openrails.PaymentID(pay2).String(), item.Recommendation.Params["refund_payment_id"], "later purchase is the refund target")
 	_, hasSub := item.Recommendation.Params["subscription_id"]
 	assert.False(t, hasSub, "pure one-off duplicate: refund-only recommendation")
 	assert.EqualValues(t, 1, body.Gauges.DuplicateCoverage)

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/modules/money"
 
 	"github.com/google/uuid"
@@ -411,8 +412,8 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 		&recommend.Recommendation{
 			Action: recommend.ActionCancelAndRefund,
 			Params: map[string]any{
-				"subscription_id":   subID.String(),
-				"refund_payment_id": payID.String(),
+				"subscription_id":   openrails.SubscriptionID(subID).String(),
+				"refund_payment_id": openrails.PaymentID(payID).String(),
 			},
 		})
 
@@ -443,7 +444,7 @@ func TestFindingsQueueApproveCancelAndRefundEndToEnd(t *testing.T) {
 	var single findingItemBody
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &single))
 	require.NotNil(t, single.Recommendation)
-	assert.Equal(t, subID.String(), single.Recommendation.Params["subscription_id"])
+	assert.Equal(t, openrails.SubscriptionID(subID).String(), single.Recommendation.Params["subscription_id"])
 
 	// --- approve ---
 	rec = fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+dupID.String()+"/resolve",
@@ -538,7 +539,7 @@ func TestFindingsQueueApprovePartialFailureLeavesOpen(t *testing.T) {
 	findingID := fx.seedFinding("consistency.duplicate.ownership", "subject-"+uuid.NewString()[:8], "critical",
 		"duplicate; cancel + refund", &recommend.Recommendation{
 			Action: recommend.ActionCancelAndRefund,
-			Params: map[string]any{"subscription_id": subID.String(), "refund_payment_id": payID.String()},
+			Params: map[string]any{"subscription_id": openrails.SubscriptionID(subID).String(), "refund_payment_id": openrails.PaymentID(payID).String()},
 		})
 	fx.fake.refundStatus.Store(`{"object":"transaction","id":"txn_refund_1","response":"2","response_text":"DECLINED","response_code":"300"}`)
 
@@ -619,14 +620,14 @@ func TestFindingsQueueOverrideParamsSwapSubscription(t *testing.T) {
 	findingID := fx.seedFinding("consistency.duplicate.ownership", "subject-"+uuid.NewString()[:8], "critical",
 		"cancel the later-created (A) by default", &recommend.Recommendation{
 			Action: recommend.ActionCancelAndRefund,
-			Params: map[string]any{"subscription_id": subA.String()},
+			Params: map[string]any{"subscription_id": openrails.SubscriptionID(subA).String()},
 		})
 
 	rec := fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+findingID.String()+"/resolve",
 		map[string]any{
 			"outcome":         "approve",
 			"notes":           "keep A (annual plan the user meant to keep); cancel B instead",
-			"override_params": map[string]any{"subscription_id": subB.String()},
+			"override_params": map[string]any{"subscription_id": openrails.SubscriptionID(subB).String()},
 		}, findingID.String())
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 
@@ -656,7 +657,7 @@ func TestFindingsQueueRevokeEntitlementAndAdminGrant(t *testing.T) {
 			Params: map[string]any{"entitlement_id": entID.String(), "as_of": asOf.Format(time.RFC3339)},
 			Alternatives: []recommend.Recommendation{{
 				Action: recommend.ActionRecordAdminGrant,
-				Params: map[string]any{"customer_id": fx.customer.String(), "product_id": fx.product.String(), "reason": "known-legitimate"},
+				Params: map[string]any{"customer_id": fx.customer.String(), "product_id": openrails.ProductID(fx.product).String(), "reason": "known-legitimate"},
 			}},
 		})
 
@@ -677,7 +678,7 @@ func TestFindingsQueueRevokeEntitlementAndAdminGrant(t *testing.T) {
 	grantFinding := fx.seedFinding("derive.entitlement.unjustified", "cust:"+fx.customer.String(), "high",
 		"known-legitimate — record an admin grant instead", &recommend.Recommendation{
 			Action: recommend.ActionRecordAdminGrant,
-			Params: map[string]any{"customer_id": fx.customer.String(), "product_id": fx.product.String(), "reason": "comp account"},
+			Params: map[string]any{"customer_id": fx.customer.String(), "product_id": openrails.ProductID(fx.product).String(), "reason": "comp account"},
 		})
 	rec = fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+grantFinding.String()+"/resolve",
 		map[string]any{"outcome": "approve", "notes": "comp confirmed with support"}, grantFinding.String())

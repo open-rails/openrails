@@ -75,7 +75,7 @@ GET  /v1/me/invoices[/:id]                itemized statements
 GET  /v1/me/payments                      one-off payment history
 GET  /v1/me/entitlements/active           active entitlements
 PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}: invoice collection method
-GET  /v1/me/subscriptions[/:id]           own subscriptions (enriched with product/price)
+GET  /v1/me/subscriptions[/:id]           own subscriptions: the shared Subscription shape (typed ids, price/product, scheduled change, card, access)
 POST /v1/me/subscriptions/:id/cancel      body {"feedback": "..."} → 202 {"status":"queued"}
 POST /v1/me/subscriptions/:id/resume      cancelled Stripe subscriptions → 202
 POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} — upgrades/downgrades

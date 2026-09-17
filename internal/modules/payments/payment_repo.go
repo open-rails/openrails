@@ -20,7 +20,7 @@ import (
 )
 
 type PaymentFilters struct {
-	UserID         string                   `form:"user_id"`
+	CustomerID     string                   `form:"customer_id"`
 	PriceID        openrails.PriceID        `form:"price_id"`
 	SubscriptionID openrails.SubscriptionID `form:"subscription_id"`
 	Rail           string                   `form:"rail"`
@@ -477,8 +477,8 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 	f := opts.Filters
 
 	var tsid *uuid.UUID
-	if f.UserID != "" {
-		id, err := db.ResolveCustomerID(f.UserID)
+	if f.CustomerID != "" {
+		id, err := db.ResolveCustomerID(f.CustomerID)
 		if err != nil {
 			return nil, 0, err
 		}

@@ -13,6 +13,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -583,9 +584,10 @@ func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail st
 // an invoice: one rung per bucket, never an access effect. Notification
 // failure never fails collection.
 func (h *InvoiceCollectionHandler) notifyInvoiceCollectionOutcome(ctx context.Context, invoice *models.Invoice, action collection.Action, failureCode string, now time.Time) {
-	data := map[string]any{
-		"invoice_id": invoice.ID.String(), "currency": invoice.Currency, "amount_due": invoice.AmountDue,
-		"failure_code": failureCode, "decline_outcome": action.Outcome.String(),
+	amountDue := invoice.AmountDue
+	data := openrails.NotificationData{
+		InvoiceID: invoice.ID, Currency: invoice.Currency, AmountDue: &amountDue,
+		FailureCode: failureCode, DeclineOutcome: action.Outcome.String(),
 	}
 	eventType := models.NotificationPaymentMethodFailed
 	switch {
@@ -597,9 +599,10 @@ func (h *InvoiceCollectionHandler) notifyInvoiceCollectionOutcome(ctx context.Co
 		if action.ScheduleExhausted() {
 			reason = "schedule_exhausted"
 		}
-		data["reason"] = reason
+		data.Reason = reason
 	case action.NextAttemptAt != nil:
-		data["next_attempt_at"] = action.NextAttemptAt.UTC().Format(time.RFC3339)
+		next := action.NextAttemptAt.UTC()
+		data.NextAttemptAt = &next
 	}
 	notification := &models.NotificationQueue{ID: uuidutil.NewV7(), CustomerID: invoice.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
 	if err := subscriptions.NewNotificationQueueRepo(h.DB).Create(ctx, notification); err != nil {

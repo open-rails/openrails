@@ -103,7 +103,7 @@ export function PaymentsPage() {
   const [params, setParams] = useSearchParams()
   const rail = params.get("rail") ?? ""
   const view = params.get("view") ?? ""
-  const userId = params.get("user_id") ?? ""
+  const userId = params.get("customer_id") ?? ""
   const customerLabel = params.get("customer") ?? ""
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
@@ -114,7 +114,7 @@ export function PaymentsPage() {
   const filters = {
     rail: rail || undefined,
     refunds_only: view === "refunds" ? true : undefined,
-    user_id: userId || undefined,
+    customer_id: userId || undefined,
   }
   const { data, isPending: loading } = useQuery(
     adminQueries.payments(filters, PAGE, offset)
@@ -140,7 +140,7 @@ export function PaymentsPage() {
         return
       }
       const p = new URLSearchParams(params)
-      p.set("user_id", c.id)
+      p.set("customer_id", c.id)
       p.set("customer", c.email || c.subject || shortId(c.id, 13))
       p.delete("offset")
       setParams(p)
@@ -152,7 +152,7 @@ export function PaymentsPage() {
 
   const clearCustomer = () => {
     const p = new URLSearchParams(params)
-    p.delete("user_id")
+    p.delete("customer_id")
     p.delete("customer")
     p.delete("offset")
     setParams(p)

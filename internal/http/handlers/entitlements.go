@@ -301,7 +301,7 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 func entitlementRecordFromModel(e *models.Entitlement) openrails.EntitlementRecord {
 	rec := openrails.EntitlementRecord{ID: e.ID.String(), CustomerID: openrails.CustomerID(e.CustomerID), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 	if e.SourceID != nil {
-		source := e.SourceID.String()
+		source := openrails.SourceRef(string(e.SourceType), e.SourceID.String())
 		rec.SourceID = &source
 	}
 	if e.RevokeReason != nil {
