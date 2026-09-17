@@ -1,0 +1,30 @@
+# Release workflow matrix, one owned source for #1002 qualification.
+# Columns (tab-separated): scenario, deployment, package, test path, status, note.
+# status: retained (real integration test path; a subtest names the deployment),
+# gap (no deployment-level workflow exists), or pending#<PR> (test on an open PR).
+# Every scenario/deployment cell must appear; any gap or pending cell fails qualification.
+purchase_recovery	embedded	./embed	TestCommerceClientCheckoutAndTier/embedded	retained	CCBill form signed locally; no provider call
+purchase_recovery	embedded	./embed	TestRecoveryClientAcrossTransports/embedded	retained	NMI rows seeded; no provider call
+purchase_recovery	standalone	./embed	TestCommerceClientCheckoutAndTier/remote	retained	CCBill form signed locally; no provider call
+purchase_recovery	standalone	./embed	TestRecoveryClientAcrossTransports/standalone	retained	NMI rows seeded; no provider call
+purchase_recovery	saas	-	-	gap	Real SaaS mount/auth not exercised; the multi_merchant subtest is in-process without SaaS auth
+metered_billing	embedded	./embed	TestMeteringClientRatesIntoInvoice/embedded	retained	Usage rated into invoice; finalized through the service, no collection
+metered_billing	embedded	./embed	TestInvoiceClientWorkflowAcrossTransports/embedded	retained	Receivable seeded by accrual, not usage
+metered_billing	standalone	./embed	TestMeteringClientRatesIntoInvoice/standalone	retained	Usage rated into invoice; finalized through the service, no collection
+metered_billing	standalone	./embed	TestInvoiceClientWorkflowAcrossTransports/standalone	retained	Receivable seeded by accrual, not usage
+metered_billing	saas	-	-	gap	No SaaS metering workflow in core or openrails-saas
+merchant_isolation	embedded	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients
+merchant_isolation	embedded	./pkg/service	TestAdmissionClientRecoveryAndCaptureReceipt/embedded	retained	Other merchant cannot capture, release or extend a hold
+merchant_isolation	standalone	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients
+merchant_isolation	standalone	./pkg/service	TestAdmissionClientRecoveryAndCaptureReceipt/remote	retained	Other merchant cannot capture, release or extend a hold
+merchant_isolation	saas	-	-	gap	openrails-saas host resolution test does not prove content isolation and is not run here
+signed_delegation	embedded	./internal/integrationharness	TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant	retained	Host AuthKit bearer tokens through the embedded mount; not DPoP
+signed_delegation	standalone	./internal/integrationharness	TestDelegationHTTPWorkflow	retained	Issuer-signed DPoP tokens; one merchant
+signed_delegation	standalone	./internal/integrationharness	TestDelegationNativeTLSWorkflow	retained	Certificate-bound token over native TLS
+signed_delegation	saas	-	-	gap	openrails-saas uses a static-key JWT, not DPoP, and is not run here
+provider_uncertainty	embedded	-	-	gap	Unknown PSP outcomes are covered only below the Client (internal/intents, modules/checkout, modules/money)
+provider_uncertainty	standalone	./internal/integrationharness	TestMerchantInvoiceAdministrationHTTP	retained	Injected ambiguous charger: retry refused with 409 and never resent; no real PSP
+provider_uncertainty	saas	-	-	gap	No SaaS provider-uncertainty workflow
+restart	embedded	-	-	gap	Crash windows are simulated below the Client; no process-restart harness (PR425 receipts are also below the Client)
+restart	standalone	-	-	gap	No standalone process-restart workflow
+restart	saas	-	-	gap	openrails-saas reboot test proves idempotent boot only, not billing convergence
