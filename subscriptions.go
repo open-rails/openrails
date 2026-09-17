@@ -28,36 +28,38 @@ type SubscriptionFilter struct {
 // this one shape; the self routes additionally fill ScheduledPrice,
 // ScheduledProduct, CancelPortalURL and Access.
 type Subscription struct {
-	LastRetryAt           *time.Time            `json:"last_retry_at"`
-	RetryAttempts         *int                  `json:"retry_attempts"`
-	NextRetryAt           *time.Time            `json:"next_retry_at"`
-	GraceEndsAt           *time.Time            `json:"grace_ends_at"`
-	DeletionScheduledAt   *time.Time            `json:"deletion_scheduled_at,omitempty"`
-	Payments              []SubscriptionPayment `json:"payments,omitempty"`
-	ID                    SubscriptionID        `json:"id"`
-	CustomerID            CustomerID            `json:"customer_id"`
-	ProductID             ProductID             `json:"product_id"`
-	PriceID               PriceID               `json:"price_id"`
-	PSPID                 string                `json:"psp_id"`
-	Rail                  string                `json:"rail"`
-	RailSubscriptionID    string                `json:"rail_subscription_id"`
-	Status                string                `json:"status"`
-	ScheduledPriceID      *PriceID              `json:"scheduled_price_id,omitempty"`
-	PaymentMethodID       *PaymentMethodID      `json:"payment_method_id"`
-	StartedAt             time.Time             `json:"started_at"`
-	EndedAt               *time.Time            `json:"ended_at"`
-	CurrentPeriodStartsAt *time.Time            `json:"current_period_starts_at"`
-	CurrentPeriodEndsAt   *time.Time            `json:"current_period_ends_at"`
-	CancelledAt           *time.Time            `json:"cancelled_at"`
-	CancelType            *string               `json:"cancel_type"`
-	CancelFeedback        *string               `json:"cancel_feedback"`
-	Resumable             bool                  `json:"resumable"`
-	CancelScheduled       bool                  `json:"cancel_scheduled"`
-	CancelMode            string                `json:"cancel_mode"`
-	Price                 *SubscriptionPrice    `json:"price,omitempty"`
-	Product               *SubscriptionProduct  `json:"product,omitempty"`
-	ScheduledPrice        *SubscriptionPrice    `json:"scheduled_price,omitempty"`
-	ScheduledProduct      *SubscriptionProduct  `json:"scheduled_product,omitempty"`
+	LastRetryAt         *time.Time `json:"last_retry_at"`
+	RetryAttempts       *int       `json:"retry_attempts"`
+	NextRetryAt         *time.Time `json:"next_retry_at"`
+	GraceEndsAt         *time.Time `json:"grace_ends_at"`
+	DeletionScheduledAt *time.Time `json:"deletion_scheduled_at,omitempty"`
+	// Payments is the subscription's recovery history: the same Payment shape
+	// GET /v1/merchant/payments serves.
+	Payments              []Payment            `json:"payments,omitempty"`
+	ID                    SubscriptionID       `json:"id"`
+	CustomerID            CustomerID           `json:"customer_id"`
+	ProductID             ProductID            `json:"product_id"`
+	PriceID               PriceID              `json:"price_id"`
+	PSPID                 string               `json:"psp_id"`
+	Rail                  string               `json:"rail"`
+	RailSubscriptionID    string               `json:"rail_subscription_id"`
+	Status                string               `json:"status"`
+	ScheduledPriceID      *PriceID             `json:"scheduled_price_id,omitempty"`
+	PaymentMethodID       *PaymentMethodID     `json:"payment_method_id"`
+	StartedAt             time.Time            `json:"started_at"`
+	EndedAt               *time.Time           `json:"ended_at"`
+	CurrentPeriodStartsAt *time.Time           `json:"current_period_starts_at"`
+	CurrentPeriodEndsAt   *time.Time           `json:"current_period_ends_at"`
+	CancelledAt           *time.Time           `json:"cancelled_at"`
+	CancelType            *string              `json:"cancel_type"`
+	CancelFeedback        *string              `json:"cancel_feedback"`
+	Resumable             bool                 `json:"resumable"`
+	CancelScheduled       bool                 `json:"cancel_scheduled"`
+	CancelMode            string               `json:"cancel_mode"`
+	Price                 *SubscriptionPrice   `json:"price,omitempty"`
+	Product               *SubscriptionProduct `json:"product,omitempty"`
+	ScheduledPrice        *SubscriptionPrice   `json:"scheduled_price,omitempty"`
+	ScheduledProduct      *SubscriptionProduct `json:"scheduled_product,omitempty"`
 	// Card is display data for the card behind PaymentMethodID, when it is one.
 	Card *SubscriptionCard `json:"card,omitempty"`
 	// CancelPortalURL is where the customer cancels when CancelMode is
@@ -134,15 +136,4 @@ type CancelSubscriptionRequest struct {
 
 type UpdateSubscriptionPaymentMethodRequest struct {
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
-}
-
-// SubscriptionPayment is an immutable payment summary for recovery history.
-type SubscriptionPayment struct {
-	ID            PaymentID `json:"id"`
-	Status        string    `json:"status"`
-	Amount        int64     `json:"amount,string"`
-	Currency      string    `json:"currency"`
-	Rail          string    `json:"rail"`
-	TransactionID string    `json:"transaction_id"`
-	PurchasedAt   time.Time `json:"purchased_at"`
 }

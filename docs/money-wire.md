@@ -47,8 +47,11 @@ public product/price/payment objects and the admin credit grant's `expires_at`
 `time.RFC3339Nano` and handlers accept any fractional precision. Durations stay
 integer seconds (`window_seconds`, `retry_after_seconds`) and day buckets stay
 `YYYY-MM-DD`. Missing optional timestamps are omitted; explicit nullable receipt
-fields use null. Not yet moved: the epoch-seconds `created` on `Payment`,
-`PublicPrice` and the admin catalog objects (tracked with #983).
+fields use null. Handlers encode instants as `time.Time` (RFC3339 at full
+nanosecond precision), never through a hand-written second-precision format.
+A subscription's `payments[]` history is the same `Payment` shape
+`GET /v1/merchant/payments` serves (`created_at`, `status` `succeeded`,
+`amount`), not a second summary shape.
 
 The registry has one owner. Go consumers read it with `openrails.Currencies()`
 / `openrails.LookupCurrency(code)` (pure, no I/O); browsers fetch the same
