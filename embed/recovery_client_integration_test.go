@@ -16,6 +16,7 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -37,10 +38,26 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 
 	local, err := host.Runtime().Client()
 	require.NoError(t, err)
-	for name, client := range map[string]*openrails.Client{"embedded": local, "hosted_http": host.Client(), "standalone": remote.Client(), "multi_merchant": multiClient} {
-		t.Run(name, func(t *testing.T) {
+	// SaaS: a hosted merchant on the shared engine behind the real hosted
+	// control plane, integrating with an owner-minted API key.
+	hosted := h.StartHosted("USD")
+	tenant := hosted.ProvisionMerchant(hosted.RegisterUser("owner"), "recovery-"+uuid.NewString()[:8])
+	deployments := []struct {
+		name     string
+		client   *openrails.Client
+		merchant merchant.ID
+	}{
+		{"embedded", local, dbtest.TestMerchantID},
+		{"hosted_http", host.Client(), dbtest.TestMerchantID},
+		{"standalone", remote.Client(), dbtest.TestMerchantID},
+		{"multi_merchant", multiClient, dbtest.TestMerchantID},
+		{"saas", tenant.Client(), tenant.ID},
+	}
+	for _, d := range deployments {
+		client := d.client
+		t.Run(d.name, func(t *testing.T) {
 			customer, product, price, psp, method, sub := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
-			mid := dbtest.TestMerchantID.UUID()
+			mid := d.merchant.UUID()
 			now, end := time.Now().UTC(), time.Now().UTC().Add(48*time.Hour)
 			exec := func(sql string, args ...any) { _, err := h.Pool().Exec(ctx, sql, args...); require.NoError(t, err) }
 			exec(`INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid, customer)
