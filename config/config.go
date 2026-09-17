@@ -197,7 +197,7 @@ type Config struct {
 	// config + catalog truth lives. ONE knob for both — deliberately no separate
 	// catalog_source.
 	//   - "manifest" (DEFAULT, empty = manifest): MODE 1. The boot YAML (merchant
-	//     manifest + catalog + BILLING_MERCHANTS_* env / secret-file overlays) IS
+	//     manifest + catalog + the host's structured secret overlays) IS
 	//     the truth, held in memory. No merchant-secret store is constructed;
 	//     catalog/provider-config mutation APIs are rejected (405); change =
 	//     edit the YAML + reboot. DB rows are boot-converged projections for FKs.
@@ -207,6 +207,11 @@ type Config struct {
 	// Deployment shape does NOT imply mode — embedded and standalone can run
 	// either. Env: MERCHANT_SOURCE. Unknown values refuse to load.
 	MerchantSource string `koanf:"merchant_source,omitempty"`
+	// MerchantManifestOverlays are YAML files in the manifest's own shape
+	// (secrets rendered by Vault Agent / a k8s Secret volume) merged over the
+	// MODE-1 boot manifest in order, later wins. Env: MERCHANT_MANIFEST_OVERLAYS
+	// (comma-separated).
+	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays,omitempty"`
 
 	// CatalogReconciliationInterval schedules the alert-only catalog
 	// reconciliation pull loop (#209/#712): a Go duration ("30m", "2h"). Empty
@@ -1366,8 +1371,6 @@ func validateSourceCIDRs(cidrs []string) error {
 // config posture:
 //   - unknown merchant_source values refuse to load (a typo must never
 //     silently pick a truth model);
-//   - api mode (MODE 2) with manifest truth present — BILLING_MERCHANTS_* env
-//     vars or mounted secret files — refuses boot (two truths);
 //   - api mode outside development requires a merchant-secret backend (Vault,
 //     or ENCRYPTION_MASTER_KEY for the DB store) — extends the #667 posture
 //     from store-build time to declared-mode time.
@@ -1383,18 +1386,6 @@ func validateMerchantSource(cfg *Config, isDev bool) error {
 	}
 	if cfg.MerchantSourceMode() != MerchantSourceAPI {
 		return nil
-	}
-	if hasEnvPrefix(merchantManifestEnvPrefix) {
-		return fmt.Errorf("merchant_source=api refuses %s* env overlays: merchant truth lives in the API/store, not a manifest (two truths, #723); unset them or run merchant_source=manifest", merchantManifestEnvPrefix)
-	}
-	files, err := SecretFiles()
-	if err != nil {
-		return err
-	}
-	for name := range files {
-		if strings.HasPrefix(name, merchantManifestEnvPrefix) {
-			return fmt.Errorf("merchant_source=api refuses mounted %s* secret files (%s): merchant truth lives in the API/store, not a manifest (two truths, #723)", merchantManifestEnvPrefix, name)
-		}
 	}
 	// or#893: WHERE merchant secrets live is declared intent, never inferred.
 	// vault.enabled means "a Vault connection exists" (Transit signing counts);
@@ -1412,10 +1403,6 @@ func validateMerchantSource(cfg *Config, isDev bool) error {
 	return nil
 }
 
-// merchantManifestEnvPrefix mirrors bootstrap.MerchantBillingEnvPrefix +
-// "MERCHANTS_" (config cannot import internal/bootstrap; the prefix is part of
-// the documented BILLING_MERCHANTS_* wire shape).
-const merchantManifestEnvPrefix = "BILLING_MERCHANTS_"
 
 // validateSecretBackend checks the declared secret backend is valid and reachable.
 // secret_backend=vault needs a Vault connection to serve the KV store (#661).

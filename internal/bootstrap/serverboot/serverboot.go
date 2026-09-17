@@ -171,7 +171,11 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if !cfg.IsManifestMerchantSource() {
 		return fmt.Errorf("merchant_source=api refuses the merchant manifest at %s: merchant truth lives in the API/store, not a boot file (two truths, #723); delete the file or run merchant_source=manifest", path)
 	}
-	manifest, err := bootstrap.LoadMerchantConfigManifestBytes(raw)
+	overlays, err := bootstrap.ReadMerchantManifestOverlays(cfg.MerchantManifestOverlays)
+	if err != nil {
+		return err
+	}
+	manifest, err := bootstrap.LoadMerchantConfigManifestWithOverlays(raw, overlays...)
 	if err != nil {
 		return fmt.Errorf("merchant manifest %s: %w", path, err)
 	}

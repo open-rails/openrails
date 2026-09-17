@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -75,4 +77,19 @@ func TestLoadMerchantConfigManifestWithOverlaysRejectsUndeclaredPSPAndUnknownFie
 	_, err = LoadMerchantConfigManifestWithOverlays([]byte(overlayBaseManifest),
 		[]byte("catalogs: {x: 1}"))
 	require.ErrorContains(t, err, "does not accept")
+}
+
+func TestReadMerchantManifestOverlays(t *testing.T) {
+	dir := t.TempDir()
+	a := filepath.Join(dir, "a.yaml")
+	require.NoError(t, os.WriteFile(a, []byte("merchants: {doujins: {psps: {mobius: {nmi: {secrets: {security_key: from-file}}}}}}"), 0o600))
+	overlays, err := ReadMerchantManifestOverlays([]string{a, " "})
+	require.NoError(t, err)
+	require.Len(t, overlays, 1)
+	m, err := LoadMerchantConfigManifestWithOverlays([]byte(overlayBaseManifest), overlays...)
+	require.NoError(t, err)
+	require.Equal(t, "from-file", m.Merchants["doujins"].PSPs["mobius"]["nmi"].Secrets["security_key"])
+
+	_, err = ReadMerchantManifestOverlays([]string{filepath.Join(dir, "missing.yaml")})
+	require.Error(t, err)
 }

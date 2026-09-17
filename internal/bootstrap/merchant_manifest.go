@@ -13,13 +13,10 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/go-viper/mapstructure/v2"
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	koanfyaml "github.com/knadh/koanf/parsers/yaml"
-	"github.com/knadh/koanf/providers/confmap"
-	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/rawbytes"
 	"github.com/knadh/koanf/v2"
 	"github.com/open-rails/authkit"
@@ -81,10 +78,27 @@ func LoadMerchantConfigManifestFiles(path string, overlays ...string) (*BillingC
 	return LoadMerchantConfigManifestWithOverlays(docs[0], docs[1:]...)
 }
 
+// ReadMerchantManifestOverlays reads operator-mounted overlay files for
+// LoadMerchantConfigManifestWithOverlays. Every listed path must exist.
+func ReadMerchantManifestOverlays(paths []string) ([][]byte, error) {
+	out := make([][]byte, 0, len(paths))
+	for _, p := range paths {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		raw, err := os.ReadFile(p) // #nosec G304 -- operator-configured overlay path
+		if err != nil {
+			return nil, fmt.Errorf("read merchant manifest overlay %s: %w", p, err)
+		}
+		out = append(out, raw)
+	}
+	return out, nil
+}
+
 // LoadMerchantConfigManifestWithOverlays merges the manifest with structured YAML
-// overlays (later wins) and validates the result. This is the embedded-host path
-// for operator-mounted secret files: it never consults BILLING_MERCHANTS_* env
-// or config.SecretFiles, so the host's file tree is the only overlay truth.
+// overlays (later wins) and validates the result. Overlays are the caller's
+// concern (a host's mounted secret files); the engine reads no env or files.
 func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error) {
 	k := koanf.New(".")
 	for i, doc := range append([][]byte{raw}, overlays...) {
@@ -111,100 +125,6 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 		return nil, fmt.Errorf("merge merchant config manifest: %w", err)
 	}
 	return ParseMerchantConfigManifest(merged)
-}
-
-func LoadMerchantConfigManifestBytes(raw []byte) (*BillingConfig, error) {
-	manifest, err := ParseMerchantConfigManifest(raw)
-	if err != nil {
-		return nil, err
-	}
-	if err := rejectRenamedMerchantEnvVars(); err != nil {
-		return nil, err
-	}
-	k := koanf.New(".")
-	// Operator-mounted secret files (filename = env-var name) load BELOW the
-	// env overlay, so env wins. Default non-SaaS path: Vault renders
-	// BILLING_MERCHANTS_* files into the mounted dir; no live Vault needed.
-	fileOverlay, err := merchantSecretFileOverlay()
-	if err != nil {
-		return nil, err
-	}
-	if len(fileOverlay) > 0 {
-		if err := k.Load(confmap.Provider(fileOverlay, "."), nil); err != nil {
-			return nil, fmt.Errorf("load merchant config secret-file overlay: %w", err)
-		}
-	}
-	if err := k.Load(env.ProviderWithValue(MerchantBillingEnvPrefix, ".", merchantBillingEnvKV), nil); err != nil {
-		return nil, fmt.Errorf("load merchant config env overlay: %w", err)
-	}
-	if len(k.Keys()) > 0 {
-		var overlay BillingConfig
-		// Strict, matching the file path's DisallowUnknownField (#710): a var that
-		// routes to a section but names an unknown field errors, never drops.
-		if err := k.UnmarshalWithConf("", &overlay, koanf.UnmarshalConf{
-			Tag: "koanf",
-			DecoderConfig: &mapstructure.DecoderConfig{
-				DecodeHook: mapstructure.ComposeDecodeHookFunc(
-					mapstructure.StringToTimeDurationHookFunc(),
-					mapstructure.StringToSliceHookFunc(","),
-					mapstructure.TextUnmarshallerHookFunc(),
-				),
-				Result:           &overlay,
-				WeaklyTypedInput: true,
-				ErrorUnused:      true,
-			},
-		}); err != nil {
-			return nil, fmt.Errorf("unmarshal merchant config env overlay: %w", err)
-		}
-		mergeMerchantConfigManifest(manifest, &overlay)
-		if err := validateMerchantManifestShape(manifest); err != nil {
-			return nil, err
-		}
-	}
-	return manifest, nil
-}
-
-// merchantSecretFileOverlay maps operator-mounted secret files
-// (config.SecretFiles: filename = env-var name, content = value) through the
-// same routing and rejection rules as BILLING_* env vars.
-func merchantSecretFileOverlay() (map[string]any, error) {
-	files, err := config.SecretFiles()
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]any{}
-	for name, value := range files {
-		if !strings.HasPrefix(name, MerchantBillingEnvPrefix) {
-			continue
-		}
-		if err := rejectRenamedMerchantEnvName("secret file", name); err != nil {
-			return nil, err
-		}
-		key, v := merchantBillingEnvKV(name, value)
-		if key == "" {
-			continue
-		}
-		out[key] = v
-	}
-	return out, nil
-}
-
-// merchantBillingEnvKV maps a BILLING_* env var to its koanf key and value.
-// JSON array/object values decode structurally so list-valued manifest fields
-// (delegated_invoker_wasted_spend_windows) can be overlaid from one var.
-func merchantBillingEnvKV(name, value string) (string, any) {
-	key := MerchantBillingEnvKey(name)
-	if key == "" {
-		return "", nil
-	}
-	v := strings.TrimSpace(value)
-	if len(v) >= 2 && ((v[0] == '[' && v[len(v)-1] == ']') || (v[0] == '{' && v[len(v)-1] == '}')) {
-		var decoded any
-		if err := json.Unmarshal([]byte(v), &decoded); err == nil {
-			return key, decoded
-		}
-	}
-	return key, v
 }
 
 // ParseMerchantConfigManifest parses the merchant config manifest consumed by

@@ -95,15 +95,6 @@ func TestMerchantSourceAPIRequiresAnExplicitSecretBackend(t *testing.T) {
 	}
 }
 
-func TestMerchantSourceAPIRefusesManifestEnvOverlays(t *testing.T) {
-	t.Setenv("BILLING_MERCHANTS_ACME_DISPLAY_NAME", "Acme")
-	cfg := validAPIBase("development")
-	err := Validate(cfg)
-	if err == nil || !strings.Contains(err.Error(), "two truths") {
-		t.Fatalf("api mode with BILLING_MERCHANTS_* env must refuse boot, got %v", err)
-	}
-}
-
 func TestMerchantSourceManifestIgnoresEncryptionPosture(t *testing.T) {
 	// MODE 1 persists nothing; no ENCRYPTION_MASTER_KEY, no Vault — validates
 	// even outside development (#723: the #667 gate is store-scoped).

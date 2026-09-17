@@ -272,39 +272,20 @@ custodian's own tenant id is declared once on the custodian entry. Several PSPs
 may reference the same custodian. See
 [payment-method-custody.md](payment-method-custody.md).
 
-### Structured YAML overlays (embedded hosts)
+### Secret overlays
 
-An embedded host that mounts its secrets as YAML files hands them to
-`embed.LoadMerchantConfigManifestWithOverlays(manifest, overlays...)`: each
-overlay is a YAML document in the manifest's own shape (`merchants.<slug>.psps.
-<key>.<rail>.secrets.*`), merged in order (later wins) and strict-parsed with
-the manifest. This path never reads `BILLING_MERCHANTS_*` env or secret files,
-so the mounted tree is the only overlay truth. A secret for a PSP the manifest
-does not declare fails validation rather than being ignored.
+Secret values do not belong in the committed YAML. Overlays are YAML documents
+in the manifest's own shape (`merchants.<slug>.psps.<key>.<rail>.secrets.*`),
+merged over the manifest in order (later wins) and strict-parsed with it:
+an unknown field, or secrets for a PSP the manifest never declared, is an
+error, never a silent drop.
 
-### Env and secret-file overlays (standalone)
+- Embedded hosts pass them from their own config tree:
+  `embed.LoadMerchantConfigManifestWithOverlays(manifest, overlays...)`.
+- Standalone MODE 1 lists mounted files in `merchant_manifest_overlays`
+  (env `MERCHANT_MANIFEST_OVERLAYS`).
 
-Secret values should not live in the YAML. Two overlays route into the same
-manifest tree, with precedence `yaml < secret files < env`:
-
-- **Secret files**: a directory (default `/vault/secrets`, override
-  `VAULT_SECRETS_PATH`) of files named like env vars, content = value.
-- **Env vars**: `BILLING_MERCHANTS_<MERCHANT>_PSPS_<KEY>_<RAIL>_…`, e.g.
-  `BILLING_MERCHANTS_MYAPP_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY` →
-  `merchants.myapp.psps.mobius.nmi.secrets.security_key`. Custodians overlay the
-  same way: `BILLING_MERCHANTS_MYAPP_CUSTODIANS_BT_BASIS_THEORY_SECRETS_API_KEY`
-  → `merchants.myapp.custodians.bt.basis_theory.secrets.api_key`.
-
-Both fail loudly on retired anchors (`_ACCOUNTS_`, `_RAIL_MERCHANT_ACCOUNTS_`,
-`_PROVIDER_ACCOUNTS_` → "renamed to PSPS") and on any `BILLING_MERCHANTS_*`
-name that routes to no manifest field — a typo is an error, never a silent drop.
-
-The overlay carries ONLY credentials + branding (or#915): `..._SECRETS_*`
-(PSP and custodian), `_DISPLAY_NAME`, and `_PROFILE_*`. Everything else —
-`invoice`, `api_host`, `delegated_invoker_wasted_spend_windows`, PSP/custodian
-`account_id` / `settings` / `archived` / `custodian` / `signer` — is manifest
-YAML (or DB/API) state, and an env var naming one refuses boot with that home
-named in the error.
+The engine itself reads no `BILLING_MERCHANTS_*` env and no secret directory.
 
 ## Secrets: seeding vs runtime source of truth
 

@@ -264,9 +264,10 @@ Semantics by mode:
   `PUT /v1/merchant/payment-providers` and the catalog APIs instead.
 
 YAML-first hosts can keep the merchant in a file: `embed.ParseMerchantConfig` (one
-merchant, strict — unknown fields rejected) or `embed.LoadMerchantConfigManifest`
-(multi-merchant manifest + `BILLING_MERCHANTS_*` env overlays, so committed files
-hold placeholders and real secrets arrive from the environment).
+merchant, strict — unknown fields rejected) or
+`embed.LoadMerchantConfigManifestWithOverlays(manifest, overlays...)` (multi-merchant
+manifest plus the host's mounted YAML secret overlays, so committed files hold
+placeholders and the host supplies real secrets from its own config tree).
 
 **Catalog push at boot**: products/prices/entitlements converge from a catalog
 manifest via `embedded.PushMerchantCatalog`:

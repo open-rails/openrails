@@ -190,15 +190,9 @@ func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
 	return boot.ParseMerchantConfigManifest(raw)
 }
 
-// LoadMerchantConfigManifest parses a multi-merchant config manifest and applies
-// BILLING_ environment overlays using OpenRails' merchant config mapper.
-func LoadMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
-	return boot.LoadMerchantConfigManifestBytes(raw)
-}
-
 // LoadMerchantConfigManifestWithOverlays merges the manifest with the host's
-// structured YAML secret overlays (later wins) and validates the result. It
-// never reads BILLING_MERCHANTS_* env: the mounted files are the only truth.
+// structured YAML secret overlays (later wins) and validates the result. The
+// host's config tree is the only source; the engine reads no env or files.
 func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*BillingConfig, error) {
 	return boot.LoadMerchantConfigManifestWithOverlays(raw, overlays...)
 }

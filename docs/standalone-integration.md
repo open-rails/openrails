@@ -98,12 +98,8 @@ openrails run-server --config /etc/openrails/config.yaml \
 | Merchant/PSP mutation APIs | 405 `manifest_driven` (reads work) | full surface |
 | Pick when | one/few merchants you operate yourself; secrets rendered by Vault Agent/k8s | merchants managed at runtime, SaaS-style |
 
-Full MODE 1 walkthrough (file layout, secret-file overlay, precedence
-`yaml < secret files < env`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).
-The env overlay for merchant values is `BILLING_MERCHANTS_<MERCHANT>_PSPS_…`,
-e.g. `BILLING_MERCHANTS_MYAPP_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY` — and it
-carries only credentials + branding (`..._SECRETS_*`, `_DISPLAY_NAME`,
-`_PROFILE_*`; or#915). Everything else is manifest YAML state.
+Full MODE 1 walkthrough (file layout, YAML secret overlays via
+`merchant_manifest_overlays`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).
 
 ### First run
 

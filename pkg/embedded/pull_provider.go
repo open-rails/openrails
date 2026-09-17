@@ -434,7 +434,11 @@ func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database
 		if err != nil {
 			return nil, fmt.Errorf("pull-provider: read merchant manifest %s: %w", path, err)
 		}
-		manifest, err = boot.LoadMerchantConfigManifestBytes(raw)
+		overlays, err := boot.ReadMerchantManifestOverlays(cfg.MerchantManifestOverlays)
+		if err != nil {
+			return nil, fmt.Errorf("pull-provider: %w", err)
+		}
+		manifest, err = boot.LoadMerchantConfigManifestWithOverlays(raw, overlays...)
 		if err != nil {
 			return nil, fmt.Errorf("pull-provider: merchant manifest %s: %w", path, err)
 		}
