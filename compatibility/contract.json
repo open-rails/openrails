@@ -378,6 +378,7 @@
       "func SplitCCBillAccountID(accountID string) (accNum, subAcc string, err error)",
       "func Validate(cfg *Config) error",
       "func ValidateCustodianEntry(e CustodianEntry) error",
+      "func ValidateLoopbackGatewayURL(raw string) error",
       "func ValidateRailAccountID(rail models.Rail, accountID string) error",
       "func ValidateRailSet(cfg *Config, rails PSPSet) error",
       "func ValidateSolanaAccountSettings(settings map[string]any) error",
@@ -412,6 +413,7 @@
       "type StripeRailConfig struct {\n\tSecretKey            string\n\tWebhookSigningSecret string\n\n\tWebhookSigningSecretThin string\n}",
       "type TokenConfig struct {\n\tMint string `json:\"mint\"`\n\tName string `json:\"name\"`\n}",
       "type VaultConfig struct {\n\tEnabled    bool   `koanf:\"enabled,omitempty\"`\n\tAddress    string `koanf:\"address,omitempty\"`\n\tAuthMethod string `koanf:\"auth_method,omitempty\"`\n\n\tToken    string `koanf:\"token,omitempty\"`\n\tRoleID   string `koanf:\"role_id,omitempty\"`\n\tSecretID string `koanf:\"secret_id,omitempty\"`\n\tK8sRole  string `koanf:\"k8s_role,omitempty\"`\n\n\tKVMount string `koanf:\"kv_mount,omitempty\"`\n\n\tTransitMount string `koanf:\"transit_mount,omitempty\"`\n}",
+      "var ErrProviderSandboxGateway = errors.New(\"provider_sandbox.nmi_gateway_url refused\")",
       "var ReservedPSPRails = map[string]models.Rail{\n\t\"ccbill\": models.RailCCBill,\n\t\"stripe\": models.RailStripe,\n\t\"solana\": models.RailSolana,\n}",
       "var ValidProviderWriteModes = map[string]bool{\n\t\"\":                        true,\n\tProviderWriteModeFull:     true,\n\tProviderWriteModeLimited:  true,\n\tProviderWriteModeReadOnly: true,\n}"
     ],
