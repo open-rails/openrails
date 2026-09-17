@@ -15,41 +15,74 @@ import (
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 )
 
-func TestWriteCheckoutSessionErrorSanitizesVaultFailures(t *testing.T) {
+func TestWriteCheckoutSessionErrorRendersPaymentRefusals(t *testing.T) {
 	tests := []struct {
-		name           string
-		localizationID string
-		wantCode       string
-		wantMessage    string
-		wantReason     string
+		name        string
+		err         error
+		wantStatus  int
+		wantType    string
+		wantCode    string
+		wantMessage string
+		wantReason  any
+		wantFailure any
 	}{
 		{
-			name:           "generic decline",
-			localizationID: "do_not_honor",
-			wantCode:       "card_declined",
-			wantMessage:    "Your card was declined. Contact your bank or try a different card.",
-			wantReason:     "card_declined",
+			name:        "generic decline",
+			err:         &paymentmethods.PaymentMethodError{LocalizationID: "do_not_honor", Message: "raw processor detail that must stay server-side"},
+			wantStatus:  http.StatusPaymentRequired,
+			wantType:    "card_error",
+			wantCode:    "card_declined",
+			wantMessage: "Your card was declined. Contact your bank or try a different card.",
+			wantReason:  "card_declined",
+			wantFailure: "do_not_honor",
 		},
 		{
-			name:           "security code mismatch",
-			localizationID: "invalid_card_security_code",
-			wantCode:       "cvv_avs",
-			wantMessage:    "Check your card security code and billing details, then try again.",
-			wantReason:     "cvv_avs",
+			name:        "security code mismatch by numeric response code",
+			err:         &paymentmethods.PaymentMethodError{LocalizationID: "225", Message: "raw processor detail that must stay server-side"},
+			wantStatus:  http.StatusPaymentRequired,
+			wantType:    "card_error",
+			wantCode:    "card_declined",
+			wantMessage: "Check your card security code and billing details, then try again.",
+			wantReason:  "cvv_avs",
+			wantFailure: "225",
 		},
 		{
-			name:           "suspected fraud",
-			localizationID: "fraudulent_card",
-			wantCode:       "fraud_suspected",
-			wantMessage:    "Your bank declined this payment. Contact your bank or try a different card.",
-			wantReason:     "fraud_suspected",
+			name:        "suspected fraud",
+			err:         &paymentmethods.PaymentMethodError{LocalizationID: "fraudulent_card", Message: "raw processor detail that must stay server-side"},
+			wantStatus:  http.StatusPaymentRequired,
+			wantType:    "card_error",
+			wantCode:    "card_declined",
+			wantMessage: "Your bank declined this payment. Contact your bank or try a different card.",
+			wantReason:  "fraud_suspected",
+			wantFailure: "fraudulent_card",
 		},
 		{
-			name:           "unknown response",
-			localizationID: "unmapped_gateway_response",
-			wantCode:       "payment_failed",
-			wantMessage:    "We could not complete this payment. Please try again or use a different card.",
-			wantReason:     "unknown",
+			name:        "unknown response",
+			err:         &paymentmethods.PaymentMethodError{LocalizationID: "unmapped_gateway_response", Message: "raw processor detail that must stay server-side"},
+			wantStatus:  http.StatusPaymentRequired,
+			wantType:    "card_error",
+			wantCode:    "card_declined",
+			wantMessage: "We could not complete this payment. Please try again or use a different card.",
+			wantReason:  "unknown",
+			wantFailure: "unmapped_gateway_response",
+		},
+		{
+			name:        "gateway rejection is not a card decline",
+			err:         &paymentmethods.PaymentMethodError{LocalizationID: "300", Message: "raw processor detail that must stay server-side"},
+			wantStatus:  http.StatusBadGateway,
+			wantType:    "api_error",
+			wantCode:    "payment_provider_rejected",
+			wantMessage: "The payment processor could not complete this payment. Please try again later.",
+			wantReason:  "processor_error",
+			wantFailure: "300",
+		},
+		{
+			name:        "stale saved payment method",
+			err:         fmt.Errorf("%w: raw processor detail that must stay server-side", checkout.ErrPaymentMethodStale),
+			wantStatus:  http.StatusPaymentRequired,
+			wantType:    "card_error",
+			wantCode:    "payment_method_stale",
+			wantMessage: "This saved payment method can no longer be used. Add the card again.",
 		},
 	}
 
@@ -60,16 +93,14 @@ func TestWriteCheckoutSessionErrorSanitizesVaultFailures(t *testing.T) {
 			httpReq.Header.Set("X-Request-ID", "req-checkout-149")
 			req := httprequest.NewHTTP(rec, httpReq, &app.Runtime{})
 
-			writeCheckoutSessionError(req, &paymentmethods.PaymentMethodError{
-				LocalizationID: tt.localizationID,
-				Message:        "raw processor detail that must stay server-side",
-			}, checkoutSessionErrorContext{})
+			writeCheckoutSessionError(req, tt.err, checkoutSessionErrorContext{})
 
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
 			}
 			var body struct {
 				Error struct {
+					Type      string         `json:"type"`
 					Code      string         `json:"code"`
 					Message   string         `json:"message"`
 					RequestID string         `json:"request_id"`
@@ -79,14 +110,14 @@ func TestWriteCheckoutSessionErrorSanitizesVaultFailures(t *testing.T) {
 			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 				t.Fatal(err)
 			}
-			if body.Error.Code != tt.wantCode || body.Error.Message != tt.wantMessage {
-				t.Fatalf("error = %#v, want code %q message %q", body.Error, tt.wantCode, tt.wantMessage)
+			if body.Error.Type != tt.wantType || body.Error.Code != tt.wantCode || body.Error.Message != tt.wantMessage {
+				t.Fatalf("error = %#v, want type %q code %q message %q", body.Error, tt.wantType, tt.wantCode, tt.wantMessage)
 			}
 			if body.Error.RequestID != "req-checkout-149" {
 				t.Fatalf("request_id = %q", body.Error.RequestID)
 			}
-			if body.Error.Metadata["decline_reason"] != tt.wantReason {
-				t.Fatalf("decline_reason = %#v, want %q", body.Error.Metadata["decline_reason"], tt.wantReason)
+			if body.Error.Metadata["decline_reason"] != tt.wantReason || body.Error.Metadata["failure_code"] != tt.wantFailure {
+				t.Fatalf("metadata = %#v, want decline_reason %v failure_code %v", body.Error.Metadata, tt.wantReason, tt.wantFailure)
 			}
 			if strings.Contains(rec.Body.String(), "raw processor detail") {
 				t.Fatalf("response leaked processor text: %s", rec.Body.String())
