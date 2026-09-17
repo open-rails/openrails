@@ -56,7 +56,7 @@ type Measure struct {
 	Family      Family
 	Description string // one line, token-lean (rides in LLM context)
 	Formula     string // /schema formula text
-	Unit        string // "micros" | "count" | "ratio" | "days" | "seconds"
+	Unit        string // UnitMoney | "count" | "ratio" | "days" | "seconds"
 	// Expr is the aggregate SQL expression (flow + snapshot families).
 	Expr string
 	// Dims are the allowed group-by/filter dimensions (besides time).
@@ -81,7 +81,7 @@ type Dimension struct {
 }
 
 const (
-	// monthlyNormExpr converts a price to a monthly-normalized amount (micros):
+	// monthlyNormExpr converts a price to a monthly-normalized amount (native currency units):
 	// cycles >= ~27d divide by the rounded month count; shorter cycles scale up
 	// by 730h/month. Deterministic; pinned by tests.
 	monthlyNormExpr = `CASE
@@ -309,6 +309,10 @@ var families = map[Family]familySpec{
 	},
 }
 
+// UnitMoney marks a measure whose cells are MoneyCell values: exact native
+// units of the row's currency (the registry scale, not always millionths).
+const UnitMoney = "money"
+
 // depletionRiskDays: a payer is at depletion risk when their prepaid balance
 // covers <= this many days of their trailing-7d average burn.
 const depletionRiskDays = 7
@@ -316,23 +320,23 @@ const depletionRiskDays = 7
 // Measures is the measure registry (CORE tier + internal ratio components).
 var Measures = []Measure{
 	// --- payments: additive money -------------------------------------------
-	{Name: "gross_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
-		Description: "sum of settled sale amounts (micros), before refunds/chargebacks; gross of processor fees",
+	{Name: "gross_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
+		Description: "sum of settled sale amounts (native currency units), before refunds/chargebacks; gross of processor fees",
 		Formula:     "SUM(amount) over settled sale payments (incl. later-refunded)",
 		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE ` + saleSettled + ` AND p.amount > 0), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	{Name: "net_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
+	{Name: "net_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
 		Description: "gross_revenue minus refunds and chargebacks (net of returns, NOT net of fees); Stripe's 'net volume'",
 		Formula:     "gross_revenue - refunds - chargebacks",
 		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE p.status IN ('completed','refunded')), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	{Name: "refunds", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
-		Description: "sum of refunded amounts (micros, positive), from refund mirror rows",
+	{Name: "refunds", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
+		Description: "sum of refunded amounts (native currency units, positive), from refund mirror rows",
 		Formula:     "SUM(-amount) over reversal_kind='refund' mirror rows",
 		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'refund'), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand"}},
-	{Name: "chargebacks", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
-		Description: "sum of chargeback amounts (micros, positive), net of won disputes",
+	{Name: "chargebacks", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
+		Description: "sum of chargeback amounts (native currency units, positive), net of won disputes",
 		Formula:     "SUM(-amount) over reversal_kind IN ('chargeback','dispute_reversal') mirror rows",
 		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind IN ('chargeback','dispute_reversal')), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand"}},
@@ -383,7 +387,7 @@ var Measures = []Measure{
 		Description: "chargebacks / settled payments; group by rail_account for the per-account VAMP number",
 		Formula:     "chargeback_count / payment_count",
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand"}},
-	{Name: "realized_revenue_per_customer", Class: ClassRatio, Unit: "micros", Money: true, Num: "net_revenue", Den: "paying_customers",
+	{Name: "realized_revenue_per_customer", Class: ClassRatio, Unit: "money", Money: true, Num: "net_revenue", Den: "paying_customers",
 		Description: "net revenue per distinct paying customer in the window (LTV-to-date when windowed over lifetime)",
 		Formula:     "net_revenue / COUNT(DISTINCT paying customers)",
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "attempt_kind", "discount_code"}},
@@ -432,8 +436,8 @@ var Measures = []Measure{
 		Formula:     "recovered / (recovered + lost) dunning exits",
 		Dims:        []string{}},
 	// --- grants / usage-credits ---------------------------------------------------
-	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: "micros",
-		Description: "prepaid credit lots purchased (cash-in, micros); NOT recognized revenue until consumed",
+	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: "money",
+		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
 		Formula:     "SUM(grant lot amounts) over purchased credit grants",
 		Expr:        `COALESCE(SUM(g.amount), 0)::bigint`,
 		Dims:        []string{"currency", "product_id", "payer"}},
@@ -452,8 +456,8 @@ var Measures = []Measure{
 		Description: "share of credit purchases in the bucket made by customers with an earlier credit purchase",
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
-	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "micros",
-		Description: "consumed (recognized) usage spend in micros, from usage events; cash-in is credits_sold",
+	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
+		Description: "consumed (recognized) usage spend in native currency units, from usage events; cash-in is credits_sold",
 		Formula:     "SUM(usage_events.amount)",
 		Expr:        `COALESCE(SUM(ue.amount), 0)::bigint`,
 		Dims:        []string{"currency", "payer", "sku", "rate_card"}},
@@ -482,7 +486,7 @@ var Measures = []Measure{
 		Formula:     "COUNT(subs with started_at <= t < ended_at)",
 		Expr:        `COUNT(s.id)`,
 		Dims:        []string{"currency", "rail", "rail_account", "product_id", "price_id", "billing_cycle", "status"}},
-	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: "micros",
+	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: "money",
 		Description: "monthly-normalized recurring price of auto-renew subs existing at t; group by status to split healthy vs in-dunning",
 		Formula:     "SUM(monthly_normalized(price)) over auto-renew subs at t",
 		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE pr.auto_renew), 0)::bigint`,
@@ -497,14 +501,14 @@ var Measures = []Measure{
 		Formula:     "COUNT(DISTINCT customer_id) over entitlement windows covering t",
 		Expr:        `COUNT(DISTINCT e.customer_id)`,
 		Dims:        []string{"entitlement"}},
-	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "micros",
+	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
 		Description: "unconsumed prepaid credit (deferred revenue) at t: net customer_balance across the ledger",
 		Formula:     "SUM(credits - debits) of customer_balance accounts from transfers before t",
 		Expr: `COALESCE(SUM(
 			CASE WHEN ca.account_type = 'customer_balance' THEN lt.amount ELSE 0 END
 			- CASE WHEN da.account_type = 'customer_balance' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
-	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "micros",
+	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
 		Description: "arrears accounts receivable at t: accrued-but-unpaid usage debt",
 		Formula:     "SUM(debits - credits) of arrears_liability accounts from transfers before t",
 		Expr: `COALESCE(SUM(
