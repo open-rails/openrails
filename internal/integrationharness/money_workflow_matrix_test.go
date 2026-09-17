@@ -121,8 +121,10 @@ func moneyDeploymentBuilders(h *Harness, gateway *FakeNMIGateway) []struct {
 func runMoneyDeployments(t *testing.T, h *Harness, gateway *FakeNMIGateway, program func(t *testing.T, d moneyDeployment)) {
 	t.Helper()
 	parent := t
-	// The shared fixture pool outlives every subtest.
+	// The shared fixture pool and the server binary outlive every subtest.
 	h.Pool()
+	_, err := h.openrailsBinary()
+	require.NoError(t, err)
 	for _, b := range moneyDeploymentBuilders(h, gateway) {
 		t.Run(b.name, func(t *testing.T) {
 			h.SetT(t)
