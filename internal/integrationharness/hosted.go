@@ -185,8 +185,9 @@ func (s *Hosted) RegisterUser(label string) HostedUser {
 	h := s.h
 	h.t.Helper()
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
-	email := strings.ToLower(label) + "-" + suffix + "@example.test"
-	status, body := s.postJSON("/auth/register", "", map[string]string{"identifier": email, "username": strings.ToLower(label) + suffix, "password": "Hosted-proof-2026!"})
+	name := strings.ReplaceAll(strings.ToLower(label), "-", "")
+	email := name + "-" + suffix + "@example.test"
+	status, body := s.postJSON("/auth/register", "", map[string]string{"identifier": email, "username": name + suffix, "password": "Hosted-proof-2026!"})
 	require.Equal(h.t, http.StatusAccepted, status, "register %s: %s", email, body)
 	require.Equal(h.t, "verify_email", body["next_action"], "hosted registration is verification-gated")
 	code := s.Sender.Code(email)
