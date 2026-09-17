@@ -105,6 +105,11 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 		if len(strings.TrimSpace(string(doc))) == 0 {
 			continue
 		}
+		if i > 0 {
+			if err := validateMerchantSecretOverlay(doc); err != nil {
+				return nil, fmt.Errorf("load merchant config overlay %d: %w", i, err)
+			}
+		}
 		if err := k.Load(rawbytes.Provider(doc), koanfyaml.Parser()); err != nil {
 			if i == 0 {
 				return nil, fmt.Errorf("load merchant config manifest: %w", err)
@@ -125,6 +130,66 @@ func LoadMerchantConfigManifestWithOverlays(raw []byte, overlays ...[]byte) (*Bi
 		return nil, fmt.Errorf("merge merchant config manifest: %w", err)
 	}
 	return ParseMerchantConfigManifest(merged)
+}
+
+// validateMerchantSecretOverlay limits operator-mounted overlays to processor
+// secret values. The checked-in manifest remains the authority for merchant
+// identity, account IDs, settings, custodians, and billing policy. Without
+// this shape check, koanf's deep merge would let a bad Vault document silently
+// replace those structural fields before the strict final parse.
+func validateMerchantSecretOverlay(raw []byte) error {
+	var root map[string]any
+	if err := yaml.Unmarshal(raw, &root); err != nil {
+		return fmt.Errorf("parse merchant secret overlay: %w", err)
+	}
+	if len(root) == 0 {
+		return nil
+	}
+	for key := range root {
+		if key != "merchants" {
+			return fmt.Errorf("merchant secret overlay only accepts the merchants.psps.<psp>.<rail>.secrets shape (found %q)", key)
+		}
+	}
+	merchants, ok := root["merchants"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("merchant secret overlay merchants must be a mapping")
+	}
+	for slug, rawMerchant := range merchants {
+		merchant, ok := rawMerchant.(map[string]any)
+		if !ok {
+			return fmt.Errorf("merchant secret overlay merchants.%s must be a mapping", slug)
+		}
+		for key := range merchant {
+			if key != "psps" {
+				return fmt.Errorf("merchant secret overlay cannot set merchants.%s.%s; structural manifest fields stay in the base manifest", slug, key)
+			}
+		}
+		psps, ok := merchant["psps"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("merchant secret overlay merchants.%s.psps must be a mapping", slug)
+		}
+		for psp, rawPSP := range psps {
+			rails, ok := rawPSP.(map[string]any)
+			if !ok {
+				return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s must be a mapping", slug, psp)
+			}
+			for rail, rawRail := range rails {
+				railConfig, ok := rawRail.(map[string]any)
+				if !ok {
+					return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.%s must be a mapping", slug, psp, rail)
+				}
+				for key := range railConfig {
+					if key != "secrets" {
+						return fmt.Errorf("merchant secret overlay cannot set merchants.%s.psps.%s.%s.%s; only secrets are overlayed", slug, psp, rail, key)
+					}
+				}
+				if _, ok := railConfig["secrets"].(map[string]any); !ok {
+					return fmt.Errorf("merchant secret overlay merchants.%s.psps.%s.%s.secrets must be a mapping", slug, psp, rail)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ParseMerchantConfigManifest parses the merchant config manifest consumed by
