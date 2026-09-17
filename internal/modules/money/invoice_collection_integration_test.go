@@ -152,11 +152,13 @@ func TestInvoiceCollection_ClientKeyReplaysDurableOutcomeWithoutRecharging(t *te
 	e.requireSettledOnce(t)
 }
 
-// lockWaiters counts sessions of this database blocked on a row lock.
-func lockWaiters(t *testing.T, pool *pgxpool.Pool, ctx context.Context) int {
-	t.Helper()
+// lockWaiters counts sessions of this database blocked on a lock (0 when the
+// read itself fails; the caller polls).
+func lockWaiters(pool *pgxpool.Pool, ctx context.Context) int {
 	var n int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n))
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n); err != nil {
+		return 0
+	}
 	return n
 }
 
@@ -195,7 +197,7 @@ func TestInvoiceCollection_ConcurrentEqualRetriesShareOneOperation(t *testing.T)
 					results[i], errs[i] = e.retry(t, runner, "same-client-key", e.method)
 				}(i)
 			}
-			require.Eventually(t, func() bool { return lockWaiters(t, e.pool, e.ctx) >= 2 }, 15*time.Second, 20*time.Millisecond, "both retries wait on the invoice lock")
+			require.Eventually(t, func() bool { return lockWaiters(e.pool, e.ctx) >= 2 }, 15*time.Second, 20*time.Millisecond, "both retries wait on the invoice lock")
 			require.NoError(t, lock.Rollback(e.ctx))
 			wg.Wait()
 
