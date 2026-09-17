@@ -131,8 +131,13 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 	evidence := func() map[string]any {
 		return map[string]any{"successor": progress.Successor, "proration": progress.Proration}
 	}
+	// A step's receipt or refusal is provider truth already in hand: persist it
+	// detached from the caller's cancellation, and carry it on any ambiguous
+	// outcome so the runner's unknown mark retains it even if this write fails.
 	save := func(key string, step *nmiUpgradeStep) error {
-		return store.RecordProgress(ctx, in.ID, map[string]any{key: step})
+		wctx, cancel := intents.LedgerWriteContext(ctx)
+		defer cancel()
+		return store.RecordProgress(wctx, in.ID, map[string]any{key: step})
 	}
 	if progress.Successor != nil && progress.Successor.Refusal != "" {
 		return intents.TerminalWithEvidence(progress.Successor.Refusal, evidence())
@@ -182,7 +187,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			}
 			progress.Successor.Refusal = callErr.Error()
 			if err = save("successor", progress.Successor); err != nil {
-				return intents.Ambiguous("persist successor refusal: " + err.Error())
+				return intents.AmbiguousWithEvidence("persist successor refusal: "+err.Error(), evidence())
 			}
 			return intents.TerminalWithEvidence(callErr.Error(), evidence())
 		}
@@ -191,7 +196,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 		}
 		progress.Successor.Enrollment = receipt
 		if err = save("successor", progress.Successor); err != nil {
-			return intents.Ambiguous("persist successor receipt: " + err.Error())
+			return intents.AmbiguousWithEvidence("persist successor receipt: "+err.Error(), evidence())
 		}
 	}
 	if progress.Successor.Enrollment == nil {
@@ -227,7 +232,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 				}
 				progress.Proration.Refusal = callErr.Error()
 				if err = save("proration", progress.Proration); err != nil {
-					return intents.Ambiguous("persist proration refusal: " + err.Error())
+					return intents.AmbiguousWithEvidence("persist proration refusal: "+err.Error(), evidence())
 				}
 				return h.refusedProration(ctx, in, p, progress, evidence())
 			}
@@ -236,7 +241,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			}
 			progress.Proration.Sale = receipt
 			if err = save("proration", progress.Proration); err != nil {
-				return intents.Ambiguous("persist proration receipt: " + err.Error())
+				return intents.AmbiguousWithEvidence("persist proration receipt: "+err.Error(), evidence())
 			}
 		}
 		if progress.Proration.Sale == nil {
@@ -249,7 +254,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			}
 			progress.Proration.Sale = &nmi.SaleResponse{TransactionID: txn}
 			if err = save("proration", progress.Proration); err != nil {
-				return intents.Ambiguous("persist proration readback: " + err.Error())
+				return intents.AmbiguousWithEvidence("persist proration readback: "+err.Error(), evidence())
 			}
 		}
 	}

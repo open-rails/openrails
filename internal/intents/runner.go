@@ -54,7 +54,21 @@ const (
 	// VerifyDelay schedules the verifier's first look at a fresh ambiguous
 	// outcome.
 	VerifyDelay = time.Minute
+	// ledgerWriteTimeout bounds one detached ledger transition (LedgerWriteContext).
+	ledgerWriteTimeout = 10 * time.Second
 )
+
+// LedgerWriteContext detaches a ledger write from the caller's cancellation.
+// The caller's deadline governs the provider call; once that call has been made
+// its result must reach the ledger regardless. A synchronous caller that timed
+// out mid-send otherwise lost the unknown mark and the handler's evidence, and
+// the row sat in_flight until lease expiry handed it back to the executor
+// instead of the verifier. Handlers use it for the same reason when they
+// persist a provider receipt mid-flight. Values (merchant, PSP pins) survive;
+// only cancellation is dropped.
+func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
+}
 
 // Runner drains the intent ledger: RunExecuteOnce is the executor pass,
 // RunVerifyOnce the verifier pass. Both are single steps — scheduling is the
@@ -189,12 +203,7 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 		return
 	}
 	if !rel.Applicable {
-		if err := r.Store.MarkSuperseded(ctx, intent.ID, rel.Reason); err != nil {
-			logEntry.WithError(err).Error("intent executor: mark superseded failed")
-			return
-		}
-		stats.Superseded++
-		logEntry.WithField("reason", rel.Reason).Info("intent superseded (no longer applicable)")
+		r.supersede(ctx, logEntry, stats, intent.ID, rel.Reason)
 		return
 	}
 
@@ -235,10 +244,20 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.OpenrailsRailIntent,
 	stopBeat := r.renewClaimWhile(ctx, logEntry, intent.ID)
 	outcome := handler.Execute(ctx, intent)
 	stopBeat()
-	if err := r.logExternalMutation(ctx, intent, mutationLogPhase(outcome), outcome.Reason, outcome.Evidence); err != nil {
-		logEntry.WithError(err).Error("intent executor: external mutation result log failed")
+	r.record(ctx, logEntry, stats, handler, intent, outcome, outcome.Reason, false)
+}
+
+// record persists what the handler did — the mutation-log result phase and the
+// ledger transition — on a context detached from the caller's cancellation
+// (LedgerWriteContext): the provider call is already made, so its outcome must
+// land even when the caller has since timed out.
+func (r *Runner) record(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsRailIntent, outcome Outcome, reason string, verifying bool) {
+	ctx, cancel := LedgerWriteContext(ctx)
+	defer cancel()
+	if err := r.logExternalMutation(ctx, intent, mutationLogPhase(outcome), reason, outcome.Evidence); err != nil {
+		logEntry.WithError(err).Error("intent ledger: external mutation result log failed")
 	}
-	r.apply(ctx, logEntry, stats, handler, intent, outcome, false)
+	r.apply(ctx, logEntry, stats, handler, intent, outcome, verifying)
 }
 
 // EnqueueAndExecute records the intent and immediately claims + executes THAT
@@ -318,20 +337,13 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 		})
 		handler := r.Registry.Lookup(intent.IntentType)
 		if handler == nil {
-			// Leave it unknown; push the next look out.
-			if err := r.Store.MarkUnknown(ctx, intent.ID, r.now().Add(ParkRetryInterval), "no handler registered for intent type "+intent.IntentType, nil); err != nil {
-				logEntry.WithError(err).Error("intent verifier: mark unknown failed")
-			}
-			stats.Unknown++
+			// Leave it unknown; push the next look out (a verifier's park).
+			r.apply(ctx, logEntry, &stats, handler, intent, Parked("no handler registered for intent type "+intent.IntentType), true)
 			continue
 		}
 		rel, err := handler.CheckRelevance(ctx, intent)
 		if err == nil && !rel.Applicable {
-			if err := r.Store.MarkSuperseded(ctx, intent.ID, rel.Reason); err != nil {
-				logEntry.WithError(err).Error("intent verifier: mark superseded failed")
-				continue
-			}
-			stats.Superseded++
+			r.supersede(ctx, logEntry, &stats, intent.ID, rel.Reason)
 			continue
 		}
 		// Verification is read-only: no mode gate.
@@ -388,11 +400,13 @@ func (r *Runner) newTicker(d time.Duration) clockwork.Ticker {
 	return clockwork.NewRealClock().NewTicker(d)
 }
 
-// apply writes one classified outcome back to the ledger. verifying selects
-// the verifier's interpretation of OutcomeAmbiguous (still inconclusive ->
-// backoff the next verify) vs the executor's (fresh ambiguity -> first verify
-// soon).
+// apply writes one classified outcome back to the ledger, detached from the
+// caller's cancellation (LedgerWriteContext). verifying selects the verifier's
+// interpretation of OutcomeAmbiguous (still inconclusive -> backoff the next
+// verify) vs the executor's (fresh ambiguity -> first verify soon).
 func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.OpenrailsRailIntent, outcome Outcome, verifying bool) {
+	ctx, cancel := LedgerWriteContext(ctx)
+	defer cancel()
 	now := r.now()
 	var err error
 	switch outcome.Class {
@@ -486,13 +500,27 @@ func pruneTerminalPayloadFor(handler Handler) bool {
 	return ok && policy.PruneTerminalPayload()
 }
 
+// park and supersede are ledger transitions like apply and detach the same way.
 func (r *Runner) park(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, now time.Time, reason string) {
+	ctx, cancel := LedgerWriteContext(ctx)
+	defer cancel()
 	if err := r.Store.Park(ctx, id, now.Add(ParkRetryInterval), reason); err != nil {
 		logEntry.WithError(err).Error("intent ledger: park failed; lease expiry will re-surface the intent")
 		return
 	}
 	stats.Parked++
 	logEntry.WithField("reason", reason).Warn("intent parked (stays pending)")
+}
+
+func (r *Runner) supersede(ctx context.Context, logEntry *log.Entry, stats *Stats, id uuid.UUID, reason string) {
+	ctx, cancel := LedgerWriteContext(ctx)
+	defer cancel()
+	if err := r.Store.MarkSuperseded(ctx, id, reason); err != nil {
+		logEntry.WithError(err).Error("intent ledger: mark superseded failed; lease expiry will re-surface the intent")
+		return
+	}
+	stats.Superseded++
+	logEntry.WithField("reason", reason).Info("intent superseded (no longer applicable)")
 }
 
 func (r *Runner) logExternalMutation(ctx context.Context, intent gen.OpenrailsRailIntent, phase MutationLogPhase, reason string, evidence map[string]any) error {
