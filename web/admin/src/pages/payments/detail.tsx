@@ -34,7 +34,7 @@ import { REFUNDABLE_RAILS } from "@/lib/api/endpoints"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import {
   formatNativeAmount,
-  formatUnix,
+  formatDate,
   nativeAmountFromInput,
   nativeAmountToInput,
   shortId,
@@ -123,7 +123,7 @@ export function PaymentDetailPage() {
             "—"
           )}
         </Fact>
-        <Fact label="Created">{formatUnix(payment.created)}</Fact>
+        <Fact label="Created">{formatDate(payment.created_at)}</Fact>
         <Fact label="Type">{payment.object}</Fact>
         {payment.failure_message && (
           <Fact label="Failure">{payment.failure_message}</Fact>
@@ -167,7 +167,7 @@ export function PaymentDetailPage() {
                     <TableCell>
                       {formatNativeAmount(r.amount, r.currency)}
                     </TableCell>
-                    <TableCell>{formatUnix(r.created)}</TableCell>
+                    <TableCell>{formatDate(r.created_at)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
