@@ -91,7 +91,7 @@ OpenRails' workers converge state around that:
 | Dunning | 4 h | retries `past_due` per the derived no-knobs schedule; cancels past the staleness window instead of charging ([operations.md → Dunning](operations.md#dunning-359)) |
 | Credit expiry | 1 h | expires credit lots |
 | Solana crank | 1 h | executes due on-chain subscription pulls |
-| Cleanup / invoices / alerts / digests | 1 h – daily | expired-data cleanup, invoice collection + finalization, metric alert eval, findings digest |
+| Cleanup / invoices | 1 h – daily | expired-data cleanup, invoice collection + period finalization |
 | Worker health check | 5 min | seeds `openrails.worker_state`, raises repair alerts when a kind stops completing |
 
 **Health endpoint**: `GET /health/live` (liveness) and `GET /health/ready`
@@ -100,7 +100,7 @@ merchant-secret backend, River producer, a locally managed River consumer, and
 auth). K8s aliases `/healthz` / `/readyz`. A standalone
 `run-server --no-workers` process remains live but not ready because it has no
 local job consumer. Embedded hosts wire the dependency checks into their own
-handler via `Embedded.Ready`; a host-owned shared River client is checked
+handler via `rt.Ready(ctx)`; a host-owned shared River client is checked
 separately with `CheckJobProgress` because its process state is outside
 OpenRails.
 
@@ -237,5 +237,6 @@ checkout_routing:
   reconcile summary.
 - **Worker health**: `openrails.worker_state` rows per job kind; the 5-minute
   checker raises durable repair alerts when a periodic kind stops completing.
-- **Alerting**: metric-threshold alert evaluation every 15 minutes and a daily
-  low-severity findings digest, delivered through the notification queue.
+- **Notifications**: reconciliation findings raise deduplicated console
+  notifications and, by severity, outbound webhooks / the alert email
+  ([merchant-notifications.md](merchant-notifications.md)).

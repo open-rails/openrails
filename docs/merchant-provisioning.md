@@ -174,8 +174,8 @@ Typed refusals: `controlplane.ErrEmailUnverified`, `controlplane.ErrVaultedPayme
 
 ### Merchant retirement (never-used names go back in the pool)
 
-Core provides the mechanism; dormancy policy (warning cadence, notice state,
-arming) belongs to the host. openrails-saas owns its hosted policy and notices.
+Core provides the mechanism; when to warn about and retire an unused merchant
+is the host's policy (openrails-saas owns its own, with its own notices).
 
 - `cp.ListMerchantRetirementCandidates(ctx, req)` pages live,
   group-bound merchants created before `req.CreatedBefore`, oldest first,
