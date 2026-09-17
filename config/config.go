@@ -275,12 +275,17 @@ type ProviderSandboxConfig struct {
 	// hostnames, even "localhost", are refused because locality must not
 	// depend on a resolver. Env: PROVIDER_SANDBOX_NMI_GATEWAY_URL.
 	NMIGatewayURL string `koanf:"nmi_gateway_url,omitempty"`
+	// StripeAPIURL replaces the Stripe API root for every request through
+	// the stripeapi choke point; the readonly guard and the pinned
+	// Stripe-Version still apply above it. Same loopback-literal rule as
+	// NMIGatewayURL. Env: PROVIDER_SANDBOX_STRIPE_API_URL.
+	StripeAPIURL string `koanf:"stripe_api_url,omitempty"`
 }
 
 // ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
-// gateway declaration: a live posture, or a destination that is not a literal
-// loopback address.
-var ErrProviderSandboxGateway = errors.New("provider_sandbox.nmi_gateway_url refused")
+// gateway declaration (nmi_gateway_url, stripe_api_url): a live posture, or a
+// destination that is not a literal loopback address.
+var ErrProviderSandboxGateway = errors.New("provider_sandbox gateway refused")
 
 // SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
 // run, or "" for the real sandbox endpoints.
@@ -312,15 +317,28 @@ func ValidateLoopbackGatewayURL(raw string) error {
 	return nil
 }
 
+// SandboxStripeAPIURL is the loopback Stripe API declared for this sandbox
+// run, or "" for the real API.
+func (cfg *Config) SandboxStripeAPIURL() string {
+	if cfg == nil || cfg.ProviderSandbox == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ProviderSandbox.StripeAPIURL)
+}
+
 func validateProviderSandbox(cfg *Config) error {
-	gateway := cfg.SandboxNMIGatewayURL()
-	if gateway == "" {
-		return nil
+	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL()} {
+		if gateway == "" {
+			continue
+		}
+		if cfg.TestMode == CredentialPostureLive {
+			return fmt.Errorf("%w: provider_sandbox.%s with test_mode=live never talks to a fake provider", ErrProviderSandboxGateway, key)
+		}
+		if err := ValidateLoopbackGatewayURL(gateway); err != nil {
+			return fmt.Errorf("provider_sandbox.%s: %w", key, err)
+		}
 	}
-	if cfg.TestMode == CredentialPostureLive {
-		return fmt.Errorf("%w: test_mode=live never talks to a fake provider", ErrProviderSandboxGateway)
-	}
-	return ValidateLoopbackGatewayURL(gateway)
+	return nil
 }
 
 // CatalogReconciliationSchedule resolves the catalog reconciliation loop

@@ -1,4 +1,6 @@
-# Durable NMI upgrade recovery
+# Durable tier change recovery
+
+## NMI upgrades
 
 An upgrade is one durable rail intent with immutable pricing, billing period, instrument and predecessor/successor identities. Each provider step records its submission boundary before calling NMI and retains a positive receipt or definitive refusal after the response. A restart resumes an unsent step; a possibly submitted step only reads provider evidence. Empty search results never permit resubmission.
 
@@ -25,3 +27,11 @@ Successor non-execution terminates the operation and releases the predecessor
 for a new request; proration non-execution queues successor cancellation.
 
 Provider search visibility and exact correlation remain adapter evidence; local loopback tests prove the application's no-resend and transaction behavior, not a live provider guarantee.
+
+## Stripe tier changes
+
+A Stripe tier change is one `stripe_tier_change` operation keyed by the client's `Idempotency-Key`. Its payload freezes the subscription, the current and target prices (local and Stripe ids), the action, the proration decision, the local now-amount estimate and the period; Stripe is read once before freezing and must bill the frozen current price and carry no schedule. An upgrade is one request (`update`): the subscription item moves to the target price with `proration_behavior=always_invoice` and `billing_cycle_anchor=now`. A downgrade is two (`schedule`, then `phases`): a schedule is created from the subscription, then given the current phase to the frozen period end and the target price after it, released at its end.
+
+Every request carries `<operation id>:<step>` as its Stripe idempotency key and stamps `metadata[openrails_tier_change]=<operation id>` on the object it mutates. Each step records its fence before sending and then exactly one of a matched receipt or a definitive refusal. A receipt is the subscription or schedule Stripe answers with, or that the verifier reads back by exact id, matched to the frozen facts (operation key, Stripe price, local price, switch date); a 2xx object that does not match commits nothing. A lost response is reconciled by the exact read first; while Stripe still holds the key (23h) the executor replays the identical request and Stripe answers the stored result; afterwards only an operator closes the step with `openrails intents resolve --step update|schedule|phases`, whose `--receipt` is read back and matched the same way and whose `--not-executed` is refused while the provider shows the step's effect. An attached schedule the operation cannot attribute by key is never adopted.
+
+The local commit — the price, product and period for an upgrade; the scheduled price for a downgrade — happens only from a matched receipt, is idempotent, and fails closed if the subscription no longer sits on the frozen predecessor. The stored result answers every same-key replay (`200`), an unresolved operation answers `202` with its id, a request under another key is refused `409 tier_change_in_flight` naming it, and a definitive Stripe refusal is coded (`tier_change_refused`; a 402 keeps its decline code). Loopback Stripe fixtures prove no-resend, identical replay, restart convergence and one-time local effects; Stripe's idempotency retention and object read-back are modelled, not measured.

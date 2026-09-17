@@ -20,13 +20,20 @@ import (
 // as the subscription customer so ownership and rail behavior stay identical
 // to self-service tier changes.
 func AdminChangeTier(r *httprequest.Request) {
-	req, customer, ok := adminTierChangeRequest(r)
+	req, customer, subscription, ok := adminTierChangeRequest(r)
 	if !ok {
 		return
 	}
-
 	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
-	resp, err := r.State.CheckoutService.TierChange(r.Request.Context(), req, customer)
+	// A replay is answered from the durable operation before the admission
+	// guards: once the change committed, the subscription no longer passes them.
+	resp, found, err := r.State.CheckoutService.ReplayTierChange(r.Request.Context(), req, customer)
+	if !found && err == nil {
+		if !adminTierChangeAdmissible(r, subscription) {
+			return
+		}
+		resp, err = r.State.CheckoutService.TierChange(r.Request.Context(), req, customer)
+	}
 	if err != nil {
 		logAdminTierChange(r, req, nil, err)
 		writeChangeTierError(r, err)
@@ -34,14 +41,14 @@ func AdminChangeTier(r *httprequest.Request) {
 	}
 
 	logAdminTierChange(r, req, resp, nil)
-	r.SuccessJSON(resp)
+	writeTierChangeResponse(r, resp)
 }
 
 // AdminChangeTierPreview returns the same non-mutating proration preview as the
 // customer self-service route.
 func AdminChangeTierPreview(r *httprequest.Request) {
-	req, customer, ok := adminTierChangeRequest(r)
-	if !ok {
+	req, customer, subscription, ok := adminTierChangeRequest(r)
+	if !ok || !adminTierChangeAdmissible(r, subscription) {
 		return
 	}
 
@@ -56,53 +63,66 @@ func AdminChangeTierPreview(r *httprequest.Request) {
 
 func adminTierChangeRequest(
 	r *httprequest.Request,
-) (*checkout.TierChangeRequest, *checkout.UserIdentity, bool) {
+) (*checkout.TierChangeRequest, *checkout.UserIdentity, *models.Subscription, bool) {
 	var body ChangeTierRequest
 	if !r.BindJSON(&body) {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
 	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	subscriptionID := typedSubscriptionID.UUID()
 	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil || r.State.RepriceService == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 
 	subscription, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
 		if db.IsNotFound(err) {
 			r.ErrorJSON(http.StatusNotFound, "subscription not found")
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: load subscription")
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve subscription")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	if subscription.CustomerID == uuid.Nil {
 		log.WithField("subscription_id", subscriptionID).Error("admin tier change: subscription has no customer")
 		r.ErrorJSON(http.StatusInternalServerError, "subscription customer unavailable")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
+	return &checkout.TierChangeRequest{
+			PriceID:        body.PriceID.String(),
+			SubscriptionID: subscriptionID,
+		}, &checkout.UserIdentity{
+			ID:    subscription.CustomerID.String(),
+			Email: subscription.UserEmail,
+		}, subscription, true
+}
+
+// adminTierChangeAdmissible applies the operator-route guards to a new tier
+// change; a replay never reaches them.
+func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subscription) bool {
+	subscriptionID := subscription.ID
 	if subscription.Status != models.StatusActive && subscription.Status != models.StatusPastDue {
 		r.ErrorJSON(http.StatusConflict, "only active or past-due subscriptions can change tier")
-		return nil, nil, false
+		return false
 	}
 	if subscription.ScheduledPriceID != nil {
 		r.ErrorJSON(http.StatusConflict, "subscription already has a tier change scheduled")
-		return nil, nil, false
+		return false
 	}
 	if subscription.Rail == models.RailCCBill {
 		r.ErrorJSON(http.StatusBadRequest, "CCBill tier changes require customer self-service")
-		return nil, nil, false
+		return false
 	}
 	if subscription.Rail == models.RailSolana {
 		r.ErrorJSON(http.StatusBadRequest, "Solana tier changes require the customer's wallet signature")
-		return nil, nil, false
+		return false
 	}
 
 	scheduled := models.RepriceStatusScheduled
@@ -113,20 +133,13 @@ func adminTierChangeRequest(
 	if err != nil {
 		log.WithError(err).WithField("subscription_id", subscriptionID).Error("admin tier change: check scheduled reprices")
 		r.ErrorJSON(http.StatusInternalServerError, "failed to check scheduled price changes")
-		return nil, nil, false
+		return false
 	}
 	if len(reprices) > 0 {
 		r.ErrorJSON(http.StatusConflict, "subscription already has a scheduled price change")
-		return nil, nil, false
+		return false
 	}
-
-	return &checkout.TierChangeRequest{
-			PriceID:        body.PriceID.String(),
-			SubscriptionID: subscriptionID,
-		}, &checkout.UserIdentity{
-			ID:    subscription.CustomerID.String(),
-			Email: subscription.UserEmail,
-		}, true
+	return true
 }
 
 func logAdminTierChange(
@@ -148,6 +161,9 @@ func logAdminTierChange(
 		fields["action"] = resp.Action
 		fields["rail"] = resp.Payment.Rail
 		fields["status"] = resp.Status
+		if resp.OperationID != "" {
+			fields["operation_id"] = resp.OperationID
+		}
 	}
 	if err != nil {
 		log.WithError(err).WithFields(fields).Warn("admin subscription tier change failed")
