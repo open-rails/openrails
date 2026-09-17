@@ -3,6 +3,7 @@
 package integrationharness
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -77,7 +78,7 @@ func openrailsBinary() (string, error) {
 			return
 		}
 		binaryPath = filepath.Join(dir, "openrails")
-		build := exec.Command("go", "build", "-o", binaryPath, "./cmd/openrails")
+		build := exec.CommandContext(context.Background(), "go", "build", "-o", binaryPath, "./cmd/openrails")
 		build.Dir = root
 		build.Env = os.Environ()
 		if out, err := build.CombinedOutput(); err != nil {
@@ -118,7 +119,7 @@ func (h *Harness) StartStandaloneProcess(opts ...ProcessOption) *StandaloneProce
 	require.NoError(h.t, err)
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := (&net.ListenConfig{}).Listen(h.ctx, "tcp", "127.0.0.1:0")
 	require.NoError(h.t, err)
 	port := listener.Addr().(*net.TCPAddr).Port
 	require.NoError(h.t, listener.Close())
@@ -167,7 +168,7 @@ func (p *StandaloneProcess) Start() {
 	}
 	logFile, err := os.OpenFile(p.logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	require.NoError(h.t, err)
-	cmd := exec.Command(p.binary, "run-server", "--config", p.configPath)
+	cmd := exec.CommandContext(context.Background(), p.binary, "run-server", "--config", p.configPath)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "TMPDIR=" + os.TempDir()}
 	cmd.Stdout, cmd.Stderr = logFile, logFile
 	require.NoError(h.t, cmd.Start(), "start openrails run-server")
@@ -186,7 +187,9 @@ func (p *StandaloneProcess) Start() {
 			h.t.Fatalf("run-server exited before becoming live: %v\n%s", err, p.logTail())
 		default:
 		}
-		resp, err := http.Get(p.BaseURL + "/health/live")
+		req, err := http.NewRequestWithContext(h.ctx, http.MethodGet, p.BaseURL+"/health/live", nil)
+		require.NoError(h.t, err)
+		resp, err := http.DefaultClient.Do(req)
 		if err == nil {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			_ = resp.Body.Close()
