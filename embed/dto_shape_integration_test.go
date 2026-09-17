@@ -55,6 +55,11 @@ func TestDTOShapesAreCanonicalAcrossDeployments(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	local, err := runtime.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("usd"))
 	require.NoError(t, err)
+	// SetMerchantSettings replaces the shared merchant's document; the routing
+	// policy declared below would otherwise outlive this test.
+	before, err := local.GetMerchantSettings(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, local.SetMerchantSettings(context.Background(), *before)) })
 	mid := dbtest.TestMerchantID.UUID()
 
 	type fixture struct {
