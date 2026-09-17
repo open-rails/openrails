@@ -654,37 +654,19 @@ func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer 
 	return inv, nil
 }
 
-// FinalizeDueInvoices finalizes the [from, to) invoice for every (payer, currency)
-// pair with money activity in the request merchant. Idempotent per pair. Returns the
-// number of invoices finalized/returned. Invoices are denominated per fiat
-// account currency (#474), so a payer with both USD and EUR balances gets one
-// invoice each.
+// FinalizeDueInvoices finalizes the [from, to) invoice for every invoice payer
+// of the request merchant. Idempotent per (payer, currency). Invoices are
+// denominated per fiat account currency (#474), so a payer with both USD and
+// EUR activity gets one invoice each.
 func (s *MoneyService) FinalizeDueInvoices(ctx context.Context, from, to time.Time) (int, error) {
-	if s == nil || s.db == nil {
-		return 0, fmt.Errorf("money service not initialized")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	pairs, err := s.db.Gen(ctx).ListMoneyAccountPairs(ctx, tid.UUID())
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, p := range pairs {
-		// Custom-credit balances (#475 qualified codes) are not billed — skip them.
-		if RequireBillingCurrency(normalizeCurrency(p.Currency)) != nil {
-			continue
-		}
-		if _, err := s.FinalizeInvoice(ctx, identity.CustomerID(p.CustomerID), p.Currency, from, to); err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
+	return s.finalizeInvoicePayers(ctx, func(gen.ListInvoicePayersRow) (time.Time, time.Time, error) {
+		return from, to, nil
+	})
 }
 
+// FinalizeDueInvoicesForBoundary finalizes the previous period of every
+// invoice payer under the merchant's billing_period_boundary; anniversary
+// periods are anchored on the payer's first recorded activity.
 func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, boundary string, now time.Time) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -692,20 +674,37 @@ func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, bound
 	if now.IsZero() {
 		now = s.now()
 	}
+	return s.finalizeInvoicePayers(ctx, func(p gen.ListInvoicePayersRow) (time.Time, time.Time, error) {
+		return PreviousInvoicePeriod(now, p.PeriodAnchor, boundary)
+	})
+}
+
+// finalizeInvoicePayers runs FinalizeInvoice over every (payer, currency)
+// ListInvoicePayers enumerates: ledger money movement OR catalog-priced usage
+// that finalize still has to rate. A usage-only payer (the metered platform
+// fee: zero-amount usage, no deposit or spend) has no ledger row until
+// FinalizeInvoice rates it, so enumerating ledger_transfers alone never
+// invoiced it. Rating stays inside FinalizeInvoice (exactly-once through the
+// #672 watermark); the enumeration is what had to widen.
+func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, period func(gen.ListInvoicePayersRow) (time.Time, time.Time, error)) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("money service not initialized")
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return 0, err
 	}
-	pairs, err := s.db.Gen(ctx).ListMoneyAccountPairs(ctx, tid.UUID())
+	payers, err := s.db.Gen(ctx).ListInvoicePayers(ctx, tid.UUID())
 	if err != nil {
 		return 0, err
 	}
 	count := 0
-	for _, p := range pairs {
+	for _, p := range payers {
+		// Custom-credit activity (#475 qualified codes) is not billed.
 		if RequireBillingCurrency(normalizeCurrency(p.Currency)) != nil {
 			continue
 		}
-		from, to, err := PreviousInvoicePeriod(now, p.PeriodAnchor, boundary)
+		from, to, err := period(p)
 		if err != nil {
 			return count, err
 		}

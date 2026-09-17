@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
+	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -205,4 +207,42 @@ func TestHTTPBindQueryNestedFiltersTimeAndUUID(t *testing.T) {
 	require.Equal(t, priceID, got.Filters.PriceID)
 	require.NotNil(t, got.Filters.After)
 	require.Equal(t, "2026-01-02", got.Filters.After.Format("2006-01-02"))
+}
+
+// A refusal the handler chose (4xx) is the contract answering as designed and
+// logs at info; only a 5xx logs as an error.
+func TestHTTPRefusalLogLevel(t *testing.T) {
+	hook := logtest.NewGlobal()
+	t.Cleanup(hook.Reset)
+	newReq := func() *Request {
+		return NewHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil), nil)
+	}
+	cases := []struct {
+		name  string
+		write func(*Request)
+		want  logrus.Level
+		code  int
+	}{
+		{"ErrorJSON 404", func(r *Request) { r.ErrorJSON(http.StatusNotFound, "product_not_found") }, logrus.InfoLevel, 404},
+		{"ErrorJSON 412", func(r *Request) { r.ErrorJSON(http.StatusPreconditionFailed, "invoice profile already exists") }, logrus.InfoLevel, 412},
+		{"AbortJSON 409", func(r *Request) { r.AbortJSON(http.StatusConflict, "conflict") }, logrus.InfoLevel, 409},
+		{"APIError 400", func(r *Request) {
+			r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeCard, payments.FailureCardDeclined, "declined"))
+		}, logrus.InfoLevel, 400},
+		{"ErrorJSON 500", func(r *Request) { r.ErrorJSON(http.StatusInternalServerError, "boom") }, logrus.ErrorLevel, 500},
+		{"APIError 503", func(r *Request) {
+			r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "unavailable", "down"))
+		}, logrus.ErrorLevel, 503},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hook.Reset()
+			tc.write(newReq())
+			entry := hook.LastEntry()
+			require.NotNil(t, entry)
+			require.Equal(t, tc.want, entry.Level)
+			require.Equal(t, tc.code, entry.Data["status"])
+			require.NotEmpty(t, entry.Data["request_id"])
+		})
+	}
 }

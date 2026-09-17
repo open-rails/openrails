@@ -78,6 +78,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 }
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
+
 SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
@@ -89,6 +90,9 @@ type GetMoneyAccountSettingsParams struct {
 	Currency   string
 }
 
+// openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
+// state (#237/#239/#240/#241/#298/#299/#302). amounts use the currency's internal
+// precision. currency is a system code; the Go registry is authority.
 func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccountSettingsParams) (OpenrailsMoneySetting, error) {
 	row := q.db.QueryRow(ctx, getMoneyAccountSettings, arg.MerchantID, arg.CustomerID, arg.Currency)
 	var i OpenrailsMoneySetting
@@ -131,47 +135,6 @@ func (q *Queries) InsertMoneyAccountSettingsIfAbsent(ctx context.Context, arg In
 		arg.Now,
 	)
 	return err
-}
-
-const listMoneyAccountPairs = `-- name: ListMoneyAccountPairs :many
-
-SELECT customer_id::uuid AS customer_id, currency, MIN(created_at)::timestamptz AS period_anchor
-FROM openrails.ledger_transfers
-WHERE merchant_id = $1 AND customer_id IS NOT NULL
-GROUP BY customer_id, currency
-ORDER BY customer_id, currency
-`
-
-type ListMoneyAccountPairsRow struct {
-	CustomerID   uuid.UUID
-	Currency     string
-	PeriodAnchor time.Time
-}
-
-// openrails.money_settings: per-(tenant, payer, currency) spend policy + money-in
-// state (#237/#239/#240/#241/#298/#299/#302). amounts use the currency's internal
-// precision. currency is a system code; the Go registry is authority.
-// Distinct (payer, currency) pairs to finalize invoices for (#472). The #512
-// ledger transfers are the durable source of every payer with money activity,
-// in every currency (the single-entry money_transactions table is gone).
-func (q *Queries) ListMoneyAccountPairs(ctx context.Context, merchantID uuid.UUID) ([]ListMoneyAccountPairsRow, error) {
-	rows, err := q.db.Query(ctx, listMoneyAccountPairs, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListMoneyAccountPairsRow
-	for rows.Next() {
-		var i ListMoneyAccountPairsRow
-		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodAnchor); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
