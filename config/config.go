@@ -250,6 +250,45 @@ type Config struct {
 	// "127.0.0.1/32". Env: CCBILL_WEBHOOK_IP_ALLOWLIST (YAML list or a JSON
 	// array string).
 	CCBillWebhookIPAllowlist []string `koanf:"ccbill_webhook_ip_allowlist,omitempty"`
+
+	// ProviderSandbox points sandbox-posture provider clients at loopback
+	// gateways so a whole process (standalone or embedded) can be qualified
+	// against fake providers over its real wire paths. Honored only under
+	// test_mode=sandbox; a live posture refuses it at load.
+	ProviderSandbox *ProviderSandboxConfig `koanf:"provider_sandbox,omitempty"`
+}
+
+// ProviderSandboxConfig names loopback provider gateways for sandbox runs.
+type ProviderSandboxConfig struct {
+	// NMIGatewayURL replaces the NMI sandbox direct-post, query and v5 base
+	// URLs for every store-armed NMI client (checkout sales, invoice
+	// collection, payment-method updates and their verify reads). Env:
+	// PROVIDER_SANDBOX_NMI_GATEWAY_URL.
+	NMIGatewayURL string `koanf:"nmi_gateway_url,omitempty"`
+}
+
+// SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
+// run, or "" for the real sandbox endpoints.
+func (cfg *Config) SandboxNMIGatewayURL() string {
+	if cfg == nil || cfg.ProviderSandbox == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ProviderSandbox.NMIGatewayURL)
+}
+
+func validateProviderSandbox(cfg *Config) error {
+	gateway := cfg.SandboxNMIGatewayURL()
+	if gateway == "" {
+		return nil
+	}
+	if cfg.TestMode == CredentialPostureLive {
+		return fmt.Errorf("provider_sandbox.nmi_gateway_url is refused with test_mode=live: a loopback gateway is a sandbox-only seam")
+	}
+	u, err := url.Parse(gateway)
+	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("invalid provider_sandbox.nmi_gateway_url %q: must be an absolute http(s) URL", gateway)
+	}
+	return nil
 }
 
 // CatalogReconciliationSchedule resolves the catalog reconciliation loop
@@ -1317,6 +1356,9 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("encryption config validation failed: %w", err)
 	}
 
+	if err := validateProviderSandbox(cfg); err != nil {
+		return err
+	}
 	if err := validateSecretBackend(cfg); err != nil {
 		return fmt.Errorf("secret_backend config validation failed: %w", err)
 	}
