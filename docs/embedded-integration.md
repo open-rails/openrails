@@ -214,6 +214,14 @@ if err := jobs.Start(ctx); err != nil { log.Fatal(err) }
 `RunWorkers` is a no-op for a host-owned client. `rt.CheckJobProgress(ctx)` gives
 the live fleet verdict for a health endpoint.
 
+**Inserting an engine job.** OpenRails registers its own periodic jobs on the
+client you return. The one job a host inserts itself is the invoice sweep:
+`jobs.Insert(ctx, embed.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
+runs the daily period finalize now (rates reported usage and issues every
+payer's previous-period invoice); `Collect: true` runs the collection pass. Runs
+are idempotent. Every other job kind is an engine-internal schedule and stays
+private.
+
 **No job clock.** Your `river.Config.JobTimeout` (River's default is one minute)
 does not apply to OpenRails' workers: each declares `Timeout() = -1` and ends
 on observed lack of progress instead — a job that reports no progress past

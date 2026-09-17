@@ -51,6 +51,10 @@ func WithAdminConsole(assets fs.FS) Option {
 // RouteSet names a mountable billing HTTP route group.
 type RouteSet = embedded.RouteSet
 
+// InvoiceSweepArgs lets a host that owns River insert one run of the engine's
+// invoice job; see embedded.InvoiceSweepArgs.
+type InvoiceSweepArgs = embedded.InvoiceSweepArgs
+
 const (
 	// RouteSetCheckout mounts buyer-facing products, prices, config, and checkout routes.
 	RouteSetCheckout = embedded.RouteSetCheckout
