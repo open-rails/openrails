@@ -1403,7 +1403,6 @@ func validateMerchantSource(cfg *Config, isDev bool) error {
 	return nil
 }
 
-
 // validateSecretBackend checks the declared secret backend is valid and reachable.
 // secret_backend=vault needs a Vault connection to serve the KV store (#661).
 func validateSecretBackend(cfg *Config) error {
