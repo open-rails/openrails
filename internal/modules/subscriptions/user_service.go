@@ -3,7 +3,6 @@ package subscriptions
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -19,10 +18,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
@@ -119,15 +116,16 @@ func (s *UserSubscriptionService) now() time.Time {
 	return time.Now()
 }
 
-// UserSubscriptionResponse represents a user's subscription with enriched data
+// UserSubscriptionResponse is a customer's subscription with the catalog rows
+// its wire projection needs. The HTTP layer serves it as openrails.Subscription.
 type UserSubscriptionResponse struct {
 	*models.Subscription
 	// EvaluatedAt binds derived eligibility flags to the service's business clock.
-	EvaluatedAt      time.Time        `json:"-"`
-	Price            *models.Price    `json:"-"`
-	ScheduledPrice   *models.Price    `json:"-"`
-	ScheduledProduct *models.Product  `json:"-"`
-	Access           *UserAccessGrant `json:"access,omitempty"`
+	EvaluatedAt      time.Time
+	Price            *models.Price
+	ScheduledPrice   *models.Price
+	ScheduledProduct *models.Product
+	Access           *openrails.SubscriptionAccess
 }
 
 // EvaluationTime defaults only for responses constructed without a service.
@@ -137,177 +135,6 @@ func (r *UserSubscriptionResponse) EvaluationTime() time.Time {
 		return r.EvaluatedAt.UTC()
 	}
 	return time.Now().UTC()
-}
-
-// MarshalJSON keeps user-facing subscription payloads on the same Stripe-like
-// resource contract as catalog endpoints while preserving model pointers for
-// internal service callers.
-func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
-	type userSubscriptionJSON struct {
-		ID                    uuid.UUID                 `json:"id,omitempty"`
-		CustomerID            string                    `json:"customer_id,omitempty"`
-		ProductID             uuid.UUID                 `json:"product_id,omitempty"`
-		PriceID               uuid.UUID                 `json:"price_id,omitempty"`
-		ScheduledPriceID      *uuid.UUID                `json:"scheduled_price_id,omitempty"`
-		Status                models.SubscriptionStatus `json:"status,omitempty"`
-		StartedAt             time.Time                 `json:"started_at,omitempty"`
-		EndedAt               *time.Time                `json:"ended_at,omitempty"`
-		CurrentPeriodStartsAt *time.Time                `json:"current_period_starts_at,omitempty"`
-		CurrentPeriodEndsAt   *time.Time                `json:"current_period_ends_at,omitempty"`
-		Rail                  models.Rail               `json:"rail,omitempty"`
-		CancelFeedback        *string                   `json:"cancel_feedback,omitempty"`
-		CancelType            *models.CancelType        `json:"cancel_type,omitempty"`
-		CancelledAt           *time.Time                `json:"cancelled_at,omitempty"`
-		Resumable             bool                      `json:"resumable"`
-		CancelScheduled       bool                      `json:"cancel_scheduled"`
-		CancelMode            string                    `json:"cancel_mode,omitempty"`
-		CancelPortalURL       *string                   `json:"cancel_portal_url,omitempty"`
-		CreatedAt             time.Time                 `json:"created_at,omitempty"`
-		UpdatedAt             time.Time                 `json:"updated_at,omitempty"`
-		Price                 *api.PriceObject          `json:"price,omitempty"`
-		Product               *api.ProductObject        `json:"product,omitempty"`
-		ScheduledPrice        *api.PriceObject          `json:"scheduled_price,omitempty"`
-		ScheduledProduct      *api.ProductObject        `json:"scheduled_product,omitempty"`
-		Card                  *subscriptionCardJSON     `json:"card,omitempty"`
-		Access                *UserAccessGrant          `json:"access,omitempty"`
-	}
-
-	if r.Subscription != nil {
-		// Resumability surface — derived from the single shared predicate so the
-		// HTTP serialization stays in lockstep with the resume handler, the worker,
-		// and the library DTO.
-		now := r.EvaluationTime()
-		out := userSubscriptionJSON{
-			ID:                    r.Subscription.ID,
-			CustomerID:            r.Subscription.CustomerID.String(),
-			ProductID:             r.Subscription.ProductID,
-			PriceID:               r.Subscription.PriceID,
-			ScheduledPriceID:      r.Subscription.ScheduledPriceID,
-			Status:                r.Subscription.Status,
-			StartedAt:             r.Subscription.StartedAt,
-			EndedAt:               r.Subscription.EndedAt,
-			CurrentPeriodStartsAt: r.Subscription.CurrentPeriodStartsAt,
-			CurrentPeriodEndsAt:   r.Subscription.CurrentPeriodEndsAt,
-			Rail:                  r.Subscription.Rail,
-			CancelFeedback:        r.Subscription.CancelFeedback,
-			CancelType:            r.Subscription.CancelType,
-			CancelledAt:           r.Subscription.CancelledAt,
-			Resumable:             Resumable(r.Subscription, now),
-			CancelScheduled:       CancelScheduled(r.Subscription, now),
-			CancelMode:            string(CancelModeFor(r.Subscription, now)),
-			CancelPortalURL:       CancelPortalURL(r.Subscription, now),
-			CreatedAt:             r.Subscription.CreatedAt,
-			UpdatedAt:             r.Subscription.UpdatedAt,
-			Access:                r.Access,
-		}
-		if r.Price != nil {
-			price := priceToAPIObject(r.Price)
-			out.Price = &price
-		}
-		if r.Subscription.Product != nil {
-			product := productToAPIObject(r.Subscription.Product)
-			out.Product = &product
-		}
-		if r.ScheduledPrice != nil {
-			price := priceToAPIObject(r.ScheduledPrice)
-			out.ScheduledPrice = &price
-		}
-		if r.ScheduledProduct != nil {
-			product := productToAPIObject(r.ScheduledProduct)
-			out.ScheduledProduct = &product
-		}
-		out.Card = subscriptionCardFromPaymentMethod(r.Subscription.PaymentMethod)
-		return json.Marshal(out)
-	}
-
-	return json.Marshal(userSubscriptionJSON{Access: r.Access})
-}
-
-// subscriptionCardJSON is the card on the subscription's current payment method,
-// served purely from the DB (the linked openrails.payment_methods row). No Stripe
-// fetch.
-type subscriptionCardJSON struct {
-	Brand    string `json:"brand,omitempty"`
-	Last4    string `json:"last4,omitempty"`
-	ExpMonth *int   `json:"exp_month,omitempty"`
-	ExpYear  *int   `json:"exp_year,omitempty"`
-}
-
-func subscriptionCardFromPaymentMethod(pm *models.PaymentMethod) *subscriptionCardJSON {
-	if pm == nil {
-		return nil
-	}
-	brand, last4 := "", ""
-	if pm.CardType != nil {
-		brand = *pm.CardType
-	}
-	if pm.LastFour != nil {
-		last4 = *pm.LastFour
-	}
-	if brand == "" && last4 == "" {
-		return nil
-	}
-	card := &subscriptionCardJSON{Brand: brand, Last4: last4}
-	if pm.ExpiryDate != nil {
-		if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
-			card.ExpMonth = &month
-			card.ExpYear = &year
-		}
-	}
-	return card
-}
-
-func priceToAPIObject(p *models.Price) api.PriceObject {
-	var recurring *api.RecurringInfo
-	if ch := p.RecurringCycleHours(); ch != nil {
-		recurring = &api.RecurringInfo{Interval: sharedformat.BillingCycleHoursToInterval(*ch)}
-	}
-	priceType := "one_time"
-	if recurring != nil {
-		priceType = "recurring"
-	}
-	return api.PriceObject{
-		ID:         openrails.PriceID(p.ID),
-		Object:     "price",
-		UnitAmount: p.Amount,
-		Currency:   p.Currency,
-		Type:       priceType,
-		Recurring:  recurring,
-		Product:    openrails.ProductID(p.ProductID),
-		Active:     p.IsPurchasable(),
-		Metadata:   map[string]string{},
-		Created:    api.ToUnix(p.CreatedAt),
-	}
-}
-
-func productToAPIObject(p *models.Product) api.ProductObject {
-	return api.ProductObject{
-		ID:               openrails.ProductID(p.ID),
-		Object:           "product",
-		Key:              p.Key,
-		Name:             p.DisplayName,
-		Description:      p.Description,
-		EntitlementsSpec: p.EntitlementsSpec,
-		TierGroup:        p.TierGroup,
-		TierRank:         p.TierRank,
-		Active:           p.IsPurchasable(),
-		Metadata:         map[string]string{},
-		Created:          api.ToUnix(p.CreatedAt),
-		Updated:          api.ToUnix(p.UpdatedAt),
-	}
-}
-
-// UserAccessGrant summarizes how the user currently has premium access (subscription vs one-off entitlement).
-type UserAccessGrant struct {
-	Kind               string                        `json:"kind"`
-	Entitlement        string                        `json:"entitlement"`
-	SourceType         *models.EntitlementSourceType `json:"source_type,omitempty"`
-	SourceID           *uuid.UUID                    `json:"source_id,omitempty"`
-	SubscriptionID     *uuid.UUID                    `json:"subscription_id,omitempty"`
-	Rail               string                        `json:"rail,omitempty"`
-	RailSubscriptionID *string                       `json:"-"`
-	StartAt            time.Time                     `json:"start_at"`
-	EndAt              *time.Time                    `json:"end_at,omitempty"`
 }
 
 // GetUserSubscription retrieves the current subscription for a user with enriched data
@@ -333,8 +160,8 @@ func (s *UserSubscriptionService) GetUserSubscription(ctx context.Context, userI
 }
 
 // GetUserAccessStatus composes all active access grants (subscriptions + entitlements) for a user.
-func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userID string) ([]*UserAccessGrant, error) {
-	grants := make([]*UserAccessGrant, 0, 2)
+func (s *UserSubscriptionService) GetUserAccessStatus(ctx context.Context, userID string) ([]*openrails.SubscriptionAccess, error) {
+	grants := make([]*openrails.SubscriptionAccess, 0, 2)
 	skipSubscriptionIDs := make(map[uuid.UUID]struct{})
 	if s.SubscriptionService != nil {
 		if sub, err := s.SubscriptionService.GetActiveSubscription(ctx, userID); err == nil {
@@ -382,9 +209,8 @@ func (s *UserSubscriptionService) GetUserSubscriptionByID(ctx context.Context, u
 
 // GetUserSubscriptionHistory retrieves subscription history for a user
 func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context, userID string, queryOpts *query.QueryOptions[GetSubscriptionsFilters]) ([]*UserSubscriptionResponse, int64, error) {
-	// Set user filter
-	if queryOpts.Filters.UserID == "" {
-		queryOpts.Filters.UserID = userID
+	if queryOpts.Filters.CustomerID == "" {
+		queryOpts.Filters.CustomerID = userID
 	}
 
 	subscriptions, total, err := s.SubscriptionService.GetSubscribers(ctx, *queryOpts)
@@ -395,9 +221,7 @@ func (s *UserSubscriptionService) GetUserSubscriptionHistory(ctx context.Context
 
 	responses := make([]*UserSubscriptionResponse, len(subscriptions))
 	for i, sub := range subscriptions {
-		responses[i] = &UserSubscriptionResponse{
-			Subscription: sub,
-		}
+		responses[i] = &UserSubscriptionResponse{Subscription: sub, Access: accessFromSubscription(sub)}
 		s.enrichSubscriptionResponse(ctx, responses[i])
 	}
 
@@ -435,9 +259,8 @@ func (s *UserSubscriptionService) enrichSubscriptionResponse(ctx context.Context
 
 // GetUserPayments retrieves one-off purchases for a user
 func (s *UserSubscriptionService) GetUserPayments(ctx context.Context, userID string, queryOpts *query.QueryOptions[payments.GetPaymentsFilters]) ([]*models.Payment, int64, error) {
-	// Set user filter
-	if queryOpts.Filters.UserID == "" {
-		queryOpts.Filters.UserID = userID
+	if queryOpts.Filters.CustomerID == "" {
+		queryOpts.Filters.CustomerID = userID
 	}
 
 	purchases, total, err := s.PaymentService.GetPayments(ctx, *queryOpts)
@@ -594,7 +417,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		EventType:  models.NotificationPremiumEnded,
-		Data:       map[string]any{"reason": string(PremiumEndReasonUserCancel)},
+		Data:       openrails.NotificationData{Reason: string(PremiumEndReasonUserCancel)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{
@@ -608,23 +431,16 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	return nil
 }
 
-func accessFromSubscription(sub *models.Subscription) *UserAccessGrant {
-	grant := &UserAccessGrant{
-		Kind:        "subscription",
-		Entitlement: "premium",
-		Rail:        string(sub.Rail),
-	}
-	if subID := sub.ID; subID != uuid.Nil {
-		grant.SubscriptionID = &subID
-	}
-	if sub.RailSubscriptionID != "" {
-		psid := sub.RailSubscriptionID
-		grant.RailSubscriptionID = &psid
+func accessFromSubscription(sub *models.Subscription) *openrails.SubscriptionAccess {
+	grant := &openrails.SubscriptionAccess{
+		Kind:           "subscription",
+		Entitlement:    "premium",
+		Rail:           string(sub.Rail),
+		SubscriptionID: openrails.SubscriptionID(sub.ID),
+		StartAt:        sub.StartedAt,
 	}
 	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
 		grant.StartAt = *sub.CurrentPeriodStartsAt
-	} else {
-		grant.StartAt = sub.StartedAt
 	}
 	if sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.IsZero() {
 		grant.EndAt = sub.CurrentPeriodEndsAt
@@ -632,7 +448,7 @@ func accessFromSubscription(sub *models.Subscription) *UserAccessGrant {
 	return grant
 }
 
-func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, userID string) (*UserAccessGrant, error) {
+func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, userID string) (*openrails.SubscriptionAccess, error) {
 	grants, err := s.entitlementAccessGrants(ctx, userID, nil)
 	if err != nil {
 		return nil, err
@@ -643,7 +459,7 @@ func (s *UserSubscriptionService) activeEntitlementAccess(ctx context.Context, u
 	return nil, nil
 }
 
-func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, userID string, skipSubs map[uuid.UUID]struct{}) ([]*UserAccessGrant, error) {
+func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, userID string, skipSubs map[uuid.UUID]struct{}) ([]*openrails.SubscriptionAccess, error) {
 	if s.EntitlementService == nil {
 		return nil, nil
 	}
@@ -651,31 +467,29 @@ func (s *UserSubscriptionService) entitlementAccessGrants(ctx context.Context, u
 	if err != nil {
 		return nil, fmt.Errorf("failed to list entitlements: %w", err)
 	}
-	grants := make([]*UserAccessGrant, 0, len(ents))
+	grants := make([]*openrails.SubscriptionAccess, 0, len(ents))
 	for _, ent := range ents {
 		if ent.Entitlement == "" {
 			continue
 		}
-		if ent.SourceType == models.EntitlementSourceSubscription && ent.SourceID != nil {
+		fromSubscription := ent.SourceType == models.EntitlementSourceSubscription && ent.SourceID != nil
+		if fromSubscription {
 			if _, ok := skipSubs[*ent.SourceID]; ok {
 				continue
 			}
 		}
-		grant := &UserAccessGrant{
+		grant := &openrails.SubscriptionAccess{
 			Kind:        "entitlement",
 			Entitlement: ent.Entitlement,
+			SourceType:  string(ent.SourceType),
 			StartAt:     ent.StartAt,
 			EndAt:       ent.EndAt,
 		}
-		if ent.SourceType != "" {
-			src := ent.SourceType
-			grant.SourceType = &src
-			if ent.SourceType == models.EntitlementSourceSubscription && ent.SourceID != nil {
-				grant.SubscriptionID = ent.SourceID
-			}
-		}
 		if ent.SourceID != nil {
-			grant.SourceID = ent.SourceID
+			grant.SourceID = openrails.SourceRef(string(ent.SourceType), ent.SourceID.String())
+		}
+		if fromSubscription {
+			grant.SubscriptionID = openrails.SubscriptionID(*ent.SourceID)
 		}
 		grants = append(grants, grant)
 	}

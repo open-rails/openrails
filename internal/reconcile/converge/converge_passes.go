@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -160,7 +161,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Severity:   "critical",
 			SubjectKey: "payment:" + p.ID.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"payment_id": p.ID.String(), "amount": p.Amount, "currency": p.Currency, "cause": "grantable_payment_without_grant"},
+			Evidence:   map[string]any{"payment_id": openrails.PaymentID(p.ID).String(), "amount": p.Amount, "currency": p.Currency, "cause": "grantable_payment_without_grant"},
 			// surface-only: re-granting re-runs derive-1 (product-spec-dependent).
 		})
 	}
@@ -185,7 +186,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Severity:   "high",
 			SubjectKey: "subscription:" + s.ID.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"subscription_id": s.ID.String(), "status": string(s.Status), "cause": "subscription_without_grant"},
+			Evidence:   map[string]any{"subscription_id": openrails.SubscriptionID(s.ID).String(), "status": string(s.Status), "cause": "subscription_without_grant"},
 			Repair:     func(ctx context.Context) error { return gl.DeriveSubscriptionGrant(ctx, s) },
 		})
 	}
@@ -206,7 +207,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Severity:   "high",
 			SubjectKey: "payment:" + w.ID.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"payment_id": w.ID.String(), "cause": "wallet_payment_without_grant"},
+			Evidence:   map[string]any{"payment_id": openrails.PaymentID(w.ID).String(), "cause": "wallet_payment_without_grant"},
 			Repair:     func(ctx context.Context) error { return gl.DeriveWalletGrant(ctx, w) },
 		})
 	}
@@ -219,7 +220,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		g := refunded[i]
 		pid := ""
 		if g.PaymentID != nil {
-			pid = g.PaymentID.String()
+			pid = openrails.PaymentID(*g.PaymentID).String()
 		}
 		out = append(out, ConvergeFinding{
 			Type:       "derive.grant.excess",
@@ -260,7 +261,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			SubjectKey: "subscription:" + s.ID.String(),
 			Provider:   "self",
 			Evidence: map[string]any{
-				"subscription_id": s.ID.String(), "customer_id": s.CustomerID.String(),
+				"subscription_id": openrails.SubscriptionID(s.ID).String(), "customer_id": s.CustomerID.String(),
 				"direction": "grant", "missing_features": json.RawMessage(s.EntitlementsSpec),
 			},
 			Repair: func(ctx context.Context) error {
@@ -299,7 +300,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			SubjectKey: "subscription:" + s.ID.String(),
 			Provider:   "self",
 			Evidence: map[string]any{
-				"subscription_id": s.ID.String(), "customer_id": s.CustomerID.String(),
+				"subscription_id": openrails.SubscriptionID(s.ID).String(), "customer_id": s.CustomerID.String(),
 				"direction": "standing", "cause": "active_auto_renew_bounded_access_expired",
 			},
 			Repair: func(ctx context.Context) error {
@@ -330,7 +331,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		d := dead[i]
 		closeAt := now // no recorded bound: close at detection time
 		evidence := map[string]any{
-			"subscription_id": d.ID.String(), "customer_id": d.CustomerID.String(),
+			"subscription_id": openrails.SubscriptionID(d.ID).String(), "customer_id": d.CustomerID.String(),
 			"status": string(d.Status), "direction": "revoke",
 		}
 		if bound := latestTime(d.CurrentPeriodEndsAt, d.EndedAt); bound != nil {
@@ -388,16 +389,16 @@ func latestTime(a, b *time.Time) *time.Time {
 // as an ADMIN finding carrying the #692 recommendation: revoke (default) or
 // record an admin grant instead.
 func unjustifiedEntitlementFinding(o *gen.ListUnjustifiedEntitlementWindowsRow) ConvergeFinding {
-	productID := ""
+	var productID openrails.ProductID
 	if o.PaymentProductID != nil {
-		productID = o.PaymentProductID.String()
+		productID = openrails.ProductID(*o.PaymentProductID)
 	}
-	alt := recommend.RecordAdminGrantRec(o.CustomerID.String(), productID, "known-legitimate access")
+	alt := recommend.RecordAdminGrantRec(openrails.CustomerID(o.CustomerID), productID, "known-legitimate access")
 	rec := recommend.RevokeEntitlementRec(o.EntitlementID.String(), "", &alt)
 
 	ev := map[string]any{
 		"entitlement_id": o.EntitlementID.String(), "customer_id": o.CustomerID.String(),
-		"entitlement": o.Entitlement, "source_type": o.SourceType, "source_id": o.SourceID.String(),
+		"entitlement": o.Entitlement, "source_type": o.SourceType, "source_id": openrails.SourceRef(o.SourceType, o.SourceID.String()),
 		"cause":               o.Cause,
 		recommend.EvidenceKey: rec.Map(),
 	}
@@ -477,7 +478,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Severity:   "low",
 			SubjectKey: "checkout_session:" + id.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"checkout_session_id": id.String()},
+			Evidence:   map[string]any{"checkout_session_id": openrails.CheckoutSessionID(id).String()},
 			Repair: func(ctx context.Context) error {
 				_, e := q.ExpireCheckoutSessionByID(ctx, gen.ExpireCheckoutSessionByIDParams{
 					MerchantID: scope.Merchant.UUID(), ID: id, Now: p.e.Now(),
@@ -531,7 +532,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		}, now, 0)
 
 		var ftype, severity string
-		evidence := map[string]any{"subscription_id": row.ID.String(), "cause": d.Reason}
+		evidence := map[string]any{"subscription_id": openrails.SubscriptionID(row.ID).String(), "cause": d.Reason}
 		switch d.Kind {
 		case reconcile.TransitionPastDue:
 			ftype, severity = "life.subscription.period_overdue", "medium"
@@ -586,9 +587,9 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			SubjectKey: "subscription:" + row.ID.String(),
 			Provider:   "self",
 			Evidence: map[string]any{
-				"subscription_id": row.ID.String(),
+				"subscription_id": openrails.SubscriptionID(row.ID).String(),
 				"rail":            row.Rail,
-				"payment_id":      row.PaymentID.String(),
+				"payment_id":      openrails.PaymentID(row.PaymentID).String(),
 				"transaction_id":  row.TransactionID,
 				"purchased_at":    row.PurchasedAt.UTC(),
 				"pending_since":   row.CreatedAt.UTC(),
@@ -624,7 +625,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Severity:     "low",
 			SubjectKey:   "subscription:" + subID.String(),
 			Provider:     "self",
-			Evidence:     map[string]any{"subscription_id": subID.String()},
+			Evidence:     map[string]any{"subscription_id": openrails.SubscriptionID(subID).String()},
 			Repair: func(ctx context.Context) error {
 				// Terminal cancel through the shared core. A never-confirmed pending
 				// sub has no entitlements/money to unwind (RevokeSources empty); the
@@ -670,7 +671,7 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Severity:   "medium",
 			SubjectKey: "subscription:" + subID.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"subscription_id": subID.String(), "next_retry_at": now},
+			Evidence:   map[string]any{"subscription_id": openrails.SubscriptionID(subID).String(), "next_retry_at": now},
 			Repair: func(ctx context.Context) error {
 				_, e := q.SetSubscriptionNextRetry(ctx, gen.SetSubscriptionNextRetryParams{
 					ID: subID, MerchantID: scope.Merchant.UUID(), NextRetryAt: p.e.Now(),
@@ -854,7 +855,7 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 			Provider:   "self",
 			Evidence: map[string]any{
 				"customer_id": cust.String(), "entitlement": entName,
-				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": c.SourceID.String(),
+				"ended_at": closedAt.Format(time.RFC3339), "source_type": c.SourceType, "source_id": openrails.SourceRef(c.SourceType, c.SourceID.String()),
 			},
 			Repair: func(ctx context.Context) error {
 				ctx = merchant.WithID(ctx, scope.Merchant)
@@ -862,11 +863,11 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 					ID:         uuidutil.NewV7(),
 					CustomerID: cust,
 					EventType:  models.NotificationPremiumEnded,
-					Data: map[string]any{
-						"reason":      string(subscriptions.PremiumEndReasonAccessEnded),
-						"ended_at":    closedAt.Format(time.RFC3339),
-						"entitlement": entName,
-						"source":      "converge_notify",
+					Data: openrails.NotificationData{
+						Reason:      string(subscriptions.PremiumEndReasonAccessEnded),
+						EndedAt:     &closedAt,
+						Entitlement: entName,
+						Source:      "converge_notify",
 					},
 				})
 			},
@@ -928,7 +929,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			Provider:   "self",
 			Evidence: map[string]any{
 				"entitlement_id": entID.String(), "customer_id": userID,
-				"entitlement": entitlement, "source_type": sourceType, "source_id": sourceID.String(),
+				"entitlement": entitlement, "source_type": sourceType, "source_id": openrails.SourceRef(sourceType, sourceID.String()),
 			},
 			// surface-only: a dangling source has no safe auto-repair (it may be a
 			// valid historical record or a real corruption) — an admin decides.
@@ -959,11 +960,11 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 		d := dupCharges[i]
 		ids := make([]string, len(d.PaymentIds))
 		for j, id := range d.PaymentIds {
-			ids[j] = id.String()
+			ids[j] = openrails.PaymentID(id).String()
 		}
 		// payment_ids is ordered purchased_at DESC: ids[0] is the later charge —
 		// the default refund target (operator can override before approving).
-		rec := recommend.CancelAndRefundRec("", ids[0])
+		rec := recommend.CancelAndRefundRec(openrails.SubscriptionID{}, openrails.PaymentID(d.PaymentIds[0]))
 		out = append(out, ConvergeFinding{
 			Type:       "consistency.duplicate.provider_charge",
 			Shape:      ShapeExcess,
@@ -972,7 +973,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			SubjectKey: "provider_charge:" + d.UserID + ":" + d.ProductID.String() + ":" + d.FirstDate.Format("2006-01"),
 			Provider:   "self",
 			Evidence: map[string]any{
-				"customer_id": d.UserID, "product_id": d.ProductID.String(), "product_key": d.ProductKey,
+				"customer_id": d.UserID, "product_id": openrails.ProductID(d.ProductID).String(), "product_key": d.ProductKey,
 				"charge_count": d.Count, "payment_ids": ids, "total_amount": d.TotalAmount,
 				"first_date": d.FirstDate, "last_date": d.LastDate,
 				recommend.EvidenceKey: rec.Map(),
@@ -1039,17 +1040,37 @@ func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeF
 	if err := json.Unmarshal(d.Purchases, &purchases); err != nil {
 		return ConvergeFinding{}, fmt.Errorf("con: decode duplicate ownership purchases: %w", err)
 	}
+	// The query spells ids as bare UUIDs; the finding spells them typed.
+	var subID openrails.SubscriptionID
+	var refundPay openrails.PaymentID
+	for i := range purchases {
+		p := &purchases[i]
+		p.SourceID = openrails.SourceRef(p.SourceType, p.SourceID)
+		if p.PaymentID != nil {
+			if u, err := uuid.Parse(*p.PaymentID); err == nil {
+				typed := openrails.PaymentID(u).String()
+				p.PaymentID = &typed
+			}
+		}
+	}
 	later := purchases[len(purchases)-1]
-	subID, refundPay := "", ""
 	if later.SourceType == "subscription" {
-		subID = later.SourceID
+		if id, err := openrails.ParseSubscriptionID(later.SourceID); err == nil {
+			subID = id
+		}
 	}
 	if later.PaymentID != nil {
-		refundPay = *later.PaymentID
+		if id, err := openrails.ParsePaymentID(*later.PaymentID); err == nil {
+			refundPay = id
+		}
 	}
-	productID := ""
+	productID, subjectProduct := "", ""
 	if d.ProductID != nil {
-		productID = d.ProductID.String()
+		productID, subjectProduct = openrails.ProductID(*d.ProductID).String(), d.ProductID.String()
+	}
+	purchasesJSON, err := json.Marshal(purchases)
+	if err != nil {
+		return ConvergeFinding{}, fmt.Errorf("con: encode duplicate ownership purchases: %w", err)
 	}
 
 	descs := make([]string, len(purchases))
@@ -1061,9 +1082,9 @@ func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeF
 
 	ev := map[string]any{
 		"customer_id": d.CustomerID.String(), "product_id": productID, "product_key": d.ProductKey,
-		"grant_count": d.Count, "purchases": json.RawMessage(d.Purchases),
+		"grant_count": d.Count, "purchases": json.RawMessage(purchasesJSON),
 	}
-	if subID != "" || refundPay != "" {
+	if !subID.IsZero() || !refundPay.IsZero() {
 		rec := recommend.CancelAndRefundRec(subID, refundPay)
 		ev[recommend.EvidenceKey] = rec.Map()
 	}
@@ -1072,7 +1093,7 @@ func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeF
 		Shape:             ShapeExcess,
 		Class:             ClassAdmin,
 		Severity:          "critical",
-		SubjectKey:        "ownership:" + d.CustomerID.String() + ":" + productID,
+		SubjectKey:        "ownership:" + d.CustomerID.String() + ":" + subjectProduct,
 		Provider:          "self",
 		Evidence:          ev,
 		RecommendedAction: prose,

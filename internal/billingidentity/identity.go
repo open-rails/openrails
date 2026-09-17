@@ -6,13 +6,15 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 )
 
-// CustomerID identifies an openrails.customers row: the OpenRails
-// payable subject whose balance, invoices, reservations, and entitlements are
-// recorded. It is distinct from any invoker or operator identity so the compiler
+// CustomerID identifies an openrails.customers row: the OpenRails payable
+// subject whose balance, invoices, reservations, and entitlements are
+// recorded. It is the shared wire type openrails.CustomerID (one family, one
+// spelling), distinct from any invoker or operator identity so the compiler
 // rejects passing the wrong one.
-type CustomerID uuid.UUID
+type CustomerID = openrails.CustomerID
 
 // InvokerType classifies whether an invoker is the payer acting directly or a
 // delegated principal using the payer's billing authority.
@@ -26,15 +28,6 @@ const (
 	// wasted-spend reports use payer grace then charge overage.
 	InvokerTypePayer InvokerType = "payer"
 )
-
-// String returns the canonical string form of the customer id.
-func (id CustomerID) String() string { return uuid.UUID(id).String() }
-
-// UUID returns the underlying uuid.UUID for use in queries.
-func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
-
-// IsZero reports whether the customer id is unset.
-func (id CustomerID) IsZero() bool { return uuid.UUID(id) == uuid.Nil }
 
 // NormalizeInvokerType treats empty/unknown values as delegated. That fails
 // closed into the stricter abuse cutoff unless the host explicitly marks the

@@ -10,8 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func ptrTime(t time.Time) *time.Time { return &t }
-
 func baseSub(rail models.Rail, status models.SubscriptionStatus) *models.Subscription {
 	return &models.Subscription{
 		ID:         uuid.New(),

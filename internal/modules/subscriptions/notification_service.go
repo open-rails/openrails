@@ -2,10 +2,7 @@ package subscriptions
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -156,18 +153,14 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		return s.emailService.SendSubscriptionRenewed(ctx, notification.CustomerID.String())
 	case models.NotificationPremiumEnded:
 		reason := PremiumEndReasonUnknown
-		if notification.Data != nil {
-			if r, ok := notification.Data["reason"].(string); ok {
-				reason = ParsePremiumEndReason(r)
-			}
+		if notification.Data.Reason != "" {
+			reason = ParsePremiumEndReason(notification.Data.Reason)
 		}
 		if reason == PremiumEndReasonAccessEnded {
 			// #789: subscription-row-free path; ended_at rides in the row data.
 			endedAt := s.emailService.now().UTC()
-			if raw, ok := notification.Data["ended_at"].(string); ok {
-				if t, err := time.Parse(time.RFC3339, raw); err == nil {
-					endedAt = t
-				}
+			if notification.Data.EndedAt != nil {
+				endedAt = notification.Data.EndedAt.UTC()
 			}
 			return s.emailService.SendAccessEnded(ctx, notification.CustomerID.String(), endedAt)
 		}
@@ -175,41 +168,20 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	case models.NotificationPaymentMethodFailed:
 		return s.emailService.SendPaymentFailed(ctx, notification.CustomerID.String())
 	case models.NotificationOneOffPurchaseCompleted:
-		if notification.Data == nil {
-			log.WithContext(ctx).WithField("user_id", notification.CustomerID.String()).Warn("one-off purchase notification missing data payload")
+		_, email, err := s.emailService.getUserEmail(ctx, notification.CustomerID.String())
+		if err != nil || email == "" {
+			log.WithContext(ctx).WithField("user_id", notification.CustomerID.String()).Warn("one-off purchase notification: no email on the profile")
 			return nil
 		}
-
-		email, _ := notification.Data["user_email"].(string)
-		if email == "" {
-			if uname, mail, err := s.emailService.getUserEmail(ctx, notification.CustomerID.String()); err == nil && mail != "" {
-				_ = uname
-				email = mail
-			}
+		if notification.Data.Amount == nil {
+			return fmt.Errorf("one-off purchase notification %s has no amount", notification.ID)
 		}
-		if email == "" {
-			log.WithContext(ctx).WithField("user_id", notification.CustomerID.String()).Warn("one-off purchase notification missing user email and profile lookup failed")
-			return nil
-		}
-
-		// amount_micros is a decimal INTEGER STRING, never a JSON number: a
-		// JSONB round-trip decodes numbers as float64, and no monetary value
-		// may pass through a float (#818). A malformed amount fails the
-		// delivery rather than emailing a fabricated one.
-		amountMicros, err := notificationAmountMicros(notification.Data["amount_micros"])
-		if err != nil {
-			return fmt.Errorf("one-off purchase notification amount: %w", err)
-		}
-		currency, _ := notification.Data["currency"].(string)
-		productName, _ := notification.Data["product_name"].(string)
-		paymentMethod, _ := notification.Data["payment_method"].(string)
-
 		return s.emailService.SendOneOffPurchaseReceipt(ctx, OneOffPurchaseEmailData{
 			UserEmail:     email,
-			AmountMicros:  amountMicros,
-			Currency:      currency,
-			ProductName:   productName,
-			PaymentMethod: paymentMethod,
+			AmountMicros:  *notification.Data.Amount,
+			Currency:      notification.Data.Currency,
+			ProductName:   notification.Data.ProductName,
+			PaymentMethod: notification.Data.PaymentMethod,
 			IsPremium:     true,
 		})
 	case models.NotificationPaymentMethodAutoUpdated:
@@ -224,27 +196,6 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 	default:
 		log.WithContext(ctx).WithField("event_type", notification.EventType).Warn("unknown notification event type for email delivery")
 		return nil
-	}
-}
-
-// notificationAmountMicros reads a money field out of a notification payload
-// without ever touching a float. json.Number keeps the exact source text, so a
-// producer that wrote a JSON integer still round-trips; anything else must be a
-// decimal integer string.
-func notificationAmountMicros(raw any) (int64, error) {
-	switch v := raw.(type) {
-	case nil:
-		return 0, fmt.Errorf("missing amount_micros")
-	case string:
-		return strconv.ParseInt(strings.TrimSpace(v), 10, 64)
-	case json.Number:
-		return v.Int64()
-	case int64:
-		return v, nil
-	case int:
-		return int64(v), nil
-	default:
-		return 0, fmt.Errorf("amount_micros must be a decimal integer string, got %T", raw)
 	}
 }
 

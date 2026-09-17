@@ -389,7 +389,10 @@ type ResourceRevenueResponse struct {
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
 }
 
-// EntitlementRecord is one entitlement window.
+// EntitlementRecord is one entitlement window. SourceID is the source
+// resource's own wire id beside SourceType (see SourceRef): sub_… for
+// subscription and grace sources, pay_… for one_off sources, the host's
+// declared id for admin sources.
 type EntitlementRecord struct {
 	ID           string     `json:"id"`
 	CustomerID   CustomerID `json:"customer_id,omitzero"`
@@ -405,7 +408,8 @@ type EntitlementRecord struct {
 }
 
 // ProductAccessGrant is one active product-access row from the merchant lookup
-// API.
+// API. SourceID follows the EntitlementRecord rule (pay_… for purchase,
+// sub_… for subscription, the declared id for admin).
 type ProductAccessGrant struct {
 	ID           string     `json:"id"`
 	CustomerID   CustomerID `json:"customer_id"`
