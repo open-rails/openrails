@@ -20,6 +20,7 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/embedded"
 )
 
@@ -126,7 +127,7 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 			subscriptions, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: subscriber.String()})
 			require.NoError(t, err)
 			require.Len(t, subscriptions.Data, 1)
-			require.Equal(t, price.ID.String(), subscriptions.Data[0].Price.ID)
+			require.Equal(t, api.FormatPriceID(price.ID), subscriptions.Data[0].Price.ID)
 
 			replay, err := client.ImportBilling(ctx, book)
 			require.NoError(t, err)
