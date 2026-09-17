@@ -9,12 +9,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
@@ -27,7 +27,7 @@ import (
 func TestInvoiceWorker_SweepInvoicesUsageOnlyPayer(t *testing.T) {
 	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
 	merchantID := dbtest.TestMerchantID.UUID()
-	ledgerPayer := identity.CustomerIDFromString(uuid.NewString())
+	ledgerPayer := billingidentity.CustomerIDFromString(uuid.NewString())
 	productID := uuid.New()
 	meter := "payment-volume-" + uuid.NewString()[:8]
 	eventType := "platform.payment_volume." + uuid.NewString()[:8]
