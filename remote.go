@@ -51,6 +51,10 @@ func WithMerchantID(id MerchantID) ClientOption {
 	}
 }
 
+// MerchantID returns the merchant this client is bound to, or zero when a
+// remote client relies on its credential's merchant.
+func (c *Client) MerchantID() MerchantID { return c.merchantID }
+
 // WithHTTPClient injects a transport (tests, custom TLS/conn pooling). When
 // unset a client bounded by the configured timeout is created. The per-call
 // timeout (WithTimeout) is enforced via a per-request context deadline
@@ -281,7 +285,8 @@ func (c *Client) Release(ctx context.Context, requestID string) error {
 	return c.do(ctx, http.MethodPost, path, nil, nil)
 }
 
-// ExtendHold implements Client (handler ServiceExtendHold).
+// ExtendHold moves a live hold's deadline to expiresAt. ErrNotFound means the
+// hold was captured, released or lapsed; re-admit instead.
 func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("request_id is required")
@@ -453,7 +458,7 @@ func (c *Client) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 	return out.Items, nil
 }
 
-// GetMerchantSettings implements PolicySyncClient.
+// GetMerchantSettings reads the merchant settings document.
 func (c *Client) GetMerchantSettings(ctx context.Context) (*MerchantSettings, error) {
 	var out MerchantSettings
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, &out); err != nil {
@@ -462,14 +467,13 @@ func (c *Client) GetMerchantSettings(ctx context.Context) (*MerchantSettings, er
 	return &out, nil
 }
 
-// SetMerchantSettings implements PolicySyncClient.
+// SetMerchantSettings replaces merchant-owned settings in one validated document.
 func (c *Client) SetMerchantSettings(ctx context.Context, settings MerchantSettings) error {
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil)
 }
 
-// SetCustomerSpendDelegations implements PolicySyncClient over the
-// machine-authenticated merchant surface. The /v1/customers counterpart is
-// reserved for a customer-owned delegated browser principal.
+// SetCustomerSpendDelegations replaces the customer's complete delegation
+// document over the machine-authenticated merchant surface.
 func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")
@@ -487,8 +491,8 @@ func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID stri
 	return c.do(ctx, http.MethodPut, path, delegation, nil)
 }
 
-// DeleteCustomerSpendDelegation implements PolicySyncClient (handler
-// ServiceDeleteCustomerSpendDelegation): single-grant revocation (or#911).
+// DeleteCustomerSpendDelegation revokes exactly one delegation (or#911); a
+// missing grant returns ErrNotFound.
 func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID, scope, scopeKey string) error {
 	if strings.TrimSpace(customerID) == "" {
 		return invalidErr("customer_id required")
@@ -502,8 +506,9 @@ func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID, 
 	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
-// ListActiveEntitlements implements Client (handler
-// ServiceGetExternalSubjectEntitlements, entitlements.go).
+// ListActiveEntitlements returns active records for up to 500 subjects, keyed
+// by every requested subject after trim and dedupe; unknown subjects map to an
+// empty slice. A zero at means now.
 func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
 	body := map[string]any{
 		"subjects": subjects,
@@ -716,16 +721,19 @@ type clientResponse struct {
 // is an error. Transport failures wrap ErrUnreachable.
 func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
 	expectedMerchant := c.merchantID
-	if pinned, ok := merchant.FromContext(ctx); ok {
-		if !expectedMerchant.IsZero() && expectedMerchant != pinned {
-			return nil, &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
-				Type: "invalid_request_error", Code: "resource_conflict", Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant),
-			}}
+	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
+		// A merchant on the caller's context is never a selection. Against a
+		// bound client it must agree with the construction-time binding
+		// (#772); an unbound remote client forwards it as the assertion the
+		// server verifies against the credential's authority.
+		if !expectedMerchant.IsZero() && pinned != expectedMerchant {
+			return nil, &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{Type: "invalid_request_error", Code: "resource_conflict",
+				Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant)}}
 		}
 		expectedMerchant = pinned
 	}
 	if !expectedMerchant.IsZero() {
-		// The local transport uses this explicit host-selected binding; HTTP
+		// The local transport uses this construction-time binding; HTTP
 		// servers resolve authority independently and verify the header.
 		ctx = merchant.WithID(ctx, expectedMerchant)
 	}
