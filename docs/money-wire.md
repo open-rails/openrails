@@ -27,7 +27,18 @@ is `invalid_param`. Customer, merchant and PSP ids are plain UUIDs. Go callers
 hold `openrails.PriceID` etc.; the zero id marshals as `""` and `IsZero` tells.
 The catalog `by-key` routes, checkout `price_id` on the public (browser)
 checkout route and `plan-migrations` price references still accept a price
-key; the shared Client's typed fields do not.
+key; the shared Client's typed fields do not. The same spelling holds
+wherever a typed kind appears inside another document: the customer's own
+`/v1/me/subscriptions`, `/v1/me/status` and `/v1/me/notifications` (the
+shared `Subscription`, `BillingStatus` and `Notification` shapes, so the ids
+they list are the ids their action routes take), metrics `product_id` /
+`price_id` dimensions and filters, findings evidence and recommendation
+params, the hosted checkout document's `payment_id` / `subscription_id` /
+`saved_methods[].id` / `payment_method_id`, and entitlement or grant
+`source_id` (the source resource's own id beside `source_type`: `sub_` for
+subscription and grace sources, `pay_` for one-off and purchase sources; an
+admin source is the host's declared id verbatim). Customer filters on the
+merchant list routes are `customer_id`.
 Counts and timestamps are not money: counts remain numbers. Every timestamp on the
 wire — response fields and request parameters alike (`created_at`, `expires_at`,
 `occurred_at`, `at`, rollup `from`/`to`) — is an RFC3339 instant, including the
@@ -49,18 +60,29 @@ as out of range and rejected as input. No compatibility
 parser accepts numeric money on these finalized routes during the pre-v1 cut.
 Catalog publish manifests (`POST /catalog/publish` JSON; YAML files keep plain
 integers), the admin customer billing profile balances and metrics money cells
-(unit `money`, exact int64 sums) use the same decimal strings. Finding evidence
-and stored event payloads are operator records, not the shared wire, and keep
-integers.
+(unit `money`, exact int64 sums; a money-unit ratio such as
+`realized_revenue_per_customer` is the exact rational quotient rounded half
+away from zero, never a float) use the same decimal strings. Finding evidence,
+recommendation params and notification data are wire too and spell money the
+same way; stored event payloads, row metadata and River job arguments are
+internal records and keep integers. Provider rates (`/v1/solana/tokens`
+`price`, `token_price_usd`, `fx_rate`) are decimal strings of the float the
+feed quoted (`strconv.FormatFloat(rate, 'f', -1, 64)`): a rate is not money,
+but the browser never parses a JSON float either.
 
 `testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
 time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
 (`web/admin/src/lib/api/wire-fixtures.test.ts`) both decode them.
-`wire_money_guard_test.go` fails when a monetary int64 field in a wire package
-is a JSON number unless it is listed with its reason (pending #983, deleted
-elsewhere, or not HTTP), and when a listed field becomes a decimal string.
-Map-literal responses, metrics cells and finding evidence are outside that
-static guard.
+`wire_money_guard_test.go` walks the root package, `pkg`, `internal`,
+`embed`, `config` and `permissions` (all but SQLC output) and fails when a
+monetary field (any integer, float or untyped `any`/`map[string]any`/
+`json.RawMessage` whose JSON name names money) is not an int64/uint64 with
+`,string`, when a `map[string]any` literal or `m["amount"] = v` assignment
+carries a monetary key whose value is not spelled as a string, and when a
+custom `MarshalJSON` is not pinned to the test that proves its encoding —
+unless the site is listed with its reason (storage row, provider wire, job
+args, stored metadata, log context, page size, count). Listed entries can only
+shrink; `TestWireMoneyGuardDetects` proves each rule fires.
 
 ## Admin console browser support
 

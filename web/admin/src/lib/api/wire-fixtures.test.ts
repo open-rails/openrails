@@ -105,5 +105,27 @@ describe("typed ids on the wire", () => {
     expect(payment.customer_id).toBe(sub.customer_id)
     expect(payment.subscription_id).toBe(sub.id)
     expect(payment.price.product).toBe(sub.product_id)
+
+    // The self routes serve the same subscription shape: the ids it lists
+    // are the ids its action routes take, and its access grant names them.
+    expect(sub.scheduled_price.id).toBe(sub.scheduled_price_id)
+    expect(sub.access.subscription_id).toBe(sub.id)
+    expect(BigInt(sub.price.unit_amount)).toBe(maxInt64)
+    const status = JSON.parse(fixture("billing_status.json"))
+    expect(status.subscription.id).toBe(sub.id)
+    expect(status.access.subscription_id).toBe(sub.id)
+    expect(status.entitlements[0].source_id).toBe(sub.id)
+
+    const hosted = JSON.parse(fixture("hosted_checkout_session.json"))
+    expect(hosted.saved_methods[0].id).toBe(sub.payment_method_id)
+    expect(hosted.payment_id).toBe(sub.payments[0].id)
+    expect(hosted.subscription_id).toBe(sub.id)
+
+    const notification = JSON.parse(fixture("notification.json"))
+    expect(notification.customer_id).toBe(sub.customer_id)
+    expect(notification.data.subscription_id).toBe(sub.id)
+    expect(notification.data.from_price_id).toBe(sub.price_id)
+    expect(BigInt(notification.data.old_amount)).toBe(maxInt64)
+    expect(BigInt(notification.data.new_amount)).toBe(minInt64)
   })
 })

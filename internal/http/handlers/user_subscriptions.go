@@ -54,7 +54,11 @@ func listSubscriptionsForUser(r *httprequest.Request, userID string) {
 		return
 	}
 
-	r.SuccessJSONPaginated(subscriptions, queryOpts.TotalItems, limit, offset)
+	out := make([]openrails.Subscription, 0, len(subscriptions))
+	for _, sub := range subscriptions {
+		out = append(out, sub.View())
+	}
+	r.SuccessJSONPaginated(out, queryOpts.TotalItems, limit, offset)
 }
 
 func GetSubscription(r *httprequest.Request) {
@@ -87,5 +91,5 @@ func GetSubscription(r *httprequest.Request) {
 		return
 	}
 
-	r.SuccessJSON(subscription)
+	r.SuccessJSON(subscription.View())
 }

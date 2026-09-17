@@ -143,6 +143,25 @@ func (id *CheckoutSessionID) UnmarshalText(text []byte) error {
 	return err
 }
 
+// SourceRef spells a polymorphic entitlement or grant source in its kind's
+// wire form, so source_id beside source_type is the id the source resource
+// itself carries: subscription and grace sources are SubscriptionIDs, one_off
+// and purchase sources are PaymentIDs. Any other source (admin) is the host's
+// own declared id, verbatim.
+func SourceRef(sourceType, id string) string {
+	u, err := uuid.Parse(id)
+	if err != nil {
+		return id
+	}
+	switch sourceType {
+	case "subscription", "grace":
+		return SubscriptionID(u).String()
+	case "one_off", "purchase":
+		return PaymentID(u).String()
+	}
+	return id
+}
+
 func formatPrefixedID(prefix string, u uuid.UUID) string {
 	if u == uuid.Nil {
 		return ""

@@ -41,6 +41,7 @@ import type {
 import { cn } from "@/lib/utils"
 
 import {
+  donutSlices,
   chartColor,
   exactKey,
   filteredCurrency,
@@ -163,7 +164,10 @@ function StatViz({
   )
 }
 
-function MetricTooltip({
+// MetricTooltip formats a hovered value from the exact wire cell the series
+// row carries under exactKey (a money decimal string), falling back to the
+// plotted Number only for series that never had one. Exported for tests.
+export function MetricTooltip({
   series,
   ...props
 }: ComponentProps<typeof ChartTooltipContent> & { series: PivotSeries[] }) {
@@ -324,25 +328,9 @@ function DonutViz({
   result: MetricsResult
   currency?: string
 }) {
-  const idx = indexColumns(result.columns)
-  const primary = idx.measures[0]
+  const primary = indexColumns(result.columns).measures[0]
   if (!primary) return <Empty label="no measure" />
-  const slices = result.rows
-    .map((row, i) => ({
-      key: `slice-${i}`,
-      label:
-        idx.dims
-          .map((d) => String(row[d.index] ?? ""))
-          .filter(Boolean)
-          .join(" · ") || primary.name,
-      measure: primary.name,
-      dimensions: idx.dims.map((d) => row[d.index]),
-      unit: primary.unit,
-      currency:
-        primary.unit === "money" ? rowCurrency(row, idx, currency) : undefined,
-      value: Number(row[primary.index] ?? 0),
-    }))
-    .filter((slice) => slice.value !== 0)
+  const slices = donutSlices(result, currency)
   if (slices.length === 0) return <Empty label="no data in range" />
   const groups = groupSeries(slices)
   const charts = groups.map((group) => {

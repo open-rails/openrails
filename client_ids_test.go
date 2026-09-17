@@ -4,12 +4,35 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
+
+// Deposit keys are opaque query values, not resource path segments. A key
+// accepted when funding the payer must remain usable for receipt lookup (#484).
+func TestGetDepositPreservesOpaqueSourceKeys(t *testing.T) {
+	requests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.URL.Query().Get("source_id")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"amount":"1"}`))
+	}))
+	t.Cleanup(server.Close)
+	client, err := NewRemote(server.URL, WithAPIKey("test-key"))
+	require.NoError(t, err)
+	for _, key := range []string{".", "..", "source/receipt?part=1&currency=JPY"} {
+		t.Run(key, func(t *testing.T) {
+			receipt, err := client.GetDeposit(context.Background(), CustomerID(uuid.New()), key)
+			require.NoError(t, err)
+			require.EqualValues(t, 1, receipt.Amount)
+			require.Equal(t, key, <-requests)
+		})
+	}
+}
 
 // noRequestTransport fails the test if the Client sends anything.
 type noRequestTransport struct{ t *testing.T }

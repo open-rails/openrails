@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -332,10 +332,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			if inv.InvoiceNumber != nil && *inv.InvoiceNumber != "" {
 				number = *inv.InvoiceNumber
 			}
-			data, err := models.ToJSONB(map[string]any{
-				"invoice_id": inv.ID.String(), "invoice_number": number,
-				"amount_due": strconv.FormatInt(inv.AmountDue, 10), "currency": inv.Currency, "due_at": inv.DueAt,
-			})
+			amountDue := inv.AmountDue
+			data, err := json.Marshal(openrails.NotificationData{InvoiceID: inv.ID, InvoiceNumber: number, AmountDue: &amountDue, Currency: inv.Currency, DueAt: inv.DueAt})
 			if err != nil {
 				return err
 			}

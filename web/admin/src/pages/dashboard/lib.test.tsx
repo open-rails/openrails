@@ -5,6 +5,7 @@ import { adminQueries } from "@/lib/queries"
 import type { MetricsResult } from "@/lib/api/metrics"
 import { formatNativeAmount } from "@/lib/format"
 import {
+  donutSlices,
   filteredCurrency,
   formatMeasure,
   groupSeries,
@@ -13,7 +14,8 @@ import {
   pivotTimeSeries,
   statDelta,
 } from "./lib"
-import { WidgetVizView } from "./widget-viz"
+import { ChartContainer } from "@/components/ui/chart"
+import { MetricTooltip, WidgetVizView } from "./widget-viz"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -260,5 +262,42 @@ describe("money cells beyond Number precision", () => {
     expect(
       formatMeasure(String(data[0][exactKey(series[0].key)]), "money", "USD")
     ).toBe(formatNativeAmount(huge, "USD"))
+  })
+
+  it("renders the donut tooltip from the exact slice cell, not the plotted Number", () => {
+    const huge = "9007199254740993"
+    const result: MetricsResult = {
+      range,
+      columns: [
+        { name: "currency", kind: "dimension" },
+        { name: "revenue", kind: "measure", unit: "money" },
+      ],
+      rows: [["USD", huge]],
+    }
+    const slices = donutSlices(result)
+    expect(slices).toHaveLength(1)
+    expect(slices[0][exactKey(slices[0].key)]).toBe(huge)
+    expect(slices[0].value).toBe(9007199254740992) // the plotted Number is lossy
+    const html = renderToStaticMarkup(
+      <ChartContainer config={{ [slices[0].key]: { label: "USD" } }}>
+        <MetricTooltip
+          series={slices}
+          nameKey="key"
+          active
+          payload={[
+            {
+              name: slices[0].key,
+              dataKey: "value",
+              graphicalItemId: "pie",
+              value: slices[0].value,
+              payload: slices[0],
+            },
+          ]}
+        />
+      </ChartContainer>
+    )
+    expect(html).toContain(formatNativeAmount(huge, "USD"))
+    expect(html).toContain("9,007,199,254.740993")
+    expect(html).not.toContain(formatNativeAmount(slices[0].value, "USD"))
   })
 })

@@ -175,12 +175,13 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify subscription data
-		assert.Equal(t, sub.ID.String(), subscriptions[0]["id"])
+		assert.Equal(t, openrails.SubscriptionID(sub.ID).String(), subscriptions[0]["id"])
 		assert.Equal(t, string(models.StatusActive), subscriptions[0]["status"])
 		price, ok := subscriptions[0]["price"].(map[string]any)
 		require.True(t, ok, "Should include price details")
 		assert.Equal(t, "9990000", price["unit_amount"], "unit_amount should be 9990000 micros")
-		assert.NotContains(t, price, "amount", "public subscription price should not expose amount")
+		assert.Equal(t, openrails.PriceID(priceID).String(), price["id"])
+		assert.NotContains(t, price, "amount", "the price shape spells money unit_amount")
 	})
 
 	t.Run("requires authentication", func(t *testing.T) {
@@ -252,11 +253,11 @@ func TestGetSubscriptionHistoryEndpoint(t *testing.T) {
 			status := sub["status"].(string)
 			if status == string(models.StatusActive) {
 				hasActive = true
-				assert.Equal(t, activeSub.ID.String(), sub["id"])
+				assert.Equal(t, openrails.SubscriptionID(activeSub.ID).String(), sub["id"])
 			}
 			if status == string(models.StatusCancelled) {
 				hasCancelled = true
-				assert.Equal(t, cancelledSub.ID.String(), sub["id"])
+				assert.Equal(t, openrails.SubscriptionID(cancelledSub.ID).String(), sub["id"])
 			}
 		}
 		assert.True(t, hasActive, "Should have active subscription")

@@ -5,6 +5,8 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/query"
@@ -41,7 +43,15 @@ func GetNotifications(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to retrieve notifications")
 		return
 	}
-	r.SuccessJSONPaginated(items, q.TotalItems, limit, offset)
+	r.SuccessJSONPaginated(notificationViews(items), q.TotalItems, limit, offset)
+}
+
+func notificationViews(items []*models.NotificationQueue) []openrails.Notification {
+	out := make([]openrails.Notification, 0, len(items))
+	for _, n := range items {
+		out = append(out, n.View())
+	}
+	return out
 }
 
 func MarkNotificationRead(r *httprequest.Request) {
