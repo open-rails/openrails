@@ -133,6 +133,16 @@ func (r *Request) ErrorJSON(code int, msg string) {
 	r.t.WriteJSON(code, response)
 }
 
+// PreconditionFailed answers a conditional request (If-None-Match: *) whose
+// precondition did not hold. That is the outcome the caller asked to be told
+// about — an idempotent ensure finding its row already present — not a
+// failure, so unlike ErrorJSON it is not logged as an error.
+func (r *Request) PreconditionFailed(msg string) {
+	response := api.SimpleErrorResponse(http.StatusPreconditionFailed, msg)
+	response.Error.RequestID = r.RequestID()
+	r.t.WriteJSON(http.StatusPreconditionFailed, response)
+}
+
 // InternalError answers 500 with a STABLE, non-leaky msg and logs the cause
 // verbatim against the request id.
 //

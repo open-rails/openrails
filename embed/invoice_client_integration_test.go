@@ -4,6 +4,7 @@ package embed_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,12 +15,41 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )
+
+// errorLogHook records every error-level entry the engine emits.
+type errorLogHook struct {
+	mu      sync.Mutex
+	entries []string
+}
+
+func (h *errorLogHook) Levels() []logrus.Level { return []logrus.Level{logrus.ErrorLevel} }
+
+func (h *errorLogHook) Fire(e *logrus.Entry) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.entries = append(h.entries, e.Message)
+	return nil
+}
+
+func (h *errorLogHook) drain() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := append([]string(nil), h.entries...)
+	h.entries = nil
+	return out
+}
 
 func TestInvoiceClientWorkflowAcrossTransports(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
+	errorLogs := &errorLogHook{}
+	logger := logrus.StandardLogger()
+	previousHooks := logger.ReplaceHooks(logrus.LevelHooks{})
+	logger.AddHook(errorLogs)
+	t.Cleanup(func() { logger.ReplaceHooks(previousHooks) })
 	remote := h.StartStandalone("USD")
 	host := h.StartEmbeddedHost("USD")
 	embedded, err := host.Runtime().Client()
@@ -43,9 +73,13 @@ func TestInvoiceClientWorkflowAcrossTransports(t *testing.T) {
 			require.True(t, created)
 			profile.Memo = "operator settings"
 			require.NoError(t, client.SetCustomerInvoiceProfile(ctx, payer.String(), profile))
+			// An idempotent ensure that finds the profile is a success for the
+			// caller and must not be logged by the engine as an error.
+			errorLogs.drain()
 			created, err = client.EnsureCustomerInvoiceProfile(ctx, payer.String(), openrails.InvoiceProfileDTO{NetTermsDays: 30, CollectionMethod: "send_invoice"})
 			require.NoError(t, err)
 			require.False(t, created)
+			require.Empty(t, errorLogs.drain(), "idempotent EnsureCustomerInvoiceProfile logged an error")
 			got, err := client.GetCustomerInvoiceProfile(ctx, payer.String())
 			require.NoError(t, err)
 			require.Equal(t, profile, *got)

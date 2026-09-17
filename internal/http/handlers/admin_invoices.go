@@ -327,7 +327,7 @@ func PutAdminInvoiceProfile(r *httprequest.Request) {
 			return
 		}
 		if !created {
-			r.ErrorJSON(http.StatusPreconditionFailed, "invoice profile already exists")
+			r.PreconditionFailed("invoice profile already exists")
 			return
 		}
 		r.JSON(http.StatusCreated, body)
