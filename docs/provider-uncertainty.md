@@ -56,8 +56,11 @@ idempotency-key root), so a client retry key, a restart or a resumed lease
 never mints a second identity. A pre-submission failure (unarmed account,
 missing secret, parked instrument) parks the operation without consuming an
 attempt. After the write-ahead fence every adapter error is a possible
-submission: NMI-family operations converge only from the order-reference
-search or an exact receipt; Stripe replays the same idempotent sequence
+submission: NMI-family operations converge only from an exact receipt —
+the Query API's successful sale for the operation's order reference, read
+back approved, in the frozen currency, for the frozen amount, on the
+instrument's vault (a custodian-held card has no vault at NMI; its read binds
+approval, currency and amount); Stripe replays the same idempotent sequence
 through the executor while Stripe still holds the key (23h) and then waits
 for operator resolution. The Stripe sequence creates the invoice first,
 excluding the customer's pending items, and attaches its line by invoice id,
@@ -68,11 +71,15 @@ keeps the outcome unknown). A confirmed charge whose local settlement fails
 keeps its transaction id on the operation and settles from it after restart;
 an invoice that no longer accepts the frozen snapshot fails closed (nothing
 written, pointer kept) until an operator repairs it.
-`intents resolve --receipt` accepts an NMI transaction only when the Query
-API returns it as the successful sale for the operation's own order
-reference and, for a vaulted instrument, the exact read shows an approved
-sale of the frozen amount and currency on that vault; for Stripe the invoice
-must carry the operation key and be paid for the frozen amount.
+The autonomous verifier and `intents resolve --receipt` share that one
+exact-receipt path (`--receipt` additionally requires the named transaction
+to be the order reference's sale); for Stripe the paid invoice — returned by
+the sequence or named by the operator — must carry the operation key and be
+paid in the frozen currency for exactly the frozen amount. A provider object
+under the operation's identity that contradicts the frozen facts settles
+nothing: it is retained as `provider_contradiction` evidence, the operation
+stays unknown and `--not-executed` is refused until an operator repairs from
+the provider record.
 `--not-executed` refuses while the provider shows the operation's charge (for
 Stripe it first deletes/voids the operation's unpaid objects and refuses on a
 paid one), then fails the attempt without a decline and makes the invoice due
