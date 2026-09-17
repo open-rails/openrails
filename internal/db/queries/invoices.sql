@@ -1,6 +1,28 @@
 -- openrails.invoices: period invoices/statements. Arrears invoices become open
 -- receivables at finalization; payments are allocated back to invoice_id.
 
+-- name: ListInvoicePayers :many
+-- Every (payer, currency) the period sweep must finalize: payers with #512
+-- ledger money movement, and payers whose only activity is catalog-priced
+-- usage that FinalizeInvoice still has to rate (no ledger row exists before
+-- rating, so ledger_transfers alone never enumerates a usage-only payer such
+-- as a metered platform fee). period_anchor is the first recorded activity,
+-- from append-only created_at columns so anniversary windows never move.
+SELECT customer_id::uuid AS customer_id, currency, MIN(period_anchor)::timestamptz AS period_anchor
+FROM (
+    SELECT customer_id, currency, MIN(created_at) AS period_anchor
+    FROM openrails.ledger_transfers
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id IS NOT NULL
+    GROUP BY customer_id, currency
+    UNION ALL
+    SELECT customer_id, currency, MIN(created_at) AS period_anchor
+    FROM openrails.usage_events
+    WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND pricing_authority = 'catalog'
+    GROUP BY customer_id, currency
+) activity
+GROUP BY customer_id, currency
+ORDER BY customer_id, currency;
+
 -- name: GetInvoiceByPeriod :one
 -- Idempotency key is per (payer, period, currency): one invoice per currency (#474).
 SELECT * FROM openrails.invoices

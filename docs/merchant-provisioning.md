@@ -123,13 +123,13 @@ attaching a name to an unbound billing row.
 ### Hosted creation recipe (registration is provisioning)
 
 A hosted product (openrails-saas shape) wires everything through
-`AttachOptions.MerchantCreation`:
+`controlplane.Options.MerchantCreation` (`embed/controlplane`):
 
 ```go
-embcp.AttachWithOptions(ctx, app, cfg, pool, embcp.AttachOptions{
+cp, err := controlplane.Attach(ctx, rt, controlplane.Options{
     HostedPosture: true,
     EmailSender:   sender,
-    MerchantCreation: &embcp.MerchantCreationConfig{
+    MerchantCreation: &controlplane.MerchantCreationConfig{
         ReservedSlugs: []string{"my-brand"}, // + merchant.ReservedHostedSlugs, always
         Admission: func(ctx context.Context, slug, ownerUserID string) error {
             return nil // host cost gate: allowance / card-on-file (or#914 item 3)
@@ -145,21 +145,21 @@ list, and your admission gate — and OpenRails attaches the
 "registration is provisioning" flow (re-POSTing the same slug is the
 idempotent repair; the response carries `group_id`); (2) holds in-process
 `ProvisionMerchant` calls that name an `OwnerUserID` to the SAME policy
-(typed refusals `embcp.ErrSlugReserved` / `embcp.ErrCreationRefused`).
+(typed refusals `controlplane.ErrSlugReserved` / `controlplane.ErrCreationRefused`).
 Ownerless `ProvisionMerchant` and Bootstrap are operator acts and stay
 ungated — that is how a platform merchant claims a reserved name.
 
-For the Admission gate itself, `embcp.MerchantCreationAdmission` composes the
+For the Admission gate itself, `controlplane.MerchantCreationAdmission` composes the
 standard hosted policy from openrails' own state — verified email always; a
 free allowance of OWNED merchants; beyond it, a vaulted payment method on
 file (no charge) unlocks more:
 
 ```go
-admission, err := embcp.MerchantCreationAdmission(app, embcp.MerchantCreationPolicy{
+admission, err := controlplane.MerchantCreationAdmission(rt, controlplane.MerchantCreationPolicy{
     FreeAllowance: 2,
     HasVaultedPaymentMethod: func(ctx context.Context, subject string) (bool, error) {
         // openrails-saas shape: the platform merchant's book holds the vault.
-        return embcp.SubjectHasVaultedPaymentMethod(ctx, app, platformMerchantID, subject)
+        return controlplane.SubjectHasVaultedPaymentMethod(ctx, rt, platformMerchantID, subject)
     },
 })
 ```
@@ -170,24 +170,24 @@ slug that resolves to a merchant the caller already owns bypasses the
 allowance and vault checks because it creates nothing. A genuinely new slug
 still runs the full gate.
 
-Typed refusals: `embcp.ErrEmailUnverified`, `embcp.ErrVaultedPaymentMethodRequired`.
+Typed refusals: `controlplane.ErrEmailUnverified`, `controlplane.ErrVaultedPaymentMethodRequired`.
 
 ### Merchant retirement (never-used names go back in the pool)
 
 Core provides the mechanism; dormancy policy (warning cadence, notice state,
 arming) belongs to the host. openrails-saas owns its hosted policy and notices.
 
-- `embcp.ListMerchantRetirementCandidates(ctx, app, req)` pages live,
+- `cp.ListMerchantRetirementCandidates(ctx, req)` pages live,
   group-bound merchants created before `req.CreatedBefore`, oldest first,
   excluding reserved slugs (`merchant.ReservedHostedSlugs` plus
   `MerchantCreationConfig.ReservedSlugs`). Each candidate carries `Used`, probed
   under the merchant's own RLS scope.
-- `embcp.RetireUnusedMerchant(ctx, app, merchantID, groupID)` locks the merchant
+- `cp.RetireUnusedMerchant(ctx, merchantID, groupID)` locks the merchant
   row, refuses a missing/retired merchant, a different group UUID, a reserved
   slug or any activity, and otherwise commits the irreversible tombstone before
   deleting exactly that AuthKit group with `ReleaseSlug: true`. Refusals are
   returned in the result.
-- `embcp.CompletePendingMerchantRetirements(ctx, app, limit)` retries committed
+- `cp.CompletePendingMerchantRetirements(ctx, limit)` retries committed
   retirements whose group release failed, by UUID, so a released name reclaimed
   in between is never deleted.
 
@@ -374,7 +374,7 @@ Two things a purge cannot do, by construction:
 ## API keys
 
 Merchant-scoped backend credentials are minted through the self-serve surface
-(requires the control plane; embedded hosts without one answer 501):
+(requires the control plane; embedded hosts without one do not mount the routes):
 
 - `POST /v1/merchant/api-keys` `{"name": …, "role": …}` → 201 with the key
   **secret exactly once** — it is never stored or retrievable again. The

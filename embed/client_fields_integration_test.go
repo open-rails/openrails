@@ -46,7 +46,7 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 				Source: "client-fields", SourceID: uuid.NewString(),
 			})
 			require.NoError(t, err)
-			expires := time.Now().Add(time.Hour).Unix()
+			expires := time.Now().Add(time.Hour)
 			req := openrails.AdmitRequest{
 				CustomerID: payer.String(), Invoker: "client-fields", InvokerType: "payer", Currency: "USD",
 				EstimatedAmount: 1000, ExpiresAt: &expires, AccrualRateDeltaPerHour: 11_000_000,

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/requestauth"
+
 	"github.com/open-rails/authkit/verify"
 
 	"github.com/open-rails/openrails/internal/app"
@@ -158,6 +160,9 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	// providerRoutes: it is exactly the endpoint that TELLS a frontend which
 	// rails this merchant has.
 	group.Handle(http.MethodGet, "/checkout-config", h(httphandlers.GetCheckoutConfig))
+	// The currency scale registry behind every monetary string on the wire:
+	// system-fixed, so it needs neither a merchant nor a database connection.
+	rr.Handle(http.MethodGet, "/currencies", h(httphandlers.GetCurrencies))
 	if providerRoutes.Solana {
 		group.Handle(http.MethodGet, "/solana/config", h(httphandlers.GetSolanaConfig))
 		group.Handle(http.MethodGet, "/solana/tokens", h(httphandlers.GetSupportedTokens))
@@ -207,6 +212,8 @@ func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	)
 
 	customers := group.Group("/customers/:customer_id")
+	// Materialize a customer before its first purchase (idempotent touch).
+	customers.Handle(http.MethodPut, "", h(httphandlers.ServiceEnsureCustomer), writeMW...)
 	paymentReadMW := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantPaymentsRead)}, dbMW...)
 	customers.Handle(http.MethodGet, "/payment-settlement-status", h(httphandlers.ServicePaymentSettlementStatus), paymentReadMW...)
 	customers.Handle(http.MethodGet, "/entitlements",
@@ -308,7 +315,7 @@ func RegisterMerchantActionRoutes(rr router.Router, rt *app.Runtime, opts Option
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
 	}
-	registerMerchantSupportRoutes(rr, opts, dbMW...)
+	registerMerchantSupportRoutes(rr, rt, opts, dbMW...)
 }
 
 func RegisterCatalogRoutes(rr router.Router, rt *app.Runtime, opts Options) {
@@ -415,7 +422,7 @@ func (g legacyGate) Authorize(ctx context.Context, req *http.Request, perm strin
 	// embed SDK's in-process transport. Trusted precisely because context values
 	// cannot arrive on a network request (no header is consulted); gated on
 	// permissions like every other credential.
-	if hp, ok := billingauth.HostPrincipalFromContext(ctx); ok {
+	if hp, ok := requestauth.HostPrincipalFromContext(ctx); ok {
 		if hp.MerchantID.IsZero() {
 			return billingauth.Principal{}, billingauth.GateError{Status: http.StatusUnauthorized, Message: "host_principal_invalid"}
 		}
@@ -676,14 +683,20 @@ func registerCatalogActionRoutes(catalog router.Router, rt *app.Runtime, opts Op
 	// metrics ask shares metrics-read — the LLM-cost axis is guarded by the
 	// service's own per-merchant rate limit + fail-closed consent flag. NOT
 	// manifest-guarded: it never mutates catalog rows, even when drafting.
-	catalog.Handle(http.MethodPost, "/ask", h(httphandlers.CatalogCopilotAsk), readMW...)
-	// The confirm-provenance log rides the catalog-WRITE permission (only a
-	// caller who could actually apply a price change should be able to log a
-	// draft as confirmed) but skips the mode-1 write guard: it never touches
-	// a catalog row, only an audit log entry, for a mutation that already
-	// happened via the normal catalog/reprice endpoints.
-	copilotConfirmMW := append([]router.Middleware{write}, dbMW...)
-	catalog.Handle(http.MethodPost, "/copilot/confirm", h(httphandlers.CatalogCopilotConfirmDraft), copilotConfirmMW...)
+	// Registered only when the copilot is configured (llm.api_key +
+	// llm.catalog_copilot_enabled): an absent route is the only honest
+	// advertisement of an absent capability (#1001), and the console keys its
+	// panels on /admin/config.json, never on probing here.
+	if rt != nil && rt.CopilotService.Configured() {
+		catalog.Handle(http.MethodPost, "/ask", h(httphandlers.CatalogCopilotAsk), readMW...)
+		// The confirm-provenance log rides the catalog-WRITE permission (only a
+		// caller who could actually apply a price change should be able to log a
+		// draft as confirmed) but skips the mode-1 write guard: it never touches
+		// a catalog row, only an audit log entry, for a mutation that already
+		// happened via the normal catalog/reprice endpoints.
+		copilotConfirmMW := append([]router.Middleware{write}, dbMW...)
+		catalog.Handle(http.MethodPost, "/copilot/confirm", h(httphandlers.CatalogCopilotConfirmDraft), copilotConfirmMW...)
+	}
 }
 
 func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
@@ -707,7 +720,7 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	}
 }
 
-func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...router.Middleware) {
+func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
 	registerMerchantInvoiceRoutes(rr, opts, dbMW...)
 	customerRead := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantCustomerSettingsRead)}, dbMW...)
 	offChannelWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationOffChannel, dbMW...)
@@ -805,7 +818,11 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	// #756 metrics Q&A: read-only over the same data as /query (evidence IS
 	// /query output), so it shares the metrics-read permission; the LLM-cost
 	// axis is guarded by the per-merchant ask rate limit + fail-closed consent.
-	metricsGrp.Handle(http.MethodPost, "/ask", h(httphandlers.MerchantMetricsAsk), metricsRead...)
+	// Registered only with llm.api_key AND the llm.ask_enabled consent: /ask
+	// sends aggregate query results to the LLM provider.
+	if rt != nil && rt.DashboardService.AskConfigured() {
+		metricsGrp.Handle(http.MethodPost, "/ask", h(httphandlers.MerchantMetricsAsk), metricsRead...)
+	}
 
 	// #741 configurable dashboard: reads share the metrics permission (a
 	// dashboard is a saved view over metrics); writes + NL generation (the
@@ -813,7 +830,10 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	dashboardWrite := append([]router.Middleware{opts.merchantActionPermissionMW(controlplane.PermMerchantDashboardUpdate)}, dbMW...)
 	rr.Handle(http.MethodGet, "/dashboard", h(httphandlers.GetMerchantDashboard), metricsRead...)
 	rr.Handle(http.MethodPut, "/dashboard", h(httphandlers.PutMerchantDashboard), dashboardWrite...)
-	rr.Handle(http.MethodPost, "/dashboard/widgets/generate", h(httphandlers.GenerateDashboardWidget), dashboardWrite...)
+	// NL widget generation exists only when an LLM key is configured.
+	if rt != nil && rt.DashboardService.NLConfigured() {
+		rr.Handle(http.MethodPost, "/dashboard/widgets/generate", h(httphandlers.GenerateDashboardWidget), dashboardWrite...)
+	}
 
 	// #757 merchant self-serve API keys: mint/list/revoke scoped credentials
 	// through AuthKit core. Gated on merchant:credentials:manage — the SAME
@@ -834,10 +854,14 @@ func registerMerchantSupportRoutes(rr router.Router, opts Options, dbMW ...route
 	// MerchantDBConnMW: the merchants directory service writes the directory
 	// row (openrails.merchants, not an RLS-scoped merchant table) with its own
 	// pool.
-	apiHostRead := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
-	apiHostWrite := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
-	rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), apiHostRead)
-	rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), apiHostWrite)
+	// Registered only when the merchant directory is armed; a deployment
+	// without one has no host mapping to read or assign.
+	if rt != nil && rt.Merchants != nil {
+		apiHostRead := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsRead)
+		apiHostWrite := opts.merchantActionPermissionMW(controlplane.PermMerchantSettingsUpdate)
+		rr.Handle(http.MethodGet, "/api-host", h(httphandlers.GetMerchantAPIHost), apiHostRead)
+		rr.Handle(http.MethodPut, "/api-host", h(httphandlers.PutMerchantAPIHost), apiHostWrite)
+	}
 
 	// #760 merchant team management: roster, invites (register+join links),
 	// role changes, and removal — all through AuthKit group membership. Reads

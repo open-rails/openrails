@@ -16,17 +16,22 @@ type CatalogPage[T any] struct {
 	Offset int   `json:"offset"`
 }
 
+// ProductFilter selects products. Archived nil lists every product; false
+// lists live products only; true lists archived products only.
 type ProductFilter struct {
 	PageOptions
-	ActiveOnly bool
-	TierGroup  string
+	Archived  *bool
+	TierGroup string
 }
+
+// PriceFilter selects prices. Archived nil lists every price; false lists
+// live prices only; true lists archived prices only.
 type PriceFilter struct {
 	PageOptions
-	ProductID  *uuid.UUID
-	ActiveOnly bool
-	Currency   string
-	Type       string
+	ProductID *uuid.UUID
+	Archived  *bool
+	Currency  string
+	Type      string
 }
 
 func (c *Client) CreateProduct(ctx context.Context, request CreateProductRequest) (*CatalogProduct, error) {
@@ -60,7 +65,9 @@ func (c *Client) GetProductByKey(ctx context.Context, key string) (*CatalogProdu
 }
 func (c *Client) ListProducts(ctx context.Context, filter ProductFilter) (*CatalogPage[CatalogProduct], error) {
 	q := pageQuery(filter.PageOptions)
-	q.Set("active_only", strconv.FormatBool(filter.ActiveOnly))
+	if filter.Archived != nil {
+		q.Set("archived", strconv.FormatBool(*filter.Archived))
+	}
 	q.Set("tier_group", filter.TierGroup)
 	var out CatalogPage[CatalogProduct]
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/catalog/products?"+q.Encode(), nil, &out); err != nil {
@@ -110,7 +117,9 @@ func (c *Client) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice, 
 }
 func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPage[CatalogPrice], error) {
 	q := pageQuery(filter.PageOptions)
-	q.Set("active_only", strconv.FormatBool(filter.ActiveOnly))
+	if filter.Archived != nil {
+		q.Set("archived", strconv.FormatBool(*filter.Archived))
+	}
 	q.Set("currency", filter.Currency)
 	q.Set("type", filter.Type)
 	if filter.ProductID != nil {

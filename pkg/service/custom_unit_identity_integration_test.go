@@ -109,7 +109,7 @@ func TestCustomUnitIdentityRenameReclaimAndCapture(t *testing.T) {
 	require.NoError(t, admin.QueryRow(ctx, `SELECT currency FROM openrails.grants WHERE id=$1`, deposited.ID).Scan(&stored))
 	require.Equal(t, canonical, stored)
 	requestID := uuid.NewString()
-	admitted, err := svc.Admit(a, AdmitInput{CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: "payer", Currency: old + "/tokens", EstimatedAmount: 25, SourceID: requestID, ExpiresAtUnix: time.Now().Add(time.Hour).Unix()})
+	admitted, err := svc.Admit(a, AdmitInput{CustomerID: payer, Invoker: payer.UUID().String(), InvokerType: "payer", Currency: old + "/tokens", EstimatedAmount: 25, SourceID: requestID, ExpiresAt: time.Now().Add(time.Hour)})
 	require.NoError(t, err)
 	require.True(t, admitted.Allowed)
 	heldBalance, err := svc.GetCreditAccount(a, payer, old+"/tokens")

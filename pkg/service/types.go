@@ -269,7 +269,7 @@ type PaymentMethod struct {
 	Type           string // "card"
 	Rail           string // "nmi", "ccbill", "stripe", etc.
 	PSPID          string // Exact payment-provider account that vaulted the method
-	Created        int64  // Unix epoch seconds
+	CreatedAt      time.Time
 	BillingDetails *BillingDetails
 	Card           *CardDetails
 	Subscriptions  []SubscriptionSummary

@@ -106,9 +106,10 @@ record kind. Subscription access follows from subscription standing and from
 the derive pass: run `embedded.ConvergeMerchant` (the operator-triggerable
 merchant-wide convergence) after import to materialize grants + entitlement
 windows from the imported subscriptions/payments immediately. Operator/manual
-comps — access with no payment behind it — go through the separate
-`embedded.ImportAdminGrants` seam as grant-ledger facts; OpenRails derives
-the windows.
+comps — access with no payment behind it — ride the same book as
+`admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
+derives the windows. `Client.ImportBilling` posts the same book over
+`POST /v1/import/billing`.
 
 ### The migration playbook
 
@@ -122,14 +123,18 @@ billing data over this seam:
    operator-declared PSP rows through `embed.Runtime.UpsertMerchantConfig`
    (or manifest boot), then push the catalog — including *retired* historical
    price points, so every legacy subscription resolves a price. Resolve the
-   `psps` row ids to stamp on imported rows.
+   `psps` row ids to stamp on imported rows. A PSP declared without
+   credentials (`Runtime.DeclarePSP`) is an identity for attribution and price
+   links only: it is never armed, so checkout discovery does not advertise it,
+   a checkout naming it is refused as unroutable, and links to it are stored
+   as operator-owned with `sync_status: sync_disabled`.
 3. **Fix the horizon.** Derive `as_of` from the legacy dump itself (e.g. the
    max source `updated_at`) or declare it explicitly; never default to
    wall-clock.
 4. **Import in dependency order, batched**: customers → payment methods →
    subscriptions + their transactions. Keep the host's stable ids as
-   `source_id` so re-runs are exact and results are auditable per row. Hand
-   admin/manual comps to `ImportAdminGrants`.
+   `source_id` so re-runs are exact and results are auditable per row. Declare
+   admin/manual comps as `admin_grants` in the same book.
 5. **Converge.** Run `ConvergeMerchant` once so entitlements/grants derive
    now rather than on the next scheduled sweep.
 6. **Boot with `PROVIDER_WRITE_MODE=limited` — set before first start.**

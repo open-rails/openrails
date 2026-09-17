@@ -221,11 +221,7 @@ func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *Checkou
 		completeCheckoutIdempotency(ctx, s.IdempotencyStore, idempOp, idempotencyKey, payload)
 		return saleResponse(cached, "Purchase completed successfully"), nil
 	case intents.StatusFailedTerminal:
-		reason := "payment failed"
-		if intent.LastFailureReason != nil && *intent.LastFailureReason != "" {
-			reason = "payment failed: " + *intent.LastFailureReason
-		}
-		failErr := errors.New(reason)
+		failErr := terminalCheckoutError(intent, "payment failed")
 		_ = s.IdempotencyStore.Fail(ctx, idempOp, idempotencyKey, failErr)
 		return nil, failErr
 	default:
@@ -317,7 +313,7 @@ func (h *CustodianSaleIntentHandler) Execute(ctx context.Context, intent gen.Ope
 	tokenIntent, err := bt.GetTokenIntent(ctx, p.TokenIntentID)
 	if err != nil {
 		if basistheory.IsNotFound(err) {
-			return intents.Terminal("bt token intent not found (intents expire after 24h; re-collect the card)")
+			return intents.TerminalWithEvidence("bt token intent not found (intents expire after 24h; re-collect the card)", map[string]any{"payment_method_stale": true})
 		}
 		return intents.Parked("bt token intent read failed before submission: " + err.Error())
 	}

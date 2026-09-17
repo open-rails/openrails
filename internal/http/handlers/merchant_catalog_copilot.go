@@ -24,13 +24,8 @@ import (
 // write-shaped output is a DRAFT for human review in the console.
 func CatalogCopilotAsk(r *httprequest.Request) {
 	svc := r.State.CopilotService
-	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "catalog copilot service not configured")
-		return
-	}
 	if !svc.Configured() {
-		r.ErrorJSON(http.StatusNotImplemented,
-			"the catalog copilot is not configured on this deployment: set llm.api_key (env LLM_API_KEY) AND llm.catalog_copilot_enabled (env LLM_CATALOG_COPILOT_ENABLED=true) — see docs/admin-console.md")
+		r.ErrorJSON(http.StatusServiceUnavailable, "catalog copilot service unavailable")
 		return
 	}
 	var body struct {

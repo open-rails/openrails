@@ -14,7 +14,7 @@ import (
 
 	authcore "github.com/open-rails/authkit/embedded"
 
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // #760 merchant team management over the REAL standalone server + AuthKit

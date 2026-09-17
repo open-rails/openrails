@@ -139,6 +139,7 @@ func New(ctx context.Context, opts Options) (*Embedded, error) {
 		return nil, fmt.Errorf("initialize merchant services: %w", err)
 	}
 
+	application.ConsoleAssets = opts.ConsoleAssets
 	e := &Embedded{app: application, consoleAssets: opts.ConsoleAssets}
 	if opts.StripeTransport != nil {
 		stripeapi.SetBaseTransport(opts.StripeTransport)
@@ -259,7 +260,7 @@ func (e *Embedded) Service() (*service.Service, error) {
 	return service.New(e.app.Runtime)
 }
 
-// Control-plane bootstrap + accessor moved to the OPT-IN pkg/embedded/controlplane
+// Control-plane bootstrap + accessor moved to the OPT-IN embed/controlplane
 // helper (#284): the embedded CORE no longer imports internal/controlplane (or,
 // through it, AuthKit). Standalone/AuthKit hosts call
 // controlplane.RunBootstrap(ctx, e.App(), controlplane.BootstrapOptions{...}) and

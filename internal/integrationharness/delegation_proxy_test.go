@@ -16,9 +16,9 @@ import (
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails/internal/dbtest"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/permissions"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )

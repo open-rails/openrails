@@ -124,7 +124,7 @@ func TestCustomerDelegationSpend_HTTP_EndToEnd(t *testing.T) {
 		body := map[string]any{"items": []map[string]any{{
 			"customer_id": payerID.String(), "invoker": invoker, "invoker_type": "delegated",
 			"currency": money.DefaultCurrency, "estimated_amount": strconv.FormatInt(amount, 10), "request_id": reqID,
-			"expires_at": time.Now().Add(time.Hour).Unix(),
+			"expires_at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano),
 		}}}
 		data, mErr := json.Marshal(body)
 		require.NoError(t, mErr)

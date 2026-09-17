@@ -75,7 +75,7 @@ func (f *fakeApplier) GetProductByKey(_ context.Context, key string) (*billingse
 func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListProductsOptions) (billingservice.CatalogPage[billingservice.CatalogProduct], error) {
 	var out []billingservice.CatalogProduct
 	for _, p := range f.products {
-		if opts.ActiveOnly && p.Archived {
+		if opts.Archived != nil && p.Archived != *opts.Archived {
 			continue
 		}
 		if opts.TierGroup != "" && (p.TierGroup == nil || !strings.EqualFold(*p.TierGroup, opts.TierGroup)) {

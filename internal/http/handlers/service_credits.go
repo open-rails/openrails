@@ -179,11 +179,11 @@ type serviceTxnResponse struct {
 }
 
 type serviceUsageRollupRequest struct {
-	CustomerID string `json:"customer_id" binding:"required"`
-	Currency   string `json:"currency"`
-	From       int64  `json:"from" binding:"required"` // unix seconds, inclusive
-	To         int64  `json:"to" binding:"required"`   // unix seconds, exclusive
-	GroupBy    string `json:"group_by" binding:"required"`
+	CustomerID string    `json:"customer_id" binding:"required"`
+	Currency   string    `json:"currency"`
+	From       time.Time `json:"from" binding:"required"` // RFC3339, inclusive
+	To         time.Time `json:"to" binding:"required"`   // RFC3339, exclusive
+	GroupBy    string    `json:"group_by" binding:"required"`
 }
 
 type serviceRecordUsageRequest = openrails.UsageReport
@@ -219,8 +219,8 @@ func ServiceRecordUsage(r *httprequest.Request) {
 		return
 	}
 	var occurredAt time.Time
-	if req.OccurredAtUnix > 0 {
-		occurredAt = time.Unix(req.OccurredAtUnix, 0).UTC()
+	if req.OccurredAt != nil {
+		occurredAt = req.OccurredAt.UTC()
 	}
 	usageKey, err := money.NewIdempotencyKey(money.UsageOperation(req.EventType), req.Source, req.SourceID)
 	if err != nil {
@@ -249,10 +249,10 @@ func ServiceRecordUsage(r *httprequest.Request) {
 }
 
 type serviceEndpointRevenueRequest struct {
-	Resource string `json:"resource" binding:"required"`
-	Currency string `json:"currency"`
-	From     int64  `json:"from" binding:"required"`
-	To       int64  `json:"to" binding:"required"`
+	Resource string    `json:"resource" binding:"required"`
+	Currency string    `json:"currency"`
+	From     time.Time `json:"from" binding:"required"`
+	To       time.Time `json:"to" binding:"required"`
 }
 
 // ServiceResourceRevenue returns per-day revenue for a resource (by usage_event
@@ -272,7 +272,7 @@ func ServiceResourceRevenue(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	rows, err := svc.ResourceRevenueDaily(r.Request.Context(), req.Resource, currency, time.Unix(req.From, 0).UTC(), time.Unix(req.To, 0).UTC())
+	rows, err := svc.ResourceRevenueDaily(r.Request.Context(), req.Resource, currency, req.From.UTC(), req.To.UTC())
 	if err != nil {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
@@ -316,8 +316,8 @@ func ServiceUsageRollup(r *httprequest.Request) {
 	rows, err := svc.ServiceUsageRollup(r.Request.Context(), billingservice.ServiceUsageRollupRequest{
 		CustomerID: tenantSubjectID,
 		Currency:   currency,
-		From:       time.Unix(req.From, 0).UTC(),
-		To:         time.Unix(req.To, 0).UTC(),
+		From:       req.From.UTC(),
+		To:         req.To.UTC(),
 		GroupBy:    req.GroupBy,
 	})
 	if err != nil {
@@ -603,7 +603,7 @@ func ServiceReleaseHold(r *httprequest.Request) {
 }
 
 type serviceExtendHoldRequest struct {
-	ExpiresAt int64 `json:"expires_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 // ServiceExtendHold re-declares a live hold's deadline (xs-007 row 33).
@@ -617,7 +617,7 @@ func ServiceExtendHold(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.ExpiresAt <= 0 {
+	if req.ExpiresAt.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "expires_at required")
 		return
 	}
@@ -629,7 +629,7 @@ func ServiceExtendHold(r *httprequest.Request) {
 	if !requireAdmissionScope(r, svc, requestID) {
 		return
 	}
-	err = svc.ExtendHold(r.Request.Context(), requestID, time.Unix(req.ExpiresAt, 0).UTC())
+	err = svc.ExtendHold(r.Request.Context(), requestID, req.ExpiresAt.UTC())
 	switch {
 	case err == nil:
 		r.SuccessJSON(map[string]any{"ok": true})

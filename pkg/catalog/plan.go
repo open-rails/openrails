@@ -130,8 +130,9 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 		if opts.ArchiveMissingProducts {
 			// Products dropped from the manifest -> archive. Scope to active products
 			// in this tier group.
+			live := false
 			for offset := 0; ; {
-				page, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{ActiveOnly: true, TierGroup: group.Key, Limit: 1000, Offset: offset})
+				page, err := applier.ListProducts(ctx, billingservice.ListProductsOptions{Archived: &live, TierGroup: group.Key, Limit: 1000, Offset: offset})
 				if err != nil {
 					return nil, fmt.Errorf("list active products for tier group %s: %w", group.Key, err)
 				}

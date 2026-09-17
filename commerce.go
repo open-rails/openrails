@@ -1,5 +1,7 @@
 package openrails
 
+import "time"
+
 type CheckoutRailOption struct {
 	Selector string `json:"selector"`
 	PSPID    string `json:"psp_id"`
@@ -12,6 +14,28 @@ type CheckoutRailOption struct {
 type CheckoutConfig struct {
 	Object string              `json:"object"`
 	PSPs   []CheckoutPSPConfig `json:"psps"`
+	// Solana is present when a Solana PSP is armed: the network and the
+	// tokens the merchant accepts, so a host renders wallet options from the
+	// same document it renders card options from.
+	Solana *SolanaCheckoutConfig `json:"solana,omitempty"`
+}
+
+// SolanaCheckoutConfig is the merchant's public Solana acceptance policy.
+type SolanaCheckoutConfig struct {
+	Network        string                `json:"network"`
+	Chain          string                `json:"chain"`
+	PreferredToken string                `json:"preferred_token"`
+	Tokens         []SolanaCheckoutToken `json:"tokens"`
+}
+
+// SolanaCheckoutToken is one accepted SPL token.
+type SolanaCheckoutToken struct {
+	Symbol            string `json:"symbol"`
+	Name              string `json:"name"`
+	Mint              string `json:"mint"`
+	Decimals          int    `json:"decimals"`
+	Preferred         bool   `json:"preferred"`
+	RecurringEligible bool   `json:"recurring_eligible"`
 }
 
 // CheckoutPSPConfig describes one armed PSP for browser checkout.
@@ -80,7 +104,8 @@ type CheckoutPayment struct {
 }
 
 // CheckoutSession is the durable result of a checkout attempt. Amount is native
-// currency units (micros for fiat), encoded as a decimal string over HTTP.
+// currency units (micros for fiat), encoded as a decimal string over HTTP;
+// timestamps are RFC3339 instants.
 type CheckoutSession struct {
 	ID             string            `json:"id"`
 	Status         string            `json:"status"` // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
@@ -93,8 +118,8 @@ type CheckoutSession struct {
 	URL            *string           `json:"url"` // Redirect URL for CCBill/Stripe
 	SubscriptionID *string           `json:"subscription_id"`
 	PaymentID      *string           `json:"payment_id"`
-	ExpiresAt      int64             `json:"expires_at"` // Unix epoch seconds
-	Created        int64             `json:"created"`    // Unix epoch seconds
+	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
+	CreatedAt      time.Time         `json:"created_at"`
 	Metadata       map[string]string `json:"metadata"`
 	RailData       map[string]any    `json:"rail_data"` // Rail-specific response data
 }

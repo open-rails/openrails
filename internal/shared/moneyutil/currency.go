@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"github.com/open-rails/openrails"
 )
 
 // System currency registry (#472), moved here from internal/modules/money by
@@ -28,11 +30,15 @@ type Currency struct {
 // rail minor unit: internal = minor * 10^NativeShift.
 func (c Currency) NativeShift() int { return c.Decimals - c.MinorDecimals }
 
-var currencies = map[string]Currency{
-	"USD": {Code: "USD", Decimals: 6, MinorDecimals: 2, Kind: "fiat"},
-	"EUR": {Code: "EUR", Decimals: 6, MinorDecimals: 2, Kind: "fiat"},
-	"JPY": {Code: "JPY", Decimals: 4, MinorDecimals: 0, Kind: "fiat"},
-}
+// currencies mirrors the public registry (openrails.Currencies), the one owner
+// of every currency scale.
+var currencies = func() map[string]Currency {
+	out := map[string]Currency{}
+	for _, units := range openrails.Currencies() {
+		out[units.Code] = Currency{Code: units.Code, Decimals: units.Decimals, MinorDecimals: units.MinorDecimals, Kind: "fiat"}
+	}
+	return out
+}()
 
 // NormalizeCurrency canonicalises a currency code to UPPER case (CUR-6).
 // It lives here, in the leaf, rather than in the registry package, because it

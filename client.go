@@ -126,7 +126,7 @@ type AdminFundingClient interface {
 	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
 	// ResourceRevenueDaily returns per-day revenue for a resource across all
 	// payers in the merchant (#410).
-	ResourceRevenueDaily(ctx context.Context, resource, currency string, fromUnix, toUnix int64) (*ResourceRevenueResponse, error)
+	ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) (*ResourceRevenueResponse, error)
 }
 
 // CustomerLookupClient reads customer-forward billing state.
@@ -268,10 +268,10 @@ type AdmitRequest struct {
 	AccrualRateDeltaPerHour int64  `json:"accrual_rate_delta_per_hour,omitempty,string"`
 	RequestID               string `json:"request_id"`
 	Source                  string `json:"source,omitempty"`
-	// ExpiresAt (unix seconds) is the deadline of the job this admit covers.
-	// REQUIRED when EstimatedAmount places a hold: the hold lives that long
-	// unless captured, released or extended (ExtendHold). Refused otherwise.
-	ExpiresAt *int64 `json:"expires_at,omitempty"`
+	// ExpiresAt is the deadline of the job this admit covers. REQUIRED when
+	// EstimatedAmount places a hold: the hold lives that long unless captured,
+	// released or extended (ExtendHold). Refused otherwise.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// Roles are the immutable role UUIDs the invoker holds (#473). Each role with a
 	// matching (subject, role) budget-scope policy gates this request's spend in
 	// the same admit verdict. The host reads them from the delegated
@@ -470,8 +470,8 @@ type WastedSpendReport struct {
 // nor re-charges; a replay with a DIFFERENT Amount is refused (or#891) rather
 // than answered with the first event. Amount is the host-priced cost in the currency's internal
 // precision; 0 records a free/metered-only event (dimensions still aggregate
-// through rate-card rating). OccurredAtUnix (seconds; 0 = now) places the
-// event in its rating window — gauge segment reporters set it to segment end.
+// through rate-card rating). OccurredAt (nil = now) places the event in its
+// rating window — gauge segment reporters set it to segment end.
 type UsageReport struct {
 	CustomerID string           `json:"customer_id"`
 	Invoker    string           `json:"invoker"`
@@ -483,8 +483,8 @@ type UsageReport struct {
 	Metadata   map[string]any   `json:"metadata,omitempty"`
 	Source     string           `json:"source"`
 	SourceID   string           `json:"source_id"`
-	// OccurredAtUnix is the event time as a unix timestamp in seconds (0 = now).
-	OccurredAtUnix int64 `json:"occurred_at_unix,omitempty"`
+	// OccurredAt is the event time (nil = now).
+	OccurredAt *time.Time `json:"occurred_at,omitempty"`
 }
 
 // WastedSpendResponse reports how OpenRails handled a wasted-spend report.

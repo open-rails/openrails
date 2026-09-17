@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/db/models"
-	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
-	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/merchant"
 	"net/http"
 	"sort"
 	"strings"
@@ -15,13 +11,18 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -248,9 +249,32 @@ func GetSolanaConfig(r *httprequest.Request) {
 	}
 
 	network := normalizeSolanaNetwork(solanaConf.Network)
-	// or#881: advertise exactly what the merchant accepts; no registry fallback.
-	tokenMap := normalizeTokenMap(solanaConf.Tokens)
+	tokens := acceptedSolanaTokens(r, solanaConf)
 
+	resp := SolanaRuntimeConfigResponse{
+		Network: network,
+		Chain:   "solana:" + network,
+		// RPCURL is intentionally empty (#352): there is no rpc_endpoint knob
+		// anymore, and the server-side Helius key must never reach a browser.
+		// Wallets/frontends bring their own RPC.
+		RPCURL:          "",
+		ExplorerCluster: explorerCluster(network),
+		PreferredToken:  solanatokens.PreferredStablecoin,
+		Tokens:          tokens,
+	}
+	resp.Features.SolanaPay = true
+	resp.Features.RecurringSubscriptions = true
+	// Always supported: rebillability is a property of the PRICE (catalog
+	// auto_renew), never merchant config (v2 transaction system).
+	resp.Features.SolanaPayRecurringSubscriptions = true
+
+	r.SuccessJSON(resp)
+}
+
+// acceptedSolanaTokens lists exactly the tokens the merchant accepts (or#881:
+// no registry fallback), dropping any whose mint decimals cannot be read.
+func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailConfig) []TokenInfo {
+	tokenMap := normalizeTokenMap(solanaConf.Tokens)
 	symbols := make([]string, 0, len(tokenMap))
 	for symbol := range tokenMap {
 		symbols = append(symbols, symbol)
@@ -279,25 +303,25 @@ func GetSolanaConfig(r *httprequest.Request) {
 			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
 		})
 	}
+	return tokens
+}
 
-	resp := SolanaRuntimeConfigResponse{
-		Network: network,
-		Chain:   "solana:" + network,
-		// RPCURL is intentionally empty (#352): there is no rpc_endpoint knob
-		// anymore, and the server-side Helius key must never reach a browser.
-		// Wallets/frontends bring their own RPC.
-		RPCURL:          "",
-		ExplorerCluster: explorerCluster(network),
-		PreferredToken:  solanatokens.PreferredStablecoin,
-		Tokens:          tokens,
+// solanaCheckoutConfig projects the armed Solana rail onto the shared
+// checkout-config document; nil when Solana is not armed for the merchant.
+func solanaCheckoutConfig(r *httprequest.Request) (*openrails.SolanaCheckoutConfig, error) {
+	solanaConf, err := effectiveSolanaRailConfig(r)
+	if err != nil || solanaConf == nil {
+		return nil, err
 	}
-	resp.Features.SolanaPay = true
-	resp.Features.RecurringSubscriptions = true
-	// Always supported: rebillability is a property of the PRICE (catalog
-	// auto_renew), never merchant config (v2 transaction system).
-	resp.Features.SolanaPayRecurringSubscriptions = true
-
-	r.SuccessJSON(resp)
+	network := normalizeSolanaNetwork(solanaConf.Network)
+	accepted := acceptedSolanaTokens(r, solanaConf)
+	tokens := make([]openrails.SolanaCheckoutToken, 0, len(accepted))
+	for _, t := range accepted {
+		tokens = append(tokens, openrails.SolanaCheckoutToken{Symbol: t.Symbol, Name: t.Name, Mint: t.Mint,
+			Decimals: t.Decimals, Preferred: t.Preferred, RecurringEligible: t.RecurringEligible})
+	}
+	return &openrails.SolanaCheckoutConfig{Network: network, Chain: "solana:" + network,
+		PreferredToken: solanatokens.PreferredStablecoin, Tokens: tokens}, nil
 }
 
 func normalizeSolanaNetwork(network string) string {

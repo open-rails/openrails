@@ -64,7 +64,8 @@ admin responses are never replayed by global middleware.
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
 | GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
 | GET | `/v1/prices` | optional | List prices. Query: `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
-| GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`redirect`/`wallet`, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear |
+| GET | `/v1/currencies` | none | The currency scale registry: `{object:"currencies", currencies:[{code, decimals, minor_decimals}]}`. Every monetary string on the wire is in native units (`10^decimals` per major unit); providers settle in `10^minor_decimals`. System-fixed, merchant-independent; `openrails.Currencies()` is the same table in Go |
+| GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`redirect`/`wallet`, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear. When a Solana PSP is armed, `solana` carries `{network, chain, preferred_token, tokens[]}` (the same acceptance policy as `/v1/solana/config`) |
 | GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
 | GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }` |
 
@@ -236,6 +237,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
 | POST | `/v1/merchant/customers/entitlements:batch` | `merchant:customer-settings:read` | Batch entitlement lookup by external subject |
+| PUT | `/v1/merchant/customers/{customer_id}` | `merchant:customer-settings:update` | Materialize or touch the customer record (`Client.EnsureCustomer`); returns `{id, created_at, last_seen_at}` |
 | GET | `/v1/merchant/customers/{customer_id}/entitlements` | `merchant:customer-settings:read` | Active entitlements for a customer. Query: `at` (RFC3339) for point-in-time |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations` | `merchant:customer-settings:update` | Replace the customer's full spend-delegation policy |
 | PUT | `/v1/merchant/customers/{customer_id}/spend-delegations:upsert` | `merchant:customer-settings:update` | Upsert one delegation |
@@ -247,12 +249,12 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/checkout-sessions/{id}` | `merchant:customer-settings:read` | Read a checkout owned by query customer_id |
 | POST | `/v1/merchant/checkout-sessions/{id}/confirm` | `merchant:checkout:create` | Confirm the checkout for the supplied customer_id |
 | GET | `/v1/merchant/checkout-options` | `merchant:customer-settings:read` | Locally ready providers for query price_id; no provider request |
-| GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs and their public browser values for the credential's merchant |
+| GET | `/v1/merchant/checkout-config` | `merchant:customer-settings:read` | Armed PSPs, their public browser values and the Solana acceptance policy for the credential's merchant |
 | GET | `/v1/merchant/customers/{customer_id}/effective-tier` | `merchant:customer-settings:read` | Active tier for query group; null when none |
-| POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (unix seconds): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
+| POST | `/v1/merchant/admissions` | `merchant:admissions:create` | Pre-authorize spend / place holds; returns the durable admission id. Idempotent per `(customer_id, credit_type, source, source_id)`. An item with `estimated_amount > 0` places a hold and MUST carry `expires_at` (RFC3339): the deadline of the job the hold covers. There is no default lifetime — the hold lives until captured, released, extended, or that deadline |
 | POST | `/v1/merchant/admissions/{id}/capture` | `merchant:admissions:create` | Capture a hold: `{ amount }`. Idempotent on the path `{id}` unconditionally (or#907); an identical retry answers `Replayed: true`, a changed amount is refused 409 `idempotency_key_reused` |
 | POST | `/v1/merchant/admissions/{id}/release` | `merchant:admissions:create` | Release a hold without spending |
-| POST | `/v1/merchant/admissions/{id}/extend` | `merchant:admissions:create` | Re-declare a live hold's deadline: `{ expires_at }` (unix seconds). A hold lives exactly as long as its admit declared (`expires_at` is required with `estimated_amount`); a still-running job extends before that or loses it. 404 `hold_not_found` when nothing live exists — re-admit, a lapsed hold is never resurrected |
+| POST | `/v1/merchant/admissions/{id}/extend` | `merchant:admissions:create` | Re-declare a live hold's deadline: `{ expires_at }` (RFC3339). A hold lives exactly as long as its admit declared (`expires_at` is required with `estimated_amount`); a still-running job extends before that or loses it. 404 `hold_not_found` when nothing live exists — re-admit, a lapsed hold is never resurrected |
 | POST | `/v1/merchant/wasted-spend` | `merchant:admissions:create` | Report wasted spend against admissions |
 | POST | `/v1/merchant/usage/report` | `merchant:admissions:create` | Record usage events |
 | POST | `/v1/merchant/provider-operations` | `merchant:admissions:create` | Open a durable provider-operation authorization (#1004): `{ operation_id, payer, record_owner, authorized_usd_micros, claim_reference, authorization_body, authorization_body_sha256 }`. Exact replay → `replayed=true`; a changed field → 409 `operation_authorization_conflict` with `param`; 402 `insufficient_credits` |
@@ -274,7 +276,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | GET | `/v1/merchant/credits/balance` | `merchant:customer-settings:read` | Credit balance |
 | POST | `/v1/merchant/credits/deposit` | `merchant:customer-settings:update` | Deposit/grant credits: `{ customer_id, invoker, currency, amount, source, source_id, expires_at?, description? }`. `source_id` (any non-empty string) is REQUIRED and is the caller's reproducible idempotency key: once-only per `(customer_id, source_id)` is a database fact; `source` is a label, NOT part of the key. Identical replay → same grant with `Replayed=true`; replay with a different `amount` → 409 `idempotency_key_reused` |
 | GET | `/v1/merchant/credits/deposit` | `merchant:customer-settings:read` | What did this deposit key do (or#906): `?customer_id=&source_id=` → the committed grant (id, amount, created_at, `Replayed=true`); 404 `deposit_not_found` when the key never committed |
-| POST | `/v1/import/billing` | `merchant:billing:import` | Bulk DeclaredBilling book import (subscriptions/payments/payment methods wholesale) — a distinct owner-level grant |
+| POST | `/v1/import/billing` | `merchant:billing:import` | Declared billing facts (`Client.ImportBilling`): customers, payment methods, subscriptions, transactions and admin comps (`admin_grants`), idempotent by source id — a distinct owner-level grant |
 
 ## 5. Merchant admin (human) routes
 
@@ -364,14 +366,14 @@ manifest and reboot instead. Reads stay live.
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/v1/merchant/catalog/products` | Create a product: at least `{ key, display_name }`, optionally `entitlements_spec`, `credits_spec` |
-| GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `active_only` filter before count/pagination |
+| GET | `/v1/merchant/catalog/products` | Paginated products; `tier_group` and `archived` (`false` live only, `true` archived only, absent both) filter before count/pagination |
 | GET | `/v1/merchant/catalog/products/{id}` | One product |
 | GET | `/v1/merchant/catalog/products/by-key/{key}` | Product by catalog key |
 | PATCH | `/v1/merchant/catalog/products/{id}` | Update definition fields |
 | POST | `/v1/merchant/catalog/products/{id}/activate` | Activate |
 | POST | `/v1/merchant/catalog/products/{id}/deactivate` | Deactivate |
 | POST | `/v1/merchant/catalog/prices` | Create a price with per-PSP links (`psp_links`: link existing provider ids or select declarative provider config; recurring Solana defaults to USDC, accepts `token: USD1`, or resolves an attached `plan_pda`) |
-| GET | `/v1/merchant/catalog/prices` | Paginated prices; `product_id`, `currency`, `type`, `active_only` filters |
+| GET | `/v1/merchant/catalog/prices` | Paginated prices; `product_id`, `currency`, `type`, `archived` (`false` live only, `true` archived only, absent both) filters |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}` | Price by key |
 | GET | `/v1/merchant/catalog/prices/by-key/{key}/history` | The key's version chain, most-recent-first |
 | GET | `/v1/merchant/catalog/prices/{id}` | One price |
@@ -454,7 +456,7 @@ manifest-guarded like catalog writes).
 | PATCH | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Change a member's role |
 | DELETE | `/v1/merchant/team/{user_id}` | `merchant:members:manage` | Remove a member |
 
-On deployments without a control plane these routes stay mounted but answer 501.
+On deployments without a control plane these routes are not registered (404), like every other capability the deployment cannot serve: the LLM routes (`/dashboard/widgets/generate`, `/metrics/ask`, `/catalog/ask`, `/catalog/copilot/confirm`) exist only with `llm.api_key` and the matching consent, and `/api-host` only when the merchant directory is armed. `GET /v1/capabilities` and `/admin/config.json` advertise what is mounted.
 
 ### Platform operator (`/v1/platform`, standalone only)
 
@@ -531,7 +533,8 @@ The list is merchant-scoped and bounded (`limit` defaults to 100, maximum 1000).
 after idempotent host processing commits, then fetch again; a UUID high-water
 mark can miss transactions that commit late. Acknowledgment is idempotent and
 independent of customer and merchant notification read state. A payment event
-contains the original payment UUID, amount, currency, merchant and settlement
+contains the original payment UUID, its payer (`customer_id`), `price_id`, the
+renewed `subscription_id` when any, amount, currency, merchant and settlement
 time, preserving the fee-attribution coordinate.
 
 `include_acknowledged=true` includes retained acknowledged rows; `payment_id`

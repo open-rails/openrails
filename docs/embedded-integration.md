@@ -171,10 +171,19 @@ defer rt.Close(ctx)
 
 **Runtime surface**: `rt.Client()` (the shared `*openrails.Client`),
 `rt.UpsertMerchantConfig`, `rt.Handler(MountOptions)`, `rt.SelfHandler`,
-`rt.StandaloneHandler()`, `rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`,
-`rt.HasExternalRiverClient()`, `rt.DeclarePSP`, `rt.ActiveRouteSets()`,
-`rt.RunWorkers(ctx)`, `rt.Close(ctx)`. `rt.Embedded()` remains only for
-control-plane wiring that still takes the application graph.
+`rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`, `rt.HasExternalRiverClient()`,
+`rt.DeclarePSP`, `rt.ActiveRouteSets()`, `rt.RunWorkers(ctx)`, `rt.Close(ctx)`.
+Hosts that use OpenRails' own AuthKit control plane (standalone-shaped or
+hosted products) attach it with `embed/controlplane`:
+
+```go
+cp, err := controlplane.Attach(ctx, rt, controlplane.Options{HostedPosture: true, EmailSender: sender})
+handler, err := cp.Handler() // billing + AuthKit routes + admin console
+```
+
+`cp` carries the operator mechanisms (`ProvisionMerchant`, directory reads,
+provider configuration, fleet aggregates, retirement, `UserAuthenticator`,
+`JWKSHandler`). Hosts that bring their own AuthKit never import it.
 
 **Host-owned River**: a host that runs its own [River](https://riverqueue.com)
 client declares `RiverFromHost`. OpenRails registers its workers on the shared
@@ -204,6 +213,14 @@ if err := jobs.Start(ctx); err != nil { log.Fatal(err) }
 
 `RunWorkers` is a no-op for a host-owned client. `rt.CheckJobProgress(ctx)` gives
 the live fleet verdict for a health endpoint.
+
+**Inserting an engine job.** OpenRails registers its own periodic jobs on the
+client you return. The one job a host inserts itself is the invoice sweep:
+`jobs.Insert(ctx, embed.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)`
+runs the daily period finalize now (rates reported usage and issues every
+payer's previous-period invoice); `Collect: true` runs the collection pass. Runs
+are idempotent. Every other job kind is an engine-internal schedule and stays
+private.
 
 **No job clock.** Your `river.Config.JobTimeout` (River's default is one minute)
 does not apply to OpenRails' workers: each declares `Timeout() = -1` and ends
@@ -385,9 +402,9 @@ mux.Handle("/billing/", handler)
 | `RouteSetMerchantAPI` | The standalone service/API-key surface (`/v1/merchant/*` over the wire) — most embedded hosts use `Client()` instead | opt-in |
 
 Admin routes **fail closed**: without a `Gate` and an attached control plane
-(`pkg/embedded/controlplane.Attach(ctx, rt.Embedded().App(), cfg, pool)` for
-AuthKit-backed hosts), omit `RouteSetMerchantAdmin` and run admin operations through
-the in-process client.
+(`controlplane.Attach(ctx, rt, opts)` for hosts on OpenRails' own AuthKit),
+omit `RouteSetMerchantAdmin` and run admin operations through the in-process
+client.
 
 **Admin console** (optional, #754): the engine ships zero frontend bytes. The host
 builds the SPA (`scripts/build-admin-console.sh` from the module cache into a

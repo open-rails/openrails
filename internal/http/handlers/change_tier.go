@@ -120,6 +120,10 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 		writePaymentMethodError(r, pmErr)
 		return
 	}
+	if errors.Is(err, checkout.ErrPaymentMethodStale) {
+		writePaymentMethodStale(r)
+		return
+	}
 
 	switch {
 	case errors.Is(err, checkout.ErrTierChangeNoSubscription):

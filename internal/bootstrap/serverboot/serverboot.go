@@ -19,9 +19,9 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	server "github.com/open-rails/openrails/internal/http"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/cache"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

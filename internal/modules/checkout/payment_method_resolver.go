@@ -41,14 +41,17 @@ func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context
 
 		pm, err := s.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pmID, user.ID)
 		if err != nil {
+			if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) || errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied) {
+				return "", "", nil, false, fmt.Errorf("%w: %w", ErrPaymentMethodStale, err)
+			}
 			return "", "", nil, false, fmt.Errorf("invalid payment method: %w", err)
 		}
 
 		if !rails.IsNMI(pm.Rail) {
-			return "", "", nil, false, errors.New("payment method is not compatible with card payments")
+			return "", "", nil, false, fmt.Errorf("%w: payment method is not compatible with card payments", ErrPaymentMethodStale)
 		}
 		if !rails.SameRail(pm.Rail, models.Rail(target.Rail)) {
-			return "", "", nil, false, errors.New("payment method belongs to a different payment provider")
+			return "", "", nil, false, fmt.Errorf("%w: payment method belongs to a different payment provider", ErrPaymentMethodStale)
 		}
 		if err := paymentMethodMatchesTargetPSP(pm, target); err != nil {
 			return "", "", nil, false, err
@@ -111,7 +114,7 @@ func paymentMethodMatchesTargetPSP(pm *models.PaymentMethod, target railTarget) 
 		return errors.New("payment provider identity is unavailable")
 	}
 	if pm.PspID == uuid.Nil || pm.PspID != target.Scope.ID {
-		return errors.New("payment method belongs to a different payment provider account")
+		return fmt.Errorf("%w: payment method belongs to a different payment provider account", ErrPaymentMethodStale)
 	}
 	return nil
 }

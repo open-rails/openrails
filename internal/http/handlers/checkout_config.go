@@ -1,14 +1,17 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -72,10 +75,33 @@ func checkoutConfig(r *httprequest.Request) (merchants.PublicCheckoutConfig, boo
 		return merchants.PublicCheckoutConfig{}, false
 	}
 	env := config.ExpectedProviderEnvironment(r.State.Config != nil && r.State.Config.IsTestMode())
-	psps, err := r.State.Merchants.PublicCheckoutPSPs(r.Request.Context(), mid, env)
+	psps, err := r.State.Merchants.PublicCheckoutPSPs(r.Request.Context(), mid, env, pspArmed(r.State.RailConfigs))
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to load checkout configuration")
 		return merchants.PublicCheckoutConfig{}, false
 	}
-	return merchants.PublicCheckoutConfig{Object: "checkout_config", PSPs: psps}, true
+	solana, err := solanaCheckoutConfig(r)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "failed to load solana checkout configuration")
+		return merchants.PublicCheckoutConfig{}, false
+	}
+	return merchants.PublicCheckoutConfig{Object: "checkout_config", PSPs: psps, Solana: solana}, true
+}
+
+// pspArmed reports whether a declared account resolves with its full credential
+// shape — the same question checkout routing asks before charging. Resolution
+// errors fail closed.
+func pspArmed(rails railresolve.Source) func(context.Context, merchants.PSPScope) (bool, error) {
+	return func(ctx context.Context, scope merchants.PSPScope) (bool, error) {
+		if rails == nil {
+			return false, nil
+		}
+		if _, err := rails.RailConfig(ctx, scope.Rail, scope.AccountID); err != nil {
+			if errors.Is(err, railresolve.ErrRailNotArmed) {
+				return false, nil
+			}
+			return false, err
+		}
+		return true, nil
+	}
 }

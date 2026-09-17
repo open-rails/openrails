@@ -23,9 +23,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"

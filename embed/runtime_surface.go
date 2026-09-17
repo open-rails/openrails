@@ -21,12 +21,6 @@ func (r *Runtime) SelfHandler(authenticator billingauth.DelegatedAuthenticator) 
 	return embedded.SelfHandler(r.emb, authenticator)
 }
 
-// StandaloneHandler returns the full standalone surface with the OpenRails
-// control plane attached.
-func (r *Runtime) StandaloneHandler() (http.Handler, error) {
-	return embedded.StandaloneHandler(r.emb)
-}
-
 // Ready reports the first unhealthy dependency: Postgres, configured Redis,
 // the merchant secret backend and, for OpenRails-managed River, its consumer.
 func (r *Runtime) Ready(ctx context.Context) error {

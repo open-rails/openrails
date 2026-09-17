@@ -229,7 +229,7 @@ func TestStandaloneMerchantCatalogPublishHTTP(t *testing.T) {
 	require.NotNil(t, planned.Plan)
 	require.Nil(t, planned.Result)
 
-	listURL := surface.BaseURL + "/v1/merchant/catalog/products?tier_group=" + url.QueryEscape(groupSlug) + "&active_only=true"
+	listURL := surface.BaseURL + "/v1/merchant/catalog/products?tier_group=" + url.QueryEscape(groupSlug) + "&archived=false"
 	missingStatus, missingBody := requestJSON(t, http.MethodGet, listURL, token, nil)
 	require.Equal(t, http.StatusOK, missingStatus, string(missingBody))
 	var missingPage struct {
@@ -1441,8 +1441,8 @@ func (a httpCatalogApplier) ListProducts(_ context.Context, opts billingservice.
 	if opts.TierGroup != "" {
 		q.Set("tier_group", opts.TierGroup)
 	}
-	if opts.ActiveOnly {
-		q.Set("active_only", "true")
+	if opts.Archived != nil {
+		q.Set("archived", fmt.Sprint(*opts.Archived))
 	}
 	if opts.Limit > 0 {
 		q.Set("limit", fmt.Sprint(opts.Limit))
@@ -1496,7 +1496,7 @@ func (a httpCatalogApplier) DeactivateProduct(_ context.Context, id uuid.UUID) (
 func (a httpCatalogApplier) ListPricesByProduct(_ context.Context, productID uuid.UUID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
 	q := url.Values{"product_id": []string{productID.String()}}
 	if activeOnly {
-		q.Set("active_only", "true")
+		q.Set("archived", "false")
 	}
 	status, body := requestJSON(a.t, http.MethodGet, a.baseURL+"/v1/merchant/catalog/prices?"+q.Encode(), a.token, nil)
 	if status != http.StatusOK {
@@ -1805,7 +1805,7 @@ func exampleUsageRateCardCount(m catalog.Manifest) int {
 
 // holdDeadline is the declared deadline every hold-placing admit must carry
 // (xs-007 row 33): an hour from now, as a job would declare.
-func holdDeadline() *int64 {
-	v := time.Now().Add(time.Hour).Unix()
+func holdDeadline() *time.Time {
+	v := time.Now().Add(time.Hour)
 	return &v
 }

@@ -297,11 +297,8 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 // Verify performs a live retrieve of the Stripe Price (and its Product) and
 // computes per-field drift vs. the OpenRails snapshot.
 func (a *stripeAdapter) Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) ([]DriftField, bool, error) {
-	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil {
-		return nil, false, fmt.Errorf("stripe is not configured")
-	}
-	if !a.stripeConfigured(ctx) {
-		return nil, false, fmt.Errorf("stripe is not configured")
+	if a.svc == nil || a.svc.rt == nil || a.svc.rt.Config == nil || !a.stripeConfigured(ctx) {
+		return nil, false, fmt.Errorf("stripe is not configured: %w", errProviderNotArmed)
 	}
 	priceID := strings.TrimSpace(ids[models.RailKeyStripePriceID])
 	if priceID == "" {

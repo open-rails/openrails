@@ -267,14 +267,15 @@ export const REFUNDABLE_RAILS = ["nmi", "stripe"]
 
 // --- Catalog ---
 
+// archived: false lists live products, true archived ones, undefined both.
 export const listProducts = (
   limit: number,
   offset: number,
-  activeOnly?: boolean,
+  archived?: boolean,
   signal?: AbortSignal
 ) =>
   api<ItemsEnvelope<CatalogProduct>>("/merchant/catalog/products", {
-    query: { limit, offset, active_only: activeOnly },
+    query: { limit, offset, archived },
     signal,
   })
 

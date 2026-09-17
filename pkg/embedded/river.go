@@ -86,6 +86,36 @@ var ErrRiverRequired = errors.New("embedded billing: Options.River is required (
 //	})
 const QueueBilling = riverjobs.QueueBilling
 
+// InvoiceSweepArgs is the invoice job OpenRails schedules on the billing queue
+// (daily period finalize, hourly collection, 30-day monthly-floor collection),
+// as public River job args so a host that owns the fleet (RiverFromHost) can
+// insert one run itself: `jobs.Insert(ctx, embedded.InvoiceSweepArgs{
+// FinalizePreviousMonth: true}, nil)` finalizes every payer's previous period
+// now, worked by the same InvoiceWorker on the same registry. Every run is
+// idempotent, so an extra run never double-bills. This is the only engine
+// job a host inserts; the other kinds are engine-internal schedules.
+type InvoiceSweepArgs struct {
+	// Collect runs the collection pass over open receivables.
+	Collect bool `json:"collect,omitempty"`
+	// CollectionThresholdAmount overrides the merchant's collection trigger
+	// (minor units); 0 keeps the merchant setting.
+	CollectionThresholdAmount int64 `json:"collection_threshold_amount,omitempty"`
+	// UseMonthlyFloor collects down to the merchant's monthly floor instead of
+	// its collection threshold.
+	UseMonthlyFloor bool `json:"use_monthly_floor,omitempty"`
+	// FinalizePreviousMonth finalizes each payer's previous billing period
+	// under the merchant's billing_period_boundary, rating reported usage.
+	FinalizePreviousMonth bool `json:"finalize_previous_month,omitempty"`
+}
+
+// Kind is the engine's invoice job kind, so the host's insert is worked by
+// OpenRails' InvoiceWorker.
+func (InvoiceSweepArgs) Kind() string { return riverjobs.KindInvoice }
+
+// InsertOpts targets the billing queue by default; a host may still pass
+// explicit river.InsertOpts to Insert.
+func (InvoiceSweepArgs) InsertOpts() river.InsertOpts { return river.InsertOpts{Queue: QueueBilling} }
+
 // RiverFleet is handed to a RiverBinder during New. Workers already holds every
 // OpenRails billing worker, each with its health bookkeeping attached (#895), so
 // there is nothing for the host to remember to install. Add your own workers to
