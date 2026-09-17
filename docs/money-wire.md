@@ -57,9 +57,11 @@ table from the public `GET /v1/currencies` route. The admin UI's
 values beyond JavaScript's safe integer range; numeric money above 2^53 is shown
 as out of range and rejected as input. No compatibility
 parser accepts numeric money on these finalized routes during the pre-v1 cut.
-Remaining numeric money (catalog publish manifests, the admin customer billing
-profile, metrics cells, finding evidence and event payloads) is tracked in #983
-and not frozen yet.
+Catalog publish manifests (`POST /catalog/publish` JSON; YAML files keep plain
+integers), the admin customer billing profile balances and metrics money cells
+(unit `money`, exact int64 sums) use the same decimal strings. Finding evidence
+and stored event payloads are operator records, not the shared wire, and keep
+integers.
 
 `testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
 time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI
