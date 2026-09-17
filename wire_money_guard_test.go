@@ -15,7 +15,7 @@ import (
 )
 
 // moneyJSONName matches JSON names that carry native monetary units.
-var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit|cap|threshold|floor|balance|revenue|fee|cost|refunded|due|owed|spent|used|reserved|remaining|captured|authorized)(_|$)`)
+var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit|cap|threshold|floor|balance|revenue|fee|cost|tax|refunded|due|owed|spent|used|reserved|remaining|captured|authorized)(_|$)`)
 
 // wireDTODirs hold types that the shared Client or HTTP handlers encode.
 var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "internal/operator", "pkg/pricing", "internal/service", "internal/http/handlers", "internal/modules/copilot", "internal/modules/money"}

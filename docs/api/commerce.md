@@ -32,3 +32,24 @@ in JSON, retaining `int64` in Go. Session `created_at`/`expires_at` are RFC3339
 instants like every other wire timestamp ([errors and wire rules](errors.md)).
 This is a pre-v1 contract; remaining whole-API money/list qualification is tracked
 in #983/#1002 before the final freeze.
+
+## Hosted checkout document
+
+A host that sells through the `openrails-checkout` browser package serves that
+package one session document (`GET .../checkout/sessions/{id}`) and accepts
+its pay request. The Go shape is `openrails.HostedCheckoutSession` (with
+`HostedCheckoutPayRequest`/`HostedCheckoutPayResult`); the canonical fixture
+is `testdata/wire/hosted_checkout_session.json` and the package decodes the
+same file. The host owns the session (id, expiry, attempts, Redis or SQL);
+OpenRails owns the shape so every host renders the same checkout.
+
+Money is exact: `plan.unit_amount`, `line_items[].amount`, `tax` and
+`due_today` are int64 decimal strings of `plan.currency`'s native unit, and
+`plan.unit_decimals` is that currency's registered scale. Build the plan with
+`openrails.NewHostedCheckoutPlan(product, price)`, which stamps the scale from
+the registry (`openrails.LookupCurrency`, the same table as
+`GET /v1/currencies`) and refuses an unregistered currency; never hardcode a
+scale. `openrails.HostedCheckoutDriver(rail)` names the browser driver for
+each `ListCheckoutRailOptions` result and reports rails the package cannot
+execute, which must not be offered. The package (0.3.0 and later) rejects a
+numeric amount or a missing `unit_decimals` as an unavailable session.
