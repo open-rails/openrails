@@ -7,7 +7,10 @@ credit-limit, usage-rollup and resource-revenue, credit grant and credit
 transaction, self balance and usage, invoker credit balance, delinquency,
 Solana token base-unit, fleet analytics, catalog price and copilot price
 draft, public price, payment and refund, subscription price/payment, tier-change
-and rate-card DTOs encode monetary values as decimal JSON strings. Rate cards
+and rate-card DTOs, and the hosted checkout document
+(`HostedCheckoutSession`, served by hosts to the `openrails-checkout` browser
+package with `plan.unit_decimals` stamped from the registry), encode monetary
+values as decimal JSON strings. Rate cards
 keep the same representation in `catalog_rate_cards.price`. Invoice movement maps use the same representation. A JavaScript
 consumer must use BigInt or an exact decimal library for arithmetic; converting
 to Number before parsing loses values above 2^53.
