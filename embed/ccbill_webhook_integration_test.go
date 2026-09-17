@@ -323,7 +323,7 @@ func TestAPIMode_CCBillWebhookNewSaleSuccessEndToEnd(t *testing.T) {
 	// is refused as a second truth) — publish a ccbill-linked price.
 	flexID := uuid.NewString()
 	formName := "test-form"
-	publish := fmt.Sprintf(`{"insert":true,"overwrite":true,"catalog":{"version":1,"products":[{"key":"pro-%s","display_name":"Pro","entitlements":["pro-access"],"prices":[{"currency":"usd","unit_amount":%d,"duration":"30d","auto_renew":true,"psps":["ccbill"],"psp_links":{"ccbill":{"flex_id":%q,"form_name":%q}}}]}]}}`,
+	publish := fmt.Sprintf(`{"insert":true,"overwrite":true,"catalog":{"version":1,"products":[{"key":"pro-%s","display_name":"Pro","entitlements":["pro-access"],"prices":[{"currency":"usd","unit_amount":"%d","duration":"30d","auto_renew":true,"psps":["ccbill"],"psp_links":{"ccbill":{"flex_id":%q,"form_name":%q}}}]}]}}`,
 		slug, ccbillWebhookTestPriceMicros, flexID, formName)
 	req, err = http.NewRequest(http.MethodPost, adminServer.URL+"/v1/merchant/catalog/publish", strings.NewReader(publish))
 	require.NoError(t, err)

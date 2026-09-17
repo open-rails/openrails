@@ -64,7 +64,7 @@ Price fields worth knowing:
 
 | Field | Meaning |
 |---|---|
-| `unit_amount` | integer micros |
+| `unit_amount` | integer native units at the currency's registered scale (micros for USD); a JSON manifest (`POST /catalog/publish`) spells it as a decimal string |
 | `duration` | access window: `Nd`/`Nh`, or `indefinite` (default — perpetual ownership) |
 | `auto_renew` | charge again and extend at each period end; rejected with `indefinite` |
 | `trial` | optional first phase: `{unit_amount: 0, duration: 7d}` = free 7-day trial, then the recurring terms; requires `auto_renew` |

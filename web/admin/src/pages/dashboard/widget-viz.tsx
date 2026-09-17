@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils"
 
 import {
   chartColor,
+  exactKey,
   filteredCurrency,
   groupSeries,
   rowCurrency,
@@ -170,16 +171,29 @@ function MetricTooltip({
   return (
     <ChartTooltipContent
       {...props}
-      formatter={(value, name) => (
-        <div className="flex w-full items-center justify-between gap-3">
-          <span className="text-muted-foreground">
-            {series.find((item) => item.key === String(name))?.label ?? name}
-          </span>
-          <span className="font-mono font-medium tabular-nums">
-            {formatMeasure(Number(value), measure.unit, measure.currency)}
-          </span>
-        </div>
-      )}
+      formatter={(value, name, item) => {
+        // item.payload is the pivoted row, which carries each series' exact
+        // wire cell beside the Number recharts plots.
+        const row = (item as { payload?: unknown }).payload
+        const exact =
+          row && typeof row === "object"
+            ? (row as Record<string, unknown>)[exactKey(String(name))]
+            : undefined
+        const cell =
+          typeof exact === "string" || typeof exact === "number"
+            ? exact
+            : Number(value)
+        return (
+          <div className="flex w-full items-center justify-between gap-3">
+            <span className="text-muted-foreground">
+              {series.find((item) => item.key === String(name))?.label ?? name}
+            </span>
+            <span className="font-mono font-medium tabular-nums">
+              {formatMeasure(cell, measure.unit, measure.currency)}
+            </span>
+          </div>
+        )
+      }}
     />
   )
 }
@@ -243,7 +257,7 @@ function TimeSeriesChart({
       <YAxis
         tickLine={false}
         axisLine={false}
-        width={unit === "micros" ? 80 : 52}
+        width={unit === "money" ? 80 : 52}
         tickFormatter={tickFormatter}
       />
     </>
@@ -325,7 +339,7 @@ function DonutViz({
       dimensions: idx.dims.map((d) => row[d.index]),
       unit: primary.unit,
       currency:
-        primary.unit === "micros" ? rowCurrency(row, idx, currency) : undefined,
+        primary.unit === "money" ? rowCurrency(row, idx, currency) : undefined,
       value: Number(row[primary.index] ?? 0),
     }))
     .filter((slice) => slice.value !== 0)

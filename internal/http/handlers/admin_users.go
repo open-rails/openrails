@@ -41,15 +41,17 @@ type adminUserBillingProfile struct {
 	ProductAccess  []openrails.ProductAccessGrant `json:"product_access"`
 }
 
+// adminCreditBalanceResponse is one currency's balance on the profile; the
+// amounts are native units as decimal strings (docs/money-wire.md).
 type adminCreditBalanceResponse struct {
 	Currency              string `json:"currency"`
 	TrustLevel            string `json:"trust_level,omitempty"`
 	DisplayName           string `json:"display_name"`
 	Unit                  string `json:"unit"`
 	DecimalPlaces         int    `json:"decimal_places"`
-	Balance               int64  `json:"balance"`
-	HeldBalance           int64  `json:"held_balance"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
+	Balance               int64  `json:"balance,string"`
+	HeldBalance           int64  `json:"held_balance,string"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount,string"`
 }
 
 // adminProfileSubscriptionWindow bounds the profile's subscriptions section to
