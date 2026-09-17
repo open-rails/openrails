@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // Applier is the narrow facade surface the plan/apply pipeline drives. It

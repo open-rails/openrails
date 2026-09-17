@@ -20,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -54,7 +53,7 @@ func bootRoutingFixture(
 	// Use the ordinary manifest posture so fake credentials do not trigger
 	// the separate sandbox qualification gate.
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -103,7 +102,7 @@ func bootRoutingFixture(
 	delegated := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: userID, Email: email, EmailVerified: true, Username: username}, nil
 	})
-	buyerHandler, err := rt.Handler(embedded.MountOptions{
+	buyerHandler, err := rt.Handler(embed.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetCustomer},
 		Authenticator:          userAuthn,
 		DelegatedAuthenticator: delegated,
@@ -112,7 +111,7 @@ func bootRoutingFixture(
 	buyerServer := httptest.NewServer(buyerHandler)
 	t.Cleanup(buyerServer.Close)
 
-	merchantHandler, err := rt.Handler(embedded.MountOptions{
+	merchantHandler, err := rt.Handler(embed.MountOptions{
 		RouteSets: []embed.RouteSet{embed.RouteSetPaymentProviders, embed.RouteSetMerchantAPI},
 		Gate:      allowAllGate{id: id},
 	})

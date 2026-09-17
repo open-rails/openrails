@@ -1,0 +1,316 @@
+package hosttools
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+
+	"github.com/goccy/go-yaml"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/pkg/catalog"
+	"github.com/open-rails/openrails/pkg/merchant"
+)
+
+type CatalogDumpOptions struct {
+	NameAuthority merchant.NameAuthority
+	Config        *config.Config
+	PGXPool       *pgxpool.Pool
+	Merchant      string
+	Out           io.Writer
+}
+
+func DumpMerchantCatalog(ctx context.Context, opts CatalogDumpOptions) error {
+	if opts.Config == nil {
+		return fmt.Errorf("config not loaded; in-process mode requires config")
+	}
+	out := opts.Out
+	if out == nil {
+		out = io.Discard
+	}
+	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	if err != nil {
+		return err
+	}
+	if opts.PGXPool == nil {
+		defer func() { _ = database.Close() }()
+	}
+	directory, err := merchants.NewDirectoryService(database.DataPool())
+	if err != nil {
+		return err
+	}
+	directory.WithNameAuthority(opts.NameAuthority)
+	mctx, canonicalName, err := contextForCatalogPushTarget(ctx, directory, opts.Merchant)
+	if err != nil {
+		return err
+	}
+	var manifest *catalog.Manifest
+	if err := database.RunInMerchantConn(mctx, func(ctx context.Context) error {
+		var err error
+		manifest, err = dumpCatalogManifest(ctx, database)
+		return err
+	}); err != nil {
+		return err
+	}
+	raw, err := yaml.Marshal(catalogPushFile{
+		Version: catalog.SupportedVersion,
+		Catalogs: []catalogPushFileEntry{{
+			Merchant: canonicalName,
+			Products: manifest.Products,
+			Meters:   manifest.Meters,
+		}},
+	})
+	if err != nil {
+		return fmt.Errorf("marshal catalog manifest: %w", err)
+	}
+	_, err = out.Write(raw)
+	return err
+}
+
+func dumpCatalogManifest(ctx context.Context, database *db.DB) (*catalog.Manifest, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m := &catalog.Manifest{Version: catalog.SupportedVersion}
+	productIDs, byID, err := dumpCatalogProducts(ctx, database, tid.UUID())
+	if err != nil {
+		return nil, err
+	}
+	if m.Meters, err = dumpCatalogMeters(ctx, database, tid.UUID()); err != nil {
+		return nil, err
+	}
+	if err := dumpCatalogPrices(ctx, database, tid.UUID(), byID); err != nil {
+		return nil, err
+	}
+	if err := dumpCatalogRateCards(ctx, database, tid.UUID(), byID); err != nil {
+		return nil, err
+	}
+	for _, id := range productIDs {
+		if p := byID[id]; p != nil {
+			normalizeDumpProduct(p)
+			m.Products = append(m.Products, *p)
+		}
+	}
+	return m, nil
+}
+
+func normalizeDumpProduct(p *catalog.Product) {
+	if p == nil {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(p.TierGroup), "default") {
+		p.TierGroup = ""
+		p.TierRank = nil
+	}
+	if len(p.RateCards) == 0 {
+		return
+	}
+	p.TierGroup = ""
+	p.TierRank = nil
+}
+
+func dumpCatalogProducts(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]uuid.UUID, map[uuid.UUID]*catalog.Product, error) {
+	rows, err := database.Qx(ctx).Query(ctx, `
+	SELECT id, key, display_name, COALESCE(description, ''), COALESCE(entitlements_spec, '{}'::jsonb),
+	       tier_group, tier_rank, archived
+	FROM openrails.products
+	WHERE merchant_id = $1
+	ORDER BY COALESCE(tier_group, ''), tier_rank, key`, merchantID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list catalog products: %w", err)
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	byID := map[uuid.UUID]*catalog.Product{}
+	for rows.Next() {
+		var (
+			id              uuid.UUID
+			p               catalog.Product
+			entitlementsRaw []byte
+			tierGroup       sql.NullString
+		)
+		if err := rows.Scan(&id, &p.Key, &p.DisplayName, &p.Description, &entitlementsRaw, &tierGroup, &p.TierRank, &p.Archived); err != nil {
+			return nil, nil, err
+		}
+		if tierGroup.Valid {
+			p.TierGroup = tierGroup.String
+		}
+		p.Entitlements = entitlementKeys(entitlementsRaw)
+		ids = append(ids, id)
+		cp := p
+		byID[id] = &cp
+	}
+	return ids, byID, rows.Err()
+}
+
+func dumpCatalogMeters(ctx context.Context, database *db.DB, merchantID uuid.UUID) ([]catalog.Meter, error) {
+	rows, err := database.Qx(ctx).Query(ctx, `
+SELECT key, COALESCE(event_type, ''), COALESCE(value_property, ''),
+       COALESCE(aggregation, ''), COALESCE(unit, ''), COALESCE(group_by, '{}'::jsonb)
+FROM openrails.catalog_meters
+WHERE merchant_id = $1
+ORDER BY key`, merchantID)
+	if err != nil {
+		return nil, fmt.Errorf("list catalog meters: %w", err)
+	}
+	defer rows.Close()
+	var out []catalog.Meter
+	for rows.Next() {
+		var m catalog.Meter
+		var groupBy []byte
+		if err := rows.Scan(&m.Key, &m.EventType, &m.ValueProperty, &m.Aggregation, &m.Unit, &groupBy); err != nil {
+			return nil, err
+		}
+		_ = json.Unmarshal(groupBy, &m.GroupBy)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+func dumpCatalogPrices(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.Product) error {
+	// Metered pricing dumps as rate cards (#707): legacy metered: declarations
+	// are translated at push time, so no price-attached metered shape exists.
+	rows, err := database.Qx(ctx).Query(ctx, `
+SELECT p.product_id, p.amount, p.currency, p.access_duration_hours, p.auto_renew,
+       p.trial_unit_amount, p.trial_duration_hours, COALESCE((SELECT jsonb_object_agg(COALESCE(psp.key, psp.id::text), binding.configuration || jsonb_strip_nulls(jsonb_build_object(
+           'psp_id', psp.id::text, 'rail', psp.rail, 'plan_id', binding.plan_id, 'price_id', binding.price_ref,
+           'recurring_billing_option_id', binding.recurring_billing_option_id, 'plan_pda', binding.plan_pda, 'flex_id', binding.flex_id)))
+           FROM openrails.price_psp_bindings binding JOIN openrails.psps psp ON psp.id = binding.psp_id AND psp.merchant_id = binding.merchant_id
+           WHERE binding.price_id = p.id AND binding.merchant_id = p.merchant_id), '{}'::jsonb),
+       p.archived
+FROM openrails.prices p
+WHERE p.merchant_id = $1
+ORDER BY p.product_id, p.amount, p.currency`, merchantID)
+	if err != nil {
+		return fmt.Errorf("list catalog prices: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			productID               uuid.UUID
+			price                   catalog.Price
+			accessHours, trialHours sql.NullInt64
+			trialAmount             sql.NullInt64
+			railsRaw                []byte
+		)
+		if err := rows.Scan(&productID, &price.UnitAmount, &price.Currency, &accessHours, &price.AutoRenew, &trialAmount, &trialHours, &railsRaw, &price.Archived); err != nil {
+			return err
+		}
+		if p := byID[productID]; p != nil {
+			if accessHours.Valid {
+				price.Duration = hoursSpec(int(accessHours.Int64))
+			}
+			if trialAmount.Valid && trialHours.Valid {
+				price.Trial = &catalog.PriceTrial{UnitAmount: trialAmount.Int64, Duration: hoursSpec(int(trialHours.Int64))}
+			}
+			price.PSPLinks = providerLinks(railsRaw)
+			for provider := range price.PSPLinks {
+				price.PSPs = append(price.PSPs, provider)
+			}
+			sort.Strings(price.PSPs)
+			p.Prices = append(p.Prices, price)
+		}
+	}
+	return rows.Err()
+}
+
+func dumpCatalogRateCards(ctx context.Context, database *db.DB, merchantID uuid.UUID, byID map[uuid.UUID]*catalog.Product) error {
+	rows, err := database.Qx(ctx).Query(ctx, `
+SELECT product_id, meter_key, payment_term, filter, allowance, price
+FROM openrails.catalog_rate_cards
+WHERE merchant_id = $1
+ORDER BY product_id, ordinal`, merchantID)
+	if err != nil {
+		return fmt.Errorf("list catalog rate cards: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			productID    uuid.UUID
+			rc           catalog.RateCard
+			meterKey     sql.NullString
+			filterRaw    []byte
+			allowanceRaw []byte
+			priceRaw     []byte
+		)
+		if err := rows.Scan(&productID, &meterKey, &rc.PaymentTerm, &filterRaw, &allowanceRaw, &priceRaw); err != nil {
+			return err
+		}
+		if meterKey.Valid {
+			rc.Meter = meterKey.String
+		}
+		_ = json.Unmarshal(filterRaw, &rc.Filter)
+		if len(allowanceRaw) > 0 {
+			var a catalog.Allowance
+			if err := json.Unmarshal(allowanceRaw, &a); err != nil {
+				return fmt.Errorf("decode rate-card allowance: %w", err)
+			}
+			rc.Allowance = &a
+		}
+		if err := json.Unmarshal(priceRaw, &rc.Price); err != nil {
+			return fmt.Errorf("decode rate-card price: %w", err)
+		}
+		if p := byID[productID]; p != nil {
+			p.RateCards = append(p.RateCards, rc)
+		}
+	}
+	return rows.Err()
+}
+
+func entitlementKeys(raw []byte) []string {
+	var m map[string]*int
+	_ = json.Unmarshal(raw, &m)
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func providerLinks(raw []byte) map[string]map[string]string {
+	var links map[string]map[string]string
+	_ = json.Unmarshal(raw, &links)
+	if len(links) == 0 {
+		return nil
+	}
+	// The stored blob is account-keyed with the rail stamped inside each
+	// entry; the manifest derives the rail from the account key, so the stamp
+	// is storage detail, not manifest content.
+	for psp, cfg := range links {
+		delete(cfg, models.RailKeyRail)
+		if strings.EqualFold(strings.TrimSpace(psp), string(models.RailSolana)) {
+			// mint_symbol is the resolved on-chain snapshot. The push manifest
+			// declares token only when selecting a new non-default plan, so
+			// never emit snapshot metadata as input. A stored plan_pda is
+			// authoritative for an attached plan and resolves its token from
+			// chain, so emitting token beside it would duplicate that fact.
+			delete(cfg, "mint_symbol")
+			if strings.TrimSpace(cfg["plan_pda"]) != "" ||
+				strings.EqualFold(strings.TrimSpace(cfg["token"]), "USDC") {
+				delete(cfg, "token")
+			}
+		}
+	}
+	return links
+}
+
+func hoursSpec(hours int) string {
+	if hours == 0 {
+		return ""
+	}
+	if hours%24 == 0 {
+		return fmt.Sprintf("%dd", hours/24)
+	}
+	return fmt.Sprintf("%dh", hours)
+}

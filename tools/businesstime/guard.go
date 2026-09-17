@@ -19,7 +19,7 @@ import (
 var (
 	// GuardPaths is deliberately explicit: adding a billing plane is a reviewed
 	// expansion of the invariant, not an accidental recursive scan.
-	GuardPaths = []string{"internal/modules", "internal/river", "internal/http/handlers", "internal/reconcile", "internal/intents", "pkg/service"}
+	GuardPaths = []string{"internal/modules", "internal/river", "internal/http/handlers", "internal/reconcile", "internal/intents", "internal/service"}
 
 	physicalClockPattern = regexp.MustCompile(`time\.Now\(|\bNOW\(\)|CURRENT_TIMESTAMP|clockwork\.NewRealClock\(\)`)
 	classifications      = map[string]bool{

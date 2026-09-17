@@ -13,9 +13,9 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/pricing"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 func TestUsageMeterSpec(t *testing.T) {

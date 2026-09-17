@@ -31,7 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
@@ -145,5 +145,5 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 // to name the same refusal without importing internal/.
 func TestOr900_ServiceFacadeExportsTheIdempotencySentinel(t *testing.T) {
 	require.True(t, errors.Is(billingservice.ErrIdempotencyKeyReused, money.ErrIdempotencyKeyReused),
-		"pkg/service must re-export the money sentinel itself, not a look-alike")
+		"internal/service must re-export the money sentinel itself, not a look-alike")
 }

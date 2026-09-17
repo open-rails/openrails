@@ -14,8 +14,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	embcp "github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // TestHostRoutedWebhookMountHTTP proves the #734 Host-routed webhook mount
@@ -43,12 +44,12 @@ func TestHostRoutedWebhookMountHTTP(t *testing.T) {
 		Auth:     &config.AuthConfig{Issuer: "https://host-webhook-controlplane.test"},
 	}
 
-	e, err := embedded.New(context.Background(), embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()})
+	e, err := embed.New(context.Background(), embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = e.Close(context.Background()) })
 
-	require.NoError(t, embcp.AttachWithOptions(ctx, e.App(), cfg, nil, embcp.AttachOptions{}))
-	cp := embcp.Get(e.App())
+	require.NoError(t, embcp.AttachWithOptions(ctx, app.HostGraph(e), cfg, nil, embcp.AttachOptions{}))
+	cp := embcp.Get(app.HostGraph(e))
 	require.NotNil(t, cp, "control plane attached")
 
 	// A bare merchant directory row + api_host is all Host resolution needs
@@ -56,8 +57,8 @@ func TestHostRoutedWebhookMountHTTP(t *testing.T) {
 	hostA := "api.host-webhook-a-" + strings.ReplaceAll(uuid.NewString(), "-", "") + ".test"
 	insertMerchantWithHost(t, h.sharedPool(), "host-webhook-a-"+strings.ReplaceAll(uuid.NewString(), "-", ""), hostA)
 
-	handler, err := embedded.MountHandler(e, embedded.MountOptions{
-		RouteSets: []embedded.RouteSet{embedded.RouteSetWebhooks},
+	handler, err := e.Handler(embed.MountOptions{
+		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
 	})
 	require.NoError(t, err)
 

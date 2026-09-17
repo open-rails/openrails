@@ -65,7 +65,7 @@ placeholders, not customer or repository names.
 - Declarative provider model. The **pull** reconciliation job
   (`internal/river/jobs_catalog_reconciliation.go`) is ALERT-ONLY — it never mutates providers.
 - The **push** path (OpenRails definitions → provider) is the provider adapter — e.g. the Stripe
-  adapter `AutoCreate` in `pkg/service/catalog_provider_stripe.go` (find-or-create Product + Price,
+  adapter `AutoCreate` in `internal/service/catalog_provider_stripe.go` (find-or-create Product + Price,
   and entitlement Features). Entitlements are plain strings: the keys of `product.EntitlementsSpec`,
   mirrored to Stripe Features (`lookup_key` = the string).
 

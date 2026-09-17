@@ -12,8 +12,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
-	billingidentity "github.com/open-rails/openrails/pkg/identity"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation proves the #335 batch

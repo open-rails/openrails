@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	service "github.com/open-rails/openrails/pkg/service"
+	service "github.com/open-rails/openrails/internal/service"
 )
 
 func writeHostEventError(r *httprequest.Request, err error) {

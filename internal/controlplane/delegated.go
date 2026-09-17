@@ -13,9 +13,9 @@ import (
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/verify"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/requestauth"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/embedded"
+	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -46,7 +46,7 @@ func runDumpCatalog(cmd *cobra.Command, opts catalogDumpOptions) error {
 		defer close()
 		authority = configuredAuthority
 	}
-	return embedded.DumpMerchantCatalog(cmd.Context(), embedded.CatalogDumpOptions{
+	return hosttools.DumpMerchantCatalog(cmd.Context(), hosttools.CatalogDumpOptions{
 		Config:        cfg,
 		NameAuthority: authority,
 		Merchant:      slug,
