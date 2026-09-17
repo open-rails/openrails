@@ -2,8 +2,13 @@ package nmi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
+
+// ErrLiveCredentialsUnderTestMode refuses to arm production credentials in a
+// sandbox deployment.
+var ErrLiveCredentialsUnderTestMode = errors.New("PRODUCTION NMI credentials detected while test_mode is enabled; refusing to arm: use sandbox account credentials or select live mode")
 
 // CheckTestModeArm requires fresh evidence that an NMI account simulates
 // transactions before it may be armed in sandbox mode. Unknown is a refusal;
@@ -17,7 +22,7 @@ func CheckTestModeArm(ctx context.Context, client *NMIClient) error {
 	case ProbeSimulated:
 		return nil
 	case ProbeLive:
-		return fmt.Errorf("PRODUCTION NMI credentials detected while test_mode is enabled; refusing to arm: use sandbox account credentials or select live mode")
+		return ErrLiveCredentialsUnderTestMode
 	default:
 		return fmt.Errorf("NMI sandbox qualification was indeterminate; refusing to arm")
 	}

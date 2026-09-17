@@ -394,15 +394,10 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		Description: description,
 	})
 	if err != nil {
-		// #483: an unknown/invalid currency is a client error (parity with local), not a 500.
-		if strings.Contains(err.Error(), "unknown currency") {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
-		}
 		if serviceIdempotencyConflict(r, err) {
 			return
 		}
-		r.ErrorJSON(http.StatusInternalServerError, "deposit failed")
+		writeRefusal(r, err, "deposit failed")
 		return
 	}
 	r.SuccessJSON(trx)
@@ -478,14 +473,10 @@ func AdminGrantCredits(r *httprequest.Request) {
 		Description: req.Description,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "unknown currency") {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
-		}
 		if serviceIdempotencyConflict(r, err) {
 			return
 		}
-		r.ErrorJSON(http.StatusInternalServerError, "credit grant failed")
+		writeRefusal(r, err, "credit grant failed")
 		return
 	}
 	r.SuccessJSON(trx)
