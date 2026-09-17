@@ -6,8 +6,9 @@ day-to-day customer operations via the merchant API and admin console.
 
 Vocabulary: a **rail** is a gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a
 **PSP** is *your account* on a rail (e.g. a `mobius` key on the nmi rail; `stripe`,
-`ccbill`, `solana` are their own PSP names). All money amounts are **integer micros**
-(millionths of a currency unit): `20_000_000` = $20.00. YAML underscore separators are
+`ccbill`, `solana` are their own PSP names). Money amounts are **integers in the
+currency's native units** (micros for USD: `20_000_000` = $20.00; the scale per
+currency is `GET /v1/currencies`). YAML underscore separators are
 just readability — there are no dollar-string amounts in the catalog manifest.
 
 ### The mental model
@@ -72,7 +73,23 @@ Price fields worth knowing:
 | `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
 
-Custom credit shops, product-bundled balances, bundles and catalog quotas are deferred. Manual fiat deposits and grants retain their explicit expiration terms.
+**A one-time purchase** — omit `auto_renew`; a finite `duration` gives timed
+access, `indefinite` gives permanent ownership:
+
+```yaml
+      - key: course-101
+        display_name: Course 101
+        entitlements: [course:101]
+        prices:
+          - currency: usd
+            unit_amount: 20_000_000
+            duration: indefinite
+            psps: [stripe]
+```
+
+Prepaid balances are not catalog products: fund them with
+`POST /v1/merchant/credits/deposit` (`Client.DepositCredits`), whose grants carry
+their own expiry.
 
 **Charge models** (for metered rate cards):
 
@@ -180,7 +197,7 @@ reference: `docs/api/endpoints.md`.
 | Spend delegations (per-customer agent budgets) | `PUT /v1/merchant/customers/{id}/spend-delegations[:upsert]`, `DELETE .../spend-delegations/{scope}/{scope_key}` | — |
 | Credit limit / trust level | `PUT /v1/merchant/credit-limit`, `GET /v1/merchant/trust-level` | Settings |
 | Catalog CRUD over HTTP | `POST/PATCH /v1/merchant/catalog/products`, `/prices` | Catalog |
-| Metrics | `GET /v1/merchant/metrics`, `/v1/merchant/metrics/query` + `/schema` | Dashboard |
+| Metrics | `POST /v1/merchant/metrics/query`, `GET /v1/merchant/metrics/schema` | Dashboard |
 | Repair alerts / drift findings | `GET /v1/merchant/repair-alerts` | Ops |
 
 Destructive semantics are deliberate: refunds and cancels require an explicit

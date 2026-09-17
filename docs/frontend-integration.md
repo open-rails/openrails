@@ -9,7 +9,9 @@ deployment shapes:
 - **SaaS (hosted)** — identical to standalone from the browser's perspective; everything
   below that says "standalone" applies unchanged.
 
-All money amounts are **micros** (millionths of a currency unit): `$5.00 = 5_000_000`.
+Money amounts are integers in the currency's native units (micros for USD:
+`$5.00 = 5_000_000`), carried as decimal strings — parse with `BigInt`, never
+`Number` ([money-wire.md](money-wire.md)).
 A **rail** is the gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a **PSP** is the
 merchant's account on a rail, named by its key (`mobius` = an NMI account). Checkout's
 `payment.rail` value is the PSP key; a bare rail kind is also accepted when the merchant
