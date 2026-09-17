@@ -700,7 +700,7 @@ func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, period func(ge
 	}
 	count := 0
 	for _, p := range payers {
-		// Custom-credit activity (#475 qualified codes) is not billed.
+		// Balances in an unregistered currency are never invoiced.
 		if RequireBillingCurrency(normalizeCurrency(p.Currency)) != nil {
 			continue
 		}
