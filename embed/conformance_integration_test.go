@@ -364,7 +364,7 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	r.Usage = rows
 
 	// 7) Per-resource daily revenue (#410).
-	rev, err := c.ResourceRevenueDaily(ctx, env.resource, money.DefaultCurrency, env.from.Unix(), env.to.Unix())
+	rev, err := c.ResourceRevenueDaily(ctx, env.resource, money.DefaultCurrency, env.from, env.to)
 	require.NoError(t, err, "%s resource-revenue", env.side)
 	r.RevenueTotal = rev.RevenueAmount
 	for _, d := range rev.Daily {
@@ -621,7 +621,7 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 
 // holdDeadline is the declared deadline every hold-placing admit must carry
 // (xs-007 row 33): an hour from now, as a job would declare.
-func holdDeadline() *int64 {
-	v := time.Now().Add(time.Hour).Unix()
+func holdDeadline() *time.Time {
+	v := time.Now().Add(time.Hour)
 	return &v
 }

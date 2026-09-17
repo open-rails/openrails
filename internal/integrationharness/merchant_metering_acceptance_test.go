@@ -220,15 +220,15 @@ VALUES ($1, $2)`, customerID, merchantID)
 
 func usageReport(customerID uuid.UUID, eventType, sourceID string, occurredAt time.Time, units int64) map[string]any {
 	return map[string]any{
-		"customer_id":      customerID.String(),
-		"currency":         "USD",
-		"event_type":       eventType,
-		"dimensions":       map[string]int64{"units": units},
-		"metadata":         map[string]any{"region": "eu"},
-		"amount":           "0",
-		"source":           "metering-acceptance",
-		"source_id":        sourceID,
-		"occurred_at_unix": occurredAt.Unix(),
+		"customer_id": customerID.String(),
+		"currency":    "USD",
+		"event_type":  eventType,
+		"dimensions":  map[string]int64{"units": units},
+		"metadata":    map[string]any{"region": "eu"},
+		"amount":      "0",
+		"source":      "metering-acceptance",
+		"source_id":   sourceID,
+		"occurred_at": occurredAt.UTC().Format(time.RFC3339Nano),
 	}
 }
 
