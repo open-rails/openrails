@@ -87,6 +87,15 @@ type UpdateSubscriptionPaymentMethodRequest struct {
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
 
+// CodePaymentMethodPSPMismatch: the saved method the request named was vaulted
+// by a different provider account than the one that owns the subscription
+// (type invalid_request_error, 409). Provider vault references are
+// account-scoped, so nothing was sent to the provider; collect the card again
+// on the subscription's active provider account.
+const CodePaymentMethodPSPMismatch = "payment_method_psp_mismatch"
+
+var ErrPaymentMethodPSPMismatch error = newCodedError(CodePaymentMethodPSPMismatch, ErrConflict)
+
 // SubscriptionPayment is an immutable payment summary for recovery history.
 type SubscriptionPayment struct {
 	ID            PaymentID `json:"id"`

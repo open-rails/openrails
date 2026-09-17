@@ -42,6 +42,8 @@
 //  4. No charge may straddle the flip. An instrument whose subscription has a
 //     charge intent in_flight or unknown_needs_verify is REFUSED for this run,
 //     not failed: both states clear on their own, so the operator re-runs.
+//     Likewise no payment-source update may straddle it: an unresolved swap
+//     naming the instrument refuses the flip (#657).
 //
 // DRY RUN FIRST. Options.Apply defaults to false: a plan performs every read
 // and every refusal check and writes nothing, so the operator sees the counts
@@ -192,6 +194,12 @@ const (
 	// mid-attempt (in_flight, or sent-and-unverified). No charge may straddle
 	// the flip. Transient by construction — re-run.
 	ReasonChargeInFlight = "charge_in_flight"
+	// ReasonPaymentSourceUpdateUnresolved: a payment-source update naming this
+	// instrument (its frozen new or old side) is pending, in flight, awaiting
+	// retry or awaiting verification. Re-attributing the instrument under it
+	// would finalize a subscription onto a method another PSP now owns
+	// (#657). Transient by construction — resolve or supersede, then re-run.
+	ReasonPaymentSourceUpdateUnresolved = "payment_source_update_unresolved"
 	// ReasonTokenConflict: another instrument already holds this custodian
 	// token. Two instruments pointing at one card is never right.
 	ReasonTokenConflict = "token_conflict"

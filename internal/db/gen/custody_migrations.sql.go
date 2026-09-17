@@ -41,6 +41,33 @@ func (q *Queries) CountInFlightChargeIntentsForPaymentMethod(ctx context.Context
 	return column_1, err
 }
 
+const countUnresolvedPaymentSourceUpdatesForPaymentMethod = `-- name: CountUnresolvedPaymentSourceUpdatesForPaymentMethod :one
+SELECT count(*)::bigint FROM openrails.rail_intents ri
+WHERE ri.merchant_id = $1::uuid
+  AND ri.intent_type = 'nmi_payment_source_update'
+  AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
+  AND $2::uuid::text IN (ri.payload->>'new_payment_method_id', ri.payload->>'old_payment_method_id')
+`
+
+type CountUnresolvedPaymentSourceUpdatesForPaymentMethodParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// #657 refusal predicate: a payment-source update pins the instruments it
+// names — frozen in its payload, NOT the subscription's mutable link, which
+// only moves at finalize — until it resolves. Every unresolved state counts:
+// pending and failed_retryable rows re-run from the scheduled executor,
+// in_flight is mid-attempt, unknown_needs_verify was sent. Re-attributing the
+// instrument's PSP under any of them would finalize a subscription onto a
+// method another account now owns.
+func (q *Queries) CountUnresolvedPaymentSourceUpdatesForPaymentMethod(ctx context.Context, arg CountUnresolvedPaymentSourceUpdatesForPaymentMethodParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnresolvedPaymentSourceUpdatesForPaymentMethod, arg.MerchantID, arg.PaymentMethodID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getPaymentMethodForCustodianToken = `-- name: GetPaymentMethodForCustodianToken :one
 SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid
@@ -120,6 +147,57 @@ type LockPaymentMethodForCustodyRemapParams struct {
 // charge site reading the same instrument cannot straddle the custody change.
 func (q *Queries) LockPaymentMethodForCustodyRemap(ctx context.Context, arg LockPaymentMethodForCustodyRemapParams) (OpenrailsPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, lockPaymentMethodForCustodyRemap, arg.MerchantID, arg.ID)
+	var i OpenrailsPaymentMethod
+	err := row.Scan(
+		&i.ID,
+		&i.Rail,
+		&i.InitialTransactionID,
+		&i.LastFour,
+		&i.CardType,
+		&i.ExpiryDate,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.RailCustomerRef,
+		&i.RailMethodRef,
+		&i.RebillDriver,
+		&i.StoredCredentialRecurringRef,
+		&i.StoredCredentialUnscheduledRef,
+		&i.Custodian,
+		&i.CustodianID,
+		&i.Fingerprint,
+		&i.NetworkTokenID,
+		&i.NetworkTokenStatus,
+		&i.NetworkTokenPar,
+		&i.ChargeVia,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.AccountUpdaterCheckedAt,
+	)
+	return i, err
+}
+
+const lockPaymentMethodForProviderAccountCheck = `-- name: LockPaymentMethodForProviderAccountCheck :one
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
+WHERE merchant_id = $1::uuid
+  AND id = $2::uuid
+FOR SHARE
+`
+
+type LockPaymentMethodForProviderAccountCheckParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// #657: the payment-source update's shared lock on its target instrument. It
+// conflicts with LockPaymentMethodForCustodyRemap (FOR UPDATE), so the
+// provider-account comparison and a custody flip are serialized: whichever
+// commits first is what the other one sees.
+func (q *Queries) LockPaymentMethodForProviderAccountCheck(ctx context.Context, arg LockPaymentMethodForProviderAccountCheckParams) (OpenrailsPaymentMethod, error) {
+	row := q.db.QueryRow(ctx, lockPaymentMethodForProviderAccountCheck, arg.MerchantID, arg.ID)
 	var i OpenrailsPaymentMethod
 	err := row.Scan(
 		&i.ID,

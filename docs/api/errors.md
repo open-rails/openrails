@@ -44,6 +44,15 @@ Classification uses only provider facts (response and localization codes), never
 provider text. The same codes are returned by payment-method creation and tier
 changes. `insufficient_credits` (402) remains the payer-balance denial.
 
+Reassigning a subscription to a saved method vaulted by a different provider
+account (`PUT .../subscriptions/{id}/payment-method`) is `409
+payment_method_psp_mismatch` (`openrails.ErrPaymentMethodPSPMismatch`, also
+`ErrConflict`): provider vault references are account-scoped, nothing was sent to
+the provider, and the card must be collected again on the subscription's active
+account. The same code answers whether the mismatch is seen at the HTTP
+pre-check or by the durable intent, which re-verifies it under the method's row
+lock before any provider call.
+
 Transport failures preserve their cause: `errors.Is(err, context.Canceled)` and
 `errors.Is(err, context.DeadlineExceeded)` work in both modes. A transport failure
 is not proof that an operation was rejected or did not commit. Financial retries
