@@ -114,7 +114,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (decimal string, native units). Query: `currency` |
 | GET | `/v1/me/transactions` | Ledger transactions, newest first. Query: `currency`, `limit`, `offset` |
 | PUT | `/v1/me/collection-payment-method` | Choose the saved method for automatic invoice collection in one currency. Body: `currency`, `payment_method_id`. The method must belong to the payer and support saved-method charges; otherwise `400` |
-| GET | `/v1/me/status` | Aggregated premium status: `has_active_subscription`, enriched `subscription`, `next_renewal_at`, `entitlements` |
+| GET | `/v1/me/status` | Aggregated premium status (`openrails.BillingStatus`): `has_active_subscription`, `subscription` (the shared `Subscription` shape), `access` (the standing grant, from the subscription or a one-off entitlement), `next_renewal_at`, `entitlements` (`EntitlementRecord[]`) |
 | GET | `/v1/me/usage` | Usage breakdown for the token's subject |
 | GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The payer's admin view of every delegation it granted stays on `GET /v1/customers/{id}/spend-delegations` |
 | GET | `/v1/me/invoices` | List the subject's invoices |
@@ -124,7 +124,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
 | GET | `/v1/me/products` | Products relevant to the subject |
 | GET | `/v1/me/products/{product_id}/access` | Whether the subject currently has access to a product |
-| GET | `/v1/me/notifications` | Notifications. Query: `limit`, `offset`, `seen` |
+| GET | `/v1/me/notifications` | Notifications (`openrails.Notification`: typed `data`, money as decimal strings, ids typed). Query: `limit`, `offset`, `seen` |
 | GET | `/v1/me/notifications/unread-count` | `{ unread_count }` |
 | POST | `/v1/me/notifications/{id}/read` | Mark one notification read |
 | POST | `/v1/me/billing-portal` | Provider billing-portal session `{ url }` (mounted only when a Stripe rail is configured) |
@@ -133,8 +133,8 @@ scoped to the token's subject — no `:user_id` appears in any path.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/subscriptions` | Subscription history. Query: `status` (`pending`,`active`,`past_due`,`cancelled`,`all`), `limit`, `offset` |
-| GET | `/v1/me/subscriptions/{id}` | One subscription with enriched product/price/access (404 if not the caller's) |
+| GET | `/v1/me/subscriptions` | Subscription history as the shared `Subscription` shape (typed ids, `price.unit_amount` string, `scheduled_price`/`scheduled_product`, `card`, `cancel_portal_url`, `access`). Query: `status` (`pending`,`active`,`past_due`,`cancelled`,`all`), `limit`, `offset` |
+| GET | `/v1/me/subscriptions/{id}` | One subscription, same shape (404 if not the caller's); `{id}` is the listed `sub_…` id |
 | POST | `/v1/me/subscriptions/{id}/cancel` | Cancel. Body `{ "feedback": "..." }` (4-500 chars, required). Returns `202 { "status": "queued" }` on EVERY rail — the cancel is recorded locally and the remote cancel executes as a durable intent (CCBill included; the old portal-only 422 is retired) |
 | POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
 | POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
@@ -316,10 +316,10 @@ for those routes.
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`user_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
+| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
 | GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; `Client.GetPayment` |
 | POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail; `revoke_access` must be explicit to also revoke one-off access |
-| GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters |
+| GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters (`customer_id`, `status`, `rail`, `price_id`, ...); `Client.ListSubscriptions` |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
 | POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately |
 | POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |

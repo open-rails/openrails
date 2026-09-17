@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails"
 )
 
 // --- fakes -----------------------------------------------------------------
@@ -676,7 +678,7 @@ func TestDiffTaxonomy(t *testing.T) {
 		candidates, ok := ps1[0].LocalEvidence["email_candidates"].([]map[string]any)
 		require.True(t, ok)
 		require.Len(t, candidates, 1)
-		assert.Equal(t, known.ID.String(), candidates[0]["subscription_id"])
+		assert.Equal(t, openrails.SubscriptionID(known.ID).String(), candidates[0]["subscription_id"])
 		assert.Equal(t, FindingStatusAdminRequired, ps1[0].Status)
 	})
 

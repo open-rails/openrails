@@ -13,7 +13,7 @@ import (
 )
 
 // Deposit keys are opaque query values, not resource path segments. A key
-// accepted when funding the payer must remain usable for receipt lookup.
+// accepted when funding the payer must remain usable for receipt lookup (#484).
 func TestGetDepositPreservesOpaqueSourceKeys(t *testing.T) {
 	requests := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -26,7 +26,7 @@ func TestGetDepositPreservesOpaqueSourceKeys(t *testing.T) {
 	require.NoError(t, err)
 	for _, key := range []string{".", "..", "source/receipt?part=1&currency=JPY"} {
 		t.Run(key, func(t *testing.T) {
-			receipt, err := client.GetDeposit(context.Background(), uuid.NewString(), key)
+			receipt, err := client.GetDeposit(context.Background(), CustomerID(uuid.New()), key)
 			require.NoError(t, err)
 			require.EqualValues(t, 1, receipt.Amount)
 			require.Equal(t, key, <-requests)

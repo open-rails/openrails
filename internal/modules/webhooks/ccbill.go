@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	identitydir "github.com/open-rails/openrails/internal/identity"
@@ -1526,7 +1527,7 @@ func (s *CCBillWebhookService) handleRefund(ctx context.Context) error {
 					ID:         uuidutil.NewV7(),
 					CustomerID: sub.CustomerID,
 					EventType:  models.NotificationPremiumEnded,
-					Data:       map[string]any{"reason": string(subscriptions.PremiumEndReasonRefund)},
+					Data:       openrails.NotificationData{Reason: string(subscriptions.PremiumEndReasonRefund)},
 				}
 				if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
 					log.WithContext(ctx).WithError(err).Error("failed to create and deliver refund termination notification")
@@ -1838,7 +1839,7 @@ func (s *CCBillWebhookService) handleChargeback(ctx context.Context) error {
 				ID:         uuidutil.NewV7(),
 				CustomerID: sub.CustomerID,
 				EventType:  models.NotificationPremiumEnded,
-				Data:       map[string]any{"reason": string(subscriptions.PremiumEndReasonChargeback)},
+				Data:       openrails.NotificationData{Reason: string(subscriptions.PremiumEndReasonChargeback)},
 			}
 			if err := s.NotificationService.CreateAndDeliver(ctx, userNotification); err != nil {
 				log.WithContext(ctx).WithError(err).Error("failed to create and deliver chargeback termination notification")
@@ -2140,12 +2141,9 @@ func (s *CCBillWebhookService) handleRenewalFailure(ctx context.Context) error {
 			ID:         uuidutil.NewV7(),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPaymentMethodFailed,
-			Data: map[string]any{
-				"rail":                 string(models.RailCCBill),
-				"rail_subscription_id": ccBillSubID,
-				"transaction_id":       transactionID,
-				"failure_code":         data.FailureCode,
-				"failure_reason":       data.FailureReason,
+			Data: openrails.NotificationData{
+				Rail: string(models.RailCCBill), RailSubscriptionID: ccBillSubID, TransactionID: transactionID,
+				FailureCode: data.FailureCode, FailureReason: data.FailureReason,
 			},
 		}
 		if err := s.NotificationService.CreateAndDeliver(ctx, notification); err != nil {

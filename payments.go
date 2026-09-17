@@ -85,7 +85,7 @@ func (c *Client) GetPayment(ctx context.Context, id PaymentID) (*Payment, error)
 // ListPayments lists the merchant's payments, newest first.
 func (c *Client) ListPayments(ctx context.Context, filter PaymentFilter) (*Page[Payment], error) {
 	q := pageQuery(filter.PageOptions)
-	for key, value := range map[string]string{"user_id": filter.CustomerID.String(), "price_id": filter.PriceID.String(), "status": filter.Status, "rail": filter.Rail} {
+	for key, value := range map[string]string{"customer_id": filter.CustomerID.String(), "price_id": filter.PriceID.String(), "status": filter.Status, "rail": filter.Rail} {
 		if value = strings.TrimSpace(value); value != "" {
 			q.Set(key, value)
 		}

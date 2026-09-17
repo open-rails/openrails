@@ -249,7 +249,7 @@ func (c *Client) GetDeposit(ctx context.Context, customerID CustomerID, sourceID
 		return nil, err
 	}
 	// A deposit source is an opaque idempotency key carried in the query,
-	// so dot strings are valid keys, not traversal components.
+	// so dot strings are valid keys, not traversal components (#484).
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return nil, invalidErr("source_id is required")

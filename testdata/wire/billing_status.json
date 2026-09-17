@@ -1,0 +1,115 @@
+{
+  "has_active_subscription": true,
+  "subscription": {
+    "last_retry_at": null,
+    "retry_attempts": null,
+    "next_retry_at": null,
+    "grace_ends_at": null,
+    "payments": [
+      {
+        "id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+        "status": "completed",
+        "amount": "9223372036854775807",
+        "currency": "USD",
+        "rail": "nmi",
+        "transaction_id": "txn-1",
+        "purchased_at": "2026-09-16T00:00:00.123456789Z"
+      }
+    ],
+    "id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "customer_id": "22222222-2222-2222-2222-222222222222",
+    "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    "psp_id": "55555555-5555-5555-5555-555555555555",
+    "rail": "nmi",
+    "rail_subscription_id": "rail-sub-1",
+    "status": "active",
+    "scheduled_price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
+    "payment_method_id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "started_at": "2026-09-16T00:00:00.123456789Z",
+    "ended_at": null,
+    "current_period_starts_at": "2026-09-16T00:00:00.123456789Z",
+    "current_period_ends_at": "2026-09-16T00:00:00.123456789Z",
+    "cancelled_at": null,
+    "cancel_type": null,
+    "cancel_feedback": null,
+    "resumable": false,
+    "cancel_scheduled": false,
+    "cancel_mode": "reversible",
+    "price": {
+      "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      "key": "pro-monthly",
+      "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "unit_amount": "9223372036854775807",
+      "currency": "USD",
+      "auto_renew": true,
+      "access_duration_hours": null,
+      "archived": false
+    },
+    "product": {
+      "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "key": "pro",
+      "display_name": "Pro",
+      "description": "",
+      "tier_rank": 0,
+      "archived": false
+    },
+    "scheduled_price": {
+      "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc",
+      "key": "pro-annual",
+      "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "unit_amount": "9223372036854775807",
+      "currency": "USD",
+      "auto_renew": true,
+      "access_duration_hours": null,
+      "archived": false
+    },
+    "scheduled_product": {
+      "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      "key": "pro",
+      "display_name": "Pro",
+      "description": "",
+      "tier_rank": 0,
+      "archived": false
+    },
+    "card": {
+      "brand": "visa",
+      "last4": "4242",
+      "exp_month": 12,
+      "exp_year": 2030
+    },
+    "cancel_portal_url": "https://support.ccbill.com/",
+    "access": {
+      "kind": "subscription",
+      "entitlement": "premium",
+      "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "rail": "nmi",
+      "start_at": "2026-09-16T00:00:00.123456789Z",
+      "end_at": "2026-09-16T00:00:00.123456789Z"
+    },
+    "created_at": "2026-09-16T00:00:00.123456789Z",
+    "updated_at": "2026-09-16T00:00:00.123456789Z"
+  },
+  "access": {
+    "kind": "subscription",
+    "entitlement": "premium",
+    "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    "rail": "nmi",
+    "start_at": "2026-09-16T00:00:00.123456789Z",
+    "end_at": "2026-09-16T00:00:00.123456789Z"
+  },
+  "next_renewal_at": "2026-09-16T00:00:00.123456789Z",
+  "entitlements": [
+    {
+      "id": "66666666-6666-4666-8666-666666666666",
+      "customer_id": "22222222-2222-2222-2222-222222222222",
+      "entitlement": "premium",
+      "start_at": "2026-09-16T00:00:00.123456789Z",
+      "end_at": "2026-09-16T00:00:00.123456789Z",
+      "source_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "source_type": "subscription",
+      "created_at": "2026-09-16T00:00:00.123456789Z",
+      "updated_at": "2026-09-16T00:00:00.123456789Z"
+    }
+  ]
+}
