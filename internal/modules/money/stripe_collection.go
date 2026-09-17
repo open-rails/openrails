@@ -119,22 +119,6 @@ func stripeDefinitiveRefusal(err error) (ChargeResult, bool) {
 	return ChargeResult{Rail: string(models.RailStripe), Declined: true, FailureCode: &code, FailureMessage: &message}, true
 }
 
-// stripeReceiptMatches requires the exact invoice to be paid for the frozen
-// operation identity and amount.
-func stripeReceiptMatches(r subscriptions.StripeCollectionReceipt, key string, amount moneyutil.Cents, currency string) error {
-	switch {
-	case r.CollectionKey != strings.TrimSpace(key):
-		return fmt.Errorf("stripe invoice %s does not carry this operation's collection key", r.InvoiceID)
-	case !strings.EqualFold(r.Status, "paid"):
-		return fmt.Errorf("stripe invoice %s is %s, not paid", r.InvoiceID, r.Status)
-	case !strings.EqualFold(r.Currency, currency):
-		return fmt.Errorf("stripe invoice %s is in %s, not %s", r.InvoiceID, r.Currency, currency)
-	case moneyutil.Cents(r.AmountPaid) < amount:
-		return fmt.Errorf("stripe invoice %s paid %d of %d", r.InvoiceID, r.AmountPaid, amount)
-	}
-	return nil
-}
-
 func stripeReceiptTransactionID(r subscriptions.StripeCollectionReceipt) string {
 	for _, id := range []string{r.ChargeID, r.PaymentIntentID, r.InvoiceID} {
 		if id = strings.TrimSpace(id); id != "" {
