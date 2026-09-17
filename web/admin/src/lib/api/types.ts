@@ -117,8 +117,7 @@ export interface PaymentMethodResponse {
     exp_month?: number
     exp_year?: number
   }
-  livemode: boolean
-  created: number
+  created_at: string
   health?: {
     expiry_status?: "valid" | "expiring_soon" | "expired"
     last_charged_at?: string
@@ -177,7 +176,7 @@ export interface PaymentObject {
   failure_code?: string
   failure_message?: string
   refunds?: { object: "list"; data: PaymentObject[] }
-  created: number
+  created_at: string
 }
 
 // --- Subscription admin response (list/detail) ---

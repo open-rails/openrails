@@ -413,13 +413,13 @@ func ServiceDepositCredits(r *httprequest.Request) {
 // structural identity — unique per (merchant, customer) in the database);
 // source is a descriptive label and deliberately NOT part of the key.
 type adminGrantCreditsRequest struct {
-	Invoker     string  `json:"invoker"`
-	Currency    string  `json:"currency"`
-	Amount      int64   `json:"amount,string" binding:"required"`
-	Source      string  `json:"source"`
-	SourceID    string  `json:"source_id" binding:"required"`
-	ExpiresAt   *int64  `json:"expires_at"`
-	Description *string `json:"description"`
+	Invoker     string     `json:"invoker"`
+	Currency    string     `json:"currency"`
+	Amount      int64      `json:"amount,string" binding:"required"`
+	Source      string     `json:"source"`
+	SourceID    string     `json:"source_id" binding:"required"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	Description *string    `json:"description"`
 }
 
 // AdminGrantCredits is POST /v1/merchant/customers/{customer_id}/credits
@@ -465,7 +465,7 @@ func AdminGrantCredits(r *httprequest.Request) {
 	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
-		v := time.Unix(*req.ExpiresAt, 0).UTC()
+		v := req.ExpiresAt.UTC()
 		expiresAt = &v
 	}
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{

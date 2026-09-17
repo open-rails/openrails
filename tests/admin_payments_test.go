@@ -101,7 +101,7 @@ func TestAdminListPayments(t *testing.T) {
 		assert.NotEmpty(t, payment["customer_id"], "customer id is the plain UUID")
 		assert.NotNil(t, payment["rail"], "Should have rail")
 		assert.NotNil(t, payment["transaction_id"], "Should have transaction_id")
-		assert.NotNil(t, payment["created"], "Should have created (unix timestamp)")
+		assert.NotNil(t, payment["created_at"], "Should have created_at (RFC3339)")
 		assert.NotNil(t, payment["refunded"], "Should have refunded boolean")
 		assert.NotNil(t, payment["amount_refunded"], "Should have amount_refunded")
 
@@ -225,9 +225,11 @@ func TestAdminListPayments(t *testing.T) {
 		for i := 0; i < len(data)-1; i++ {
 			p1 := data[i].(map[string]interface{})
 			p2 := data[i+1].(map[string]interface{})
-			t1 := int64(p1["created"].(float64))
-			t2 := int64(p2["created"].(float64))
-			assert.GreaterOrEqual(t, t1, t2, "Payments should be in descending order by created")
+			t1, err := time.Parse(time.RFC3339Nano, p1["created_at"].(string))
+			require.NoError(t, err)
+			t2, err := time.Parse(time.RFC3339Nano, p2["created_at"].(string))
+			require.NoError(t, err)
+			assert.False(t, t1.Before(t2), "Payments should be in descending order by created_at")
 		}
 	})
 

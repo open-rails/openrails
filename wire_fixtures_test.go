@@ -92,8 +92,8 @@ func canonicalWireFixtures() map[string]any {
 		},
 		"payment.json": Payment{
 			ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, AmountRefunded: zero, Currency: "USD", CustomerID: customerFixture,
-			SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, Created: 1789430400,
-			Price: &PublicPrice{ID: priceFixture, Key: "pro-monthly", Object: "price", UnitAmount: maxMoney, Currency: "USD", Type: "recurring", Product: productFixture, Active: true, Created: 1789430400},
+			SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, CreatedAt: when,
+			Price: &PublicPrice{ID: priceFixture, Key: "pro-monthly", Object: "price", UnitAmount: maxMoney, Currency: "USD", Type: "recurring", Product: productFixture, Active: true, CreatedAt: when},
 		},
 	}
 }
