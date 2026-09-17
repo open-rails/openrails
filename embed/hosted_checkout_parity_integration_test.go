@@ -24,8 +24,10 @@ import (
 func TestHostedCheckoutDocumentParity(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
+	// The same CCBill account the package's other tests arm: the shared test
+	// merchant must stay single-account on the rail.
 	remote := h.StartStandalone("USD", integrationharness.WithRails(config.PSPSet{
-		"ccbill": {AccountID: "999983-0000", CCBill: &config.CCBillRailConfig{Salt: "issue983-local-fixture"}},
+		"ccbill": {AccountID: "999981-0000", CCBill: &config.CCBillRailConfig{Salt: "issue983-local-fixture"}},
 	}))
 	local, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
