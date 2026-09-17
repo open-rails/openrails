@@ -92,3 +92,37 @@ func TestRecordBoundAndWriterOrder(t *testing.T) {
 		t.Fatal("accepted missing tables")
 	}
 }
+
+func TestNestedContractsRejectRawFieldsAndPreserveIndefiniteAccess(t *testing.T) {
+	for _, raw := range []string{
+		`{"profile":{"cardNumber":"4111111111111111","apiKey":"sk_live_review_canary"}}`,
+		`{"profile":{"secret":"review_canary"},"profile":{"display_name":"normal"}}`,
+		`{"profile collection_threshold":42}`,
+		`{"collection_threshold":"not-money"}`,
+		`{"profile":{"display_name":"4111111111111111"}}`,
+	} {
+		if validateJSON("merchant_configurations.config", raw) == nil {
+			t.Fatal("accepted unsafe contract", raw)
+		}
+	}
+	if validateJSON("usage_events.dimensions", `{"tokens":1e100}`) == nil {
+		t.Fatal("accepted unbounded measurement")
+	}
+	for _, field := range []string{"products.entitlements_spec", "subscriptions.entitlements_spec_snapshot", "payments.entitlements_spec_snapshot"} {
+		if err := validateJSON(field, `{"premium":null,"secret_content":24}`); err != nil {
+			t.Fatal(field, err)
+		}
+	}
+	if err := validateJSON("custodians.settings", `{"public_api_key":"public","account_updater":true,"account_updater_lookahead_days":"30"}`); err != nil {
+		t.Fatal(err)
+	}
+	if validateJSON("admission_operations.capture_terms", `{"metadata":{"opaque":"replay-fact"}}`) == nil {
+		t.Fatal("accepted unsupported opaque replay metadata")
+	}
+	for _, v := range []string{"now", "infinity", "2026-01-01", "-----BEGIN PRIVATE KEY-----"} {
+		p := Profile{Name: "customers", Columns: []Column{{"created_at", "timestamp with time zone"}}}
+		if ValidateValues(p, []*string{&v}) == nil {
+			t.Fatal("accepted nonabsolute timestamp")
+		}
+	}
+}
