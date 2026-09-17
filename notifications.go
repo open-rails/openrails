@@ -75,10 +75,12 @@ type NotificationData struct {
 	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 	TransactionID      string `json:"transaction_id,omitempty"`
 
-	// One-off purchase receipt (one_off_purchase_completed).
+	// One-off purchase receipt (one_off_purchase_completed). UserEmail is the
+	// address the purchase was made with, for buyers without a profile email.
 	Amount        *int64 `json:"amount,omitempty,string"`
 	ProductName   string `json:"product_name,omitempty"`
 	PaymentMethod string `json:"payment_method,omitempty"`
+	UserEmail     string `json:"user_email,omitempty"`
 
 	// Merchant repair alerts (system_alert): what needs an operator and why.
 	Kind               string         `json:"kind,omitempty"`
