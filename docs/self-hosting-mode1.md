@@ -22,16 +22,24 @@ Deployment shape does not imply mode: embedded and standalone can run either.
 Manifest anatomy and field semantics:
 [merchant-provisioning.md](merchant-provisioning.md).
 
-## The secrets directory
+## Secret overlays
 
-Secret VALUES do not belong in the YAML. Render them (Vault Agent template,
-k8s secret volume, CSI, …) into a directory mounted read-only in the container
-— one file per secret, **filename = the env-var name**, content = the value:
+Secret VALUES do not belong in the committed YAML. Render them (Vault Agent
+template, k8s Secret volume, CSI, …) as YAML files in the manifest's own shape
+and list them in `merchant_manifest_overlays` (env
+`MERCHANT_MANIFEST_OVERLAYS`, comma-separated):
 
-```text
-/vault/secrets/                      # override with VAULT_SECRETS_PATH
-  BILLING_MERCHANTS_MYAPP_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY
-  BILLING_MERCHANTS_MYAPP_PSPS_CCBILL_CCBILL_SECRETS_DATALINK_PASSWORD
+```yaml
+# /vault/secrets/merchants.yaml
+merchants:
+  myapp:
+    psps:
+      mobius:
+        nmi:
+          secrets: { security_key: ..., webhook_signing_secret: ... }
+      ccbill:
+        ccbill:
+          secrets: { datalink_username: ..., datalink_password: ..., salt: ... }
 ```
 
 OpenRails needs **no live Vault connection** at runtime (Vault Transit for
@@ -39,15 +47,9 @@ Solana signing is the one optional exception — KV is never consulted).
 
 ## Precedence
 
-For every merchant-manifest value: `yaml < secret files < env`. The manifest
-YAML is the base; mounted secret files overlay it; real `BILLING_MERCHANTS_*`
-environment variables win over both.
-
-The env/secret-file overlay carries ONLY credentials + branding (or#915):
-`..._SECRETS_*`, `_DISPLAY_NAME`, `_PROFILE_*`. Structural account state
-(`account_id`, `settings`, `archived`, `custodian`, `signer`), `invoice`,
-`api_host` and `delegated_invoker_wasted_spend_windows` live in the YAML; an
-env var naming one refuses boot with the manifest/DB home in the error.
+The manifest is the base; overlays merge over it in the listed order, later
+wins. The merged tree is strict-parsed: an unknown field, or secrets for a PSP
+the manifest does not declare, refuses boot rather than being dropped.
 
 ## What happens at boot
 
@@ -56,10 +58,9 @@ The conventional file is optional: absent, the server boots control-plane-only
 boot refuses otherwise. `merchant_source: api` (MODE 2) refuses a present
 manifest outright: two truths.
 
-1. The manifest parses strictly. Unknown fields, retired key names (the old
-   `accounts:` key and `_ACCOUNTS_` / `_RAIL_MERCHANT_ACCOUNTS_` env anchors —
-   renamed to `psps:` / `_PSPS_`), and any `BILLING_MERCHANTS_*` name that
-   routes to no manifest field all refuse boot — never a silent drop.
+1. The manifest and its overlays parse strictly. Unknown fields and retired
+   key names (the old `accounts:` key — renamed to `psps:`) refuse boot — never
+   a silent drop.
 2. Merchant rows, configuration, and `openrails.psps` converge into Postgres —
    **projections for foreign keys only**, steamrolled by the YAML every boot
    (insert+overwrite+prune).
@@ -95,9 +96,8 @@ manifest outright: two truths.
 
 ## Mode 2 in one line
 
-`merchant_source: api`: no manifests at boot (their presence — file,
-`BILLING_MERCHANTS_*` env, or mounted secret files — refuses boot: two
-truths), merchants/catalog mutate over the HTTP APIs, secrets live in Vault
+`merchant_source: api`: no manifests at boot (a present manifest file refuses
+boot: two truths), merchants/catalog mutate over the HTTP APIs, secrets live in Vault
 KV or the DEK-encrypted DB store, and a secret backend is REQUIRED outside
 development. Initial bootstrap is `openrails push-merchant-config --seed` — a
 one-time, create-only import of a manifest file into those stores (the command

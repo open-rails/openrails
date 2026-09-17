@@ -36,8 +36,8 @@ From CCBill (dashboard or merchant support) you need:
 
 ### PSP manifest entry
 
-Under `merchants.<slug>.psps` (env overlay `BILLING_MERCHANTS_<M>_PSPS_…`;
-secret-store prefix `psps/…`):
+Under `merchants.<slug>.psps` (secrets via YAML overlays; secret-store prefix
+`psps/…`):
 
 ```yaml
 psps:

@@ -59,7 +59,7 @@ the opposite direction and never mutates a payment rail.
 
 PSP secrets in `push-merchant-config` are seed material, not the runtime
 source of truth. The manifest key is `merchants.<slug>.psps.<psp-key>.<rail>`
-(env overlay `BILLING_MERCHANTS_<MERCHANT>_PSPS_…`); the retired anchors
+(secret overlays: `merchant_manifest_overlays`); the retired anchors
 (`accounts`, `rail_merchant_accounts`, `provider_accounts`) fail loudly with
 a rename error. The command imports each PSP's secrets under the canonical
 scoped name `psps/<rail>/<environment>/<account_id>/<secret_key>` into the

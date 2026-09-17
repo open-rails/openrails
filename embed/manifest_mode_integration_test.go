@@ -10,8 +10,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -81,12 +79,12 @@ catalogs:
 }
 
 // bootManifestRuntime is one "pod boot": parse the manifest bytes (secret-file
-// overlay applied via VAULT_SECRETS_PATH), start the engine, apply the merchant
-// manifest, converge the catalog.
-func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5BaseURL string, manifestRaw, catalogRaw []byte) (*embed.Runtime, merchant.ID) {
+// overlay passed as a structured YAML document), start the engine, apply the
+// merchant manifest, converge the catalog.
+func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5BaseURL string, manifestRaw, catalogRaw []byte, overlays ...[]byte) (*embed.Runtime, merchant.ID) {
 	t.Helper()
 	cfg := manifestModeConfig(dsn)
-	manifest, err := embed.LoadMerchantConfigManifest(manifestRaw)
+	manifest, err := embed.LoadMerchantConfigManifestWithOverlays(manifestRaw, overlays...)
 	require.NoError(t, err)
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
@@ -230,18 +228,16 @@ func TestManifestMode_Loop(t *testing.T) {
 	keyV1 := fmt.Sprintf("sec-key-v1-%d", nano)
 	keyV2 := fmt.Sprintf("sec-key-v2-%d", nano)
 
-	// Operator-mounted secret files: filename = env-var name (#723 precedence
-	// yaml < files < env).
-	secretsDir := t.TempDir()
-	secretFile := filepath.Join(secretsDir, fmt.Sprintf("BILLING_MERCHANTS_%s_PSPS_MOBIUS_NMI_SECRETS_SECURITY_KEY", strings.ToUpper(slug)))
-	require.NoError(t, os.WriteFile(secretFile, []byte(keyV1+"\n"), 0o600))
-	t.Setenv("VAULT_SECRETS_PATH", secretsDir)
+	// Host-mounted secret overlay: a YAML document in the manifest's own shape.
+	overlay := func(key string) []byte {
+		return []byte(fmt.Sprintf("merchants:\n  %s:\n    psps:\n      mobius:\n        nmi:\n          secrets:\n            security_key: %s\n", slug, key))
+	}
 
 	manifestRaw := manifestModeManifestYAML(slug, gatewayID)
 	server, seenKeys := fakeNMI(t)
 
 	// ---- Boot 1.
-	rt1, id := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 5_000_000))
+	rt1, id := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 5_000_000), overlay(keyV1))
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.entitlements WHERE merchant_id = $1`,
@@ -305,11 +301,10 @@ func TestManifestMode_Loop(t *testing.T) {
 	require.ErrorIs(t, err, merchants.ErrManifestSecretsReadOnly)
 
 	// ---- Rotate: new secret value in the file, new price in the catalog.
-	require.NoError(t, os.WriteFile(secretFile, []byte(keyV2+"\n"), 0o600))
 	require.NoError(t, rt1.Close(ctx))
 
 	// ---- Boot 2 (reboot: fresh runtime, same DB).
-	rt2, id2 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000))
+	rt2, id2 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000), overlay(keyV2))
 	require.Equal(t, id, id2, "reboot binds the same merchant")
 
 	require.Equal(t, []int64{7_000_000}, activePriceAmounts(t, pool, ctx, id), "changed price is live after reboot; the old one is archived")
@@ -319,7 +314,7 @@ func TestManifestMode_Loop(t *testing.T) {
 
 	// ---- Boot 3: unchanged inputs are an idempotent no-op.
 	require.NoError(t, rt2.Close(ctx))
-	rt3, id3 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000))
+	rt3, id3 := bootManifestRuntime(t, ctx, dsn, slug, server.URL, manifestRaw, manifestModeCatalogYAML(slug, 7_000_000), overlay(keyV2))
 	require.Equal(t, id, id3)
 	require.Equal(t, []int64{7_000_000}, activePriceAmounts(t, pool, ctx, id))
 	require.NoError(t, chargeViaStorePlane(t, ctx, rt3, id, server.URL))
@@ -460,9 +455,9 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 // TestManifestMode_MalformedManifestRefusesBoot: matrix row — manifest mode
 // with unresolvable declared truth refuses.
 func TestManifestMode_MalformedManifestRefusesBoot(t *testing.T) {
-	_, err := embed.LoadMerchantConfigManifest([]byte("version: 1\nmerchants: {}\n"))
+	_, err := embed.LoadMerchantConfigManifestWithOverlays([]byte("version: 1\nmerchants: {}\n"))
 	require.Error(t, err, "a manifest declaring no merchants is refused")
-	_, err = embed.LoadMerchantConfigManifest([]byte("merchants:\n  x:\n    acounts: {}\n"))
+	_, err = embed.LoadMerchantConfigManifestWithOverlays([]byte("merchants:\n  x:\n    acounts: {}\n"))
 	require.Error(t, err, "a typo'd manifest field is refused, never dropped")
 }
 
@@ -479,7 +474,7 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 	gatewayID := fmt.Sprintf("58%d", nano%1_000_000)
 	cfg := manifestModeConfig(dsn)
 
-	manifest, err := embed.LoadMerchantConfigManifest(manifestModeManifestYAML(slug, gatewayID))
+	manifest, err := embed.LoadMerchantConfigManifestWithOverlays(manifestModeManifestYAML(slug, gatewayID))
 	require.NoError(t, err)
 	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
 	require.NoError(t, err)
