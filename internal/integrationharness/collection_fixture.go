@@ -158,7 +158,7 @@ func (h *Harness) ResolveOperation(nmiGatewayURL string, mid merchant.ID, id uui
 	} else {
 		args = append(args, "--receipt", receipt)
 	}
-	cmd := exec.Command(binary, args...)
+	cmd := exec.CommandContext(h.ctx, binary, args...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "TMPDIR=" + os.TempDir()}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
