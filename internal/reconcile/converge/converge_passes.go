@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -161,7 +162,7 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 			Severity:   "critical",
 			SubjectKey: "payment:" + p.ID.String(),
 			Provider:   "self",
-			Evidence:   map[string]any{"payment_id": openrails.PaymentID(p.ID).String(), "amount": p.Amount, "currency": p.Currency, "cause": "grantable_payment_without_grant"},
+			Evidence:   map[string]any{"payment_id": openrails.PaymentID(p.ID).String(), "amount": strconv.FormatInt(p.Amount, 10), "currency": p.Currency, "cause": "grantable_payment_without_grant"},
 			// surface-only: re-granting re-runs derive-1 (product-spec-dependent).
 		})
 	}
@@ -974,7 +975,7 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 			Provider:   "self",
 			Evidence: map[string]any{
 				"customer_id": d.UserID, "product_id": openrails.ProductID(d.ProductID).String(), "product_key": d.ProductKey,
-				"charge_count": d.Count, "payment_ids": ids, "total_amount": d.TotalAmount,
+				"charge_count": d.Count, "payment_ids": ids, "total_amount": strconv.FormatInt(d.TotalAmount, 10),
 				"first_date": d.FirstDate, "last_date": d.LastDate,
 				recommend.EvidenceKey: rec.Map(),
 			},
@@ -1004,9 +1005,10 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 	return out, nil
 }
 
-// ownershipPurchase is one leg of a duplicate-ownership group (decoded from
-// the query's jsonb purchases array, ordered oldest-first).
-type ownershipPurchase struct {
+// ownershipPurchaseRow is one leg of a duplicate-ownership group as the
+// query's jsonb purchases array spells it (bare ids, numeric amount,
+// ordered oldest-first); ownershipPurchase is its finding-evidence shape.
+type ownershipPurchaseRow struct {
 	GrantID     string  `json:"grant_id"`
 	SourceType  string  `json:"source_type"`
 	SourceID    string  `json:"source_id"`
@@ -1014,6 +1016,29 @@ type ownershipPurchase struct {
 	Amount      *int64  `json:"amount"`
 	Currency    *string `json:"currency"`
 	PurchasedAt string  `json:"purchased_at"`
+}
+
+type ownershipPurchase struct {
+	GrantID     string  `json:"grant_id"`
+	SourceType  string  `json:"source_type"`
+	SourceID    string  `json:"source_id"`
+	PaymentID   *string `json:"payment_id"`
+	Amount      *int64  `json:"amount,string"`
+	Currency    *string `json:"currency"`
+	PurchasedAt string  `json:"purchased_at"`
+}
+
+func (r ownershipPurchaseRow) evidence() ownershipPurchase {
+	p := ownershipPurchase{GrantID: r.GrantID, SourceType: r.SourceType, SourceID: openrails.SourceRef(r.SourceType, r.SourceID), Amount: r.Amount, Currency: r.Currency, PurchasedAt: r.PurchasedAt}
+	if r.PaymentID != nil {
+		if u, err := uuid.Parse(*r.PaymentID); err == nil {
+			typed := openrails.PaymentID(u).String()
+			p.PaymentID = &typed
+		} else {
+			p.PaymentID = r.PaymentID
+		}
+	}
+	return p
 }
 
 func (p ownershipPurchase) describe() string {
@@ -1036,23 +1061,16 @@ func (p ownershipPurchase) describe() string {
 // carries refund_payment_id only. No payment linkage at all → prose only
 // (approve unavailable; the operator resolves out-of-band).
 func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeFinding, error) {
-	var purchases []ownershipPurchase
-	if err := json.Unmarshal(d.Purchases, &purchases); err != nil {
+	var rows []ownershipPurchaseRow
+	if err := json.Unmarshal(d.Purchases, &rows); err != nil {
 		return ConvergeFinding{}, fmt.Errorf("con: decode duplicate ownership purchases: %w", err)
 	}
-	// The query spells ids as bare UUIDs; the finding spells them typed.
+	purchases := make([]ownershipPurchase, len(rows))
+	for i, row := range rows {
+		purchases[i] = row.evidence()
+	}
 	var subID openrails.SubscriptionID
 	var refundPay openrails.PaymentID
-	for i := range purchases {
-		p := &purchases[i]
-		p.SourceID = openrails.SourceRef(p.SourceType, p.SourceID)
-		if p.PaymentID != nil {
-			if u, err := uuid.Parse(*p.PaymentID); err == nil {
-				typed := openrails.PaymentID(u).String()
-				p.PaymentID = &typed
-			}
-		}
-	}
 	later := purchases[len(purchases)-1]
 	if later.SourceType == "subscription" {
 		if id, err := openrails.ParseSubscriptionID(later.SourceID); err == nil {
