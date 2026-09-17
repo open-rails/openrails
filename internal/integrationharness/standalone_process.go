@@ -58,34 +58,30 @@ func ProcessWithNMIGateway(url string) ProcessOption {
 	return ProcessWithYAML("provider_sandbox:\n  nmi_gateway_url: " + url + "\n")
 }
 
-var (
-	binaryOnce sync.Once
-	binaryPath string
-	binaryErr  error
-)
-
-// openrailsBinary builds cmd/openrails once per test process.
-func openrailsBinary() (string, error) {
-	binaryOnce.Do(func() {
+// openrailsBinary builds cmd/openrails once per harness into a directory
+// removed at cleanup.
+func (h *Harness) openrailsBinary() (string, error) {
+	h.binaryOnce.Do(func() {
 		root, err := moduleRoot()
 		if err != nil {
-			binaryErr = err
+			h.binaryErr = err
 			return
 		}
 		dir, err := os.MkdirTemp("", "openrails-bin-")
 		if err != nil {
-			binaryErr = err
+			h.binaryErr = err
 			return
 		}
-		binaryPath = filepath.Join(dir, "openrails")
-		build := exec.CommandContext(context.Background(), "go", "build", "-o", binaryPath, "./cmd/openrails")
+		h.cleanup(func() { _ = os.RemoveAll(dir) })
+		h.binaryPath = filepath.Join(dir, "openrails")
+		build := exec.CommandContext(context.Background(), "go", "build", "-o", h.binaryPath, "./cmd/openrails")
 		build.Dir = root
 		build.Env = os.Environ()
 		if out, err := build.CombinedOutput(); err != nil {
-			binaryErr = fmt.Errorf("build cmd/openrails: %w\n%s", err, out)
+			h.binaryErr = fmt.Errorf("build cmd/openrails: %w\n%s", err, out)
 		}
 	})
-	return binaryPath, binaryErr
+	return h.binaryPath, h.binaryErr
 }
 
 func moduleRoot() (string, error) {
@@ -115,7 +111,7 @@ func (h *Harness) StartStandaloneProcess(opts ...ProcessOption) *StandaloneProce
 			opt(&pc)
 		}
 	}
-	binary, err := openrailsBinary()
+	binary, err := h.openrailsBinary()
 	require.NoError(h.t, err)
 	dbtest.EnsureTestMerchant(h.ctx, h.t, h.sharedPool())
 
