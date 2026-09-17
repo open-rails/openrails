@@ -64,6 +64,39 @@ describe("engine currency registry", () => {
     expect(formatNativeAmount(20_000_000, "usd")).toBe("$20.00")
     expect(formatNativeAmount(1, "XXX")).toContain("unregistered currency")
   })
+  it("never prefills a rounded amount from an unsafe JSON number", () => {
+    // A Number cannot hold 2^53 + 1; the prefill must refuse it rather than
+    // hand nativeAmountFromInput the rounded digits, which it would accept.
+    for (const unsafe of [
+      Number("9007199254740993"),
+      -Number("9007199254740993"),
+      Number("9223372036854775807"),
+      1e21,
+    ]) {
+      expect(nativeAmountToInput(unsafe, "USD")).toBe("")
+      expect(
+        nativeAmountFromInput(nativeAmountToInput(unsafe, "USD"), "USD")
+      ).toBeNull()
+    }
+    expect(nativeAmountToInput(Number.MAX_SAFE_INTEGER, "USD")).toBe(
+      "9007199254.740991"
+    )
+    expect(
+      nativeAmountFromInput(
+        nativeAmountToInput(Number.MAX_SAFE_INTEGER, "USD"),
+        "USD"
+      )
+    ).toBe(String(Number.MAX_SAFE_INTEGER))
+    // The exact string form of the same value prefills and round-trips unchanged.
+    expect(
+      nativeAmountFromInput(
+        nativeAmountToInput("9007199254740993", "USD"),
+        "USD"
+      )
+    ).toBe("9007199254740993")
+    expect(nativeAmountToInput(1.5, "USD")).toBe("")
+    expect(nativeAmountToInput(Number.NaN, "USD")).toBe("")
+  })
   it.each(Object.entries(currencyUnits))(
     "%s round-trips every int64 edge exactly at scale %i",
     (currency, scale) => {

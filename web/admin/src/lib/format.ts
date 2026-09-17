@@ -140,20 +140,18 @@ export function nativeAmountFromInput(
   return scale === undefined ? null : amountFromInput(major, scale)
 }
 
-// nativeAmountToInput prefills an editable major-unit amount. An unsafe JSON
-// number keeps its (rounded) digits so nativeAmountFromInput rejects it on save
-// instead of silently dropping or rounding the field.
+// nativeAmountToInput prefills an editable major-unit amount. A JSON number
+// beyond the safe-integer range has already lost digits, so it is refused
+// before any BigInt or string conversion and the field starts empty: an empty
+// input never passes nativeAmountFromInput, so a rounded value is never saved.
 export function nativeAmountToInput(
   amount: MoneyAmount | undefined,
   currency: string
 ): string {
   const scale = currencyScale(currency)
   if (amount === undefined || scale === undefined) return ""
-  const units =
-    typeof amount === "number" && Number.isInteger(amount)
-      ? BigInt(amount).toString()
-      : amount
-  return unitsToDecimal(units, scale) ?? ""
+  if (typeof amount === "number" && !Number.isSafeInteger(amount)) return ""
+  return unitsToDecimal(amount, scale) ?? ""
 }
 
 export function formatDate(iso?: string | null): string {
