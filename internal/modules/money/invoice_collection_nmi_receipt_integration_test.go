@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -30,6 +31,8 @@ type fakeNMIReceiptGateway struct {
 	// payments is the v5 read per transaction id.
 	payments map[string]map[string]any
 	sends    int
+	// saleOrderIDs records the orderid of every sale sent.
+	saleOrderIDs []string
 }
 
 func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.Server) {
@@ -51,6 +54,7 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 		require.NoError(t, r.ParseForm())
 		if r.Form.Get("type") == "sale" {
 			f.sends++
+			f.saleOrderIDs = append(f.saleOrderIDs, r.Form.Get("orderid"))
 			fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
 			return
 		}
@@ -73,6 +77,12 @@ func (f *fakeNMIReceiptGateway) payment(txn, vault, amount, currency string) {
 	}
 }
 
+func (f *fakeNMIReceiptGateway) sentOrderIDs() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.saleOrderIDs...)
+}
+
 func (f *fakeNMIReceiptGateway) orderSale(orderID, txn string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -82,6 +92,7 @@ func (f *fakeNMIReceiptGateway) orderSale(orderID, txn string) {
 type nmiReceiptEnv struct {
 	collectionEnv
 	gateway *fakeNMIReceiptGateway
+	plane   *money.MerchantCollectionAdapterBuilder
 	runner  *intents.Runner
 	op      uuid.UUID
 	vault   string
@@ -110,7 +121,7 @@ func nmiReceiptScenario(t *testing.T) nmiReceiptEnv {
 	require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
 	return nmiReceiptEnv{
 		collectionEnv: collectionEnv{svc: svc, db: dbi, pool: pool, payer: payer, currency: currency, method: method, invoice: invoiceID, ctx: ctx},
-		gateway:       gateway, runner: runner, op: op.ID, vault: "vault_" + method.String(),
+		gateway:       gateway, plane: plane, runner: runner, op: op.ID, vault: "vault_" + method.String(),
 	}
 }
 
@@ -118,6 +129,30 @@ func (e nmiReceiptEnv) resolve(t *testing.T, txn string) error {
 	t.Helper()
 	_, err := e.runner.Resolve(e.ctx, e.op, intents.Resolution{ProviderReference: txn, Actor: "ops", Reason: "gateway portal"})
 	return err
+}
+
+// verify runs the autonomous verifier over the operation once and returns
+// its status afterwards.
+func (e nmiReceiptEnv) verify(t *testing.T) string {
+	t.Helper()
+	dueNow(t, e.pool, e.ctx, e.op)
+	_, err := e.runner.RunVerifyOnce(e.ctx)
+	require.NoError(t, err)
+	return latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status
+}
+
+// requireStillUnknown: the operation is unknown, nothing settled, the
+// invoice still points at it, and the gateway saw no second sale.
+func (e nmiReceiptEnv) requireStillUnknown(t *testing.T, why string) {
+	t.Helper()
+	require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status, why)
+	require.Zero(t, e.settledPayments(t), why)
+	require.Zero(t, e.owedPaymentTransfers(t), why)
+	inv := e.invoiceRow(t)
+	require.NotEqual(t, "paid", inv.Status, why)
+	require.Equal(t, int64(0), inv.AmountPaid, why)
+	require.NotNil(t, inv.CollectionIntentID, why)
+	require.Equal(t, 1, e.gateway.sends, why)
 }
 
 // TestInvoiceCollection_NMIReceiptRejectsSaleOfAnotherOperation: an approved
@@ -176,4 +211,87 @@ func TestInvoiceCollection_SettledReceiptIsUniquePerMerchant(t *testing.T) {
 	_, err = e.pool.Exec(e.ctx, `INSERT INTO openrails.invoice_payments (id, merchant_id, customer_id, invoice_id, currency, amount, status, rail, rail_payment_id, psp_id)
 		SELECT gen_random_uuid(), merchant_id, customer_id, invoice_id, currency, amount, 'settled', rail, rail_payment_id, psp_id FROM openrails.invoice_payments WHERE invoice_id = $1`, e.invoice)
 	require.ErrorContains(t, err, "uq_invoice_payments_settled_rail_payment")
+}
+
+// TestInvoiceCollection_AutonomousVerifierRequiresExactReadToMatch (final
+// review R1): the verifier settles from the order search's sale only through
+// the SAME exact read operator resolution applies. After each operator
+// rejection the verifier runs over the same facts and must keep the operation
+// unknown with nothing settled; once the exact read matches it settles once.
+func TestInvoiceCollection_AutonomousVerifierRequiresExactReadToMatch(t *testing.T) {
+	e := nmiReceiptScenario(t)
+	e.gateway.orderSale(e.op.String(), "txn_ours")
+
+	require.ErrorIs(t, e.resolve(t, "txn_ours"), intents.ErrResolutionRejected, "the exact read must exist")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+	e.requireStillUnknown(t, "missing exact read")
+
+	e.gateway.payment("txn_ours", "vault_other", "0.05", "USD")
+	require.ErrorIs(t, e.resolve(t, "txn_ours"), intents.ErrResolutionRejected, "wrong vault")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+	e.requireStillUnknown(t, "wrong vault")
+
+	e.gateway.payment("txn_ours", e.vault, "0.50", "USD")
+	require.ErrorIs(t, e.resolve(t, "txn_ours"), intents.ErrResolutionRejected, "wrong amount")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+	e.requireStillUnknown(t, "wrong amount")
+
+	e.gateway.payment("txn_ours", e.vault, "0.05", "EUR")
+	require.ErrorIs(t, e.resolve(t, "txn_ours"), intents.ErrResolutionRejected, "wrong currency")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+	e.requireStillUnknown(t, "wrong currency")
+	reason := latestCollectionIntent(t, e.pool, e.ctx, e.invoice).LastFailureReason
+	require.NotNil(t, reason)
+	require.Contains(t, *reason, "contradicts the frozen operation")
+
+	e.gateway.payment("txn_ours", e.vault, "0.05", "USD")
+	require.Equal(t, intents.StatusSucceeded, e.verify(t))
+	e.requireSettledOnce(t)
+	var railPaymentID string
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
+	require.Equal(t, "txn_ours", railPaymentID)
+	require.Equal(t, 1, e.gateway.sends, "the verifier never resends")
+}
+
+// TestInvoiceCollection_NMIReceiptBindsCustodianHeldCardWithoutVault: a card
+// held by the custodian (or#879) is charged by card data, so its sale has no
+// customer vault at NMI. Both readers still bind approval, currency and
+// amount through the exact read; the order reference binds the instrument.
+func TestInvoiceCollection_NMIReceiptBindsCustodianHeldCardWithoutVault(t *testing.T) {
+	e := nmiReceiptScenario(t)
+	custodianID := dbtest.EnsureTestCustodian(e.ctx, t, e.pool, dbtest.TestMerchantID.UUID())
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(e.ctx, "DELETE FROM openrails.payment_methods WHERE id = $1", e.method)
+		_, _ = e.pool.Exec(e.ctx, "DELETE FROM openrails.custodians WHERE id = $1", custodianID)
+	})
+	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET custodian = 'basis_theory', custodian_id = $2, rail_customer_ref = '', rail_method_ref = 'tok_'||$1::text WHERE id = $1`, e.method, custodianID)
+	require.NoError(t, err)
+	e.gateway.orderSale(e.op.String(), "txn_pan")
+
+	e.gateway.payment("txn_pan", "", "0.50", "USD")
+	require.ErrorIs(t, e.resolve(t, "txn_pan"), intents.ErrResolutionRejected, "wrong amount")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+	e.requireStillUnknown(t, "wrong amount")
+	e.gateway.payment("txn_pan", "", "0.05", "EUR")
+	require.ErrorIs(t, e.resolve(t, "txn_pan"), intents.ErrResolutionRejected, "wrong currency")
+	require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+	e.requireStillUnknown(t, "wrong currency")
+
+	e.gateway.payment("txn_pan", "", "0.05", "USD")
+	require.Equal(t, intents.StatusSucceeded, e.verify(t))
+	e.requireSettledOnce(t)
+	require.Equal(t, 1, e.gateway.sends)
+}
+
+// TestInvoiceCollection_NMINonExecutionRefusedByContradictingSale: a sale for
+// the operation's order reference that does not read back exactly is
+// contradictory evidence, not proof of non-execution.
+func TestInvoiceCollection_NMINonExecutionRefusedByContradictingSale(t *testing.T) {
+	e := nmiReceiptScenario(t)
+	e.gateway.orderSale(e.op.String(), "txn_ours")
+	e.gateway.payment("txn_ours", e.vault, "0.50", "USD")
+	_, err := e.runner.Resolve(e.ctx, e.op, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "portal"})
+	require.ErrorIs(t, err, intents.ErrResolutionRejected)
+	require.ErrorContains(t, err, "contradicts the operation")
+	e.requireStillUnknown(t, "non-execution refused")
 }

@@ -75,8 +75,10 @@ type CollectionVerifyResult struct {
 	ExternalInvoiceID string
 }
 
-// CollectionReceiptExpectation is the frozen operation an operator receipt
-// must match exactly.
+// CollectionReceiptExpectation is the frozen operation every receipt must
+// match exactly: its provider identity (the operation key) and the amount
+// and currency frozen at enqueue. The instrument is the payment method the
+// reads are made for.
 type CollectionReceiptExpectation struct {
 	OperationKey string
 	Amount       moneyutil.Cents
@@ -86,10 +88,13 @@ type CollectionReceiptExpectation struct {
 // CollectionVerifier answers the reconciliation reads for one collection
 // operation. Implemented by the store-armed credential plane; faked in tests.
 type CollectionVerifier interface {
-	// VerifyCollectionCharge searches for a successful charge carrying the
-	// operation key (NMI-family order reference). Supported=false for rails
-	// without such a read; an empty result is inconclusive, never non-execution.
-	VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, operationKey string) (CollectionVerifyResult, error)
+	// VerifyCollectionCharge looks for this operation's settled charge at the
+	// provider (NMI-family order reference search) and reads it back through
+	// the same exact match operator resolution uses. Supported=false for rails
+	// without such a read; an empty search is inconclusive (Settled=false, nil
+	// error), never non-execution; a charge that exists but contradicts the
+	// frozen facts is an error, never a receipt.
+	VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) (CollectionVerifyResult, error)
 	// ConfirmCollectionReceipt reads the exact provider object an operator
 	// named and requires it to be this operation's settled charge.
 	ConfirmCollectionReceipt(ctx context.Context, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error)
@@ -189,31 +194,31 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 }
 
 // VerifyCollectionCharge is the invoice_collection verifier's provider READ:
-// for NMI-family rails it arms the store-scoped client and asks the Query API
-// for a successful sale carrying the operation's order reference — the same
-// probe the manual-rebill verifier trusts. Custodian-proxied charges settle on
-// the SAME NMI gateway account (or#879), so one branch covers both transports.
-// Stripe has no such read and converges through idempotent replay instead.
-func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, operationKey string) (CollectionVerifyResult, error) {
+// for NMI-family rails it arms the store-scoped client and runs the one
+// exact-receipt path (nmiCollectionReceipt) with no operator-named
+// transaction: the Query API's sale for the operation's order reference is
+// the only candidate, and it must read back exactly. Custodian-proxied
+// charges settle on the SAME NMI gateway account (or#879), so one branch
+// covers both transports. Stripe has no such read and converges through
+// idempotent replay instead.
+func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
 	client, ok, err := b.nmiClientFor(ctx, method)
 	if err != nil || !ok {
 		return CollectionVerifyResult{}, err
 	}
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, operationKey)
-	if err != nil {
-		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", operationKey, err)
-	}
-	return CollectionVerifyResult{Supported: true, Settled: found, TransactionID: txnID}, nil
+	return nmiCollectionReceipt(ctx, client, method, "", expect)
 }
 
 // ConfirmCollectionReceipt reads the exact provider object an operator named.
-// NMI: the transaction must be the successful sale the Query API returns for
-// the operation's own order reference (identity), and for a vaulted
-// instrument also an approved sale of the frozen amount and currency on that
-// vault (exact read). Stripe: the invoice must carry the operation key and be
-// paid for the frozen amount.
+// NMI: the same exact-receipt path as autonomous verification, with the
+// named transaction required to be the order reference's sale. Stripe: the
+// invoice must match the operation through the same check the collection
+// sequence applies to its own paid invoice.
 func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.Context, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
 	providerReference = strings.TrimSpace(providerReference)
+	if providerReference == "" {
+		return CollectionVerifyResult{}, errors.New("provider reference is required")
+	}
 	if normalizeRail(method.Rail) == string(models.RailStripe) {
 		service, err := b.stripeServiceFor(ctx, method)
 		if err != nil {
@@ -226,7 +231,7 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 		if !found {
 			return CollectionVerifyResult{}, fmt.Errorf("stripe invoice %s does not exist", providerReference)
 		}
-		if err := stripeReceiptMatches(receipt, expect.OperationKey, expect.Amount, expect.Currency); err != nil {
+		if err := receipt.MatchesOperation(expect.OperationKey, expect.Amount, expect.Currency); err != nil {
 			return CollectionVerifyResult{}, err
 		}
 		return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: stripeReceiptTransactionID(receipt), ExternalInvoiceID: receipt.InvoiceID}, nil
@@ -238,17 +243,52 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 	if !ok {
 		return CollectionVerifyResult{}, fmt.Errorf("rail %q has no armed provider read", method.Rail)
 	}
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, expect.OperationKey)
+	res, err := nmiCollectionReceipt(ctx, client, method, providerReference, expect)
 	if err != nil {
 		return CollectionVerifyResult{}, err
 	}
-	if !found || strings.TrimSpace(txnID) != providerReference {
+	if !res.Settled {
 		return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, expect.OperationKey)
 	}
-	if vault := strings.TrimSpace(method.RailCustomerRef); vault != "" {
-		if err := client.ConfirmApprovedSale(ctx, providerReference, vault, expect.Amount, expect.Currency); err != nil {
-			return CollectionVerifyResult{}, err
+	return res, nil
+}
+
+// nmiCollectionReceipt is the ONE exact-receipt path for an NMI-family
+// collection, shared by autonomous verification and operator resolution. The
+// Query API must return a successful sale for the operation's order reference
+// (identity); with providerReference set it must be that very sale. The v5
+// read of that sale must then be approved, in the frozen currency, for the
+// frozen amount, on the instrument's customer vault. A custodian-held card
+// (or#879) is charged by card data and has no vault at NMI: its exact read
+// binds approval, currency and amount, and the order reference binds the
+// instrument. An empty search is inconclusive (Settled=false, nil error); a
+// sale that exists but contradicts the frozen facts is an error.
+func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+	key := strings.TrimSpace(expect.OperationKey)
+	if key == "" || expect.Amount <= 0 || strings.TrimSpace(expect.Currency) == "" {
+		return CollectionVerifyResult{}, errors.New("collection receipt expectation is incomplete")
+	}
+	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, key)
+	if err != nil {
+		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", key, err)
+	}
+	txnID = strings.TrimSpace(txnID)
+	if !found || txnID == "" {
+		if providerReference != "" {
+			return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, key)
 		}
+		return CollectionVerifyResult{Supported: true}, nil
+	}
+	if providerReference != "" && txnID != providerReference {
+		return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, key)
+	}
+	if method.Custodian == models.CustodianBasisTheory {
+		err = client.ConfirmApprovedUnvaultedSale(ctx, txnID, expect.Amount, expect.Currency)
+	} else {
+		err = client.ConfirmApprovedSale(ctx, txnID, strings.TrimSpace(method.RailCustomerRef), expect.Amount, expect.Currency)
+	}
+	if err != nil {
+		return CollectionVerifyResult{}, err
 	}
 	return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txnID}, nil
 }
@@ -270,7 +310,10 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 		}
 		return service.CleanupCollection(ctx, customerID, expect.OperationKey)
 	}
-	res, err := b.VerifyCollectionCharge(ctx, method, expect.OperationKey)
+	res, err := b.VerifyCollectionCharge(ctx, method, expect)
+	if errors.Is(err, nmi.ErrReceiptMismatch) {
+		return fmt.Errorf("provider shows a sale for order %s that contradicts the operation: %w", expect.OperationKey, err)
+	}
 	if err != nil {
 		return err
 	}
