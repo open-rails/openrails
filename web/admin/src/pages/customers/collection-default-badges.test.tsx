@@ -40,8 +40,7 @@ it("refreshes profile and saved-method caches after the server deletes or clears
     object: "payment_method",
     type: "card",
     rail: "nmi",
-    livemode: false,
-    created: 0,
+    created_at: "2026-09-16T00:00:00Z",
     collection_default_currencies: ["USD"],
   }
   let methods = [method]
