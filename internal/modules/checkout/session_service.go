@@ -885,10 +885,18 @@ func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
 		"payment.wallet":       payment.Wallet,
 		"success_url":          req.SuccessURL,
 		"cancel_url":           req.CancelURL,
-		"subscription_id":      req.SubscriptionID,
-		"new_price_id":         req.NewPriceID,
-		"price_id":             req.PriceID,
 		"mode":                 req.Mode,
+	}
+	// Typed id handles (plain or prefixed UUIDs) can contain a Luhn-valid
+	// digit run across their groups; a key or malformed handle keeps the scan.
+	for name, handle := range map[string]struct{ value, prefix string }{
+		"subscription_id": {req.SubscriptionID, api.PrefixSubscription},
+		"new_price_id":    {req.NewPriceID, api.PrefixPrice},
+		"price_id":        {req.PriceID, api.PrefixPrice},
+	} {
+		if !canonicalUUIDHandle(strings.TrimPrefix(strings.TrimSpace(handle.value), handle.prefix)) {
+			extraFields[name] = handle.value
+		}
 	}
 	if err := RejectPANShapedFields(&CheckoutRequest{Metadata: extraFields}); err != nil {
 		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutSessionValidation, err)
