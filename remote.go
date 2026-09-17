@@ -229,9 +229,11 @@ func (c *Client) GetDeposit(ctx context.Context, customerID, sourceID string) (*
 	if err != nil {
 		return nil, err
 	}
-	sourceID, err = requireID("source_id", sourceID)
-	if err != nil {
-		return nil, err
+	// A deposit source is an opaque idempotency key carried in the query,
+	// so dot strings are valid keys, not traversal components.
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil, invalidErr("source_id is required")
 	}
 	q := url.Values{}
 	q.Set("customer_id", customerID)
