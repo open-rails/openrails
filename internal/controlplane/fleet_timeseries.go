@@ -26,8 +26,8 @@ type FleetWeeklyPoint struct {
 	CancelledSubscriptions int64
 }
 
-// FleetWeeklyVolume is one week's settled sale volume in one currency, in
-// MICROS. Sale rows only — reversal mirror rows never count.
+// FleetWeeklyVolume is one week's settled sale volume in one currency, in the
+// currency's native units. Sale rows only — reversal mirror rows never count.
 type FleetWeeklyVolume struct {
 	WeekStart     time.Time
 	Currency      string

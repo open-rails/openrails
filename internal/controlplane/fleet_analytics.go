@@ -27,8 +27,8 @@ type FleetMerchantFunnel struct {
 	ActiveRevenue int64
 }
 
-// FleetCurrencyRevenue is the window's settled volume in one currency, in
-// MICROS (millionths of a major unit — the ledger convention).
+// FleetCurrencyRevenue is the window's settled volume in one currency, in the
+// currency's native units (the ledger convention, docs/money-wire.md).
 type FleetCurrencyRevenue struct {
 	Currency      string
 	Payments      int64
@@ -46,7 +46,7 @@ type FleetRailHealth struct {
 }
 
 // FleetMRR is the monthly-normalized recurring run-rate in one currency, in
-// MICROS: each active auto-renew subscription's price scaled by 720h/period.
+// native units: each active auto-renew subscription's price scaled by 720h/period.
 type FleetMRR struct {
 	Currency      string
 	Subscriptions int64

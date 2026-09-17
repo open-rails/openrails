@@ -20,13 +20,14 @@ type FleetWeeklyPoint struct {
 	CancelledSubscriptions int64     `json:"cancelled_subscriptions"`
 }
 
-// FleetWeeklyVolume is one week's settled sale volume in one currency, in
-// MICROS; only weeks×currencies with activity appear.
+// FleetWeeklyVolume is one week's settled sale volume in one currency; only
+// weeks×currencies with activity appear. SettledAmount is in the currency's
+// native units and travels as an exact decimal string.
 type FleetWeeklyVolume struct {
 	WeekStart     time.Time `json:"week_start"`
 	Currency      string    `json:"currency"`
 	Payments      int64     `json:"payments"`
-	SettledAmount int64     `json:"settled_amount_micros"`
+	SettledAmount int64     `json:"settled_amount,string"`
 }
 
 // FleetSeries is the windowed weekly trend series for the hosted fleet.
