@@ -69,6 +69,64 @@ describe("Checkout", () => {
     expect(screen.getByText("Crypto")).toBeInTheDocument()
   })
 
+  it("renders exact money at the plan's registered scale", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            plan: {
+              display_name: "Lifetime",
+              unit_amount: "9223372036854775807",
+              currency: "JPY",
+              unit_decimals: 4,
+              automatically_renews: false,
+            },
+            line_items: [
+              { label: "Lifetime", amount: "9223372036854775807" },
+              { label: "Launch discount", amount: "-9223372036854775807" },
+            ],
+            tax: "12345",
+            due_today: undefined,
+            rails: [checkoutOption("nmi")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    expect(
+      await screen.findByText("Pay ¥922,337,203,685,477.5807")
+    ).toBeInTheDocument()
+    expect(screen.getByText("-¥922,337,203,685,477.5807")).toBeInTheDocument()
+    // Tax, and the exact sum of the two items plus tax.
+    expect(screen.getAllByText("¥1.2345")).toHaveLength(2)
+    expect(screen.getByText("Due today").nextSibling).toHaveTextContent(
+      "¥1.2345"
+    )
+  })
+
+  it("refuses a due-today sum that leaves int64 instead of rounding it", async () => {
+    render(
+      <Checkout
+        source={createFixtureSource({
+          session: {
+            line_items: [
+              { label: "A", amount: "9223372036854775807" },
+              { label: "B", amount: "1" },
+            ],
+            rails: [checkoutOption("nmi")],
+            saved_methods: [],
+          },
+        })}
+      />
+    )
+
+    expect(await screen.findByText("Due today")).toBeInTheDocument()
+    expect(screen.getByText("Due today").nextSibling).toHaveTextContent(
+      "USD amount exceeds the exact display range"
+    )
+  })
+
   it("renders one native cardholder identity with browser autofill semantics", async () => {
     render(
       <Checkout

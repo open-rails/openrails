@@ -36,7 +36,7 @@ import {
   nmiBillingSchema,
   type NMIBilling,
 } from "#orck/lib/billing"
-import { formatMoney } from "#orck/lib/money"
+import { amountToDecimal, formatAmount } from "#orck/lib/money"
 import { cn } from "#orck/lib/utils"
 import type { CheckoutSource } from "#orck/source"
 import type {
@@ -95,7 +95,8 @@ function solanaAmountLabel(
       // The wire schema already requires solana:, so retain the plan fallback.
     }
   }
-  return `${(session.plan.unit_amount_micros / 1_000_000).toFixed(2)} ${tokenSymbol}`.trim()
+  const { unit_amount, unit_decimals } = session.plan
+  return `${amountToDecimal(unit_amount, unit_decimals) ?? unit_amount} ${tokenSymbol}`.trim()
 }
 
 export function Checkout({
@@ -457,7 +458,7 @@ export function Checkout({
     active && session
       ? active.driver === "redirect"
         ? `Continue to ${active.rail === "stripe" ? "Stripe" : "CCBill"}`
-        : `Pay ${formatMoney(session.plan.unit_amount_micros, session.plan.currency)}`
+        : `Pay ${formatAmount(session.plan.unit_amount, session.plan.currency, session.plan.unit_decimals)}`
       : ""
 
   const paymentColumn = session ? (

@@ -15,6 +15,13 @@ export {
 } from "./source"
 export { createFixtureSource, fixtureSession } from "./fixtures"
 export {
+  addAmounts,
+  amountToDecimal,
+  formatAmount,
+  isAmount,
+  type Amount,
+} from "./lib/money"
+export {
   type CheckoutAppearance,
   type CheckoutTheme,
   type CheckoutVariables,
@@ -31,6 +38,7 @@ export type {
   SavedPaymentMethod,
 } from "./types"
 export {
+  amountSchema,
   checkoutLineItemSchema,
   checkoutPlanSchema,
   checkoutSessionSchema,
@@ -39,4 +47,5 @@ export {
   payResultSchema,
   paymentRailOptionSchema,
   savedPaymentMethodSchema,
+  unitDecimalsSchema,
 } from "./types"

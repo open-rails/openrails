@@ -3,7 +3,13 @@
 // Compact variant (narrow containers) is one line: who + what left, how much
 // right.
 import { cn } from "#orck/lib/utils"
-import { formatMoney, formatPeriod, periodNoun } from "#orck/lib/money"
+import {
+  addAmounts,
+  formatAmount,
+  formatPeriod,
+  periodNoun,
+  type Amount,
+} from "#orck/lib/money"
 import type { CheckoutLineItem, CheckoutSession } from "#orck/types"
 
 function lineItems(session: CheckoutSession): CheckoutLineItem[] {
@@ -16,18 +22,20 @@ function lineItems(session: CheckoutSession): CheckoutLineItem[] {
     {
       label: session.plan.display_name,
       sublabel: renews && noun ? `Renews ${noun}` : undefined,
-      amount_micros: session.plan.unit_amount_micros,
+      amount: session.plan.unit_amount,
     },
   ]
 }
 
-function dueToday(session: CheckoutSession): number {
-  if (session.due_today_micros !== undefined) return session.due_today_micros
-  const items = lineItems(session).reduce(
-    (total, item) => total + item.amount_micros,
-    0
+// dueToday is the host's figure when it sends one; otherwise the exact sum of
+// the line items and tax. An int64 overflow (null) is refused by the
+// formatter, never rounded.
+function dueToday(session: CheckoutSession): Amount | null {
+  if (session.due_today !== undefined) return session.due_today
+  return addAmounts(
+    ...lineItems(session).map((item) => item.amount),
+    session.tax ?? "0"
   )
-  return items + (session.tax_micros ?? 0)
 }
 
 export function Eyebrow({
@@ -81,12 +89,14 @@ function Row({
 }
 
 export function OrderSummary({ session }: { session: CheckoutSession }) {
-  const currency = session.plan.currency
+  const { currency, unit_decimals: decimals } = session.plan
+  const money = (amount: Amount | null) =>
+    formatAmount(amount, currency, decimals)
   return (
     <div className="grid content-start gap-5">
       <Eyebrow>{session.merchant.display_name}</Eyebrow>
       <div className="text-[38px] leading-[1.05] font-semibold tracking-[-0.02em] tabular-nums">
-        {formatMoney(session.plan.unit_amount_micros, currency)}
+        {money(session.plan.unit_amount)}
         <span className="ml-1 text-[15px] font-normal tracking-normal text-muted-foreground">
           {formatPeriod(session.plan.period_hours)}
         </span>
@@ -97,20 +107,16 @@ export function OrderSummary({ session }: { session: CheckoutSession }) {
             key={item.label}
             label={item.label}
             sublabel={item.sublabel}
-            amount={formatMoney(item.amount_micros, currency)}
+            amount={money(item.amount)}
           />
         ))}
-        {session.tax_micros !== undefined ? (
-          <Row
-            label="Tax"
-            amount={formatMoney(session.tax_micros, currency)}
-            quiet
-          />
+        {session.tax !== undefined ? (
+          <Row label="Tax" amount={money(session.tax)} quiet />
         ) : null}
         <div className="-mt-px flex items-start justify-between gap-4 border-t border-border pt-[13px] text-[13.5px] font-semibold">
           <span>Due today</span>
           <span className="whitespace-nowrap tabular-nums">
-            {formatMoney(dueToday(session), currency)}
+            {money(dueToday(session))}
           </span>
         </div>
       </div>
@@ -142,7 +148,11 @@ export function CompactSummary({
         </div>
       </div>
       <div className="text-[22px] font-semibold tracking-[-0.01em] whitespace-nowrap tabular-nums">
-        {formatMoney(session.plan.unit_amount_micros, session.plan.currency)}
+        {formatAmount(
+          session.plan.unit_amount,
+          session.plan.currency,
+          session.plan.unit_decimals
+        )}
         <span className="text-xs font-normal text-muted-foreground">
           {" "}
           {formatPeriod(session.plan.period_hours).replace("/ ", "/")}

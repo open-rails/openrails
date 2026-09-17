@@ -1,8 +1,28 @@
-// Wire types for the #45 checkout session surface, validated at runtime with
-// zod so a drifting API fails loudly at the boundary instead of rendering
+// Wire types for the hosted checkout session surface, validated at runtime
+// with zod so a drifting API fails loudly at the boundary instead of rendering
 // garbage. These schemas are the package's only contract with the host
-// backend.
+// backend. OpenRails publishes the same document as Go types
+// (openrails.HostedCheckoutSession) and a canonical fixture
+// (testdata/wire/hosted_checkout_session.json) that src/types.test.ts decodes.
 import { z } from "zod"
+
+import { isAmount, isUnitDecimals, MAX_UNIT_DECIMALS } from "./lib/money"
+
+// Money is an exact signed int64 decimal string of the plan currency's native
+// unit ("99000000" is 99 USD at unit_decimals 6). A JSON number is refused:
+// it cannot carry every int64 and a scale must never be assumed.
+export const amountSchema = z
+  .string()
+  .refine(isAmount, "amount must be an int64 decimal string")
+
+// The currency's registered scale from OpenRails' currency registry
+// (openrails.LookupCurrency / GET /v1/currencies), stamped by the host.
+export const unitDecimalsSchema = z
+  .number()
+  .refine(
+    isUnitDecimals,
+    `unit_decimals must be an integer from 0 to ${MAX_UNIT_DECIMALS}`
+  )
 
 const httpsURLSchema = z
   .string()
@@ -69,17 +89,19 @@ export const savedPaymentMethodSchema = z.object({
 })
 export type SavedPaymentMethod = z.infer<typeof savedPaymentMethodSchema>
 
+// Amounts are in the plan's currency at the plan's unit_decimals.
 export const checkoutLineItemSchema = z.object({
   label: z.string(),
   sublabel: z.string().optional(),
-  amount_micros: z.number(),
+  amount: amountSchema,
 })
 export type CheckoutLineItem = z.infer<typeof checkoutLineItemSchema>
 
 export const checkoutPlanSchema = z.object({
   display_name: z.string(),
-  unit_amount_micros: z.number(),
-  currency: z.string(),
+  unit_amount: amountSchema,
+  currency: z.string().min(1),
+  unit_decimals: unitDecimalsSchema,
   period_hours: z.number().nullish(),
   automatically_renews: z.boolean(),
 })
@@ -91,8 +113,8 @@ export const checkoutSessionSchema = z.object({
   merchant: z.object({ display_name: z.string() }),
   plan: checkoutPlanSchema,
   line_items: z.array(checkoutLineItemSchema).optional(),
-  tax_micros: z.number().optional(),
-  due_today_micros: z.number().optional(),
+  tax: amountSchema.optional(),
+  due_today: amountSchema.optional(),
   rails: z.array(paymentRailOptionSchema),
   saved_methods: z.array(savedPaymentMethodSchema).optional(),
   transaction_url: z.string().startsWith("solana:").optional(),

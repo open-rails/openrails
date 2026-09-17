@@ -13,12 +13,13 @@ export function fixtureSession(
     merchant: { display_name: "Acme Demo" },
     plan: {
       display_name: "Premium Membership",
-      unit_amount_micros: 99_000_000,
-      currency: "usd",
+      unit_amount: "99000000",
+      currency: "USD",
+      unit_decimals: 6,
       period_hours: 720,
       automatically_renews: true,
     },
-    tax_micros: 0,
+    tax: "0",
     rails: [
       {
         id: "option_1",
