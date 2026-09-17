@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -142,7 +143,7 @@ func seedMerchantFacts(ctx context.Context, t *testing.T, h *integrationharness.
 	}))
 	return billingapp.Inputs{
 		Currency: "USD", Run: run, CheckoutPriceKey: priceKey, CheckoutRail: "ccbill",
-		SubscriberID: subscriber.String(), SubscriptionID: subscription.String(), InvoiceID: invoiceID,
+		SubscriberID: subscriber.String(), SubscriptionID: api.FormatSubscriptionID(subscription), InvoiceID: invoiceID,
 	}, price
 }
 
@@ -152,7 +153,9 @@ func assertDurableFacts(ctx context.Context, t *testing.T, h *integrationharness
 	pool := h.Pool()
 	var intents, sessions int
 	var status string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2`, mid.UUID(), in.SubscriptionID).Scan(&intents))
+	subscription, err := api.ParseSubscriptionID(in.SubscriptionID)
+	require.NoError(t, err)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2`, mid.UUID(), subscription).Scan(&intents))
 	require.Positive(t, intents, "cancellation is a durable provider intent")
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id=$1 AND price_id=$2`, mid.UUID(), price).Scan(&sessions))
 	require.Equal(t, 1, sessions, "checkout replay creates one session")
