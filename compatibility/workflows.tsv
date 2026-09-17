@@ -3,28 +3,37 @@
 # status: retained (real integration test path; a subtest names the deployment),
 # gap (no deployment-level workflow exists), or pending#<PR> (test on an open PR).
 # Every scenario/deployment cell must appear; any gap or pending cell fails qualification.
+# saas = the shared multi-merchant engine behind the real hosted control plane
+# (integrationharness.StartHosted, the openrails-saas engine shape); providers are
+# loopback fakes, never live PSPs.
 purchase_recovery	embedded	./embed	TestCommerceClientCheckoutAndTier/embedded	retained	CCBill form signed locally; no provider call
 purchase_recovery	embedded	./embed	TestRecoveryClientAcrossTransports/embedded	retained	NMI rows seeded; no provider call
+purchase_recovery	embedded	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/embedded	retained	One application program: checkout, subscription cancel/resume, invoice remittance
 purchase_recovery	standalone	./embed	TestCommerceClientCheckoutAndTier/remote	retained	CCBill form signed locally; no provider call
 purchase_recovery	standalone	./embed	TestRecoveryClientAcrossTransports/standalone	retained	NMI rows seeded; no provider call
-purchase_recovery	saas	-	-	gap	Real SaaS mount/auth not exercised; the multi_merchant subtest is in-process without SaaS auth
+purchase_recovery	standalone	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/standalone_http	retained	Same program over the real standalone server and API key
+purchase_recovery	saas	./embed	TestCommerceClientCheckoutAndTier/saas	retained	Owner-provisioned merchant on the shared engine behind the hosted control plane; owner-minted API key; CCBill form signed locally
+purchase_recovery	saas	./embed	TestRecoveryClientAcrossTransports/saas	retained	Hosted merchant, owner-minted API key; NMI rows seeded; no provider call
+purchase_recovery	saas	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/saas_http	retained	Same program, hosted merchant over HTTP with an owner-minted API key
+purchase_recovery	saas	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/saas_engine	retained	Same program, the host's in-process Client for a second hosted merchant
 metered_billing	embedded	./embed	TestMeteringClientRatesIntoInvoice/embedded	retained	Usage rated into invoice; finalized through the service, no collection
 metered_billing	embedded	./embed	TestInvoiceClientWorkflowAcrossTransports/embedded	retained	Receivable seeded by accrual, not usage
 metered_billing	standalone	./embed	TestMeteringClientRatesIntoInvoice/standalone	retained	Usage rated into invoice; finalized through the service, no collection
 metered_billing	standalone	./embed	TestInvoiceClientWorkflowAcrossTransports/standalone	retained	Receivable seeded by accrual, not usage
-metered_billing	saas	-	-	gap	No SaaS metering workflow in core or openrails-saas
+metered_billing	saas	./embed	TestMeteringClientRatesIntoInvoice/saas	retained	Hosted merchant, owner-minted API key; usage rated into invoice; finalized through the hosted engine's service, no collection
 merchant_isolation	embedded	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients
 merchant_isolation	embedded	./internal/service	TestAdmissionClientRecoveryAndCaptureReceipt/embedded	retained	Other merchant cannot capture, release or extend a hold
 merchant_isolation	standalone	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients
 merchant_isolation	standalone	./internal/service	TestAdmissionClientRecoveryAndCaptureReceipt/remote	retained	Other merchant cannot capture, release or extend a hold
-merchant_isolation	saas	-	-	gap	openrails-saas host resolution test does not prove content isolation and is not run here
+merchant_isolation	saas	./internal/integrationharness	TestHostedMerchantsIsolateOneSubject	retained	Two owner-provisioned merchants on one shared engine; one subject through each owner's HTTP key and the host's in-process Client; cross-merchant keys and mints refused
 signed_delegation	embedded	./internal/integrationharness	TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant	retained	Host AuthKit bearer tokens through the embedded mount; not DPoP
 signed_delegation	standalone	./internal/integrationharness	TestDelegationHTTPWorkflow	retained	Issuer-signed DPoP tokens; one merchant
 signed_delegation	standalone	./internal/integrationharness	TestDelegationNativeTLSWorkflow	retained	Certificate-bound token over native TLS
-signed_delegation	saas	-	-	gap	openrails-saas uses a static-key JWT, not DPoP, and is not run here
-provider_uncertainty	embedded	-	-	gap	Unknown PSP outcomes are covered only below the Client (internal/intents, modules/checkout, modules/money)
+signed_delegation	saas	./internal/integrationharness	TestHostedDelegationSenderBoundClient	retained	Owner registers an AuthKit issuer over the hosted routes; ES256 DPoP delegated token drives the shared Client; refused for the other merchant, without proof, wrong sender, replay, withdrawn issuer
+provider_uncertainty	embedded	./internal/integrationharness	TestProviderUncertaintyResolvedThroughOperator/embedded	retained	Loopback NMI lost response through the Client; no resend; operator receipt via intents resolve; no live PSP
 provider_uncertainty	standalone	./internal/integrationharness	TestMerchantInvoiceAdministrationHTTP	retained	Injected ambiguous charger: retry refused with 409 and never resent; no real PSP
-provider_uncertainty	saas	-	-	gap	No SaaS provider-uncertainty workflow
-restart	embedded	-	-	gap	Crash windows are simulated below the Client; no process-restart harness (PR425 receipts are also below the Client)
-restart	standalone	-	-	gap	No standalone process-restart workflow
-restart	saas	-	-	gap	openrails-saas reboot test proves idempotent boot only, not billing convergence
+provider_uncertainty	standalone	./internal/integrationharness	TestProviderUncertaintyResolvedThroughOperator/standalone	retained	Real cmd/openrails process against a loopback NMI; operator receipt via intents resolve; no live PSP
+provider_uncertainty	saas	./internal/integrationharness	TestProviderUncertaintyResolvedThroughOperator/saas	retained	Hosted merchant on the shared engine against a loopback NMI; operator receipt via intents resolve; no live PSP
+restart	embedded	./internal/integrationharness	TestRestartConvergesCollectionExactlyOnce/embedded	retained	Runtime graph closed after the submission fence and rebuilt on the same PG; its verifier settles once; verify delay collapsed by making the operation due and firing the scheduled job
+restart	standalone	./internal/integrationharness	TestRestartConvergesCollectionExactlyOnce/standalone	retained	cmd/openrails process killed after the submission fence and relaunched on the same PG; its worker settles once; loopback NMI
+restart	saas	./internal/integrationharness	TestRestartConvergesCollectionExactlyOnce/saas	retained	Shared engine and hosted control plane rebuilt behind the same URL on the same PG; its worker settles once; loopback NMI

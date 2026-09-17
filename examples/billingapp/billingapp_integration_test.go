@@ -63,6 +63,14 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	unbound := newRuntime()
 	sharedEngineClient, err := unbound.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
 	require.NoError(t, err)
+	// SaaS: two merchants provisioned by registered owners on one shared
+	// engine behind the real hosted control plane. One integrates over HTTP
+	// with an owner-minted API key; the host drives the other in process.
+	hosted := h.StartHosted("USD")
+	saasHTTP := hosted.ProvisionMerchant(hosted.RegisterUser("owner-a"), "billingapp-saas-"+uuid.NewString()[:8])
+	saasEngine := hosted.ProvisionMerchant(hosted.RegisterUser("owner-b"), "billingapp-saas-"+uuid.NewString()[:8])
+	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasHTTP.ID, ccbill("999981-0003"))
+	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasEngine.ID, ccbill("999981-0004"))
 
 	deployments := []struct {
 		name     string
@@ -76,6 +84,8 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 			openrails.WithTokenProvider(func(context.Context) (string, error) { return tenant.APIKey, nil }),
 			openrails.WithMerchantID(tenant.MerchantID),
 		)},
+		{"saas_http", saasHTTP.ID, saasHTTP.Client()},
+		{"saas_engine", saasEngine.ID, saasEngine.EngineClient()},
 	}
 	var want *billingapp.Report
 	for _, deployment := range deployments {

@@ -39,6 +39,13 @@ func TestWorkflowManifestRejectsIncompleteMatrices(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := string(raw)
+	var firstRow string
+	for _, line := range strings.Split(manifest, "\n") {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "#") {
+			firstRow = line
+			break
+		}
+	}
 	withoutCell := func(cell string) string {
 		var kept []string
 		for _, line := range strings.Split(manifest, "\n") {
@@ -52,7 +59,7 @@ func TestWorkflowManifestRejectsIncompleteMatrices(t *testing.T) {
 		"empty":              "",
 		"comments only":      "# nothing\n",
 		"missing cell":       withoutCell("restart/saas"),
-		"duplicate row":      manifest + "restart\tsaas\t-\t-\tgap\tagain\n",
+		"duplicate row":      manifest + firstRow + "\n",
 		"gap names a test":   manifest + "restart\tsaas\t./embed\tTestX\tgap\tnot a gap\n",
 		"gap without note":   manifest + "restart\tembedded\t-\t-\tgap\t\n",
 		"unknown status":     manifest + "restart\tsaas\t./embed\tTestX\tskipped\tlater\n",
