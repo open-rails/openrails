@@ -105,7 +105,7 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	acct := decodeHostSeamBody(t, w)
 	require.Equal(t, currency, acct["currency"])
-	require.EqualValues(t, 7_500_000, acct["balance_amount"])
+	require.Equal(t, "7500000", acct["balance_amount"])
 	require.NotContains(t, acct, "held_amount")
 	require.NotContains(t, acct, "available_amount")
 
@@ -121,13 +121,13 @@ func TestSelfAccountSurface_HostPrincipalFullLoopAndScoping(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, payerA.UUID().String(), first["customer_id"])
 	require.Equal(t, currency, first["currency"])
-	require.EqualValues(t, 7_500_000, first["amount"])
+	require.Equal(t, "7500000", first["amount"])
 
 	// --- SCOPING: subject B sees NONE of A's data. ---
 	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/me/balance?currency="+currency, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	acctB := decodeHostSeamBody(t, w)
-	require.EqualValues(t, 0, acctB["balance_amount"], "B must not see A's balance")
+	require.Equal(t, "0", acctB["balance_amount"], "B must not see A's balance")
 
 	w = doHostSeamSelf(routerB, http.MethodGet, "/v1/me/transactions?currency="+currency, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

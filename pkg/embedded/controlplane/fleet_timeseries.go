@@ -26,7 +26,7 @@ type FleetWeeklyVolume struct {
 	WeekStart     time.Time `json:"week_start"`
 	Currency      string    `json:"currency"`
 	Payments      int64     `json:"payments"`
-	SettledAmount int64     `json:"settled_amount_micros"`
+	SettledAmount int64     `json:"settled_amount_micros,string"`
 }
 
 // FleetSeries is the windowed weekly trend series for the hosted fleet.

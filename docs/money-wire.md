@@ -3,7 +3,9 @@
 Go uses signed int64 native currency units. Deposit, ledger receipt, balance,
 checkout-session, capture, admission, usage-report, wasted-spend, invoice,
 merchant settings/billing policy, spend delegation and self spend-window,
-credit-limit, usage-rollup and resource-revenue DTOs encode monetary values as
+credit-limit, usage-rollup and resource-revenue, credit grant and credit
+transaction, self balance and usage, invoker credit balance, delinquency,
+Solana token base-unit and fleet analytics DTOs encode monetary values as
 decimal JSON strings. Invoice movement maps use the same representation. A JavaScript
 consumer must use BigInt or an exact decimal library for arithmetic; converting
 to Number before parsing loses values above 2^53.

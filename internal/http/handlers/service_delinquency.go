@@ -16,7 +16,7 @@ type serviceDelinquencyResponse struct {
 	Currency        string `json:"currency"`
 	State           string `json:"state"`
 	OverdueSince    string `json:"overdue_since,omitempty"`
-	OverdueAmount   int64  `json:"overdue_amount"`
+	OverdueAmount   int64  `json:"overdue_amount,string"`
 	OverdueInvoices int    `json:"overdue_invoices"`
 	EnteredAt       string `json:"entered_at"`
 	EvaluatedAt     string `json:"evaluated_at"`
@@ -80,7 +80,7 @@ func ServiceListDelinquency(r *httprequest.Request) {
 		"delinquency": serviceDelinquencyRows(rows),
 		"policy": map[string]any{
 			"grace_days":   policy.GraceDays,
-			"amount_floor": policy.AmountFloor,
+			"amount_floor": strconv.FormatInt(policy.AmountFloor, 10),
 		},
 	})
 }

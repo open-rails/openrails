@@ -45,7 +45,7 @@ type adminBillingProfileSnapshot struct {
 
 type selfAccountSnapshot struct {
 	Currency      string `json:"currency"`
-	BalanceAmount int64  `json:"balance_amount"`
+	BalanceAmount int64  `json:"balance_amount,string"`
 }
 
 // TestAPIKeyCrossMerchantIsolationHTTP: merchant A's API key sees only
