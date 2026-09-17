@@ -6,8 +6,10 @@ the doc map. Follow it top to bottom.
 
 ## Non-negotiable facts
 
-- **Money is micros** (millionths of a currency unit) everywhere in OpenRails. Never
-  pass cents or dollars to an API that takes an amount.
+- **Money is an integer in the currency's native units** — micros for USD, per the
+  `GET /v1/currencies` registry — sent as a decimal string on the wire
+  ([money-wire.md](money-wire.md)). Never pass cents or dollars to an API that
+  takes an amount.
 - **Entitlements are the access truth.** The host app gates features on active
   entitlements, never by inspecting subscription rows. See
   [entitlements_timeline.md](entitlements_timeline.md).
@@ -51,7 +53,7 @@ milestone order, each verifiable before the next:
 4. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    push at boot. Verify: catalog list routes return the products.
 5. **Mount routes.** Implement `billingauth` authenticators mapping the host's existing
-   auth; mount `MountHandler` under a prefix. Verify: an authenticated request to
+   auth; mount `rt.Handler(embed.MountOptions{...})` under a prefix. Verify: an authenticated request to
    `GET <prefix>/v1/me/status` returns the caller's own subject.
 6. **Backend calls.** Wire `rt.Client()` where the host needs admission/holds, usage,
    or entitlement reads. Verify: `AdmitBatch` + `Capture` round-trip in a test.
@@ -68,7 +70,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    Verify: `GET /health/ready` (note: there is no `/health`).
 2. **Provision.** Manifest with merchant + sandbox PSPs; `push-auth-bootstrap` →
    `push-merchant-config --insert` → `push-merchant-catalog --insert --overwrite`.
-   Mint an API key. Verify: key works via `openrails.Verify` (Go) or an authenticated
+   Mint an API key. Verify: key works via `client.Verify(ctx)` (Go) or an authenticated
    `GET /v1/merchant/*` call.
 3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithAPIKey`. Other stacks:
    plain HTTP per [api/endpoints.md](api/endpoints.md).
@@ -106,5 +108,5 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
   hit 429 — back off, don't raise limits.
 - Embedded config is programmatic: `config.Load` never runs, so nothing is defaulted
   for you; unset `TestMode` refusing to boot is the designed behavior.
-- Catalog amounts are integer micros (`12_000_000` = $12). No dollar strings in the
-  catalog manifest.
+- Catalog amounts are integers in native units (`12_000_000` = $12). No dollar
+  strings in the catalog manifest.
