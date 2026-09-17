@@ -102,6 +102,12 @@ func SimpleErrorResponse(httpStatus int, message string) ErrorResponse {
 	}
 }
 
+// ErrorTypeForStatus is the envelope category an HTTP status maps to.
+func ErrorTypeForStatus(httpStatus int) string {
+	errType, _ := inferErrorTypeAndCode(httpStatus)
+	return errType
+}
+
 // inferErrorTypeAndCode determines the error type and code from an HTTP status code
 func inferErrorTypeAndCode(httpStatus int) (errType string, code string) {
 	switch httpStatus {
