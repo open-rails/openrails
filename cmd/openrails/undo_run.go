@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/embedded"
+	"github.com/open-rails/openrails/internal/hosttools"
 )
 
 // newUndoRunCmd wires or#859 §5.2's single undo verb over the whole
@@ -58,7 +58,7 @@ func newUndoRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return embedded.UndoRun(c.Context(), embedded.UndoRunOptions{
+			return hosttools.UndoRun(c.Context(), hosttools.UndoRunOptions{
 				Config: cfg, MerchantID: mid, RunID: runID, Actor: cliActor(),
 				Apply: apply, ExpectRows: expectRows, Format: format, Out: os.Stdout,
 			})

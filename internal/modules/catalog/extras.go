@@ -12,7 +12,7 @@ import (
 // A remote Stripe object is an EXTRA when the local catalog neither links it by
 // id (a price row stores its stripe id) nor matches it by content key (the
 // OpenRails ownership marker resolves to a local product key / price content
-// key). This single definition is shared by the pkg/service extras report
+// key). This single definition is shared by the internal/service extras report
 // (DetectCatalogExtras) and the intent ledger's archive relevance checks
 // (stripe_archive_product / stripe_archive_price): an archive intent stays
 // applicable exactly while its object is STILL an extra — if the object has
@@ -112,7 +112,7 @@ func RemoteStripePriceContentKey(sp StripePrice) string {
 // OpenRailsPriceContentKey is the content key derived from a price's financial
 // substance — product key + immutable money terms. Format:
 // "<product_key>.<currency>.<unit_amount>.<cycle>" where <cycle> is the
-// provider day cadence or "onetime". Canonical here; pkg/service delegates.
+// provider day cadence or "onetime". Canonical here; internal/service delegates.
 func OpenRailsPriceContentKey(productKey, currency string, unitAmount int64, billingCycleDays *int) string {
 	cycle := "onetime"
 	if billingCycleDays != nil && *billingCycleDays > 0 {

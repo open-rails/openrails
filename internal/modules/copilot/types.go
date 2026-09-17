@@ -54,7 +54,7 @@ type Draft struct {
 const DraftedBy = "copilot"
 
 // CreatePriceDraft mirrors billingservice.CreatePriceRequest's WIRE shape
-// (field-for-field, not the Go type — importing pkg/service would cycle:
+// (field-for-field, not the Go type — importing internal/service would cycle:
 // it transitively imports internal/app, which imports this package). This
 // is exactly the body the #777 wizard's confirm step POSTs to
 // /v1/merchant/catalog/prices.

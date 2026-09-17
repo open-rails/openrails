@@ -18,15 +18,15 @@ import (
 	"github.com/stretchr/testify/require"
 
 	openrails "github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/identity"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
