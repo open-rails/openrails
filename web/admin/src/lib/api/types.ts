@@ -48,14 +48,12 @@ export interface RawSubscription {
   updated_at: string
 }
 
-// RawPrice mirrors internal/db/models.Price verbatim — the shape embedded on
-// subscription responses (distinct from CatalogPrice, the catalog
-// endpoints' own view: NOTE the field is "amount" here, not "unit_amount").
+// RawPrice mirrors openrails.SubscriptionPrice — the price embedded on
+// subscription responses (distinct from CatalogPrice, the catalog endpoints'
+// own view: NOTE the field is "amount" here, not "unit_amount").
 export interface RawPrice {
   id: string
   product_id?: string
-  // Exact string on merchant subscription routes; still a number on the
-  // customer billing profile (#983 pending).
   amount?: MoneyAmount
   currency?: string
   archived?: boolean
@@ -67,22 +65,16 @@ export interface RawPrice {
   [k: string]: unknown
 }
 
-export interface RawPayment {
-  id: string
-  customer_id?: string
-  price_id: string
-  subscription_id?: string
-  refunded_payment_id?: string
+// SubscriptionPayment mirrors openrails.SubscriptionPayment: the immutable
+// payment summary on a subscription's recovery history.
+export interface SubscriptionPayment {
+  id: string // pay_...
+  status: string
+  amount: MoneyAmount
+  currency: string
   rail: Rail
   transaction_id: string
-  amount: MoneyAmount
-  list_amount: number
-  currency: string
-  status: string // "pending" | "completed" | "failed" | "refunded"
-  card_brand?: string
-  card_last4?: string
   purchased_at: string
-  created_at: string
 }
 
 export interface RawEntitlement {
@@ -141,14 +133,15 @@ export interface PaymentMethodResponse {
   }[]
 }
 
+// CreditBalance amounts are exact decimal strings of native units.
 export interface CreditBalance {
   currency: string
   display_name: string
   unit: string
   decimal_places: number
-  balance: number
-  held_balance: number
-  outstanding_owed_amount: number
+  balance: string
+  held_balance: string
+  outstanding_owed_amount: string
 }
 
 // CustomerBillingProfile composes the shared Client DTOs each dedicated
@@ -190,7 +183,7 @@ export interface PaymentObject {
 // --- Subscription admin response (list/detail) ---
 
 export interface AdminSubscription extends RawSubscription {
-  payments?: RawPayment[]
+  payments?: SubscriptionPayment[]
 }
 
 export interface TierChangePreview {

@@ -20,13 +20,9 @@ export function formatMeasure(
   currency?: string
 ): string {
   if (value === null || value === undefined) return "—"
-  // "micros" money cells are native units at the currency's registered scale.
-  // Metrics aggregate in float64, so a fractional ratio shows its nearest unit.
-  if (unit === "micros")
-    return formatNativeAmount(
-      typeof value === "number" ? Math.round(value) : value,
-      currency ?? ""
-    )
+  // "money" cells are exact decimal strings of native units at the
+  // currency's registered scale (a money-unit ratio arrives already rounded).
+  if (unit === "money") return formatNativeAmount(value, currency ?? "")
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(n)) return String(value)
   switch (unit) {
@@ -137,14 +133,14 @@ export function groupSeries<T extends PivotSeries>(
 ): { key: string; label: string; series: T[] }[] {
   const groups = new Map<string, { key: string; label: string; series: T[] }>()
   for (const item of series) {
-    const currency = item.unit === "micros" ? item.currency : undefined
+    const currency = item.unit === "money" ? item.currency : undefined
     const key = JSON.stringify([item.unit ?? "number", currency ?? null])
     let group = groups.get(key)
     if (!group) {
       group = {
         key,
         label:
-          item.unit === "micros"
+          item.unit === "money"
             ? currency || "Amount (currency not supplied)"
             : item.unit || "Values",
         series: [],
@@ -159,6 +155,13 @@ export function groupSeries<T extends PivotSeries>(
 export interface Pivoted {
   data: Record<string, number | string>[]
   series: PivotSeries[]
+}
+
+// exactKey names the pivoted row field that keeps a series' exact wire cell
+// (a money decimal string) beside the Number recharts plots, so tooltips
+// format the exact value rather than a Number-coerced one.
+export function exactKey(seriesKey: string): string {
+  return `${seriesKey}:exact`
 }
 
 // pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
@@ -198,11 +201,13 @@ export function pivotTimeSeries(
           dimensions,
           unit: m.unit,
           currency:
-            m.unit === "micros" ? rowCurrency(row, idx, currency) : undefined,
+            m.unit === "money" ? rowCurrency(row, idx, currency) : undefined,
         }
         series.set(identity, item)
       }
-      entry[item.key] = Number(row[m.index] ?? 0)
+      const cell = row[m.index]
+      entry[item.key] = Number(cell ?? 0)
+      entry[exactKey(item.key)] = cell ?? 0
     }
   }
   const data = [...buckets.entries()]
@@ -210,7 +215,11 @@ export function pivotTimeSeries(
     .map(([, entry]) => entry)
   const keys = [...series.values()]
   for (const entry of data) {
-    for (const s of keys) if (!(s.key in entry)) entry[s.key] = 0
+    for (const s of keys)
+      if (!(s.key in entry)) {
+        entry[s.key] = 0
+        entry[exactKey(s.key)] = 0
+      }
   }
   return { data, series: keys }
 }

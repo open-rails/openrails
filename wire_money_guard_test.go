@@ -18,27 +18,13 @@ import (
 var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit|cap|threshold|floor|balance|revenue|fee|cost|tax|refunded|due|owed|spent|used|reserved|remaining|captured|authorized)(_|$)`)
 
 // wireDTODirs hold types that the shared Client or HTTP handlers encode.
-var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "internal/operator", "pkg/pricing", "internal/service", "internal/http/handlers", "internal/modules/copilot", "internal/modules/money"}
+var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "internal/operator", "pkg/pricing", "internal/service", "internal/http/handlers", "internal/modules/copilot", "internal/modules/money", "internal/modules/metrics"}
 
-// pendingNumericMoney lists monetary integers still encoded as JSON numbers.
-// Every entry is a known #983 gap or a type that never reaches the HTTP wire;
-// the guard fails when a listed field becomes a decimal string.
+// pendingNumericMoney lists the monetary integers still encoded as JSON
+// numbers: every one is a type that never reaches the HTTP wire. The guard
+// fails when a listed field becomes a decimal string or stops existing, so
+// the list can only shrink.
 var pendingNumericMoney = map[string]string{
-	"pkg/catalog/manifest.go:Price.UnitAmount unit_amount":                                                                                           pendingCatalogPublish,
-	"pkg/catalog/manifest.go:PriceTrial.UnitAmount unit_amount":                                                                                      pendingCatalogPublish,
-	"internal/http/handlers/admin_users.go:adminCreditBalanceResponse.Balance balance":                                                               pendingAdminBalance,
-	"internal/http/handlers/admin_users.go:adminCreditBalanceResponse.HeldBalance held_balance":                                                      pendingAdminBalance,
-	"internal/http/handlers/admin_users.go:adminCreditBalanceResponse.OutstandingOwedAmount outstanding_owed_amount":                                 pendingAdminBalance,
-	"internal/http/handlers/self_account.go:selfAccountSettingsRequest.AutoTopupAmount auto_topup_amount":                                            deletedByAutoTopupCut,
-	"internal/http/handlers/self_account.go:selfAccountSettingsRequest.LowBalanceThreshold low_balance_threshold":                                    deletedByAutoTopupCut,
-	"internal/http/handlers/self_account.go:selfAccountSettingsResponse.AutoTopupAmount auto_topup_amount":                                           deletedByAutoTopupCut,
-	"internal/http/handlers/self_account.go:selfAccountSettingsResponse.LowBalanceThreshold low_balance_threshold":                                   deletedByAutoTopupCut,
-	"pkg/api/response.go:CreditGrantSpecObject.Amount amount":                                                                                        deletedByCatalogCut,
-	"pkg/catalog/manifest.go:CreditGrant.Amount amount":                                                                                              deletedByCatalogCut,
-	"pkg/catalog/manifest.go:UsageLimitWindow.Amount amount":                                                                                         deletedByCatalogCut,
-	"internal/service/catalog_recovery_metadata.go:credit.Amount amount":                                                                             deletedByCatalogCut,
-	"internal/service/catalog_sidecars.go:CatalogUsageLimitWindowSpec.Amount amount":                                                                 deletedByCatalogCut,
-	"internal/service/service_definition_catalog.go:CreditGrantSpec.Amount amount":                                                                   deletedByCatalogCut,
 	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                          notMoneyCount,
 	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                            notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                                            notHTTPToolArgs,
@@ -61,10 +47,6 @@ var pendingNumericMoney = map[string]string{
 }
 
 const (
-	pendingCatalogPublish   = "pending #983: catalog publish manifest (file changed by #1008 PR438)"
-	pendingAdminBalance     = "pending #983: admin customer balances (file changed by #1008 PR432/PR438)"
-	deletedByAutoTopupCut   = "deleted with auto-topup settings (#1008 PR432)"
-	deletedByCatalogCut     = "deleted with catalog credit/usage-limit features (#1008 PR438)"
 	notMoneyCount           = "not HTTP: merchant counts"
 	notHTTPToolArgs         = "not HTTP: LLM tool-call arguments"
 	notHTTPPendingCharges   = "not HTTP: no route serves pending charges"
@@ -77,8 +59,10 @@ const (
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {
 	var violations, converted []string
+	seen := map[string]bool{}
 	for _, dir := range wireDTODirs {
 		for field, exact := range moneyFields(t, dir) {
+			seen[field] = true
 			_, pending := pendingNumericMoney[field]
 			switch {
 			case !exact && !pending:
@@ -88,13 +72,23 @@ func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {
 			}
 		}
 	}
+	var stale []string
+	for field := range pendingNumericMoney {
+		if _, ok := seen[field]; !ok {
+			stale = append(stale, field)
+		}
+	}
 	sort.Strings(violations)
 	sort.Strings(converted)
+	sort.Strings(stale)
 	if len(violations) > 0 {
 		t.Fatalf("monetary integers must use the json \",string\" option (docs/money-wire.md):\n%s", strings.Join(violations, "\n"))
 	}
 	if len(converted) > 0 {
 		t.Fatalf("remove converted entries from pendingNumericMoney:\n%s", strings.Join(converted, "\n"))
+	}
+	if len(stale) > 0 {
+		t.Fatalf("remove entries for deleted fields from pendingNumericMoney:\n%s", strings.Join(stale, "\n"))
 	}
 }
 
