@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -33,10 +35,24 @@ type PaymentProviderCredentialStatus struct {
 	RotationVersion int `json:"rotation_version,omitempty"`
 }
 
-// PaymentProviderConfig is one merchant-owned payment-PSP.
 // ErrPaymentProviderNotFound reports that the merchant has no active provider
 // account on the requested rail and environment.
-var ErrPaymentProviderNotFound = fmt.Errorf("merchants: payment provider not configured: %w", ErrSecretNotFound)
+var ErrPaymentProviderNotFound error = apperr.New(http.StatusNotFound, "payment_provider_not_found", "merchants: payment provider not configured")
+
+// ErrPaymentProviderCredentialsRejected is the typed refusal (#983) for
+// credentials the provider itself would not accept for this deployment posture.
+var ErrPaymentProviderCredentialsRejected = apperr.New(http.StatusBadRequest, "payment_provider_credentials_rejected", "payment provider rejected the credentials")
+
+// providerCredentialError types a provider-side credential rejection; any
+// other probe outcome (transport, indeterminate) stays an internal failure.
+func providerCredentialError(err error) error {
+	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrLiveCredentialsUnderTestMode) {
+		return fmt.Errorf("%w: %v", ErrPaymentProviderCredentialsRejected, err)
+	}
+	return err
+}
+
+// PaymentProviderConfig is one merchant-owned payment-PSP.
 
 type PaymentProviderConfig struct {
 	ID              uuid.UUID                                  `json:"id"`
@@ -118,7 +134,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 	if strings.TrimSpace(environment) == "" {
 		environment = s.providerEnvironment // deployment posture (#681)
 	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
-		return nil, errors.New("merchants: provider environment must be live or test")
+		return nil, apperr.Invalidf("merchants: provider environment must be live or test")
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	// or#893: the lifecycle filter has ONE vocabulary. It used to accept four
@@ -128,7 +144,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 	switch status {
 	case "", pspLifecycleAll, pspLifecycleActive, pspLifecycleArchived:
 	default:
-		return nil, fmt.Errorf("merchants: unknown status %q (use %q, %q, or omit for all)", status, pspLifecycleActive, pspLifecycleArchived)
+		return nil, apperr.Invalidf("merchants: unknown status %q (use %q, %q, or omit for all)", status, pspLifecycleActive, pspLifecycleArchived)
 	}
 
 	var rows []gen.OpenrailsPsp
@@ -180,7 +196,7 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 	if strings.TrimSpace(environment) == "" {
 		environment = s.providerEnvironment // deployment posture (#681)
 	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
-		return PaymentProviderConfig{}, errors.New("merchants: provider environment must be live or test")
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: provider environment must be live or test")
 	}
 	items, err := s.ListPaymentProviderConfigs(ctx, id, rail, environment, pspLifecycleActive)
 	if err != nil {
@@ -200,15 +216,15 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	}
 	rail = normalizeProviderSecretType(rail)
 	if !supportedPaymentProvider(rail) {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: unsupported payment rail %q", rail)
 	}
 	if strings.TrimSpace(req.LegacyEnvironment) != "" {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: `environment` was removed (#882): the environment is derived from the deployment's test_mode (currently %q) — drop the field", s.providerEnvironment)
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: `environment` was removed (#882): the environment is derived from the deployment's test_mode (currently %q) — drop the field", s.providerEnvironment)
 	}
 	environment := s.providerEnvironment // derived from test_mode (#681/#882)
 	accountID := strings.TrimSpace(req.AccountID)
 	if accountID == "" {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: provider account_id required")
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: provider account_id required")
 	}
 	if err := s.refuseLiveNMIUnderTestMode(ctx, id, rail, environment, accountID, req.Credentials); err != nil {
 		return PaymentProviderConfig{}, err
@@ -694,7 +710,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 		client.V5BaseURL = s.nmiProbeV5BaseURL
 	}
 	if err := nmi.CheckTestModeArm(ctx, client); err != nil {
-		return fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err)
+		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err))
 	}
 	return nil
 }

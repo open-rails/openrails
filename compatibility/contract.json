@@ -1782,10 +1782,8 @@
     "internal/http/handlers/admin_catalog.go": {
       "billingservice": "github.com/open-rails/openrails/internal/service",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
-      "errors": "errors",
       "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
-      "log": "github.com/sirupsen/logrus",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "openrails": "github.com/open-rails/openrails",
       "strconv": "strconv",
@@ -1882,9 +1880,8 @@
       "pricing": "github.com/open-rails/openrails/pkg/pricing"
     },
     "internal/http/handlers/admin_reprice.go": {
-      "api": "github.com/open-rails/openrails/pkg/api",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
-      "errors": "errors",
+      "db": "github.com/open-rails/openrails/internal/db",
       "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "models": "github.com/open-rails/openrails/internal/db/models",
@@ -1896,7 +1893,6 @@
     },
     "internal/http/handlers/admin_users.go": {
       "api": "github.com/open-rails/openrails/pkg/api",
-      "errors": "errors",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
@@ -2472,11 +2468,13 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/merchants/payment_provider_config.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "config": "github.com/open-rails/openrails/config",
       "context": "context",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
       "json": "encoding/json",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
@@ -2500,6 +2498,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/merchants/secrets.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "context": "context",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
@@ -3235,8 +3234,9 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/subscriptions/reprice_types.go": {
-      "errors": "errors",
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "fmt": "fmt",
+      "http": "net/http",
       "openrails": "github.com/open-rails/openrails",
       "time": "time",
       "uuid": "github.com/google/uuid"
@@ -3310,6 +3310,7 @@
     },
     "internal/modules/subscriptions/user_service.go": {
       "api": "github.com/open-rails/openrails/pkg/api",
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "clockwork": "github.com/jonboulle/clockwork",
       "context": "context",
@@ -3317,6 +3318,7 @@
       "entitlements": "github.com/open-rails/openrails/internal/modules/entitlements",
       "errors": "errors",
       "fmt": "fmt",
+      "http": "net/http",
       "identity": "github.com/open-rails/openrails/internal/billingidentity",
       "json": "encoding/json",
       "log": "github.com/sirupsen/logrus",
@@ -3738,7 +3740,9 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/service/price_key.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
@@ -3749,6 +3753,7 @@
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/service/service_definition_catalog_admin.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "catalog": "github.com/open-rails/openrails/internal/modules/catalog",
       "context": "context",
       "db": "github.com/open-rails/openrails/internal/db",
@@ -4080,7 +4085,7 @@
     "internal/http/embedhttp/embedhttp.go": "db5e34a412add96cac6c1fa129aac4c888f4724fb1007428c8dd86f658303449",
     "internal/http/embedhttp/route_set.go": "969f2f510a55479d674367881f5dc6c18491e310a51a8aeb62bca0c139e045de",
     "internal/http/embedhttp/self.go": "e3933c204309a040d671efb862d8ef8d7905d46dfceaeb3502e5d83eccbe1b5d",
-    "internal/http/handlers/admin_catalog.go": "5403c5c888174b51fbc8f03e2434fb436936e82e2c627f763bb584eb96bb23be",
+    "internal/http/handlers/admin_catalog.go": "0a8ab2d46a93c6d6f750bd760da49812a64707d63fc500aec841512ec1879bcd",
     "internal/http/handlers/admin_catalog_drift.go": "fce9fd694763d9f6707773c6b33759364c4951553930c3df2f5edcba396a4804",
     "internal/http/handlers/admin_change_tier.go": "7edc9d2af97307a73b23a25502b3d1a981b598ab23d8eba11c6454812543beaf",
     "internal/http/handlers/admin_credit_grants.go": "51e63c024f18663756686155365ebff2777654cb67a9bdd5a03ed49d64e19341",
@@ -4093,10 +4098,10 @@
     "internal/http/handlers/admin_payments.go": "ae685afe6fc48c285c22348fbfa5eeb00cf0c3e4c2e08cbd0d18bd0e41f82938",
     "internal/http/handlers/admin_plan_migration.go": "e249acf03ec748c1ef9e1a350303d538d5865f35cd862c7265d1055339f4430f",
     "internal/http/handlers/admin_rate_overrides.go": "6a4257bc274f54959cc359254a87c9bcb8fe5958b3acd13cd644d77744541d64",
-    "internal/http/handlers/admin_reprice.go": "cef9efaf68e954b0a13800240c063be4bb676a2a9473fe23c50e442112b3cd93",
-    "internal/http/handlers/admin_users.go": "28eab7b26a7b98db492027454106e703b5c2f35ed9d95f3e84d7483b6a981f7c",
+    "internal/http/handlers/admin_reprice.go": "0fdeddbedb1b6f35cb41baeb6bfc2ecd892a10e32bb2fd7e63b09a807a9050a9",
+    "internal/http/handlers/admin_users.go": "1fb4f66b50699299c0022c029f9ad4ebbed3bf94346082571ca57f0c3c1673b4",
     "internal/http/handlers/admin_worker_health.go": "ab45aef3e54e63bcb1e19de052e3816800519cf2852a4962d4beedf9a18c80bc",
-    "internal/http/handlers/billing_import.go": "e6a5fe13c20e66e7546db200349123df4f0d0ea7a95a1243716f10c4d831e7e4",
+    "internal/http/handlers/billing_import.go": "b1217db484516d7a2d97a469e3b0b3be44a80bccfb0ac25083606b05ae8e7c7c",
     "internal/http/handlers/billing_status.go": "cdec0db09d0fb0971c9f0adfcc8a54027e5ffdbe740b0183b1d9492c0a4873ed",
     "internal/http/handlers/card_error.go": "74dc09332b00291b3aeeb147f37502cb3343c0d19a454ab768b3351d08678d20",
     "internal/http/handlers/catalog.go": "53faf186a4a1840f8d2007f2162829b42bb8fe6e86a4ed996784b084421fc6d2",
@@ -4116,7 +4121,7 @@
     "internal/http/handlers/merchant_checkout_routing.go": "668b5de7b8df37cc47341d23acbf20c3404ff7362983e17c7fb2d29d5fc0f642",
     "internal/http/handlers/merchant_dashboard.go": "d84d744e7912464be18ca92efc27911e812d78bc9c440c174819989efa8a6b46",
     "internal/http/handlers/merchant_metrics.go": "27343ed2bcd9d1307a863f8cbdf3272dbefecc4e5a81c35ab0b93261da9169b8",
-    "internal/http/handlers/merchant_payment_providers.go": "2e15b3bce450da1a2a00c8be95a09269c9037ef41393201af5663837d82f43a7",
+    "internal/http/handlers/merchant_payment_providers.go": "87385c75462a11bf55e785377d57654a0b56a42528ed811bc4e7f92caa4ccd76",
     "internal/http/handlers/merchant_team.go": "48cff76896e2e525ef1ebee703a2cc8e7f13af8465d96f841efa511e352a5051",
     "internal/http/handlers/notifications.go": "cbe78cc46be5df85b4ca6e5a8b765dfcb16f2b0decdb796c1b9430fe082f5284",
     "internal/http/handlers/payment_api.go": "3ef439eecadfad218b6df203d579afedec40bed4d0c77a7ac079f0cf4a89413d",
@@ -4125,12 +4130,13 @@
     "internal/http/handlers/portal.go": "a08623bb9092c9dd138bb1748e0a9e8a0c3a409e296eecf653f56a1bff13021c",
     "internal/http/handlers/product_access.go": "09efd7f3ae0bac0e630ba4bd93d7f08850a02d3b1792951b83068cd6c7f0853d",
     "internal/http/handlers/provider_operations.go": "e8fbc2586a4db93614c7f52b475a6fd6a120d12628a9f12e8bcff06fd7e0148c",
+    "internal/http/handlers/refusal.go": "dc38ffbd46e2bcada71a02d6079c3c3dc1719b11297a53faae076bb2d7fd9842",
     "internal/http/handlers/self_account.go": "8999564f9ad961ab69c23616259fda1ae1b75b1459b0855b054cf3b450d8a5b3",
     "internal/http/handlers/self_spend_limits.go": "2c71d6190e68e50ac4f835f402d2226da5b967f249deec31c9962fad9555342d",
     "internal/http/handlers/self_usage_invoices.go": "7d2329bb1ff4b2229513d7d7b4ad3474fd3d1f6feceaef93cf43cf44be4ba3f3",
     "internal/http/handlers/service_admission.go": "6e50a19c111101124760fd8cc5cde2aa59765e09540d6d014ecda497ea21f72a",
     "internal/http/handlers/service_commerce.go": "0e315486851d5b3617bd5de157a300b8502e303e1a1590f7d7d43faf9743d82c",
-    "internal/http/handlers/service_credits.go": "b37e04b77c047467e455b53eb7dd964d18f88ed32be6e6e30ad8b12c97943a77",
+    "internal/http/handlers/service_credits.go": "d41e432c3e6cf421a99db86cf669413f3b868f65229a66f739a43bec4571427c",
     "internal/http/handlers/service_customers.go": "52fa526f1fda3781a294d20af1a304e84d0899e0a27956c90ba82c72e7d21f96",
     "internal/http/handlers/service_delinquency.go": "fe913aa8e0fed25d5fc38cce34dab69e2994957275c1f5515140e283f5996a8c",
     "internal/http/handlers/service_host_events.go": "55abeafde5f4e1547509cc72ef3d110edff90811671f8aa2ae714734bd574e8a",

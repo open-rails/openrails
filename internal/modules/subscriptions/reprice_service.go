@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -139,6 +140,9 @@ func (s *RepriceService) scheduledConflict(ctx context.Context, subscriptionID u
 func (s *RepriceService) Reprice(ctx context.Context, req RepriceRequest) (*models.SubscriptionReprice, error) {
 	sub, err := s.subscriptions.GetByID(ctx, req.SubscriptionID)
 	if err != nil {
+		if db.IsNotFound(err) {
+			return nil, ErrSubscriptionNotFound
+		}
 		return nil, fmt.Errorf("reprice: load subscription: %w", err)
 	}
 	fromPrice, err := s.prices.GetByID(ctx, sub.PriceID)
@@ -147,6 +151,9 @@ func (s *RepriceService) Reprice(ctx context.Context, req RepriceRequest) (*mode
 	}
 	toPrice, err := s.prices.GetByID(ctx, req.ToPriceID)
 	if err != nil {
+		if db.IsNotFound(err) {
+			return nil, ErrRepriceTargetPriceNotFound
+		}
 		return nil, fmt.Errorf("reprice: load target price: %w", err)
 	}
 	if err := validateRepriceConstraints(req.SubscriptionID, fromPrice, toPrice); err != nil {
@@ -189,7 +196,7 @@ func (s *RepriceService) Reprice(ctx context.Context, req RepriceRequest) (*mode
 func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req RepriceAllPriorVersionsRequest) (*RepriceBatchResult, error) {
 	key := strings.TrimSpace(req.PriceKey)
 	if key == "" {
-		return nil, fmt.Errorf("reprice_all_prior_versions: price_key required")
+		return nil, apperr.Invalidf("reprice_all_prior_versions: price_key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -197,7 +204,10 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 	}
 	toPrice, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key)
 	if err != nil {
-		return nil, fmt.Errorf("reprice_all_prior_versions: price key %q has no current price: %w", key, err)
+		if db.IsNotFound(err) {
+			return nil, fmt.Errorf("%w: price key %q has no current price", ErrRepricePriceKeyNotFound, key)
+		}
+		return nil, fmt.Errorf("reprice_all_prior_versions: load current price for key %q: %w", key, err)
 	}
 	priorVersions, err := s.prices.ListPriorVersionsByKey(ctx, tid.UUID(), key)
 	if err != nil {
@@ -305,7 +315,7 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey string) (*RepricePreviewResult, error) {
 	key := strings.TrimSpace(priceKey)
 	if key == "" {
-		return nil, fmt.Errorf("reprice_all_prior_versions preview: price_key required")
+		return nil, apperr.Invalidf("reprice_all_prior_versions preview: price_key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -313,7 +323,10 @@ func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey s
 	}
 	toPrice, err := s.prices.GetCurrentByKey(ctx, tid.UUID(), key)
 	if err != nil {
-		return nil, fmt.Errorf("reprice_all_prior_versions preview: price key %q has no current price: %w", key, err)
+		if db.IsNotFound(err) {
+			return nil, fmt.Errorf("%w: price key %q has no current price", ErrRepricePriceKeyNotFound, key)
+		}
+		return nil, fmt.Errorf("reprice_all_prior_versions preview: load current price for key %q: %w", key, err)
 	}
 	chain, err := s.prices.ListChainByKey(ctx, tid.UUID(), key)
 	if err != nil {
@@ -339,13 +352,17 @@ func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey s
 func (s *RepriceService) ListBatchesForKey(ctx context.Context, priceKey string, limit, offset int) ([]*models.RepriceBatch, error) {
 	key := strings.TrimSpace(priceKey)
 	if key == "" {
-		return nil, fmt.Errorf("list reprice batches: price_key required")
+		return nil, apperr.Invalidf("list reprice batches: price_key required")
 	}
 	return s.repo.ListBatchesByPriceKey(ctx, key, limit, offset)
 }
 
 func (s *RepriceService) GetByID(ctx context.Context, id uuid.UUID) (*models.SubscriptionReprice, error) {
-	return s.repo.GetByID(ctx, id)
+	out, err := s.repo.GetByID(ctx, id)
+	if db.IsNotFound(err) {
+		return nil, ErrRepriceNotFound
+	}
+	return out, err
 }
 
 // List returns scheduled/applied/canceled reprices — the inspect-before-effect

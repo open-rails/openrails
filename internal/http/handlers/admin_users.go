@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -289,7 +288,7 @@ func GetAdminSubscription(r *httprequest.Request) {
 	}
 	subscription, err := svc.GetSubscriptionByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, err.Error())
+		writeRefusal(r, err, "failed to load subscription")
 		return
 	}
 	r.SuccessJSON(subscriptionView(subscription, r.Clock.Now()))
@@ -308,27 +307,7 @@ func AdminCancelSubscription(r *httprequest.Request) {
 		return
 	}
 	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason, req.RevokeAccess); err != nil {
-		// Map domain errors to stable status codes; never leak raw sql/pgx text
-		// to the client (#783). AdminSubscriptionService.CancelSubscription
-		// returns "subscription not found: <wrapped ErrNoRows>" for a missing
-		// id, "subscription is not active" for a bad state, and "cancel
-		// operation not supported for rail '<rail>'" for an ineligible rail.
-		msg := err.Error()
-		switch {
-		case strings.HasPrefix(msg, "subscription not found"):
-			r.ErrorJSON(http.StatusNotFound, "subscription not found")
-		case strings.Contains(msg, "not active"):
-			r.ErrorJSON(http.StatusConflict, "subscription is not active")
-		// or#896: a Solana cancel is the subscriber's signature to give, not a
-		// server-side operation — name the endpoints instead of a 500.
-		case errors.Is(err, subscriptions.ErrSolanaCancelNeedsWalletSignature):
-			r.ErrorJSON(http.StatusBadRequest, msg)
-		case strings.Contains(msg, "not supported for rail"):
-			r.ErrorJSON(http.StatusBadRequest, msg)
-		default:
-			log.WithError(err).Error("admin cancel subscription failed")
-			r.ErrorJSON(http.StatusInternalServerError, "failed to cancel subscription")
-		}
+		writeRefusal(r, err, "failed to cancel subscription")
 		return
 	}
 	r.SuccessJSONMessage("subscription cancelled successfully")

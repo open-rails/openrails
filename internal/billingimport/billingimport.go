@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -71,7 +72,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		ctx = context.Background()
 	}
 	if opts.Book.AsOf.IsZero() {
-		return res, fmt.Errorf("import billing: Book.AsOf (evidence horizon) is required")
+		return res, apperr.Invalidf("import billing: Book.AsOf (evidence horizon) is required")
 	}
 	asOf := opts.Book.AsOf.UTC()
 
@@ -141,7 +142,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		}
 		for _, pm := range opts.Book.PaymentMethods {
 			if pm.Rail == "" || pm.RailCustomerRef == "" || pm.Customer.IsZero() {
-				return fmt.Errorf("declared payment method requires rail, rail_customer_ref and customer")
+				return apperr.Invalidf("declared payment method requires rail, rail_customer_ref and customer")
 			}
 			pmPSP, err := psps.resolve(pm.PSP, pm.Rail, fmt.Sprintf("payment method %s/%s", pm.Rail, pm.RailCustomerRef))
 			if err != nil {
@@ -181,9 +182,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			} else if err != nil {
 				return fmt.Errorf("lookup payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
 			} else if owner != pm.Customer.UUID() {
-				return fmt.Errorf("payment method %s/%s already belongs to customer %s, not %s", pm.Rail, pm.RailCustomerRef, owner, pm.Customer)
+				return apperr.Conflictf("payment method %s/%s already belongs to customer %s, not %s", pm.Rail, pm.RailCustomerRef, owner, pm.Customer)
 			} else if !strings.EqualFold(existingRail, pm.Rail) {
-				return fmt.Errorf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
+				return apperr.Conflictf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
 			}
 			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
@@ -246,7 +247,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 						Scan(&existing, &owner)
 					if err == nil {
 						if owner != s.Customer.UUID() {
-							return fmt.Errorf("resolve payment method ref %s: instrument belongs to customer %s, not %s", s.SourceID, owner, s.Customer)
+							return apperr.Conflictf("resolve payment method ref %s: instrument belongs to customer %s, not %s", s.SourceID, owner, s.Customer)
 						}
 						id, ok = existing, true
 						pmIDs[key] = existing
@@ -342,7 +343,7 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 	specs := map[uuid.UUID][]string{}
 	for _, g := range declared {
 		if g.Customer.IsZero() || g.Product.IsZero() || strings.TrimSpace(g.SourceID) == "" || g.StartsAt.IsZero() {
-			return fmt.Errorf("declared admin grant requires customer, product, source_id and starts_at")
+			return apperr.Invalidf("declared admin grant requires customer, product, source_id and starts_at")
 		}
 		if err := db.EnsureCustomerRowQ(ctx, q, merchantID, g.Customer.UUID()); err != nil {
 			return fmt.Errorf("ensure customer %s: %w", g.Customer, err)

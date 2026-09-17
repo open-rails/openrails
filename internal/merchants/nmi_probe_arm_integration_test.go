@@ -78,7 +78,7 @@ func TestUpsertPaymentProviderConfigRefusesLiveNMIUnderTestMode(t *testing.T) {
 	require.Equal(t, 0, countNMIAccounts(t, svc, "arm-348-live"), "a refused arm must never persist the PSP row")
 
 	_, err = svc.GetPaymentProviderConfig(ctx, tn.ID, "nmi", "test")
-	require.ErrorIs(t, err, ErrSecretNotFound, "a refused arm must not create a resolvable provider config")
+	require.ErrorIs(t, err, ErrPaymentProviderNotFound, "a refused arm must not create a resolvable provider config")
 }
 
 // TestUpsertPaymentProviderConfigArmsSimulatedNMIUnderTestMode is the
