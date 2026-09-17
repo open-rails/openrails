@@ -159,7 +159,7 @@ func TestProviderUncertaintyResolvedThroughOperator(t *testing.T) {
 		sales := gateway.SaleCount()
 		fixture := h.SeedPastDueInvoice(d.runtime(), d.merchant, "USD", 5_000_000)
 		client := d.client()
-		retry := openrails.InvoiceCollectionRetryRequest{InvoiceID: fixture.Invoice, IdempotencyKey: "lost-" + uuid.NewString()[:8], PaymentMethodID: fixture.Method}
+		retry := openrails.InvoiceCollectionRetryRequest{InvoiceID: fixture.Invoice, IdempotencyKey: "lost-" + uuid.NewString()[:8], PaymentMethodID: openrails.PaymentMethodID(fixture.Method)}
 
 		result, err := client.RetryInvoiceCollection(ctx, retry)
 		require.NoError(t, err)
@@ -246,7 +246,7 @@ func TestRestartConvergesCollectionExactlyOnce(t *testing.T) {
 		gateway.SetVisible(false)
 		sales := gateway.SaleCount()
 		fixture := h.SeedPastDueInvoice(d.runtime(), d.merchant, "USD", 7_500_000)
-		retry := openrails.InvoiceCollectionRetryRequest{InvoiceID: fixture.Invoice, IdempotencyKey: "restart-" + uuid.NewString()[:8], PaymentMethodID: fixture.Method}
+		retry := openrails.InvoiceCollectionRetryRequest{InvoiceID: fixture.Invoice, IdempotencyKey: "restart-" + uuid.NewString()[:8], PaymentMethodID: openrails.PaymentMethodID(fixture.Method)}
 		result, err := d.client().RetryInvoiceCollection(ctx, retry)
 		require.NoError(t, err)
 		require.Equal(t, "attempted", result.Attempt.Status)
