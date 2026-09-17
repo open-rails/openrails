@@ -213,7 +213,7 @@ export function SubscriptionDetailPage() {
                     Amount
                   </TableHead>
                   <TableHead className="text-muted-foreground">
-                    Purchased
+                    Created
                   </TableHead>
                 </TableRow>
               </TableHeader>
@@ -234,7 +234,7 @@ export function SubscriptionDetailPage() {
                     <TableCell>
                       {formatNativeAmount(p.amount, p.currency)}
                     </TableCell>
-                    <TableCell>{formatDate(p.purchased_at)}</TableCell>
+                    <TableCell>{formatDate(p.created_at)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

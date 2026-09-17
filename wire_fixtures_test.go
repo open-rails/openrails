@@ -114,7 +114,7 @@ func subscriptionFixtureValue(when time.Time, maxMoney int64, expMonth, expYear 
 		ScheduledProduct: &SubscriptionProduct{ID: productFixture, Key: "pro", DisplayName: "Pro"},
 		Card:             &SubscriptionCard{Brand: "visa", Last4: "4242", ExpMonth: &expMonth, ExpYear: &expYear},
 		Access:           &SubscriptionAccess{Kind: "subscription", Entitlement: "premium", SubscriptionID: subscriptionFixture, Rail: "nmi", StartAt: when, EndAt: &when},
-		Payments:         []SubscriptionPayment{{ID: paymentFixture, Status: "completed", Amount: maxMoney, Currency: "USD", Rail: "nmi", TransactionID: "txn-1", PurchasedAt: when}},
+		Payments:         []Payment{{ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, Currency: "USD", CustomerID: customerFixture, SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, CreatedAt: when}},
 	}
 }
 

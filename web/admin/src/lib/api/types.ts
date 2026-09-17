@@ -1,7 +1,6 @@
 // Types mirror the Go handlers' JSON shapes exactly (see internal/http/handlers).
 // Money is native units at the currency registry scale; exact wires send int64
 // decimal strings (docs/money-wire.md).
-import type { MoneyAmount } from "@/lib/format"
 
 export type SubscriptionStatus =
   "pending" | "active" | "past_due" | "cancelled" | "unknown"
@@ -63,18 +62,6 @@ export interface RawPrice {
   access_duration_hours?: number
   auto_renew?: boolean
   [k: string]: unknown
-}
-
-// SubscriptionPayment mirrors openrails.SubscriptionPayment: the immutable
-// payment summary on a subscription's recovery history.
-export interface SubscriptionPayment {
-  id: string // pay_...
-  status: string
-  amount: MoneyAmount
-  currency: string
-  rail: Rail
-  transaction_id: string
-  purchased_at: string
 }
 
 export interface RawEntitlement {
@@ -182,7 +169,8 @@ export interface PaymentObject {
 // --- Subscription admin response (list/detail) ---
 
 export interface AdminSubscription extends RawSubscription {
-  payments?: SubscriptionPayment[]
+  // Recovery history: the same Payment shape the payments endpoints serve.
+  payments?: PaymentObject[]
 }
 
 export interface TierChangePreview {
