@@ -369,7 +369,6 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
 		return nil, err
 	}
-	req.Currency = strings.ToLower(req.Currency)
 
 	// Validate product exists.
 	product, err := products.GetByID(ctx, req.ProductID)

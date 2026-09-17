@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrationharness"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +64,7 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 			require.EqualValues(t, 1, page.Total)
 			require.False(t, page.HasMore)
 			row := page.Data[0]
-			require.Equal(t, sub.String(), row.ID)
+			require.Equal(t, api.FormatSubscriptionID(sub), row.ID)
 			require.Equal(t, psp.String(), row.PSPID)
 			require.True(t, row.Resumable)
 			require.True(t, row.CancelScheduled)

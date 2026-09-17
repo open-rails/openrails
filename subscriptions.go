@@ -22,7 +22,11 @@ type SubscriptionFilter struct {
 }
 
 // Subscription exposes lifecycle and recovery state without making provider
-// credentials or mutable storage models part of the client contract.
+// credentials or mutable storage models part of the client contract. Ids of
+// resource kinds pkg/api prefixes travel prefixed (sub_, prod_, price_, pm_,
+// pay_) as on PaymentMethod and CheckoutSession; the prefixed form is what
+// every subscription and payment-method operation accepts. CustomerID and
+// PSPID are plain UUIDs.
 type Subscription struct {
 	LastRetryAt           *time.Time            `json:"last_retry_at"`
 	RetryAttempts         *int                  `json:"retry_attempts"`

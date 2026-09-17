@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Checkout routing policy shape (or#288). ONE validator serves both declaration
@@ -62,7 +63,7 @@ func NormalizeCheckoutRouting(rules []models.CheckoutRoutingRule) ([]models.Chec
 
 func normalizeRoutingMatch(i int, m models.CheckoutRoutingMatch) (models.CheckoutRoutingMatch, error) {
 	out := models.CheckoutRoutingMatch{
-		Currency: strings.ToLower(strings.TrimSpace(m.Currency)),
+		Currency: moneyutil.NormalizeCurrency(m.Currency),
 		Product:  strings.TrimSpace(m.Product),
 		Price:    strings.TrimSpace(m.Price),
 		Mode:     strings.ToLower(strings.TrimSpace(m.Mode)),

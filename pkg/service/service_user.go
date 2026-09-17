@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/query"
@@ -133,7 +134,7 @@ func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*Pagina
 	}
 
 	filter := catalog.PriceFilter{
-		Currency: strings.ToLower(opts.Currency),
+		Currency: moneyutil.NormalizeCurrency(opts.Currency),
 		Type:     opts.Type,
 	}
 	if opts.ProductID != nil {

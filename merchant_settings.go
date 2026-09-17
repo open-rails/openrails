@@ -15,7 +15,7 @@ type CheckoutRoutingRule struct {
 // CheckoutRoutingMatch is a rule's condition. Every SET field must match the
 // routing inputs; an all-empty match accepts everything (the catch-all rule).
 type CheckoutRoutingMatch struct {
-	Currency string `json:"currency,omitempty"` // ISO-4217, lowercase
+	Currency string `json:"currency,omitempty"` // ISO-4217, uppercase (matched case-insensitively)
 	Product  string `json:"product,omitempty"`  // product key
 	Price    string `json:"price,omitempty"`    // price key
 	Mode     string `json:"mode,omitempty"`     // one_off | subscription
