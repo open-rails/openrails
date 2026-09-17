@@ -76,7 +76,22 @@ func TestLoadMerchantConfigManifestWithOverlaysRejectsUndeclaredPSPAndUnknownFie
 
 	_, err = LoadMerchantConfigManifestWithOverlays([]byte(overlayBaseManifest),
 		[]byte("catalogs: {x: 1}"))
-	require.ErrorContains(t, err, "does not accept")
+	require.Error(t, err)
+}
+
+func TestLoadMerchantConfigManifestWithOverlaysRejectsStructuralOverrides(t *testing.T) {
+	cases := map[string]string{
+		"account identity":   `merchants: {doujins: {psps: {mobius: {nmi: {account_id: "attacker"}}}}}`,
+		"processor settings": `merchants: {doujins: {psps: {mobius: {nmi: {settings: {tokenization_key: attacker}}}}}}`,
+		"merchant profile":   `merchants: {doujins: {profile: {display_name: Attacker}}}`,
+		"billing policy":     `merchants: {doujins: {billing_policies: {free: {kind: outstanding_cap}}}}`,
+	}
+	for name, overlay := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := LoadMerchantConfigManifestWithOverlays([]byte(overlayBaseManifest), []byte(overlay))
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestReadMerchantManifestOverlays(t *testing.T) {

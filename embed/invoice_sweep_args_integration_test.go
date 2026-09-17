@@ -83,10 +83,11 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	payer := uuid.New()
 	const settled = int64(17_000_000)
 	for _, occurred := range []time.Time{periodFrom.Add(3 * 24 * time.Hour), periodTo.Add(-time.Hour)} {
+		occurred := occurred
 		require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
 			CustomerID: payer.String(), Invoker: payer.String(), Currency: "USD", EventType: eventType,
 			Dimensions: map[string]int64{"amount_micros": settled},
-			Source:     "host-settlement", SourceID: uuid.NewString(), OccurredAtUnix: occurred.Unix(),
+			Source:     "host-settlement", SourceID: uuid.NewString(), OccurredAt: &occurred,
 		}))
 	}
 	// Ledger reads go through a merchant-pinned connection: the tables force RLS.
