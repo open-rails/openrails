@@ -6,10 +6,10 @@ export interface BootstrapConfig {
   auth_base_url: string
   api_base_url: string
   // #741 fail-closed LLM gate: false hides the natural-language widget box
-  // entirely (the generate endpoint would answer 501).
+  // entirely (the generate endpoint is not mounted).
   nl_widgets_enabled: boolean
   // #756 metrics Q&A gate (llm.ask_enabled AND an LLM key): false renders the
-  // Ask panel as a pointed empty-state (the ask endpoint would answer 501).
+  // Ask panel as a pointed empty-state (the ask endpoint is not mounted).
   ask_enabled: boolean
   // #779 catalog copilot Q&A gate (llm.catalog_copilot_enabled AND an LLM
   // key): false renders the catalog copilot panel as a pointed empty-state.

@@ -3,10 +3,11 @@ package controlplane
 import (
 	"encoding/json"
 	"errors"
-	"github.com/open-rails/authkit/dpop"
-	authcore "github.com/open-rails/authkit/embedded"
 	"net/http"
 	"strings"
+
+	"github.com/open-rails/authkit/dpop"
+	authcore "github.com/open-rails/authkit/embedded"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"

@@ -8,12 +8,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/requestauth"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -53,9 +54,9 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 		"request without the transport's context marker must be rejected by the real middleware")
 
 	// 2) The SAME request with the transport's context-attached principal passes.
-	allowCtx := billingauth.WithHostPrincipal(
+	allowCtx := requestauth.WithHostPrincipal(
 		merchant.WithID(ctx, dbtest.TestMerchantID),
-		&billingauth.HostPrincipal{MerchantID: dbtest.TestMerchantID, Permissions: hostPermissions()},
+		&requestauth.HostPrincipal{MerchantID: dbtest.TestMerchantID, Permissions: hostPermissions()},
 	)
 	req2 := httptest.NewRequest(http.MethodGet, "/v1/merchant/settings", nil).WithContext(allowCtx)
 	rec2 := httptest.NewRecorder()
@@ -63,9 +64,9 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec2.Code, "context-attached host principal must authorize: %s", rec2.Body.String())
 
 	// 3) The principal is still permission-gated: no permissions -> 403.
-	deniedCtx := billingauth.WithHostPrincipal(
+	deniedCtx := requestauth.WithHostPrincipal(
 		merchant.WithID(ctx, dbtest.TestMerchantID),
-		&billingauth.HostPrincipal{MerchantID: dbtest.TestMerchantID},
+		&requestauth.HostPrincipal{MerchantID: dbtest.TestMerchantID},
 	)
 	req3 := httptest.NewRequest(http.MethodGet, "/v1/merchant/settings", nil).WithContext(deniedCtx)
 	rec3 := httptest.NewRecorder()

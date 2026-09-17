@@ -1,4 +1,4 @@
-package billingauth
+package requestauth
 
 import (
 	"context"
