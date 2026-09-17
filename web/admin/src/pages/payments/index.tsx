@@ -86,7 +86,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
 
 // csvAmount exports an exact major-unit decimal; an amount that cannot be
 // represented exactly aborts the export rather than writing a wrong figure.
-function csvAmount(amount: number, currency: string): string {
+function csvAmount(amount: string, currency: string): string {
   const scale = currencyScale(currency)
   const decimal = scale === undefined ? null : unitsToDecimal(amount, scale)
   if (decimal === null)

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -167,7 +168,8 @@ func TestAdminListPayments(t *testing.T) {
 		data := response["data"].([]interface{})
 		for _, p := range data {
 			payment := p.(map[string]interface{})
-			amount := int64(payment["amount"].(float64))
+			amount, err := strconv.ParseInt(payment["amount"].(string), 10, 64)
+			require.NoError(t, err)
 			assert.GreaterOrEqual(t, amount, int64(500), "Amount should be >= min_amount")
 			assert.LessOrEqual(t, amount, int64(1500), "Amount should be <= max_amount")
 		}
@@ -200,7 +202,8 @@ func TestAdminListPayments(t *testing.T) {
 		for _, p := range data {
 			payment := p.(map[string]interface{})
 			// Refunds have negative amounts
-			amount := int64(payment["amount"].(float64))
+			amount, err := strconv.ParseInt(payment["amount"].(string), 10, 64)
+			require.NoError(t, err)
 			assert.Less(t, amount, int64(0), "Refund should have negative amount")
 		}
 	})
@@ -249,7 +252,8 @@ func TestAdminListPayments(t *testing.T) {
 		var prevAmount int64 = -1000000
 		for _, p := range data {
 			payment := p.(map[string]interface{})
-			amount := int64(payment["amount"].(float64))
+			amount, err := strconv.ParseInt(payment["amount"].(string), 10, 64)
+			require.NoError(t, err)
 			assert.GreaterOrEqual(t, amount, prevAmount, "Amounts should be in ascending order")
 			prevAmount = amount
 		}
@@ -313,13 +317,13 @@ func TestAdminGetPayment(t *testing.T) {
 		// Verify Stripe-like format
 		assert.Equal(t, api.FormatPaymentID(payment.ID), response["id"], "Payment ID should have pay_ prefix")
 		assert.Equal(t, "charge", response["object"], "Object should be 'charge'")
-		assert.Equal(t, float64(999), response["amount"], "Amount should match")
+		assert.Equal(t, "999", response["amount"], "Amount should match")
 		assert.Equal(t, "USD", response["currency"], "Currency should match")
 		assert.Equal(t, api.FormatUserID(userID), response["user"], "User should have usr_ prefix")
 		assert.Equal(t, "nmi", response["rail"], "Rail should match")
 		assert.NotNil(t, response["subscription"], "Should include subscription ID")
 		assert.Equal(t, false, response["refunded"], "Should not be refunded")
-		assert.Equal(t, float64(0), response["amount_refunded"], "Amount refunded should be 0")
+		assert.Equal(t, "0", response["amount_refunded"], "Amount refunded should be 0")
 
 		// Should include expanded price
 		assert.NotNil(t, response["price"], "Should include price details")
@@ -358,7 +362,7 @@ func TestAdminGetPayment(t *testing.T) {
 
 		// Should show partial refund status
 		assert.Equal(t, false, response["refunded"], "Should not be fully refunded (partial)")
-		assert.Equal(t, float64(500), response["amount_refunded"], "Amount refunded should be 500")
+		assert.Equal(t, "500", response["amount_refunded"], "Amount refunded should be 500")
 
 		// Should have refunds list with the refund
 		refunds := response["refunds"].(map[string]interface{})
@@ -368,7 +372,7 @@ func TestAdminGetPayment(t *testing.T) {
 
 		refundObj := refundData[0].(map[string]interface{})
 		assert.Equal(t, api.FormatPaymentID(refund.ID), refundObj["id"], "Refund ID should match")
-		assert.Equal(t, float64(-500), refundObj["amount"], "Refund amount should be negative")
+		assert.Equal(t, "-500", refundObj["amount"], "Refund amount should be negative")
 	})
 
 	t.Run("returns 404 for non-existent payment", func(t *testing.T) {
@@ -466,7 +470,7 @@ func TestAdminRefund_RequiresPaymentsWrite(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()),
-		strings.NewReader(`{"amount": 500}`))
+		strings.NewReader(`{"amount": "500"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	reader.ServeHTTP(w, req)
@@ -488,7 +492,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		nonExistentID := uuid.New()
 
 		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
+		body := `{"amount": "500"}`
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", nonExistentID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -501,7 +505,7 @@ func TestAdminRefundPayment(t *testing.T) {
 	t.Run("returns 400 for invalid payment ID", func(t *testing.T) {
 		admin := adminPaymentsWriter(t, suite)
 		w := httptest.NewRecorder()
-		body := `{"amount": 500}`
+		body := `{"amount": "500"}`
 		req, _ := http.NewRequest("POST", "/v1/merchant/payments/not-a-uuid/refunds", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -540,7 +544,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		body := `{"amount": 0}`
+		body := `{"amount": "0"}`
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -562,7 +566,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		body := `{"amount": 5000}` // 5,000 micros = $0.005: not a whole cent
+		body := `{"amount": "5000"}` // 5,000 micros = $0.005: not a whole cent
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -589,7 +593,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		body := `{"amount": 5000000}` // whole-cent micros ($5) so the rail branch is reached
+		body := `{"amount": "5000000"}` // whole-cent micros ($5) so the rail branch is reached
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -619,7 +623,7 @@ func TestAdminRefundPayment(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		body := `{"amount": 5000000}` // whole-cent micros so the rail branch is reached
+		body := `{"amount": "5000000"}` // whole-cent micros so the rail branch is reached
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -667,7 +671,7 @@ func TestAdminRefundReachesAnyUserInMerchant(t *testing.T) {
 
 	for _, payment := range []*models.Payment{paymentA, paymentB} {
 		w := httptest.NewRecorder()
-		body := `{"amount": 5000000}` // whole-cent micros so the rail branch is reached
+		body := `{"amount": "5000000"}` // whole-cent micros so the rail branch is reached
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()), strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -728,7 +732,7 @@ func TestAdminRefundPaymentThroughIntentLedger(t *testing.T) {
 	refundReq := func(idempotencyKey string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", payment.ID.String()),
-			strings.NewReader(`{"amount": 4000000}`)) // $4 in micros
+			strings.NewReader(`{"amount": "4000000"}`)) // $4 in micros
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		req.Header.Set("Idempotency-Key", idempotencyKey)
@@ -779,7 +783,7 @@ func ccbillAdminRefundReq(t *testing.T, admin http.Handler, paymentID uuid.UUID,
 	t.Helper()
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", fmt.Sprintf("/v1/merchant/payments/%s/refunds", paymentID.String()),
-		strings.NewReader(`{"amount": 5000000}`)) // $5 in micros
+		strings.NewReader(`{"amount": "5000000"}`)) // $5 in micros
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	req.Header.Set("Idempotency-Key", idempotencyKey)

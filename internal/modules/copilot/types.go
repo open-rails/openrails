@@ -61,11 +61,11 @@ const DraftedBy = "copilot"
 type CreatePriceDraft struct {
 	ProductID           string   `json:"product_id"`
 	Key                 string   `json:"key"`
-	UnitAmount          int64    `json:"unit_amount"`
+	UnitAmount          int64    `json:"unit_amount,string"`
 	Currency            string   `json:"currency"`
 	AccessDurationHours *int     `json:"access_duration_hours,omitempty"`
 	AutoRenew           bool     `json:"auto_renew"`
-	TrialUnitAmount     *int64   `json:"trial_unit_amount,omitempty"`
+	TrialUnitAmount     *int64   `json:"trial_unit_amount,omitempty,string"`
 	TrialDurationHours  *int     `json:"trial_duration_hours,omitempty"`
 	Providers           []string `json:"providers,omitempty"`
 }
@@ -86,8 +86,8 @@ type PriceChangeDraft struct {
 	DraftID       string           `json:"draft_id"`
 	DraftedBy     string           `json:"drafted_by"`
 	PriceKey      string           `json:"price_key"`
-	CurrentAmount int64            `json:"current_amount"`
-	NewAmount     int64            `json:"new_amount"`
+	CurrentAmount int64            `json:"current_amount,string"`
+	NewAmount     int64            `json:"new_amount,string"`
 	Currency      string           `json:"currency"`
 	Direction     string           `json:"direction"` // increase | decrease | unchanged
 	MigrationMode string           `json:"migration_mode"`

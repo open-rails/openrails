@@ -7,7 +7,6 @@ import {
   formatUnits,
   nativeAmountFromInput,
   nativeAmountToInput,
-  unitsFromInput,
   unitsToDecimal,
 } from "./format"
 
@@ -17,19 +16,18 @@ const digits = (value: string) => value.replace(/\D/g, "")
 
 describe("server-scaled monetary amounts", () => {
   it("uses the supplied JPY/custom scale rather than assuming micros", () => {
-    expect(unitsFromInput("1.2345", 4)).toBe(12345)
-    expect(unitsFromInput("1.23456", 4)).toBeNull()
-    expect(unitsFromInput("12", 0)).toBe(12)
-    expect(unitsFromInput("12.1", 0)).toBeNull()
-    expect(unitsFromInput("0.000000000000000001", 18)).toBe(1)
-    expect(nativeAmountFromInput("1.234567", "USD")).toBe(1234567)
+    expect(amountFromInput("1.2345", 4)).toBe("12345")
+    expect(amountFromInput("1.23456", 4)).toBeNull()
+    expect(amountFromInput("12", 0)).toBe("12")
+    expect(amountFromInput("12.1", 0)).toBeNull()
+    expect(amountFromInput("0.000000000000000001", 18)).toBe("1")
+    expect(nativeAmountFromInput("1.234567", "USD")).toBe("1234567")
   })
-  it("never rounds beyond the safe integer input boundary", () => {
-    expect(unitsFromInput("9007199254.740991", 6)).toBe(Number.MAX_SAFE_INTEGER)
-    expect(unitsFromInput("9007199254.740992", 6)).toBeNull()
-    expect(unitsFromInput("1e2", 6)).toBeNull()
-    expect(unitsFromInput("", 6)).toBeNull()
-    expect(unitsFromInput("1", -1)).toBeNull()
+  it("keeps int64 input exact and rejects malformed amounts", () => {
+    expect(amountFromInput("9007199254.740993", 6)).toBe("9007199254740993")
+    expect(amountFromInput("1e2", 6)).toBeNull()
+    expect(amountFromInput("", 6)).toBeNull()
+    expect(amountFromInput("1", -1)).toBeNull()
     expect(amountFromInput("9223372036854.775807", 6)).toBe(INT64_MAX)
     expect(amountFromInput("9223372036854.775808", 6)).toBeNull()
   })
@@ -59,8 +57,8 @@ describe("engine currency registry", () => {
   it("scales each registered currency from the generated table", () => {
     expect(currencyScale(" jpy ")).toBe(4)
     expect(currencyScale("constructor")).toBeUndefined()
-    expect(nativeAmountFromInput("500", "JPY")).toBe(5_000_000)
-    expect(nativeAmountFromInput("500", "USD")).toBe(500_000_000)
+    expect(nativeAmountFromInput("500", "JPY")).toBe("5000000")
+    expect(nativeAmountFromInput("500", "USD")).toBe("500000000")
     expect(nativeAmountFromInput("1", "UNKNOWN")).toBeNull()
     expect(formatNativeAmount(5_000_000, "JPY")).toBe("¥500")
     expect(formatNativeAmount(20_000_000, "usd")).toBe("$20.00")
@@ -87,14 +85,10 @@ describe("engine currency registry", () => {
       }
       expect(
         nativeAmountFromInput(
-          nativeAmountToInput(Number.MAX_SAFE_INTEGER, currency),
+          nativeAmountToInput(INT64_MAX, currency),
           currency
         )
-      ).toBe(Number.MAX_SAFE_INTEGER)
-      // An already-rounded JSON number stays visible but cannot be saved.
-      const rounded = nativeAmountToInput(2 ** 60, currency)
-      expect(rounded).not.toBe("")
-      expect(nativeAmountFromInput(rounded, currency)).toBeNull()
+      ).toBe(INT64_MAX)
     }
   )
 })

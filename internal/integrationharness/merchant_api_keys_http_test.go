@@ -107,7 +107,7 @@ func TestMerchantSelfServeAPIKeys(t *testing.T) {
 	t.Run("viewer key CANNOT refund", func(t *testing.T) {
 		status, body := requestJSON(t, http.MethodPost,
 			base+"/v1/merchant/payments/"+uuid.NewString()+"/refunds", viewerToken,
-			map[string]any{"amount": 1000000})
+			map[string]any{"amount": "1000000"})
 		require.Equalf(t, http.StatusForbidden, status, "refund: %s", string(body))
 	})
 
