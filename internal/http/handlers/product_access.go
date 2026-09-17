@@ -50,7 +50,7 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 			CustomerID: openrails.CustomerID(g.CustomerID),
 			ProductID:  openrails.ProductID(g.ProductID),
 			SourceType: string(g.SourceType),
-			SourceID:   g.SourceID,
+			SourceID:   openrails.SourceRef(string(g.SourceType), g.SourceID),
 			Status:     string(g.Status),
 			StartsAt:   g.StartsAt,
 			EndsAt:     g.EndsAt,

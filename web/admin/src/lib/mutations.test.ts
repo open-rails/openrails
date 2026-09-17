@@ -390,7 +390,7 @@ describe("list export mutations", () => {
 
   it("stops payment export when the API returns an empty page", async () => {
     const queryClient = new QueryClient()
-    const filters = { refunds_only: true, user_id: "customer-1" }
+    const filters = { refunds_only: true, customer_id: "customer-1" }
     vi.mocked(listPayments)
       .mockResolvedValueOnce({
         data: [{ id: "payment-1" }],

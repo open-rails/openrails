@@ -656,16 +656,16 @@ func (s *RepriceService) emitPlanChangeNotification(ctx context.Context, sub *mo
 		ID:         uuidutil.NewV7(),
 		CustomerID: sub.CustomerID,
 		EventType:  models.NotificationSubscriptionPlanChangeScheduled,
-		Data: map[string]any{
-			"subscription_id": sub.ID.String(),
-			"from_price_id":   from.ID.String(),
-			"to_price_id":     to.ID.String(),
-			"to_product_id":   toProduct.ID.String(),
-			"to_product_name": toProduct.DisplayName,
-			"old_amount":      from.Amount,
-			"new_amount":      to.Amount,
-			"currency":        to.Currency,
-			"effective_at":    effectiveAt.UTC().Format(time.RFC3339),
+		Data: openrails.NotificationData{
+			SubscriptionID: openrails.SubscriptionID(sub.ID),
+			FromPriceID:    openrails.PriceID(from.ID),
+			ToPriceID:      openrails.PriceID(to.ID),
+			ToProductID:    openrails.ProductID(toProduct.ID),
+			ToProductName:  toProduct.DisplayName,
+			OldAmount:      &from.Amount,
+			NewAmount:      &to.Amount,
+			Currency:       to.Currency,
+			EffectiveAt:    ptrTime(effectiveAt.UTC()),
 		},
 	}
 	if err := s.notifications.CreateAndDeliver(ctx, n); err != nil {

@@ -55,7 +55,7 @@
   ],
   "saved_methods": [
     {
-      "id": "pm_fixture",
+      "id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
       "option_id": "option_card",
       "rail": "nmi",
       "brand": "visa",
@@ -64,6 +64,8 @@
       "exp_year": 2030
     }
   ],
+  "payment_id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
   "success_url": "https://merchant.example/thanks?checkout=ocs_fixture",
   "expires_at": "2026-09-16T00:00:00.123456789Z"
 }

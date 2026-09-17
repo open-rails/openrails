@@ -139,12 +139,15 @@ export function SubscriptionDetailPage() {
         <Fact label="Price">
           <div className="flex flex-col gap-1">
             <span className="flex items-center gap-2">
-              {sub.price?.amount !== undefined && sub.price?.currency ? (
+              {sub.price?.unit_amount !== undefined && sub.price?.currency ? (
                 <Link
                   className="underline-offset-2 hover:underline"
                   to={`/catalog/prices/${sub.price_id}`}
                 >
-                  {formatNativeAmount(sub.price.amount, sub.price.currency)}
+                  {formatNativeAmount(
+                    sub.price.unit_amount,
+                    sub.price.currency
+                  )}
                 </Link>
               ) : (
                 <Link
