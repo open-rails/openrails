@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	billingidentity "github.com/open-rails/openrails/internal/billingidentity"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
@@ -21,16 +22,16 @@ import (
 // per-item isolation — one item's bad input, scope denial, money deny, or
 // backend error never fails the other items.
 func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
-	allowedPayer := uuid.NewString()
-	brokePayer := uuid.NewString()
-	abuseLimitedPayer := uuid.NewString()
-	erroringPayer := uuid.NewString()
-	scopedOutPayer := uuid.NewString()
+	allowedPayer := openrails.CustomerID(uuid.New())
+	brokePayer := openrails.CustomerID(uuid.New())
+	abuseLimitedPayer := openrails.CustomerID(uuid.New())
+	erroringPayer := openrails.CustomerID(uuid.New())
+	scopedOutPayer := openrails.CustomerID(uuid.New())
 
 	items := []serviceAdmitRequest{
 		{CustomerID: allowedPayer, Invoker: "user:a", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r1"},
 		{CustomerID: brokePayer, Invoker: "user:b", EstimatedAmount: 100, ExpiresAt: holdDeadline(), RequestID: "r2"},
-		{CustomerID: "not-a-uuid", Invoker: "user:c", RequestID: "r3"},
+		{Invoker: "user:c", RequestID: "r3"},
 		{CustomerID: abuseLimitedPayer, Invoker: "user:d", RequestID: "r4"},
 		{CustomerID: erroringPayer, Invoker: "user:e", RequestID: "r5"},
 		{CustomerID: scopedOutPayer, Invoker: "user:f", RequestID: "r6"},
@@ -38,10 +39,10 @@ func TestServiceAdmitBatchVerdicts_MixedVerdictsAndIsolation(t *testing.T) {
 	}
 
 	allows := func(ts billingidentity.CustomerID) bool {
-		return ts.UUID().String() != scopedOutPayer
+		return openrails.CustomerID(ts) != scopedOutPayer
 	}
 	admit := func(_ context.Context, in billingservice.AdmitInput) (*billingservice.AdmitResult, error) {
-		switch in.CustomerID.UUID().String() {
+		switch openrails.CustomerID(in.CustomerID) {
 		case allowedPayer:
 			return &billingservice.AdmitResult{Allowed: true}, nil
 		case brokePayer:
@@ -109,7 +110,7 @@ func TestServiceAdmitBatchVerdicts_LogsTheCause(t *testing.T) {
 	log.SetLevel(log.ErrorLevel)
 	t.Cleanup(func() { log.SetOutput(prevOut); log.SetLevel(prevLevel) })
 
-	payer := uuid.NewString()
+	payer := openrails.CustomerID(uuid.New())
 	out := serviceAdmitBatchVerdicts(context.Background(),
 		[]serviceAdmitRequest{{CustomerID: payer, Invoker: "user:a", RequestID: "r1", Source: "host-four"}},
 		func(billingidentity.CustomerID) bool { return true },
@@ -126,7 +127,7 @@ func TestServiceAdmitBatchVerdicts_LogsTheCause(t *testing.T) {
 	// logrus escapes quotes in the text formatter, so match the payload, not the framing.
 	require.Contains(t, logged, "billing_policy_bindings", "the cause must reach the operator log")
 	require.Contains(t, logged, "42P01", "including the SQLSTATE that names the failure class")
-	require.Contains(t, logged, payer, "and be attributable to a payer")
+	require.Contains(t, logged, payer.String(), "and be attributable to a payer")
 }
 
 // holdDeadline is the declared deadline every hold-placing admit must carry

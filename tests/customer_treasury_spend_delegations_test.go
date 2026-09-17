@@ -70,10 +70,10 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 		Scope: "role", ScopeKey: uuid.NewString(),
 		Windows: []openrails.SpendLimitWindow{{Key: "week", WindowSeconds: 604800, Limit: 9000, Currency: "USD"}},
 	}
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), first))
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), second))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(payerID), first))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(payerID), second))
 	first.Windows[0].Limit = 321
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), first))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(payerID), first))
 
 	svc, err := billingservice.New(suite.App.Runtime)
 	require.NoError(t, err)
@@ -81,13 +81,13 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, stored, 2, "singular machine upsert must preserve sibling grants")
 
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, payerID.String(), []openrails.SpendDelegationInput{second}))
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(payerID), []openrails.SpendDelegationInput{second}))
 	stored, err = svc.InvokerSpendLimits(ctx, payer)
 	require.NoError(t, err)
 	require.Len(t, stored, 1, "full replacement must remove omitted grants")
 	require.Equal(t, "role", stored[0].Scope)
 
-	err = client.SetCustomerSpendDelegations(ctx, payerID.String(), []openrails.SpendDelegationInput{
+	err = client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(payerID), []openrails.SpendDelegationInput{
 		{
 			Scope: " role ", ScopeKey: " " + second.ScopeKey + " ", Windows: second.Windows,
 		},
@@ -105,8 +105,8 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 	// or#911 over the machine client: provenance rides the grant, and the
 	// single-grant delete revokes exactly the addressed row.
 	second.Provenance = "sha256:" + strings.Repeat("cd", 32)
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), second))
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, payerID.String(), first))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(payerID), second))
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(payerID), first))
 	stored, err = svc.InvokerSpendLimits(ctx, payer)
 	require.NoError(t, err)
 	require.Len(t, stored, 2)
@@ -116,13 +116,13 @@ func TestMerchantServiceJWTSpendDelegationRemoteClient(t *testing.T) {
 		}
 	}
 
-	require.NoError(t, client.DeleteCustomerSpendDelegation(ctx, payerID.String(), "role", second.ScopeKey))
+	require.NoError(t, client.DeleteCustomerSpendDelegation(ctx, openrails.CustomerID(payerID), "role", second.ScopeKey))
 	stored, err = svc.InvokerSpendLimits(ctx, payer)
 	require.NoError(t, err)
 	require.Len(t, stored, 1, "delete must leave the sibling invoker grant untouched")
 	require.Equal(t, "invoker", stored[0].Scope)
 
-	err = client.DeleteCustomerSpendDelegation(ctx, payerID.String(), "role", second.ScopeKey)
+	err = client.DeleteCustomerSpendDelegation(ctx, openrails.CustomerID(payerID), "role", second.ScopeKey)
 	require.ErrorIs(t, err, openrails.ErrNotFound, "an already-revoked grant is a real answer")
 }
 

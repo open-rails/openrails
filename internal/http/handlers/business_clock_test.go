@@ -1,13 +1,14 @@
 package handlers
 
 import (
+	"net/http/httptest"
+	"testing"
+	"time"
+
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/app"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/stretchr/testify/require"
-	"net/http/httptest"
-	"testing"
-	"time"
 )
 
 func TestSelfUsageWindowUsesRuntimeClock(t *testing.T) {

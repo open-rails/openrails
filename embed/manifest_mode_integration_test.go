@@ -31,7 +31,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -279,7 +278,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	mctx := merchant.WithID(ctx, id)
 	client, err := rt1.Client()
 	require.NoError(t, err)
-	userID := uuid.NewString()
+	userID := openrails.CustomerID(uuid.New())
 	_, err = client.GrantEntitlement(ctx, userID, openrails.GrantEntitlementRequest{Entitlement: "pro-access"})
 	require.NoError(t, err)
 	ents, err := client.ListEntitlements(ctx, userID, time.Time{})
@@ -607,7 +606,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":"ccbill"}}`, api.FormatPriceID(uuid.New()))
+	body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":"ccbill"}}`, openrails.PriceID(uuid.New()).String())
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/me/checkout", strings.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")

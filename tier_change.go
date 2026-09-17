@@ -7,10 +7,10 @@ type TierChangeResponse struct {
 	Status         string                         `json:"status"`                    // succeeded, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
-	PriceID        string                         `json:"price_id"`                  // Target price ID
+	PriceID        PriceID                        `json:"price_id"`                  // Target price ID
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Rail info
-	SubscriptionID *string                        `json:"subscription_id,omitempty"` // Affected subscription
+	SubscriptionID *SubscriptionID                `json:"subscription_id,omitempty"` // Affected subscription
 	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
 	Message        string                         `json:"message,omitempty"`         // User-friendly message
 	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"`   // For scheduled downgrades
@@ -28,7 +28,7 @@ type TierChangeResponse struct {
 type TierChangePreviewResponse struct {
 	Object           string     `json:"object"` // "tier_change_preview"
 	Action           string     `json:"action"` // upgrade | downgrade
-	PriceID          string     `json:"price_id"`
+	PriceID          PriceID    `json:"price_id"`
 	Rail             string     `json:"rail"`
 	Currency         string     `json:"currency"`
 	AmountDueNow     int64      `json:"amount_due_now,string"`     // native units charged immediately (0 for downgrade)
@@ -64,5 +64,5 @@ type CheckoutSessionPaymentResponse struct {
 }
 
 type ChangeTierRequest struct {
-	PriceID string `json:"price_id" binding:"required"`
+	PriceID PriceID `json:"price_id"`
 }

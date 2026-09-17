@@ -17,15 +17,17 @@ export interface CustomerSummary {
   last_seen_at: string
 }
 
-// --- Raw DB models (returned verbatim by profile/subscription endpoints) ---
+// --- Shared Client DTOs (subscription and profile endpoints) ---
 
+// RawSubscription mirrors openrails.Subscription: ids of prefixed kinds are
+// typed (sub_, prod_, price_, pm_, pay_); customer_id and psp_id are plain UUIDs.
 export interface RawSubscription {
-  id: string // bare UUID
-  merchant_id: string
-  customer_id?: string
-  product_id: string
-  price_id: string
-  scheduled_price_id?: string | null
+  id: string // sub_...
+  customer_id: string
+  psp_id?: string
+  product_id: string // prod_...
+  price_id: string // price_...
+  scheduled_price_id?: string | null // price_...
   status: SubscriptionStatus
   started_at: string
   ended_at: string | null
@@ -34,7 +36,7 @@ export interface RawSubscription {
   rail: Rail
   rail_subscription_id: string
   user_email?: string
-  payment_method_id: string | null
+  payment_method_id: string | null // pm_...
   retry_attempts: number | null
   next_retry_at: string | null
   grace_ends_at: string | null
@@ -140,7 +142,6 @@ export interface PaymentMethodResponse {
 }
 
 export interface CreditBalance {
-
   currency: string
   display_name: string
   unit: string
@@ -150,13 +151,15 @@ export interface CreditBalance {
   outstanding_owed_amount: number
 }
 
+// CustomerBillingProfile composes the shared Client DTOs each dedicated
+// route serves (subscriptions, payments, entitlements, product access).
 export interface CustomerBillingProfile {
   customer_id: string
   email?: string
   trust_level?: string
-  subscriptions: RawSubscription[]
+  subscriptions: AdminSubscription[]
   entitlements: RawEntitlement[]
-  payments: RawPayment[]
+  payments: PaymentObject[]
   payment_methods: PaymentMethodResponse[]
   credit_balance: CreditBalance[]
   product_access: RawProductAccessGrant[]
@@ -172,8 +175,8 @@ export interface PaymentObject {
   amount: string
   amount_refunded: string
   currency: string
-  user: string // usr_...
-  subscription?: string // sub_...
+  customer_id: string // plain UUID
+  subscription_id?: string // sub_...
   rail: Rail
   transaction_id: string
   refunded: boolean

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -67,14 +68,14 @@ func TestBillingImportHTTP(t *testing.T) {
 	book := billingimport.DeclaredBilling{
 		AsOf:       asOf,
 		DefaultPSP: billingimport.PSPRef{Key: "nmi"},
-		Customers:  []billingimport.DeclaredCustomer{{Customer: cActive}, {Customer: cCancelled}},
+		Customers:  []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(cActive)}, {Customer: openrails.CustomerID(cCancelled)}},
 		Subscriptions: []billingimport.DeclaredSubscription{
 			{
-				SourceID: "runway-" + sfx, Customer: cActive, Price: price, Rail: "nmi",
+				SourceID: "runway-" + sfx, Customer: openrails.CustomerID(cActive), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: subActive, StartedAt: asOf.Add(-100 * day), PaidThrough: &paidThrough,
 			},
 			{
-				SourceID: "usercancel-" + sfx, Customer: cCancelled, Price: price, Rail: "ccbill",
+				SourceID: "usercancel-" + sfx, Customer: openrails.CustomerID(cCancelled), Price: openrails.PriceID(price), Rail: "ccbill",
 				RailSubscriptionID: subCancelled, StartedAt: asOf.Add(-90 * day),
 				PSP:    billingimport.PSPRef{Key: "ccbill"},
 				Cancel: billingimport.CancelEvidence{Kind: "user_cancelled", At: cancelAt},

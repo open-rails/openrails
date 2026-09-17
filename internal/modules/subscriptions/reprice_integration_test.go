@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -340,10 +342,10 @@ func TestRepriceAllPriorVersions_BulkSchedulesOnlyPriorVersions(t *testing.T) {
 	effectiveAt := f.clock.Now().Add(24 * time.Hour)
 	result, err := f.repriceSvc.RepriceAllPriorVersions(ctx, RepriceAllPriorVersionsRequest{PriceKey: key, EffectiveAt: effectiveAt})
 	require.NoError(t, err)
-	require.Equal(t, f.highPriceID, result.ToPriceID)
+	require.Equal(t, openrails.PriceID(f.highPriceID), result.ToPriceID)
 	require.Equal(t, 1, result.Matched)
 	require.Len(t, result.Scheduled, 1)
-	require.Equal(t, pinnedToPrior, result.Scheduled[0].SubscriptionID)
+	require.Equal(t, openrails.SubscriptionID(pinnedToPrior), result.Scheduled[0].SubscriptionID)
 
 	scheduled, err := f.repriceRepo.GetScheduledForSubscription(ctx, pinnedToPrior)
 	require.NoError(t, err)
@@ -471,7 +473,7 @@ func TestRepriceAllPriorVersions_NoticeWindow_IncreaseInsideWindowSkipped(t *tes
 	require.Equal(t, 1, result.Matched)
 	require.Empty(t, result.Scheduled)
 	require.Len(t, result.Skipped, 1)
-	require.Equal(t, pinned, result.Skipped[0].SubscriptionID)
+	require.Equal(t, openrails.SubscriptionID(pinned), result.Skipped[0].SubscriptionID)
 	require.Contains(t, result.Skipped[0].Reason, "notice window")
 
 	_, err = f.repriceRepo.GetScheduledForSubscription(ctx, pinned)
@@ -502,7 +504,7 @@ func TestRepriceAllPriorVersions_NoticeWindow_AcknowledgeShortNotice(t *testing.
 	require.Equal(t, 1, result.Matched)
 	require.Empty(t, result.Skipped)
 	require.Len(t, result.Scheduled, 1)
-	require.Equal(t, pinned, result.Scheduled[0].SubscriptionID)
+	require.Equal(t, openrails.SubscriptionID(pinned), result.Scheduled[0].SubscriptionID)
 	require.True(t, result.Scheduled[0].AcknowledgedShortNotice, "audit evidence on the API response")
 
 	scheduled, err := f.repriceRepo.GetScheduledForSubscription(ctx, pinned)

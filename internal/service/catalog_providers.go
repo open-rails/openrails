@@ -335,7 +335,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 	reqCycle := priceRequestCycleDays(req)
 	pctx := autoCreateContext{
 		PriceID:              priceID,
-		ProductID:            req.ProductID,
+		ProductID:            req.ProductID.UUID(),
 		Product:              product,
 		ProductKey:           productKey,
 		UnitAmount:           req.UnitAmount,

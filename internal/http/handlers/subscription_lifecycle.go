@@ -5,12 +5,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -69,11 +69,12 @@ func CancelSubscription(r *httprequest.Request) {
 		return
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {
@@ -130,11 +131,12 @@ func ResumeSubscription(r *httprequest.Request) {
 		return
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	sub, err := r.State.SubscriptionService.GetByID(r.Request.Context(), subscriptionID)
 	if err != nil {

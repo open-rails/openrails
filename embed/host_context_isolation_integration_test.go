@@ -131,7 +131,7 @@ func observeHostContext(t *testing.T, ctx context.Context, h *integrationharness
 
 	var out hostContextObservation
 	for i := 0; i < 11; i++ {
-		err := client.SetCustomerInvoiceProfile(hostCtx, customer.String(), openrails.InvoiceProfileDTO{
+		err := client.SetCustomerInvoiceProfile(hostCtx, openrails.CustomerID(customer), openrails.InvoiceProfileDTO{
 			NetTermsDays: i, CollectionMethod: "send_invoice",
 		})
 		status := 0
@@ -146,7 +146,7 @@ func observeHostContext(t *testing.T, ctx context.Context, h *integrationharness
 	out.AuditUsers = hook.drain()
 	require.NotContains(t, out.AuditUsers, sessionUser, "the host's session user must never be an engine audit actor")
 
-	_, err = client.GetCustomerInvoiceProfile(merchant.WithID(hostCtx, merchant.ID(uuid.New())), customer.String())
+	_, err = client.GetCustomerInvoiceProfile(merchant.WithID(hostCtx, merchant.ID(uuid.New())), openrails.CustomerID(customer))
 	var se *openrails.StatusError
 	require.ErrorAs(t, err, &se, "pin mismatch must be a StatusError")
 	out.PinMismatchStatus, out.PinMismatchConflict = se.Status, errors.Is(err, openrails.ErrConflict)

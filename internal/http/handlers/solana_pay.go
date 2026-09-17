@@ -4,10 +4,10 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 type SolanaPayGetResponse struct {
@@ -34,11 +34,12 @@ func GetSolanaPay(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	parsedID, err := api.ParseCheckoutSessionID(sessionID)
-	if err != nil {
+	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
+	parsedID := typedParsedID.UUID()
 	session, err := r.State.CheckoutSessionService.GetSessionForSolanaPay(r.Request.Context(), parsedID)
 	if err != nil {
 		writeSolanaPayError(r, err)
@@ -78,11 +79,12 @@ func PostSolanaPay(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	parsedID, err := api.ParseCheckoutSessionID(sessionID)
-	if err != nil {
+	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
+	parsedID := typedParsedID.UUID()
 	resp, err := r.State.CheckoutSessionService.BuildSolanaPayTransaction(r.Request.Context(), parsedID, req.Account)
 	if err != nil {
 		writeSolanaPayError(r, err)

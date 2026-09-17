@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -70,7 +71,7 @@ catalogs:
 		{"ImportAdminGrants", func() error {
 			_, err := billingimport.Import(ctx, billingimport.Options{Config: cfg, PGXPool: pool, MerchantID: merchant.ID(uuid.New()),
 				Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(),
-					AdminGrants: []billingimport.DeclaredAdminGrant{{Customer: uuid.New(), Product: uuid.New(), SourceID: "src", StartsAt: time.Now().UTC()}}}})
+					AdminGrants: []billingimport.DeclaredAdminGrant{{Customer: openrails.CustomerID(uuid.New()), Product: openrails.ProductID(uuid.New()), SourceID: "src", StartsAt: time.Now().UTC()}}}})
 			return err
 		}},
 		{"hosttools.PruneList", func() error {

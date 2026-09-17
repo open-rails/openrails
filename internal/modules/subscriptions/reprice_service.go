@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -207,7 +208,7 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 		if err != nil {
 			return nil, err
 		}
-		return &RepriceBatchResult{BatchID: batch.ID, ToPriceID: toPrice.ID}, nil
+		return &RepriceBatchResult{BatchID: batch.ID, ToPriceID: openrails.PriceID(toPrice.ID)}, nil
 	}
 	priorByID := make(map[uuid.UUID]*models.Price, len(priorVersions))
 	priorIDs := make([]uuid.UUID, 0, len(priorVersions))
@@ -235,15 +236,15 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 		fromPrice := priorByID[sub.PriceID]
 		if fromPrice == nil {
 			// Should not happen (sub.PriceID came from priorIDs) — skip defensively.
-			skipped = append(skipped, RepriceOutcome{SubscriptionID: sub.ID, Reason: "current price not found among prior versions"})
+			skipped = append(skipped, RepriceOutcome{SubscriptionID: openrails.SubscriptionID(sub.ID), Reason: "current price not found among prior versions"})
 			continue
 		}
 		if err := validateRepriceConstraints(sub.ID, fromPrice, toPrice); err != nil {
-			skipped = append(skipped, RepriceOutcome{SubscriptionID: sub.ID, Reason: err.Error()})
+			skipped = append(skipped, RepriceOutcome{SubscriptionID: openrails.SubscriptionID(sub.ID), Reason: err.Error()})
 			continue
 		}
 		if err := s.scheduledConflict(ctx, sub.ID); err != nil {
-			skipped = append(skipped, RepriceOutcome{SubscriptionID: sub.ID, Reason: err.Error()})
+			skipped = append(skipped, RepriceOutcome{SubscriptionID: openrails.SubscriptionID(sub.ID), Reason: err.Error()})
 			continue
 		}
 		// #781: per-subscription, since a bulk call's prior versions can carry
@@ -255,7 +256,7 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 		}
 		if violatesNotice && !req.AcknowledgeShortNotice {
 			skipped = append(skipped, RepriceOutcome{
-				SubscriptionID: sub.ID,
+				SubscriptionID: openrails.SubscriptionID(sub.ID),
 				Reason:         (&RepriceConstraintError{Sentinel: ErrRepriceNoticeWindowViolation, SubscriptionID: sub.ID, FromPriceID: fromPrice.ID, ToPriceID: toPrice.ID}).Error(),
 			})
 			continue
@@ -280,14 +281,14 @@ func (s *RepriceService) RepriceAllPriorVersions(ctx context.Context, req Repric
 			"acknowledged_count": acknowledgedCount,
 		}).Warn("reprice_all_prior_versions: short-notice override acknowledged for a price increase inside the merchant's notice window")
 	}
-	result := &RepriceBatchResult{BatchID: batch.ID, ToPriceID: toPrice.ID, Matched: len(subs), Skipped: skipped}
+	result := &RepriceBatchResult{BatchID: batch.ID, ToPriceID: openrails.PriceID(toPrice.ID), Matched: len(subs), Skipped: skipped}
 	batchID := batch.ID
 	for _, item := range schedule {
 		rr, err := s.repo.CreateSubscriptionReprice(ctx, item.sub.ID, item.from.ID, toPrice.ID, req.EffectiveAt, &batchID, item.acknowledgedShortNotice)
 		if err != nil {
 			return nil, fmt.Errorf("reprice_all_prior_versions: schedule subscription %s: %w", item.sub.ID, err)
 		}
-		result.Scheduled = append(result.Scheduled, RepriceOutcome{SubscriptionID: item.sub.ID, RepriceID: rr.ID, AcknowledgedShortNotice: item.acknowledgedShortNotice})
+		result.Scheduled = append(result.Scheduled, RepriceOutcome{SubscriptionID: openrails.SubscriptionID(item.sub.ID), RepriceID: rr.ID, AcknowledgedShortNotice: item.acknowledgedShortNotice})
 		s.emitScheduledNotification(ctx, item.sub, item.from, toPrice, req.EffectiveAt)
 	}
 	return result, nil
@@ -319,7 +320,7 @@ func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey s
 		return nil, fmt.Errorf("reprice_all_prior_versions preview: list version chain: %w", err)
 	}
 	if len(chain) == 0 {
-		return &RepricePreviewResult{PriceKey: key, ToPriceID: toPrice.ID}, nil
+		return &RepricePreviewResult{PriceKey: key, ToPriceID: openrails.PriceID(toPrice.ID)}, nil
 	}
 	chainIDs := make([]uuid.UUID, 0, len(chain))
 	for _, p := range chain {
@@ -329,7 +330,7 @@ func (s *RepriceService) PreviewAllPriorVersions(ctx context.Context, priceKey s
 	if err != nil {
 		return nil, fmt.Errorf("reprice_all_prior_versions preview: count affected subscriptions: %w", err)
 	}
-	return &RepricePreviewResult{PriceKey: key, ToPriceID: toPrice.ID, Matched: len(subs)}, nil
+	return &RepricePreviewResult{PriceKey: key, ToPriceID: openrails.PriceID(toPrice.ID), Matched: len(subs)}, nil
 }
 
 // ListBatchesForKey lists a price key's bulk reprice operations, most recent

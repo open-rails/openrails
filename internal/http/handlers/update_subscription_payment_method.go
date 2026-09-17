@@ -2,9 +2,10 @@ package handlers
 
 import (
 	"errors"
-	"github.com/open-rails/openrails"
 	"net/http"
 	"time"
+
+	"github.com/open-rails/openrails"
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -13,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,22 +39,23 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	var req updateSubscriptionPaymentMethodBody
 	if !r.BindJSON(&req) {
 		return
 	}
 
-	paymentMethodID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
-	if err != nil {
+	if req.PaymentMethodID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid payment_method_id format")
 		return
 	}
+	paymentMethodID := req.PaymentMethodID.UUID()
 
 	ctx, cancel := r.Budget(15 * time.Second)
 	defer cancel()

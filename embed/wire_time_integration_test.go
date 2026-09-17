@@ -52,7 +52,7 @@ func TestWireTimesKeepSubSecondPrecisionAcrossDeployments(t *testing.T) {
 			deadline := microInstant(time.Now().Add(time.Hour))
 			requestID := "wire-time-" + uuid.NewString()
 			admitted, err := client.Admit(ctx, openrails.AdmitRequest{
-				CustomerID: payer.String(), Invoker: "wire-time", InvokerType: openrails.InvokerTypePayer, Currency: "USD",
+				CustomerID: openrails.CustomerID(payer), Invoker: "wire-time", InvokerType: openrails.InvokerTypePayer, Currency: "USD",
 				EstimatedAmount: 10_000, ExpiresAt: &deadline, RequestID: requestID, Source: "wire-time",
 			})
 			require.NoError(t, err)
@@ -63,7 +63,7 @@ func TestWireTimesKeepSubSecondPrecisionAcrossDeployments(t *testing.T) {
 			// A replay with the same sub-second deadline is the same operation;
 			// a whole-second reading of it would be a changed term.
 			replayed, err := client.Admit(ctx, openrails.AdmitRequest{
-				CustomerID: payer.String(), Invoker: "wire-time", InvokerType: openrails.InvokerTypePayer, Currency: "USD",
+				CustomerID: openrails.CustomerID(payer), Invoker: "wire-time", InvokerType: openrails.InvokerTypePayer, Currency: "USD",
 				EstimatedAmount: 10_000, ExpiresAt: &deadline, RequestID: requestID, Source: "wire-time",
 			})
 			require.NoError(t, err)
@@ -81,14 +81,14 @@ func TestWireTimesKeepSubSecondPrecisionAcrossDeployments(t *testing.T) {
 			// microsecond later.
 			occurred := microInstant(time.Now())
 			require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
-				CustomerID: payer.String(), Invoker: "wire-time", Currency: "USD", EventType: "wire-time-event",
+				CustomerID: openrails.CustomerID(payer), Invoker: "wire-time", Currency: "USD", EventType: "wire-time-event",
 				Dimensions: map[string]int64{"units": 7}, Amount: 0, Resource: "wire-time", Source: "wire-time", SourceID: uuid.NewString(),
 				OccurredAt: &occurred,
 			}))
-			rows, err := client.UsageRollup(ctx, payer.String(), "USD", occurred, occurred.Add(time.Microsecond), "resource")
+			rows, err := client.UsageRollup(ctx, openrails.CustomerID(payer), "USD", occurred, occurred.Add(time.Microsecond), "resource")
 			require.NoError(t, err)
 			require.Len(t, rows, 1, "the event occurred exactly at the window start")
-			rows, err = client.UsageRollup(ctx, payer.String(), "USD", occurred.Add(time.Microsecond), occurred.Add(time.Second), "resource")
+			rows, err = client.UsageRollup(ctx, openrails.CustomerID(payer), "USD", occurred.Add(time.Microsecond), occurred.Add(time.Second), "resource")
 			require.NoError(t, err)
 			require.Empty(t, rows, "one microsecond later the event is outside the window")
 			revenue, err := client.ResourceRevenueDaily(ctx, "wire-time", "USD", occurred.Add(-time.Hour), occurred.Add(time.Hour))
@@ -100,7 +100,7 @@ func TestWireTimesKeepSubSecondPrecisionAcrossDeployments(t *testing.T) {
 			_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.payment_methods(id,merchant_id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,last_four,card_type,created_at,updated_at) VALUES($1,$2,$3,$4,'nmi',$5::text,$5::text,$5::text,'4242','visa',$6,$6)`,
 				pmID, mid, customer, dbtest.EnsureTestPSP(ctx, t, h.Pool(), mid, "nmi"), "wire-time-"+pmID.String(), created)
 			require.NoError(t, err)
-			methods, err := client.ListPaymentMethods(ctx, customer.String(), openrails.PageOptions{Limit: 10})
+			methods, err := client.ListPaymentMethods(ctx, openrails.CustomerID(customer), openrails.PageOptions{Limit: 10})
 			require.NoError(t, err)
 			require.Len(t, methods.Data, 1)
 			require.True(t, methods.Data[0].CreatedAt.Equal(created), "created_at %s != %s", methods.Data[0].CreatedAt, created)

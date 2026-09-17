@@ -2,10 +2,9 @@ package handlers
 
 import (
 	"errors"
-	"github.com/open-rails/openrails"
 	"net/http"
 
-	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 
 	"github.com/open-rails/openrails/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -200,7 +199,7 @@ func defaultUsageRateCardInput(
 	meter billingservice.UsageMeterDTO,
 	req adminDefaultUsageRateCardRequest,
 ) (billingservice.UsageRateCardInput, error) {
-	if req.ProductID == uuid.Nil {
+	if req.ProductID.IsZero() {
 		return billingservice.UsageRateCardInput{}, errors.New("product_id required")
 	}
 	if err := pricing.ValidateUsagePrice("usage rate card", &req.Price); err != nil {
@@ -218,8 +217,9 @@ func defaultUsageRateCardInput(
 	if err := pricing.ValidateDimensions("usage rate card", meter.GroupBy, req.Filter, &req.Price); err != nil {
 		return billingservice.UsageRateCardInput{}, err
 	}
+	productID := req.ProductID.UUID()
 	return billingservice.UsageRateCardInput{
-		ProductID: &req.ProductID,
+		ProductID: &productID,
 		MeterKey:  meter.Key,
 		Filter:    req.Filter,
 		Price:     req.Price,

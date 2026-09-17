@@ -8,19 +8,19 @@ import (
 
 // ProductObject represents a product resource
 type ProductObject struct {
-	ID               string            `json:"id"`
-	Object           string            `json:"object"` // Always "product"
-	Key              string            `json:"key"`
-	Name             string            `json:"name"`
-	Description      string            `json:"description"`
-	EntitlementsSpec map[string]*int   `json:"entitlements_spec,omitempty"`
-	TierGroup        *string           `json:"tier_group,omitempty"`
-	TierRank         int               `json:"tier_rank"`
-	Active           bool              `json:"active"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
-	Created          int64             `json:"created"`
-	Updated          int64             `json:"updated"`
-	Prices           []PriceObject     `json:"prices,omitempty"`
+	ID               openrails.ProductID `json:"id"`
+	Object           string              `json:"object"` // Always "product"
+	Key              string              `json:"key"`
+	Name             string              `json:"name"`
+	Description      string              `json:"description"`
+	EntitlementsSpec map[string]*int     `json:"entitlements_spec,omitempty"`
+	TierGroup        *string             `json:"tier_group,omitempty"`
+	TierRank         int                 `json:"tier_rank"`
+	Active           bool                `json:"active"`
+	Metadata         map[string]string   `json:"metadata,omitempty"`
+	Created          int64               `json:"created"`
+	Updated          int64               `json:"updated"`
+	Prices           []PriceObject       `json:"prices,omitempty"`
 }
 
 // PriceObject represents a price resource
