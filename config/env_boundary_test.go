@@ -38,6 +38,7 @@ func TestNoLibraryEnvReads(t *testing.T) {
 		"scripts/":                               "operational tooling run as its own process, not importable library code",
 		"internal/dbtest/":                       "test-support package: container/DSN discovery for test binaries",
 		"internal/integrations/vault/vaulttest/": "test-support package: VAULT_ADDR/VAULT_TOKEN external-server override, mirrors dbtest",
+		"internal/integrationharness/":           "test-support package (integration-tagged): launches cmd/openrails as a child process for restart and operator workflows",
 		"internal/bootstrap/merchant_env.go":     "the BILLING_MERCHANTS_* overlay — part of the binary's config pipeline (#712 blesses it)",
 	}
 
