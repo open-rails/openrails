@@ -22,7 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
 
-// #756 metrics Q&A: fail-closed consent gating (501 + config.json flag),
+// #756 metrics Q&A: fail-closed consent gating (absent route + config.json flag),
 // tool-loop execution against the REAL metrics service on the caller's
 // RLS-pinned merchant context (evidence == direct /query, cross-merchant
 // isolation), and the per-merchant ask rate limit. The LLM is a deterministic
@@ -81,17 +81,15 @@ func TestMerchantMetricsAsk(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 
-	t.Run("keyless fails closed naming both knobs", func(t *testing.T) {
+	t.Run("keyless deployments do not advertise the route", func(t *testing.T) {
 		surface := h.StartStandalone("usd")
 		token := surface.MintAPIKey(dbtest.TestMerchantSlug, "ask-keyless-"+uuid.NewString(),
 			[]string{controlplane.PermMerchantMetricsRead})
-		status, body := askOnce(t, surface.BaseURL, token, "how is revenue?")
-		require.Equal(t, http.StatusNotImplemented, status)
-		require.Contains(t, string(body), "LLM_API_KEY")
-		require.Contains(t, string(body), "LLM_ASK_ENABLED")
+		status, _ := askOnce(t, surface.BaseURL, token, "how is revenue?")
+		require.Equal(t, http.StatusNotFound, status, "an unconfigured capability is an absent route, never a 501")
 	})
 
-	t.Run("key without ask consent fails closed naming the consent flag", func(t *testing.T) {
+	t.Run("key without ask consent does not advertise the route", func(t *testing.T) {
 		surface := h.StartStandalone("usd",
 			WithConsoleAssets(fixtureConsoleAssets()),
 			WithConfig(func(cfg *config.Config) {
@@ -100,10 +98,8 @@ func TestMerchantMetricsAsk(t *testing.T) {
 			}))
 		token := surface.MintAPIKey(dbtest.TestMerchantSlug, "ask-noconsent-"+uuid.NewString(),
 			[]string{controlplane.PermMerchantMetricsRead})
-		status, body := askOnce(t, surface.BaseURL, token, "how is revenue?")
-		require.Equal(t, http.StatusNotImplemented, status)
-		require.Contains(t, string(body), "LLM_ASK_ENABLED")
-		require.Contains(t, string(body), "RESULTS", "the message must state the data-flow difference")
+		status, _ := askOnce(t, surface.BaseURL, token, "how is revenue?")
+		require.Equal(t, http.StatusNotFound, status, "consent is a registration condition, not a 501")
 
 		// config.json: NL widgets armed, ask not — distinct consents.
 		status, cfgBody, _ := getRaw(t, surface.BaseURL+"/admin/config.json")

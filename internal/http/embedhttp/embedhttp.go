@@ -68,7 +68,7 @@ type Assembler struct {
 	ServiceCredentialResolver httproutes.ServiceCredentialResolver
 	// APIKeys is the #757 merchant self-serve API-key manager (the attached
 	// control plane). nil for hosts without a control plane — the /api-keys
-	// routes then answer 501.
+	// routes are then not registered.
 	APIKeys      httphandlers.MerchantAPIKeyManager
 	CaptchaStore *captcha.ChallengeStore
 	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha

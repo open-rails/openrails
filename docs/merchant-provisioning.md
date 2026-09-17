@@ -374,7 +374,7 @@ Two things a purge cannot do, by construction:
 ## API keys
 
 Merchant-scoped backend credentials are minted through the self-serve surface
-(requires the control plane; embedded hosts without one answer 501):
+(requires the control plane; embedded hosts without one do not mount the routes):
 
 - `POST /v1/merchant/api-keys` `{"name": …, "role": …}` → 201 with the key
   **secret exactly once** — it is never stored or retrievable again. The

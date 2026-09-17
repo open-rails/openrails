@@ -25,12 +25,12 @@ type Config struct {
 	// embedded hosts typically "/billing/v1".
 	APIBaseURL string `json:"api_base_url"`
 	// NLWidgetsEnabled mirrors the #741 fail-closed LLM gate: false hides the
-	// natural-language widget box entirely (the generate endpoint would 501).
+	// natural-language widget box entirely (the generate endpoint is not mounted).
 	// The manual widget builder is always available.
 	NLWidgetsEnabled bool `json:"nl_widgets_enabled"`
 	// AskEnabled mirrors the #756 metrics Q&A gate (llm.ask_enabled AND an LLM
 	// key): false renders the Ask panel as a pointed empty-state (the ask
-	// endpoint would 501). Distinct consent from NLWidgetsEnabled because /ask
+	// endpoint is not mounted). Distinct consent from NLWidgetsEnabled because /ask
 	// sends aggregate query results to the LLM provider.
 	AskEnabled bool `json:"ask_enabled"`
 	// CatalogCopilotEnabled mirrors the #779 catalog copilot Q&A gate

@@ -59,19 +59,14 @@ func PutMerchantDashboard(r *httprequest.Request) {
 
 // GenerateDashboardWidget handles POST /v1/merchant/dashboard/widgets/generate:
 // prompt → VALIDATED {query, title, viz} via the server-side LLM (#741). The
-// LLM sees only the metrics schema, never data; unconfigured deployments
-// answer 501 (fail-closed — the console shows a pointed empty-state, #755).
+// LLM sees only the metrics schema, never data. The route is registered only
+// on deployments with an LLM key; the console keys on /admin/config.json.
 // Optional base_query (an existing widget's query, validated like any client
 // query) makes the prompt a REFINEMENT of that query instead of a fresh start.
 func GenerateDashboardWidget(r *httprequest.Request) {
 	svc := r.State.DashboardService
-	if svc == nil {
-		r.ErrorJSON(http.StatusServiceUnavailable, "dashboard service not configured")
-		return
-	}
 	if !svc.NLConfigured() {
-		r.ErrorJSON(http.StatusNotImplemented,
-			"natural-language widget generation is not configured on this deployment: set llm.api_key (env LLM_API_KEY) — see docs/admin-console.md")
+		r.ErrorJSON(http.StatusServiceUnavailable, "dashboard service unavailable")
 		return
 	}
 	var body struct {
