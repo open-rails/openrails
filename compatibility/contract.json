@@ -14,6 +14,7 @@
       "const (\n\tProviderBillingRefusalSchemaAmbiguity  ProviderBillingEvidenceRefusalKind = \"schema_ambiguity\"\n\tProviderBillingRefusalSubmicroAmount   ProviderBillingEvidenceRefusalKind = \"submicro_amount\"\n\tProviderBillingRefusalAmountOverflow   ProviderBillingEvidenceRefusalKind = \"amount_overflow\"\n\tProviderBillingRefusalResponseTooLarge ProviderBillingEvidenceRefusalKind = \"response_too_large\"\n)",
       "const (\n\tProviderStatusLinked            ProviderStatus = \"linked\"\n\tProviderStatusPendingManualLink ProviderStatus = \"pending_manual_link\"\n\tProviderStatusSyncDisabled      ProviderStatus = \"sync_disabled\"\n\tProviderStatusError             ProviderStatus = \"error\"\n)",
       "const (\n\tSyncStatusUnknown      SyncStatus = \"unknown\"\n\tSyncStatusInSync       SyncStatus = \"in_sync\"\n\tSyncStatusDrifted      SyncStatus = \"drifted\"\n\tSyncStatusMissing      SyncStatus = \"missing\"\n\tSyncStatusNeverSynced  SyncStatus = \"never_synced\"\n\tSyncStatusSyncDisabled SyncStatus = \"sync_disabled\"\n)",
+      "const CodePaymentMethodPSPMismatch = \"payment_method_psp_mismatch\"",
       "const MaxHostEventPageSize = 1000",
       "const ProviderBillingObservationMaxBytes = 768 \u003c\u003c 10",
       "const SelfIssuer = \"openrails:self\"",
@@ -347,6 +348,7 @@
       "var ErrOperationAuthorizationHasBillingEvidence error = newCodedError(\"operation_authorization_has_billing_evidence\", ErrConflict)",
       "var ErrOperationAuthorizationNotFound error = newCodedError(\"operation_authorization_not_found\", ErrNotFound)",
       "var ErrOperationAuthorizationNotOpen error = newCodedError(\"operation_authorization_not_open\", ErrConflict)",
+      "var ErrPaymentMethodPSPMismatch error = newCodedError(CodePaymentMethodPSPMismatch, ErrConflict)",
       "var ErrPaymentMethodStale error = newCodedError(CodePaymentMethodStale, ErrPaymentRefused)",
       "var ErrPaymentProviderRejected error = newCodedError(CodePaymentProviderRejected, ErrInternal)",
       "var ErrPaymentRefused = errors.New(\"openrails: payment refused\")",
@@ -555,8 +557,7 @@
       "type Verifier interface {\n\tVerifyRequest(r *http.Request) (verify.Claims, error)\n}"
     ],
     "embed/controlplane": [
-      "const (\n\tMerchantType = operator.MerchantType\n\tCustomerType = operator.CustomerType\n\n\tMerchantRetirementRefusedNotLive       = operator.MerchantRetirementRefusedNotLive\n\tMerchantRetirementRefusedGroupMismatch = operator.MerchantRetirementRefusedGroupMismatch\n\tMerchantRetirementRefusedReserved      = operator.MerchantRetirementRefusedReserved\n\tMerchantRetirementRefusedActive        = operator.MerchantRetirementRefusedActive\n)",
-      "func (c *ControlPlane) ArchivePaymentProviderAccount(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error)",
+      "const (\n\tMerchantType = operator.MerchantType\n\tCustomerType = operator.CustomerType\n\n\tMerchantRetirementRefusedNotLive       = operator.MerchantRetirementRefusedNotLive\n\tMerchantRetirementRefusedGroupMismatch = operator.MerchantRetirementRefusedGroupMismatch\n\tMerchantRetirementRefusedReserved      = operator.MerchantRetirementRefusedReserved\n\tMerchantRetirementRefusedActive        = operator.MerchantRetirementRefusedActive\n\n\tProviderAccountCutoverSameAccount     = operator.ProviderAccountCutoverSameAccount\n\tProviderAccountCutoverRequiresReentry = operator.ProviderAccountCutoverRequiresReentry\n\tProviderAccountCutoverBlocked         = operator.ProviderAccountCutoverBlocked\n)",
       "func (c *ControlPlane) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error)",
       "func (c *ControlPlane) Core() *authcore.Client",
       "func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, customerID, ownerSubject string) (string, error)",
@@ -571,7 +572,7 @@
       "func (c *ControlPlane) ListMerchantRefs(ctx context.Context, slugs []string) ([]MerchantRef, error)",
       "func (c *ControlPlane) ListMerchantRetirementCandidates(ctx context.Context, req MerchantRetirementCandidatesRequest) (MerchantRetirementCandidatePage, error)",
       "func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject string) ([]MerchantRef, error)",
-      "func (c *ControlPlane) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID, rail, status string) ([]PaymentProviderConfig, error)",
+      "func (c *ControlPlane) PlanProviderAccountCutover(ctx context.Context, id merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error)",
       "func (c *ControlPlane) ProvisionMerchant(ctx context.Context, req ProvisionMerchantRequest) (*ProvisionMerchantResult, error)",
       "func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, ref, userID, permission string) (merchant.ID, string, error)",
       "func (c *ControlPlane) ResolveMerchantForGroup(ctx context.Context, ref string) (merchant.ID, string, error)",
@@ -587,7 +588,6 @@
       "func MerchantCreationAdmission(rt *embed.Runtime, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error)",
       "func MerchantGroup(slug string) authkit.GroupRef",
       "func SubjectHasVaultedPaymentMethod(ctx context.Context, rt *embed.Runtime, vaultMerchant merchant.ID, subjectUserID string) (bool, error)",
-      "type ArchivePaymentProviderAccountRequest = operator.ArchivePaymentProviderAccountRequest",
       "type BootstrapOptions = operator.BootstrapOptions",
       "type BootstrapResult = operator.BootstrapResult",
       "type ControlPlane struct {\n}",
@@ -599,7 +599,6 @@
       "type FleetSnapshot = operator.FleetSnapshot",
       "type FleetWeeklyPoint = operator.FleetWeeklyPoint",
       "type FleetWeeklyVolume = operator.FleetWeeklyVolume",
-      "type LastActiveProviderAccountError = merchants.LastActiveProviderAccountError",
       "type MerchantCreationConfig = operator.MerchantCreationConfig",
       "type MerchantCreationPolicy = operator.MerchantCreationPolicy",
       "type MerchantRef = operator.MerchantRef",
@@ -610,6 +609,10 @@
       "type MerchantRetirementRefusal = operator.MerchantRetirementRefusal",
       "type Options = operator.AttachOptions",
       "type PaymentProviderConfig = operator.PaymentProviderConfig",
+      "type ProviderAccountCutoverDisposition = operator.ProviderAccountCutoverDisposition",
+      "type ProviderAccountCutoverPlan = operator.ProviderAccountCutoverPlan",
+      "type ProviderAccountCutoverQuery = operator.ProviderAccountCutoverQuery",
+      "type ProviderAccountCutoverReport = operator.ProviderAccountCutoverReport",
       "type ProvisionMerchantRequest = operator.ProvisionMerchantRequest",
       "type ProvisionMerchantResult = operator.ProvisionMerchantResult",
       "type RetireUnusedMerchantResult = operator.RetireUnusedMerchantResult",
@@ -620,9 +623,9 @@
       "var ErrMerchantGroupReleasePending = operator.ErrMerchantGroupReleasePending",
       "var ErrMerchantNotFound = operator.ErrMerchantNotFound",
       "var ErrMerchantUnresolved = operator.ErrMerchantUnresolved",
-      "var ErrPaymentProviderAccountNotFound = merchants.ErrPaymentProviderAccountNotFound",
       "var ErrPaymentProviderNotFound = merchants.ErrPaymentProviderNotFound",
       "var ErrPermissionRequired = operator.ErrPermissionRequired",
+      "var ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified",
       "var ErrSlugReserved = operator.ErrSlugReserved",
       "var ErrVaultedPaymentMethodRequired = operator.ErrVaultedPaymentMethodRequired"
     ],
@@ -1065,7 +1068,7 @@
       "type NMIDeletePayload struct {\n\tUserID             string `json:\"user_id\"`\n\tRailSubscriptionID string `json:\"rail_subscription_id,omitempty\"`\n}",
       "type NMIPaymentMethodDeletePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref,omitempty\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n}",
       "type NMIPaymentMethodUpdatePayload struct {\n\tUserID          string    `json:\"user_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n\tRailCustomerRef string    `json:\"rail_customer_ref\"`\n\tRailMethodRef   string    `json:\"rail_method_ref,omitempty\"`\n\tPaymentToken    string    `json:\"payment_token\"`\n\tNameOnCard      string    `json:\"name_on_card,omitempty\"`\n\tFirstName       string    `json:\"first_name,omitempty\"`\n\tLastName        string    `json:\"last_name,omitempty\"`\n\tAddress1        string    `json:\"address1,omitempty\"`\n\tCity            string    `json:\"city,omitempty\"`\n\tState           string    `json:\"state,omitempty\"`\n\tZip             string    `json:\"zip,omitempty\"`\n\tCountry         string    `json:\"country,omitempty\"`\n\tPhone           string    `json:\"phone,omitempty\"`\n\tEmail           string    `json:\"email,omitempty\"`\n\tCompany         string    `json:\"company,omitempty\"`\n\tAddress2        string    `json:\"address2,omitempty\"`\n\tTargetCard      nmiCard   `json:\"target_card\"`\n}",
-      "type NMIPaymentSourceUpdatePayload struct {\n\tUserID             string     `json:\"user_id\"`\n\tRailSubscriptionID string     `json:\"rail_subscription_id,omitempty\"`\n\tNewPaymentMethodID uuid.UUID  `json:\"new_payment_method_id\"`\n\tNewRailCustomerRef string     `json:\"new_vault_id\"`\n\tOldPaymentMethodID *uuid.UUID `json:\"old_payment_method_id,omitempty\"`\n\tOldRailCustomerRef string     `json:\"old_vault_id,omitempty\"`\n}",
+      "type NMIPaymentSourceUpdatePayload struct {\n\tUserID             string     `json:\"user_id\"`\n\tRailSubscriptionID string     `json:\"rail_subscription_id,omitempty\"`\n\tNewPaymentMethodID uuid.UUID  `json:\"new_payment_method_id\"`\n\tNewRailCustomerRef string     `json:\"new_vault_id\"`\n\tNewPspID           uuid.UUID  `json:\"new_psp_id\"`\n\tOldPaymentMethodID *uuid.UUID `json:\"old_payment_method_id,omitempty\"`\n\tOldRailCustomerRef string     `json:\"old_vault_id,omitempty\"`\n}",
       "type RefundPayload struct {\n\tOriginalPaymentID uuid.UUID `json:\"original_payment_id\"`\n\n\tReservationID uuid.UUID `json:\"reservation_id\"`\n\n\tAmountCents  moneyutil.Cents `json:\"amount_cents\"`\n\tReason       string          `json:\"reason,omitempty\"`\n\tRevokeAccess bool            `json:\"revoke_access\"`\n\n\tProviderTarget string `json:\"provider_target\"`\n\n\tProviderTransactionID string `json:\"provider_transaction_id,omitempty\"`\n}",
       "type SolanaSunsetPayload struct {\n\tPlanPDA string `json:\"plan_pda\"`\n\tLabel   string `json:\"label,omitempty\"`\n}",
       "type StripeArchivePayload struct {\n\tObjectID  string `json:\"object_id\"`\n\tMarkerKey string `json:\"marker_key\"`\n\tLabel     string `json:\"label,omitempty\"`\n}",
@@ -1073,12 +1076,10 @@
       "type nmiPaymentMethodUpdateProgress struct {\n\tSubmissionStarted bool    `json:\"submission_started\"`\n\tOldCard           nmiCard `json:\"old_card\"`\n}"
     ],
     "internal/merchants": [
-      "type ArchivePaymentProviderAccountRequest struct {\n\tAllowLast bool `json:\"allow_last\"`\n}",
       "type MerchantSecretStatus struct {\n\tName string `json:\"name\"`\n\n\tRail string `json:\"rail\"`\n\n\tCustodian        string `json:\"custodian,omitempty\"`\n\tKey              string `json:\"key\"`\n\tDisplayLabel     string `json:\"display_label\"`\n\tMerchantWritable bool   `json:\"merchant_writable\"`\n\tConfigured       bool   `json:\"configured\"`\n\tVersion          int    `json:\"version,omitempty\"`\n}",
       "type PaymentProviderConfig struct {\n\tID              uuid.UUID                                  `json:\"id\"`\n\tRail            string                                     `json:\"rail\"`\n\tEnvironment     string                                     `json:\"environment\"`\n\tAccountID       string                                     `json:\"account_id\"`\n\tArchived        bool                                       `json:\"archived\"`\n\tDrained         bool                                       `json:\"drained\"`\n\tOpenObligations int64                                      `json:\"open_obligations\"`\n\tPublicConfig    map[string]string                          `json:\"public_config,omitempty\"`\n\tCredentials     map[string]PaymentProviderCredentialStatus `json:\"credentials\"`\n\tFirstSeenAt     time.Time                                  `json:\"first_seen_at\"`\n\tLastVerifiedAt  *time.Time                                 `json:\"last_validated_at,omitempty\"`\n\tReplacedAt      *time.Time                                 `json:\"replaced_at,omitempty\"`\n\tCreatedAt       time.Time                                  `json:\"created_at\"`\n\tUpdatedAt       time.Time                                  `json:\"updated_at\"`\n}",
       "type PaymentProviderCredentialStatus struct {\n\tConfigured      bool       `json:\"configured\"`\n\tLastValidatedAt *time.Time `json:\"last_validated_at,omitempty\"`\n\n\tRotationVersion int `json:\"rotation_version,omitempty\"`\n}",
       "type PaymentProviderDefinition struct {\n\tRail           string   `json:\"rail\"`\n\tDisplayName    string   `json:\"display_name\"`\n\tCredentialKeys []string `json:\"credential_keys\"`\n}",
-      "type ProviderAccountRef struct {\n\tID        uuid.UUID `json:\"id\"`\n\tAccountID string    `json:\"account_id\"`\n}",
       "type ProvisionRequest struct {\n\tSlug string `json:\"slug\"`\n\n\tPermissionGroupID string `json:\"permission_group_id\"`\n}",
       "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}",
       "type UpsertPaymentProviderConfigRequest struct {\n\tEnabled      *bool             `json:\"enabled\"`\n\tAccountID    string            `json:\"account_id\"`\n\tPublicConfig map[string]string `json:\"public_config\"`\n\tCredentials  map[string]string `json:\"credentials\"`\n\n\tLegacyEnvironment string `json:\"environment,omitempty\"`\n}",
@@ -1243,6 +1244,7 @@
       "func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {\n\ttype userSubscriptionJSON struct {\n\t\tID                    uuid.UUID                 `json:\"id,omitempty\"`\n\t\tCustomerID            string                    `json:\"customer_id,omitempty\"`\n\t\tProductID             uuid.UUID                 `json:\"product_id,omitempty\"`\n\t\tPriceID               uuid.UUID                 `json:\"price_id,omitempty\"`\n\t\tScheduledPriceID      *uuid.UUID                `json:\"scheduled_price_id,omitempty\"`\n\t\tStatus                models.SubscriptionStatus `json:\"status,omitempty\"`\n\t\tStartedAt             time.Time                 `json:\"started_at,omitempty\"`\n\t\tEndedAt               *time.Time                `json:\"ended_at,omitempty\"`\n\t\tCurrentPeriodStartsAt *time.Time                `json:\"current_period_starts_at,omitempty\"`\n\t\tCurrentPeriodEndsAt   *time.Time                `json:\"current_period_ends_at,omitempty\"`\n\t\tRail                  models.Rail               `json:\"rail,omitempty\"`\n\t\tCancelFeedback        *string                   `json:\"cancel_feedback,omitempty\"`\n\t\tCancelType            *models.CancelType        `json:\"cancel_type,omitempty\"`\n\t\tCancelledAt           *time.Time                `json:\"cancelled_at,omitempty\"`\n\t\tResumable             bool                      `json:\"resumable\"`\n\t\tCancelScheduled       bool                      `json:\"cancel_scheduled\"`\n\t\tCancelMode            string                    `json:\"cancel_mode,omitempty\"`\n\t\tCancelPortalURL       *string                   `json:\"cancel_portal_url,omitempty\"`\n\t\tCreatedAt             time.Time                 `json:\"created_at,omitempty\"`\n\t\tUpdatedAt             time.Time                 `json:\"updated_at,omitempty\"`\n\t\tPrice                 *api.PriceObject          `json:\"price,omitempty\"`\n\t\tProduct               *api.ProductObject        `json:\"product,omitempty\"`\n\t\tScheduledPrice        *api.PriceObject          `json:\"scheduled_price,omitempty\"`\n\t\tScheduledProduct      *api.ProductObject        `json:\"scheduled_product,omitempty\"`\n\t\tCard                  *subscriptionCardJSON     `json:\"card,omitempty\"`\n\t\tAccess                *UserAccessGrant          `json:\"access,omitempty\"`\n\t}\n\n\tif r.Subscription != nil {\n\n\t\tnow := r.EvaluationTime()\n\t\tout := userSubscriptionJSON{\n\t\t\tID:                    r.Subscription.ID,\n\t\t\tCustomerID:            r.Subscription.CustomerID.String(),\n\t\t\tProductID:             r.Subscription.ProductID,\n\t\t\tPriceID:               r.Subscription.PriceID,\n\t\t\tScheduledPriceID:      r.Subscription.ScheduledPriceID,\n\t\t\tStatus:                r.Subscription.Status,\n\t\t\tStartedAt:             r.Subscription.StartedAt,\n\t\t\tEndedAt:               r.Subscription.EndedAt,\n\t\t\tCurrentPeriodStartsAt: r.Subscription.CurrentPeriodStartsAt,\n\t\t\tCurrentPeriodEndsAt:   r.Subscription.CurrentPeriodEndsAt,\n\t\t\tRail:                  r.Subscription.Rail,\n\t\t\tCancelFeedback:        r.Subscription.CancelFeedback,\n\t\t\tCancelType:            r.Subscription.CancelType,\n\t\t\tCancelledAt:           r.Subscription.CancelledAt,\n\t\t\tResumable:             Resumable(r.Subscription, now),\n\t\t\tCancelScheduled:       CancelScheduled(r.Subscription, now),\n\t\t\tCancelMode:            string(CancelModeFor(r.Subscription, now)),\n\t\t\tCancelPortalURL:       CancelPortalURL(r.Subscription, now),\n\t\t\tCreatedAt:             r.Subscription.CreatedAt,\n\t\t\tUpdatedAt:             r.Subscription.UpdatedAt,\n\t\t\tAccess:                r.Access,\n\t\t}\n\t\tif r.Price != nil {\n\t\t\tprice := priceToAPIObject(r.Price)\n\t\t\tout.Price = \u0026price\n\t\t}\n\t\tif r.Subscription.Product != nil {\n\t\t\tproduct := productToAPIObject(r.Subscription.Product)\n\t\t\tout.Product = \u0026product\n\t\t}\n\t\tif r.ScheduledPrice != nil {\n\t\t\tprice := priceToAPIObject(r.ScheduledPrice)\n\t\t\tout.ScheduledPrice = \u0026price\n\t\t}\n\t\tif r.ScheduledProduct != nil {\n\t\t\tproduct := productToAPIObject(r.ScheduledProduct)\n\t\t\tout.ScheduledProduct = \u0026product\n\t\t}\n\t\tout.Card = subscriptionCardFromPaymentMethod(r.Subscription.PaymentMethod)\n\t\treturn json.Marshal(out)\n\t}\n\n\treturn json.Marshal(userSubscriptionJSON{Access: r.Access})\n}",
       "type AdminSubscriptionResponse struct {\n\t*models.Subscription\n\n\tPrice    *models.Price     `json:\"price,omitempty\"`\n\tPayments []*models.Payment `json:\"payments,omitempty\"`\n}",
       "type PlanMigrationRedriveResult struct {\n\tExamined int `json:\"examined\"`\n\n\tRedriven int `json:\"redriven\"`\n\n\tConverged int `json:\"converged\"`\n\n\tDeferred int `json:\"deferred\"`\n\n\tSkipped int `json:\"skipped\"`\n\n\tFailed int `json:\"failed\"`\n}",
+      "type ProviderAccountCutoverPlan struct {\n\tDisposition ProviderAccountCutoverDisposition `json:\"disposition\"`\n\tExecutable  bool                              `json:\"executable\"`\n\tReason      string                            `json:\"reason\"`\n\tSteps       []string                          `json:\"steps\"`\n}",
       "type RefundResult struct {\n\tID            string            `json:\"id\"`\n\tAmount        int64             `json:\"amount\"`\n\tCurrency      string            `json:\"currency\"`\n\tChargeID      string            `json:\"charge\"`\n\tStatus        string            `json:\"status\"`\n\tReason        string            `json:\"reason\"`\n\tFailureReason string            `json:\"failure_reason\"`\n\tMetadata      map[string]string `json:\"metadata\"`\n}",
       "type RepriceBatchResult struct {\n\tBatchID   uuid.UUID         `json:\"batch_id\"`\n\tToPriceID openrails.PriceID `json:\"to_price_id\"`\n\tMatched   int               `json:\"matched\"`\n\tScheduled []RepriceOutcome  `json:\"scheduled\"`\n\tSkipped   []RepriceOutcome  `json:\"skipped\"`\n}",
       "type RepriceBatchView struct {\n\tID                     uuid.UUID          `json:\"id\"`\n\tMerchantID             uuid.UUID          `json:\"merchant_id\"`\n\tPriceKey               *string            `json:\"price_key,omitempty\"`\n\tToPriceID              openrails.PriceID  `json:\"to_price_id\"`\n\tSourcePriceID          *openrails.PriceID `json:\"source_price_id,omitempty\"`\n\tEffectiveAt            time.Time          `json:\"effective_at\"`\n\tKind                   models.RepriceKind `json:\"kind\"`\n\tFallbackPolicy         string             `json:\"fallback_policy,omitempty\"`\n\tSubscriptionsMatched   int                `json:\"subscriptions_matched\"`\n\tSubscriptionsScheduled int                `json:\"subscriptions_scheduled\"`\n\tSubscriptionsSkipped   int                `json:\"subscriptions_skipped\"`\n\tSubscriptionsBlocked   int                `json:\"subscriptions_blocked\"`\n\tCreatedAt              time.Time          `json:\"created_at\"`\n}",
@@ -1312,7 +1314,8 @@
       "type FleetSnapshot struct {\n\tWindowDays int                    `json:\"window_days\"`\n\tMerchants  FleetMerchantFunnel    `json:\"merchants\"`\n\tRevenue    []FleetCurrencyRevenue `json:\"revenue\"`\n\tRails      []FleetRailHealth      `json:\"rails\"`\n\tMRR        []FleetMRR             `json:\"mrr\"`\n}",
       "type FleetWeeklyPoint struct {\n\tWeekStart              time.Time `json:\"week_start\"`\n\tNewMerchants           int64     `json:\"new_merchants\"`\n\tActiveMerchants        int64     `json:\"active_merchants\"`\n\tCancelledSubscriptions int64     `json:\"cancelled_subscriptions\"`\n}",
       "type FleetWeeklyVolume struct {\n\tWeekStart     time.Time `json:\"week_start\"`\n\tCurrency      string    `json:\"currency\"`\n\tPayments      int64     `json:\"payments\"`\n\tSettledAmount int64     `json:\"settled_amount_micros,string\"`\n}",
-      "type MerchantRef struct {\n\tID          merchant.ID `json:\"id\"`\n\tSlug        string      `json:\"slug\"`\n\tDisplayName string      `json:\"display_name,omitempty\"`\n}"
+      "type MerchantRef struct {\n\tID          merchant.ID `json:\"id\"`\n\tSlug        string      `json:\"slug\"`\n\tDisplayName string      `json:\"display_name,omitempty\"`\n}",
+      "type ProviderAccountCutoverReport struct {\n\tSubscriptionID uuid.UUID                  `json:\"subscription_id\"`\n\tSourcePSPID    uuid.UUID                  `json:\"source_psp_id\"`\n\tTargetPSPID    uuid.UUID                  `json:\"target_psp_id\"`\n\tPlan           ProviderAccountCutoverPlan `json:\"plan\"`\n}"
     ],
     "internal/reconcile": [
       "type Capabilities struct {\n\tSubscriptions bool `json:\"subscriptions\"`\n\tTransactions  bool `json:\"transactions\"`\n\tRefunds       bool `json:\"refunds\"`\n\tChargebacks   bool `json:\"chargebacks\"`\n\tVault         bool `json:\"vault\"`\n}",
@@ -1521,8 +1524,7 @@
       "http": "net/http",
       "merchant": "github.com/open-rails/openrails/pkg/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "operator": "github.com/open-rails/openrails/internal/operator",
-      "uuid": "github.com/google/uuid"
+      "operator": "github.com/open-rails/openrails/internal/operator"
     },
     "embed/embed.go": {
       "app": "github.com/open-rails/openrails/internal/app",
@@ -2422,7 +2424,8 @@
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
       "time": "time",
-      "uuid": "github.com/google/uuid"
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/intents/refund.go": {
       "ccbill": "github.com/open-rails/openrails/internal/integrations/ccbill",
@@ -3242,6 +3245,10 @@
       "time": "time",
       "uuid": "github.com/google/uuid"
     },
+    "internal/modules/subscriptions/provider_account_cutover.go": {
+      "errors": "errors",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/modules/subscriptions/reprice_types.go": {
       "errors": "errors",
       "fmt": "fmt",
@@ -3446,6 +3453,17 @@
       "context": "context",
       "fmt": "fmt",
       "merchant": "github.com/open-rails/openrails/pkg/merchant"
+    },
+    "internal/operator/provider_account_cutover.go": {
+      "app": "github.com/open-rails/openrails/internal/app",
+      "context": "context",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "merchant": "github.com/open-rails/openrails/pkg/merchant",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "uuid": "github.com/google/uuid",
+      "v5": "github.com/jackc/pgx/v5"
     },
     "internal/reconcile/converge/converge_passes.go": {
       "context": "context",
@@ -4054,7 +4072,7 @@
   },
   "boundary_sources_sha256": {
     "embed/authkit/authkit.go": "05aeab359a5540dc96f204a0c72cc993023817c2a66af6dd0b362bb002026944",
-    "embed/controlplane/controlplane.go": "0db6c276017ed19dde9fb9a7eb588346bbe3cbe93acc94328d4ec88657fb9381",
+    "embed/controlplane/controlplane.go": "85d3ca4dd3d8bb7d122d0d932b51c2de30fe9531912ac2bdc9d58dc7164ac43a",
     "embed/mount.go": "29f5b5b630d51b748508c0c05da518bd8f00978171f2ed14c7227e72f8428e40",
     "errors.go": "bea224812329fcb558d6b087b3a524107ce5d939d16b303b99354d35a6397d55",
     "examples/embedded/main.go": "0d5564988f72131da7d58c0f74a9455aff56054257d12dd65fd858e07437ea0b",
@@ -4124,7 +4142,7 @@
     "internal/http/handlers/merchant_checkout_routing.go": "668b5de7b8df37cc47341d23acbf20c3404ff7362983e17c7fb2d29d5fc0f642",
     "internal/http/handlers/merchant_dashboard.go": "d84d744e7912464be18ca92efc27911e812d78bc9c440c174819989efa8a6b46",
     "internal/http/handlers/merchant_metrics.go": "27343ed2bcd9d1307a863f8cbdf3272dbefecc4e5a81c35ab0b93261da9169b8",
-    "internal/http/handlers/merchant_payment_providers.go": "1d5159053c610d68ff24523d6b1095382d841698d9e26efa08ae582860fbf73e",
+    "internal/http/handlers/merchant_payment_providers.go": "2e15b3bce450da1a2a00c8be95a09269c9037ef41393201af5663837d82f43a7",
     "internal/http/handlers/merchant_team.go": "48cff76896e2e525ef1ebee703a2cc8e7f13af8465d96f841efa511e352a5051",
     "internal/http/handlers/notifications.go": "cbe78cc46be5df85b4ca6e5a8b765dfcb16f2b0decdb796c1b9430fe082f5284",
     "internal/http/handlers/payment_api.go": "3ef439eecadfad218b6df203d579afedec40bed4d0c77a7ac079f0cf4a89413d",
@@ -4149,7 +4167,7 @@
     "internal/http/handlers/solana_supported_tokens.go": "a8261bfa4f50f65252624ca13c68d6a71841dffeb958c15d578c2eaf18a89e00",
     "internal/http/handlers/subscription_lifecycle.go": "706a8987b03dfcffc14009d67cebbdc2d812facd12c6df9049f9b282bd576ca0",
     "internal/http/handlers/subscription_view.go": "f461c56122e6b9bf39203dd0dcede6fc589229d3b06293216447ea76789b1f30",
-    "internal/http/handlers/update_subscription_payment_method.go": "c4ccaf670e82a7af0071c5a27fabd6115f910f7b420af381f7a5b0a78cc612c7",
+    "internal/http/handlers/update_subscription_payment_method.go": "eff94f7c61bde618babde2ef352002764aa4aa0a41fcfca2795b2a9bdef4eaa8",
     "internal/http/handlers/user_payments.go": "0ecaca5883e5176b240dc03a513f2dc4afa483ea2200cf31e7bd6844cab21063",
     "internal/http/handlers/user_subscriptions.go": "1f07749899b2b038a8b2f33d946d2234bffce79338a925b3570340ac49798070",
     "internal/http/handlers/webhook.go": "85f68ab2d7a506f8a920148a23adb9025b03a731bff3ecc30809be56e6905287",
@@ -4165,7 +4183,7 @@
     "internal/http/router/mux.go": "d2ebb1886749d56fc464d5c61dd1c999fbbecc3c998cf299c2d78b1b79f75a74",
     "internal/http/router/router.go": "30ddebbb8d3b25bfcaf1c33d9fc62537599e50f965bd063e7f577a3fadf225b9",
     "internal/http/routes/platform.go": "91ee70c261cd3c5a0685f996a7c225e771263405ede2267fed07dc08bab263f3",
-    "internal/http/routes/routes.go": "c597482041ef285e6dac876fb618d60f50a6490f768175868ba45c1681bff1a9",
+    "internal/http/routes/routes.go": "3f77c1aba4949bde844eaafb064348c3b08cbae10ea5bf4dce3721812f0f5dac",
     "internal/http/routes/self.go": "537150e58931a4e4c2c82cf9964662912b319dfb490af00bb910f5ff07c4da88",
     "internal/http/routes_admin.go": "2a4f430108673678e70adaefc77391cda012c6467fca5864e4bf0ef6a7b4ff28",
     "internal/http/routes_admin_console.go": "7a75f06fe018140696a6af193b8b7a51d564ef271535aa4ad82d0cc141068c27",
