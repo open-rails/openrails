@@ -11,8 +11,8 @@ import (
 
 func TestNewHostedCheckoutPlanStampsRegistryScale(t *testing.T) {
 	hours := 720
-	product := &CatalogProduct{ID: uuid.New(), DisplayName: "Premium"}
-	price := &CatalogPrice{ID: uuid.New(), UnitAmount: math.MaxInt64, Currency: "jpy", AccessDurationHours: &hours, AutoRenew: true}
+	product := &CatalogProduct{ID: ProductID(uuid.New()), DisplayName: "Premium"}
+	price := &CatalogPrice{ID: PriceID(uuid.New()), UnitAmount: math.MaxInt64, Currency: "jpy", AccessDurationHours: &hours, AutoRenew: true}
 	plan, err := NewHostedCheckoutPlan(product, price)
 	if err != nil {
 		t.Fatal(err)

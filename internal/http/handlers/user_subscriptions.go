@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
@@ -70,11 +70,12 @@ func GetSubscription(r *httprequest.Request) {
 		return
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	subscription, err := r.State.UserSubscriptionService.GetUserSubscriptionByID(r.Request.Context(), user.ID, subscriptionID)
 	if err != nil {

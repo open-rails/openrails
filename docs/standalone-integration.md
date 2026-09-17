@@ -171,7 +171,7 @@ if err := client.Verify(ctx); err != nil { // authenticated boot probe
 }
 
 verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-    CustomerID:      customerID,
+    CustomerID:      openrails.CustomerID(customerID), // the host's subject UUID
     Invoker:         userID,
     EstimatedAmount: 50_000,    // native units (USD: micros)
     ExpiresAt:       &deadline, // required with a hold: the job's deadline
@@ -192,8 +192,10 @@ remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
 `ErrPaymentRefused` (402 `card_declined` / `payment_method_stale`),
 `ErrInternal`, and `ErrUnreachable` — which wraps transport failures,
 timeouts, and 5xx. Every server error is a `*StatusError` carrying the HTTP
-status and wire code/message ([api/errors.md](api/errors.md)). A blank, whitespace or dot identifier (or a zero UUID)
-is refused by the Client before any request with the same `400 invalid_param`
+status and wire code/message ([api/errors.md](api/errors.md)). Identifiers are typed (`openrails.CustomerID`,
+`ProductID`, `PriceID`, `SubscriptionID`, `PaymentID`, `PaymentMethodID`,
+`CheckoutSessionID`): a zero id, or a blank, whitespace or dot key, is refused
+by the Client before any request with the same `400 invalid_param`
 `StatusError` the server returns for a malformed identifier, so embedded and
 remote callers observe one error.
 

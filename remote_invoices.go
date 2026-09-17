@@ -13,7 +13,7 @@ import (
 
 func (c *Client) ListMerchantInvoices(ctx context.Context, filter MerchantInvoiceFilter, limit, offset int) ([]MerchantInvoiceDTO, int64, error) {
 	q := url.Values{"limit": {strconv.Itoa(limit)}, "offset": {strconv.Itoa(offset)}}
-	if filter.CustomerID != nil {
+	if !filter.CustomerID.IsZero() {
 		q.Set("customer_id", filter.CustomerID.String())
 	}
 	if filter.Currency != nil {
@@ -122,7 +122,7 @@ func (c *Client) ListInvoicePaymentAttempts(ctx context.Context, id uuid.UUID, l
 	return out.Items, out.Total, nil
 }
 
-func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID string) (*InvoiceProfileDTO, error) {
+func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID CustomerID) (*InvoiceProfileDTO, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -136,7 +136,7 @@ func (c *Client) GetCustomerInvoiceProfile(ctx context.Context, customerID strin
 	return out.Profile, nil
 }
 
-func (c *Client) SetCustomerInvoiceProfile(ctx context.Context, customerID string, profile InvoiceProfileDTO) error {
+func (c *Client) SetCustomerInvoiceProfile(ctx context.Context, customerID CustomerID, profile InvoiceProfileDTO) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
@@ -146,7 +146,7 @@ func (c *Client) SetCustomerInvoiceProfile(ctx context.Context, customerID strin
 
 // EnsureCustomerInvoiceProfile installs defaults only when no profile exists.
 // A concurrent operator update is never overwritten.
-func (c *Client) EnsureCustomerInvoiceProfile(ctx context.Context, customerID string, profile InvoiceProfileDTO) (bool, error) {
+func (c *Client) EnsureCustomerInvoiceProfile(ctx context.Context, customerID CustomerID, profile InvoiceProfileDTO) (bool, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return false, err

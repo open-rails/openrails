@@ -86,8 +86,8 @@ export function PaymentDetailPage() {
         <div className="ml-auto">
           <RefundDialog
             payment={payment}
-            customerId={payment.user.replace(/^usr_/, "")}
-            subscriptionId={payment.subscription?.replace(/^sub_/, "")}
+            customerId={payment.customer_id}
+            subscriptionId={payment.subscription_id}
             disabled={!refundable}
             disabledNote={railRefundNote}
           />
@@ -106,18 +106,18 @@ export function PaymentDetailPage() {
         <Fact label="Customer">
           <Link
             className="text-xs underline-offset-2 hover:underline"
-            to={`/customers/${payment.user.replace(/^usr_/, "")}`}
+            to={`/customers/${payment.customer_id}`}
           >
-            {shortId(payment.user, 16)}
+            {shortId(payment.customer_id, 16)}
           </Link>
         </Fact>
         <Fact label="Subscription">
-          {payment.subscription ? (
+          {payment.subscription_id ? (
             <Link
               className="text-xs underline-offset-2 hover:underline"
-              to={`/subscriptions/${payment.subscription.replace(/^sub_/, "")}`}
+              to={`/subscriptions/${payment.subscription_id}`}
             >
-              {shortId(payment.subscription, 16)}
+              {shortId(payment.subscription_id, 16)}
             </Link>
           ) : (
             "—"

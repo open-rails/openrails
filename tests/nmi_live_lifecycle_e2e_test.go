@@ -36,6 +36,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -110,10 +112,10 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 
 	// 5. One-off checkout charging the saved vault, through the HTTP API.
 	oneOffResp := postSelfCheckout(t, oneOffRouter, map[string]any{
-		"price_id": oneOff.ID.String(),
+		"price_id": openrails.PriceID(oneOff.ID).String(),
 		"mode":     "one_off",
 		"metadata": map[string]string{"e2e_run_id": runID},
-		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": oneOffPM.ID.String()},
+		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": openrails.PaymentMethodID(oneOffPM.ID).String()},
 	})
 	require.Equal(t, "succeeded", oneOffResp.Status, "one-off checkout should be immediately approved by NMI: %+v", oneOffResp)
 	require.NotEmpty(t, oneOffResp.Payment.TransactionID, "one-off should carry an NMI transaction id")
@@ -124,10 +126,10 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 
 	// 6. Subscription checkout with the same vault (separate customer).
 	subResp := postSelfCheckout(t, subRouter, map[string]any{
-		"price_id": recurring.ID.String(),
+		"price_id": openrails.PriceID(recurring.ID).String(),
 		"mode":     "subscription",
 		"metadata": map[string]string{"e2e_run_id": runID},
-		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": subPM.ID.String()},
+		"payment":  map[string]any{"rail": nmiE2EProvider, "payment_method_id": openrails.PaymentMethodID(subPM.ID).String()},
 	})
 	require.Contains(t, []string{"succeeded", "pending"}, subResp.Status, "subscription checkout status: %+v", subResp)
 	require.NotEmpty(t, subResp.SubscriptionID, "subscription checkout should return a subscription id")
@@ -153,7 +155,7 @@ func TestNMILiveLifecycleE2E(t *testing.T) {
 
 	// 9. Cancel through the HTTP API. Cancellation is async (enqueues a River job
 	// that calls NMI and flips the local status), so poll for the terminal state.
-	wc := doHostSeamSelf(subRouter, http.MethodPost, "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", `{"feedback":"nmi live e2e cancel"}`)
+	wc := doHostSeamSelf(subRouter, http.MethodPost, "/v1/me/subscriptions/"+openrails.SubscriptionID(sub.ID).String()+"/cancel", `{"feedback":"nmi live e2e cancel"}`)
 	require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, wc.Code, "cancel should be accepted: %s", wc.Body.String())
 	requireSubscriptionStatus(t, suite, sub.ID, models.StatusCancelled, 90*time.Second)
 	t.Logf("== PASS live NMI lifecycle E2E (run %s) ==", runID)

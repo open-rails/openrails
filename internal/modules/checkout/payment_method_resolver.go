@@ -7,11 +7,11 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 type CheckoutPaymentMethodResolver struct {
@@ -34,12 +34,12 @@ func NewCheckoutPaymentMethodResolver(paymentMethodService *paymentmethods.Payme
 // for pre-#682 rows that never recorded one.
 func (s *CheckoutPaymentMethodResolver) ResolvePaymentMethod(ctx context.Context, req *CheckoutRequest, user *UserIdentity, target railTarget) (railCustomerRef, billingID string, pm *models.PaymentMethod, created bool, err error) {
 	if req.PaymentMethodID != "" {
-		pmID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
-		if err != nil {
+		pmID, err := openrails.ParsePaymentMethodID(req.PaymentMethodID)
+		if err != nil || pmID.IsZero() {
 			return "", "", nil, false, fmt.Errorf("invalid payment_method_id: %w", err)
 		}
 
-		pm, err := s.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pmID, user.ID)
+		pm, err := s.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pmID.UUID(), user.ID)
 		if err != nil {
 			if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) || errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied) {
 				return "", "", nil, false, fmt.Errorf("%w: %w", ErrPaymentMethodStale, err)

@@ -35,7 +35,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			_, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "owner", Currency: "USD", Amount: 1000, Source: "fixture", SourceID: uuid.NewString()})
 			require.NoError(t, err)
 			deadline := time.Now().Add(time.Hour)
-			in := openrails.AdmitRequest{CustomerID: payer.String(), Invoker: "original", InvokerType: openrails.InvokerTypePayer,
+			in := openrails.AdmitRequest{CustomerID: openrails.CustomerID(payer), Invoker: "original", InvokerType: openrails.InvokerTypePayer,
 				Currency: "USD", EstimatedAmount: 200, RequestID: ".", ExpiresAt: &deadline}
 			admit := func(in openrails.AdmitRequest) openrails.AdmitBatchVerdict {
 				t.Helper()
@@ -81,7 +81,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 				Dimensions: map[string]int64{"tokens": 7}, Metadata: map[string]any{"availability_tier": "paid"}}
 			captured, err := client.Capture(ctx, in.RequestID, 500, &usage)
 			require.NoError(t, err)
-			require.Equal(t, payer.UUID(), captured.CustomerID)
+			require.Equal(t, openrails.CustomerID(payer), captured.CustomerID)
 			require.Equal(t, "USD", captured.Currency)
 			require.EqualValues(t, 500, captured.Amount)
 			require.NotNil(t, captured.LedgerTransferID)
@@ -107,7 +107,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			}
 			_, err = client.Capture(ctx, in.RequestID, 500, nil)
 			require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
-			rollup, err := client.UsageRollup(ctx, payer.String(), "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "invoker")
+			rollup, err := client.UsageRollup(ctx, openrails.CustomerID(payer), "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "invoker")
 			require.NoError(t, err)
 			require.Len(t, rollup, 1)
 			require.Equal(t, "original", rollup[0].Key)
@@ -119,7 +119,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			require.True(t, terminal.Result.Replayed)
 			require.Equal(t, "captured", terminal.Result.State)
 			require.ErrorIs(t, client.Release(ctx, in.RequestID), openrails.ErrConflict)
-			balance, err := client.GetCreditAccount(ctx, payer.String(), "USD")
+			balance, err := client.GetCreditAccount(ctx, openrails.CustomerID(payer), "USD")
 			require.NoError(t, err)
 			require.EqualValues(t, 500, balance.BalanceAmount)
 			require.Zero(t, balance.HeldAmount)
@@ -131,7 +131,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			require.True(t, admit(in).Allowed())
 			_, err = client.Capture(ctx, in.RequestID, 50, &usage)
 			require.ErrorIs(t, err, openrails.ErrIdempotencyKeyReused)
-			balance, err = client.GetCreditAccount(ctx, payer.String(), "USD")
+			balance, err = client.GetCreditAccount(ctx, openrails.CustomerID(payer), "USD")
 			require.NoError(t, err)
 			require.EqualValues(t, 500, balance.BalanceAmount)
 			require.EqualValues(t, 100, balance.HeldAmount)
@@ -156,7 +156,7 @@ func TestAdmissionClientRecoveryAndCaptureReceipt(t *testing.T) {
 			require.NoError(t, err)
 			free.Replayed = true
 			require.Equal(t, free, freeReplay)
-			rollup, err = client.UsageRollup(ctx, payer.String(), "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "invoker")
+			rollup, err = client.UsageRollup(ctx, openrails.CustomerID(payer), "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "invoker")
 			require.NoError(t, err)
 			require.Len(t, rollup, 1)
 			require.EqualValues(t, 3, rollup[0].EventCount, "free completion records usage without a fake transfer")

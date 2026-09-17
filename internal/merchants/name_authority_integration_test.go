@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/billingimport"
@@ -140,7 +141,7 @@ func TestAliveMerchantKeepsIdentityAfterNameReclaim(t *testing.T) {
 	require.NotContains(t, reclaimedCatalog.String(), "Original catalog")
 	importedCustomer := uuid.New()
 	_, err = billingimport.Import(ctx, billingimport.Options{PGXPool: pool, MerchantID: first.ID,
-		Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(), Customers: []billingimport.DeclaredCustomer{{Customer: importedCustomer}}},
+		Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(), Customers: []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(importedCustomer)}}},
 	})
 	require.NoError(t, err)
 	var importedOwner uuid.UUID

@@ -39,8 +39,9 @@ func (s *Service) ListHostEvents(ctx context.Context, options openrails.HostEven
 		options.Limit = 100
 	}
 	var paymentID *uuid.UUID
-	if options.PaymentID != uuid.Nil {
-		paymentID = &options.PaymentID
+	if !options.PaymentID.IsZero() {
+		id := options.PaymentID.UUID()
+		paymentID = &id
 	}
 	rows, err := s.rt.DB.Gen(ctx).ListHostEvents(ctx, gen.ListHostEventsParams{
 		MerchantID: mid.UUID(), EventType: string(options.Type), PaymentID: paymentID,
@@ -58,8 +59,12 @@ func (s *Service) ListHostEvents(ctx context.Context, options openrails.HostEven
 			if row.PaymentID == nil || row.Amount == nil || row.PaymentCustomerID == nil || row.PaymentPriceID == nil {
 				return nil, fmt.Errorf("host event %s has incomplete payment payload", row.ID)
 			}
-			event.Payment = &openrails.PaymentSettledEvent{PaymentID: *row.PaymentID, CustomerID: *row.PaymentCustomerID,
-				PriceID: *row.PaymentPriceID, SubscriptionID: row.PaymentSubscriptionID, Amount: *row.Amount, Currency: row.Currency}
+			event.Payment = &openrails.PaymentSettledEvent{PaymentID: openrails.PaymentID(*row.PaymentID), CustomerID: openrails.CustomerID(*row.PaymentCustomerID),
+				PriceID: openrails.PriceID(*row.PaymentPriceID), Amount: *row.Amount, Currency: row.Currency}
+			if row.PaymentSubscriptionID != nil {
+				subscriptionID := openrails.SubscriptionID(*row.PaymentSubscriptionID)
+				event.Payment.SubscriptionID = &subscriptionID
+			}
 		case openrails.HostEventDelinquencyGrace, openrails.HostEventDelinquencyEntered, openrails.HostEventDelinquencyCleared:
 			// Storage predates the public wire DTO and stores money as JSON
 			// integers. Decode those fields explicitly before the Client emits
@@ -72,7 +77,7 @@ func (s *Service) ListHostEvents(ctx context.Context, options openrails.HostEven
 			if err := json.Unmarshal(row.Data, &payload); err != nil {
 				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
 			}
-			payload.CustomerID = row.SubjectID
+			payload.CustomerID = openrails.CustomerID(row.SubjectID)
 			payload.Currency = row.Currency
 			payload.DelinquencyHostEvent.OverdueAmount = payload.OverdueAmount
 			payload.DelinquencyHostEvent.AmountFloor = payload.AmountFloor

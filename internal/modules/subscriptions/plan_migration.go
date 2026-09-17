@@ -238,7 +238,7 @@ func (s *PlanMigrationService) classify(ctx context.Context, req *PlanMigrationR
 		return byRail[key]
 	}
 	for _, sub := range cohort {
-		out := PlanMigrationOutcome{SubscriptionID: sub.ID, Rail: string(sub.Rail)}
+		out := PlanMigrationOutcome{SubscriptionID: openrails.SubscriptionID(sub.ID), Rail: string(sub.Rail)}
 		capability := s.classifyMigrationCapability(ctx, sub)
 		switch {
 		case sub.PriceID == target.ID:
@@ -312,8 +312,8 @@ func (s *PlanMigrationService) Preview(ctx context.Context, req PlanMigrationReq
 		return nil, err
 	}
 	res := &PlanMigrationResult{
-		SourcePriceID:  source.ID,
-		TargetPriceID:  target.ID,
+		SourcePriceID:  openrails.PriceID(source.ID),
+		TargetPriceID:  openrails.PriceID(target.ID),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -357,8 +357,8 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 	}
 
 	res := &PlanMigrationResult{
-		SourcePriceID:  source.ID,
-		TargetPriceID:  target.ID,
+		SourcePriceID:  openrails.PriceID(source.ID),
+		TargetPriceID:  openrails.PriceID(target.ID),
 		EffectiveAt:    req.EffectiveAt,
 		FallbackPolicy: fallback,
 		Matched:        len(cohort),
@@ -388,7 +388,7 @@ func (s *PlanMigrationService) Migrate(ctx context.Context, req PlanMigrationReq
 
 	for i := range outcomes {
 		o := &outcomes[i]
-		sub := subByID[o.SubscriptionID]
+		sub := subByID[o.SubscriptionID.UUID()]
 		switch o.Disposition {
 		case "blocked":
 			row, berr := s.reprice.repo.CreateBlockedReprice(ctx, sub.ID, sub.PriceID, target.ID, req.EffectiveAt, &batchID, models.RepriceKindPlanChange, o.Reason)
@@ -635,7 +635,7 @@ func (s *PlanMigrationService) CancelBatch(ctx context.Context, batchID uuid.UUI
 		// that this cancel does not release.
 		if row.Kind == models.RepriceKindPlanChange {
 			if sub, serr := s.reprice.subscriptions.GetByID(ctx, row.SubscriptionID); serr == nil && sub != nil && sub.Rail == models.RailStripe {
-				res.RailReleaseRequired = append(res.RailReleaseRequired, row.SubscriptionID)
+				res.RailReleaseRequired = append(res.RailReleaseRequired, openrails.SubscriptionID(row.SubscriptionID))
 			}
 		}
 	}

@@ -66,12 +66,12 @@ func ListAdminInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 		}
 		filter := billingservice.MerchantInvoiceFilter{}
 		if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
-			id, err := uuid.Parse(raw)
-			if err != nil || id == uuid.Nil {
+			id, err := openrails.ParseCustomerID(raw)
+			if err != nil || id.IsZero() {
 				r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 				return
 			}
-			filter.CustomerID = &id
+			filter.CustomerID = id
 		}
 		if raw := strings.ToUpper(strings.TrimSpace(r.Query("currency"))); raw != "" {
 			if err := money.RequireBillingCurrency(raw); err != nil {
@@ -228,13 +228,13 @@ func RetryAdminInvoiceCollection(r *httprequest.Request) {
 		return
 	}
 	var body struct {
-		PaymentMethodID uuid.UUID `json:"payment_method_id"`
+		PaymentMethodID openrails.PaymentMethodID `json:"payment_method_id"`
 	}
 	if !r.BindJSON(&body) {
 		return
 	}
 	key := strings.TrimSpace(r.Request.Header.Get("Idempotency-Key"))
-	if body.PaymentMethodID == uuid.Nil || key == "" || len(key) > 255 {
+	if body.PaymentMethodID.IsZero() || key == "" || len(key) > 255 {
 		r.ErrorJSON(http.StatusBadRequest, "payment_method_id and Idempotency-Key (1–255 bytes) are required")
 		return
 	}

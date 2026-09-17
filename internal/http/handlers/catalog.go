@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -74,11 +75,12 @@ func GetPrices(r *httprequest.Request) {
 	filter.Archived = &archived
 
 	if req.Product != "" {
-		productID, err := api.ParseProductID(req.Product)
-		if err != nil {
+		id, err := openrails.ParseProductID(req.Product)
+		if err != nil || id.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "Invalid product ID format")
 			return
 		}
+		productID := id.UUID()
 		filter.ProductID = &productID
 	}
 

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -90,32 +91,32 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		AsOf:       asOf,
 		DefaultPSP: defaultNMIPSP,
 		Customers: []billingimport.DeclaredCustomer{
-			{Customer: cRunway}, {Customer: cDunning}, {Customer: cLapsed}, {Customer: cUser},
-			{Customer: cUserNMI}, {Customer: cChargeback}, {Customer: cParked}, {Customer: cIncr},
+			{Customer: openrails.CustomerID(cRunway)}, {Customer: openrails.CustomerID(cDunning)}, {Customer: openrails.CustomerID(cLapsed)}, {Customer: openrails.CustomerID(cUser)},
+			{Customer: openrails.CustomerID(cUserNMI)}, {Customer: openrails.CustomerID(cChargeback)}, {Customer: openrails.CustomerID(cParked)}, {Customer: openrails.CustomerID(cIncr)},
 		},
 		PaymentMethods: []billingimport.DeclaredPaymentMethod{{
-			Customer: cDunning, Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: "",
+			Customer: openrails.CustomerID(cDunning), Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: "",
 			InitialTransactionID: "itx-" + sfx, LastFour: "4242",
 		}},
 		Subscriptions: []billingimport.DeclaredSubscription{
 			{
-				SourceID: "runway", Customer: cRunway, Price: price, Rail: "nmi",
+				SourceID: "runway", Customer: openrails.CustomerID(cRunway), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-runway-" + sfx, StartedAt: asOf.Add(-100 * day), PaidThrough: &paidRunway,
 			},
 			{
-				SourceID: "dunning", Customer: cDunning, Price: price, Rail: "nmi",
+				SourceID: "dunning", Customer: openrails.CustomerID(cDunning), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-dunning-" + sfx, StartedAt: asOf.Add(-200 * day), PaidThrough: &paidDunning,
 				Dunning:       &billingimport.DunningEvidence{Retries: 2, LastRetryAt: &lastRetryAt, ScheduleLive: true},
 				PaymentMethod: &billingimport.PaymentMethodRef{Rail: "nmi", RailCustomerRef: "vault-" + sfx, RailMethodRef: ""},
 				Evidence:      json.RawMessage(`{"legacy_source":"subscriptions","legacy_id":42}`),
 			},
 			{
-				SourceID: "lapsed", Customer: cLapsed, Price: price, Rail: "nmi",
+				SourceID: "lapsed", Customer: openrails.CustomerID(cLapsed), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-lapsed-" + sfx, StartedAt: asOf.Add(-3 * 365 * day), PaidThrough: &lapsedAt,
 				Cancel: billingimport.CancelEvidence{Kind: "provider_terminated", At: lapsedAt},
 			},
 			{
-				SourceID: "usercancel", Customer: cUser, Price: price, Rail: "ccbill",
+				SourceID: "usercancel", Customer: openrails.CustomerID(cUser), Price: openrails.PriceID(price), Rail: "ccbill",
 				RailSubscriptionID: "sub-user-" + sfx, StartedAt: asOf.Add(-90 * day), PaidThrough: &userPaidThrough,
 				PSP:    ccbillPSPRef,
 				Cancel: billingimport.CancelEvidence{Kind: "user_cancelled", At: userCancelAt},
@@ -124,24 +125,24 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 				// Explicit user cancel on NMI whose legacy schedule was NOT
 				// confirmed dead at AsOf: the import must arm the marker AND
 				// enqueue the real delete intent (no boot-sweep reliance).
-				SourceID: "usercancel-nmi-live", Customer: cUserNMI, Price: price, Rail: "nmi",
+				SourceID: "usercancel-nmi-live", Customer: openrails.CustomerID(cUserNMI), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-user-nmi-" + sfx, StartedAt: asOf.Add(-90 * day), PaidThrough: &userPaidThrough,
 				Cancel: billingimport.CancelEvidence{Kind: "user_cancelled", At: userCancelAt, ScheduleLive: true},
 			},
 			{
-				SourceID: "chargeback", Customer: cChargeback, Price: price, Rail: "nmi",
+				SourceID: "chargeback", Customer: openrails.CustomerID(cChargeback), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-cb-" + sfx, StartedAt: asOf.Add(-120 * day),
 				Cancel: billingimport.CancelEvidence{Kind: "chargeback", At: chargebackAt},
 			},
 			{
-				SourceID: "parked", Customer: cParked, Price: price, Rail: "nmi",
+				SourceID: "parked", Customer: openrails.CustomerID(cParked), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-parked-" + sfx, StartedAt: asOf.Add(-4 * 365 * day), PaidThrough: &parkedPaid,
 			},
 			{
 				// Task 2 fixture: active-with-runway at import #1, re-declared
 				// stalled (no explicit cancel evidence) in a LATER import (below) —
 				// exercises the incremental re-import terminal cancel.
-				SourceID: "incremental", Customer: cIncr, Price: price, Rail: "nmi",
+				SourceID: "incremental", Customer: openrails.CustomerID(cIncr), Price: openrails.PriceID(price), Rail: "nmi",
 				RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day), PaidThrough: &paidIncr,
 			},
 		},
@@ -297,7 +298,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		AsOf:       asOf,
 		DefaultPSP: ccbillPSPRef,
 		Subscriptions: []billingimport.DeclaredSubscription{{
-			SourceID: "twin", Customer: cRunway, Price: price, Rail: "ccbill",
+			SourceID: "twin", Customer: openrails.CustomerID(cRunway), Price: openrails.PriceID(price), Rail: "ccbill",
 			RailSubscriptionID: "sub-twin-" + sfx, StartedAt: asOf.Add(-50 * day), PaidThrough: &paidRunway,
 		}},
 	}
@@ -348,7 +349,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		AsOf:       asOf2,
 		DefaultPSP: defaultNMIPSP,
 		Subscriptions: []billingimport.DeclaredSubscription{{
-			SourceID: "incremental-restalled", Customer: cIncr, Price: price, Rail: "nmi",
+			SourceID: "incremental-restalled", Customer: openrails.CustomerID(cIncr), Price: openrails.PriceID(price), Rail: "nmi",
 			RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day),
 			Dunning: &billingimport.DunningEvidence{ScheduleLive: true},
 		}},
@@ -389,7 +390,7 @@ func TestImportBilling_DeclaredBookClassifiesAtAsOf(t *testing.T) {
 		AsOf:       asOf3,
 		DefaultPSP: defaultNMIPSP,
 		Subscriptions: []billingimport.DeclaredSubscription{{
-			SourceID: "incremental-terminated", Customer: cIncr, Price: price, Rail: "nmi",
+			SourceID: "incremental-terminated", Customer: openrails.CustomerID(cIncr), Price: openrails.PriceID(price), Rail: "nmi",
 			RailSubscriptionID: "sub-incr-" + sfx, StartedAt: asOf.Add(-60 * day),
 			Cancel: billingimport.CancelEvidence{Kind: "provider_terminated", At: asOf3},
 		}},
@@ -458,13 +459,13 @@ func TestImportBilling_RollsBackWholeBookOnInfrastructureError(t *testing.T) {
 	book := billingimport.DeclaredBilling{
 		AsOf:       asOf,
 		DefaultPSP: billingimport.PSPRef{Key: "nmi"},
-		Customers:  []billingimport.DeclaredCustomer{{Customer: customerID}},
+		Customers:  []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(customerID)}},
 		PaymentMethods: []billingimport.DeclaredPaymentMethod{{
-			Customer: customerID, Rail: "nmi", RailCustomerRef: vaultID,
+			Customer: openrails.CustomerID(customerID), Rail: "nmi", RailCustomerRef: vaultID,
 			InitialTransactionID: "atomic-initial-" + sfx,
 		}},
 		Subscriptions: []billingimport.DeclaredSubscription{{
-			SourceID: "atomic", Customer: customerID, Price: priceID, Rail: "nmi",
+			SourceID: "atomic", Customer: openrails.CustomerID(customerID), Price: openrails.PriceID(priceID), Rail: "nmi",
 			RailSubscriptionID: railSubID, StartedAt: asOf.Add(-30 * 24 * time.Hour),
 			Evidence: json.RawMessage(`{`),
 		}},
@@ -527,9 +528,9 @@ func TestImportBilling_RefusesPaymentMethodOwnerChange(t *testing.T) {
 		return billingimport.DeclaredBilling{
 			AsOf:       asOf,
 			DefaultPSP: billingimport.PSPRef{Key: "nmi"},
-			Customers:  []billingimport.DeclaredCustomer{{Customer: customer}},
+			Customers:  []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(customer)}},
 			PaymentMethods: []billingimport.DeclaredPaymentMethod{{
-				Customer: customer, Rail: "nmi", RailCustomerRef: vaultID,
+				Customer: openrails.CustomerID(customer), Rail: "nmi", RailCustomerRef: vaultID,
 				InitialTransactionID: "owned-initial-" + sfx,
 			}},
 		}

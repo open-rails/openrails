@@ -106,14 +106,14 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 			book := openrails.DeclaredBilling{
 				AsOf:       now,
 				DefaultPSP: openrails.PSPRef{Key: "ccbill"},
-				Customers:  []openrails.DeclaredCustomer{{Customer: subscriber}},
+				Customers:  []openrails.DeclaredCustomer{{Customer: openrails.CustomerID(subscriber)}},
 				Subscriptions: []openrails.DeclaredSubscription{{
-					SourceID: trial, Customer: subscriber, Price: price.ID, Rail: "ccbill", RailSubscriptionID: trial,
+					SourceID: trial, Customer: openrails.CustomerID(subscriber), Price: price.ID, Rail: "ccbill", RailSubscriptionID: trial,
 					StartedAt: now.Add(-time.Hour), PaidThrough: &end,
 				}},
 				AdminGrants: []openrails.DeclaredAdminGrant{
-					{Customer: comped, Product: product.ID, SourceID: source, StartsAt: now.Add(-time.Hour), EndsAt: &end},
-					{Customer: comped, Product: bare.ID, SourceID: source + "-nospec", StartsAt: now},
+					{Customer: openrails.CustomerID(comped), Product: product.ID, SourceID: source, StartsAt: now.Add(-time.Hour), EndsAt: &end},
+					{Customer: openrails.CustomerID(comped), Product: bare.ID, SourceID: source + "-nospec", StartsAt: now},
 				},
 			}
 			result, err := client.ImportBilling(ctx, book)
@@ -121,13 +121,13 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 			require.ElementsMatch(t, []string{source, trial}, result.Imported)
 			require.Equal(t, []string{source + "-nospec"}, result.Blocked)
 			require.Equal(t, "product has no entitlements_spec", result.Reasons[source+"-nospec"])
-			has, err := client.HasEntitlement(ctx, comped.String(), "premium", time.Time{})
+			has, err := client.HasEntitlement(ctx, openrails.CustomerID(comped), "premium", time.Time{})
 			require.NoError(t, err)
 			require.True(t, has, "the comp materialized its entitlement window")
-			subscriptions, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: subscriber.String()})
+			subscriptions, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: openrails.CustomerID(subscriber)})
 			require.NoError(t, err)
 			require.Len(t, subscriptions.Data, 1)
-			require.Equal(t, price.ID.String(), subscriptions.Data[0].Price.ID)
+			require.Equal(t, price.ID, subscriptions.Data[0].Price.ID)
 
 			replay, err := client.ImportBilling(ctx, book)
 			require.NoError(t, err)

@@ -102,8 +102,8 @@ func serviceAdmitBatchVerdicts(
 			out[i] = admitFailure(http.StatusBadRequest, "estimated_amount must be >= 0", "estimated_amount")
 			continue
 		}
-		payer, err := parseServiceCustomerID(item.CustomerID)
-		if err != nil || payer == nil {
+		payer := servicePayer(item.CustomerID)
+		if payer == nil {
 			out[i] = admitFailure(http.StatusBadRequest, "customer_id required", "customer_id")
 			continue
 		}
@@ -241,8 +241,8 @@ func ServiceReportWastedSpend(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
 		return
 	}
-	payer, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil || payer == nil {
+	payer := servicePayer(req.CustomerID)
+	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
@@ -297,8 +297,8 @@ func ServiceSetCreditLimit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "credit_limit_amount must be >= 0")
 		return
 	}
-	payer, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil || payer == nil {
+	payer := servicePayer(req.CustomerID)
+	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
@@ -347,7 +347,7 @@ func ServiceGetCreditLimit(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	r.SuccessJSON(openrails.CreditLimitRequest{CustomerID: payer.String(), Currency: currency, CreditLimitAmount: v})
+	r.SuccessJSON(openrails.CreditLimitRequest{CustomerID: openrails.CustomerID(*payer), Currency: currency, CreditLimitAmount: v})
 }
 
 // ServiceGetMerchantSettings returns the complete declarative policy document.

@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -113,8 +113,8 @@ func AdminListProducts(r *httprequest.Request) {
 }
 
 func AdminGetProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParseProductID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
 	}
@@ -149,8 +149,8 @@ func AdminGetProductByKey(r *httprequest.Request) {
 }
 
 func AdminUpdateProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParseProductID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
 	}
@@ -171,8 +171,8 @@ func AdminUpdateProduct(r *httprequest.Request) {
 }
 
 func AdminActivateProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParseProductID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
 	}
@@ -189,8 +189,8 @@ func AdminActivateProduct(r *httprequest.Request) {
 }
 
 func AdminDeactivateProduct(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParseProductID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product id")
 		return
 	}
@@ -235,12 +235,13 @@ func AdminListPrices(r *httprequest.Request) {
 		Type:     strings.TrimSpace(r.Query("type")),
 	}
 	if raw := strings.TrimSpace(r.Query("product_id")); raw != "" {
-		id, err := uuid.Parse(raw)
-		if err != nil || id == uuid.Nil {
+		id, err := openrails.ParseProductID(raw)
+		if err != nil || id.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid product_id")
 			return
 		}
-		filter.ProductID = &id
+		productID := id.UUID()
+		filter.ProductID = &productID
 	}
 	// archived=false lists live prices, archived=true archived ones; absent
 	// lists both.
@@ -259,8 +260,8 @@ func AdminListPrices(r *httprequest.Request) {
 }
 
 func AdminGetPrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParsePriceID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
 	}
@@ -274,7 +275,7 @@ func AdminGetPrice(r *httprequest.Request) {
 		return
 	}
 	if parseBool(r.Query("verify")) {
-		if states, vErr := svc.VerifyPriceSync(r.Request.Context(), id); vErr == nil && len(states) > 0 {
+		if states, vErr := svc.VerifyPriceSync(r.Request.Context(), id.UUID()); vErr == nil && len(states) > 0 {
 			out.Providers = states
 		}
 	}
@@ -282,8 +283,8 @@ func AdminGetPrice(r *httprequest.Request) {
 }
 
 func AdminUpdatePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParsePriceID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
 	}
@@ -304,8 +305,8 @@ func AdminUpdatePrice(r *httprequest.Request) {
 }
 
 func AdminActivatePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParsePriceID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
 	}
@@ -322,8 +323,8 @@ func AdminActivatePrice(r *httprequest.Request) {
 }
 
 func AdminDeactivatePrice(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParsePriceID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
 	}
@@ -394,8 +395,8 @@ type setPriceKeyRequest struct {
 // Service.SetPriceKey for the repoint semantics if the target key is already
 // held by another live row).
 func AdminSetPriceKey(r *httprequest.Request) {
-	id, err := uuid.Parse(strings.TrimSpace(r.Param("id")))
-	if err != nil || id == uuid.Nil {
+	id, err := openrails.ParsePriceID(r.Param("id"))
+	if err != nil || id.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price id")
 		return
 	}

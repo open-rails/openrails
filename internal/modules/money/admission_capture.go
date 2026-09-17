@@ -77,7 +77,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 				return err
 			}
 		}
-		receipt := &openrails.CaptureReceipt{RequestID: requestID, CustomerID: row.PayerID, Currency: row.Currency, Amount: amount, Replayed: replayed}
+		receipt := &openrails.CaptureReceipt{RequestID: requestID, CustomerID: openrails.CustomerID(row.PayerID), Currency: row.Currency, Amount: amount, Replayed: replayed}
 		if amount > 0 {
 			payer := identity.CustomerID(row.PayerID)
 			transaction, err := NewMoneyService(d, s.clock).CaptureAuthorized(ctx, SpendParams{

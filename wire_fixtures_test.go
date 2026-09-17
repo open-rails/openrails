@@ -45,8 +45,8 @@ func canonicalWireFixtures() map[string]any {
 		}},
 		"page_empty.json": Page[CreditTransaction]{Object: "list", Data: []CreditTransaction{}, Limit: 20},
 		"page_credit_transactions.json": Page[CreditTransaction]{Object: "list", Total: 2, Limit: 2, HasMore: false, Data: []CreditTransaction{
-			{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Invoker: "host", Currency: "USD", Amount: maxMoney, BalanceAfter: &maxMoney, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", SourceID: &sourceID, ExpiresAt: &when, CreatedAt: when, UpdatedAt: when},
-			{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), CustomerID: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Invoker: "host", Currency: "JPY", Amount: minMoney, BalanceAfter: &minMoney, TransactionType: "withdrawal", Status: "completed", Source: "operator", CreatedAt: when, UpdatedAt: when, Replayed: true},
+			{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Invoker: "host", Currency: "USD", Amount: maxMoney, BalanceAfter: &maxMoney, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", SourceID: &sourceID, ExpiresAt: &when, CreatedAt: when, UpdatedAt: when},
+			{ID: uuid.MustParse("33333333-3333-3333-3333-333333333333"), CustomerID: CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Invoker: "host", Currency: "JPY", Amount: minMoney, BalanceAfter: &minMoney, TransactionType: "withdrawal", Status: "completed", Source: "operator", CreatedAt: when, UpdatedAt: when, Replayed: true},
 		}},
 		"merchant_settings.json": MerchantSettings{
 			InvoiceCollectionThreshold: &maxMoney, ArrearsDelinquencyFloor: &zero,
@@ -74,8 +74,37 @@ func canonicalWireFixtures() map[string]any {
 			SuccessURL:   "https://merchant.example/thanks?checkout=ocs_fixture",
 			ExpiresAt:    when,
 		},
+		"subscription.json": Subscription{
+			ID: subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: "55555555-5555-5555-5555-555555555555",
+			Rail: "nmi", RailSubscriptionID: "rail-sub-1", Status: "active", ScheduledPriceID: &scheduledPriceFixture, PaymentMethodID: &methodFixture,
+			StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CreatedAt: when, UpdatedAt: when,
+			Price:    &SubscriptionPrice{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, Amount: maxMoney, Currency: "USD", AutoRenew: true},
+			Product:  &SubscriptionProduct{ID: productFixture, Key: "pro", DisplayName: "Pro"},
+			Payments: []SubscriptionPayment{{ID: paymentFixture, Status: "completed", Amount: maxMoney, Currency: "USD", Rail: "nmi", TransactionID: "txn-1", PurchasedAt: when}},
+		},
+		"catalog_price.json": CatalogPrice{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, CreatedAt: when, UpdatedAt: when},
+		"checkout_session.json": CheckoutSession{
+			ID: sessionFixture, Status: "succeeded", Mode: "subscription", PriceID: priceFixture, Amount: maxMoney, Currency: "USD", PaymentStatus: "paid",
+			SubscriptionID: &subscriptionFixture, PaymentID: &paymentFixture, ExpiresAt: &when, CreatedAt: when, Metadata: map[string]string{"plan": "pro"}, RailData: map[string]any{"rail": "nmi"},
+		},
+		"payment.json": Payment{
+			ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, AmountRefunded: zero, Currency: "USD", CustomerID: customerFixture,
+			SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, Created: 1789430400,
+			Price: &PublicPrice{ID: priceFixture, Key: "pro-monthly", Object: "price", UnitAmount: maxMoney, Currency: "USD", Type: "recurring", Product: productFixture, Active: true, Created: 1789430400},
+		},
 	}
 }
+
+var (
+	customerFixture       = CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222"))
+	productFixture        = ProductID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))
+	priceFixture          = PriceID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"))
+	scheduledPriceFixture = PriceID(uuid.MustParse("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc"))
+	subscriptionFixture   = SubscriptionID(uuid.MustParse("cccccccc-cccc-4ccc-8ccc-cccccccccccc"))
+	methodFixture         = PaymentMethodID(uuid.MustParse("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	paymentFixture        = PaymentID(uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
+	sessionFixture        = CheckoutSessionID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
+)
 
 func TestCanonicalWireFixtures(t *testing.T) {
 	for name, value := range canonicalWireFixtures() {

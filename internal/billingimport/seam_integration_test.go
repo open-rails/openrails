@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -87,7 +88,7 @@ func TestDeclaredAdminGrantThenConverge(t *testing.T) {
 		PGXPool:    pool,
 		MerchantID: dbtest.TestMerchantID,
 		Book: billingimport.DeclaredBilling{AsOf: time.Now().UTC(),
-			AdminGrants: []billingimport.DeclaredAdminGrant{{Customer: custAdmin, Product: prod, SourceID: adminSource, StartsAt: start, EndsAt: &end}}},
+			AdminGrants: []billingimport.DeclaredAdminGrant{{Customer: openrails.CustomerID(custAdmin), Product: openrails.ProductID(prod), SourceID: adminSource, StartsAt: start, EndsAt: &end}}},
 	})
 	require.NoError(t, err)
 	require.Equal(t, []string{adminSource}, res.Imported, "admin comp imported as a grant")

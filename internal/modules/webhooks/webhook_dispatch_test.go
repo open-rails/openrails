@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -124,7 +126,7 @@ func TestHandleStripeWebhookDispatchesCheckoutSessionEvents(t *testing.T) {
 	sessionID := uuid.New()
 	store := &recordingCheckoutSessionStore{}
 	svc := &StripeWebhookService{CheckoutSessionService: store}
-	obj := map[string]any{"metadata": map[string]string{"checkout_session_id": sessionID.String()}}
+	obj := map[string]any{"metadata": map[string]string{"checkout_session_id": openrails.CheckoutSessionID(sessionID).String()}}
 
 	require.NoError(t, svc.HandleStripeWebhook(context.Background(), stripeWebhookPayload(t, "checkout.session.async_payment_failed", obj)))
 	require.Equal(t, sessionID, store.failedID)

@@ -72,3 +72,38 @@ describe("canonical wire fixtures in the browser", () => {
     expect(empty.has_more).toBe(false)
   })
 })
+
+describe("typed ids on the wire", () => {
+  const prefixed = (prefix: string) =>
+    new RegExp(
+      `^${prefix}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    )
+
+  it("spell every prefixed kind with its prefix and customers as plain UUIDs", () => {
+    const sub = JSON.parse(fixture("subscription.json"))
+    expect(sub.id).toMatch(prefixed("sub_"))
+    expect(sub.customer_id).toMatch(prefixed(""))
+    expect(sub.product_id).toMatch(prefixed("prod_"))
+    expect(sub.price_id).toMatch(prefixed("price_"))
+    expect(sub.scheduled_price_id).toMatch(prefixed("price_"))
+    expect(sub.payment_method_id).toMatch(prefixed("pm_"))
+    expect(sub.payments[0].id).toMatch(prefixed("pay_"))
+    expect(sub.price.id).toBe(sub.price_id)
+    expect(sub.product.id).toBe(sub.product_id)
+
+    const price = JSON.parse(fixture("catalog_price.json"))
+    expect(price.id).toBe(sub.price_id)
+    expect(price.product_id).toBe(sub.product_id)
+
+    const session = JSON.parse(fixture("checkout_session.json"))
+    expect(session.id).toMatch(prefixed("cs_"))
+    expect(session.subscription_id).toBe(sub.id)
+    expect(session.payment_id).toBe(sub.payments[0].id)
+
+    const payment = JSON.parse(fixture("payment.json"))
+    expect(payment.id).toBe(sub.payments[0].id)
+    expect(payment.customer_id).toBe(sub.customer_id)
+    expect(payment.subscription_id).toBe(sub.id)
+    expect(payment.price.product).toBe(sub.product_id)
+  })
+})

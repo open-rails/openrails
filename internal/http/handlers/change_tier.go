@@ -2,15 +2,15 @@ package handlers
 
 import (
 	"errors"
-	"github.com/open-rails/openrails"
 	"net/http"
 	"strings"
+
+	"github.com/open-rails/openrails"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 type ChangeTierRequest = openrails.ChangeTierRequest
@@ -33,11 +33,12 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	if r.State.CheckoutService == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout service unavailable")
@@ -47,7 +48,7 @@ func ChangeTier(r *httprequest.Request) {
 	idempotencyKey := strings.TrimSpace(r.Header("Idempotency-Key"))
 
 	svcReq := &checkout.TierChangeRequest{
-		PriceID:        req.PriceID,
+		PriceID:        req.PriceID.String(),
 		SubscriptionID: subscriptionID,
 		IdempotencyKey: idempotencyKey,
 	}
@@ -83,11 +84,12 @@ func ChangeTierPreview(r *httprequest.Request) {
 		return
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	if r.State.CheckoutService == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout service unavailable")
@@ -95,7 +97,7 @@ func ChangeTierPreview(r *httprequest.Request) {
 	}
 
 	svcReq := &checkout.TierChangeRequest{
-		PriceID:        req.PriceID,
+		PriceID:        req.PriceID.String(),
 		SubscriptionID: subscriptionID,
 	}
 

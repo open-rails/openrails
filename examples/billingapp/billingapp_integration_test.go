@@ -151,7 +151,7 @@ func seedMerchantFacts(ctx context.Context, t *testing.T, h *integrationharness.
 	}))
 	return billingapp.Inputs{
 		Currency: "USD", Run: run, CheckoutPriceKey: priceKey, CheckoutRail: "ccbill",
-		SubscriberID: subscriber.String(), SubscriptionID: subscription.String(), InvoiceID: invoiceID,
+		SubscriberID: openrails.CustomerID(subscriber), SubscriptionID: openrails.SubscriptionID(subscription), InvoiceID: invoiceID,
 	}, price
 }
 

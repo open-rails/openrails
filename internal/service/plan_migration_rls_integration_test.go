@@ -10,6 +10,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db"
@@ -106,8 +107,8 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// The whole defect in one call: a preview of a price this facade wrote a
 	// moment ago, on the same role, with no upstream pin.
 	res, err := svc.PreviewPlanMigration(mctx, billingservice.PlanMigrationRequest{
-		SourcePriceID: sourcePrice.ID,
-		TargetPriceID: targetPrice.ID,
+		SourcePriceID: sourcePrice.ID.UUID(),
+		TargetPriceID: targetPrice.ID.UUID(),
 	})
 	require.NoError(t, err, "PreviewPlanMigration must SEE the price it just wrote (or#900)")
 	require.NotNil(t, res)
@@ -118,8 +119,8 @@ func TestPlanMigrationFacade_RLS_Under_OpenRailsApp(t *testing.T) {
 	// Commit the same migration: the write path resolves the same rows.
 	archive := false
 	committed, err := svc.PlanMigrate(mctx, billingservice.PlanMigrationRequest{
-		SourcePriceID: sourcePrice.ID,
-		TargetPriceID: targetPrice.ID,
+		SourcePriceID: sourcePrice.ID.UUID(),
+		TargetPriceID: targetPrice.ID.UUID(),
 		ArchiveSource: &archive,
 	})
 	require.NoError(t, err, "PlanMigrate must resolve the same prices under openrails_app")
@@ -157,7 +158,7 @@ func TestFacadeRefusesWithoutAMerchant(t *testing.T) {
 	svc, err := billingservice.New(rt)
 	require.NoError(t, err)
 
-	_, err = svc.GetProduct(ctx, uuid.New())
+	_, err = svc.GetProduct(ctx, openrails.ProductID(uuid.New()))
 	require.Error(t, err, "an unscoped facade read must fail loudly, not return nothing")
 	require.Contains(t, err.Error(), "merchant")
 }

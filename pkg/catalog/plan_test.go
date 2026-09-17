@@ -9,35 +9,36 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // fakeApplier is an in-memory Applier for plan/apply tests. No DB or network.
 type fakeApplier struct {
 	products map[string]*billingservice.CatalogProduct // by key
-	prices   map[uuid.UUID][]billingservice.CatalogPrice
+	prices   map[openrails.ProductID][]billingservice.CatalogPrice
 
 	createdProducts  []billingservice.CreateProductRequest
-	updatedProducts  []uuid.UUID
-	deactivatedProds []uuid.UUID
+	updatedProducts  []openrails.ProductID
+	deactivatedProds []openrails.ProductID
 	createdPrices    []billingservice.CreatePriceRequest
-	activatedPrices  []uuid.UUID
-	archivedPrices   []uuid.UUID
-	relabeledPrices  map[uuid.UUID]string
-	relinkedPrices   map[uuid.UUID]billingservice.UpdatePriceRequest
+	activatedPrices  []openrails.PriceID
+	archivedPrices   []openrails.PriceID
+	relabeledPrices  map[openrails.PriceID]string
+	relinkedPrices   map[openrails.PriceID]billingservice.UpdatePriceRequest
 }
 
 func newFakeApplier() *fakeApplier {
 	return &fakeApplier{
 		products: map[string]*billingservice.CatalogProduct{},
-		prices:   map[uuid.UUID][]billingservice.CatalogPrice{},
+		prices:   map[openrails.ProductID][]billingservice.CatalogPrice{},
 	}
 }
 
 func (f *fakeApplier) seedProduct(key, tierGroup string, rank int, archived bool) *billingservice.CatalogProduct {
 	tg := tierGroup
 	p := &billingservice.CatalogProduct{
-		ID:          uuid.New(),
+		ID:          openrails.ProductID(uuid.New()),
 		Key:         key,
 		DisplayName: key,
 		TierGroup:   &tg,
@@ -48,13 +49,13 @@ func (f *fakeApplier) seedProduct(key, tierGroup string, rank int, archived bool
 	return p
 }
 
-func (f *fakeApplier) seedPrice(productID uuid.UUID, amount int64, currency string, cycleHours int, archived bool, providers ...string) {
+func (f *fakeApplier) seedPrice(productID openrails.ProductID, amount int64, currency string, cycleHours int, archived bool, providers ...string) {
 	states := map[string]billingservice.ProviderState{}
 	for _, provider := range providers {
 		states[provider] = billingservice.ProviderState{Status: billingservice.ProviderStatusLinked}
 	}
 	f.prices[productID] = append(f.prices[productID], billingservice.CatalogPrice{
-		ID:                  uuid.New(),
+		ID:                  openrails.PriceID(uuid.New()),
 		ProductID:           productID,
 		Archived:            archived,
 		UnitAmount:          amount,
@@ -88,22 +89,22 @@ func (f *fakeApplier) ListProducts(_ context.Context, opts billingservice.ListPr
 
 func (f *fakeApplier) CreateProduct(_ context.Context, req billingservice.CreateProductRequest) (*billingservice.CatalogProduct, error) {
 	f.createdProducts = append(f.createdProducts, req)
-	p := &billingservice.CatalogProduct{ID: uuid.New(), Key: req.Key, DisplayName: req.DisplayName, TierGroup: req.TierGroup, TierRank: req.TierRank, Archived: req.Archived}
+	p := &billingservice.CatalogProduct{ID: openrails.ProductID(uuid.New()), Key: req.Key, DisplayName: req.DisplayName, TierGroup: req.TierGroup, TierRank: req.TierRank, Archived: req.Archived}
 	f.products[req.Key] = p
 	return p, nil
 }
 
-func (f *fakeApplier) UpdateProduct(_ context.Context, id uuid.UUID, _ billingservice.UpdateProductRequest) (*billingservice.CatalogProduct, error) {
+func (f *fakeApplier) UpdateProduct(_ context.Context, id openrails.ProductID, _ billingservice.UpdateProductRequest) (*billingservice.CatalogProduct, error) {
 	f.updatedProducts = append(f.updatedProducts, id)
 	return &billingservice.CatalogProduct{ID: id}, nil
 }
 
-func (f *fakeApplier) DeactivateProduct(_ context.Context, id uuid.UUID) (*billingservice.CatalogProduct, error) {
+func (f *fakeApplier) DeactivateProduct(_ context.Context, id openrails.ProductID) (*billingservice.CatalogProduct, error) {
 	f.deactivatedProds = append(f.deactivatedProds, id)
 	return &billingservice.CatalogProduct{ID: id}, nil
 }
 
-func (f *fakeApplier) ListPricesByProduct(_ context.Context, productID uuid.UUID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
+func (f *fakeApplier) ListPricesByProduct(_ context.Context, productID openrails.ProductID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
 	var out []billingservice.CatalogPrice
 	for _, p := range f.prices[productID] {
 		if activeOnly && p.Archived {
@@ -116,30 +117,30 @@ func (f *fakeApplier) ListPricesByProduct(_ context.Context, productID uuid.UUID
 
 func (f *fakeApplier) CreatePrice(_ context.Context, req billingservice.CreatePriceRequest) (*billingservice.CatalogPrice, error) {
 	f.createdPrices = append(f.createdPrices, req)
-	return &billingservice.CatalogPrice{ID: uuid.New(), Key: req.Key, ProductID: req.ProductID, UnitAmount: req.UnitAmount, Currency: req.Currency, Archived: req.Archived}, nil
+	return &billingservice.CatalogPrice{ID: openrails.PriceID(uuid.New()), Key: req.Key, ProductID: req.ProductID, UnitAmount: req.UnitAmount, Currency: req.Currency, Archived: req.Archived}, nil
 }
 
-func (f *fakeApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
+func (f *fakeApplier) ActivatePrice(_ context.Context, id openrails.PriceID) (*billingservice.CatalogPrice, error) {
 	f.activatedPrices = append(f.activatedPrices, id)
 	return &billingservice.CatalogPrice{ID: id}, nil
 }
 
-func (f *fakeApplier) DeactivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
+func (f *fakeApplier) DeactivatePrice(_ context.Context, id openrails.PriceID) (*billingservice.CatalogPrice, error) {
 	f.archivedPrices = append(f.archivedPrices, id)
 	return &billingservice.CatalogPrice{ID: id}, nil
 }
 
-func (f *fakeApplier) UpdatePrice(_ context.Context, id uuid.UUID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
+func (f *fakeApplier) UpdatePrice(_ context.Context, id openrails.PriceID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
 	if f.relinkedPrices == nil {
-		f.relinkedPrices = map[uuid.UUID]billingservice.UpdatePriceRequest{}
+		f.relinkedPrices = map[openrails.PriceID]billingservice.UpdatePriceRequest{}
 	}
 	f.relinkedPrices[id] = req
 	return &billingservice.CatalogPrice{ID: id}, nil
 }
 
-func (f *fakeApplier) SetPriceKey(_ context.Context, id uuid.UUID, key string) (*billingservice.CatalogPrice, error) {
+func (f *fakeApplier) SetPriceKey(_ context.Context, id openrails.PriceID, key string) (*billingservice.CatalogPrice, error) {
 	if f.relabeledPrices == nil {
-		f.relabeledPrices = map[uuid.UUID]string{}
+		f.relabeledPrices = map[openrails.PriceID]string{}
 	}
 	f.relabeledPrices[id] = key
 	return &billingservice.CatalogPrice{ID: id, Key: key}, nil
@@ -505,7 +506,7 @@ products:
 			"mobius": {Status: billingservice.ProviderStatusLinked, IDs: map[string]string{"plan_id": "premium_new", "provider": "mobius"}},
 			"solana": {Status: billingservice.ProviderStatusLinked, IDs: solana},
 		}
-		return f, price.ID
+		return f, price.ID.UUID()
 	}
 
 	t.Run("stale link is rotated", func(t *testing.T) {
@@ -542,7 +543,7 @@ products:
 		if res.PricesRelinked != 1 {
 			t.Fatalf("PricesRelinked = %d, want 1", res.PricesRelinked)
 		}
-		req, ok := f.relinkedPrices[priceID]
+		req, ok := f.relinkedPrices[openrails.PriceID(priceID)]
 		if !ok || req.ReplacePSPLinks || !reflect.DeepEqual(req.PSPLinks, want) {
 			t.Fatalf("UpdatePrice request = %+v (found %v), want merge of %v", req, ok, want)
 		}

@@ -38,8 +38,8 @@ type DeclaredBilling struct {
 
 // DeclaredCustomer ensures a customer row for a host subject.
 type DeclaredCustomer struct {
-	Customer uuid.UUID `json:"customer"`
-	Email    string    `json:"email,omitempty"`
+	Customer CustomerID `json:"customer"`
+	Email    string     `json:"email,omitempty"`
 }
 
 // PSPRef names the PSP a declared row belongs to: the psps row id, or the
@@ -64,8 +64,8 @@ func (r PSPRef) String() string {
 // DeclaredPaymentMethod is a stored instrument fact, idempotent by
 // (psp, rail_customer_ref, rail_method_ref).
 type DeclaredPaymentMethod struct {
-	Customer uuid.UUID `json:"customer"`
-	Rail     string    `json:"rail"`
+	Customer CustomerID `json:"customer"`
+	Rail     string     `json:"rail"`
 	// PSP is the account holding the vault entry; falls back to DefaultPSP.
 	PSP                  PSPRef    `json:"psp,omitzero"`
 	RailCustomerRef      string    `json:"rail_customer_ref"`
@@ -116,11 +116,11 @@ type DeclaredTransaction struct {
 
 // DeclaredSubscription is one subscription's facts, not classifications.
 type DeclaredSubscription struct {
-	SourceID           string    `json:"source_id"` // host's stable id: idempotency and audit
-	Customer           uuid.UUID `json:"customer"`
-	Price              uuid.UUID `json:"price"`
-	Rail               string    `json:"rail"`
-	RailSubscriptionID string    `json:"rail_subscription_id"`
+	SourceID           string     `json:"source_id"` // host's stable id: idempotency and audit
+	Customer           CustomerID `json:"customer"`
+	Price              PriceID    `json:"price"`
+	Rail               string     `json:"rail"`
+	RailSubscriptionID string     `json:"rail_subscription_id"`
 	// PSP is the merchant account owning this subscription at the provider;
 	// falls back to DefaultPSP.
 	PSP           PSPRef            `json:"psp,omitzero"`
@@ -137,8 +137,8 @@ type DeclaredSubscription struct {
 // DeclaredAdminGrant is a comped product window with no payment behind it,
 // idempotent by SourceID. A nil EndsAt is indefinite.
 type DeclaredAdminGrant struct {
-	Customer uuid.UUID  `json:"customer"`
-	Product  uuid.UUID  `json:"product"`
+	Customer CustomerID `json:"customer"`
+	Product  ProductID  `json:"product"`
 	SourceID string     `json:"source_id"`
 	StartsAt time.Time  `json:"starts_at"`
 	EndsAt   *time.Time `json:"ends_at,omitempty"`

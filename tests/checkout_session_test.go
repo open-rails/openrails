@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 
@@ -25,7 +27,7 @@ func TestCheckoutSessionRequiresAuth(t *testing.T) {
 	priceID := products[0].Prices[0].ID
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail": "nmi",
 		},
@@ -53,7 +55,7 @@ func TestCheckoutSessionMobiusSubscription(t *testing.T) {
 	mock.Reset()
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail":          "nmi",
 			"payment_token": "tok_test_123",
@@ -109,7 +111,7 @@ func TestCheckoutSessionSolanaTransferRequest(t *testing.T) {
 	priceID := products[2].Prices[0].ID
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail":         "solana",
 			"token_symbol": "USDC",
@@ -156,7 +158,7 @@ func TestCheckoutSessionSolanaTransferRequestDefaultsRecipientToAccountID(t *tes
 	priceID := products[2].Prices[0].ID
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail":         "solana",
 			"token_symbol": "USDC",
@@ -194,7 +196,7 @@ func TestCheckoutSessionCCBillRedirect(t *testing.T) {
 	token := suite.minter.Mint(userID, email, "user_"+t.Name(), nil)
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail":       "ccbill",
 			"email":      email,
@@ -240,7 +242,7 @@ func TestCheckoutSessionMobiusTokenXOR(t *testing.T) {
 	token := suite.MintUserToken(userID, email)
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail":              "nmi",
 			"payment_token":     "tok_test_123",

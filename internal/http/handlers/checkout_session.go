@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -164,11 +165,12 @@ func GetCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	parsedID, err := api.ParseCheckoutSessionID(sessionID)
-	if err != nil {
+	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
+	parsedID := typedParsedID.UUID()
 	resp, err := r.State.CheckoutSessionService.GetSession(r.Request.Context(), parsedID, user)
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{CheckoutSessionID: sessionID})
@@ -196,11 +198,12 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "checkout session service unavailable")
 		return
 	}
-	parsedID, err := api.ParseCheckoutSessionID(sessionID)
-	if err != nil {
+	typedParsedID, err := openrails.ParseCheckoutSessionID(sessionID)
+	if err != nil || typedParsedID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
+	parsedID := typedParsedID.UUID()
 	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
 	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
 	if err != nil {

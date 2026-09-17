@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -31,7 +33,7 @@ func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
 	userID := uuid.New().String()
 
 	// Grant ownership.
-	body, _ := json.Marshal(map[string]any{"product_id": productID.String()})
+	body, _ := json.Marshal(map[string]any{"product_id": openrails.ProductID(productID).String()})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+userID+"/product-access", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
@@ -47,7 +49,7 @@ func TestAdminProductAccessGrantAndRevoke(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &grant))
 	require.Equal(t, userID, grant.CustomerID, "grant must land on the path user (#364 UUID subject)")
-	require.Equal(t, productID.String(), grant.ProductID)
+	require.Equal(t, openrails.ProductID(productID).String(), grant.ProductID)
 	require.Equal(t, "active", grant.Status)
 	require.NotEmpty(t, grant.ID)
 
@@ -79,7 +81,7 @@ func TestAdminProductAccess_RequiresProductAccessWrite(t *testing.T) {
 		[]string{controlplane.PermMerchantCustomerSettingsRead})
 
 	products := suite.SeedProducts()
-	body, _ := json.Marshal(map[string]any{"product_id": products[0].Product.ID.String()})
+	body, _ := json.Marshal(map[string]any{"product_id": openrails.ProductID(products[0].Product.ID).String()})
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/merchant/customers/"+uuid.New().String()+"/product-access", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)

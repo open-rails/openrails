@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Active-entitlements SELF read (issue #245). #528 retired the admin
@@ -93,8 +93,8 @@ type effectiveTierBody struct {
 }
 
 type effectiveTierRef struct {
-	ID  string `json:"id"`
-	Key string `json:"key"`
+	ID  openrails.ProductID `json:"id"`
+	Key string              `json:"key"`
 }
 
 // GetMyTier resolves THE effective tier for the authenticated user within one
@@ -135,7 +135,7 @@ func GetMyTier(r *httprequest.Request) {
 			DisplayName: tier.ProductDisplayName,
 			TierRank:    tier.TierRank,
 			Product: effectiveTierRef{
-				ID:  api.FormatProductID(tier.ProductID),
+				ID:  openrails.ProductID(tier.ProductID),
 				Key: tier.ProductKey,
 			},
 		}

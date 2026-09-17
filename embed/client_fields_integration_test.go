@@ -48,7 +48,7 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 			require.NoError(t, err)
 			expires := time.Now().Add(time.Hour)
 			req := openrails.AdmitRequest{
-				CustomerID: payer.String(), Invoker: "client-fields", InvokerType: "payer", Currency: "USD",
+				CustomerID: openrails.CustomerID(payer), Invoker: "client-fields", InvokerType: "payer", Currency: "USD",
 				EstimatedAmount: 1000, ExpiresAt: &expires, AccrualRateDeltaPerHour: 11_000_000,
 				RequestID: uuid.NewString(), Source: "client-fields", Resource: "compute", TrustLevel: "standard",
 			}
@@ -83,10 +83,10 @@ func TestClientAdmissionFieldsAndDelegationProvenance(t *testing.T) {
 					dbtest.TestMerchantID.UUID(), payer, grant.Scope, grant.ScopeKey).Scan(&value))
 				return value
 			}
-			require.NoError(t, client.SetCustomerSpendDelegations(ctx, payer.String(), []openrails.SpendDelegationInput{grant}))
+			require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(payer), []openrails.SpendDelegationInput{grant}))
 			require.Equal(t, grant.Provenance, readProvenance())
 			grant.Provenance = "updated-policy"
-			require.NoError(t, client.SetCustomerSpendDelegation(ctx, payer.String(), grant))
+			require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(payer), grant))
 			require.Equal(t, grant.Provenance, readProvenance())
 		})
 	}

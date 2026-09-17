@@ -124,7 +124,7 @@ var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
 // Same-field concurrent patches use last-committed-write wins.
 type UpdateProductRequest = openrails.UpdateProductRequest
 
-func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req UpdateProductRequest) (*CatalogProduct, error) {
+func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -135,9 +135,10 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	if err != nil {
 		return nil, err
 	}
-	if productID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("product_id required")
 	}
+	productID := id.UUID()
 	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
@@ -239,7 +240,7 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 
 func productToCatalogProduct(p *models.Product) *CatalogProduct {
 	return &CatalogProduct{
-		ID:               p.ID,
+		ID:               openrails.ProductID(p.ID),
 		Key:              p.Key,
 		DisplayName:      p.DisplayName,
 		Description:      p.Description,
@@ -330,7 +331,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if err != nil {
 		return nil, err
 	}
-	if req.ProductID == uuid.Nil {
+	if req.ProductID.IsZero() {
 		return nil, fmt.Errorf("product_id required")
 	}
 	// CUR-6: canonicalise at the price WRITE boundary. ValidateCurrency below
@@ -371,7 +372,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	}
 
 	// Validate product exists.
-	product, err := products.GetByID(ctx, req.ProductID)
+	product, err := products.GetByID(ctx, req.ProductID.UUID())
 	if err != nil {
 		return nil, fmt.Errorf("product not found")
 	}
@@ -380,7 +381,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	// exactly the unique_prices_product_amount_window columns. A reprice hashes
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
-	priceID := priceDeterministicID(req.ProductID, req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
+	priceID := priceDeterministicID(req.ProductID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
 
 	rails, providerStates, pending, err := s.resolveProviders(ctx, product, req, priceID)
 	if err != nil {
@@ -446,7 +447,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		price = &models.Price{
 			ID:                  priceID,
 			MerchantID:          tid.UUID(),
-			ProductID:           req.ProductID,
+			ProductID:           req.ProductID.UUID(),
 			Archived:            req.Archived,
 			Amount:              req.UnitAmount,
 			Currency:            req.Currency,
@@ -504,7 +505,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 // PSP entirely, supply an empty inner map for it and set ReplacePSPLinks=true.
 type UpdatePriceRequest = openrails.UpdatePriceRequest
 
-func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req UpdatePriceRequest) (*CatalogPrice, error) {
+func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -515,9 +516,10 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	if err != nil {
 		return nil, err
 	}
-	if priceID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("price_id required")
 	}
+	priceID := id.UUID()
 	// Declarative PSP link rotation. ReplacePSPLinks=true overwrites the
 	// entire psp_links map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
@@ -639,9 +641,9 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 // values.
 func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
-		ID:                  p.ID,
+		ID:                  openrails.PriceID(p.ID),
 		Key:                 p.Key,
-		ProductID:           p.ProductID,
+		ProductID:           openrails.ProductID(p.ProductID),
 		Archived:            p.Archived,
 		UnitAmount:          p.Amount,
 		Currency:            p.Currency,
