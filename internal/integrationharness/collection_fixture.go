@@ -143,7 +143,7 @@ func (h *Harness) FireProviderIntentVerify(pool *pgxpool.Pool) {
 // after checking the gateway portal.
 func (h *Harness) ResolveOperation(nmiGatewayURL string, mid merchant.ID, id uuid.UUID, receipt string, notExecuted bool) (string, error) {
 	h.t.Helper()
-	binary, err := openrailsBinary()
+	binary, err := h.openrailsBinary()
 	require.NoError(h.t, err)
 	dir := h.t.TempDir()
 	redisAddr := ""
