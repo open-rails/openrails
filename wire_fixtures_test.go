@@ -36,6 +36,7 @@ func canonicalWireFixtures() map[string]any {
 	when := time.Date(2026, 9, 16, 0, 0, 0, 123456789, time.UTC)
 	maxMoney, minMoney, zero := int64(math.MaxInt64), int64(math.MinInt64), int64(0)
 	param, sourceID := "amount", "deposit-1"
+	periodHours, expMonth, expYear := 720, 12, 2030
 	return map[string]any{
 		"error_envelope.json": errorEnvelope{Error: ErrorDetails{
 			Type: "invalid_request_error", Code: "idempotency_key_reused", Message: "retry changed the committed amount",
@@ -59,6 +60,20 @@ func canonicalWireFixtures() map[string]any {
 			{Scope: "invoker", ScopeKey: "worker-1", Windows: []SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: maxMoney, Currency: "USD"}}, Provenance: "sha256:fixture"},
 			{Scope: "subject", Windows: []SpendLimitWindow{}},
 		}},
+		"hosted_checkout_session.json": HostedCheckoutSession{
+			ID: "ocs_fixture", Status: "created", Merchant: HostedCheckoutMerchant{DisplayName: "Acme Demo"},
+			Plan:      HostedCheckoutPlan{DisplayName: "Premium Membership", UnitAmount: maxMoney, Currency: "USD", UnitDecimals: 6, PeriodHours: &periodHours, AutomaticallyRenews: true},
+			LineItems: []HostedCheckoutLineItem{{Label: "Premium Membership", Sublabel: "Renews monthly", Amount: maxMoney}, {Label: "Launch discount", Amount: minMoney}},
+			Tax:       &zero, DueToday: &maxMoney,
+			Rails: []HostedCheckoutRail{
+				{ID: "option_card", Rail: "nmi", Mode: "subscription", Driver: "collect_js", PublicConfig: map[string]string{"tokenization_key": "public-key", "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js"}},
+				{ID: "option_wallet", Rail: "solana", Mode: "one_off", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "USDC", "network": "devnet"}},
+				{ID: "option_redirect", Rail: "ccbill", Mode: "subscription", Driver: "redirect"},
+			},
+			SavedMethods: []HostedCheckoutSavedMethod{{ID: "pm_fixture", OptionID: "option_card", Rail: "nmi", Brand: "visa", LastFour: "4242", ExpMonth: &expMonth, ExpYear: &expYear}},
+			SuccessURL:   "https://merchant.example/thanks?checkout=ocs_fixture",
+			ExpiresAt:    when,
+		},
 	}
 }
 
