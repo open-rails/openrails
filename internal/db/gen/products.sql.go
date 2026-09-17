@@ -14,17 +14,17 @@ import (
 
 const countProductsFiltered = `-- name: CountProductsFiltered :one
 SELECT count(*) FROM openrails.products
-WHERE (NOT $1::boolean OR NOT archived)
+WHERE ($1::boolean IS NULL OR archived = $1::boolean)
   AND ($2::text = '' OR lower(btrim(tier_group)) = lower(btrim($2::text)))
 `
 
 type CountProductsFilteredParams struct {
-	ActiveOnly bool
-	TierGroup  string
+	Archived  *bool
+	TierGroup string
 }
 
 func (q *Queries) CountProductsFiltered(ctx context.Context, arg CountProductsFilteredParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countProductsFiltered, arg.ActiveOnly, arg.TierGroup)
+	row := q.db.QueryRow(ctx, countProductsFiltered, arg.Archived, arg.TierGroup)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -245,14 +245,14 @@ func (q *Queries) ListProductsByIDs(ctx context.Context, ids []uuid.UUID) ([]Ope
 
 const listProductsFiltered = `-- name: ListProductsFiltered :many
 SELECT id, key, display_name, description, entitlements_spec, credits_spec, tier_group, tier_rank, archived, created_at, updated_at, merchant_id FROM openrails.products
-WHERE (NOT $1::boolean OR NOT archived)
+WHERE ($1::boolean IS NULL OR archived = $1::boolean)
   AND ($2::text = '' OR lower(btrim(tier_group)) = lower(btrim($2::text)))
 ORDER BY created_at DESC, id DESC
 LIMIT NULLIF($4::int, 0) OFFSET $3::int
 `
 
 type ListProductsFilteredParams struct {
-	ActiveOnly bool
+	Archived   *bool
 	TierGroup  string
 	PageOffset int32
 	PageLimit  int32
@@ -260,7 +260,7 @@ type ListProductsFilteredParams struct {
 
 func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilteredParams) ([]OpenrailsProduct, error) {
 	rows, err := q.db.Query(ctx, listProductsFiltered,
-		arg.ActiveOnly,
+		arg.Archived,
 		arg.TierGroup,
 		arg.PageOffset,
 		arg.PageLimit,

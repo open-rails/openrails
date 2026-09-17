@@ -118,13 +118,16 @@ func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) 
 	return productsFromGen(rows)
 }
 
+// ProductFilter selects products. Archived nil lists every product; false
+// lists live products only; true lists archived products only.
 type ProductFilter struct {
-	ActiveOnly bool
-	TierGroup  string
+	Archived  *bool
+	TierGroup string
 }
 
 func (s *ProductService) GetActivePaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
-	return s.GetPaginated(ctx, ProductFilter{ActiveOnly: true}, limit, offset)
+	live := false
+	return s.GetPaginated(ctx, ProductFilter{Archived: &live}, limit, offset)
 }
 
 func (s *ProductService) GetAllPaginated(ctx context.Context, limit, offset int) ([]*models.Product, int64, error) {
@@ -135,11 +138,11 @@ func (s *ProductService) GetAllPaginated(ctx context.Context, limit, offset int)
 func (s *ProductService) GetPaginated(ctx context.Context, filter ProductFilter, limit, offset int) ([]*models.Product, int64, error) {
 	q := s.db.Gen(ctx)
 	tierGroup := strings.TrimSpace(filter.TierGroup)
-	total, err := q.CountProductsFiltered(ctx, gen.CountProductsFilteredParams{ActiveOnly: filter.ActiveOnly, TierGroup: tierGroup})
+	total, err := q.CountProductsFiltered(ctx, gen.CountProductsFilteredParams{Archived: filter.Archived, TierGroup: tierGroup})
 	if err != nil {
 		return nil, 0, err
 	}
-	rows, err := q.ListProductsFiltered(ctx, gen.ListProductsFilteredParams{ActiveOnly: filter.ActiveOnly, TierGroup: tierGroup, PageLimit: productPageInt32(limit), PageOffset: productPageInt32(offset)})
+	rows, err := q.ListProductsFiltered(ctx, gen.ListProductsFilteredParams{Archived: filter.Archived, TierGroup: tierGroup, PageLimit: productPageInt32(limit), PageOffset: productPageInt32(offset)})
 	if err != nil {
 		return nil, 0, err
 	}

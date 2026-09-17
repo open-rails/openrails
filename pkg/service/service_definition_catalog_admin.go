@@ -100,15 +100,15 @@ func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProd
 // ListProductsOptions controls ListProducts filtering and pagination.
 //
 // Zero values mean "no filter / use defaults":
-//   - ActiveOnly=false: include both active and inactive products
+//   - Archived=nil: include live and archived products; false live only; true archived only
 //   - TierGroup="": no tier_group filter
 //   - Limit=0: defaults to 100
 //   - Offset=0: start from the first row
 type ListProductsOptions struct {
-	ActiveOnly bool
-	TierGroup  string
-	Limit      int
-	Offset     int
+	Archived  *bool
+	TierGroup string
+	Limit     int
+	Offset    int
 }
 
 // ListProducts returns a paginated list of products with optional filters.
@@ -125,7 +125,7 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (C
 		return page, err
 	}
 	page.Limit, page.Offset = clampCatalogPage(opts.Limit, opts.Offset)
-	raws, total, err := products.GetPaginated(ctx, catalog.ProductFilter{ActiveOnly: opts.ActiveOnly, TierGroup: opts.TierGroup}, page.Limit, page.Offset)
+	raws, total, err := products.GetPaginated(ctx, catalog.ProductFilter{Archived: opts.Archived, TierGroup: opts.TierGroup}, page.Limit, page.Offset)
 	if err != nil {
 		return page, err
 	}
