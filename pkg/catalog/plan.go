@@ -158,16 +158,6 @@ func PlanWithOptions(ctx context.Context, applier Applier, m *Manifest, opts Pla
 
 func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGroup, product Product, opts PlanOptions) (*ProductPlan, error) {
 	entitlements := entitlementsSpec(product.Entitlements)
-	credits := creditsSpec(product.Credits)
-	if normalizer, ok := applier.(interface {
-		NormalizeCatalogCredits(context.Context, billingservice.CreditsSpec) (billingservice.CreditsSpec, error)
-	}); ok {
-		var err error
-		credits, err = normalizer.NormalizeCatalogCredits(ctx, credits)
-		if err != nil {
-			return nil, err
-		}
-	}
 	// Usage-metered products carry no tier_group — they aren't tier-exclusive
 	// subscriptions (#642). The loader put them in a synthetic singleton group;
 	// persist NULL so they never share tier exclusivity.
@@ -190,7 +180,6 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 			DisplayName:      product.DisplayName,
 			Description:      strings.TrimSpace(product.Description),
 			EntitlementsSpec: entitlements,
-			CreditsSpec:      credits,
 			TierGroup:        tierGroupPtr,
 			TierRank:         tierRank,
 			Archived:         product.Archived,
@@ -210,14 +199,12 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 		Description:      &desc,
 		EntitlementsSpec: entitlements,
 		SetEntitlements:  true,
-		CreditsSpec:      credits,
-		SetCredits:       true,
 		TierGroup:        tierGroupPtr,
 		SetTierGroup:     true,
 		TierRank:         &tierRank,
 		Archived:         &archived,
 	}
-	if productUnchanged(existing, product, entitlements, credits, tierGroupPtr, tierRank) {
+	if productUnchanged(existing, product, entitlements, tierGroupPtr, tierRank) {
 		pp.Action = ProductUnchanged
 	} else {
 		pp.Action = ProductUpdate
@@ -238,7 +225,7 @@ func sameTierGroup(existing, desired *string) bool {
 	return strings.EqualFold(strings.TrimSpace(*existing), strings.TrimSpace(*desired))
 }
 
-func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, credits billingservice.CreditsSpec, tierGroup *string, tierRank int) bool {
+func productUnchanged(existing *billingservice.CatalogProduct, product Product, entitlements map[string]*int, tierGroup *string, tierRank int) bool {
 	if existing == nil {
 		return false
 	}
@@ -262,21 +249,6 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 	}
 	for k := range entitlements {
 		if _, ok := existing.EntitlementsSpec[k]; !ok {
-			return false
-		}
-	}
-	if len(existing.CreditsSpec) != len(credits) {
-		return false
-	}
-	for k, v := range credits {
-		ev, ok := existing.CreditsSpec[k]
-		if !ok || ev.Unit != v.Unit || ev.Amount != v.Amount || ev.Cadence != v.Cadence {
-			return false
-		}
-		if (ev.ExpiryHours == nil) != (v.ExpiryHours == nil) {
-			return false
-		}
-		if ev.ExpiryHours != nil && *ev.ExpiryHours != *v.ExpiryHours {
 			return false
 		}
 	}
@@ -312,9 +284,6 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 	resolvedKeys := make([]string, len(product.Prices))
 	byResolvedKey := map[string][]string{}
 	for i, price := range product.Prices {
-		if price.Model != "" {
-			continue
-		}
 		accessDurationHours, err := normalizeDuration(price.Duration)
 		if err != nil {
 			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
@@ -333,9 +302,6 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 	}
 
 	for i, price := range product.Prices {
-		if price.Model != "" {
-			continue
-		}
 		accessDurationHours, err := normalizeDuration(price.Duration)
 		if err != nil {
 			return fmt.Errorf("price %s duration: %w", PriceLabel(product.Key, price), err)
@@ -524,28 +490,6 @@ func entitlementsSpec(entitlements []string) map[string]*int {
 		if e != "" {
 			out[e] = nil
 		}
-	}
-	return out
-}
-
-func creditsSpec(credits []CreditGrant) billingservice.CreditsSpec {
-	if len(credits) == 0 {
-		return nil
-	}
-	out := make(billingservice.CreditsSpec, len(credits))
-	for _, credit := range credits {
-		if credit.Amount == nil {
-			continue
-		}
-		out[credit.Key] = billingservice.CreditGrantSpec{
-			Unit:        strings.TrimSpace(credit.Unit),
-			Amount:      *credit.Amount,
-			ExpiryHours: credit.ExpiryHours,
-			Cadence:     billingservice.CreditGrantCadence(strings.TrimSpace(credit.Cadence)),
-		}
-	}
-	if len(out) == 0 {
-		return nil
 	}
 	return out
 }

@@ -25,7 +25,7 @@ type merchantCatalogPublishResponse struct {
 // It is the HTTP form of push-merchant-catalog for the current merchant only.
 func MerchantPublishCatalog(r *httprequest.Request) {
 	var req merchantCatalogPublishRequest
-	if !r.BindJSON(&req) {
+	if !bindCatalogJSON(r, &req) {
 		return
 	}
 	if err := req.Catalog.Validate(); err != nil {

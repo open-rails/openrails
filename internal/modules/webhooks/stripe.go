@@ -25,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -753,29 +752,6 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 		}
 	}
 
-	var creditsSpec models.CreditsSpec
-	if s.PaymentService != nil {
-		payment, err := s.PaymentService.GetByID(ctx, result.PaymentID)
-		if err == nil {
-			creditsSpec = payment.CreditsSpecSnapshot
-		} else {
-			log.WithContext(ctx).WithError(err).WithField("payment_id", result.PaymentID).Warn("failed to load payment snapshot for stripe purchase credits")
-		}
-	}
-	if len(creditsSpec) > 0 && s.MoneyService != nil {
-		payer := identity.CustomerIDFromString(userID)
-		if payer.IsZero() {
-			return fmt.Errorf("grant purchased credits: invalid user_id %q", userID)
-		}
-		if err := s.MoneyService.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
-			Payer:     payer,
-			PaymentID: result.PaymentID,
-			Spec:      creditsSpec,
-			Source:    "purchase",
-		}); err != nil {
-			return fmt.Errorf("grant purchased credits: %w", err)
-		}
-	}
 	return nil
 }
 

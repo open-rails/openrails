@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
@@ -140,11 +139,7 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 	for _, unit := range []struct {
 		code     string
 		decimals int
-	}{{"JPY", 4}, {"test/support-" + uuid.NewString(), 2}} {
-		if unit.decimals == 2 {
-			_, err = admin.Exec(ctx, `INSERT INTO openrails.custom_credit_types(id,merchant_id,name,decimals,active) VALUES(uuidv7(),$1,$2,2,true)`, mid, strings.TrimPrefix(unit.code, "test/"))
-			require.NoError(t, err)
-		}
+	}{{"JPY", 4}, {"EUR", 6}} {
 		code, body = request(http.MethodPost, path, "owner", mid, map[string]any{"currency": unit.code, "amount": 125, "source_id": uuid.NewString()})
 		require.Equal(t, 200, code, body)
 		code, page = request(http.MethodGet, path+"?currency="+url.QueryEscape(unit.code), "viewer", mid, nil)
@@ -162,10 +157,6 @@ func TestCreditSupportHTTPGrantListRevokeIsolation(t *testing.T) {
 		balance := item.(map[string]any)
 		if balance["currency"] == "JPY" {
 			require.EqualValues(t, 4, balance["decimal_places"])
-		}
-		if strings.HasPrefix(balance["currency"].(string), "test/support-") {
-			require.EqualValues(t, 2, balance["decimal_places"])
-			require.EqualValues(t, 0, balance["outstanding_owed_amount"])
 		}
 	}
 

@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -18,12 +17,12 @@ import (
 )
 
 // TestCreditGrantExpiryDefault (#857) pins the DEFAULT on credit-lot expiry
-// through the real grant path (MoneyService.GrantPurchaseCredits -> grant
+// through the real manual deposit path (MoneyService.Deposit -> grant
 // ledger) and the real reaper (CreditExpiryWorker, whose predicate is
 // `ends_at IS NOT NULL AND ends_at <= now`).
 //
 // Doctrine: expiry destroys customer money, so it happens only because a
-// merchant asked for it. A credits_spec that omits expiry_hours writes a NULL
+// merchant asked for it. A deposit that omits ExpiresAt writes a NULL
 // ends_at, which no future sweep can ever match — it is not "expires in a
 // year", it is never. An explicitly declared 365-day expiry is a contract and
 // still fires exactly on time.
@@ -89,26 +88,20 @@ type creditLot struct {
 	unit     string
 }
 
-// grantCreditLot deposits one 1,000-unit purchase credit lot for a fresh
-// customer through the production grant path, with the money service's clock
+// grantCreditLot deposits one 1,000-unit manual credit lot for a fresh
+// customer through the production deposit path, with the money service's clock
 // pinned to grantedAt so the lot's expiry math is deterministic.
 func grantCreditLot(t *testing.T, ctx context.Context, dbi *db.DB, grantedAt time.Time, expiryHours *int) creditLot {
 	t.Helper()
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), uuid.New().String())
 	svc := money.NewMoneyService(dbi, clockwork.NewFakeClockAt(grantedAt))
-	require.NoError(t, svc.GrantPurchaseCredits(ctx, money.GrantPurchaseCreditsParams{
-		Payer:     identity.CustomerID(customerID),
-		PaymentID: uuid.New(),
-		Source:    "purchase",
-		Spec: models.CreditsSpec{
-			"expiry_default_probe": {
-				Unit:        "USD",
-				Amount:      1_000,
-				Cadence:     models.CreditGrantCadenceOnce,
-				ExpiryHours: expiryHours,
-			},
-		},
-	}))
+	var expiresAt *time.Time
+	if expiryHours != nil && *expiryHours > 0 {
+		expiry := grantedAt.Add(time.Duration(*expiryHours) * time.Hour)
+		expiresAt = &expiry
+	}
+	_, err := svc.Deposit(ctx, money.DepositParams{Invoker: customerID.String(), Currency: "USD", Amount: 1_000, Source: "manual", ExpiresAt: expiresAt})
+	require.NoError(t, err)
 	return creditLot{customer: identity.CustomerID(customerID), unit: "USD"}
 }
 

@@ -415,7 +415,6 @@ func insertDeclaredCancelled(
 		ProductID:                price.ProductID,
 		PriceID:                  &priceID,
 		EntitlementsSpecSnapshot: product.EntitlementsSpec,
-		CreditsSpecSnapshot:      product.CreditsSpec,
 		Status:                   string(models.StatusCancelled),
 		StartedAt:                f.StartedAt.UTC(),
 		EndedAt:                  &endedAt,

@@ -91,7 +91,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 			return nil, &spendgate.ValidationError{Param: "invoker_type", Message: "invoker_type must be payer or delegated"}
 		}
 	}
-	currency, err := s.resolveCurrency(ctx, in.Currency)
+	currency, err := requireCurrency(in.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -158,10 +158,7 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*AdmitResult, error
 	if dec.Allowed {
 		res.HoldExpiresAt = dec.HoldExpiresAt
 	}
-	res.Currency, err = s.DisplayCurrency(ctx, currency)
-	if err != nil {
-		return nil, err
-	}
+	res.Currency = currency
 	return res, nil
 }
 
@@ -349,7 +346,7 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 	if invoker == "" {
 		return nil, fmt.Errorf("invoker required")
 	}
-	currency, err := s.resolveCurrency(ctx, in.Currency)
+	currency, err := requireCurrency(in.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -391,10 +388,6 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 		return nil, err
 	}
 
-	displayCurrency, err := s.DisplayCurrency(ctx, currency)
-	if err != nil {
-		return nil, err
-	}
 	out := make([]InvokerSpendWindow, 0, len(usage))
 	for _, u := range usage {
 		remaining := u.Limit - u.Used
@@ -406,7 +399,7 @@ func (s *Service) InvokerSpendWindows(ctx context.Context, payer identity.Custom
 			Key:           u.Key,
 			WindowSeconds: int64(u.Duration / time.Second),
 			Limit:         u.Limit,
-			Currency:      displayCurrency,
+			Currency:      currency,
 			Used:          u.Used,
 			Reserved:      u.Reserved,
 			Remaining:     remaining,
@@ -833,7 +826,7 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 	if in.Amount < 0 {
 		return nil, fmt.Errorf("amount must be >= 0")
 	}
-	cur, err := s.resolveCurrency(ctx, in.Currency)
+	cur, err := requireCurrency(in.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -1235,7 +1228,7 @@ func (s *Service) GetTrustLevel(ctx context.Context, payer identity.CustomerID, 
 	if payer.IsZero() {
 		return "", fmt.Errorf("payer required")
 	}
-	cur, err := s.resolveCurrency(ctx, currency)
+	cur, err := requireCurrency(currency)
 	if err != nil {
 		return "", err
 	}

@@ -59,10 +59,6 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 	if err != nil {
 		return err
 	}
-	credSpec, err := models.ToJSONB(product.CreditsSpec)
-	if err != nil {
-		return err
-	}
 	var desc *string
 	if product.Description != "" {
 		desc = &product.Description
@@ -78,7 +74,6 @@ func (s *ProductService) Create(ctx context.Context, product *models.Product) er
 		DisplayName:      product.DisplayName,
 		Description:      desc,
 		EntitlementsSpec: entSpec,
-		CreditsSpec:      credSpec,
 		TierGroup:        product.TierGroup,
 		TierRank:         tierRank32,
 		Archived:         product.Archived,
@@ -202,8 +197,6 @@ type ProductDefinitionUpdateParams struct {
 	Description      *string
 	EntitlementsSpec map[string]*int
 	SetEntitlements  bool
-	CreditsSpec      models.CreditsSpec
-	SetCredits       bool
 	TierGroup        *string
 	SetTierGroup     bool
 	TierRank         *int
@@ -215,10 +208,6 @@ type ProductDefinitionUpdateParams struct {
 // leave their columns unchanged. A description of "" clears it.
 func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, params ProductDefinitionUpdateParams) (*models.Product, error) {
 	entSpec, err := models.ToJSONB(params.EntitlementsSpec)
-	if err != nil {
-		return nil, err
-	}
-	credSpec, err := models.ToJSONB(params.CreditsSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +223,6 @@ func (s *ProductService) UpdateDefinition(ctx context.Context, id uuid.UUID, par
 		ID: id, DisplayName: params.DisplayName,
 		Description: params.Description, SetDescription: params.Description != nil,
 		EntitlementsSpec: entSpec, SetEntitlements: params.SetEntitlements,
-		CreditsSpec: credSpec, SetCredits: params.SetCredits,
 		TierGroup: params.TierGroup, SetTierGroup: params.SetTierGroup,
 		TierRank: rank, Archived: params.Archived,
 	})

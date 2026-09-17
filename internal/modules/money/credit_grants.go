@@ -90,8 +90,8 @@ func (s *MoneyService) ListCreditGrants(ctx context.Context, payer identity.Cust
 	if err != nil {
 		return nil, err
 	}
-	currency = normalizeUnit(currency)
-	decimals, _, err := s.ResolveUnit(ctx, currency)
+	currency = normalizeCurrency(currency)
+	decimals, err := CurrencyDecimals(currency)
 	if err != nil {
 		return nil, err
 	}

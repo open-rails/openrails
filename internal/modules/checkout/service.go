@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -889,7 +890,6 @@ func (s *CheckoutService) completeNMISubscriptionRegistration(ctx context.Contex
 		ProductID:                price.ProductID,
 		PriceID:                  price.ID,
 		EntitlementsSpecSnapshot: models.CloneEntitlementsSpec(product.EntitlementsSpec),
-		CreditsSpecSnapshot:      models.CloneCreditsSpec(product.CreditsSpec),
 		RailSubscriptionID:       providerSubscriptionID,
 		Status:                   models.StatusPending,
 		Rail:                     models.Rail(provider),
@@ -1631,7 +1631,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	}
 	end := now.Add(time.Duration(hours) * time.Hour)
 	startDate, _ := buildNMIFutureStartDate(end, now)
-	payload := NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Credits: models.CloneCreditsSpec(newProduct.CreditsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
+	payload := NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
 	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"})
 	var conflict *pgconn.PgError
 	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == "uq_rail_intents_upgrade_predecessor" {

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -41,8 +43,8 @@ func (s *MoneyService) ServiceUsageRollup(ctx context.Context, payer identity.Cu
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	groupBy = strings.TrimSpace(groupBy)
@@ -97,8 +99,8 @@ func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource, curre
 	if resource == "" {
 		return nil, fmt.Errorf("resource required")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	var out []ResourceRevenueDailyRow

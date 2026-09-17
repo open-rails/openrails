@@ -29,16 +29,19 @@ func normalizeCurrency(c string) string {
 // sibling modules that key native-money rows by currency but still rely on this
 // package's registry as the source of truth.
 func NormalizeCurrency(c string) string {
-	return normalizeUnit(c)
+	return normalizeCurrency(c)
 }
 
-// RequireBillingCurrency enforces the #474/#475 invariant at the billing layer:
-// billing (invoice/owed/charge/account-settings) is external-currency-
-// only, so a qualified custom-credit code (merchant/name, #475) is REJECTED here.
-// Ledger primitives (Deposit/Withdraw/Hold) keep using the looser ValidateCurrency.
+// RequireBillingCurrency validates a currency against the supported registry.
 func RequireBillingCurrency(code string) error {
-	if IsQualifiedUnit(code) {
-		return fmt.Errorf("%w: %q", ErrBillingUnitRequired, code)
-	}
 	return moneyutil.ValidateCurrency(code)
+}
+
+// CurrencyDecimals returns the scale of a supported currency.
+func CurrencyDecimals(code string) (int, error) {
+	decimals, ok := moneyutil.CurrencyScale(code)
+	if !ok {
+		return 0, fmt.Errorf("money: unknown currency %q", code)
+	}
+	return decimals, nil
 }

@@ -21,7 +21,6 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 		Name:             p.DisplayName,
 		Description:      p.Description,
 		EntitlementsSpec: p.EntitlementsSpec,
-		CreditsSpec:      creditGrantSpecsToAPI(p.CreditsSpec),
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
@@ -30,22 +29,6 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 		Updated:          api.ToUnix(p.UpdatedAt),
 		Prices:           priceObjects,
 	}
-}
-
-func creditGrantSpecsToAPI(specs models.CreditsSpec) map[string]api.CreditGrantSpecObject {
-	if len(specs) == 0 {
-		return nil
-	}
-	out := make(map[string]api.CreditGrantSpecObject, len(specs))
-	for creditType, spec := range specs {
-		out[creditType] = api.CreditGrantSpecObject{
-			Unit:        spec.Unit,
-			Amount:      spec.Amount,
-			ExpiryHours: spec.ExpiryHours,
-			Cadence:     string(spec.Cadence),
-		}
-	}
-	return out
 }
 
 func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObject {
