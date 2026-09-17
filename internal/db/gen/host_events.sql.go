@@ -33,12 +33,15 @@ func (q *Queries) AcknowledgeHostEvent(ctx context.Context, arg AcknowledgeHostE
 }
 
 const listHostEvents = `-- name: ListHostEvents :many
-SELECT id, merchant_id, event_type, subject_type, payment_id, amount, subject_id, currency, occurred_at, data, delivered_at, dedupe_key FROM openrails.host_outbox
-WHERE merchant_id = $1::uuid
-  AND ($2::text = '' OR event_type = $2::text)
-  AND ($3::uuid IS NULL OR payment_id = $3::uuid)
-  AND ($4::boolean OR delivered_at IS NULL)
-ORDER BY id
+SELECT h.id, h.merchant_id, h.event_type, h.subject_type, h.payment_id, h.amount, h.subject_id, h.currency, h.occurred_at, h.data, h.delivered_at, h.dedupe_key, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
+  p.subscription_id AS payment_subscription_id
+FROM openrails.host_outbox h
+LEFT JOIN openrails.payments p ON p.merchant_id = h.merchant_id AND p.id = h.payment_id
+WHERE h.merchant_id = $1::uuid
+  AND ($2::text = '' OR h.event_type = $2::text)
+  AND ($3::uuid IS NULL OR h.payment_id = $3::uuid)
+  AND ($4::boolean OR h.delivered_at IS NULL)
+ORDER BY h.id
 LIMIT $5::int
 `
 
@@ -50,7 +53,27 @@ type ListHostEventsParams struct {
 	RowLimit            int32
 }
 
-func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) ([]OpenrailsHostOutbox, error) {
+type ListHostEventsRow struct {
+	ID                    uuid.UUID
+	MerchantID            uuid.UUID
+	EventType             string
+	SubjectType           string
+	PaymentID             *uuid.UUID
+	Amount                *int64
+	SubjectID             uuid.UUID
+	Currency              string
+	OccurredAt            time.Time
+	Data                  []byte
+	DeliveredAt           *time.Time
+	DedupeKey             string
+	PaymentCustomerID     *uuid.UUID
+	PaymentPriceID        *uuid.UUID
+	PaymentSubscriptionID *uuid.UUID
+}
+
+// A settled payment carries its payer, price and subscription from the
+// authoritative payment row so a host never re-reads the payment to route it.
+func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) ([]ListHostEventsRow, error) {
 	rows, err := q.db.Query(ctx, listHostEvents,
 		arg.MerchantID,
 		arg.EventType,
@@ -62,9 +85,9 @@ func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) 
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OpenrailsHostOutbox
+	var items []ListHostEventsRow
 	for rows.Next() {
-		var i OpenrailsHostOutbox
+		var i ListHostEventsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MerchantID,
@@ -78,6 +101,9 @@ func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) 
 			&i.Data,
 			&i.DeliveredAt,
 			&i.DedupeKey,
+			&i.PaymentCustomerID,
+			&i.PaymentPriceID,
+			&i.PaymentSubscriptionID,
 		); err != nil {
 			return nil, err
 		}

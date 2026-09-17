@@ -9,7 +9,7 @@ VALUES (sqlc.arg(id), sqlc.arg(merchant_id), sqlc.narg(issuer))
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, openrails.customers.issuer),
   last_seen_at = now()
-RETURNING id;
+RETURNING *;
 
 -- name: EnsureCustomerRow :exec
 -- FK-target materialization before commerce writes. The scoped primary key

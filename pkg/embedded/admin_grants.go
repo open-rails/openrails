@@ -2,17 +2,13 @@ package embedded
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/billingimport"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -47,83 +43,29 @@ type AdminGrantImportResult struct {
 	Blocked  []string // grant recorded, but every feature's window overlapped a live window → no window materialized (#695)
 }
 
-// ImportAdminGrants records each admin comp as a source_type=admin entitlement
-// grant and materializes its entitlement window, idempotent by SourceID (#636).
-// This lets a legacy migration hand admin/manual access over as a fact instead
-// of writing openrails.entitlements directly. Runs in a
-// single merchant-scoped connection (RLS). A real DB error aborts the batch; a
-// product with no entitlements_spec is counted (NoSpec) and skipped.
+// ImportAdminGrants records admin comps through the declared-facts import
+// (DeclaredBilling.AdminGrants) so hosts keep one door for legacy facts.
 func ImportAdminGrants(ctx context.Context, opts AdminGrantImportOptions) (AdminGrantImportResult, error) {
 	var res AdminGrantImportResult
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	if len(opts.Grants) == 0 {
 		return res, nil
 	}
-	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
+	declared := make([]billingimport.DeclaredAdminGrant, 0, len(opts.Grants))
+	for _, g := range opts.Grants {
+		declared = append(declared, billingimport.DeclaredAdminGrant{Customer: g.Customer, Product: g.Product, SourceID: g.SourceID, StartsAt: g.StartsAt, EndsAt: g.EndsAt})
+	}
+	out, err := ImportBilling(ctx, BillingImportOptions{Config: opts.Config, PGXPool: opts.PGXPool, MerchantID: opts.MerchantID,
+		Book: DeclaredBilling{AsOf: time.Now().UTC(), AdminGrants: declared}})
 	if err != nil {
 		return res, err
 	}
-	defer database.Close()
-
-	merchantID := opts.MerchantID
-	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
-		return res, err
-	}
-	ctx = merchant.WithID(ctx, merchantID)
-
-	err = database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		gl := grants.New(database.Gen(ctx), merchantID.UUID())
-		specCache := map[uuid.UUID][]string{}
-		for _, g := range opts.Grants {
-			feats, ok := specCache[g.Product]
-			if !ok {
-				prod, err := database.Gen(ctx).GetProductByID(ctx, g.Product)
-				if err != nil {
-					return fmt.Errorf("import admin grants: load product %s: %w", g.Product, err)
-				}
-				feats = productEntitlementKeys(prod.EntitlementsSpec)
-				specCache[g.Product] = feats
-			}
-			if len(feats) == 0 {
-				res.NoSpec = append(res.NoSpec, g.SourceID)
-				continue
-			}
-			created, alreadyExists, err := gl.GrantAdmin(ctx, g.Customer, g.SourceID, feats, g.StartsAt, g.EndsAt)
-			if err != nil {
-				return fmt.Errorf("import admin grant %s: %w", g.SourceID, err)
-			}
-			switch {
-			case alreadyExists:
-				res.Skipped = append(res.Skipped, g.SourceID)
-			case created > 0:
-				res.Imported = append(res.Imported, g.SourceID)
-			default:
-				res.Blocked = append(res.Blocked, g.SourceID) // all features overlapped
-			}
+	res.Imported, res.Skipped = out.Imported, out.Skipped
+	for _, src := range out.Blocked {
+		if out.Reasons[src] == "product has no entitlements_spec" {
+			res.NoSpec = append(res.NoSpec, src)
+			continue
 		}
-		return nil
-	})
-	return res, err
-}
-
-// productEntitlementKeys returns the entitlement feature names — the keys of a
-// product's entitlements_spec ({name: hours} JSONB).
-func productEntitlementKeys(raw []byte) []string {
-	if len(raw) == 0 {
-		return nil
+		res.Blocked = append(res.Blocked, src)
 	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		if k = strings.TrimSpace(k); k != "" {
-			out = append(out, k)
-		}
-	}
-	sort.Strings(out)
-	return out
+	return res, nil
 }

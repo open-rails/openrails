@@ -14,6 +14,28 @@ type CheckoutRailOption struct {
 type CheckoutConfig struct {
 	Object string              `json:"object"`
 	PSPs   []CheckoutPSPConfig `json:"psps"`
+	// Solana is present when a Solana PSP is armed: the network and the
+	// tokens the merchant accepts, so a host renders wallet options from the
+	// same document it renders card options from.
+	Solana *SolanaCheckoutConfig `json:"solana,omitempty"`
+}
+
+// SolanaCheckoutConfig is the merchant's public Solana acceptance policy.
+type SolanaCheckoutConfig struct {
+	Network        string                `json:"network"`
+	Chain          string                `json:"chain"`
+	PreferredToken string                `json:"preferred_token"`
+	Tokens         []SolanaCheckoutToken `json:"tokens"`
+}
+
+// SolanaCheckoutToken is one accepted SPL token.
+type SolanaCheckoutToken struct {
+	Symbol            string `json:"symbol"`
+	Name              string `json:"name"`
+	Mint              string `json:"mint"`
+	Decimals          int    `json:"decimals"`
+	Preferred         bool   `json:"preferred"`
+	RecurringEligible bool   `json:"recurring_eligible"`
 }
 
 // CheckoutPSPConfig describes one armed PSP for browser checkout.

@@ -59,14 +59,14 @@ func EnsureCustomerID(ctx context.Context, qx gen.DBTX, tenantID uuid.UUID, user
 		}
 		tenantID = tid.UUID()
 	}
-	id, err := gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
+	row, err := gen.New(qx).EnsureCustomer(ctx, gen.EnsureCustomerParams{
 		ID:         uid,
 		MerchantID: tenantID,
 	})
 	if err != nil {
 		return uuid.Nil, err
 	}
-	return id, nil
+	return row.ID, nil
 }
 
 // ResolveCustomerID derives the payable merchant subject id for a userID

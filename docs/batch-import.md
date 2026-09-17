@@ -106,9 +106,10 @@ record kind. Subscription access follows from subscription standing and from
 the derive pass: run `embedded.ConvergeMerchant` (the operator-triggerable
 merchant-wide convergence) after import to materialize grants + entitlement
 windows from the imported subscriptions/payments immediately. Operator/manual
-comps — access with no payment behind it — go through the separate
-`embedded.ImportAdminGrants` seam as grant-ledger facts; OpenRails derives
-the windows.
+comps — access with no payment behind it — ride the same book as
+`admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
+derives the windows. `Client.ImportBilling` posts the same book over
+`POST /v1/import/billing`.
 
 ### The migration playbook
 
@@ -132,8 +133,8 @@ billing data over this seam:
    wall-clock.
 4. **Import in dependency order, batched**: customers → payment methods →
    subscriptions + their transactions. Keep the host's stable ids as
-   `source_id` so re-runs are exact and results are auditable per row. Hand
-   admin/manual comps to `ImportAdminGrants`.
+   `source_id` so re-runs are exact and results are auditable per row. Declare
+   admin/manual comps as `admin_grants` in the same book.
 5. **Converge.** Run `ConvergeMerchant` once so entitlements/grants derive
    now rather than on the next scheduled sweep.
 6. **Boot with `PROVIDER_WRITE_MODE=limited` — set before first start.**
