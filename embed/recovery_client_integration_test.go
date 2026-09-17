@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrationharness"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/stretchr/testify/require"
 )
 
@@ -25,10 +24,10 @@ func TestRecoveryClientAcrossTransports(t *testing.T) {
 	remote := h.StartStandalone("USD")
 	host := h.StartEmbeddedHost("USD")
 	// A SaaS process serves several merchants using distinct bound clients.
-	multi, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	multi, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, multi.Close(context.Background())) })
 	multiClient, err := multi.Client(openrails.WithMerchantID(dbtest.TestMerchantID))

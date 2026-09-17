@@ -234,7 +234,7 @@ func (h *StripeArchiveProductHandler) Type() string { return TypeStripeArchivePr
 // PrunePolicy keeps the result_evidence on a succeeded archive tombstone
 // (#607): the catalog status view renders its verification booleans
 // (verified_absent/already_inactive/...) off the succeeded row
-// (pkg/service/catalog_extras.go). The payload (object id) is dropped.
+// (internal/service/catalog_extras.go). The payload (object id) is dropped.
 func (h *StripeArchiveProductHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
 	return false, true
 }
@@ -291,7 +291,7 @@ func (h *StripeArchivePriceHandler) Type() string { return TypeStripeArchivePric
 
 // PrunePolicy keeps the result_evidence on a succeeded archive tombstone
 // (#607): the catalog status view renders its verification booleans off the
-// succeeded row (pkg/service/catalog_extras.go).
+// succeeded row (internal/service/catalog_extras.go).
 func (h *StripeArchivePriceHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
 	return false, true
 }

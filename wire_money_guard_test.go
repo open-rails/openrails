@@ -18,7 +18,7 @@ import (
 var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit|cap|threshold|floor|balance|revenue|fee|cost|refunded|due|owed|spent|used|reserved|remaining|captured|authorized)(_|$)`)
 
 // wireDTODirs hold types that the shared Client or HTTP handlers encode.
-var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "pkg/embedded/controlplane", "pkg/pricing", "pkg/service", "internal/http/handlers", "internal/modules/copilot", "internal/modules/money"}
+var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "internal/operator", "pkg/pricing", "internal/service", "internal/http/handlers", "internal/modules/copilot", "internal/modules/money"}
 
 // pendingNumericMoney lists monetary integers still encoded as JSON numbers.
 // Every entry is a known #983 gap or a type that never reaches the HTTP wire;
@@ -36,27 +36,27 @@ var pendingNumericMoney = map[string]string{
 	"pkg/api/response.go:CreditGrantSpecObject.Amount amount":                                                                                        deletedByCatalogCut,
 	"pkg/catalog/manifest.go:CreditGrant.Amount amount":                                                                                              deletedByCatalogCut,
 	"pkg/catalog/manifest.go:UsageLimitWindow.Amount amount":                                                                                         deletedByCatalogCut,
-	"pkg/service/catalog_recovery_metadata.go:credit.Amount amount":                                                                                  deletedByCatalogCut,
-	"pkg/service/catalog_sidecars.go:CatalogUsageLimitWindowSpec.Amount amount":                                                                      deletedByCatalogCut,
-	"pkg/service/service_definition_catalog.go:CreditGrantSpec.Amount amount":                                                                        deletedByCatalogCut,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                  notMoneyCount,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                    notMoneyCount,
+	"internal/service/catalog_recovery_metadata.go:credit.Amount amount":                                                                             deletedByCatalogCut,
+	"internal/service/catalog_sidecars.go:CatalogUsageLimitWindowSpec.Amount amount":                                                                 deletedByCatalogCut,
+	"internal/service/service_definition_catalog.go:CreditGrantSpec.Amount amount":                                                                   deletedByCatalogCut,
+	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                          notMoneyCount,
+	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                            notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                                            notHTTPToolArgs,
 	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                                              notHTTPToolArgs,
 	"internal/modules/money/enterprise.go:PendingCharge.Amount amount":                                                                               notHTTPPendingCharges,
-	"pkg/service/enterprise.go:PendingChargeDTO.Amount amount":                                                                                       notHTTPPendingCharges,
+	"internal/service/enterprise.go:PendingChargeDTO.Amount amount":                                                                                  notHTTPPendingCharges,
 	"internal/modules/money/reconcile.go:OrphanedHold.Amount authorized_amount":                                                                      notHTTPReconcileReport,
 	"internal/modules/money/provider_billing.go:normalizedProviderBillingRecord.AmountUSDMicros amount_usd_micros":                                   notHTTPProviderEvidence,
 	"internal/modules/money/provider_billing.go:providerBillingSettlementManifest.QualifiedProviderCostUSDMicros qualified_provider_cost_usd_micros": notHTTPProviderEvidence,
 	"internal/modules/money/service_usage.go:ResourceRevenueDailyRow.Amount amount":                                                                  notHTTPInternalRow,
 	"internal/modules/money/service_usage.go:ServiceUsageRollupRow.TotalAmount total_amount":                                                         notHTTPInternalRow,
 	"internal/modules/money/usage.go:UsageRollupRow.TotalAmount total_amount":                                                                        notHTTPInternalRow,
-	"pkg/service/spend.go:CreditAccountSnapshot.AvailableAmount available_amount":                                                                    notHTTPInternalRow,
-	"pkg/service/spend.go:CreditAccountSnapshot.BalanceAmount balance_amount":                                                                        notHTTPInternalRow,
-	"pkg/service/spend.go:CreditAccountSnapshot.HeldAmount held_amount":                                                                              notHTTPInternalRow,
-	"pkg/service/spend.go:CreditAccountSnapshot.OutstandingOwedAmount outstanding_owed_amount":                                                       notHTTPInternalRow,
-	"pkg/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                        notHTTPStoredPayload,
-	"pkg/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                                    notHTTPStoredPayload,
+	"internal/service/spend.go:CreditAccountSnapshot.AvailableAmount available_amount":                                                               notHTTPInternalRow,
+	"internal/service/spend.go:CreditAccountSnapshot.BalanceAmount balance_amount":                                                                   notHTTPInternalRow,
+	"internal/service/spend.go:CreditAccountSnapshot.HeldAmount held_amount":                                                                         notHTTPInternalRow,
+	"internal/service/spend.go:CreditAccountSnapshot.OutstandingOwedAmount outstanding_owed_amount":                                                  notHTTPInternalRow,
+	"internal/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                   notHTTPStoredPayload,
+	"internal/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                               notHTTPStoredPayload,
 	"internal/modules/money/invoice_collection_intent.go:InvoiceCollectionPayload.Amount amount":                                                     notHTTPIntentPayload,
 }
 
@@ -70,7 +70,7 @@ const (
 	notHTTPPendingCharges   = "not HTTP: no route serves pending charges"
 	notHTTPReconcileReport  = "not HTTP: CLI/job reconcile report"
 	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
-	notHTTPInternalRow      = "not HTTP: internal rows converted by pkg/service"
+	notHTTPInternalRow      = "not HTTP: internal rows converted by internal/service"
 	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
 	notHTTPIntentPayload    = "not HTTP: frozen rail_intents payload; the pinned provider wire is asserted separately"
 )

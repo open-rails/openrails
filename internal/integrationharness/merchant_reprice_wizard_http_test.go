@@ -17,8 +17,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/catalog"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // These tests drive the #777 console price-change wizard's backend contract

@@ -16,7 +16,7 @@ OpenRails-SaaS, not the engine.
 | Platform operations | Owned by the host | Local human operator plus current root permission |
 
 Embedded applications supply request-aware authenticators. AuthKit hosts use
-`pkg/embedded/authkit` with their existing verifier and live admission callback;
+`embed/authkit` with their existing verifier and live admission callback;
 remote JWKS verification cannot independently observe a remote user's ban.
 The normal local host-user adapter remains distinct from the wire delegated
 profile: a local user has `sub`, while a delegated caller has `delegated_sub`.

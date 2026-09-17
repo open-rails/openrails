@@ -10,7 +10,7 @@ import (
 // CancelMode describes how a subscription's cancellation behaves for a given
 // rail (and, for NMI, the subscription's current lifecycle state). Registry-
 // owned since #686 (rails.CancelMode); aliased here for the existing exported
-// surface (handlers, pkg/service).
+// surface (handlers, internal/service).
 type CancelMode = rails.CancelMode
 
 const (
