@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"net/http"
-	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 )
 
@@ -64,7 +64,7 @@ func GetPrices(r *httprequest.Request) {
 	}
 
 	filter := catalog.PriceFilter{
-		Currency: strings.ToLower(req.Currency),
+		Currency: moneyutil.NormalizeCurrency(req.Currency),
 		Type:     req.Type,
 	}
 
