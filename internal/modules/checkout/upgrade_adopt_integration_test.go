@@ -17,6 +17,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -29,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // fakeNMIUpgradeGateway scripts successor creation, proration submission,
@@ -271,7 +271,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 	return &upgradeAdoptFixture{
 		db: dbi, svc: svc, gateway: gateway,
 		req: &CheckoutRequest{
-			PaymentMethodID: api.FormatPaymentMethodID(pm.ID),
+			PaymentMethodID: openrails.PaymentMethodID(pm.ID).String(),
 			IdempotencyKey:  "upg-key-" + sfx,
 		},
 		user:        &UserIdentity{ID: userID},

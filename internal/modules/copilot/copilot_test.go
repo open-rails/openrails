@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -172,7 +173,7 @@ func newFixture() *testFixture {
 	f.subs = &fakeSubs{counts: map[uuid.UUID]int64{premiumV2.ID: 3, premiumV1.ID: 2, basic.ID: 1}}
 	f.reprices = &fakeReprices{
 		previews: map[string]*subscriptions.RepricePreviewResult{
-			"premium-monthly": {PriceKey: "premium-monthly", ToPriceID: premiumV2.ID, Matched: 5},
+			"premium-monthly": {PriceKey: "premium-monthly", ToPriceID: openrails.PriceID(premiumV2.ID), Matched: 5},
 		},
 		batches: map[string][]*models.RepriceBatch{},
 		repRows: map[uuid.UUID][]*models.SubscriptionReprice{},

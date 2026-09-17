@@ -10,29 +10,29 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
 )
 
 type PaymentFilters struct {
-	UserID         string     `form:"user_id"`
-	PriceID        uuid.UUID  `form:"price_id"`
-	SubscriptionID string     `form:"subscription_id"` // UUID string, parsed in handler
-	Rail           string     `form:"rail"`
-	TransactionID  string     `form:"transaction_id"`
-	StartDate      *time.Time `form:"created_after" time_format:"2006-01-02"`
-	EndDate        *time.Time `form:"created_before" time_format:"2006-01-02"`
-	MinAmount      *int64     `form:"min_amount"`
-	MaxAmount      *int64     `form:"max_amount"`
-	Status         string     `form:"status"` // pending|completed|failed|refunded (#733 deep-link)
-	RefundsOnly    bool       `form:"refunds_only"`
-	SortBy         string     `form:"sort_by"`    // created_at (default), amount, purchased_at
-	SortOrder      string     `form:"sort_order"` // asc, desc (default)
+	UserID         string                   `form:"user_id"`
+	PriceID        openrails.PriceID        `form:"price_id"`
+	SubscriptionID openrails.SubscriptionID `form:"subscription_id"`
+	Rail           string                   `form:"rail"`
+	TransactionID  string                   `form:"transaction_id"`
+	StartDate      *time.Time               `form:"created_after" time_format:"2006-01-02"`
+	EndDate        *time.Time               `form:"created_before" time_format:"2006-01-02"`
+	MinAmount      *int64                   `form:"min_amount"`
+	MaxAmount      *int64                   `form:"max_amount"`
+	Status         string                   `form:"status"` // pending|completed|failed|refunded (#733 deep-link)
+	RefundsOnly    bool                     `form:"refunds_only"`
+	SortBy         string                   `form:"sort_by"`    // created_at (default), amount, purchased_at
+	SortOrder      string                   `form:"sort_order"` // asc, desc (default)
 }
 
 type PaymentRepo struct {
@@ -484,15 +484,14 @@ func (r *PaymentRepo) GetPayments(ctx context.Context, opts query.QueryOptions[P
 		}
 		tsid = &id
 	}
-	var priceID *uuid.UUID
-	if f.PriceID != uuid.Nil {
-		priceID = &f.PriceID
+	var priceID, subID *uuid.UUID
+	if !f.PriceID.IsZero() {
+		id := f.PriceID.UUID()
+		priceID = &id
 	}
-	var subID *uuid.UUID
-	if f.SubscriptionID != "" {
-		if parsed, err := api.ParseSubscriptionID(f.SubscriptionID); err == nil {
-			subID = &parsed
-		}
+	if !f.SubscriptionID.IsZero() {
+		id := f.SubscriptionID.UUID()
+		subID = &id
 	}
 	var rail, transactionID, status *string
 	if f.Rail != "" {

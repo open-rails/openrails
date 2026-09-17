@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -229,7 +230,7 @@ func TestOr897_BindingResolutionPrecedence(t *testing.T) {
 
 	// Rung 3 — the payer's own binding beats both.
 	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{
-		PolicyName: "large", CustomerID: payer.UUID().String(),
+		PolicyName: "large", CustomerID: openrails.CustomerID(payer.UUID()),
 	}))
 	require.True(t, admits(100_000_000), "the per-customer binding must beat the tier and the default")
 }
@@ -342,7 +343,7 @@ func TestOr897_ValidatorIsSharedByBothDeclarationPaths(t *testing.T) {
 	// A binding that names both rungs cannot be ranked, so it is refused rather
 	// than silently resolved one way.
 	err := svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{
-		PolicyName: "p", Tier: "gold", CustomerID: uuid.NewString(),
+		PolicyName: "p", Tier: "gold", CustomerID: openrails.CustomerID(uuid.New()),
 	})
 	require.ErrorIs(t, err, billingservice.ErrInvalidBillingPolicy)
 	require.ErrorContains(t, err, "a customer OR a tier, not both")

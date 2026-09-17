@@ -71,7 +71,7 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	// Two gauge segment events via the EMBEDDED unified client; the first is
 	// replayed and must not double-record.
 	report := openrails.UsageReport{
-		CustomerID: payerID.String(),
+		CustomerID: openrails.CustomerID(payerID),
 		Invoker:    "usage-report-test",
 		Currency:   currency,
 		EventType:  meterKey,

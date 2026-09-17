@@ -1,0 +1,11 @@
+{
+  "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "key": "pro-monthly",
+  "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "archived": false,
+  "unit_amount": "9223372036854775807",
+  "currency": "USD",
+  "auto_renew": true,
+  "created_at": "2026-09-16T00:00:00.123456789Z",
+  "updated_at": "2026-09-16T00:00:00.123456789Z"
+}

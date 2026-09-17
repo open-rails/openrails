@@ -142,7 +142,7 @@ func (s *Service) EnsureUsageProduct(ctx context.Context, key, displayName strin
 		}
 		return uuid.Nil, err
 	}
-	return p.ID, nil
+	return p.ID.UUID(), nil
 }
 
 // UsageMeterSpec declares a host-owned usage meter (upserted idempotently).

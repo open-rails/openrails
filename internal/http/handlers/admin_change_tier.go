@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -62,11 +62,12 @@ func adminTierChangeRequest(
 		return nil, nil, false
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(r.Param("id"))
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return nil, nil, false
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 	if r.State.CheckoutService == nil || r.State.SubscriptionService == nil || r.State.RepriceService == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
 		return nil, nil, false
@@ -120,7 +121,7 @@ func adminTierChangeRequest(
 	}
 
 	return &checkout.TierChangeRequest{
-			PriceID:        body.PriceID,
+			PriceID:        body.PriceID.String(),
 			SubscriptionID: subscriptionID,
 		}, &checkout.UserIdentity{
 			ID:    subscription.CustomerID.String(),

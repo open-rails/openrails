@@ -32,6 +32,26 @@ type serviceDepositRequest = openrails.DepositCreditsRequest
 
 type serviceCaptureRequest = openrails.CaptureRequest
 
+// servicePayer converts a typed wire customer id to the engine's payer
+// identity; the zero id is nil (absent).
+func servicePayer(id openrails.CustomerID) *billingidentity.CustomerID {
+	if id.IsZero() {
+		return nil
+	}
+	payer := billingidentity.CustomerID(id)
+	return &payer
+}
+
+// customerIDParam reads a plain-UUID customer id from a path or query value;
+// anything unparseable is the zero id, which callers refuse.
+func customerIDParam(raw string) openrails.CustomerID {
+	id, err := openrails.ParseCustomerID(raw)
+	if err != nil {
+		return openrails.CustomerID{}
+	}
+	return id
+}
+
 func parseServiceCustomerID(raw string) (*billingidentity.CustomerID, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -145,7 +165,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		CustomerID:            snap.CustomerID.String(),
+		CustomerID:            openrails.CustomerID(snap.CustomerID),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceAmount:         snap.BalanceAmount,
@@ -177,11 +197,11 @@ type serviceTxnResponse struct {
 }
 
 type serviceUsageRollupRequest struct {
-	CustomerID string    `json:"customer_id" binding:"required"`
-	Currency   string    `json:"currency"`
-	From       time.Time `json:"from" binding:"required"` // RFC3339, inclusive
-	To         time.Time `json:"to" binding:"required"`   // RFC3339, exclusive
-	GroupBy    string    `json:"group_by" binding:"required"`
+	CustomerID openrails.CustomerID `json:"customer_id"`
+	Currency   string               `json:"currency"`
+	From       time.Time            `json:"from" binding:"required"` // RFC3339, inclusive
+	To         time.Time            `json:"to" binding:"required"`   // RFC3339, exclusive
+	GroupBy    string               `json:"group_by" binding:"required"`
 }
 
 type serviceRecordUsageRequest = openrails.UsageReport
@@ -199,8 +219,8 @@ func ServiceRecordUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
 		return
 	}
-	payer, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil || payer == nil {
+	payer := servicePayer(req.CustomerID)
+	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
@@ -295,11 +315,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	tenantSubjectID, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
+	tenantSubjectID := servicePayer(req.CustomerID)
 	if tenantSubjectID == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return

@@ -9,7 +9,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
+
+var testCustomer = CustomerID(uuid.MustParse("7d5b4a0e-8c3f-4c1e-9b2a-1f0e2d3c4b5a"))
 
 func TestRemoteTrustLevelWireNames(t *testing.T) {
 	var settingsBody map[string]any
@@ -69,7 +73,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 	}
 
 	if _, err := client.AdmitBatch(context.Background(), []AdmitRequest{{
-		CustomerID: "cust_1", TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: "req_1", AccrualRateDeltaPerHour: 42,
+		CustomerID: testCustomer, TrustLevel: "gold", EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: "req_1", AccrualRateDeltaPerHour: 42,
 	}}); err != nil {
 		t.Fatalf("AdmitBatch: %v", err)
 	}
@@ -85,7 +89,7 @@ func TestRemoteTrustLevelWireNames(t *testing.T) {
 		t.Fatalf("prospective rate missing from admission: %#v", admitBody)
 	}
 
-	trustLevel, err := client.GetTrustLevel(context.Background(), "cust_1", "USD")
+	trustLevel, err := client.GetTrustLevel(context.Background(), testCustomer, "USD")
 	if err != nil {
 		t.Fatalf("GetTrustLevel: %v", err)
 	}
@@ -100,7 +104,7 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 		if r.Method != http.MethodPut {
 			t.Errorf("method = %s, want PUT", r.Method)
 		}
-		if r.URL.Path != "/v1/merchant/customers/customer-1/spend-delegations:upsert" {
+		if r.URL.Path != "/v1/merchant/customers/"+testCustomer.String()+"/spend-delegations:upsert" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -117,7 +121,7 @@ func TestRemoteSetCustomerSpendDelegation(t *testing.T) {
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err := client.SetCustomerSpendDelegation(context.Background(), " customer-1 ", SpendDelegationInput{
+	err := client.SetCustomerSpendDelegation(context.Background(), testCustomer, SpendDelegationInput{
 		Scope: "invoker", ScopeKey: "issuer:subject:digest:entitlement",
 		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
 	})
@@ -135,7 +139,7 @@ func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T)
 		if r.Method != http.MethodPut {
 			t.Errorf("method = %s, want PUT", r.Method)
 		}
-		if r.URL.Path != "/v1/merchant/customers/customer-1/spend-delegations" {
+		if r.URL.Path != "/v1/merchant/customers/"+testCustomer.String()+"/spend-delegations" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
 		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
@@ -152,7 +156,7 @@ func TestRemoteSetCustomerSpendDelegationsUsesMerchantMachineRoute(t *testing.T)
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err := client.SetCustomerSpendDelegations(context.Background(), " customer-1 ", []SpendDelegationInput{{
+	err := client.SetCustomerSpendDelegations(context.Background(), testCustomer, []SpendDelegationInput{{
 		Scope: "invoker", ScopeKey: "invoker-1",
 		Windows: []SpendLimitWindow{{Key: "month", WindowSeconds: 2592000, Limit: 42, Currency: "USD"}},
 	}})
@@ -179,14 +183,14 @@ func TestRemoteDeleteCustomerSpendDelegation(t *testing.T) {
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err := client.DeleteCustomerSpendDelegation(context.Background(), " customer-1 ", "invoker", "user:11111111-1111-1111-1111-111111111111")
+	err := client.DeleteCustomerSpendDelegation(context.Background(), testCustomer, "invoker", "user:11111111-1111-1111-1111-111111111111")
 	if err != nil {
 		t.Fatalf("DeleteCustomerSpendDelegation: %v", err)
 	}
 	if gotMethod != http.MethodDelete {
 		t.Fatalf("method = %s, want DELETE", gotMethod)
 	}
-	if gotPath != "/v1/merchant/customers/customer-1/spend-delegations/invoker/user:11111111-1111-1111-1111-111111111111" {
+	if gotPath != "/v1/merchant/customers/"+testCustomer.String()+"/spend-delegations/invoker/user:11111111-1111-1111-1111-111111111111" {
 		t.Fatalf("path = %s", gotPath)
 	}
 }
@@ -226,26 +230,26 @@ func TestRemoteValidationErrorParity(t *testing.T) {
 		{
 			name: "SetCustomerSpendDelegations empty customer_id",
 			fn: func() error {
-				return client.SetCustomerSpendDelegations(ctx, "", nil)
+				return client.SetCustomerSpendDelegations(ctx, CustomerID{}, nil)
 			},
 		},
 		{
 			name: "SetCustomerSpendDelegation empty customer_id",
 			fn: func() error {
-				return client.SetCustomerSpendDelegation(ctx, "", SpendDelegationInput{})
+				return client.SetCustomerSpendDelegation(ctx, CustomerID{}, SpendDelegationInput{})
 			},
 		},
 		{
 			name: "ListEntitlements empty subject",
 			fn: func() error {
-				_, err := client.ListEntitlements(ctx, "", time.Time{})
+				_, err := client.ListEntitlements(ctx, CustomerID{}, time.Time{})
 				return err
 			},
 		},
 		{
 			name: "HasEntitlement empty entitlement",
 			fn: func() error {
-				_, err := client.HasEntitlement(ctx, "user@example.com", "", time.Time{})
+				_, err := client.HasEntitlement(ctx, testCustomer, "", time.Time{})
 				return err
 			},
 		},
@@ -259,21 +263,21 @@ func TestRemoteValidationErrorParity(t *testing.T) {
 		{
 			name: "ListProductAccess empty subject",
 			fn: func() error {
-				_, err := client.ListProductAccess(ctx, "")
+				_, err := client.ListProductAccess(ctx, CustomerID{})
 				return err
 			},
 		},
 		{
 			name: "HasProductAccess empty subject",
 			fn: func() error {
-				_, err := client.HasProductAccess(ctx, "", "pro")
+				_, err := client.HasProductAccess(ctx, CustomerID{}, ProductID(uuid.New()))
 				return err
 			},
 		},
 		{
 			name: "HasProductAccess empty product_id",
 			fn: func() error {
-				_, err := client.HasProductAccess(ctx, "user@example.com", "")
+				_, err := client.HasProductAccess(ctx, testCustomer, ProductID{})
 				return err
 			},
 		},

@@ -19,6 +19,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -606,7 +608,7 @@ func TestPlanMigration_CancelAfterStripePushWarnsLoudly(t *testing.T) {
 	cres, err := f.pm.CancelBatch(ctx, *res.BatchID)
 	require.NoError(t, err)
 	require.Equal(t, 1, cres.Canceled)
-	require.Equal(t, []uuid.UUID{subID}, cres.RailReleaseRequired)
+	require.Equal(t, []openrails.SubscriptionID{openrails.SubscriptionID(subID)}, cres.RailReleaseRequired)
 	require.Contains(t, cres.Warning, "WILL flip the price at period end")
 }
 

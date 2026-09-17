@@ -6,7 +6,7 @@ import "github.com/google/uuid"
 // Zero-cost completion has no ledger transfer; identity always comes from admission.
 type CaptureReceipt struct {
 	RequestID        string     `json:"request_id"`
-	CustomerID       uuid.UUID  `json:"customer_id"`
+	CustomerID       CustomerID `json:"customer_id"`
 	Currency         string     `json:"currency"`
 	Amount           int64      `json:"amount,string"`
 	LedgerTransferID *uuid.UUID `json:"ledger_transfer_id"`

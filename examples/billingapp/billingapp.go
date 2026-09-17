@@ -21,8 +21,8 @@ type Inputs struct {
 	Run              string
 	CheckoutPriceKey string
 	CheckoutRail     string
-	SubscriberID     string
-	SubscriptionID   string
+	SubscriberID     openrails.CustomerID
+	SubscriptionID   openrails.SubscriptionID
 	InvoiceID        uuid.UUID
 }
 
@@ -53,7 +53,7 @@ type Report struct {
 // Run executes the workflow with the given client.
 func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, error) {
 	var r Report
-	payer := uuid.NewString()
+	payer := openrails.CustomerID(uuid.New())
 	invoker := "app:" + in.Run
 
 	if err := client.SetMerchantSettings(ctx, openrails.MerchantSettings{
@@ -81,9 +81,8 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		return r, fmt.Errorf("read credit limit: %w", err)
 	}
 
-	customer := openrails.CustomerID(uuid.MustParse(payer))
 	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{
-		CustomerID: &customer, Invoker: invoker, Currency: in.Currency, Amount: 100_000,
+		CustomerID: &payer, Invoker: invoker, Currency: in.Currency, Amount: 100_000,
 		Source: "billingapp", SourceID: in.Run + ":deposit", Description: "prepaid balance",
 	})
 	if err != nil {
@@ -130,15 +129,19 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		r.UsageEvents += row.EventCount
 	}
 
-	options, err := client.ListCheckoutRailOptions(ctx, in.CheckoutPriceKey)
+	price, err := client.GetPriceByKey(ctx, in.CheckoutPriceKey)
+	if err != nil {
+		return r, fmt.Errorf("resolve checkout price: %w", err)
+	}
+	options, err := client.ListCheckoutRailOptions(ctx, price.ID)
 	if err != nil {
 		return r, fmt.Errorf("checkout options: %w", err)
 	}
 	r.CheckoutRails = len(options)
-	buyer := uuid.NewString()
+	buyer := openrails.CustomerID(uuid.New())
 	request := openrails.CreateCheckoutSessionRequest{
-		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer[:8]},
-		PriceID:        in.CheckoutPriceKey,
+		Customer:       openrails.CheckoutCustomerIdentity{ID: buyer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + buyer.String()[:8]},
+		PriceID:        price.ID,
 		IdempotencyKey: in.Run + ":checkout",
 		Payment:        openrails.CheckoutPayment{Rail: in.CheckoutRail, NameOnCard: "Example Buyer", Zip: "90210", Country: "US"},
 	}
@@ -178,7 +181,7 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 	if err != nil {
 		return r, fmt.Errorf("read invoice: %w", err)
 	}
-	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, invoice.CustomerID.String(), openrails.InvoiceProfileDTO{
+	if r.InvoiceProfileSet, err = client.EnsureCustomerInvoiceProfile(ctx, invoice.CustomerID, openrails.InvoiceProfileDTO{
 		NetTermsDays: 14, CollectionMethod: "send_invoice",
 	}); err != nil {
 		return r, fmt.Errorf("invoice profile: %w", err)

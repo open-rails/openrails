@@ -1,0 +1,21 @@
+{
+  "id": "cs_ffffffff-ffff-4fff-8fff-ffffffffffff",
+  "status": "succeeded",
+  "mode": "subscription",
+  "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "amount": "9223372036854775807",
+  "currency": "USD",
+  "payment_status": "paid",
+  "client_secret": null,
+  "url": null,
+  "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "payment_id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  "expires_at": "2026-09-16T00:00:00.123456789Z",
+  "created_at": "2026-09-16T00:00:00.123456789Z",
+  "metadata": {
+    "plan": "pro"
+  },
+  "rail_data": {
+    "rail": "nmi"
+  }
+}

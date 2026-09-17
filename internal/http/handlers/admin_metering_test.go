@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -44,7 +45,7 @@ func TestDefaultUsageRateCardInput(t *testing.T) {
 		Key:     "storage-gb",
 		GroupBy: map[string]string{"region": "metadata.region"},
 	}, adminDefaultUsageRateCardRequest{
-		ProductID: productID,
+		ProductID: openrails.ProductID(productID),
 		Filter:    map[string][]string{" region ": {" eu ", "eu"}},
 		Price: pricing.RatePrice{
 			Model:    pricing.ModelPerUnit,
@@ -62,7 +63,7 @@ func TestDefaultUsageRateCardInput(t *testing.T) {
 		Key:     "storage-gb",
 		GroupBy: map[string]string{},
 	}, adminDefaultUsageRateCardRequest{
-		ProductID: productID,
+		ProductID: openrails.ProductID(productID),
 		Filter:    map[string][]string{},
 		Price: pricing.RatePrice{
 			Model:    pricing.ModelPerUnit,

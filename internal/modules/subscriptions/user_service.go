@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -266,13 +267,13 @@ func priceToAPIObject(p *models.Price) api.PriceObject {
 		priceType = "recurring"
 	}
 	return api.PriceObject{
-		ID:         api.FormatPriceID(p.ID),
+		ID:         openrails.PriceID(p.ID),
 		Object:     "price",
 		UnitAmount: p.Amount,
 		Currency:   p.Currency,
 		Type:       priceType,
 		Recurring:  recurring,
-		Product:    api.FormatProductID(p.ProductID),
+		Product:    openrails.ProductID(p.ProductID),
 		Active:     p.IsPurchasable(),
 		Metadata:   map[string]string{},
 		Created:    api.ToUnix(p.CreatedAt),
@@ -281,7 +282,7 @@ func priceToAPIObject(p *models.Price) api.PriceObject {
 
 func productToAPIObject(p *models.Product) api.ProductObject {
 	return api.ProductObject{
-		ID:               api.FormatProductID(p.ID),
+		ID:               openrails.ProductID(p.ID),
 		Object:           "product",
 		Key:              p.Key,
 		Name:             p.DisplayName,

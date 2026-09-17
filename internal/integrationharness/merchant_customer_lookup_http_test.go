@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -53,40 +54,41 @@ func TestStandaloneMerchantCustomerLookupClientHTTP(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	ghost := uuid.NewString()
-	batch, err := client.ListActiveEntitlements(ctx, []string{subject, ghost}, time.Time{})
+	ghost := openrails.CustomerID(uuid.New())
+	customer := openrails.CustomerID(subjectID)
+	batch, err := client.ListActiveEntitlements(ctx, []openrails.CustomerID{customer, ghost}, time.Time{})
 	require.NoError(t, err)
-	require.Len(t, batch[subject], 1)
-	require.Equal(t, "premium", batch[subject][0].Entitlement)
+	require.Len(t, batch[customer], 1)
+	require.Equal(t, "premium", batch[customer][0].Entitlement)
 	require.Empty(t, batch[ghost])
 
-	single, err := client.ListEntitlements(ctx, subject, time.Time{})
+	single, err := client.ListEntitlements(ctx, customer, time.Time{})
 	require.NoError(t, err)
 	require.Len(t, single, 1)
 	require.Equal(t, "premium", single[0].Entitlement)
 
-	hasPremium, err := client.HasEntitlement(ctx, subject, "premium", time.Time{})
+	hasPremium, err := client.HasEntitlement(ctx, customer, "premium", time.Time{})
 	require.NoError(t, err)
 	require.True(t, hasPremium)
-	hasMissing, err := client.HasEntitlement(ctx, subject, "missing", time.Time{})
+	hasMissing, err := client.HasEntitlement(ctx, customer, "missing", time.Time{})
 	require.NoError(t, err)
 	require.False(t, hasMissing)
 
-	access, err := client.ListProductAccess(ctx, subject)
+	access, err := client.ListProductAccess(ctx, customer)
 	require.NoError(t, err)
 	require.Len(t, access, 1)
-	require.Equal(t, productID.String(), access[0].ProductID)
+	require.Equal(t, openrails.ProductID(productID), access[0].ProductID)
 	require.Equal(t, "active", access[0].Status)
 
-	hasProduct, err := client.HasProductAccess(ctx, subject, productID.String())
+	hasProduct, err := client.HasProductAccess(ctx, customer, openrails.ProductID(productID))
 	require.NoError(t, err)
 	require.True(t, hasProduct)
-	hasOtherProduct, err := client.HasProductAccess(ctx, subject, uuid.NewString())
+	hasOtherProduct, err := client.HasProductAccess(ctx, customer, openrails.ProductID(uuid.New()))
 	require.NoError(t, err)
 	require.False(t, hasOtherProduct)
 
-	balance, err := client.GetCreditAccount(ctx, subject, money.DefaultCurrency)
+	balance, err := client.GetCreditAccount(ctx, customer, money.DefaultCurrency)
 	require.NoError(t, err)
-	require.Equal(t, subject, balance.CustomerID)
+	require.Equal(t, customer, balance.CustomerID)
 	require.Equal(t, money.DefaultCurrency, balance.Currency)
 }

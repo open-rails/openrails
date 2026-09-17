@@ -3,10 +3,7 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"net/url"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Customer is one merchant-scoped billing record. Its ID is the host's stable
@@ -22,11 +19,11 @@ type Customer struct {
 // materialize customers on demand; call this when a host must reference the
 // customer before its first purchase.
 func (c *Client) EnsureCustomer(ctx context.Context, id CustomerID) (*Customer, error) {
-	if uuid.UUID(id) == uuid.Nil {
-		return nil, invalidErr("customer id is required")
+	path, err := customerPath(id)
+	if err != nil {
+		return nil, err
 	}
 	var out Customer
-	path := "/v1/merchant/customers/" + url.PathEscape(uuid.UUID(id).String())
 	if err := c.do(ctx, http.MethodPut, path, struct{}{}, &out); err != nil {
 		return nil, err
 	}

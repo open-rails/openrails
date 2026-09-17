@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -67,7 +68,7 @@ func TestAdmissionDeadlineRecoveryAndZeroCapture(t *testing.T) {
 	require.NoError(t, rdb.FlushDB(ctx).Err())
 	first, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: in.SourceID, Amount: 400})
 	require.NoError(t, err)
-	require.Equal(t, payer.UUID(), first.CustomerID)
+	require.Equal(t, openrails.CustomerID(payer), first.CustomerID)
 	require.NotNil(t, first.LedgerTransferID)
 	replay, err := svc.CaptureHold(ctx, billingservice.CaptureHoldRequest{RequestID: in.SourceID, Amount: 400})
 	require.NoError(t, err)
@@ -116,7 +117,7 @@ func TestZeroEstimateStillEnforcesProspectiveRateAndDelegation(t *testing.T) {
 		require.NoError(t, err)
 	})
 	require.NoError(t, svc.SetBillingPolicy(ctx, billingservice.BillingPolicyInput{Name: name, Kind: "accrual_rate_cap", AccrualRateCapPerHour: 10_000_000}))
-	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{CustomerID: payer.String(), PolicyName: name}))
+	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{CustomerID: openrails.CustomerID(payer), PolicyName: name}))
 	in := billingservice.AdmitInput{CustomerID: payer, Invoker: "user", InvokerType: "payer", Currency: "USD", SourceID: uuid.NewString(), AccrualRateDeltaPerHour: 11_000_000}
 	result, err := svc.Admit(ctx, in)
 	require.NoError(t, err)

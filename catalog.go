@@ -1,13 +1,9 @@
 package openrails
 
-import (
-	"time"
-
-	"github.com/google/uuid"
-)
+import "time"
 
 type CatalogProduct struct {
-	ID               uuid.UUID       `json:"id"`
+	ID               ProductID       `json:"id"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
@@ -65,13 +61,13 @@ type DriftField struct {
 }
 
 type CatalogPrice struct {
-	ID uuid.UUID `json:"id"`
+	ID PriceID `json:"id"`
 	// Key (#774) is the durable, per-merchant-unique movable-pointer handle for
 	// this price's substance-version chain — the stable name to check out
 	// against, reprice by, or reference in support conversations. ID stays the
 	// #662 immutable substance UUID.
 	Key                 string    `json:"key"`
-	ProductID           uuid.UUID `json:"product_id"`
+	ProductID           ProductID `json:"product_id"`
 	Archived            bool      `json:"archived"`
 	UnitAmount          int64     `json:"unit_amount,string"`
 	Currency            string    `json:"currency"`
@@ -96,7 +92,7 @@ type CatalogPrice struct {
 }
 
 type CreatePriceRequest struct {
-	ProductID uuid.UUID `json:"product_id"`
+	ProductID ProductID `json:"product_id"`
 
 	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
 	// this price's substance-version chain — distinct from ID, which stays the
