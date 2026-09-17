@@ -111,7 +111,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (amounts in micros). Query: `currency` |
+| GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (decimal string, native units). Query: `currency` |
 | GET | `/v1/me/transactions` | Ledger transactions, newest first. Query: `currency`, `limit`, `offset` |
 | PUT | `/v1/me/collection-payment-method` | Choose the saved method for automatic invoice collection in one currency. Body: `currency`, `payment_method_id`. The method must belong to the payer and support saved-method charges; otherwise `400` |
 | GET | `/v1/me/status` | Aggregated premium status: `has_active_subscription`, enriched `subscription`, `next_renewal_at`, `entitlements` |
@@ -265,7 +265,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/usage/rollup` | `merchant:usage:read` | Usage rollup query |
 | POST | `/v1/merchant/usage/resource-revenue` | `merchant:usage:read` | Resource-revenue query |
 | GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
-| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Update merchant billing settings, incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
+| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Replace the merchant settings document atomically ([merchant-settings.md](merchant-settings.md)), incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
 | GET | `/v1/merchant/api-host` | `merchant:settings:read` | The merchant's canonical API host (#734 Host routing); `api_host` null when unset |
 | PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Assign the canonical API host: `{ api_host }` (bare lowercase hostname; `""` clears). Owner-only in the fixed role catalog; 409 when taken by another merchant |
 | GET | `/v1/merchant/trust-level` | `merchant:customer-settings:read` | Customer trust level |

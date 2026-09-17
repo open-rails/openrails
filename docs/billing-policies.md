@@ -43,7 +43,7 @@ owed, what has been spent. `accrual_rate_cap` is a question about the future —
 to start. So admission takes your **prospective delta**:
 
 ```json
-{ "customer_id": "…", "estimated_amount": 1000, "accrual_rate_delta_per_hour": 2000000 }
+{ "customer_id": "…", "estimated_amount": "1000", "expires_at": "2026-09-16T12:00:00Z", "accrual_rate_delta_per_hour": "2000000" }
 ```
 
 OpenRails measures what is **already** accruing (rated usage over the policy's
@@ -146,6 +146,6 @@ statement periods must tile its lifetime with no gap and no overlap, and
 rebinding is a live runtime lever, so a mid-cycle change would bill a stretch
 twice or never. It stays merchant-wide as `invoice.billing_period_boundary`.
 
-All amounts are micros.
+Amounts are integers in the currency's native units (micros for USD).
 
-Trust levels are assigned by the host or supplied explicitly with an admission request. Deposits do not promote accounts. Automatic cumulative-paid-spend schedules and the `trust_level_schedules` merchant setting are unavailable; explicit customer/tier policy bindings and role limits remain.
+Trust levels are assigned by the host or supplied explicitly with an admission request; deposits and paid spend never promote an account.

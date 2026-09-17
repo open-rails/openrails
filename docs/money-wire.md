@@ -28,7 +28,8 @@ wire — response fields and request parameters alike (`expires_at`, `occurred_a
 `time.RFC3339Nano` and handlers accept any fractional precision. Durations stay
 integer seconds (`window_seconds`, `retry_after_seconds`) and day buckets stay
 `YYYY-MM-DD`. Missing optional timestamps are omitted; explicit nullable receipt
-fields use null.
+fields use null. Not yet moved: the epoch-seconds `created` on `Payment`,
+`PublicPrice` and the admin catalog objects (tracked with #983).
 
 The registry has one owner. Go consumers read it with `openrails.Currencies()`
 / `openrails.LookupCurrency(code)` (pure, no I/O); browsers fetch the same
