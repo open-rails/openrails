@@ -634,9 +634,11 @@ credential guarantees attach — a live Stripe key (`sk_live_`/`rk_live_`)
 refuses to boot; each NMI account is probed when armed with one auth on the
 canonical non-issued test PAN (only a simulator approves it — a decline
 proves a live account and refuses the arm); CCBill uses the sandbox API host;
-Solana derives devnet. Each NMI arm requires a fresh probe; unavailable,
-indeterminate or live responses refuse the arm. No persistent verdict cache can
-substitute for qualification. Production mode does not run the sandbox probe.
+Solana derives devnet. Each NMI arm requires a fresh probe (manifest
+reconciliation and the provider API alike); unavailable, indeterminate or live
+responses refuse the arm, and an update that omits credentials re-probes the
+stored key — a secret-backend failure cannot bypass it. Nothing caches a
+verdict. Production mode does not run the sandbox probe.
 Sandbox is allowed in every environment (#762) — what keeps it honest is
 rail-credential validation (the live-key refusal and the NMI live-gateway
 probe, which ask the credential itself), not the environment string.
@@ -829,4 +831,4 @@ route tier:
 
 ## Payment-method update notices
 
-A recoverable stored-card failure sends an immediate `payment_method_update_required` payer notice and parks collection until the method is fixed. Core does not schedule repeated payment-method reminder ladders. Hosts may own additional reminders. Normal retry/dunning, provider verification, stored-card account updates and paid-period access are unchanged.
+A recoverable stored-card failure sends one `payment_method_update_required` payer notice and parks collection until the method is fixed; any follow-up is the host's. Retry/dunning, provider verification, stored-card account updates and paid-period access continue unchanged.

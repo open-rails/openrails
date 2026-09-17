@@ -1,9 +1,10 @@
 # Standalone Integration Guide
 
 How to deploy OpenRails as its own self-hosted HTTP service and integrate your
-application against it. The README's "Standalone Mode: How To Integrate" is the
-quickstart; this is the full guide. All money amounts are **micros** (millionths
-of a currency unit). Vocabulary: a **rail** is a gateway kind (`nmi`, `ccbill`,
+application against it; `examples/standalone` is the runnable quickstart. Money
+is an integer in the currency's native units (`GET /v1/currencies`; micros for
+USD), a decimal string on the wire ([money-wire.md](money-wire.md)). Vocabulary:
+a **rail** is a gateway kind (`nmi`, `ccbill`,
 `stripe`, `solana`); a **PSP** is your concrete account on a rail (e.g. `mobius`
 on nmi) — declared under `merchants.<slug>.psps.<key>.<rail>`.
 
@@ -158,35 +159,40 @@ response and is never retrievable again. `GET /v1/merchant/api-keys` lists,
 embedded mode:
 
 ```go
-client := openrails.NewRemote("https://openrails.example",
+client, err := openrails.NewRemote("https://openrails.example",
     openrails.WithAPIKey(os.Getenv("OPENRAILS_API_KEY")), // or WithTokenProvider for minted JWTs
-    openrails.WithCurrency("usd"),
+    openrails.WithMerchantID(merchantID),                 // immutable merchant binding
+    openrails.WithCurrency("USD"),
     openrails.WithTimeout(2*time.Second), // per-call deadline; default 2s
 )
+if err != nil { log.Fatal(err) }         // static config: bad URL, no credential
 if err := client.Verify(ctx); err != nil { // authenticated boot probe
-    log.Fatal(err)                         // bad URL, bad key — fail fast
+    log.Fatal(err)                         // unreachable, bad key — fail fast
 }
 
 verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
     CustomerID:      customerID,
     Invoker:         userID,
-    EstimatedAmount: 50_000,    // micros
+    EstimatedAmount: 50_000,    // native units (USD: micros)
+    ExpiresAt:       &deadline, // required with a hold: the job's deadline
     RequestID:       requestID, // idempotency key
 }})
-err = client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
+receipt, err := client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
 // or client.Release(ctx, requestID) if the work failed
 ```
 
 Options: `WithAPIKey`, `WithTokenProvider` (per-call minted bearer),
-`WithCurrency`, `WithTimeout`, `WithHTTPClient`. The constructor never errors;
-a bad base URL or empty key surfaces on the first call.
+`WithMerchantID` ([client-merchant-binding.md](client-merchant-binding.md)),
+`WithCurrency`, `WithTimeout`, `WithHTTPClient`. The constructor validates
+static configuration without I/O; `Verify` is the live check.
 
 **Errors** are canonical sentinels (`errors.Is` works identically against a
 remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
 `ErrNotFound`, `ErrConflict`, `ErrInsufficientCredits` (402),
+`ErrPaymentRefused` (402 `card_declined` / `payment_method_stale`),
 `ErrInternal`, and `ErrUnreachable` — which wraps transport failures,
-timeouts, and 5xx. Every error is a `*StatusError` carrying the HTTP status
-and wire code/message. A blank, whitespace or dot identifier (or a zero UUID)
+timeouts, and 5xx. Every server error is a `*StatusError` carrying the HTTP
+status and wire code/message ([api/errors.md](api/errors.md)). A blank, whitespace or dot identifier (or a zero UUID)
 is refused by the Client before any request with the same `400 invalid_param`
 `StatusError` the server returns for a malformed identifier, so embedded and
 remote callers observe one error.
@@ -205,8 +211,8 @@ your hot path.
 # Pre-authorize + hold atomically before doing expensive work
 curl -X POST https://openrails.example/v1/merchant/admissions \
   -H "Authorization: Bearer openrails_st_..." \
-  -d '{"items":[{"customer_id":"...","invoker":"user-123",
-       "estimated_amount":50000,"request_id":"req-789"}]}'
+  -d '{"items":[{"customer_id":"...","invoker":"user-123","estimated_amount":"50000",
+       "expires_at":"2026-09-16T12:00:00Z","request_id":"req-789"}]}'
 
 # Settle at real cost…
 curl -X POST https://openrails.example/v1/merchant/admissions/req-789/capture \
@@ -250,9 +256,9 @@ subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
 **Per-merchant API hosts (#734).** A multi-merchant deployment can give each
-merchant a canonical hostname (`merchants.api_host` — a plain row update via
-`merchants.Service.SetHostConfig`, resolved live on the next request, no
-restart). Host resolution then routes `/v1/webhooks/{rail}`
+merchant a canonical hostname (`PUT /v1/merchant/api-host`, or
+`cp.SetMerchantAPIHost` on an attached control plane; resolved live on the next
+request, no restart). Host resolution then routes `/v1/webhooks/{rail}`
 without the path slug, and enforces Host-merchant == issuer-merchant on every
 merchant-scoped route: a token minted for merchant A is rejected on merchant
 B's host even though it verifies.
