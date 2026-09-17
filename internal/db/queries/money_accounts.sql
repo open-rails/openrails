@@ -2,16 +2,6 @@
 -- state (#237/#239/#240/#241/#298/#299/#302). amounts use the currency's internal
 -- precision. currency is a system code; the Go registry is authority.
 
--- name: ListMoneyAccountPairs :many
--- Distinct (payer, currency) pairs to finalize invoices for (#472). The #512
--- ledger transfers are the durable source of every payer with money activity,
--- in every currency (the single-entry money_transactions table is gone).
-SELECT customer_id::uuid AS customer_id, currency, MIN(created_at)::timestamptz AS period_anchor
-FROM openrails.ledger_transfers
-WHERE merchant_id = $1 AND customer_id IS NOT NULL
-GROUP BY customer_id, currency
-ORDER BY customer_id, currency;
-
 -- name: GetMoneyAccountSettings :one
 SELECT * FROM openrails.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
