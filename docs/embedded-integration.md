@@ -1,8 +1,9 @@
 # Embedding OpenRails in your Go server
 
-The full guide to running the OpenRails billing engine in-process. The README's
-"Embedded Mode: How To Integrate" is the quickstart; this covers the depth it skips.
-All money amounts are **micros** (millionths of a currency unit). Vocabulary: a
+The full guide to running the OpenRails billing engine in-process;
+`examples/embedded` is the runnable quickstart. Money is an integer in the
+currency's native units (`GET /v1/currencies`; micros for USD), a decimal string
+on the wire ([money-wire.md](money-wire.md)). Vocabulary: a
 **rail** is a gateway kind (`nmi` / `ccbill` / `stripe` / `solana`); a **PSP** is your
 concrete account on a rail (e.g. `mobius` on nmi).
 
@@ -19,7 +20,9 @@ network hop, no second credential. Concretely:
   Parity is structural: one client implementation, one handler surface, joined by an
   in-process `http.RoundTripper` instead of a socket (enforced by a dual-mode
   conformance test).
-- One embedded engine serves **one merchant** (#770).
+- A runtime bound by `UpsertMerchantConfig` serves **one merchant**; a
+  multi-merchant runtime (`examples/multimerchant`) binds each Client with
+  `openrails.WithMerchantID`.
 
 ```mermaid
 flowchart LR
@@ -278,8 +281,10 @@ Semantics by mode:
   immediately. Change credentials = change the config + reboot.
 - **Mode 2 (`merchant_source=api`)**: a manifest-shaped upsert (PSPs, profile,
   invoice, remote-application trust) refuses loudly — two truths. Only a bare
-  identity bind (slug + top-level `DisplayName`) is legal; provision providers via
-  `PUT /v1/merchant/payment-providers` and the catalog APIs instead.
+  identity bind (slug + top-level `DisplayName`) is legal; arm providers through
+  `embed/controlplane` (`cp.UpsertPaymentProviderConfig`) or
+  `PUT /v1/merchant/payment-providers/{provider}` (`RouteSetPaymentProviders`),
+  and author the catalog through the Client.
 
 YAML-first hosts can keep the merchant in a file: `embed.ParseMerchantConfig` (one
 merchant, strict — unknown fields rejected) or `embed.LoadMerchantConfigManifest`
@@ -427,21 +432,28 @@ The shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `AdmitBatch`, `Capture`, `Release`, `GetTrustLevel`, `ReportWastedSpend` |
+| Admission (hot path) | `Admit`, `AdmitBatch`, `Capture`, `Release`, `ExtendHold`, `GetTrustLevel`, `ReportWastedSpend` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle) |
-| Policy | `GetMerchantSettings`, `SetMerchantSettings`, `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation` |
-| Funding / reporting | `DepositCredits`, `SetCreditLimit`, `GetCreditLimit`, `UsageRollup`, `ResourceRevenueDaily` |
-| Lookups / entitlements | `Balance`, `GetCreditAccount`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `ListProductAccess`, `HasProductAccess` |
+| Policy | `GetMerchantSettings`, `SetMerchantSettings`, `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` |
+| Funding / reporting | `DepositCredits`, `GetDeposit`, `SetCreditLimit`, `GetCreditLimit`, `UsageRollup`, `ResourceRevenueDaily` |
+| Customers / entitlements | `EnsureCustomer`, `Balance`, `GetCreditAccount`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `GrantEntitlement`, `RevokeEntitlement`, `ListProductAccess`, `HasProductAccess` |
+| Catalog (API hosts) | `CreateProduct`, `UpdateProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `CreatePrice`, `UpdatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `SetPriceKey`, `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `EnsureUsageProduct`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` |
+| Checkout | `CreateCheckoutSession`, `GetCheckoutSession`, `ConfirmCheckoutSession`, `ListCheckoutRailOptions`, `GetCheckoutConfig`, `ResolveEffectiveTier` |
+| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CancelPlanMigration` |
+| Payments | `GetPayment`, `ListPayments`, `HasSettledPayment`, `ListPaymentMethods`, `DeletePaymentMethod` |
+| Invoices | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetCustomerInvoiceProfile`, `SetCustomerInvoiceProfile`, `EnsureCustomerInvoiceProfile` |
 | Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification` |
+| Host feed / import | `ListHostEvents`, `AcknowledgeHostEvent`, `ImportBilling` |
 
 ```go
 verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
     CustomerID:      customerID,
     Invoker:         userID,
-    EstimatedAmount: 50_000,    // micros
+    EstimatedAmount: 50_000,    // native units (USD: micros)
+    ExpiresAt:       &deadline, // required with a hold: the job's deadline
     RequestID:       requestID, // idempotency key
 }})
-err = client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
+receipt, err := client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
 ents, err := client.ListActiveEntitlements(ctx, []string{userID}, time.Now())
 ```
 

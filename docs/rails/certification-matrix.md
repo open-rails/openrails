@@ -128,14 +128,12 @@ rests on a single dated manual probe.
 | Swap a subscription's payment source | `modeled` | `unsupported` (guarded) | `unsupported` | n/a |
 | Account Updater | `unsupported` — events logged, no action | `unsupported` — invisible to us | `unsupported` — nothing consumed | n/a |
 | Charge a saved method (arrears settlement) | `sandbox-verified` | `unsupported` — no adapter | `sandbox-verified` | `unsupported` — no adapter |
-| Credits bundled with a purchase or renewal | `modeled` | `modeled` | `modeled` | `modeled` |
-| Standalone credit-purchase price | `unsupported` — priced, never checkout-able | `unsupported` | `unsupported` | `unsupported` |
 
 - **Vaulting, NMI** — Collect.js tokenization → customer vault. last-verified: weekly / env: sandbox / how: `TestLiveCollectJSTokenVaultCreate`. `TestLiveSandboxStoredCredentialCITThenMIT` is scheduled but test presence or a skipped run is not evidence. Note the lifecycle E2E vaults **directly at NMI**, so the OpenRails payment-method API surface is not itself live-exercised.
 - **Payment methods, Stripe** — `unsupported` (guarded): there is no first-party CRUD, and since or#896 the refusal is honest. `RailPaymentMethodService` is NMI-only (`rails.SupportsPaymentMethodCRUD`), and a Stripe/CCBill/Solana request now fails with *"payment methods are not managed by OpenRails on this rail"* plus where the instrument actually lives, instead of the old **`PSP 'stripe' is not configured`** — which read as a misconfiguration. Mutation is delegated to Stripe's Billing Portal (`stripe_portal.go:23`), and `payment_method.attached` is recorded passively. Pinned by `TestCreatePaymentMethodUnsupportedRailIsHonest`.
 - **Account Updater** — no rail consumes it. NMI receives `acu.summary.*` and logs them without touching the vault or the local card record (`internal/modules/webhooks/nmi.go:383`). Stripe's card updater is not subscribed to at all. The only working Account Updater in the repo belongs to the Basis Theory custodian, which is a different rail — do not read it as coverage here.
 - **Charge saved method** — gated by `SupportsChargeSavedMethod` in the rail registry: NMI and Stripe only. last-verified: weekly / env: sandbox + Stripe test mode / how: `TestChargeOutstanding_NMISandbox_CollectsRealCharge`, `TestLiveNMIInvoiceCollectionAgainstSandbox`, `TestLiveStripeInvoiceCollectionAgainstTestAccount`. CCBill and Solana have no collection adapter, so invoice collection does not exist on those rails.
-- **Fiat balances** — manual funding and source-specific grants remain available. Custom credit-shop units, bundled product balances and automatic refill are deferred.
+- **Fiat balances** — funded by manual deposits and source-specific grants (`POST /v1/merchant/credits/deposit`), rail-agnostic; no rail sells a balance top-up product.
 
 ## Catalog and reconciliation
 

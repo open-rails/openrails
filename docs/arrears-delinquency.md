@@ -80,7 +80,7 @@ API (mode 2): `PUT /v1/merchant/settings` with `arrears_grace_days` /
 | `delinquency_grace_days` | **14**. Deliberately generous: a merchant that never touched this knob has not thought about it, and being late to call someone delinquent costs a few days of accrual while being early costs a customer. `0` is a valid explicit choice — delinquent as soon as it is overdue. |
 | `delinquency_amount_floor` | **derived from `monthly_floor`** (itself 1 currency unit). A debt you already declared too small to chase is too small to cut anyone off for. |
 
-All amounts are micros.
+Amounts are integers in the currency's native units (micros for USD).
 
 ## What OpenRails enforces: admission
 

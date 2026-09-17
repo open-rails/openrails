@@ -110,10 +110,10 @@ both of migratekit's checks reported success.
 
 ## Repo layout
 
-- `client.go`, `remote.go`, `errors.go` — root package `openrails`: the SDK surface, one `Client` interface with remote (HTTP) and embedded constructors
-- `embed/` — embedded-mode integration (host app embeds OpenRails in-process)
+- `client.go`, `remote.go`, `errors.go`, … — root package `openrails`: the SDK surface, one concrete `*Client` (`NewRemote`, or `embed.Runtime.Client` over the in-process transport)
+- `embed/` — the in-process runtime (`embed/authkit` auth bridges, `embed/controlplane` for hosts on OpenRails' own AuthKit)
 - `cmd/openrails/` — the binary: server + CLI (catalog/merchant-config/bootstrap apply, reconcile)
-- `pkg/` — importable packages (api, catalog, service, embedded, merchant, …)
+- `pkg/` — importable packages (api, billingauth, catalog, merchant, adminconsole, query, …)
 - `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/`, `controlplane/`
 - `migrations/` — bootstrap + postgres baseline and increments
 - `tests/` — cross-cutting integration + live-sandbox e2e tests
