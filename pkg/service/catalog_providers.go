@@ -45,6 +45,11 @@ const providerLookupKey = "lookup_key"
 // adapter's PendingAction template) rather than failing the whole call.
 var errPendingManualLink = errors.New("provider requires a manual link")
 
+// errProviderNotArmed is a Verify answered without a provider round trip: no
+// account with usable credentials is armed for the link's rail, so the link
+// reports sync_disabled rather than an error.
+var errProviderNotArmed = errors.New("provider is not armed")
+
 // errRemoteWritesDisabled is the sentinel adapters return from a write point
 // (find-or-create inside Attach, AutoCreate) when catalog provider writes are
 // blocked by the operating mode (mode=limited/readonly, #346). The dispatcher

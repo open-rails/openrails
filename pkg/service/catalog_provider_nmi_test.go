@@ -3,12 +3,14 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"github.com/open-rails/openrails/internal/railresolve"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 
@@ -419,10 +421,10 @@ func TestMobiusAdapter_VerifyMissingPlan(t *testing.T) {
 
 func TestMobiusAdapter_VerifyUnconfiguredIsSyncDisabled(t *testing.T) {
 	a := &nmiAdapter{svc: &Service{rt: &app.Runtime{}}}
-	// VerifyPriceSync maps "is not configured" to sync_disabled. A nil error
+	// VerifyPriceSync maps errProviderNotArmed to sync_disabled. A nil error
 	// would be read as in sync and could close drift nothing verified.
 	drift, missing, err := a.Verify(context.Background(), map[string]string{models.RailKeyPlanID: "p"}, &priceVerifyContext{})
-	if err == nil || !strings.Contains(err.Error(), "is not configured") || missing || drift != nil {
-		t.Fatalf("expected a not-configured error, got drift=%v missing=%v err=%v", drift, missing, err)
+	if !errors.Is(err, errProviderNotArmed) || missing || drift != nil {
+		t.Fatalf("expected a not-armed error, got drift=%v missing=%v err=%v", drift, missing, err)
 	}
 }

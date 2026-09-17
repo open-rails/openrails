@@ -198,6 +198,35 @@ func TestRouteExplicitSelectorMustBeArmed(t *testing.T) {
 	require.ErrorContains(t, err, "has no armed PSP")
 }
 
+// A PSP declared without credentials resolves by key but is not armed: naming
+// it is refused as unroutable up front, with the candidate's skip class on the
+// decision, instead of failing at the provider call.
+func TestRouteExplicitDeclaredSelectorWithoutCredentialsIsUnroutable(t *testing.T) {
+	t.Parallel()
+
+	armed := routingArmedAll()
+	declared := merchants.PSPScope{
+		ID: merchants.PspID("stripe", "live", "acct_declared"), Rail: "stripe", Environment: "live", AccountID: "acct_declared", Key: "stripe-declared",
+	}
+	checkoutService := &CheckoutService{
+		Config:          fullModeConfigUnit(),
+		Rails:           armed,
+		ProviderSecrets: fakePSPCatalog{scopes: append(routingScopes(armed), declared)},
+	}
+	svc := &CheckoutSessionService{config: fullModeConfigUnit(), checkoutService: checkoutService}
+
+	decision, err := svc.Route(routingContext(), RoutingInput{
+		Price:    routingFixturePrice(),
+		Mode:     models.CheckoutSessionModeSubscription,
+		Selector: "stripe-declared",
+	})
+	require.ErrorIs(t, err, ErrNoRoutableProcessor)
+	require.ErrorContains(t, err, `"stripe-declared" is not armed`)
+	require.Empty(t, decision.Target.PSP)
+	require.Len(t, decision.Candidates, 1)
+	require.Equal(t, models.CheckoutRoutingSkipNotArmed, decision.Candidates[0].Skip)
+}
+
 func TestRoutingRuleMatches(t *testing.T) {
 	t.Parallel()
 
