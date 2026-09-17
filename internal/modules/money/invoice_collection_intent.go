@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
@@ -61,6 +62,11 @@ const (
 	collectionEvidenceFailureMsg    = "failure_message"
 	collectionEvidenceNotExecuted   = "not_executed"
 	collectionEvidenceSubmittedAt   = "submitted_at"
+	// collectionEvidenceContradiction retains a provider object found under
+	// this operation's identity that is NOT the frozen charge. Nothing settles
+	// from it and non-execution can no longer be attested: an operator must
+	// repair from the provider record.
+	collectionEvidenceContradiction = "provider_contradiction"
 )
 
 // stripeReplayWindow bounds idempotent replay of a Stripe collection to well
@@ -170,6 +176,9 @@ func (h *InvoiceCollectionHandler) chargeRequest(intent gen.OpenrailsRailIntent,
 // refusal is terminal, a receipt settles, every error is a possible
 // submission.
 func (h *InvoiceCollectionHandler) classify(ctx context.Context, intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload, res ChargeResult, err error) intents.Outcome {
+	if errors.Is(err, subscriptions.ErrStripeReceiptMismatch) {
+		return contradicted(err)
+	}
 	if err != nil {
 		return intents.Ambiguous("collection outcome unknown: " + err.Error())
 	}
@@ -238,7 +247,10 @@ func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.Openra
 	if err != nil {
 		return intents.Ambiguous("load payment method: " + err.Error())
 	}
-	res, err := h.Verifier.VerifyCollectionCharge(ctx, method, intent.ID.String())
+	res, err := h.Verifier.VerifyCollectionCharge(ctx, method, receiptExpectation(intent, p))
+	if errors.Is(err, nmi.ErrReceiptMismatch) {
+		return contradicted(err)
+	}
 	if err != nil {
 		return intents.Ambiguous("provider read failed: " + err.Error())
 	}
@@ -278,8 +290,11 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if err != nil {
 		return intents.Outcome{}, fmt.Errorf("load payment method: %w", err)
 	}
-	expect := CollectionReceiptExpectation{OperationKey: intent.ID.String(), Amount: p.AmountMinor, Currency: p.Currency}
+	expect := receiptExpectation(intent, p)
 	if resolution.NotExecuted {
+		if contradiction := intents.EvidenceString(intent, collectionEvidenceContradiction); contradiction != "" {
+			return intents.Outcome{}, intents.RejectResolution("provider evidence contradicts this operation (%s); non-execution cannot be attested, repair from the provider record", contradiction)
+		}
 		if err := h.Verifier.ConfirmCollectionNotExecuted(ctx, method, expect); err != nil {
 			return intents.Outcome{}, intents.RejectResolution("%v", err)
 		}
@@ -293,6 +308,18 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 		return intents.Outcome{}, intents.RejectResolution("provider object %s is not a settled charge for this operation", resolution.ProviderReference)
 	}
 	return h.finalizeSettle(ctx, intent, p, p.Rail, res.TransactionID, res.ExternalInvoiceID, true), nil
+}
+
+// contradicted keeps an operation unknown when the provider holds an object
+// under its identity that is not the frozen charge.
+func contradicted(err error) intents.Outcome {
+	return intents.AmbiguousWithEvidence("provider receipt contradicts the frozen operation: "+err.Error(), map[string]any{collectionEvidenceContradiction: err.Error()})
+}
+
+// receiptExpectation is the frozen operation every provider receipt must
+// match: its provider identity and the amount and currency frozen at enqueue.
+func receiptExpectation(intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload) CollectionReceiptExpectation {
+	return CollectionReceiptExpectation{OperationKey: intent.ID.String(), Amount: p.AmountMinor, Currency: p.Currency}
 }
 
 // ResolveUnsent releases a pending operation that never reached the provider:

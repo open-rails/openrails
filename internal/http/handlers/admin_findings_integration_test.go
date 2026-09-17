@@ -231,7 +231,7 @@ func (f findingsNMIResolver) ResolveCollectionAdapter(context.Context, gen.Openr
 	return nil, false, nil
 }
 
-func (f findingsNMIResolver) VerifyCollectionCharge(context.Context, gen.OpenrailsPaymentMethod, string) (money.CollectionVerifyResult, error) {
+func (f findingsNMIResolver) VerifyCollectionCharge(context.Context, gen.OpenrailsPaymentMethod, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
 	return money.CollectionVerifyResult{}, nil
 }
 

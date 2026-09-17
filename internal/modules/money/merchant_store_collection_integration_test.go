@@ -4,11 +4,8 @@ package money_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -76,6 +73,7 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 	invID := seedArrearsInvoice(t, svc, ctx, payer, pm)
 
 	var calls []string
+	var collectionKey string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// The charge must authenticate with the STORE-resolved key.
 		require.Equal(t, "Bearer "+storeKey, r.Header.Get("Authorization"))
@@ -85,11 +83,13 @@ func TestChargeOutstanding_StoreOnlyStripeCredentials_ChargesThroughStore(t *tes
 		case "/v1/invoiceitems":
 			_, _ = w.Write([]byte(`{"id":"ii_store_only"}`))
 		case "/v1/invoices":
+			collectionKey = r.Form.Get("metadata[openrails_collection_key]")
 			_, _ = w.Write([]byte(`{"id":"in_store_only","status":"draft"}`))
 		case "/v1/invoices/in_store_only/finalize":
 			_, _ = w.Write([]byte(`{"id":"in_store_only","status":"open","payment_intent":"pi_store_only"}`))
 		case "/v1/invoices/in_store_only/pay":
-			_, _ = w.Write([]byte(`{"id":"in_store_only","status":"paid","amount_paid":5,"payment_intent":"pi_store_only","charge":"ch_store_only"}`))
+			// Stripe echoes the invoice as created: key-stamped, in its currency.
+			_, _ = w.Write([]byte(`{"id":"in_store_only","status":"paid","amount_paid":5,"currency":"usd","payment_intent":"pi_store_only","charge":"ch_store_only","metadata":{"openrails_collection_key":"` + collectionKey + `"}}`))
 		default:
 			t.Fatalf("unexpected Stripe path %s", r.URL.Path)
 		}
@@ -201,75 +201,34 @@ func TestChargeOutstanding_DeclaredAccountMissingSecret_FailsClosed(t *testing.T
 	require.Contains(t, *op.LastFailureReason, "missing")
 }
 
-// Actual NMI Direct Post acceptance with an uncertain processor response, then
-// an empty Query result and eventual receipt, must settle one local invoice
-// without a resend — through the store-armed plane the production runtime
-// wires as both charger and verifier.
+// TestInvoiceCollection_DelayedNMIReceiptNeverResubmits: the store-armed
+// plane through the real builder. An uncertain sale answer and an empty order
+// search keep the operation unknown across restart with no second send; once
+// the sale becomes visible AND reads back exactly, the verifier settles once.
 func TestInvoiceCollection_DelayedNMIReceiptNeverResubmits(t *testing.T) {
-	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
-	cleanupCollection(t, pool, ctx, payer)
-	msvc := merchantsServiceForTest(t, dbi)
-	seedPSPSecrets(t, dbi, msvc, string(models.RailNMI), "gw-delayed-"+uuid.NewString()[:8], map[string]string{"security_key": "synthetic-key"})
-	method := seedPaymentMethod(t, pool, ctx, payer, string(models.RailNMI))
-	invoiceID := seedArrearsInvoice(t, svc, ctx, payer, method)
-	var sends atomic.Int32
-	var visible atomic.Bool
-	var orderIDs sync.Map
+	e := nmiReceiptScenario(t)
 	transaction := "invoice-delayed-" + uuid.NewString()
-	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		require.NoError(t, r.ParseForm())
-		if r.Form.Get("type") == "sale" {
-			sends.Add(1)
-			orderIDs.Store(r.Form.Get("orderid"), true)
-			fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
-			return
-		}
-		if visible.Load() {
-			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, transaction, r.Form.Get("order_id"))
-			return
-		}
-		fmt.Fprint(w, `<nm_response></nm_response>`)
-	}))
-	t.Cleanup(gateway.Close)
-	plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: dbi, MerchantsFn: func() *merchants.Service { return msvc }, Endpoints: money.CollectionEndpoints{NMIDirectPostURL: gateway.URL, NMIQueryURL: gateway.URL}}
-	charger := money.NewScopedCharger(dbi, nil)
-	charger.SetAdapterResolver(plane)
-	runner := collectionRunner(dbi, charger, plane)
-	n, err := svc.ChargeOutstanding(ctx, runner, 0)
-	require.NoError(t, err)
-	require.Zero(t, n)
-	require.EqualValues(t, 1, sends.Load())
-	op := latestCollectionIntent(t, pool, ctx, invoiceID)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
-	_, sent := orderIDs.Load(op.ID.String())
-	require.True(t, sent, "the wire order id is the operation id")
+	require.Equal(t, []string{e.op.String()}, e.gateway.sentOrderIDs(), "the wire order id is the operation id")
 
 	// Restart: an empty search keeps the operation unknown; the sweep skips it.
-	restarted := money.NewMoneyService(dbi)
-	dueNow(t, pool, ctx, op.ID)
-	_, err = collectionRunner(dbi, charger, plane).RunVerifyOnce(ctx)
+	restarted := money.NewMoneyService(e.db)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, e.verify(t))
+	_, err := restarted.ChargeOutstanding(e.ctx, e.runner, 0)
 	require.NoError(t, err)
-	require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, pool, ctx, invoiceID).Status)
-	_, err = restarted.ChargeOutstanding(ctx, collectionRunner(dbi, charger, plane), 0)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, sends.Load())
+	e.requireStillUnknown(t, "empty search")
 
-	visible.Store(true)
-	dueNow(t, pool, ctx, op.ID)
-	_, err = collectionRunner(dbi, charger, plane).RunVerifyOnce(ctx)
-	require.NoError(t, err)
-	require.Equal(t, intents.StatusSucceeded, latestCollectionIntent(t, pool, ctx, invoiceID).Status)
-	invoice, err := restarted.GetInvoiceByID(ctx, payer, invoiceID)
+	e.gateway.orderSale(e.op.String(), transaction)
+	e.gateway.payment(transaction, e.vault, "0.05", "USD")
+	require.Equal(t, intents.StatusSucceeded, e.verify(t))
+	invoice, err := restarted.GetInvoiceByID(e.ctx, e.payer, e.invoice)
 	require.NoError(t, err)
 	require.Equal(t, "paid", invoice.Status)
 	require.Nil(t, invoice.CollectionIntentID)
-	_, err = restarted.ChargeOutstanding(ctx, collectionRunner(dbi, charger, plane), 0)
+	_, err = restarted.ChargeOutstanding(e.ctx, e.runner, 0)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, sends.Load())
-	var transfers int
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id = $1 AND transfer_type = 'owed_payment'`, payer.UUID()).Scan(&transfers))
-	require.Equal(t, 1, transfers)
+	require.Equal(t, 1, e.gateway.sends)
+	e.requireSettledOnce(t)
 	var railPaymentID string
-	require.NoError(t, pool.QueryRow(ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, invoiceID).Scan(&railPaymentID))
+	require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT rail_payment_id FROM openrails.invoice_payments WHERE invoice_id = $1 AND status = 'settled'`, e.invoice).Scan(&railPaymentID))
 	require.Equal(t, transaction, railPaymentID)
 }
