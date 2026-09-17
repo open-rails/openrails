@@ -107,6 +107,31 @@ its [Query API](https://docs.nmi.com/reference/query) does not establish a
 terminal-negative guarantee for a missing search result. The engine therefore
 uses absence as inconclusive evidence rather than assuming a provider guarantee.
 
+A Stripe tier change is a `stripe_tier_change` operation on the same ledger,
+keyed by the request's `Idempotency-Key`. The payload freezes the
+subscription, the from/to prices (local and Stripe), the proration decision
+(`always_invoice` with the cycle reset for an upgrade; a two-phase schedule
+with no proration for a downgrade), the local now-amount estimate and the
+period before anything is sent; Stripe is read once beforehand and must bill
+the price the local subscription records. Each Stripe request carries an
+idempotency key rooted in the operation id and stamps it on the object
+(`metadata[openrails_tier_change]`), behind a write-ahead fence. The receipt
+is the subscription (or schedule) Stripe answers with or that the verifier
+reads back by exact id, and it must match the frozen facts — the operation
+key, the frozen Stripe price, the frozen local price (and for a downgrade
+the frozen switch date) — before the local subscription changes; a 2xx
+object that does not match commits nothing. A lost response answers `202`
+with the operation id; the verifier reads the exact object back, and while
+Stripe still holds the key (23h) the executor replays the identical request;
+after that only `intents resolve` closes it (`--receipt` is the exact
+subscription or schedule id, read back and matched; `--not-executed` is
+refused while the provider shows the change). A parsed Stripe 4xx is a
+definitive refusal (coded `tier_change_refused`, a 402 keeps its decline
+code); an operator closure answers `409`. The same key replays the stored
+result byte for byte; another key while the operation is unresolved is
+refused `409 tier_change_in_flight` naming it. One unresolved tier change
+(NMI upgrade or Stripe) owns its subscription.
+
 NMI upgrades use the same intent runner with separate write-ahead step markers
 and durable receipts for successor creation and proration. The frozen payload
 owns the prices, billing period, instrument and account. A lost successor

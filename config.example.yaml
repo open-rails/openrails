@@ -101,10 +101,12 @@ rate_limits:
 
 # Loopback provider gateways for sandbox qualification: every store-armed NMI
 # client (checkout sales, invoice collection, payment-method updates and their
-# verify reads) talks to this URL instead of the NMI sandbox. Refused under
-# test_mode: live.
+# verify reads) talks to nmi_gateway_url instead of the NMI sandbox, and every
+# Stripe request goes to stripe_api_url through the same guarded transport.
+# Refused under test_mode: live.
 # provider_sandbox:
 #   nmi_gateway_url: http://127.0.0.1:9091
+#   stripe_api_url: http://127.0.0.1:9092
 
 captcha:
   provider: turnstile   # turnstile | recaptcha-v3 | hcaptcha

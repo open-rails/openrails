@@ -39,13 +39,14 @@ type moneyDeployment struct {
 // saas (the shared multi-merchant engine behind the hosted control plane).
 // Exactly one deployment runs workers at a time, so a converged operation was
 // converged by the deployment under test.
-func moneyDeploymentBuilders(h *Harness, gateway *FakeNMIGateway) []struct {
+func moneyDeploymentBuilders(h *Harness, providers config.ProviderSandboxConfig) []struct {
 	name  string
 	build func(t *testing.T) moneyDeployment
 } {
 	ctx := context.Background()
 	sandbox := func(cfg *config.Config) {
-		cfg.ProviderSandbox = &config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}
+		loopback := providers
+		cfg.ProviderSandbox = &loopback
 	}
 	return []struct {
 		name  string
@@ -88,7 +89,7 @@ func moneyDeploymentBuilders(h *Harness, gateway *FakeNMIGateway) []struct {
 			// The in-process standalone graph seeds fixtures and mints the
 			// API key; it runs no workers. The code under test is the process.
 			standalone := h.StartStandalone("USD")
-			process := h.StartStandaloneProcess(ProcessWithNMIGateway(gateway.URL))
+			process := h.StartStandaloneProcess(ProcessWithProviderSandbox(providers))
 			t.Cleanup(process.Stop)
 			return moneyDeployment{
 				name: "standalone", merchant: dbtest.TestMerchantID,
@@ -117,15 +118,22 @@ func moneyDeploymentBuilders(h *Harness, gateway *FakeNMIGateway) []struct {
 }
 
 // runMoneyDeployments runs program once per deployment shape, each built and
-// torn down inside its own subtest.
+// torn down inside its own subtest, against one loopback NMI gateway.
 func runMoneyDeployments(t *testing.T, h *Harness, gateway *FakeNMIGateway, program func(t *testing.T, d moneyDeployment)) {
+	t.Helper()
+	runProviderDeployments(t, h, config.ProviderSandboxConfig{NMIGatewayURL: gateway.URL}, program)
+}
+
+// runProviderDeployments runs program once per deployment shape against the
+// given loopback providers.
+func runProviderDeployments(t *testing.T, h *Harness, providers config.ProviderSandboxConfig, program func(t *testing.T, d moneyDeployment)) {
 	t.Helper()
 	parent := t
 	// The shared fixture pool and the server binary outlive every subtest.
 	h.Pool()
 	_, err := h.openrailsBinary()
 	require.NoError(t, err)
-	for _, b := range moneyDeploymentBuilders(h, gateway) {
+	for _, b := range moneyDeploymentBuilders(h, providers) {
 		t.Run(b.name, func(t *testing.T) {
 			h.SetT(t)
 			t.Cleanup(func() { h.SetT(parent) })

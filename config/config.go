@@ -270,6 +270,10 @@ type ProviderSandboxConfig struct {
 	// collection, payment-method updates and their verify reads). Env:
 	// PROVIDER_SANDBOX_NMI_GATEWAY_URL.
 	NMIGatewayURL string `koanf:"nmi_gateway_url,omitempty"`
+	// StripeAPIURL replaces the Stripe API root for every request through
+	// the stripeapi choke point; the readonly guard and the pinned
+	// Stripe-Version still apply above it. Env: PROVIDER_SANDBOX_STRIPE_API_URL.
+	StripeAPIURL string `koanf:"stripe_api_url,omitempty"`
 }
 
 // SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
@@ -281,17 +285,27 @@ func (cfg *Config) SandboxNMIGatewayURL() string {
 	return strings.TrimSpace(cfg.ProviderSandbox.NMIGatewayURL)
 }
 
+// SandboxStripeAPIURL is the loopback Stripe API declared for this sandbox
+// run, or "" for the real API.
+func (cfg *Config) SandboxStripeAPIURL() string {
+	if cfg == nil || cfg.ProviderSandbox == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ProviderSandbox.StripeAPIURL)
+}
+
 func validateProviderSandbox(cfg *Config) error {
-	gateway := cfg.SandboxNMIGatewayURL()
-	if gateway == "" {
-		return nil
-	}
-	if cfg.TestMode == CredentialPostureLive {
-		return fmt.Errorf("provider_sandbox.nmi_gateway_url is refused with test_mode=live: a loopback gateway is a sandbox-only seam")
-	}
-	u, err := url.Parse(gateway)
-	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("invalid provider_sandbox.nmi_gateway_url %q: must be an absolute http(s) URL", gateway)
+	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL()} {
+		if gateway == "" {
+			continue
+		}
+		if cfg.TestMode == CredentialPostureLive {
+			return fmt.Errorf("provider_sandbox.%s is refused with test_mode=live: a loopback gateway is a sandbox-only seam", key)
+		}
+		u, err := url.Parse(gateway)
+		if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("invalid provider_sandbox.%s %q: must be an absolute http(s) URL", key, gateway)
+		}
 	}
 	return nil
 }

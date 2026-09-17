@@ -71,3 +71,12 @@ type TierChangeError struct {
 func (e *TierChangeError) Error() string {
 	return e.Message
 }
+
+// TierChangeInFlightError: an unresolved tier change already owns the
+// subscription; a request under another idempotency key is refused with it.
+type TierChangeInFlightError struct{ OperationID uuid.UUID }
+
+func (e *TierChangeInFlightError) Error() string {
+	return "tier change " + e.OperationID.String() + " is unresolved; retry with its Idempotency-Key"
+}
+func (e *TierChangeInFlightError) Unwrap() error { return ErrTierChangePending }
