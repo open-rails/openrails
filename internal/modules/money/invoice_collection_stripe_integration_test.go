@@ -45,9 +45,12 @@ type fakeStripe struct {
 	failNext map[string]int
 	// payLostResponse pays the invoice but answers 500 once.
 	payLostResponse bool
-	keys            []string
-	charged         []int64
-	deleted         []string
+	// paid mutates the invoice Stripe reports once /pay charged it: a paid
+	// invoice that is not the frozen charge.
+	paid    func(inv map[string]any)
+	keys    []string
+	charged []int64
+	deleted []string
 }
 
 type stripeItem struct {
@@ -177,6 +180,9 @@ func (f *fakeStripe) handle(w http.ResponseWriter, r *http.Request) {
 		inv["amount_paid"] = due
 		inv["charge"] = "ch_" + id
 		f.charged = append(f.charged, due)
+		if f.paid != nil {
+			f.paid(inv)
+		}
 		if f.payLostResponse {
 			f.payLostResponse = false
 			f.fail(w, http.StatusInternalServerError)
@@ -570,4 +576,63 @@ func TestInvoiceCollection_StripeRefusalWithFailedCleanupStaysUnknown(t *testing
 	require.Equal(t, "void", stripe.invoiceStatus("in_1"))
 	require.Empty(t, stripe.chargedAmounts())
 	require.Nil(t, e.invoiceRow(t).CollectionIntentID)
+}
+
+// TestInvoiceCollection_StripePaidInvoiceMustMatchFrozenOperation (final
+// review R1, Stripe side): the paid invoice the sequence returns — on first
+// submission and on idempotent replay — settles only through the same exact
+// match operator resolution applies: key-stamped, paid, frozen currency,
+// frozen amount. A contradiction keeps the operation unknown with nothing
+// settled, and the same invoice is refused as an operator receipt.
+func TestInvoiceCollection_StripePaidInvoiceMustMatchFrozenOperation(t *testing.T) {
+	cases := map[string]func(inv map[string]any){
+		"wrong_currency": func(inv map[string]any) { inv["currency"] = "eur" },
+		"wrong_amount":   func(inv map[string]any) { inv["amount_paid"] = int64(50) },
+		"missing_key":    func(inv map[string]any) { inv["metadata"] = map[string]string{} },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			stripe, server := newFakeStripe(t)
+			stripe.paid = mutate
+			e, plane, charger := stripeCollectionEnv(t, server)
+			runner := collectionRunner(e.db, charger, plane)
+
+			n, err := e.svc.ChargeOutstanding(e.ctx, runner, 0)
+			require.NoError(t, err)
+			require.Zero(t, n)
+			op := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, op.Status)
+			require.Contains(t, *op.LastFailureReason, "contradicts the frozen operation")
+			requireNothingSettled := func(why string) {
+				t.Helper()
+				require.Zero(t, e.settledPayments(t), why)
+				require.Zero(t, e.owedPaymentTransfers(t), why)
+				inv := e.invoiceRow(t)
+				require.NotEqual(t, "paid", inv.Status, why)
+				require.NotNil(t, inv.CollectionIntentID, why)
+				require.Equal(t, []int64{frozenStripeMinor}, stripe.chargedAmounts(), why)
+				require.Equal(t, 1, stripe.created, why)
+			}
+			requireNothingSettled("first submission")
+
+			_, err = runner.Resolve(e.ctx, op.ID, intents.Resolution{ProviderReference: "in_1", Actor: "ops", Reason: "portal"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected, "the operator is refused the same invoice")
+			_, err = runner.Resolve(e.ctx, op.ID, intents.Resolution{NotExecuted: true, Actor: "ops", Reason: "portal"})
+			require.ErrorIs(t, err, intents.ErrResolutionRejected, "a paid invoice for the key is never non-execution")
+			requireNothingSettled("operator resolution")
+
+			dueNow(t, e.pool, e.ctx, op.ID)
+			_, err = runner.RunVerifyOnce(e.ctx)
+			require.NoError(t, err)
+			require.Equal(t, intents.StatusFailedRetryable, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+			dueNow(t, e.pool, e.ctx, op.ID)
+			_, err = runner.RunExecuteOnce(e.ctx)
+			require.NoError(t, err)
+			replayed := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+			require.Equal(t, intents.StatusUnknownNeedsVerify, replayed.Status, "the idempotent replay returns the same contradiction")
+			require.Contains(t, *replayed.LastFailureReason, "contradicts the frozen operation")
+			requireNothingSettled("idempotent replay")
+			require.Len(t, stripe.keySequence(), 8, "the replay reused Stripe's objects under the same keys")
+		})
+	}
 }

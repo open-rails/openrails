@@ -117,10 +117,7 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 		return nil, err
 	}
 	if strings.EqualFold(invoice.Status, "paid") {
-		if moneyutil.Cents(invoice.AmountPaid) < params.AmountCents {
-			return nil, fmt.Errorf("stripe invoice %s paid only %d of %d", invoice.ID, invoice.AmountPaid, params.AmountCents)
-		}
-		return invoice.result(), nil
+		return invoice.settledResult(params)
 	}
 
 	paidBody, err := s.stripePostForm(ctx, "/v1/invoices/"+url.PathEscape(invoice.ID)+"/pay", url.Values{"payment_method": {params.PaymentMethodID}}, params.IdempotencyKey+":pay")
@@ -131,13 +128,18 @@ func (s *StripeService) CollectInvoice(ctx context.Context, params StripeInvoice
 	if err != nil {
 		return nil, err
 	}
-	if !strings.EqualFold(invoice.Status, "paid") {
-		return nil, fmt.Errorf("stripe invoice %s not paid after collection attempt: status=%s", invoice.ID, invoice.Status)
+	return invoice.settledResult(params)
+}
+
+// settledResult accepts the invoice as this operation's settled charge only
+// through the same exact match operator resolution applies: a paid invoice
+// that is not stamped with the key or not in the frozen currency and amount
+// is not a receipt, whatever the sequence returned.
+func (i stripeCollectionInvoice) settledResult(params StripeInvoiceCollectionParams) (*StripeInvoiceCollectionResult, error) {
+	if err := i.receipt().MatchesOperation(params.IdempotencyKey, params.AmountCents, params.Currency); err != nil {
+		return nil, err
 	}
-	if moneyutil.Cents(invoice.AmountPaid) < params.AmountCents {
-		return nil, fmt.Errorf("stripe invoice %s paid only %d of %d", invoice.ID, invoice.AmountPaid, params.AmountCents)
-	}
-	return invoice.result(), nil
+	return i.result(), nil
 }
 
 func (p StripeInvoiceCollectionParams) validate() error {
@@ -280,6 +282,29 @@ func (i stripeCollectionInvoice) receipt() StripeCollectionReceipt {
 		ChargeID: strings.TrimSpace(i.Charge), PaymentIntentID: strings.TrimSpace(i.PaymentIntent)}
 	r.CollectionKey = strings.TrimSpace(i.Metadata[StripeCollectionKeyMetadata])
 	return r
+}
+
+// ErrStripeReceiptMismatch reports a Stripe invoice that exists but is not
+// the operation's settled charge.
+var ErrStripeReceiptMismatch = errors.New("stripe invoice does not match the operation")
+
+// MatchesOperation is the ONE exact-receipt check for a Stripe collection,
+// shared by the collection sequence (first submission and idempotent replay)
+// and operator resolution: the invoice must carry the operation key, be
+// paid, in the frozen currency, for exactly the frozen amount.
+func (r StripeCollectionReceipt) MatchesOperation(key string, amount moneyutil.Cents, currency string) error {
+	key = strings.TrimSpace(key)
+	switch {
+	case key == "" || r.CollectionKey != key:
+		return fmt.Errorf("%w: invoice %s does not carry this operation's collection key", ErrStripeReceiptMismatch, r.InvoiceID)
+	case !strings.EqualFold(r.Status, "paid"):
+		return fmt.Errorf("%w: invoice %s is %s, not paid", ErrStripeReceiptMismatch, r.InvoiceID, r.Status)
+	case strings.TrimSpace(currency) == "" || !strings.EqualFold(strings.TrimSpace(r.Currency), strings.TrimSpace(currency)):
+		return fmt.Errorf("%w: invoice %s is in %s, not %s", ErrStripeReceiptMismatch, r.InvoiceID, r.Currency, currency)
+	case amount <= 0 || moneyutil.Cents(r.AmountPaid) != amount:
+		return fmt.Errorf("%w: invoice %s paid %d, not %d", ErrStripeReceiptMismatch, r.InvoiceID, r.AmountPaid, amount)
+	}
+	return nil
 }
 
 // GetCollectionInvoice reads one Stripe invoice by its exact id. found=false

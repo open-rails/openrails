@@ -121,10 +121,13 @@ func (f *fakeCharger) chargeCount() int {
 }
 
 // VerifyCollectionCharge answers the NMI-style order search from what landed.
-func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, _ gen.OpenrailsPaymentMethod, operationKey string) (money.CollectionVerifyResult, error) {
+// Exact-read binding of the found sale is the credential plane's job
+// (MerchantCollectionAdapterBuilder), proven against the real gateway fake in
+// invoice_collection_nmi_receipt_integration_test.go.
+func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, _ gen.OpenrailsPaymentMethod, expect money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	txn, ok := f.landed[operationKey]
+	txn, ok := f.landed[expect.OperationKey]
 	return money.CollectionVerifyResult{Supported: true, Settled: ok, TransactionID: txn}, nil
 }
 
@@ -600,6 +603,7 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 
 	var calls []string
 	var keys []string
+	var collectionKey string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer sk_test_invoice", r.Header.Get("Authorization"))
 		require.NoError(t, r.ParseForm())
@@ -612,19 +616,22 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 			require.Equal(t, "5", r.Form.Get("amount"))
 			require.Equal(t, "usd", r.Form.Get("currency"))
 			require.Equal(t, inv.ID.String(), r.Form.Get("metadata[openrails_invoice_id]"))
-			require.NotEmpty(t, r.Form.Get("metadata[openrails_collection_key]"))
+			require.Equal(t, collectionKey, r.Form.Get("metadata[openrails_collection_key]"))
 			_, _ = w.Write([]byte(`{"id":"ii_openrails_invoice"}`))
 		case "/v1/invoices":
 			require.Equal(t, "cus_openrails_invoice", r.Form.Get("customer"))
 			require.Equal(t, "charge_automatically", r.Form.Get("collection_method"))
 			require.Equal(t, "pm_openrails_invoice", r.Form.Get("default_payment_method"))
 			require.Equal(t, "exclude", r.Form.Get("pending_invoice_items_behavior"))
+			collectionKey = r.Form.Get("metadata[openrails_collection_key]")
+			require.NotEmpty(t, collectionKey)
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"draft"}`))
 		case "/v1/invoices/in_openrails_invoice/finalize":
 			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"open","payment_intent":"pi_openrails_invoice"}`))
 		case "/v1/invoices/in_openrails_invoice/pay":
 			require.Equal(t, "pm_openrails_invoice", r.Form.Get("payment_method"))
-			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"paid","amount_paid":5,"payment_intent":"pi_openrails_invoice","charge":"ch_openrails_invoice"}`))
+			// Stripe echoes the invoice as created: key-stamped, in its currency.
+			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"paid","amount_paid":5,"currency":"usd","payment_intent":"pi_openrails_invoice","charge":"ch_openrails_invoice","metadata":{"openrails_collection_key":"` + collectionKey + `"}}`))
 		default:
 			t.Fatalf("unexpected Stripe path %s", r.URL.Path)
 		}
