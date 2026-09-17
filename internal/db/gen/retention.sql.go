@@ -13,19 +13,19 @@ import (
 )
 
 const getSweepCursor = `-- name: GetSweepCursor :one
-SELECT cursor_merchant_id, cursor_updated_at FROM openrails.worker_state
+SELECT cursor_merchant_id, cursor_version FROM openrails.worker_state
 WHERE worker_kind = $1::text
 `
 
 type GetSweepCursorRow struct {
 	CursorMerchantID *uuid.UUID
-	CursorUpdatedAt  *time.Time
+	CursorVersion    int64
 }
 
 func (q *Queries) GetSweepCursor(ctx context.Context, workerKind string) (GetSweepCursorRow, error) {
 	row := q.db.QueryRow(ctx, getSweepCursor, workerKind)
 	var i GetSweepCursorRow
-	err := row.Scan(&i.CursorMerchantID, &i.CursorUpdatedAt)
+	err := row.Scan(&i.CursorMerchantID, &i.CursorVersion)
 	return i, err
 }
 
@@ -88,28 +88,28 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 }
 
 const saveSweepCursor = `-- name: SaveSweepCursor :execrows
-INSERT INTO openrails.worker_state (worker_kind, cursor_merchant_id, cursor_updated_at)
-VALUES ($1::text, $2::uuid, clock_timestamp())
+INSERT INTO openrails.worker_state (worker_kind, cursor_merchant_id, cursor_version)
+VALUES ($1::text, $2::uuid, 1)
 ON CONFLICT (worker_kind) DO UPDATE
     SET cursor_merchant_id = EXCLUDED.cursor_merchant_id,
-        cursor_updated_at = EXCLUDED.cursor_updated_at
-    WHERE openrails.worker_state.cursor_updated_at
-          IS NOT DISTINCT FROM $3::timestamptz
+        cursor_version = openrails.worker_state.cursor_version + 1
+    WHERE openrails.worker_state.cursor_version
+          = $3::bigint
 `
 
 type SaveSweepCursorParams struct {
-	WorkerKind              string
-	CursorMerchantID        *uuid.UUID
-	ExpectedCursorUpdatedAt *time.Time
+	WorkerKind            string
+	CursorMerchantID      *uuid.UUID
+	ExpectedCursorVersion int64
 }
 
 // NULL parks the cursor at the start of the ring: the pass drained its queue.
 // The ring wraps inside a pass, so the next cursor is not ordered against the
-// previous one; monotonicity is a compare-and-swap on the cursor version the
-// pass read (cursor_updated_at). A pass finishing after a newer pass already
-// moved the cursor affects 0 rows and keeps the newer position.
+// previous one; monotonicity is a compare-and-swap on the opaque cursor_version
+// the pass read, bumped by every applied save. A pass finishing after a newer
+// pass already moved the cursor affects 0 rows and keeps the newer position.
 func (q *Queries) SaveSweepCursor(ctx context.Context, arg SaveSweepCursorParams) (int64, error) {
-	result, err := q.db.Exec(ctx, saveSweepCursor, arg.WorkerKind, arg.CursorMerchantID, arg.ExpectedCursorUpdatedAt)
+	result, err := q.db.Exec(ctx, saveSweepCursor, arg.WorkerKind, arg.CursorMerchantID, arg.ExpectedCursorVersion)
 	if err != nil {
 		return 0, err
 	}

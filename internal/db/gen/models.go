@@ -1423,7 +1423,8 @@ type OpenrailsWebhookHealthDaily struct {
 type OpenrailsWorkerState struct {
 	WorkerKind       string
 	CursorMerchantID *uuid.UUID
-	CursorUpdatedAt  *time.Time
+	// Opaque compare-and-swap token for fair-sweep cursor saves: +1 per applied save, never touched by health writes, independent of any clock.
+	CursorVersion int64
 	// First time this kind was seeded (deploy that introduced it) — anchors the never-succeeded-since-deploy alert.
 	RegisteredAt time.Time
 	// Declared periodic cadence captured at registration; NULL/0 = on-demand kind (no staleness alerting).
