@@ -59,12 +59,16 @@ func TestRequired(t *testing.T) {
 		if called {
 			t.Fatal("next was called despite auth failure")
 		}
-		var body map[string]any
+		var body struct {
+			Error struct {
+				Type, Code, Message string
+			} `json:"error"`
+		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("response not JSON: %v", err)
 		}
-		if body["object"] != "error" {
-			t.Fatalf("error envelope = %v, want object=error", body)
+		if body.Error.Type != "authentication_error" || body.Error.Code != "unauthorized" || body.Error.Message == "" {
+			t.Fatalf("error envelope = %+v, want the standard type/code/message envelope", body.Error)
 		}
 	})
 

@@ -11,6 +11,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -58,11 +59,14 @@ func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 				raw, err := io.ReadAll(body)
 				_ = body.Close()
 				if err != nil {
+					// Correlate the refusal like any handler error, in every
+					// deployment (the in-process mount has no request logger).
+					w.Header().Set("X-Request-ID", httprequest.EnsureRequestID(r))
 					var tooLarge *http.MaxBytesError
 					if errors.As(err, &tooLarge) {
-						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, "request_body_too_large", "request body too large")
+						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, openrails.CodeRequestBodyTooLarge, "request body too large")
 					} else {
-						billingauth.WriteJSONError(w, http.StatusBadRequest, "invalid_request_body", "could not read request body")
+						billingauth.WriteJSONError(w, http.StatusBadRequest, openrails.CodeInvalidRequestBody, "could not read request body")
 					}
 					return
 				}
