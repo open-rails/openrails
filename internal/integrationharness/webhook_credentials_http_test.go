@@ -19,9 +19,9 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/alerting"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/httpx"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 )

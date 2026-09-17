@@ -13,7 +13,7 @@ import (
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/stretchr/testify/require"
 )
 

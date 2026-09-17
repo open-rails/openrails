@@ -1,6 +1,6 @@
 //go:build integration
 
-package controlplane_test
+package operator_test
 
 import (
 	"context"
@@ -11,11 +11,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // TestRunBootstrap_ExternalShapeAndExplicitMintOnly is #747's regression
-// guard, exercised entirely through the exported pkg/embedded/controlplane
+// guard, exercised entirely through the exported embed/controlplane
 // surface (this file cannot import internal/controlplane, proving the shape
 // really is external-host-constructible):
 //

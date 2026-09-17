@@ -22,10 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/embedded"
 	orauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
 )
 
 // or#918 end to end: the admission seam absorbs BOTH decisions a privileged

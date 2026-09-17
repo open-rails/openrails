@@ -160,7 +160,7 @@ func Groups() []authcore.PersonaDef {
 // escalation, and the host admission (cost) gate all apply to hosted
 // "registration is provisioning" flows. Standalone/locked posture never
 // enables this; hosted products opt in through
-// pkg/embedded/controlplane.AttachOptions.MerchantCreation.
+// embed/controlplane.Options.MerchantCreation.
 type MerchantCreationConfig struct {
 	// ReservedSlugs are reserved IN ADDITION to merchant.ReservedHostedSlugs
 	// (the advisory hosted default, always included). Exact lowercase slugs.
