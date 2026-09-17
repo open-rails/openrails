@@ -72,8 +72,12 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
+	// A fixed price id: a random UUID can spell a Luhn-valid digit run across
+	// its hyphenated groups and trip the PAN firewall (seen once in 41 runs);
+	// every group here carries a hex letter, so no 13-digit run can form.
+	fabricatedPrice := uuid.MustParse("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d")
 	post := func(rail string) (int, string) {
-		body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":%q}}`, api.FormatPriceID(uuid.New()), rail)
+		body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":%q}}`, api.FormatPriceID(fabricatedPrice), rail)
 		req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/me/checkout", strings.NewReader(body))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")
