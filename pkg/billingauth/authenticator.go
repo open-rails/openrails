@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
+
+	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Authenticator is the framework-neutral auth boundary for embedded OpenRails.
@@ -92,17 +95,17 @@ func UnauthenticatedMessage(err error) string {
 	return err.Error()
 }
 
-// WriteJSONError writes the standard OpenRails error envelope to a plain
-// http.ResponseWriter. It is the net/http counterpart of the gin response
-// helpers; the full neutral response layer is tracked under issue #283.
+// WriteJSONError writes the one OpenRails error envelope
+// ({"error":{"type","code","message","request_id"}}) from a plain
+// http.ResponseWriter, for middleware that answers before a handler exists.
+// code is the stable machine code; the type is the status's category. The
+// request id is the one the request-log middleware already put on the response.
 func WriteJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
-		"object": "error",
-		"error": map[string]any{
-			"type":    code,
-			"message": message,
-		},
-	})
+	body := api.NewAPIError(status, api.ErrorTypeForStatus(status), code, message)
+	if id := strings.TrimSpace(w.Header().Get("X-Request-ID")); id != "" {
+		body.WithRequestID(id)
+	}
+	_ = json.NewEncoder(w).Encode(body.ToResponse())
 }
