@@ -1,6 +1,6 @@
 //go:build integration
 
-package controlplane_test
+package operator_test
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/dbtest"
-	embcp "github.com/open-rails/openrails/pkg/embedded/controlplane"
+	embcp "github.com/open-rails/openrails/internal/operator"
 )
 
 // TestMerchantCreationPolicy is the or#914 item-3 proof, end-to-end over the

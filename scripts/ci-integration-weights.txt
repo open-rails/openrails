@@ -63,6 +63,6 @@ internal/reconcile	2.666
 internal/reconcile/converge	4.122
 internal/river	23.959
 pkg/embedded	0.827
-pkg/embedded/controlplane	1.374
+internal/operator	1.374
 pkg/service	80.826
 tests	6.001

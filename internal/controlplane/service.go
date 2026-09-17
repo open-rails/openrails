@@ -32,7 +32,7 @@ import (
 //
 // HARD CUT (#469): the control plane is mandatory in standalone mode — the
 // standalone binary always constructs it at boot and a construction failure is
-// fatal. pkg/embedded hosts opt in via pkg/embedded/controlplane.Attach.
+// fatal. pkg/embedded hosts opt in via embed/controlplane.Attach.
 type ControlPlane struct {
 	cfg     *config.Config
 	authSvc *authhttp.Service
@@ -97,7 +97,7 @@ type Option func(*options)
 
 // WithHostedPosture opens AuthKit registration and mounts the full AuthKit API.
 // Standalone never passes this; hosted products such as openrails-saas opt in
-// through pkg/embedded/controlplane.
+// through embed/controlplane.
 func WithHostedPosture() Option {
 	return func(o *options) {
 		o.hosted = true
@@ -121,7 +121,7 @@ func WithMerchantCreation(cfg MerchantCreationConfig) Option {
 // WithPasswordless enables AuthKit's contact-based passwordless login policy.
 // autoRegistration additionally lets a verified unknown contact create a
 // no-password user during confirmation. Both remain off unless an embedding
-// host explicitly opts in through pkg/embedded/controlplane.AttachOptions.
+// host explicitly opts in through embed/controlplane.Options.
 func WithPasswordless(autoRegistration bool) Option {
 	return func(o *options) {
 		o.passwordlessLogin = true

@@ -34,6 +34,10 @@ type PaymentProviderCredentialStatus struct {
 }
 
 // PaymentProviderConfig is one merchant-owned payment-PSP.
+// ErrPaymentProviderNotFound reports that the merchant has no active provider
+// account on the requested rail and environment.
+var ErrPaymentProviderNotFound = fmt.Errorf("merchants: payment provider not configured: %w", ErrSecretNotFound)
+
 type PaymentProviderConfig struct {
 	ID              uuid.UUID                                  `json:"id"`
 	Rail            string                                     `json:"rail"`
@@ -185,7 +189,7 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 	if len(items) > 0 {
 		return items[len(items)-1], nil
 	}
-	return PaymentProviderConfig{}, ErrSecretNotFound
+	return PaymentProviderConfig{}, ErrPaymentProviderNotFound
 }
 
 // UpsertPaymentProviderConfig validates credentials first, then stores the

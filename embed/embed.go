@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/service"
 )
@@ -99,6 +100,15 @@ type Runtime struct {
 	// RegisterServiceRoutes/RegisterImportRoutes on every call.
 	handlerOnce sync.Once
 	handler     http.Handler
+}
+
+func init() {
+	app.HostGraph = func(runtime any) *app.App {
+		if r, ok := runtime.(*Runtime); ok && r != nil && r.emb != nil {
+			return r.emb.App()
+		}
+		return nil
+	}
 }
 
 // New builds the embedded runtime: the gin-free app graph (pkg/embedded.New),

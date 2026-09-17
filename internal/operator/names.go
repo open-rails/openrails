@@ -1,4 +1,4 @@
-package controlplane
+package operator
 
 import (
 	"github.com/open-rails/openrails/internal/app"
