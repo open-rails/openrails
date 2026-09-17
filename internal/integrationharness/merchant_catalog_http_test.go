@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/catalog"
 	"github.com/open-rails/openrails/pkg/identity"
 	billingservice "github.com/open-rails/openrails/pkg/service"
@@ -67,17 +68,38 @@ func TestStandaloneMerchantCatalogRoutesHTTP(t *testing.T) {
 	require.NotEmpty(t, created.ID)
 	require.Equal(t, productKey, created.Key)
 
+	// Retired fields are refused in the coded envelope: the field is named in
+	// param and Go's decoder text never reaches the wire.
+	requireRetiredFieldRefused := func(status int, body []byte, field string) {
+		t.Helper()
+		require.Equal(t, http.StatusBadRequest, status, string(body))
+		var refused struct {
+			Error openrails.ErrorDetails `json:"error"`
+		}
+		require.NoError(t, json.Unmarshal(body, &refused), string(body))
+		require.Equal(t, api.ErrorTypeInvalidRequest, refused.Error.Type, string(body))
+		require.Equal(t, api.CodeInvalidParam, refused.Error.Code, string(body))
+		require.NotNil(t, refused.Error.Param, string(body))
+		require.Equal(t, field, *refused.Error.Param, string(body))
+		require.Equal(t, "unknown field "+field, refused.Error.Message, string(body))
+		require.NotEmpty(t, refused.Error.RequestID, string(body))
+	}
 	for _, retired := range []string{"credits_spec", "set_credits"} {
 		status, body := requestJSON(t, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+created.ID, catalogToken, map[string]any{retired: true})
-		require.Equal(t, http.StatusBadRequest, status, string(body))
+		requireRetiredFieldRefused(status, body, retired)
 	}
 	for _, retired := range []string{"credits", "includes", "usage_limits"} {
 		status, body := requestJSON(t, http.MethodPost, surface.BaseURL+"/v1/merchant/catalog/publish", catalogToken, map[string]any{
 			"catalog": map[string]any{"version": 1, "products": []any{map[string]any{"key": "retired", "display_name": "Retired", retired: []any{}}}},
 			"insert":  true,
 		})
-		require.Equal(t, http.StatusBadRequest, status, string(body))
+		requireRetiredFieldRefused(status, body, retired)
 	}
+	wrongTypeStatus, wrongTypeBody := requestJSON(t, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+created.ID, catalogToken, map[string]any{"display_name": 7})
+	require.Equal(t, http.StatusBadRequest, wrongTypeStatus, string(wrongTypeBody))
+	require.Contains(t, string(wrongTypeBody), `"code":"invalid_param"`)
+	require.Contains(t, string(wrongTypeBody), `"param":"display_name"`)
+	require.NotContains(t, string(wrongTypeBody), "json:")
 
 	getStatus, getBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, catalogToken, nil)
 	require.Equal(t, http.StatusOK, getStatus, string(getBody))
