@@ -3,6 +3,7 @@ package handlers
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -26,8 +27,8 @@ func ProductToAPI(p *models.Product, prices []*models.Price) api.ProductObject {
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
 		Metadata:         map[string]string{},
-		Created:          api.ToUnix(p.CreatedAt),
-		Updated:          api.ToUnix(p.UpdatedAt),
+		CreatedAt:        p.CreatedAt,
+		UpdatedAt:        p.UpdatedAt,
 		Prices:           priceObjects,
 	}
 }
@@ -63,7 +64,7 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) api.PaymentObjec
 	} else if object == "charge" && status != "failed" && amountRefunded > 0 {
 		status = "partially_refunded"
 	}
-	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: openrails.CustomerID(p.CustomerID), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, FailureCode: p.FailureCode, FailureReason: p.FailureReason, Created: api.ToUnix(p.CreatedAt)}
+	payment := api.PaymentObject{ID: openrails.PaymentID(p.ID), Object: object, Status: status, Amount: p.Amount, AmountRefunded: amountRefunded, Currency: p.Currency, CustomerID: openrails.CustomerID(p.CustomerID), SubscriptionID: subID, Rail: string(p.Rail), TransactionID: p.TransactionID, Refunded: refunded, Captured: captured, FailureCode: p.FailureCode, FailureReason: p.FailureReason, CreatedAt: p.CreatedAt}
 	if refunds != nil {
 		if refundObjects == nil {
 			refundObjects = []api.PaymentObject{}
@@ -89,7 +90,7 @@ type userPaymentObject struct {
 	Rail           string                    `json:"rail"`
 	Refunded       bool                      `json:"refunded"`
 	Captured       bool                      `json:"captured,omitempty"`
-	Created        int64                     `json:"created"`
+	CreatedAt      time.Time                 `json:"created_at"`
 	Price          *api.PriceObject          `json:"price,omitempty"`
 	Card           *paymentCardJSON          `json:"card,omitempty"`
 }
@@ -129,7 +130,7 @@ func PaymentToUserAPI(p *models.Payment) userPaymentObject {
 		Rail:           payment.Rail,
 		Refunded:       payment.Refunded,
 		Captured:       payment.Captured,
-		Created:        payment.Created,
+		CreatedAt:      payment.CreatedAt,
 		Price:          payment.Price,
 		Card:           paymentCardFromModel(p),
 	}
@@ -176,5 +177,5 @@ func PriceToAPI(p *models.Price) api.PriceObject {
 		}
 		sort.Strings(providers)
 	}
-	return api.PriceObject{ID: openrails.PriceID(p.ID), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: openrails.ProductID(p.ProductID), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, Created: api.ToUnix(p.CreatedAt)}
+	return api.PriceObject{ID: openrails.PriceID(p.ID), Key: p.Key, Object: "price", UnitAmount: p.Amount, Currency: p.Currency, Type: priceType, Recurring: recurring, Product: openrails.ProductID(p.ProductID), Active: p.IsPurchasable(), Providers: providers, Metadata: map[string]string{}, CreatedAt: p.CreatedAt}
 }

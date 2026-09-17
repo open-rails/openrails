@@ -45,7 +45,6 @@ import {
 import {
   formatDate,
   formatNativeAmount,
-  formatUnix,
   formatUnits,
   nativeAmountFromInput,
   shortId,
@@ -238,7 +237,7 @@ export function CustomerDetailPage() {
                         </TableCell>
                         <TableCell>{p.rail}</TableCell>
                         <TableCell className="tabular-nums">
-                          {formatUnix(p.created)}
+                          {formatDate(p.created_at)}
                         </TableCell>
                       </LinkedTableRow>
                     ))}

@@ -26,7 +26,7 @@ import type { PaymentObject } from "@/lib/api/types"
 import {
   currencyScale,
   formatNativeAmount,
-  formatUnix,
+  formatDate,
   shortId,
   unitsToDecimal,
 } from "@/lib/format"
@@ -78,7 +78,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     header: "Created",
     cell: ({ row }) => (
       <span className="text-muted-foreground tabular-nums">
-        {formatUnix(row.original.created)}
+        {formatDate(row.original.created_at)}
       </span>
     ),
   },
@@ -172,7 +172,7 @@ export function PaymentsPage() {
           "rail",
           "customer_id",
           "transaction_id",
-          "created",
+          "created_at",
         ].join(","),
         ...rows.map((r) =>
           [
@@ -185,7 +185,7 @@ export function PaymentsPage() {
             r.rail,
             r.customer_id,
             r.transaction_id,
-            new Date(r.created * 1000).toISOString(),
+            r.created_at,
           ]
             .map(csvEscape)
             .join(",")

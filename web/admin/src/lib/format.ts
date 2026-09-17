@@ -166,14 +166,6 @@ export function formatDate(iso?: string | null): string {
   })
 }
 
-export function formatUnix(seconds?: number): string {
-  if (!seconds) return "—"
-  return new Date(seconds * 1000).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  })
-}
-
 export function shortId(id: string, n = 8): string {
   return id.length > n ? `${id.slice(0, n)}…` : id
 }

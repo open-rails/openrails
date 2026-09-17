@@ -29,8 +29,10 @@ The catalog `by-key` routes, checkout `price_id` on the public (browser)
 checkout route and `plan-migrations` price references still accept a price
 key; the shared Client's typed fields do not.
 Counts and timestamps are not money: counts remain numbers. Every timestamp on the
-wire — response fields and request parameters alike (`expires_at`, `occurred_at`,
-`at`, rollup `from`/`to`) — is an RFC3339 instant; the Go client sends
+wire — response fields and request parameters alike (`created_at`, `expires_at`,
+`occurred_at`, `at`, rollup `from`/`to`) — is an RFC3339 instant, including the
+public product/price/payment objects and the admin credit grant's `expires_at`
+(no Stripe-style epoch seconds remain); the Go client sends
 `time.RFC3339Nano` and handlers accept any fractional precision. Durations stay
 integer seconds (`window_seconds`, `retry_after_seconds`) and day buckets stay
 `YYYY-MM-DD`. Missing optional timestamps are omitted; explicit nullable receipt

@@ -276,7 +276,7 @@ func priceToAPIObject(p *models.Price) api.PriceObject {
 		Product:    openrails.ProductID(p.ProductID),
 		Active:     p.IsPurchasable(),
 		Metadata:   map[string]string{},
-		Created:    api.ToUnix(p.CreatedAt),
+		CreatedAt:  p.CreatedAt,
 	}
 }
 
@@ -292,8 +292,8 @@ func productToAPIObject(p *models.Product) api.ProductObject {
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
 		Metadata:         map[string]string{},
-		Created:          api.ToUnix(p.CreatedAt),
-		Updated:          api.ToUnix(p.UpdatedAt),
+		CreatedAt:        p.CreatedAt,
+		UpdatedAt:        p.UpdatedAt,
 	}
 }
 
