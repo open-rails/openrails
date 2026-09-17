@@ -111,9 +111,9 @@ func TestAdminListPayments(t *testing.T) {
 		assert.NotNil(t, response["offset"], "Should have offset")
 	})
 
-	t.Run("filters by user_id", func(t *testing.T) {
+	t.Run("filters by customer_id", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/merchant/payments?user_id=%s", userID), nil)
+		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/merchant/payments?customer_id=%s", userID), nil)
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(w, req)
 
@@ -208,7 +208,7 @@ func TestAdminListPayments(t *testing.T) {
 
 	t.Run("sorts by created descending", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/merchant/payments?user_id=%s&sort_by=created_at&sort_order=desc", userID), nil)
+		req, _ := http.NewRequest("GET", fmt.Sprintf("/v1/merchant/payments?customer_id=%s&sort_by=created_at&sort_order=desc", userID), nil)
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(w, req)
 
