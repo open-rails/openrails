@@ -278,32 +278,15 @@ func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *inten
 		return nil, err
 	}
 	key := invoiceRetryOperationKey(request.InvoiceID, request.IdempotencyKey)
-	prior, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, key)
-	replayed := false
-	var intentID uuid.UUID
-	switch {
-	case err == nil:
-		frozen, derr := decodeInvoiceCollectionPayload(prior)
-		if derr != nil {
-			return nil, derr
-		}
-		if frozen.InvoiceID != request.InvoiceID || frozen.CustomerID != payer.UUID() || frozen.PaymentMethodID != request.PaymentMethodID {
-			return nil, ErrInvoiceRetryIdempotencyConflict
-		}
-		replayed, intentID = true, prior.ID
-	case errors.Is(err, pgx.ErrNoRows):
-		pm := request.PaymentMethodID
-		intentID, _, err = s.enqueueInvoiceCollection(ctx, payer, request.InvoiceID, invoiceCollectionEnqueue{
-			manual: true, paymentMethodID: &pm, operationKey: key, origin: intents.OriginAdmin, originReason: "manual invoice collection retry",
-		})
-		if err != nil {
-			return nil, err
-		}
-		if intentID == uuid.Nil {
-			return nil, ErrInvoiceNotRetryable
-		}
-	default:
+	pm := request.PaymentMethodID
+	intentID, replayed, err := s.enqueueInvoiceCollection(ctx, payer, request.InvoiceID, invoiceCollectionEnqueue{
+		manual: true, paymentMethodID: &pm, operationKey: key, origin: intents.OriginAdmin, originReason: "manual invoice collection retry",
+	})
+	if err != nil {
 		return nil, err
+	}
+	if intentID == uuid.Nil {
+		return nil, ErrInvoiceNotRetryable
 	}
 	if _, err := runner.ExecuteByID(ctx, intentID); err != nil {
 		return nil, fmt.Errorf("retry invoice collection: %w", err)
@@ -368,16 +351,17 @@ type invoiceCollectionEnqueue struct {
 
 // enqueueInvoiceCollection freezes one collection attempt atomically: the
 // intent, its invoice_payments row and the invoice's pointer at the operation
-// commit together, or nothing does. intentID == Nil means the invoice was not
-// eligible (scheduled path) — the manual path reports why.
-func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, opts invoiceCollectionEnqueue) (uuid.UUID, *models.Invoice, error) {
+// commit together, or nothing does. A client retry key is looked up under
+// the invoice lock, so two equal concurrent retries serialize on the row and
+// the second replays the first's operation instead of seeing its in-flight
+// state (replayed=true). intentID == Nil means the invoice was not eligible
+// (scheduled path) — the manual path reports why.
+func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, opts invoiceCollectionEnqueue) (intentID uuid.UUID, replayed bool, err error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return uuid.Nil, nil, err
+		return uuid.Nil, false, err
 	}
 	now := s.now()
-	var intentID uuid.UUID
-	var invoice *models.Invoice
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		row, err := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: invoiceID})
@@ -387,9 +371,26 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if err != nil {
 			return fmt.Errorf("lock invoice: %w", err)
 		}
-		invoice, err = invoiceFromGen(row)
+		invoice, err := invoiceFromGen(row)
 		if err != nil {
 			return err
+		}
+		if opts.operationKey != "" {
+			prior, err := q.GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: tid.UUID(), IdempotencyKey: opts.operationKey})
+			switch {
+			case err == nil:
+				frozen, err := decodeInvoiceCollectionPayload(prior)
+				if err != nil {
+					return err
+				}
+				if frozen.InvoiceID != invoiceID || frozen.CustomerID != payer.UUID() || opts.paymentMethodID == nil || frozen.PaymentMethodID != *opts.paymentMethodID {
+					return ErrInvoiceRetryIdempotencyConflict
+				}
+				intentID, replayed = prior.ID, true
+				return nil
+			case !errors.Is(err, pgx.ErrNoRows):
+				return fmt.Errorf("load retry operation: %w", err)
+			}
 		}
 		if invoice.CollectionIntentID != nil {
 			if !opts.manual {
@@ -456,9 +457,9 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		return nil
 	})
 	if err != nil {
-		return uuid.Nil, nil, err
+		return uuid.Nil, false, err
 	}
-	return intentID, invoice, nil
+	return intentID, replayed, nil
 }
 
 // collectionMethodFor resolves the payer-owned saved method the attempt is

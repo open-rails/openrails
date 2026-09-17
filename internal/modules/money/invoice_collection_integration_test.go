@@ -152,6 +152,76 @@ func TestInvoiceCollection_ClientKeyReplaysDurableOutcomeWithoutRecharging(t *te
 	e.requireSettledOnce(t)
 }
 
+// lockWaiters counts sessions of this database blocked on a row lock.
+func lockWaiters(t *testing.T, pool *pgxpool.Pool, ctx context.Context) int {
+	t.Helper()
+	var n int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&n))
+	return n
+}
+
+// TestInvoiceCollection_ConcurrentEqualRetriesShareOneOperation (final review
+// R2): two identical retries that both wait on the invoice lock resolve to
+// ONE operation — the retry key is looked up under the lock, so the second
+// replays the first's attempt instead of seeing its in-flight state or the
+// attempt-key constraint. One provider submission, one attempt identity in
+// both answers, whether the charge settles or declines.
+func TestInvoiceCollection_ConcurrentEqualRetriesShareOneOperation(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		decline bool
+		status  string
+	}{{"settles", false, "settled"}, {"declines", true, "failed"}} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newCollectionEnv(t, string(models.RailNMI))
+			_, err := e.svc.ChargeOutstanding(e.ctx, collectionRunner(e.db, &fakeCharger{declineAll: true}, nil), 0)
+			require.NoError(t, err)
+			require.Equal(t, "past_due", e.invoiceRow(t).Status)
+
+			charger := &fakeCharger{declineAll: tc.decline}
+			runner := collectionRunner(e.db, charger, charger)
+			lock, err := e.pool.Begin(e.ctx)
+			require.NoError(t, err)
+			_, err = lock.Exec(e.ctx, `SELECT id FROM openrails.invoices WHERE id = $1 FOR UPDATE`, e.invoice)
+			require.NoError(t, err)
+
+			results := make([]*money.InvoiceCollectionRetryResult, 2)
+			errs := make([]error, 2)
+			var wg sync.WaitGroup
+			for i := range results {
+				wg.Add(1)
+				go func(i int) {
+					defer wg.Done()
+					results[i], errs[i] = e.retry(t, runner, "same-client-key", e.method)
+				}(i)
+			}
+			require.Eventually(t, func() bool { return lockWaiters(t, e.pool, e.ctx) >= 2 }, 15*time.Second, 20*time.Millisecond, "both retries wait on the invoice lock")
+			require.NoError(t, lock.Rollback(e.ctx))
+			wg.Wait()
+
+			require.NoError(t, errs[0])
+			require.NoError(t, errs[1])
+			require.Equal(t, 1, charger.chargeCount(), "one provider submission")
+			require.Equal(t, results[0].Attempt.ID, results[1].Attempt.ID, "both answers name the same attempt")
+			require.NotEqual(t, results[0].Replayed, results[1].Replayed, "one caller enqueued, the other replayed")
+			for _, r := range results {
+				require.Equal(t, e.method, *r.Attempt.PaymentMethodID)
+				require.Contains(t, []string{tc.status, "attempted"}, r.Attempt.Status, "a caller may answer while the other's execution is in flight")
+			}
+			ops := collectionIntents(t, e.pool, e.ctx, e.invoice)
+			require.Len(t, ops, 2, "the scheduled decline and ONE retry operation")
+			require.Equal(t, []string{tc.status, "failed"}, e.attemptStatuses(t))
+			if tc.decline {
+				inv := e.invoiceRow(t)
+				require.Nil(t, inv.CollectionIntentID)
+				require.Zero(t, e.settledPayments(t))
+			} else {
+				e.requireSettledOnce(t)
+			}
+		})
+	}
+}
+
 // TestInvoiceCollection_LostResponseNeverResendsAndConvergesOnReceipt is the
 // #990 core: a charge whose response is lost stays unknown under its one
 // provider identity — no scheduled resend, no resend under a new client key,
