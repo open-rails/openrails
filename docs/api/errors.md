@@ -52,6 +52,12 @@ account. The same code answers whether the mismatch is seen at the HTTP
 pre-check or by the durable intent, which re-verifies it under the method's row
 lock before any provider call.
 
+A method moved into third-party custody is refused with `409
+payment_method_not_psp_vaulted` on the same route, even when its PSP id still
+matches. Its retained PSP vault reference is historical correlation, not a
+usable address for changing provider-managed recurring billing. The producer,
+executor and verifier enforce this before provider traffic.
+
 Transport failures preserve their cause: `errors.Is(err, context.Canceled)` and
 `errors.Is(err, context.DeadlineExceeded)` work in both modes. A transport failure
 is not proof that an operation was rejected or did not commit. Financial retries

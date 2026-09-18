@@ -227,7 +227,10 @@ Rules:
   at enqueue and again in the executor under the method's row lock
   (`failed_terminal`, evidence `code: psp_mismatch`, no provider call), and a
   custody remap (or#297) refuses an instrument any unresolved payment-source
-  update names (`payment_source_update_unresolved`).
+  update names (`operation_unresolved`), using the same predicate that protects
+  an unresolved invoice collection's frozen instrument. A replacement already
+  moved to third-party custody is also refused (`payment_method_not_psp_vaulted`)
+  before any provider traffic, even if its PSP id is unchanged.
 
 ### Custodians (or#880)
 

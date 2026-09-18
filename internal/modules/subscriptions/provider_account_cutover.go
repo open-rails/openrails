@@ -144,7 +144,7 @@ func PlanProviderAccountCutover(req ProviderAccountCutoverRequest) ProviderAccou
 			Reason:      "replacement card is vaulted by the subscription's provider account",
 			Steps: []string{
 				"PUT /v1/merchant/subscriptions/{id}/payment-method with the replacement payment method (durable nmi_payment_source_update intent).",
-				"The intent reads the recurring record before and after the update and finalizes the local link only after the provider confirms.",
+				"The intent reads the recurring record before the update and verifies any ambiguous response before finalizing the local link.",
 			},
 		}
 	}
