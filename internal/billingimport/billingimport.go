@@ -74,6 +74,9 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	if opts.Book.AsOf.IsZero() {
 		return res, apperr.Invalidf("import billing: Book.AsOf (evidence horizon) is required")
 	}
+	if err := rejectDeclaredPANs(opts.Book); err != nil {
+		return res, err
+	}
 	asOf := opts.Book.AsOf.UTC()
 
 	database, err := openDB(ctx, opts.Config, opts.PGXPool)
