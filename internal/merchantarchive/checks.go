@@ -148,8 +148,8 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 				expected := map[string]string{"uuid": "uuid", "text": "text", "text[]": "_text", "bigint": "int8", "integer": "int4", "boolean": "bool", "jsonb": "jsonb", "timestamp with time zone": "timestamptz", "timestamptz": "timestamptz", "openrails.payment_status": "payment_status", "openrails.subscription_status": "subscription_status"}[c.Type]
 				if strings.HasPrefix(c.Type, "character varying(") {
 					expected = "varchar"
-					n, _ := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(c.Type, "character varying("), ")"))
-					if mod != int32(n+4) {
+					n, err := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(c.Type, "character varying("), ")"), 10, 32)
+					if err != nil || int64(mod) != n+4 {
 						expected = "invalid"
 					}
 				}
