@@ -105,9 +105,9 @@ func TestBillingImportHTTP(t *testing.T) {
 			customer := uuid.New()
 			candidate := billingimport.DeclaredBilling{
 				AsOf: asOf, DefaultPSP: billingimport.PSPRef{Key: "nmi"},
-				Customers: []billingimport.DeclaredCustomer{{Customer: customer}},
+				Customers: []billingimport.DeclaredCustomer{{Customer: openrails.CustomerID(customer)}},
 				Subscriptions: []billingimport.DeclaredSubscription{{
-					SourceID: "pan-" + customer.String(), Customer: customer, Price: price, Rail: "nmi",
+					SourceID: "pan-" + customer.String(), Customer: openrails.CustomerID(customer), Price: openrails.PriceID(price), Rail: "nmi",
 					RailSubscriptionID: "pan-" + customer.String(), StartedAt: asOf.Add(-day),
 					PaidThrough: &paidThrough, Evidence: evidence,
 				}},

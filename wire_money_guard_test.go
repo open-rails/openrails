@@ -129,11 +129,16 @@ var pendingNumericMoney = map[string]string{
 	"internal/river/jobs_credit_money_in.go:InvoiceArgs.CollectionThresholdAmount collection_threshold_amount":                                       notHTTPJobArgs,
 	"internal/service/catalog_sidecars.go:CatalogRateCardSpec.Price price":                                                                           notHTTPInternalRow,
 	"internal/service/service_definition_catalog_admin.go:CatalogPage.Limit limit":                                                                   notMoneyPageSize,
-	"invoices.go:InvoiceDTO.Tax tax":                                                                                                                 notMoneyTaxFacts,
-	"invoices.go:InvoiceProfileDTO.Tax tax":                                                                                                          notMoneyTaxFacts,
-	"pkg/query/query.go:QueryOptions.Limit limit":                                                                                                    notMoneyPageSize,
-	"remote_catalog.go:CatalogPage.Limit limit":                                                                                                      notMoneyPageSize,
-	"subscriptions.go:Page.Limit limit":                                                                                                              notMoneyPageSize,
+
+	"invoices.go:InvoiceDTO.Tax tax": notMoneyTaxFacts,
+
+	"invoices.go:InvoiceProfileDTO.Tax tax": notMoneyTaxFacts,
+
+	"pkg/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
+
+	"remote_catalog.go:CatalogPage.Limit limit": notMoneyPageSize,
+
+	"subscriptions.go:Page.Limit limit": notMoneyPageSize,
 }
 
 const (
