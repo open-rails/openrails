@@ -53,8 +53,8 @@ never edit existing ones.
 The **grant ledger** (`openrails.grants`, #514) is the append-only access-domain sibling of
 the money ledger. Derive-1 appends immutable events (grant / revoke / expire / supersede —
 a revoke is a NEW event referencing the original); derive-2 (`MaterializeGrant`) folds the
-log into projections: **entitlement windows** (rows carry the producing `grant_id`), credit
-lots, and derived ownership for bundle includes. Grants are provenance and replayable
+log into projections: **entitlement windows** (rows carry the producing `grant_id`),
+credit lots and product ownership. Grants are provenance and replayable
 truth; entitlement rows are the projection you query. The Convergence Engine's `derive.*`
 pass repairs any drift between the two.
 
