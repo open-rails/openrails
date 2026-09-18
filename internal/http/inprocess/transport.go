@@ -49,24 +49,25 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 		defer req.Body.Close()
 	}
 	ctx := req.Context()
+	// The client carries its construction-time binding in ctx (#445): an
+	// unbound in-process client, and a runtime bound to another merchant after
+	// that client was built, are both refused before any handler runs (#772).
+	// Synthesized as a response (not a RoundTrip error): an error here would
+	// surface via remote.go's doRaw as ErrUnreachable, which is wrong for a
+	// well-formed request the engine deliberately refuses.
+	mid, _ := merchant.FromContext(ctx)
+	refuse := func(message string) (*http.Response, error) {
+		if stream && req.Body != nil {
+			_ = req.Body.Close()
+		}
+		return conflictResponse(req, message), nil
+	}
+	if mid.IsZero() {
+		return refuse("openrails: in-process client is not bound to a merchant")
+	}
 	// Live read: EnsureMerchant/provisioning may bind the merchant after New.
-	mid := t.configuredMerchant()
-	if v, ok := merchant.FromContext(ctx); ok {
-		if !mid.IsZero() && v != mid {
-			// #772: an explicit per-call pin (openrails.WithMerchant) that
-			// disagrees with the bound merchant is refused rather than
-			// silently executed against the bound one. Synthesized as a
-			// response (not a RoundTrip error): an error here would surface
-			// via remote.go's doRaw as ErrUnreachable, which is wrong for a
-			// well-formed request the engine deliberately refuses.
-			if stream && req.Body != nil {
-				_ = req.Body.Close()
-			}
-			return mismatchResponse(req, mid, v), nil
-		}
-		if mid.IsZero() {
-			mid = v // host pinned it per call via openrails.WithMerchant
-		}
+	if bound := t.configuredMerchant(); !bound.IsZero() && mid != bound {
+		return refuse(merchantMismatchMsg(bound, mid))
 	}
 	// Only the caller's cancellation and deadline reach the engine; every host
 	// context value is dropped (engineContext).
@@ -75,11 +76,9 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 		MerchantID:  mid,
 		Permissions: hostPermissions(),
 	})
-	if !mid.IsZero() {
-		// The in-process analogue of middleware.ResolveMerchantHTTP: pin the
-		// bound merchant before any merchant-owned DB access.
-		ctx = merchant.WithID(ctx, mid)
-	}
+	// The in-process analogue of middleware.ResolveMerchantHTTP: pin the
+	// bound merchant before any merchant-owned DB access.
+	ctx = merchant.WithID(ctx, mid)
 	if stream {
 		return streamInprocessResponse(t.handler, req.Clone(ctx))
 	}
@@ -88,13 +87,13 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return w.response(req), nil
 }
 
-// mismatchResponse synthesizes a 409 response in the pkg/api Stripe error
-// envelope shape ({"error":{"type","code","message"}}) for a merchant-pin
-// mismatch (#772). remote.go's do/statusErrorFromBody parses this envelope
+// conflictResponse synthesizes a 409 response in the pkg/api Stripe error
+// envelope shape ({"error":{"type","code","message"}}) for a merchant binding
+// conflict (#772). remote.go's do/statusErrorFromBody parses this envelope
 // like any real non-2xx wire response, so the call surfaces as a StatusError
 // (ErrConflict) identically to every other in-process rejection.
-func mismatchResponse(req *http.Request, bound, pinned merchant.ID) *http.Response {
-	body, _ := json.Marshal(api.ConflictError(merchantMismatchMsg(bound, pinned)).ToResponse())
+func conflictResponse(req *http.Request, message string) *http.Response {
+	body, _ := json.Marshal(api.ConflictError(message).ToResponse())
 	header := make(http.Header)
 	header.Set("Content-Type", "application/json")
 	return &http.Response{
@@ -154,7 +153,7 @@ func (w *bufferedResponse) response(req *http.Request) *http.Response {
 }
 
 func merchantMismatchMsg(bound, pinned merchant.ID) string {
-	return fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, bound)
+	return fmt.Sprintf("openrails: client is bound to merchant %s but the runtime is bound to merchant %s", pinned, bound)
 }
 
 // engineContext derives the context the engine serves an in-process call under.
