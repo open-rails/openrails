@@ -45,26 +45,10 @@ tasks:
       - bash scripts/e2e_dump_local_test.sh
 
   ci-local:
-    desc: Run the local Go/shared gates used by CI (database required)
+    desc: Run the compact checks and end-to-end gates used by CI
     cmds:
-      - task tooling-test
-      - bash scripts/check_business_time_test.sh
-      - bash scripts/check_business_time.sh
-      - bash scripts/sql-lint.sh
-      - go mod download
-      - go vet ./...
-      - go build ./...
-      - go vet -tags integration ./...
-      - |
-        for d in examples/*/; do
-          (cd "$d" && go build ./... && go vet ./...)
-        done
-      - go test -count=1 -race ./...
-      - task lint
-      - bash scripts/scan-injected-code.sh --all --self-test
-      - MIGRATION_PREFIX_NO_FETCH=1 bash scripts/migration-prefix-collision.sh
-      # sqlc-check prepares its database or fails; this must never be conditional.
-      - task sqlc-check
+      - bash scripts/check.sh checks
+      - bash scripts/check.sh e2e
 
   build:
     desc: Build the binary locally
@@ -261,12 +245,7 @@ tasks:
   test:
     desc: Run tests
     cmds:
-      - bash scripts/check_business_time_test.sh
-      - bash scripts/check_business_time.sh
-      - echo "Running tests..."
-      - go test -v -race ./...
-      - echo "Running integration tests..."
-      - task test-integration-core
+      - bash scripts/check.sh all
 
   test-integration:
     desc: Run core Docker-backed integration tests serially
