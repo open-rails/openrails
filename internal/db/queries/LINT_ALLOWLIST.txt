@@ -22,6 +22,8 @@ PERMANENT internal/migrate/reset.go        # transactional embedded-schema DDL +
 PERMANENT internal/modules/metrics/service.go       # compiled metric SQL (compile.go builds it)
 PERMANENT internal/controlplane/fleet_analytics.go  # cross-merchant analytics, dynamic grouping
 PERMANENT internal/controlplane/fleet_timeseries.go # cross-merchant time series, dynamic buckets
+PERMANENT internal/merchantarchive/archive.go      # typed archive profiles, dynamic projection/insertion and restore transaction controls
+PERMANENT internal/merchantarchive/checks.go       # catalog introspection and checks over classified archive tables/columns
 PERMANENT internal/bootstrap/merchant_manifest.go   # dump/restore over a dynamic table list
 PERMANENT pkg/embedded/catalog_dump.go              # dump/restore over a dynamic table list
 PERMANENT internal/river/progress.go                # reads River's OWN river_job table (not OpenRails' schema)
@@ -31,6 +33,7 @@ PERMANENT internal/river/job_liveness.go            # beats River's OWN river_jo
 PERMANENT internal/crypto/dek_store_db.go      # DEK bootstrap on the privileged pool
 PERMANENT internal/merchants/secrets_db.go     # merchant secret store (pre-context)
 PERMANENT internal/merchants/credentials.go    # credential read (pre-context)
+PERMANENT internal/merchants/restore_identity.go # provision preserved directory UUID before merchant context exists
 
 # --- DEBT: ordinary queries that belong in sqlc -----------------------------
 DEBT internal/intents/store.go
