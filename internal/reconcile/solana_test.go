@@ -284,7 +284,7 @@ func TestSolanaFetcher_Fetch(t *testing.T) {
 	require.Equal(t, wallet.String(), open.CustomerID)
 	require.Equal(t, planPDA.String(), open.PlanID)
 	require.Zero(t, open.AmountCents) // zero mint is not a registry stablecoin
-	require.Contains(t, string(open.Raw), `"amount":5000000`)
+	require.Contains(t, string(open.Raw), `"amount":"5000000"`)
 	require.Contains(t, string(open.Raw), `"period_hours":720`)
 	require.Contains(t, string(open.Raw), "subscription_decode_error")
 
@@ -460,7 +460,7 @@ func TestSolanaFetcher_TransactionClassification(t *testing.T) {
 	// Wire-pinned: 9_990_000 micro-USDC => exactly 999 cents.
 	require.Equal(t, int64(999), pull.AmountCents)
 	require.Equal(t, "USD", pull.Currency)
-	require.Contains(t, string(pull.Raw), `"amount_base_units":9990000`)
+	require.Contains(t, string(pull.Raw), `"amount_base_units":"9990000"`)
 	require.Contains(t, string(pull.Raw), usdcMint.String())
 	require.Contains(t, string(pull.Raw), "transfer_subscription")
 
@@ -470,7 +470,7 @@ func TestSolanaFetcher_TransactionClassification(t *testing.T) {
 	require.Zero(t, odd.AmountCents)
 	require.Empty(t, odd.Currency)
 	require.Contains(t, string(odd.Raw), "fiat_note")
-	require.Contains(t, string(odd.Raw), `"amount_base_units":1234567`)
+	require.Contains(t, string(odd.Raw), `"amount_base_units":"1234567"`)
 
 	require.Equal(t, TransactionTypeSubscribe, snap.Transactions[2].Type)
 	require.True(t, snap.Transactions[2].Success)

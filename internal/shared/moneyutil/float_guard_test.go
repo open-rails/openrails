@@ -100,8 +100,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/integrations/pyth/client.go:PriceUSD":                        "returns the token's USD RATE; no amount is computed here",
 		"internal/integrations/pyth/client.go:validateParsedPrice":             "sanity-bounds the parsed RATE",
 		"internal/integrations/pyth/client.go:parsePythNumber":                 "parses the feed's mantissa+exponent RATE encoding; the boundary where float starts, never an amount",
-		"internal/http/handlers/solana_supported_tokens.go:TokenInfo":          "TokenInfo.Price is the token's USD RATE for display",
-		"internal/http/handlers/solana_supported_tokens.go:TokenQuote":         "TokenPriceUSD/FXRate are RATES; the quoted units are a decimal string",
+		"internal/http/handlers/solana_supported_tokens.go:rateString":         "spells a provider RATE (token USD price, FX) as the exact decimal string of the float the feed quoted",
 		"internal/http/handlers/solana_supported_tokens.go:GetSupportedTokens": "builds a symbol -> RATE map for the token list response",
 
 		// --- reconcile: fractions, counts and durations --------------------

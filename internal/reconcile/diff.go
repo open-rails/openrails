@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -328,7 +329,7 @@ func remoteSubEvidence(r *RemoteSubscription) map[string]any {
 		ev["next_billing_at"] = r.NextBillingAt.Format(time.RFC3339)
 	}
 	if r.AmountCents != 0 {
-		ev["amount_cents"] = r.AmountCents
+		ev["amount_cents"] = strconv.FormatInt(r.AmountCents, 10)
 	}
 	return ev
 }
@@ -338,7 +339,7 @@ func remoteTxnEvidence(t *RemoteTransaction) map[string]any {
 		"transaction_id": t.TransactionID,
 		"type":           string(t.Type),
 		"success":        t.Success,
-		"amount_cents":   t.AmountCents,
+		"amount_cents":   strconv.FormatInt(t.AmountCents, 10),
 		// occurred_at drives the windowed auto-resolve of PS-4/5/6.
 		"occurred_at": t.OccurredAt.UTC().Format(time.RFC3339),
 	}
@@ -1217,7 +1218,7 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 		"payment_id":     openrails.PaymentID(original.ID).String(),
 		"customer_id":    original.CustomerID.String(),
 		"transaction_id": original.TransactionID,
-		"amount_cents":   original.AmountCents,
+		"amount_cents":   strconv.FormatInt(original.AmountCents, 10),
 		"status":         original.Status,
 	}
 	f.RecommendedAction = "enforce records the refund locally (negative payment row + original marked refunded). Revoking any entitlement the refunded payment granted is a human decision — review in the admin queue if warranted"
