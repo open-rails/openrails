@@ -45,3 +45,8 @@ separate required evidence; this manifest does not imply live PSP behavior.
 
 No v1 tag is created by this tool. Before v1, regenerate after all planned
 reductions and enforce compatibility against the published tag.
+
+The current manifest qualifies the selected pre-v1 changes. Its success does
+not close the separately tracked scheduled-NMI-rebill exact-receipt gap
+(tracker #990, implementation paused with #809/#1012), or qualify live PSPs.
+A reviewed snapshot is a drift baseline, not a production-readiness verdict.
