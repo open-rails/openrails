@@ -88,7 +88,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		})
 		require.NoError(t, err)
 		_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-			ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: merchantID,
+			ID: priceID, ProductID: productID, Amount: 9_990_000, Currency: "USD", MerchantID: merchantID,
 			Archived: false, AccessDurationHours: &cycleHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -134,6 +135,34 @@ func TestCustomerPayNowAcrossDeployments(t *testing.T) {
 			require.Equal(t, "failed", attempts[1].Status)
 			require.Equal(t, sales+1, gateway.SaleCount())
 			require.Equal(t, 1, h.OwedPaymentTransfers(fixture.Customer))
+		})
+
+		t.Run("idempotency_key_bound_to_request", func(t *testing.T) {
+			gateway.SetMode(NMISaleApprove)
+			gateway.SetVisible(true)
+			sales := gateway.SaleCount()
+			fixture := h.SeedPastDueInvoice(d.runtime(), d.merchant, "USD", 3_000_000)
+			second := h.SeedAnotherInvoice(d.runtime(), fixture, 4_000_000)
+			key := "bound-" + uuid.NewString()[:8]
+			first, err := payNow(fixture, key, fixture.Method)
+			require.NoError(t, err)
+			require.Equal(t, "settled", first.Attempt.Status)
+
+			_, err = client.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{CustomerID: openrails.CustomerID(fixture.Customer), InvoiceID: second, PaymentMethodID: openrails.PaymentMethodID(fixture.Method), IdempotencyKey: key})
+			requireRefusal(t, err, openrails.ErrInvoiceRetryIdempotencyConflict, openrails.CodeInvoiceRetryIdempotencyConflict)
+			require.Equal(t, sales+1, gateway.SaleCount(), "the same key on another invoice never charges")
+			_, total, err := client.ListInvoicePaymentAttempts(ctx, second, 10, 0)
+			require.NoError(t, err)
+			require.Zero(t, total, "and records nothing on it")
+
+			replayed, err := payNow(fixture, key, fixture.Method)
+			require.NoError(t, err)
+			require.True(t, replayed.Replayed)
+			require.Equal(t, first.Attempt.ID, replayed.Attempt.ID)
+			paid, err := client.PayInvoiceNow(ctx, openrails.PayInvoiceNowRequest{CustomerID: openrails.CustomerID(fixture.Customer), InvoiceID: second, PaymentMethodID: openrails.PaymentMethodID(fixture.Method), IdempotencyKey: "second-" + uuid.NewString()[:8]})
+			require.NoError(t, err)
+			require.Equal(t, "settled", paid.Attempt.Status)
+			require.Equal(t, sales+2, gateway.SaleCount())
 		})
 
 		t.Run("provider_managed_rail_refused", func(t *testing.T) {
@@ -306,12 +335,19 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 		retryNow := func(f SubscriptionFixture, key string) (*openrails.SubscriptionRetryNowResult, error) {
 			return client.RetrySubscriptionNow(ctx, openrails.RetrySubscriptionNowRequest{CustomerID: openrails.CustomerID(f.Customer), SubscriptionID: openrails.SubscriptionID(f.Subscription), IdempotencyKey: key})
 		}
+		// seed registers the subscription's NMI plan ($12.00, the fixture
+		// price): a rebill names the subscription and NMI charges its plan.
+		seed := func(opts ...SubscriptionOption) SubscriptionFixture {
+			f := h.SeedPastDueSubscription(d.runtime(), d.merchant, opts...)
+			gateway.RegisterPlan(f.RailSubscriptionID, "12.00", "USD")
+			return f
+		}
 
 		t.Run("success_renews_and_clears_dunning", func(t *testing.T) {
 			gateway.SetMode(NMISaleApprove)
 			gateway.SetVisible(true)
 			sales := gateway.SaleCount()
-			fixture := h.SeedPastDueSubscription(d.runtime(), d.merchant)
+			fixture := seed()
 			before, err := client.GetSubscription(ctx, openrails.SubscriptionID(fixture.Subscription))
 			require.NoError(t, err)
 			require.Equal(t, "past_due", before.Status)
@@ -353,12 +389,108 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 			_, err = retryNow(fixture, "again-"+uuid.NewString()[:8])
 			requireRefusal(t, err, openrails.ErrSubscriptionNotRetryable, openrails.CodeSubscriptionNotRetryable)
 			require.Equal(t, 1, h.RebillOperations(fixture.Subscription))
+			expires := h.OperationExpiry(result.Operation.ID)
+			require.NotNil(t, expires, "retry-now bounds its operation by the dunning window (#839)")
+			require.WithinDuration(t, fixture.PeriodEnd.Add(14*24*time.Hour), *expires, time.Minute, "monthly window: last retry offset + one day")
+		})
+
+		t.Run("contradicting_receipt_stays_unknown", func(t *testing.T) {
+			gateway.SetMode(NMISaleUncertain)
+			gateway.SetVisible(false)
+			sales := gateway.SaleCount()
+			fixture := seed()
+			result, err := retryNow(fixture, "contradicted-"+uuid.NewString()[:8])
+			require.NoError(t, err)
+			require.Equal(t, "unknown_needs_verify", result.Operation.Status)
+			order := "rebill-" + fixture.Subscription.String() + "-" + strconv.FormatInt(fixture.PeriodEnd.Unix(), 10)
+			require.True(t, gateway.TamperSale(order, func(s *NMISale) { s.Vault, s.Amount = "someone-elses-vault", "0.01" }))
+			sale, ok := gateway.SaleForOrder(order)
+			require.True(t, ok)
+			gateway.SetVisible(true)
+
+			h.MakeOperationDue(result.Operation.ID)
+			h.FireProviderIntentVerify(h.Pool())
+			require.Eventually(t, func() bool {
+				return strings.Contains(h.OperationEvidence(result.Operation.ID), "provider_contradiction")
+			}, 90*time.Second, 500*time.Millisecond, "the deployment's verifier retains the contradiction")
+			require.Equal(t, "unknown_needs_verify", h.LatestRebillOperation(fixture.Subscription).Status, "a contradicting sale never settles")
+			require.Equal(t, "past_due", h.SubscriptionState(fixture.Subscription).Status, "no renewal")
+			require.Empty(t, h.SubscriptionPayments(fixture.Subscription), "no payment recorded")
+
+			out, err := h.ResolveOperation(gateway.URL, d.merchant, result.Operation.ID, sale.TransactionID, false)
+			require.Error(t, err, "the contradicting sale is not this rebill's receipt: %s", out)
+			out, err = h.ResolveOperation(gateway.URL, d.merchant, result.Operation.ID, "", true)
+			require.Error(t, err, "non-execution cannot be attested against provider evidence: %s", out)
+			require.Equal(t, "unknown_needs_verify", h.LatestRebillOperation(fixture.Subscription).Status)
+			require.Empty(t, h.SubscriptionPayments(fixture.Subscription))
+			require.Equal(t, sales+1, gateway.SaleCount(), "nothing is resent")
+			sub, err := client.GetSubscription(ctx, openrails.SubscriptionID(fixture.Subscription))
+			require.NoError(t, err)
+			require.Equal(t, "past_due", sub.Status)
+		})
+
+		t.Run("psp_mismatch_refused_without_provider_traffic", func(t *testing.T) {
+			gateway.SetMode(NMISaleApprove)
+			gateway.SetVisible(true)
+			sales := gateway.SaleCount()
+			fixture := seed()
+			h.ReattributeToAnotherPSP(fixture)
+			_, err := retryNow(fixture, "psp-"+uuid.NewString()[:8])
+			requireRefusal(t, err, openrails.ErrPaymentMethodPSPMismatch, openrails.CodePaymentMethodPSPMismatch)
+			require.Equal(t, sales, gateway.SaleCount(), "no provider traffic")
+			require.Zero(t, h.RebillOperations(fixture.Subscription), "no operation")
+			state := h.SubscriptionState(fixture.Subscription)
+			require.Equal(t, "past_due", state.Status)
+			require.EqualValues(t, 1, *state.RetryAttempts, "nothing counted")
+		})
+
+		t.Run("idempotency_key_bound_to_request", func(t *testing.T) {
+			gateway.SetMode(NMISaleDecline)
+			gateway.SetVisible(true)
+			sales := gateway.SaleCount()
+			fixture := seed()
+			other := seed(SubscriptionForCustomer(fixture.Customer))
+			key := "bound-" + uuid.NewString()[:8]
+			_, err := retryNow(fixture, key)
+			first := requireDeclined(t, err)
+			gateway.SetMode(NMISaleApprove)
+
+			_, err = retryNow(other, key)
+			requireRefusal(t, err, openrails.ErrSubscriptionRetryIdempotencyConflict, openrails.CodeSubscriptionRetryIdempotencyConflict)
+			method := openrails.PaymentMethodID(other.Method) // the payer's, not this subscription's
+			_, err = client.RetrySubscriptionNow(ctx, openrails.RetrySubscriptionNowRequest{CustomerID: openrails.CustomerID(fixture.Customer), SubscriptionID: openrails.SubscriptionID(fixture.Subscription), PaymentMethodID: &method, IdempotencyKey: key})
+			requireRefusal(t, err, openrails.ErrSubscriptionRetryIdempotencyConflict, openrails.CodeSubscriptionRetryIdempotencyConflict)
+			require.Equal(t, sales, gateway.SaleCount(), "a conflict never charges")
+			require.Zero(t, h.RebillOperations(other.Subscription))
+
+			_, err = retryNow(fixture, key)
+			replay := requireDeclined(t, err)
+			require.Equal(t, first.Metadata["operation_id"], replay.Metadata["operation_id"], "the same request still replays")
+			require.Equal(t, 1, h.RebillOperations(fixture.Subscription))
+		})
+
+		t.Run("dunning_window_and_skewed_lease", func(t *testing.T) {
+			gateway.SetMode(NMISaleApprove)
+			gateway.SetVisible(true)
+			sales := gateway.SaleCount()
+			stale := seed()
+			h.AgePastDunningWindow(stale)
+			_, err := retryNow(stale, "stale-"+uuid.NewString()[:8])
+			requireRefusal(t, err, openrails.ErrSubscriptionNotRetryable, openrails.CodeSubscriptionNotRetryable)
+			require.Zero(t, h.RebillOperations(stale.Subscription))
+
+			leased := seed()
+			h.SkewedWorkerLease(leased)
+			_, err = retryNow(leased, "leased-"+uuid.NewString()[:8])
+			requireRefusal(t, err, openrails.ErrSubscriptionRetryInProgress, openrails.CodeSubscriptionRetryInProgress)
+			require.Zero(t, h.RebillOperations(leased.Subscription), "a live worker lease is never taken over")
+			require.Equal(t, sales, gateway.SaleCount())
 		})
 
 		t.Run("decline_records_attempt_and_keeps_schedule", func(t *testing.T) {
 			gateway.SetMode(NMISaleDecline)
 			sales := gateway.SaleCount()
-			fixture := h.SeedPastDueSubscription(d.runtime(), d.merchant)
+			fixture := seed()
 			key := "decline-" + uuid.NewString()[:8]
 			_, err := retryNow(fixture, key)
 			status := requireDeclined(t, err)
@@ -402,7 +534,7 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 				"ccbill":              {SubscriptionOnRail(models.RailCCBill)},
 				"nmi_provider_billed": {SubscriptionProviderBilled()},
 			} {
-				fixture := h.SeedPastDueSubscription(d.runtime(), d.merchant, opts...)
+				fixture := seed(opts...)
 				_, err := retryNow(fixture, name+"-"+uuid.NewString()[:8])
 				requireRefusal(t, err, openrails.ErrPaymentRecoveryRailUnsupported, openrails.CodePaymentRecoveryRailUnsupported)
 				require.Zero(t, h.RebillOperations(fixture.Subscription), "%s: no operation", name)
@@ -419,8 +551,8 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 
 		t.Run("other_customer_refused", func(t *testing.T) {
 			sales := gateway.SaleCount()
-			fixture := h.SeedPastDueSubscription(d.runtime(), d.merchant)
-			other := h.SeedPastDueSubscription(d.runtime(), d.merchant)
+			fixture := seed()
+			other := seed()
 			_, err := client.RetrySubscriptionNow(ctx, openrails.RetrySubscriptionNowRequest{CustomerID: openrails.CustomerID(other.Customer), SubscriptionID: openrails.SubscriptionID(fixture.Subscription), IdempotencyKey: "cross-" + uuid.NewString()[:8]})
 			require.ErrorIs(t, err, openrails.ErrNotFound)
 			foreign := openrails.PaymentMethodID(other.Method)
@@ -440,7 +572,7 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 					gateway.SetMode(tc.mode)
 					gateway.SetVisible(true)
 					sales := gateway.SaleCount()
-					fixture := h.SeedPastDueSubscription(d.runtime(), d.merchant)
+					fixture := seed()
 					key := "same-" + uuid.NewString()[:8]
 					release := h.HoldRowLock("subscriptions", fixture.Subscription)
 					results := make([]*openrails.SubscriptionRetryNowResult, 2)
@@ -501,7 +633,7 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 			gateway.SetMode(NMISaleUncertain)
 			gateway.SetVisible(false)
 			sales := gateway.SaleCount()
-			fixture := h.SeedPastDueSubscription(d.runtime(), d.merchant)
+			fixture := seed()
 			key := "lost-" + uuid.NewString()[:8]
 			result, err := retryNow(fixture, key)
 			require.NoError(t, err)

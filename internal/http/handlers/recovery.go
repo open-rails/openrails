@@ -167,6 +167,8 @@ var recoveryRefusals = []struct {
 	{billingservice.ErrSubscriptionNotRetryable, http.StatusConflict, openrails.CodeSubscriptionNotRetryable},
 	{billingservice.ErrSubscriptionRetryInProgress, http.StatusConflict, openrails.CodeSubscriptionRetryInProgress},
 	{billingservice.ErrSubscriptionRetryOutcomeUnknown, http.StatusConflict, openrails.CodeSubscriptionRetryOutcomeUnknown},
+	{billingservice.ErrSubscriptionRetryIdempotencyConflict, http.StatusConflict, openrails.CodeSubscriptionRetryIdempotencyConflict},
+	{billingservice.ErrPaymentMethodPSPMismatch, http.StatusConflict, openrails.CodePaymentMethodPSPMismatch},
 	{money.ErrInvoiceNotRetryable, http.StatusConflict, openrails.CodeInvoiceNotRetryable},
 	{money.ErrInvoiceRetryInProgress, http.StatusConflict, openrails.CodeInvoiceRetryInProgress},
 	{money.ErrInvoiceRetryOutcomeUnknown, http.StatusConflict, openrails.CodeInvoiceRetryOutcomeUnknown},

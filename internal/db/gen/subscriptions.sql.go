@@ -46,46 +46,52 @@ func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttem
 	return result.RowsAffected(), nil
 }
 
-const claimSubscriptionRetryNow = `-- name: ClaimSubscriptionRetryNow :execrows
+const claimSubscriptionRetryNow = `-- name: ClaimSubscriptionRetryNow :one
 UPDATE openrails.subscriptions
-SET next_retry_at = $2::timestamptz,
-    last_retry_at = $3::timestamptz,
-    updated_at = $3::timestamptz
+SET last_retry_at = now(),
+    next_retry_at = now() + make_interval(secs => $2::int),
+    updated_at = now()
 WHERE id = $1
-  AND merchant_id = $4
-  AND customer_id = $5
+  AND merchant_id = $3
+  AND customer_id = $4
   AND status = 'past_due'
   AND deleted_at IS NULL
   AND (next_retry_at IS NULL
-       OR next_retry_at <= $3::timestamptz
-       OR next_retry_at > $2::timestamptz)
+       OR next_retry_at <= now()
+       OR (last_retry_at IS NOT NULL
+           AND next_retry_at - last_retry_at > make_interval(secs => $2::int)))
+RETURNING last_retry_at, next_retry_at
 `
 
 type ClaimSubscriptionRetryNowParams struct {
-	ID         uuid.UUID
-	LeaseUntil time.Time
-	ClaimedAt  time.Time
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
+	ID           uuid.UUID
+	LeaseSeconds int32
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+}
+
+type ClaimSubscriptionRetryNowRow struct {
+	LastRetryAt *time.Time
+	NextRetryAt *time.Time
 }
 
 // Customer retry-now (#809) takes the same lease the dunning worker takes
 // (ClaimDunningAttempt), but may take it ahead of the schedule: a still-due
-// row, a row with no schedule, or a row whose next retry lies beyond the
-// lease window. A row inside a live lease (next_retry_at within the window)
-// is the worker's, and is refused.
-func (q *Queries) ClaimSubscriptionRetryNow(ctx context.Context, arg ClaimSubscriptionRetryNowParams) (int64, error) {
-	result, err := q.db.Exec(ctx, claimSubscriptionRetryNow,
+// row, a row with no schedule, or a row whose next retry is a SCHEDULE. A
+// lease is told from a schedule by its own shape — a claim writes
+// next_retry_at exactly lease_seconds after last_retry_at, a decline schedules
+// days out — so a lease written by a node whose clock runs ahead is still a
+// lease. Times are the database's, never a node clock.
+func (q *Queries) ClaimSubscriptionRetryNow(ctx context.Context, arg ClaimSubscriptionRetryNowParams) (ClaimSubscriptionRetryNowRow, error) {
+	row := q.db.QueryRow(ctx, claimSubscriptionRetryNow,
 		arg.ID,
-		arg.LeaseUntil,
-		arg.ClaimedAt,
+		arg.LeaseSeconds,
 		arg.MerchantID,
 		arg.CustomerID,
 	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
+	var i ClaimSubscriptionRetryNowRow
+	err := row.Scan(&i.LastRetryAt, &i.NextRetryAt)
+	return i, err
 }
 
 const clearStripePaymentMethodSubscriptions = `-- name: ClearStripePaymentMethodSubscriptions :execrows

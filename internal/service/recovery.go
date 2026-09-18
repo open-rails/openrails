@@ -28,6 +28,12 @@ var (
 	ErrSubscriptionRetryInProgress     = dunning.ErrSubscriptionRetryInProgress
 	ErrSubscriptionRetryOutcomeUnknown = dunning.ErrSubscriptionRetryOutcomeUnknown
 	ErrSubscriptionNotFound            = subscriptions.ErrSubscriptionNotFound
+	// ErrSubscriptionRetryIdempotencyConflict: the key already names another
+	// retry-now request.
+	ErrSubscriptionRetryIdempotencyConflict = dunning.ErrSubscriptionRetryIdempotencyConflict
+	// ErrPaymentMethodPSPMismatch: the subscription's method was vaulted by
+	// another provider account (#657).
+	ErrPaymentMethodPSPMismatch = dunning.ErrPaymentMethodPSPMismatch
 )
 
 // InvoiceDeclined is a pay-now attempt the provider refused: the attempt is

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -22,16 +23,18 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 var (
-	ErrSubscriptionNotRetryable        = errors.New("subscription is not retryable now")
-	ErrSubscriptionRetryInProgress     = errors.New("a rebill for this period is executing")
-	ErrSubscriptionRetryOutcomeUnknown = errors.New("a submitted rebill has no provider answer yet; nothing is resent until it resolves")
-	ErrPaymentRecoveryRailUnsupported  = money.ErrPaymentRecoveryRailUnsupported
-	ErrPaymentMethodInvalid            = money.ErrCollectionPaymentMethodInvalid
+	ErrSubscriptionNotRetryable             = errors.New("subscription is not retryable now")
+	ErrSubscriptionRetryInProgress          = errors.New("a rebill for this period is executing")
+	ErrSubscriptionRetryOutcomeUnknown      = errors.New("a submitted rebill has no provider answer yet; nothing is resent until it resolves")
+	ErrSubscriptionRetryIdempotencyConflict = errors.New("the idempotency key already names a different retry-now request")
+	ErrDunningWindowExpired                 = fmt.Errorf("%w: the missed renewal is older than the dunning window", ErrSubscriptionNotRetryable)
+	ErrPaymentRecoveryRailUnsupported       = money.ErrPaymentRecoveryRailUnsupported
+	ErrPaymentMethodInvalid                 = money.ErrCollectionPaymentMethodInvalid
+	ErrPaymentMethodPSPMismatch             = subscriptions.ErrPaymentMethodProviderAccountMismatch
 )
 
 // RetryNow is the customer's own retry-now (#809).
@@ -61,24 +64,25 @@ type RetryNowResult struct {
 	TransactionID string
 }
 
-// RequestKey binds one client idempotency key to one subscription.
-func RequestKey(subscriptionID uuid.UUID, clientKey string) string {
-	digest := sha256.Sum256([]byte(subscriptionID.String() + "\x00" + clientKey))
+// RequestKey binds one client idempotency key to one payer's retry-now
+// requests. It is not bound to the subscription: the same key on another
+// subscription, or with another payment method, is a conflict.
+func RequestKey(payer identity.CustomerID, clientKey string) string {
+	digest := sha256.Sum256([]byte("retry-now\x00" + payer.UUID().String() + "\x00" + clientKey))
 	return hex.EncodeToString(digest[:16])
 }
-
-func (r *RetryNow) now() time.Time { return timeutil.FirstClock(r.Clock).Now().UTC() }
 
 // Run rebills the payer's past-due subscription now through its current
 // saved method. The operation is the SAME manual_rebill operation the
 // dunning worker derives for this period and attempt ordinal, so the two can
 // never submit twice for one attempt: whoever enqueues first owns the charge
-// and the other observes its durable state. The client key is bound to the
-// operation through the frozen payload and looked up under the subscription
-// row lock, so two equal requests resolve to one operation and a replay
-// answers with the same attempt after the schedule moved on. The lease is
-// the worker's own (ClaimSubscriptionRetryNow); a decline runs the one
-// decline doctrine.
+// and the other observes its durable state. The charge is frozen at enqueue
+// (FreezeRebill) and confirmed only by an exact provider receipt. The client
+// key is serialized by an advisory lock and bound to its first request (the
+// subscription and the named method) through the frozen payload, so the same
+// request replays its attempt and a different one is a conflict. The lease is
+// the worker's own (ClaimSubscriptionRetryNow, on the database clock); a
+// decline runs the one decline doctrine.
 func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowResult, error) {
 	if r == nil || r.DB == nil || r.Runner == nil || r.Lifecycle == nil {
 		return nil, fmt.Errorf("retry-now not initialized")
@@ -103,7 +107,7 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 		return nil, subscriptions.ErrSubscriptionNotFound
 	}
 	ctx = db.WithPSPID(ctx, sub.PspID)
-	requestKey := RequestKey(sub.ID, request.IdempotencyKey)
+	requestKey := RequestKey(request.Payer, request.IdempotencyKey)
 
 	// A terminal operation whose decline was never applied (a crash between
 	// the two) is applied first; that advances the ordinal. It runs outside
@@ -119,28 +123,64 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 	)
 	err = r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		if _, err := q.GetSubscriptionByIDForUpdate(ctx, sub.ID); err != nil {
+		txDB := r.DB.NewWithPgxTx(tx)
+		if err := q.LockRecoveryRequestKey(ctx, mid.String()+":retry-now:"+requestKey); err != nil {
+			return fmt.Errorf("lock request key: %w", err)
+		}
+		locked, err := q.GetSubscriptionByIDForUpdate(ctx, sub.ID)
+		if err != nil {
 			return fmt.Errorf("lock subscription: %w", err)
 		}
-		prior, err := q.GetRailIntentByRequestKey(ctx, gen.GetRailIntentByRequestKeyParams{MerchantID: mid.UUID(), IntentType: intents.TypeManualRebill, SubscriptionID: sub.ID, RequestKey: requestKey})
+		prior, err := q.GetManualRebillByRequestKey(ctx, gen.GetManualRebillByRequestKeyParams{MerchantID: mid.UUID(), RequestKey: requestKey})
 		switch {
 		case err == nil:
+			var frozen intents.ManualRebillPayload
+			if len(prior.Payload) == 0 || json.Unmarshal(prior.Payload, &frozen) != nil {
+				return fmt.Errorf("%w: its operation %s holds no request", ErrSubscriptionRetryIdempotencyConflict, prior.ID)
+			}
+			if frozen.SubscriptionID != sub.ID || !sameMethod(frozen.RequestPaymentMethodID, request.PaymentMethodID) {
+				return ErrSubscriptionRetryIdempotencyConflict
+			}
 			row, replayed = prior, true
 			return nil
 		case !errors.Is(err, pgx.ErrNoRows):
 			return fmt.Errorf("load rebill request: %w", err)
 		}
-		fresh, err := subscriptions.NewSubscriptionRepo(r.DB.NewWithPgxTx(tx)).GetByID(ctx, sub.ID)
+		// #657 same-PSP invariant, under the instrument's shared row lock (the
+		// #297 custody remap takes it exclusively).
+		if locked.PaymentMethodID != nil {
+			if _, err := q.LockPaymentMethodForProviderAccountCheck(ctx, gen.LockPaymentMethodForProviderAccountCheckParams{MerchantID: mid.UUID(), ID: *locked.PaymentMethodID}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("lock payment method: %w", err)
+			}
+		}
+		fresh, err := subscriptions.NewSubscriptionRepo(txDB).GetByID(ctx, sub.ID)
 		if err != nil {
 			return err
 		}
 		sub = fresh
-		if err := r.eligible(sub, request.PaymentMethodID); err != nil {
+		if err := eligible(sub, request.PaymentMethodID); err != nil {
 			return err
 		}
-		periodEnd := sub.CurrentPeriodEndsAt.UTC()
-		orderReference := OrderReference(sub)
-		key := intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, string(sub.Rail), orderReference, AttemptOrdinal(sub))
+		// #839: never charge a missed renewal older than the dunning window,
+		// read on the database clock.
+		now, err := q.DatabaseNow(ctx)
+		if err != nil {
+			return fmt.Errorf("read database clock: %w", err)
+		}
+		window, err := Window(ctx, txDB, sub)
+		if err != nil {
+			return err
+		}
+		windowEnd := sub.CurrentPeriodEndsAt.UTC().Add(window)
+		if !now.Before(windowEnd) {
+			return ErrDunningWindowExpired
+		}
+		payload, err := FreezeRebill(ctx, txDB, sub)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrSubscriptionNotRetryable, err)
+		}
+		payload.RequestKey, payload.RequestPaymentMethodID = requestKey, request.PaymentMethodID
+		key := intents.ManualRebillIdempotencyKey(sub.ID, payload.PeriodEnd, string(sub.Rail), payload.OrderReference, payload.Attempt)
 		existing, err := q.GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("load rebill operation: %w", err)
@@ -152,34 +192,35 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 			case intents.StatusInFlight, intents.StatusFailedRetryable, intents.StatusSucceeded, intents.StatusFailedTerminal:
 				return ErrSubscriptionRetryInProgress
 			case intents.StatusPending:
-				if existing.Attempts > 0 {
+				// A never-attempted operation (the worker's, materialized under
+				// a limited mode) is adopted; another customer request's is not.
+				var other intents.ManualRebillPayload
+				if existing.Attempts > 0 || (json.Unmarshal(existing.Payload, &other) == nil && other.RequestKey != "") {
 					return ErrSubscriptionRetryInProgress
 				}
 			}
 		}
-		now := r.now()
-		leaseUntil := now.Add(AttemptLease)
-		n, err := q.ClaimSubscriptionRetryNow(ctx, gen.ClaimSubscriptionRetryNowParams{ID: sub.ID, MerchantID: mid.UUID(), CustomerID: sub.CustomerID, ClaimedAt: now, LeaseUntil: leaseUntil})
+		lease, err := q.ClaimSubscriptionRetryNow(ctx, gen.ClaimSubscriptionRetryNowParams{
+			ID: sub.ID, MerchantID: mid.UUID(), CustomerID: sub.CustomerID, LeaseSeconds: int32(AttemptLease / time.Second),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("%w: the dunning schedule holds this subscription", ErrSubscriptionRetryInProgress)
+		}
 		if err != nil {
 			return fmt.Errorf("claim subscription for retry-now: %w", err)
 		}
-		if n == 0 {
-			return fmt.Errorf("%w: the dunning schedule holds this subscription", ErrSubscriptionRetryInProgress)
-		}
-		sub.LastRetryAt, sub.NextRetryAt = &now, &leaseUntil
+		sub.LastRetryAt, sub.NextRetryAt = lease.LastRetryAt, lease.NextRetryAt
 		claimed = sub
-		row, err = intents.NewStore(r.DB.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
+		row, err = intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{
 			MerchantID:     mid.UUID(),
 			Provider:       string(sub.Rail),
 			IntentType:     intents.TypeManualRebill,
 			SubscriptionID: &sub.ID,
 			PspID:          sub.PspID,
-			Payload: intents.ManualRebillPayload{
-				SubscriptionID: sub.ID, PeriodEnd: periodEnd, Rail: string(sub.Rail), OrderReference: orderReference,
-				Attempt: AttemptOrdinal(sub), RequestKey: requestKey,
-			},
+			Payload:        payload,
 			IdempotencyKey: key,
 			NextAttemptAt:  now,
+			ExpiresAt:      &windowEnd,
 			Origin:         intents.OriginUser,
 			OriginReason:   "customer subscription retry-now",
 			Actor:          sub.CustomerID.String(),
@@ -213,9 +254,15 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 	}
 	switch executed.Status {
 	case intents.StatusSuperseded, intents.StatusExpired:
-		// Relevance moved on under us (renewed, cancelled, period advanced).
+		// Relevance moved on under us (renewed, cancelled, period advanced,
+		// or the instrument drifted — its re-check runs under the row lock).
 		if releaseErr := ReleaseAttempt(ctx, r.DB, mid.UUID(), claimed); releaseErr != nil {
 			log.WithContext(ctx).WithError(releaseErr).WithField("subscription_id", sub.ID).Warn("retry-now: release after superseded rebill failed")
+		}
+		if current, err := repo.GetByID(ctx, sub.ID); err == nil {
+			if err := eligible(current, request.PaymentMethodID); err != nil {
+				return nil, err
+			}
 		}
 		return nil, fmt.Errorf("%w: %s", ErrSubscriptionNotRetryable, strings.TrimSpace(normalizeReason(executed.LastFailureReason)))
 	case intents.StatusFailedTerminal:
@@ -229,10 +276,18 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 	return r.result(ctx, repo, sub.ID, sub.Rail, executed, false)
 }
 
+func sameMethod(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
 // eligible is the rail gate and the state the customer surface accepts: a
 // past-due subscription on an OpenRails-driven saved-method rail whose
-// current method can be charged. It runs before any provider traffic.
-func (r *RetryNow) eligible(sub *models.Subscription, paymentMethodID *uuid.UUID) error {
+// current method can be charged and was vaulted by the subscription's own
+// provider account (#657). It runs before any provider traffic.
+func eligible(sub *models.Subscription, paymentMethodID *uuid.UUID) error {
 	descriptor, ok := rails.Lookup(sub.Rail)
 	if !ok || !money.RecoveryRailSupported(descriptor) || rails.AutoBilled(sub.Rail, sub.PaymentMethod) {
 		return fmt.Errorf("%w: rail %q", ErrPaymentRecoveryRailUnsupported, sub.Rail)
@@ -246,6 +301,9 @@ func (r *RetryNow) eligible(sub *models.Subscription, paymentMethodID *uuid.UUID
 	}
 	if paymentMethodID != nil && *paymentMethodID != pm.ID {
 		return fmt.Errorf("%w: retry-now charges the subscription's current payment method", ErrPaymentMethodInvalid)
+	}
+	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(pm, sub) {
+		return fmt.Errorf("%w: subscription PSP %s, payment method PSP %s; card re-entry on the subscription's provider account is required", ErrPaymentMethodPSPMismatch, sub.PspID, pm.PspID)
 	}
 	return nil
 }

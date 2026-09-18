@@ -307,3 +307,57 @@ func TestInvoicePayNow_RefusesForeignMethodAndInvoice(t *testing.T) {
 	require.Equal(t, "open", other.invoiceRow(t).Status)
 	require.Nil(t, other.invoiceRow(t).CollectionIntentID)
 }
+
+// TestInvoicePayNow_SameKeyOnTwoInvoicesIsOneOperation (#809 R4 P2): a pay-now
+// key is bound to its first request, not to an invoice. Two concurrent
+// requests carrying one key for two of the payer's invoices serialize on the
+// key: one operation and one provider submission, and the other request is
+// refused as a conflict — never a second charge, never a replay of the wrong
+// invoice's result.
+func TestInvoicePayNow_SameKeyOnTwoInvoicesIsOneOperation(t *testing.T) {
+	e := newCollectionEnv(t, string(models.RailNMI))
+	first := e.invoiceRow(t)
+	_, err := e.svc.AccrueOwed(e.ctx, e.payer, e.currency, "usage", "collection-"+uuid.NewString(), 3_000_000)
+	require.NoError(t, err)
+	second, err := e.svc.FinalizeInvoice(e.ctx, e.payer, e.currency, first.PeriodTo, time.Now())
+	require.NoError(t, err)
+
+	charger := &fakeCharger{}
+	runner := collectionRunner(e.db, charger, charger)
+	lock, err := e.pool.Begin(e.ctx)
+	require.NoError(t, err)
+	_, err = lock.Exec(e.ctx, `SELECT id FROM openrails.invoices WHERE id = ANY($1) FOR UPDATE`, []uuid.UUID{e.invoice, second.ID})
+	require.NoError(t, err)
+
+	invoices := []uuid.UUID{e.invoice, second.ID}
+	results := make([]*money.InvoiceCollectionRetryResult, 2)
+	errs := make([]error, 2)
+	var wg sync.WaitGroup
+	for i := range invoices {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = e.svc.PayInvoiceNow(e.ctx, runner, e.payer, money.InvoiceCollectionRetryRequest{InvoiceID: invoices[i], IdempotencyKey: "one-key", PaymentMethodID: e.method})
+		}(i)
+	}
+	require.Eventually(t, func() bool { return lockWaiters(e.pool, e.ctx) >= 2 }, 15*time.Second, 20*time.Millisecond, "one request waits on its invoice, the other on the key")
+	require.NoError(t, lock.Rollback(e.ctx))
+	wg.Wait()
+
+	settled, conflicts := 0, 0
+	for i := range errs {
+		switch {
+		case errs[i] == nil:
+			require.Equal(t, "settled", results[i].Attempt.Status)
+			settled++
+		default:
+			require.ErrorIs(t, errs[i], money.ErrInvoiceRetryIdempotencyConflict)
+			conflicts++
+		}
+	}
+	require.Equal(t, 1, settled)
+	require.Equal(t, 1, conflicts)
+	require.Equal(t, 1, charger.chargeCount(), "one provider submission")
+	ops := len(collectionIntents(t, e.pool, e.ctx, e.invoice)) + len(collectionIntents(t, e.pool, e.ctx, second.ID))
+	require.Equal(t, 1, ops, "one operation for one key")
+}

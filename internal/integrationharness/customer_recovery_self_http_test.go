@@ -253,6 +253,44 @@ func TestCustomerRecoverySelfRoutes(t *testing.T) {
 			require.EqualValues(t, 2, attempts.Total, "history is append-only")
 			require.Equal(t, "settled", attempts.Data[0].Status)
 			require.Equal(t, "failed", attempts.Data[1].Status)
+
+			// R4: the recovery block names each state that refuses a retry.
+			blocked := func(f SubscriptionFixture) openrails.PaymentRecovery {
+				t.Helper()
+				status, body := s.call(http.MethodGet, "/v1/me/subscriptions/sub_"+f.Subscription.String(), nil, nil)
+				require.Equal(t, http.StatusOK, status, string(body))
+				var view openrails.Subscription
+				require.NoError(t, json.Unmarshal(body, &view))
+				require.NotNil(t, view.Recovery, string(body))
+				require.False(t, view.Recovery.Retryable, string(body))
+				return *view.Recovery
+			}
+			remapped := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
+			h.ReattributeToAnotherPSP(remapped)
+			require.Equal(t, openrails.RecoveryBlockedPSPMismatch, blocked(remapped).BlockedReason)
+			status, body = s.call(http.MethodPost, "/v1/me/subscriptions/sub_"+remapped.Subscription.String()+"/retry-now", key(), nil)
+			require.Equal(t, http.StatusConflict, status, string(body))
+			require.Contains(t, string(body), openrails.CodePaymentMethodPSPMismatch)
+			stale := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
+			h.AgePastDunningWindow(stale)
+			require.Equal(t, openrails.RecoveryBlockedWindowExpired, blocked(stale).BlockedReason)
+			leased := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
+			h.SkewedWorkerLease(leased)
+			leasedView := blocked(leased)
+			require.Equal(t, openrails.RecoveryBlockedInProgress, leasedView.BlockedReason)
+			require.Nil(t, leasedView.NextAttemptAt, "a lease is not a schedule")
+
+			// One key, one request: reusing it on another subscription conflicts.
+			reused := key()
+			status, body = s.call(http.MethodPost, "/v1/me/subscriptions/sub_"+stale.Subscription.String()+"/retry-now", reused, nil)
+			require.Equal(t, http.StatusConflict, status, string(body))
+			require.Contains(t, string(body), openrails.CodeSubscriptionNotRetryable, "a refused request binds nothing")
+			fresh := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
+			status, body = s.call(http.MethodPost, "/v1/me/subscriptions/sub_"+fresh.Subscription.String()+"/retry-now", reused, nil)
+			require.Equal(t, http.StatusOK, status, string(body))
+			status, body = s.call(http.MethodPost, "/v1/me/subscriptions/sub_"+leased.Subscription.String()+"/retry-now", reused, nil)
+			require.Equal(t, http.StatusConflict, status, string(body))
+			require.Contains(t, string(body), openrails.CodeSubscriptionRetryIdempotencyConflict)
 		})
 	}
 	require.Equal(t, shapes["embedded"], shapes["standalone"], "one response shape on both surfaces")

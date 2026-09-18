@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -76,13 +77,28 @@ func (v RecoveryView) Subscription(ctx context.Context, sub *models.Subscription
 			recovery.AttemptCount++
 		}
 		// A scheduled retry is the engine's own next attempt; a lease (the
-		// worker mid-charge) is not a schedule.
-		if sub.NextRetryAt != nil && sub.NextRetryAt.After(now.Add(AttemptLease)) {
+		// worker or a retry-now mid-charge) is not a schedule.
+		if sub.NextRetryAt != nil && !leased(sub) {
 			recovery.NextAttemptAt = sub.NextRetryAt
 		}
 	}
-	recovery.Retryable, recovery.BlockedReason = subscriptionRecoveryEligibility(sub, recovery, now, pastDue)
+	windowExpired := false
+	if pastDue {
+		window, err := Window(ctx, v.DB, sub)
+		if err != nil {
+			return nil, err
+		}
+		windowExpired = !now.Before(sub.CurrentPeriodEndsAt.UTC().Add(window))
+	}
+	recovery.Retryable, recovery.BlockedReason = subscriptionRecoveryEligibility(sub, recovery, now, pastDue, windowExpired)
 	return recovery, nil
+}
+
+// leased reports a live attempt lease: a claim writes next_retry_at exactly
+// AttemptLease after last_retry_at, a decline schedules days out. Telling them
+// apart by shape keeps a node clock out of the decision.
+func leased(sub *models.Subscription) bool {
+	return sub.NextRetryAt != nil && sub.LastRetryAt != nil && sub.NextRetryAt.Sub(*sub.LastRetryAt) <= AttemptLease
 }
 
 // liveOperation is the current period's unresolved rebill operation, if any.
@@ -105,7 +121,7 @@ func (v RecoveryView) liveOperation(ctx context.Context, q *gen.Queries, merchan
 	return nil, nil
 }
 
-func subscriptionRecoveryEligibility(sub *models.Subscription, recovery *openrails.PaymentRecovery, now time.Time, pastDue bool) (bool, string) {
+func subscriptionRecoveryEligibility(sub *models.Subscription, recovery *openrails.PaymentRecovery, now time.Time, pastDue, windowExpired bool) (bool, string) {
 	descriptor, ok := rails.Lookup(sub.Rail)
 	switch {
 	case !pastDue:
@@ -116,12 +132,15 @@ func subscriptionRecoveryEligibility(sub *models.Subscription, recovery *openrai
 		return false, openrails.RecoveryBlockedOutcomeUnknown
 	case recovery.Operation != nil:
 		return false, openrails.RecoveryBlockedInProgress
-	case sub.NextRetryAt != nil && sub.NextRetryAt.After(now) && !sub.NextRetryAt.After(now.Add(AttemptLease)):
-		// The dunning worker holds the lease.
+	case leased(sub) && sub.NextRetryAt.After(now):
 		return false, openrails.RecoveryBlockedInProgress
+	case windowExpired:
+		return false, openrails.RecoveryBlockedWindowExpired
 	case sub.PaymentMethod == nil || strings.TrimSpace(sub.PaymentMethod.RailCustomerRef) == "" ||
 		strings.TrimSpace(sub.PaymentMethod.RailMethodRef) == "" || strings.TrimSpace(sub.PaymentMethod.ParkReason) != "":
 		return false, openrails.RecoveryBlockedNoPaymentMethod
+	case !subscriptions.PaymentMethodMatchesSubscriptionProvider(sub.PaymentMethod, sub):
+		return false, openrails.RecoveryBlockedPSPMismatch
 	}
 	return true, ""
 }

@@ -153,32 +153,50 @@ subscription's current method) require an `Idempotency-Key` (1–255 bytes).
 Each request creates one new immutable attempt through the engine's own
 durable collection machinery: the invoice's `invoice_collection` operation, or
 the period's `manual_rebill` operation the dunning worker itself derives, so a
-customer retry and the schedule can never submit twice for one attempt. The
-same key replays the same attempt (`replayed: true`) without another charge.
+customer retry and the schedule can never submit twice for one attempt.
 History is never rewritten.
+
+The key is the payer's, bound to the first request it was accepted for (the
+invoice or subscription, the route and the `payment_method_id` as sent). The
+same request replays its attempt (`replayed: true`) without another charge;
+the same key with another invoice, subscription or method is `409
+…_idempotency_conflict` and charges nothing. A refused request binds nothing.
+
+The charge is frozen when the operation is created (instrument and its vault,
+amount, currency, provider account). An unresolved operation settles only on
+an exact provider receipt: the order reference's sale, approved, on that
+vault, for that amount and currency. A sale that contradicts any of them is
+retained as evidence and keeps the operation unknown; nothing is recorded,
+renewed or resent, and an operator cannot name it as the receipt
+(`openrails intents resolve` takes the same path).
 
 Only rails where OpenRails both drives dunning and charges saved methods are
 accepted (today: NMI with an OpenRails-driven rebill); Stripe, CCBill, Solana
 and provider-billed NMI subscriptions are refused `409
-payment_recovery_rail_unsupported` before any provider traffic.
+payment_recovery_rail_unsupported` before any provider traffic. Retry-now
+also requires the subscription's method to be vaulted by the subscription's
+own provider account (#657) and the missed renewal to be inside the dunning
+window (#839); the operation expires at the window's end.
 
 Answers:
 
 | Status | Meaning |
 |---|---|
 | `200` | Terminal. Invoice: `InvoicePayNowResult { invoice, attempt (status settled), operation, replayed }`, invoice `paid`. Subscription: `SubscriptionRetryNowResult { subscription (active, dunning schedule cleared), payment, operation, replayed }` |
-| `202` | Unresolved: the same result with `operation.status` `pending`, `in_flight` or `unknown_needs_verify` and no money moved yet. Poll `GET /v1/me/invoices/{id}` (+ `/payments`) or `GET /v1/me/subscriptions/{id}`: `recovery.operation` names the operation until it resolves; the verifier settles it from an exact provider receipt or an operator resolves it (`openrails intents resolve`). Nothing is resent |
+| `202` | Unresolved: the same result with `operation.status` `pending`, `in_flight`, `failed_retryable` or `unknown_needs_verify` and no money moved yet. Poll `GET /v1/me/invoices/{id}` (+ `/payments`) or `GET /v1/me/subscriptions/{id}`: `recovery.operation` names the operation until the verifier settles it from the exact receipt or an operator resolves it. Nothing is resent |
 | `402 card_declined` | The provider refused; the attempt is recorded. Metadata: `decline_reason` (normalized category), `failure_code` (verbatim), `attempt_id`/`invoice_id` or `subscription_id`/`subscription_status`, `operation_id`, `retryable`, `attempt_count`, `next_attempt_at` |
-| `409 invoice_retry_in_progress` / `invoice_retry_outcome_unknown` / `subscription_retry_in_progress` / `subscription_retry_outcome_unknown` | A live operation exists (this key did not start it); nothing is resent |
-| `409 invoice_not_retryable` / `subscription_not_retryable` | Nothing to collect (paid, voided, uncollectible, not past due) or the saved method cannot be charged |
-| `409 invoice_retry_idempotency_conflict` | The key already names a different method or invoice |
+| `409 invoice_retry_in_progress` / `invoice_retry_outcome_unknown` / `subscription_retry_in_progress` / `subscription_retry_outcome_unknown` | A live operation or attempt lease exists (this key did not start it); nothing is resent |
+| `409 invoice_not_retryable` / `subscription_not_retryable` | Nothing to collect (paid, voided, uncollectible, not past due, outside the dunning window) or the saved method cannot be charged |
+| `409 invoice_retry_idempotency_conflict` / `subscription_retry_idempotency_conflict` | The key already names a different request |
+| `409 payment_method_psp_mismatch` | Retry-now: the subscription's method was vaulted by another provider account; collect the card again on the subscription's account. Nothing was sent |
 | `400 collection_payment_method_invalid` | The method is not the payer's, is parked, or (retry-now) is not the subscription's current method |
 | `404` | The invoice or subscription is not the caller's |
 
 `recovery` (`PaymentRecovery`, on every `/v1/me` invoice and subscription):
 `retryable`, `blocked_reason` (`not_due`, `uncollectible`, `in_progress`,
-`outcome_unknown`, `rail_unsupported`, `no_compatible_payment_method`),
-`next_attempt_at` (the engine's own next scheduled attempt), `attempt_count`,
+`outcome_unknown`, `rail_unsupported`, `no_compatible_payment_method`,
+`payment_method_psp_mismatch`, `dunning_window_expired`), `next_attempt_at`
+(the engine's own next scheduled attempt), `attempt_count`,
 `failure_category`, `last_failure_code`, `last_failed_at`,
 `compatible_payment_method_ids`, `operation`. Hosts read these flags; they do
 not re-derive rail policy.

@@ -293,6 +293,9 @@ func (s *MoneyService) runInvoiceCollectionRequest(ctx context.Context, runner *
 		return nil, err
 	}
 	key := invoiceRetryOperationKey(request.InvoiceID, request.IdempotencyKey)
+	if opts.payNow {
+		key = invoicePayNowOperationKey(payer, request.IdempotencyKey)
+	}
 	pm := request.PaymentMethodID
 	opts.paymentMethodID = &pm
 	opts.operationKey = key
@@ -331,6 +334,14 @@ func (s *MoneyService) PayInvoiceNow(ctx context.Context, runner *intents.Runner
 	return s.runInvoiceCollectionRequest(ctx, runner, payer, request, invoiceCollectionEnqueue{
 		manual: true, payNow: true, origin: intents.OriginUser, originReason: "customer invoice pay-now",
 	})
+}
+
+// invoicePayNowOperationKey binds one customer pay-now key to one payer, not
+// to an invoice: the same key on another invoice (or with another method)
+// finds this operation under the key's lock and is refused as a conflict.
+func invoicePayNowOperationKey(payer identity.CustomerID, clientKey string) string {
+	digest := sha256.Sum256([]byte(payer.UUID().String() + "\x00" + clientKey))
+	return fmt.Sprintf("%s:paynow:%s", TypeInvoiceCollection, hex.EncodeToString(digest[:16]))
 }
 
 // invoiceRetryOperationKey binds one client retry key to one invoice.
@@ -404,6 +415,13 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 	now := s.now()
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		if opts.payNow {
+			// A pay-now key spans the payer's invoices: serialize on it so a
+			// concurrent request on another invoice sees this one's operation.
+			if err := q.LockRecoveryRequestKey(ctx, tid.String()+":"+opts.operationKey); err != nil {
+				return fmt.Errorf("lock request key: %w", err)
+			}
+		}
 		row, err := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: invoiceID})
 		if errors.Is(err, pgx.ErrNoRows) && !opts.manual {
 			return nil
