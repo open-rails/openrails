@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/migrate"
 	embcp "github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -165,10 +164,10 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 
 func archiveEmbeddedClient(t *testing.T, dsn, schema string, mid merchant.ID) *openrails.Client {
 	t.Helper()
-	rt, err := embed.New(t.Context(), embed.Options{Options: embedded.Options{
+	rt, err := embed.New(t.Context(), embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn, Schema: schema}},
-		River:  embedded.RiverManagedByOpenRails(),
-	}})
+		River:  embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	client, err := rt.Client(openrails.WithMerchantID(mid), openrails.WithCurrency("USD"), openrails.WithTimeout(0))

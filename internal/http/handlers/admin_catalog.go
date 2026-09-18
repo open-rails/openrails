@@ -11,8 +11,8 @@ import (
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	billingservice "github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // Catalog action handlers (issue #205/#510). Mounted under
