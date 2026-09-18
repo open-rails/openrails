@@ -11,10 +11,12 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/stretchr/testify/require"
 )
@@ -31,11 +33,28 @@ func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	local, err := runtime.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
 	require.NoError(t, err)
-	for name, client := range map[string]*openrails.Client{"embedded": local, "standalone": remote.Client()} {
-		t.Run(name, func(t *testing.T) {
+	// SaaS: a hosted merchant on the shared engine behind the real hosted
+	// control plane, integrating with an owner-minted API key.
+	hosted := h.StartHosted("USD")
+	tenant := hosted.ProvisionMerchant(hosted.RegisterUser("owner"), "metering-"+uuid.NewString()[:8])
+	deployments := []struct {
+		name     string
+		client   *openrails.Client
+		merchant merchant.ID
+		// runtime closes the invoice the same way the invoice worker does.
+		runtime *app.Runtime
+	}{
+		{"embedded", local, dbtest.TestMerchantID, remote.App().Runtime},
+		{"standalone", remote.Client(), dbtest.TestMerchantID, remote.App().Runtime},
+		{"saas", tenant.Client(), tenant.ID, hosted.AppRuntime()},
+	}
+	for _, d := range deployments {
+		client, mid := d.client, d.merchant
+		mctx := merchant.WithID(ctx, mid)
+		t.Run(d.name, func(t *testing.T) {
 			product, payer := uuid.New(), uuid.New()
 			key := "meter-client-" + uuid.NewString()
-			_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Usage product')`, product, dbtest.TestMerchantID.UUID(), key)
+			_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Usage product')`, product, mid.UUID(), key)
 			require.NoError(t, err)
 			spec := openrails.UsageMeterSpec{Key: key, EventType: key, Aggregation: "sum", ValueProperty: "units", Unit: "requests"}
 			require.NoError(t, client.EnsureUsageMeter(ctx, spec))
@@ -49,21 +68,21 @@ func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, card.DefaultRateCard)
 			require.EqualValues(t, 100, card.DefaultRateCard.Price.PerUnit.UnitAmount)
-			ms := remote.App().Runtime.MoneyService
+			ms := d.runtime.MoneyService
 			mode := money.BillingModeArrears
-			_, err = ms.UpsertAccountSettings(dbtest.WithTestMerchant(ctx), identity.CustomerID(payer), "USD", money.AccountSettingsInput{BillingMode: &mode})
+			_, err = ms.UpsertAccountSettings(mctx, identity.CustomerID(payer), "USD", money.AccountSettingsInput{BillingMode: &mode})
 			require.NoError(t, err)
 			event := openrails.UsageReport{CustomerID: openrails.CustomerID(payer), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
 			require.NoError(t, client.RecordUsage(ctx, event))
 			require.NoError(t, client.RecordUsage(ctx, event))
 			// Drive the same close used by the invoice worker, then read with the client.
 			from, to := time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
-			invoice, err := ms.FinalizeInvoice(dbtest.WithTestMerchant(ctx), identity.CustomerID(payer), "USD", from, to)
+			invoice, err := ms.FinalizeInvoice(mctx, identity.CustomerID(payer), "USD", from, to)
 			require.NoError(t, err)
 			read, err := client.GetMerchantInvoice(ctx, invoice.ID)
 			require.NoError(t, err)
 			require.EqualValues(t, 300, read.AmountDue)
-			replay, err := ms.FinalizeInvoice(dbtest.WithTestMerchant(ctx), identity.CustomerID(payer), "USD", from, to)
+			replay, err := ms.FinalizeInvoice(mctx, identity.CustomerID(payer), "USD", from, to)
 			require.NoError(t, err)
 			require.Equal(t, invoice.ID, replay.ID)
 			meters, total, err := client.ListUsageMeters(ctx, openrails.PageOptions{Limit: 100})

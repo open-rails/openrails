@@ -39,6 +39,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,6 +100,12 @@ type Harness struct {
 	// that booted them (the tests/ compat suite).
 	persistent bool
 	cleanups   []func()
+
+	// binaryPath is the cmd/openrails build shared by this harness's child
+	// processes (StartStandaloneProcess, ResolveOperation).
+	binaryOnce sync.Once
+	binaryPath string
+	binaryErr  error
 }
 
 // cleanup registers fn for teardown: on t for per-test harnesses, on Close()

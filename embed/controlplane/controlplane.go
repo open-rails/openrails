@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	authcore "github.com/open-rails/authkit/embedded"
 
@@ -27,15 +28,20 @@ import (
 type Options = operator.AttachOptions
 
 type (
-	MerchantCreationConfig              = operator.MerchantCreationConfig
-	MerchantCreationPolicy              = operator.MerchantCreationPolicy
-	BootstrapOptions                    = operator.BootstrapOptions
-	BootstrapResult                     = operator.BootstrapResult
-	ProvisionMerchantRequest            = operator.ProvisionMerchantRequest
-	ProvisionMerchantResult             = operator.ProvisionMerchantResult
-	MerchantRef                         = operator.MerchantRef
-	PaymentProviderConfig               = operator.PaymentProviderConfig
-	UpsertPaymentProviderConfigRequest  = operator.UpsertPaymentProviderConfigRequest
+	MerchantCreationConfig               = operator.MerchantCreationConfig
+	MerchantCreationPolicy               = operator.MerchantCreationPolicy
+	BootstrapOptions                     = operator.BootstrapOptions
+	BootstrapResult                      = operator.BootstrapResult
+	ProvisionMerchantRequest             = operator.ProvisionMerchantRequest
+	ProvisionMerchantResult              = operator.ProvisionMerchantResult
+	MerchantRef                          = operator.MerchantRef
+	PaymentProviderConfig                = operator.PaymentProviderConfig
+	UpsertPaymentProviderConfigRequest   = operator.UpsertPaymentProviderConfigRequest
+	ArchivePaymentProviderAccountRequest = operator.ArchivePaymentProviderAccountRequest
+	// LastActiveProviderAccountError is ArchivePaymentProviderAccount's refusal
+	// to archive the rail's only active account without AllowLast; match it
+	// with errors.As.
+	LastActiveProviderAccountError      = merchants.LastActiveProviderAccountError
 	FleetSnapshot                       = operator.FleetSnapshot
 	FleetSeries                         = operator.FleetSeries
 	FleetMerchantFunnel                 = operator.FleetMerchantFunnel
@@ -50,6 +56,11 @@ type (
 	MerchantRetirementCandidatePage     = operator.MerchantRetirementCandidatePage
 	MerchantRetirementRefusal           = operator.MerchantRetirementRefusal
 	RetireUnusedMerchantResult          = operator.RetireUnusedMerchantResult
+	ProviderAccountCutoverDisposition   = operator.ProviderAccountCutoverDisposition
+	ProviderAccountCutoverCode          = operator.ProviderAccountCutoverCode
+	ProviderAccountCutoverPlan          = operator.ProviderAccountCutoverPlan
+	ProviderAccountCutoverQuery         = operator.ProviderAccountCutoverQuery
+	ProviderAccountCutoverReport        = operator.ProviderAccountCutoverReport
 )
 
 const (
@@ -60,6 +71,25 @@ const (
 	MerchantRetirementRefusedGroupMismatch = operator.MerchantRetirementRefusedGroupMismatch
 	MerchantRetirementRefusedReserved      = operator.MerchantRetirementRefusedReserved
 	MerchantRetirementRefusedActive        = operator.MerchantRetirementRefusedActive
+
+	ProviderAccountCutoverSameAccount     = operator.ProviderAccountCutoverSameAccount
+	ProviderAccountCutoverRequiresReentry = operator.ProviderAccountCutoverRequiresReentry
+	ProviderAccountCutoverBlocked         = operator.ProviderAccountCutoverBlocked
+
+	ProviderAccountCutoverReady                     = operator.ProviderAccountCutoverReady
+	ProviderAccountCutoverIdentityMissing           = operator.ProviderAccountCutoverIdentityMissing
+	ProviderAccountCutoverRailUnsupported           = operator.ProviderAccountCutoverRailUnsupported
+	ProviderAccountCutoverTargetRailMismatch        = operator.ProviderAccountCutoverTargetRailMismatch
+	ProviderAccountCutoverSubscriptionNotRebilling  = operator.ProviderAccountCutoverSubscriptionNotRebilling
+	ProviderAccountCutoverSubscriptionNotAtProvider = operator.ProviderAccountCutoverSubscriptionNotAtProvider
+	ProviderAccountCutoverTargetArchived            = operator.ProviderAccountCutoverTargetArchived
+	ProviderAccountCutoverSourceNotArchived         = operator.ProviderAccountCutoverSourceNotArchived
+	ProviderAccountCutoverReplacementCardRequired   = operator.ProviderAccountCutoverReplacementCardRequired
+	ProviderAccountCutoverReplacementCardNotFound   = operator.ProviderAccountCutoverReplacementCardNotFound
+	ProviderAccountCutoverReplacementCardNotOwned   = operator.ProviderAccountCutoverReplacementCardNotOwned
+	ProviderAccountCutoverReplacementCardUnusable   = operator.ProviderAccountCutoverReplacementCardUnusable
+	ProviderAccountCutoverReplacementCardPSP        = operator.ProviderAccountCutoverReplacementCardPSP
+	ProviderAccountCutoverCrossAccountNotQualified  = operator.ProviderAccountCutoverCrossAccountNotQualified
 )
 
 var (
@@ -72,9 +102,15 @@ var (
 	ErrEmailUnverified              = operator.ErrEmailUnverified
 	ErrVaultedPaymentMethodRequired = operator.ErrVaultedPaymentMethodRequired
 	ErrMerchantGroupReleasePending  = operator.ErrMerchantGroupReleasePending
+	// ErrProviderAccountCutoverNotQualified is the reason a cross-account plan
+	// reports; it is never executed automatically.
+	ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified
 	// ErrPaymentProviderNotFound is GetPaymentProviderConfig's answer when the
 	// merchant has no active account on the rail; match it with errors.Is.
 	ErrPaymentProviderNotFound = merchants.ErrPaymentProviderNotFound
+	// ErrPaymentProviderAccountNotFound is ArchivePaymentProviderAccount's
+	// answer for a PSP id the merchant does not own on that rail.
+	ErrPaymentProviderAccountNotFound = merchants.ErrPaymentProviderAccountNotFound
 )
 
 // MerchantGroup and CustomerGroup name the AuthKit persona groups.
@@ -225,9 +261,28 @@ func (c *ControlPlane) GetPaymentProviderConfig(ctx context.Context, id merchant
 }
 
 // UpsertPaymentProviderConfig arms a provider account through the merchant
-// secret backend.
+// secret backend. The supplied credentials are live-probed before anything is
+// written, so it cannot archive a dark account: use
+// ArchivePaymentProviderAccount for that.
 func (c *ControlPlane) UpsertPaymentProviderConfig(ctx context.Context, id merchant.ID, rail string, req UpsertPaymentProviderConfigRequest) (PaymentProviderConfig, error) {
 	return operator.UpsertPaymentProviderConfig(ctx, c.app, id, rail, req)
+}
+
+// ListPaymentProviderConfigs returns the merchant's redacted provider accounts
+// on rail ("" = every rail) with status "active", "archived" or "" (all) —
+// the immutable `ID` each carries is what ArchivePaymentProviderAccount takes.
+func (c *ControlPlane) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID, rail, status string) ([]PaymentProviderConfig, error) {
+	return operator.ListPaymentProviderConfigs(ctx, c.app, id, rail, status)
+}
+
+// ArchivePaymentProviderAccount archives exactly the account pspID on rail
+// (#655 lifecycle, #656 emergency step 3). No provider call is made and the
+// credentials stay, so a terminated account archives and its existing
+// obligations keep draining. Archiving an archived account is a no-op. The
+// rail's only active account is refused with LastActiveProviderAccountError
+// unless req.AllowLast is set.
+func (c *ControlPlane) ArchivePaymentProviderAccount(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
+	return operator.ArchivePaymentProviderAccount(ctx, c.app, id, rail, pspID, req)
 }
 
 // FleetAnalytics returns cross-merchant operator aggregates, excluding one merchant.
@@ -253,4 +308,15 @@ func (c *ControlPlane) RetireUnusedMerchant(ctx context.Context, id merchant.ID,
 
 func (c *ControlPlane) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error) {
 	return operator.CompletePendingMerchantRetirements(ctx, c.app, limit)
+}
+
+// PlanProviderAccountCutover reports how one subscriber could move to another
+// provider account (#657). Executable only for an NMI subscription that still
+// rebills, onto a ready replacement card vaulted by its own non-archived
+// account (the durable payment-source update); every other case is a coded,
+// non-executable plan, and a cross-account move is report-only card re-entry.
+// Read-only: it resolves the subscription, the optional replacement method and
+// both PSP rows and writes nothing.
+func (c *ControlPlane) PlanProviderAccountCutover(ctx context.Context, id merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error) {
+	return operator.PlanProviderAccountCutover(ctx, c.app, id, q)
 }
