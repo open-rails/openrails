@@ -48,8 +48,9 @@ import (
 
 // Runtime aggregates infrastructure clients and application services.
 type Runtime struct {
-	DB          *db.DB
-	RedisClient *redis.Client
+	releaseStripeTransport func()
+	DB                     *db.DB
+	RedisClient            *redis.Client
 	// redisOwned marks a self-dialed client; injected clients are borrowed and
 	// must never be closed here (the host owns their lifecycle).
 	redisOwned bool
@@ -286,6 +287,9 @@ func (r *Runtime) FXRateHealth() (time.Time, bool) {
 func (r *Runtime) Close(ctx context.Context) error {
 	if r == nil {
 		return nil
+	}
+	if r.releaseStripeTransport != nil {
+		defer r.releaseStripeTransport()
 	}
 	var errs []error
 

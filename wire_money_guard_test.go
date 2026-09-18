@@ -93,6 +93,8 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/checkout/custodian_sale.go:CustodianSalePayload.AmountMicros amount_micros":                                                    notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_sale_intent.go:NMISalePayload.AmountMicros amount_micros":                                                         notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_subscription_intent.go:NMISubscriptionCreatePayload.AmountMicros amount_micros":                                   notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.RecurringAmount recurring_amount":                                notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.AmountDueNow amount_due_now":                                     notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_upgrade_intent.go:NMIUpgradePayload.ProrationAmount proration_amount":                                             notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_upgrade_intent.go:NMIUpgradePayload.RecurringAmount recurring_amount":                                             notHTTPIntentPayload,
 	"internal/modules/delinquency/service.go:Snapshot.OverdueAmount overdue_amount":                                                                  notHTTPInternalRow,
@@ -131,6 +133,8 @@ var pendingNumericMoney = map[string]string{
 	"internal/service/service_definition_catalog_admin.go:CatalogPage.Limit limit":                                                                   notMoneyPageSize,
 
 	"invoices.go:InvoiceDTO.Tax tax": notMoneyTaxFacts,
+
+	"internal/modules/subscriptions/stripe_tier_change.go:func parseStripeScheduleState.Price price": notHTTPProviderWire,
 
 	"invoices.go:InvoiceProfileDTO.Tax tax": notMoneyTaxFacts,
 
@@ -175,6 +179,8 @@ var pendingDynamicMoney = map[string]string{
 	"internal/http/handlers/self_usage_invoices.go:func GetMyInvoices \"limit\"":                                   notMoneyPageSize,
 	"internal/http/request/request.go:func SuccessJSONPaginated \"limit\"":                                         notMoneyPageSize,
 	"internal/integrationharness/nmi_gateway.go:func serveExactRead \"amount\"":                                    notHTTPProviderWire,
+	"internal/integrationharness/stripe_gateway.go:func handle \"price\"":                                          notHTTPProviderWire,
+	"internal/integrationharness/stripe_gateway.go:func subscriptionJSON \"price\"":                                notHTTPProviderWire,
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                                 notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                                        notMoneyPurgeInventory,
 	"internal/modules/checkout/session_service.go:func confirmSolanaSession \"solana_token_amount\"":               notHTTPStoredMetadata,

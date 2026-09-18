@@ -52,6 +52,7 @@ type Options struct {
 	ConsoleAssets fs.FS
 	// StripeTransport is the test seam under the Stripe API choke point for
 	// driving rail pushes against a fake Stripe. Refused with a live posture.
+	// Process-wide: this does not independently route concurrent runtimes.
 	StripeTransport http.RoundTripper
 }
 
@@ -61,8 +62,8 @@ type Runtime struct {
 	app *app.App
 	svc *service.Service
 
-	activeRouteSets          []RouteSet
-	stripeTransportInstalled bool
+	activeRouteSets        []RouteSet
+	releaseStripeTransport func()
 
 	workersCancel context.CancelFunc
 	workersDone   chan error
@@ -118,8 +119,7 @@ func New(ctx context.Context, opts Options) (*Runtime, error) {
 
 	r := &Runtime{app: application}
 	if opts.StripeTransport != nil {
-		stripeapi.SetBaseTransport(opts.StripeTransport)
-		r.stripeTransportInstalled = true
+		r.releaseStripeTransport = stripeapi.InstallBaseTransport(opts.StripeTransport)
 	}
 	if err := r.bindRiver(ctx, opts.River); err != nil {
 		_ = r.Close(ctx)
@@ -230,9 +230,8 @@ func (r *Runtime) Close(ctx context.Context) error {
 		}
 		r.workersCancel = nil
 	}
-	if r.stripeTransportInstalled {
-		stripeapi.SetBaseTransport(nil)
-		r.stripeTransportInstalled = false
+	if r.releaseStripeTransport != nil {
+		defer r.releaseStripeTransport()
 	}
 	return r.app.Close(ctx)
 }

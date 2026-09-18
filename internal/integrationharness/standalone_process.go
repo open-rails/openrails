@@ -18,6 +18,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 )
 
@@ -55,7 +56,28 @@ func ProcessWithYAML(yaml string) ProcessOption {
 // ProcessWithNMIGateway points the server's sandbox NMI clients at a loopback
 // gateway (config.ProviderSandbox).
 func ProcessWithNMIGateway(url string) ProcessOption {
-	return ProcessWithYAML("provider_sandbox:\n  nmi_gateway_url: " + url + "\n")
+	return ProcessWithProviderSandbox(config.ProviderSandboxConfig{NMIGatewayURL: url})
+}
+
+// ProcessWithProviderSandbox points the server's sandbox provider clients at
+// loopback gateways (config.ProviderSandbox).
+func ProcessWithProviderSandbox(sandbox config.ProviderSandboxConfig) ProcessOption {
+	return ProcessWithYAML(providerSandboxYAML(sandbox))
+}
+
+// providerSandboxYAML renders the provider_sandbox block ("" when empty).
+func providerSandboxYAML(sandbox config.ProviderSandboxConfig) string {
+	var b strings.Builder
+	if sandbox.NMIGatewayURL != "" {
+		b.WriteString("  nmi_gateway_url: " + sandbox.NMIGatewayURL + "\n")
+	}
+	if sandbox.StripeAPIURL != "" {
+		b.WriteString("  stripe_api_url: " + sandbox.StripeAPIURL + "\n")
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "provider_sandbox:\n" + b.String()
 }
 
 // openrailsBinary builds cmd/openrails once per harness into a directory

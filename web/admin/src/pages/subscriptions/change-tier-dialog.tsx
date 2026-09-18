@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { Rail, SubscriptionStatus } from "@/lib/api/types"
+import { ApiError, getTokens } from "@/lib/api/client"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
 import { formatDate, formatNativeAmount } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -45,7 +46,16 @@ interface ChangeTierDialogProps {
   status: SubscriptionStatus
 }
 
-export function ChangeTierDialog({
+export function ChangeTierDialog(props: ChangeTierDialogProps) {
+  return (
+    <ChangeTierForm
+      key={`${getTokens()?.merchant ?? ""}:${props.subscriptionId}`}
+      {...props}
+    />
+  )
+}
+
+function ChangeTierForm({
   subscriptionId,
   customerId,
   productId,
@@ -59,6 +69,16 @@ export function ChangeTierDialog({
   const [open, setOpen] = React.useState(false)
   const [selectedPriceId, setSelectedPriceId] = React.useState("")
   const [reviewedPriceId, setReviewedPriceId] = React.useState("")
+  // A dismissed dialog or another preview cannot establish non-execution.
+  // Retain each submitted request's key until its outcome is definitive.
+  const attempts = React.useRef(new Map<string, string>())
+  const view = React.useRef(0)
+  React.useEffect(
+    () => () => {
+      view.current++
+    },
+    []
+  )
   const queryClient = useQueryClient()
   const preview = useMutation(
     adminMutations.previewSubscriptionTierChange(subscriptionId)
@@ -100,16 +120,12 @@ export function ChangeTierDialog({
   })
 
   const handleOpenChange = (next: boolean) => {
+    view.current++
     setOpen(next)
-    if (!next) {
-      setSelectedPriceId("")
-      setReviewedPriceId("")
-      preview.reset()
-      change.reset()
-    }
   }
 
   const handleSelect = (value: string | null) => {
+    view.current++
     setSelectedPriceId(value ?? "")
     setReviewedPriceId("")
     preview.reset()
@@ -129,7 +145,7 @@ export function ChangeTierDialog({
           <Button
             variant="outline"
             size="sm"
-            disabled={Boolean(blockReason)}
+            disabled={Boolean(blockReason) && !change.variables}
             title={blockReason}
           >
             Change tier
@@ -276,11 +292,15 @@ export function ChangeTierDialog({
               type="button"
               disabled={!selectedPriceId || preview.isPending}
               onClick={async () => {
+                const currentView = view.current
                 try {
                   await preview.mutateAsync(selectedPriceId)
+                  if (view.current !== currentView) return
                   setReviewedPriceId(selectedPriceId)
                 } catch (error) {
-                  toastApiError(error, "Preview tier change")
+                  if (view.current === currentView) {
+                    toastApiError(error, "Preview tier change")
+                  }
                 }
               }}
             >
@@ -289,10 +309,32 @@ export function ChangeTierDialog({
           ) : (
             <Button
               type="button"
-              disabled={change.isPending || Boolean(change.data)}
+              disabled={
+                change.isPending ||
+                (Boolean(change.data) && change.data?.status !== "processing")
+              }
               onClick={async () => {
+                const currentView = view.current
+                const changeKey =
+                  attempts.current.get(selectedPriceId) ?? crypto.randomUUID()
+                attempts.current.set(selectedPriceId, changeKey)
+                const completeAttempt = () => {
+                  if (attempts.current.get(selectedPriceId) === changeKey) {
+                    attempts.current.delete(selectedPriceId)
+                  }
+                }
                 try {
-                  const result = await change.mutateAsync(selectedPriceId)
+                  const result = await change.mutateAsync({
+                    priceId: selectedPriceId,
+                    idempotencyKey: changeKey,
+                  })
+                  if (
+                    result.status === "succeeded" ||
+                    result.status === "blocked"
+                  ) {
+                    completeAttempt()
+                  }
+                  if (view.current !== currentView) return
                   if (result.status === "succeeded") {
                     toast.success(
                       result.action === "upgrade"
@@ -300,18 +342,43 @@ export function ChangeTierDialog({
                         : "Downgrade scheduled"
                     )
                     handleOpenChange(false)
+                    setSelectedPriceId("")
+                    setReviewedPriceId("")
+                    preview.reset()
+                    change.reset()
+                  }
+                  if (result.status === "processing") {
+                    toast.info(
+                      "The provider is still confirming this change. Check again to read the result."
+                    )
                   }
                 } catch (error) {
-                  toastApiError(error, "Change subscription tier")
+                  // 402 is a final provider refusal regardless of its code.
+                  // Other refusals can reject a readback of an already accepted
+                  // operation, so retire only explicitly terminal outcomes.
+                  if (
+                    error instanceof ApiError &&
+                    (error.status === 402 ||
+                      (error.status === 409 &&
+                        (error.code === "tier_change_refused" ||
+                          error.code === "tier_change_idempotency_conflict")))
+                  ) {
+                    completeAttempt()
+                  }
+                  if (view.current === currentView) {
+                    toastApiError(error, "Change subscription tier")
+                  }
                 }
               }}
             >
               {change.isPending
                 ? "Applying…"
                 : change.data
-                  ? change.data.status === "blocked"
-                    ? "Change blocked"
-                    : "Action required"
+                  ? change.data.status === "processing"
+                    ? "Check result"
+                    : change.data.status === "blocked"
+                      ? "Change blocked"
+                      : "Action required"
                   : `Confirm ${reviewed.action}`}
             </Button>
           )}
