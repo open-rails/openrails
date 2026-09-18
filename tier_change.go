@@ -4,7 +4,7 @@ import "time"
 
 type TierChangeResponse struct {
 	Object         string                         `json:"object"`                    // "tier_change"
-	Status         string                         `json:"status"`                    // succeeded, requires_action, blocked
+	Status         string                         `json:"status"`                    // succeeded, processing, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
 	PriceID        PriceID                        `json:"price_id"`                  // Target price ID
@@ -24,8 +24,9 @@ type TierChangeResponse struct {
 	NextChargeAmount int64      `json:"next_charge_amount,string"`
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
 	// OperationID names the durable provider operation behind a Stripe tier
-	// change. A "processing" answer (HTTP 202) carries it while the provider
-	// outcome is unresolved; the same Idempotency-Key replays the stored result.
+	// change or an NMI upgrade. A "processing" answer (HTTP 202) carries it
+	// while the provider outcome is unresolved; the same Idempotency-Key
+	// replays the stored result.
 	OperationID string `json:"operation_id,omitempty"`
 }
 

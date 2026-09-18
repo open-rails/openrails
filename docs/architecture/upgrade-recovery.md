@@ -26,6 +26,8 @@ the verifier path: an unsent proration is still submitted only by the executor.
 Successor non-execution terminates the operation and releases the predecessor
 for a new request; proration non-execution queues successor cancellation.
 
+The route answers on the shared tier change contract (`tier_change_operation.go`), the same on both rails: the client's `Idempotency-Key` is required (`400 tier_change_idempotency_key_required` without it, before any admission or provider request) and names exactly one operation — a key that already belongs to a different customer, subscription or target is refused `409 tier_change_idempotency_conflict`, including when two requests under the same key both miss the replay lookup and the later enqueue meets the earlier row. The stored result replays under the same key (`200`, naming the successor); an unresolved operation answers `202` with its id, naming the predecessor it owns; a request under another key is refused `409 tier_change_in_flight` naming it; a terminal operation is `tier_change_refused` (a card decline is `402` with its decline code, another provider refusal `400`, an operator-attested non-execution `409`).
+
 Provider search visibility and exact correlation remain adapter evidence; local loopback tests prove the application's no-resend and transaction behavior, not a live provider guarantee.
 
 ## Stripe tier changes

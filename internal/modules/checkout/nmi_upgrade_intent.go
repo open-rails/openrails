@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -64,12 +65,36 @@ type nmiUpgradeStep struct {
 	Enrollment  *nmi.AddSubscriptionResponse `json:"enrollment,omitempty"`
 	Sale        *nmi.SaleResponse            `json:"sale,omitempty"`
 	Refusal     string                       `json:"refusal,omitempty"`
+	// RefusalStatus/RefusalCode classify a provider refusal for the route: a
+	// card decline is 402 with its failure code, another rejection 400. An
+	// operator-attested non-execution carries neither.
+	RefusalCode   string `json:"refusal_code,omitempty"`
+	RefusalStatus int    `json:"refusal_status,omitempty"`
 	// Resolution records operator evidence that supplied this step's outcome.
 	Resolution map[string]any `json:"resolution,omitempty"`
 }
+
+// refuse records a definitive provider refusal of the step.
+func (s *nmiUpgradeStep) refuse(err error) {
+	s.Refusal, s.RefusalStatus = err.Error(), http.StatusBadRequest
+	var decline *nmi.CustomerVaultError
+	if errors.As(err, &decline) && decline.ResponseCode >= 200 && decline.ResponseCode < 300 {
+		s.RefusalStatus, s.RefusalCode = http.StatusPaymentRequired, nmidirect.FailureCode(decline)
+	}
+}
+
 type nmiUpgradeProgress struct {
 	Successor *nmiUpgradeStep `json:"successor,omitempty"`
 	Proration *nmiUpgradeStep `json:"proration,omitempty"`
+}
+
+func (p nmiUpgradeProgress) refused() *nmiUpgradeStep {
+	for _, step := range []*nmiUpgradeStep{p.Successor, p.Proration} {
+		if step != nil && step.Refusal != "" {
+			return step
+		}
+	}
+	return nil
 }
 
 // NMIUpgradeIntentHandler resumes each provider step independently and commits
@@ -184,7 +209,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 			if nmi.RequiresVerification(callErr) {
 				return intents.Ambiguous("successor submission has no exact receipt: " + callErr.Error())
 			}
-			progress.Successor.Refusal = callErr.Error()
+			progress.Successor.refuse(callErr)
 			if err = save("successor", progress.Successor); err != nil {
 				return intents.AmbiguousWithEvidence("persist successor refusal: "+err.Error(), evidence())
 			}
@@ -229,7 +254,7 @@ func (h *NMIUpgradeIntentHandler) advance(ctx context.Context, in gen.OpenrailsR
 				if nmi.RequiresVerification(callErr) {
 					return intents.Ambiguous("proration submission has no exact receipt: " + callErr.Error())
 				}
-				progress.Proration.Refusal = callErr.Error()
+				progress.Proration.refuse(callErr)
 				if err = save("proration", progress.Proration); err != nil {
 					return intents.AmbiguousWithEvidence("persist proration refusal: "+err.Error(), evidence())
 				}
@@ -416,96 +441,37 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 	})
 }
 
-func (s *CheckoutService) resumeUpgrade(ctx context.Context, prior gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
-	if prior.Status == intents.StatusSucceeded || prior.Status == intents.StatusFailedTerminal {
-		return upgradeResponse(prior)
-	}
-	if s.Intents == nil {
-		return nil, ErrCheckoutProcessing
-	}
-	var p NMIUpgradePayload
-	if err := json.Unmarshal(prior.Payload, &p); err != nil {
-		return nil, err
-	}
-	row, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: prior.MerchantID, Provider: prior.Rail, PspID: *prior.PspID, SubscriptionID: prior.SubscriptionID, PriceID: prior.PriceID, IntentType: TypeNMIUpgrade, Payload: p, IdempotencyKey: prior.IdempotencyKey, NextAttemptAt: s.now(), Origin: intents.OriginUser, OriginReason: "resume tier upgrade"})
-	if err != nil {
-		return nil, err
-	}
-	return upgradeResponse(row)
-}
-func upgradeResponse(in gen.OpenrailsRailIntent) (*CheckoutResponse, error) {
-	switch in.Status {
-	case intents.StatusSucceeded:
-		var result struct {
-			SubscriptionID string `json:"subscription_id"`
-			TransactionID  string `json:"transaction_id"`
-			Message        string `json:"message"`
-		}
-		if err := json.Unmarshal(in.ResultEvidence, &result); err != nil {
-			return nil, err
-		}
-		id, err := uuid.Parse(result.SubscriptionID)
-		if err != nil {
-			return nil, err
-		}
-		return &CheckoutResponse{Status: "success", Action: "upgrade", SubscriptionID: &id, TransactionID: result.TransactionID, Message: result.Message}, nil
-	case intents.StatusFailedTerminal:
-		if in.LastFailureReason != nil {
-			return nil, errors.New(*in.LastFailureReason)
-		}
-		return nil, fmt.Errorf("upgrade refused")
-	default:
-		return nil, ErrCheckoutProcessing
-	}
-}
-
-// Replays precede mutable catalog and predecessor-status admission. Once the
-// upgrade commits, its predecessor is cancelled and its price may be archived.
-func (s *CheckoutService) replayTierUpgrade(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
-	if strings.TrimSpace(req.IdempotencyKey) == "" || s.SubscriptionService == nil {
-		return nil, false, nil
-	}
-	store := intents.NewStore(s.SubscriptionService.Database())
-	in, err := store.GetByIdempotencyKey(ctx, NMIUpgradeIdempotencyKey(req.IdempotencyKey))
-	if db.IsNotFound(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	var p NMIUpgradePayload
-	if err = json.Unmarshal(in.Payload, &p); err != nil {
-		return nil, true, err
-	}
-	price := strings.TrimSpace(req.PriceID)
-	if user == nil || p.UserID != user.ID || (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.OldSubscriptionID) || (price != p.RequestedPrice && price != openrails.PriceID(p.PriceID).String()) {
-		return nil, true, tierChangeIdempotencyConflict()
-	}
-	if _, err = s.resumeUpgrade(ctx, in); err != nil {
-		return nil, true, err
-	}
-	in, err = store.Get(ctx, in.ID)
-	if err != nil {
-		return nil, true, err
-	}
-	response, err := s.upgradeTierResponse(in)
-	return response, true, err
-}
-
-func (s *CheckoutService) upgradeTierResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
-	response, err := upgradeResponse(in)
-	if err != nil {
-		return nil, err
-	}
+// nmiUpgradeTierChangeResponse renders an NMI upgrade (tierChangeResponse).
+// While unresolved it names the predecessor the operation owns; once
+// committed, the successor.
+func nmiUpgradeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
 	var p NMIUpgradePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err
 	}
-	result := s.mapCheckoutToTierChangeResponse(response, &models.Price{ID: p.PriceID}, "upgrade")
-	result.Payment.Rail = in.Rail
-	result.Currency = p.Currency
-	result.AmountDueNow = p.ProrationAmount
-	result.NextChargeAmount = p.RecurringAmount
-	result.NextChargeDate = &p.PeriodEnd
-	return result, nil
+	subID := openrails.SubscriptionID(p.OldSubscriptionID)
+	end := p.PeriodEnd
+	resp := &TierChangeResponse{
+		Object: "tier_change", Mode: "tier_change", Action: "upgrade", PriceID: openrails.PriceID(p.PriceID),
+		Payment: CheckoutSessionPaymentResponse{Rail: in.Rail}, SubscriptionID: &subID,
+		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
+		OperationID: in.ID.String(),
+	}
+	switch in.Status {
+	case intents.StatusSucceeded:
+		successor := openrails.SubscriptionID(p.NewSubscriptionID)
+		resp.Status, resp.SubscriptionID = "succeeded", &successor
+		resp.Payment.TransactionID = intents.EvidenceString(in, "transaction_id")
+		resp.Message = intents.EvidenceString(in, "message")
+		return resp, nil
+	case intents.StatusFailedTerminal:
+		var progress nmiUpgradeProgress
+		_ = json.Unmarshal(in.ResultEvidence, &progress)
+		if step := progress.refused(); step != nil {
+			return nil, tierChangeRefused(in, step.RefusalStatus, step.RefusalCode)
+		}
+		return nil, tierChangeRefused(in, 0, "")
+	default:
+		return tierChangeProcessing(resp)
+	}
 }

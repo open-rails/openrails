@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -95,6 +96,66 @@ func (h *Harness) SeedStripeTierSubscription(rt *app.Runtime, mid merchant.ID, g
 		BasicPrice: openrails.PriceID(basic), ProPrice: openrails.PriceID(pro), BasicStripe: basicStripe, ProStripe: proStripe, PeriodEnd: periodEnd, BasicAmount: 10_000_000, ProAmount: 30_000_000}
 }
 
+// NMITierFixture is an active NMI subscription on the basic tier of a
+// two-tier group, with both tiers bound to NMI plans and a vaulted instrument.
+type NMITierFixture struct {
+	Merchant       merchant.ID
+	Subscription   openrails.SubscriptionID
+	SubscriptionID uuid.UUID
+	BasicPrice     openrails.PriceID
+	ProPrice       openrails.PriceID
+	ProPlan        string
+	Vault          string
+	ProAmount      int64
+}
+
+// SeedNMITierSubscription arms a loopback NMI account, seeds a basic/pro tier
+// group bound to NMI plans, and gives a fresh customer an active basic
+// subscription paid by a vaulted instrument.
+func (h *Harness) SeedNMITierSubscription(rt *app.Runtime, mid merchant.ID) NMITierFixture {
+	h.t.Helper()
+	psp := h.ArmLoopbackNMI(rt, mid)
+	pool := h.sharedPool()
+	sfx := uuid.NewString()[:8]
+	now := time.Now().UTC().Truncate(time.Second)
+	group := "tier-" + sfx
+	seed := func(key, name string, rank int, amount int64, plan string) uuid.UUID {
+		product, price := uuid.New(), uuid.New()
+		_, err := pool.Exec(h.ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name,tier_group,tier_rank) VALUES($1,$2,$3,$4,$5,$6)`, product, mid.UUID(), key+"-"+sfx, name, group, rank)
+		require.NoError(h.t, err)
+		_, err = pool.Exec(h.ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,$5,'USD',720,true)`, price, mid.UUID(), product, key+"-"+sfx+"-monthly", amount)
+		require.NoError(h.t, err)
+		_, err = pool.Exec(h.ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,$4)`, mid.UUID(), price, psp, plan)
+		require.NoError(h.t, err)
+		return price
+	}
+	proPlan := "plan-pro-" + sfx
+	basic := seed("basic", "Basic", 1, 10_000_000, "plan-basic-"+sfx)
+	pro := seed("pro", "Pro", 2, 30_000_000, proPlan)
+	var basicProduct uuid.UUID
+	require.NoError(h.t, pool.QueryRow(h.ctx, `SELECT product_id FROM openrails.prices WHERE id=$1`, basic).Scan(&basicProduct))
+
+	customer, method, subscription := uuid.New(), uuid.New(), uuid.New()
+	vault := "vault-" + sfx
+	_, err := pool.Exec(h.ctx, `INSERT INTO openrails.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), customer)
+	require.NoError(h.t, err)
+	_, err = gen.New(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
+		ID: method, MerchantID: mid.UUID(), CustomerID: customer, Rail: string(models.RailNMI), PspID: psp,
+		InitialTransactionID: "init-" + method.String(), RailCustomerRef: vault,
+	})
+	require.NoError(h.t, err)
+	dbtest.SeedNMIStoredCredentialRefs(h.ctx, h.t, pool, method)
+	periodStart, periodEnd := now.Add(-5*24*time.Hour), now.Add(25*24*time.Hour)
+	_, err = pool.Exec(h.ctx, `INSERT INTO openrails.subscriptions
+	        (id, merchant_id, customer_id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
+	         current_period_starts_at, current_period_ends_at, started_at, payment_method_id)
+	      VALUES ($1, $2, $3, $4, $5, 'active', 'nmi', $6, $7, $8, $9, $8, $10)`,
+		subscription, mid.UUID(), customer, basic, basicProduct, psp, "rsub-basic-"+sfx, periodStart, periodEnd, method)
+	require.NoError(h.t, err)
+	return NMITierFixture{Merchant: mid, Subscription: openrails.SubscriptionID(subscription), SubscriptionID: subscription,
+		BasicPrice: openrails.PriceID(basic), ProPrice: openrails.PriceID(pro), ProPlan: proPlan, Vault: vault, ProAmount: 30_000_000}
+}
+
 // TierChangeOperation is the durable tier change operation for a
 // subscription, read from the ledger.
 type TierChangeOperation struct {
@@ -102,12 +163,12 @@ type TierChangeOperation struct {
 	Status string
 }
 
-// LatestTierChangeOperation returns the newest stripe_tier_change operation
-// for the subscription.
+// LatestTierChangeOperation returns the newest tier change operation (NMI
+// upgrade or Stripe tier change) the subscription owns.
 func (h *Harness) LatestTierChangeOperation(subscription uuid.UUID) TierChangeOperation {
 	h.t.Helper()
 	var op TierChangeOperation
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id, status FROM openrails.rail_intents WHERE intent_type='stripe_tier_change' AND subscription_id=$1 ORDER BY created_at DESC LIMIT 1`, subscription).Scan(&op.ID, &op.Status))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT id, status FROM openrails.rail_intents WHERE intent_type IN ('nmi_upgrade','stripe_tier_change') AND subscription_id=$1 ORDER BY created_at DESC LIMIT 1`, subscription).Scan(&op.ID, &op.Status))
 	return op
 }
 
@@ -115,8 +176,16 @@ func (h *Harness) LatestTierChangeOperation(subscription uuid.UUID) TierChangeOp
 func (h *Harness) TierChangeOperations(subscription uuid.UUID) int {
 	h.t.Helper()
 	var n int
-	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE intent_type='stripe_tier_change' AND subscription_id=$1`, subscription).Scan(&n))
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT count(*) FROM openrails.rail_intents WHERE intent_type IN ('nmi_upgrade','stripe_tier_change') AND subscription_id=$1`, subscription).Scan(&n))
 	return n
+}
+
+// LocalSubscriptionStatus reads the subscription's local status.
+func (h *Harness) LocalSubscriptionStatus(subscription uuid.UUID) string {
+	h.t.Helper()
+	var status string
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT status FROM openrails.subscriptions WHERE id=$1`, subscription).Scan(&status))
+	return status
 }
 
 // LocalSubscriptionPrice reads the subscription's current local price.

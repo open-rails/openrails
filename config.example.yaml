@@ -103,10 +103,10 @@ rate_limits:
 # NMI client (checkout sales, invoice collection, payment-method updates and
 # their verify reads) talks to nmi_gateway_url instead of the NMI sandbox, and
 # every Stripe request goes to stripe_api_url through the same guarded
-# transport. Store credentials are sent there, so each host must be a loopback
-# IP literal (127.0.0.0/8 or ::1; no hostnames, no userinfo) and the posture
-# sandbox; anything else refuses to boot. Process config only, never a merchant
-# setting.
+# transport. Store credentials are sent there, so each must be a literal
+# loopback IP (127.0.0.0/8 or ::1; no hostnames, not even localhost, and no
+# userinfo) under test_mode: sandbox; anything else refuses to boot. Process
+# config only, never a merchant setting.
 # provider_sandbox:
 #   nmi_gateway_url: http://127.0.0.1:9091
 #   stripe_api_url: http://127.0.0.1:9092

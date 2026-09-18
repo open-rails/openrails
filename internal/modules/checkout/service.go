@@ -1527,14 +1527,12 @@ func (s *CheckoutService) RegisterPurchase(ctx context.Context, req *payments.Re
 	return s.PurchaseService.RegisterPurchase(ctx, req)
 }
 
-// processUpgrade handles tier upgrades with proration
-// Upgrade = user moving to a higher tier (higher TierRank)
-// Behavior: Immediate switch, charge prorated difference for remaining days
-func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, existingSub *models.Subscription, target railTarget) (*CheckoutResponse, error) {
+// processUpgrade runs an NMI tier upgrade (a higher TierRank) as one durable
+// nmi_upgrade operation: an immediate successor enrollment plus the prorated
+// charge for the remaining period, answered on the tier change contract
+// (tier_change_operation.go).
+func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutRequest, user *UserIdentity, newPrice *models.Price, newProduct *models.Product, existingSub *models.Subscription, target railTarget) (*TierChangeResponse, error) {
 	newPrice = priceForCheckoutTarget(newPrice, target)
-	if target.Rail == "ccbill" {
-		return s.processCCBillUpgrade(ctx, user, newPrice, existingSub)
-	}
 	if !rails.IsNMI(models.Rail(target.Rail)) {
 		return nil, fmt.Errorf("unsupported rail for upgrades: %s", target.Rail)
 	}
@@ -1553,14 +1551,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	database := s.SubscriptionService.Database()
 	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key)
 	if err == nil {
-		var frozen NMIUpgradePayload
-		if err := json.Unmarshal(prior.Payload, &frozen); err != nil {
-			return nil, err
-		}
-		if frozen.UserID != user.ID || frozen.OldSubscriptionID != existingSub.ID || frozen.PriceID != newPrice.ID {
-			return nil, tierChangeIdempotencyConflict()
-		}
-		return s.resumeUpgrade(ctx, prior)
+		return s.replayTierChangeOperation(ctx, prior, &TierChangeRequest{SubscriptionID: existingSub.ID, PriceID: openrails.PriceID(newPrice.ID).String()}, user)
 	}
 	if !db.IsNotFound(err) {
 		return nil, err
@@ -1604,16 +1595,17 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	end := now.Add(time.Duration(hours) * time.Hour)
 	startDate, _ := buildNMIFutureStartDate(end, now)
 	payload := NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
-	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"})
+	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"},
+		func(row gen.OpenrailsRailIntent) error { return tierChangeOwnedBy(row, payload.subject()) })
 	var conflict *pgconn.PgError
 	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
-		// Another unresolved upgrade owns this predecessor's provider steps.
-		return nil, ErrTierChangePending
+		// Another unresolved tier change owns this predecessor's provider steps.
+		return nil, s.tierChangeInFlight(ctx, existingSub.ID)
 	}
 	if err != nil {
 		return nil, err
 	}
-	return upgradeResponse(intent)
+	return tierChangeResponse(intent)
 }
 
 // shortHash returns a stable 16-hex-char digest of s, used to build
@@ -1799,20 +1791,6 @@ func CalculateModelBUpgradeCharge(
 	return firstChargeMicros, cycleHours, nil
 }
 
-// ReplayTierChange answers a request whose Idempotency-Key names a durable
-// tier change (NMI upgrade or Stripe tier change) before any admission that
-// the completed change would fail. found=false when the key is new. A tier
-// change without a key is refused here, before any admission or mutation.
-func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
-	if strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, false, tierChangeKeyRequired()
-	}
-	if response, found, err := s.replayTierUpgrade(ctx, req, user); found || err != nil {
-		return response, found, err
-	}
-	return s.replayStripeTierChange(ctx, req, user)
-}
-
 // TierChange processes a subscription tier change (upgrade or downgrade).
 // This is the unified entry point that routes to rail-specific implementations.
 func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
@@ -1856,6 +1834,11 @@ func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest
 		}
 	}
 	if err := validateTierChangeSubscriptionStatus(existingSub); err != nil {
+		return nil, err
+	}
+	// One unresolved tier change owns the subscription on every rail: a
+	// request under another key is pointed at it.
+	if err := s.refuseTierChangeInFlight(ctx, existingSub.ID); err != nil {
 		return nil, err
 	}
 
@@ -2146,13 +2129,6 @@ func (s *CheckoutService) processTierChangeStripe(
 			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
-	// An unresolved tier change owns the subscription: a request under another
-	// key is pointed at it instead of reading provider state it may be moving.
-	if live, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, existingSub.ID); err == nil {
-		return nil, &TierChangeInFlightError{OperationID: live.ID}
-	} else if !db.IsNotFound(err) {
-		return nil, err
-	}
 	// The Stripe object is read once before anything is frozen: the item the
 	// change targets, and proof that Stripe bills the price the local
 	// subscription says it does. Nothing is written here.
@@ -2317,24 +2293,12 @@ func (s *CheckoutService) processTierChangeNMI(
 	if err != nil {
 		return nil, err
 	}
-	var checkoutResp *CheckoutResponse
 	if action == "upgrade" {
-		checkoutResp, err = s.processUpgrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
-	} else {
-		checkoutResp, err = s.processDowngrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
+		return s.processUpgrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
 	}
-
+	checkoutResp, err := s.processDowngrade(ctx, checkoutReq, user, newPrice, newProduct, existingSub, target)
 	if err != nil {
 		return nil, err
-	}
-
-	if action == "upgrade" {
-		key := NMIUpgradeIdempotencyKey(checkoutReq.IdempotencyKey)
-		in, err := intents.NewStore(s.SubscriptionService.Database()).GetByIdempotencyKey(ctx, key)
-		if err != nil {
-			return nil, err
-		}
-		return s.upgradeTierResponse(in)
 	}
 	return s.mapCheckoutToTierChangeResponse(checkoutResp, newPrice, action), nil
 }
