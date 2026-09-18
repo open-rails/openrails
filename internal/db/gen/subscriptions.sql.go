@@ -1752,6 +1752,7 @@ SET dunning_claim_holder = NULL,
 WHERE id = $1
   AND merchant_id = $2
   AND dunning_claim_holder = $3::text
+  AND deleted_at IS NULL
 `
 
 type ReleaseDunningClaimParams struct {
