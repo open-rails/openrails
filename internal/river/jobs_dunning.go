@@ -2,7 +2,6 @@ package riverjobs
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -12,10 +11,10 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/dunning"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -33,8 +32,6 @@ import (
 const (
 	QueueBilling = "billing"
 	KindDunning  = "openrails.dunning"
-
-	dunningAttemptLease = 15 * time.Minute
 
 	// dunningMerchantBatch caps how many merchants one pass fans out to. The
 	// work queue is indexed on the due-dunning predicate, so this bounds a pass
@@ -534,9 +531,10 @@ func (w *DunningWorker) processSubscription(
 	}
 }
 
-// applyDeclinedRebill applies the failure policy for a terminally-failed
-// rebill intent, classifying hard/soft off the decline evidence recorded on
-// the ledger.
+// applyDeclinedRebill applies the one decline doctrine (dunning.ApplyDecline)
+// for a terminally-failed rebill intent, releasing the claim if the
+// lifecycle transition rolled back so River's retry re-derives the same
+// charge intent instead of a fresh one.
 func (w *DunningWorker) applyDeclinedRebill(
 	ctx context.Context,
 	logEntry *log.Entry,
@@ -545,109 +543,14 @@ func (w *DunningWorker) applyDeclinedRebill(
 	rail models.Rail,
 	intent gen.OpenrailsRailIntent,
 ) (dunningOutcome, error) {
-	reason := normalize.FromPtr(intent.LastFailureReason)
-	if reason == "" {
-		reason = "rebill declined"
-	}
-	responseCode := manualRebillEvidenceResponseCode(intent)
-	var failureCode *string
-	if responseCode != 0 {
-		code := fmt.Sprintf("%d", responseCode)
-		failureCode = &code
-	}
-
-	// or#870: ONE classifier, three outcomes. Unknown codes land in bucket 1.
-	declineClass := collection.ClassifyDeclineDetail(string(rail), normalize.FromPtr(failureCode))
-	outcome := declineClass.Outcome
-	// A code no table recognizes duns exactly like insufficient funds, so the
-	// gap has no downstream symptom. This is the only place it can be seen.
-	collection.AlertUnmappedDecline(ctx, declineClass)
-
-	// #821/#839: name the evidence leg that would justify a terminal outcome.
-	// Only bucket 3 does — the issuer has withdrawn the mandate or the
-	// instrument is permanently dead. Bucket 2 stops charging WITHOUT
-	// terminating, so it names nothing; bucket 1 names nothing either and
-	// FailMembership derives the dunning-exhausted leg from recorded attempts
-	// if the schedule runs out.
-	certainty := ""
-	if outcome == collection.DeclineNonRecoverable {
-		certainty = collection.CertaintyNonRetryableDecline
-	}
-
-	// #836: the operator kill switch, read on this merchant-scoped connection.
-	// When it is off, no terminal outcome (local cancel + entitlement revoke +
-	// the queued irreversible provider delete) executes — the row parks instead.
-	blocked := ""
-	if v := destructive.New(w.DB).Check(ctx, sub.MerchantID); !v.Allowed {
-		blocked = v.Reason
-	}
-
-	declineLog := logEntry.WithFields(log.Fields{
-		"response_code":      responseCode,
-		"reason":             reason,
-		"decline_outcome":    outcome.String(),
-		"decline_coverage":   declineClass.Coverage.String(),
-		"terminal_certainty": certainty,
-		"terminal_blocked":   blocked,
-	})
-	switch {
-	case blocked != "":
-		declineLog.Warn("Dunning: decline recorded but destructive actions are gated; no terminal cancellation will execute — " + blocked)
-	case outcome == collection.DeclineNonRecoverable:
-		declineLog.Error("Dunning: non-recoverable decline (or#870 bucket 3); cancelling the subscription at the rail — the stored payment method is NOT touched")
-	case outcome == collection.DeclineFixPaymentMethod:
-		declineLog.Warn("Dunning: customer's card needs fixing (or#870 bucket 2); charging STOPS, subscription and entitlements retained, update-payment-method notice sent")
-	default:
-		declineLog.Warn("Dunning: retryable decline (or#870 bucket 1); will retry on schedule")
-	}
-
-	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
-		Rail:                rail,
-		SubscriptionID:      &sub.ID,
-		FailureReason:       &reason,
-		FailureCode:         failureCode,
-		Decline:             outcome,
-		RecordFailedAttempt: true,
-		TerminalCertainty:   certainty,
-		TerminalBlocked:     blocked,
-	}); err != nil {
-		transitionErr := fmt.Errorf("apply failure policy after declined rebill: %w", err)
+	if _, err := dunning.ApplyDecline(ctx, w.DB, lifecycle, sub, rail, intent); err != nil {
 		if releaseErr := w.releaseDunningAttempt(ctx, sub); releaseErr != nil {
-			return dunningOutcomeFailed, errors.Join(transitionErr, releaseErr)
+			return dunningOutcomeFailed, errors.Join(err, releaseErr)
 		}
-		return dunningOutcomeFailed, transitionErr
+		return dunningOutcomeFailed, err
 	}
+	logEntry.Debug("Dunning: decline doctrine applied")
 	return dunningOutcomeFailed, nil
-}
-
-// manualRebillEvidenceString reads one string field off the intent's
-// result_evidence.
-func manualRebillEvidenceString(intent gen.OpenrailsRailIntent, key string) string {
-	if len(intent.ResultEvidence) == 0 {
-		return ""
-	}
-	var evidence map[string]any
-	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return ""
-	}
-	s, _ := evidence[key].(string)
-	return s
-}
-
-// manualRebillEvidenceResponseCode reads the gateway decline code off the
-// intent's result_evidence (0 when absent — classified soft).
-func manualRebillEvidenceResponseCode(intent gen.OpenrailsRailIntent) int {
-	if len(intent.ResultEvidence) == 0 {
-		return 0
-	}
-	var evidence map[string]any
-	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return 0
-	}
-	if code, ok := evidence["response_code"].(float64); ok {
-		return int(code)
-	}
-	return 0
 }
 
 // parkStaleSubscription handles a past_due subscription whose missed rebill is
@@ -687,7 +590,7 @@ func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Sub
 	}
 
 	claimedAt := now.UTC()
-	leaseUntil := claimedAt.Add(dunningAttemptLease)
+	leaseUntil := claimedAt.Add(dunning.AttemptLease)
 	rowsAffected, err := w.DB.Gen(ctx).ClaimDunningAttempt(ctx, gen.ClaimDunningAttemptParams{
 		ID: sub.ID, MerchantID: merchantID.UUID(), LeaseUntil: leaseUntil, ClaimedAt: claimedAt,
 	})
@@ -704,32 +607,17 @@ func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Sub
 }
 
 func (w *DunningWorker) releaseDunningAttempt(ctx context.Context, sub *models.Subscription) error {
-	if w == nil || w.DB == nil || sub == nil || sub.LastRetryAt == nil || sub.NextRetryAt == nil {
+	if w == nil || w.DB == nil || sub == nil {
 		return errors.New("release dunning attempt requires its claimed subscription")
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		return fmt.Errorf("release dunning attempt: %w", err)
 	}
-	rowsAffected, err := w.DB.Gen(ctx).ReleaseDunningAttempt(ctx, gen.ReleaseDunningAttemptParams{
-		ID: sub.ID, MerchantID: merchantID.UUID(), ClaimedAt: *sub.LastRetryAt, LeaseUntil: *sub.NextRetryAt,
-	})
-	if err != nil {
-		return fmt.Errorf("release dunning attempt claim: %w", err)
-	}
-	if rowsAffected == 0 {
-		return errors.New("release dunning attempt claim: subscription claim changed before release")
-	}
-	sub.NextRetryAt = sub.LastRetryAt
-	return nil
+	return dunning.ReleaseAttempt(ctx, w.DB, merchantID.UUID(), sub)
 }
 
-func rebillOrderReference(sub *models.Subscription) string {
-	if sub == nil || sub.CurrentPeriodEndsAt == nil {
-		return ""
-	}
-	return fmt.Sprintf("rebill-%s-%d", sub.ID, sub.CurrentPeriodEndsAt.UTC().Unix())
-}
+func rebillOrderReference(sub *models.Subscription) string { return dunning.OrderReference(sub) }
 
 // subscriptionProviderAutoBilled reports whether the provider bills this
 // subscription on its own side, so OpenRails must not manual-rebill or terminate

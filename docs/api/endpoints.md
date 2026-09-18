@@ -117,8 +117,10 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | GET | `/v1/me/status` | Aggregated premium status (`openrails.BillingStatus`): `has_active_subscription`, `subscription` (the shared `Subscription` shape), `access` (the standing grant, from the subscription or a one-off entitlement), `next_renewal_at`, `entitlements` (`EntitlementRecord[]`) |
 | GET | `/v1/me/usage` | Usage breakdown for the token's subject |
 | GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The payer's admin view of every delegation it granted stays on `GET /v1/customers/{id}/spend-delegations` |
-| GET | `/v1/me/invoices` | List the subject's invoices |
-| GET | `/v1/me/invoices/{id}` | One invoice |
+| GET | `/v1/me/invoices` | List the subject's invoices, each with its `recovery` state (see Customer payment recovery) |
+| GET | `/v1/me/invoices/{id}` | One invoice with `recovery` |
+| GET | `/v1/me/invoices/{id}/payments` | The invoice's immutable attempt history (`InvoicePaymentAttemptDTO` page, newest first): the read behind a `202` pay-now |
+| POST | `/v1/me/invoices/{id}/pay-now` | Pay the invoice now through a saved method the payer owns. See Customer payment recovery |
 | GET | `/v1/me/payments` | One-off payment history. Query: `type` (rail filter), `limit`, `offset` |
 | GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
 | GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
@@ -140,6 +142,46 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
 | POST | `/v1/me/subscriptions/{id}/change-tier/preview` | Dry-run of the tier change (proration/effect preview), no mutation |
 | PUT | `/v1/me/subscriptions/{id}/payment-method` | Reassign an NMI-backed subscription to another saved method. Body `{ "payment_method_id": "..." }`. A method vaulted by a different provider account is `409 payment_method_psp_mismatch` |
+| POST | `/v1/me/subscriptions/{id}/retry-now` | Rebill a past-due subscription now through its current saved method. See Customer payment recovery |
+
+### Customer payment recovery (#809)
+
+`POST /v1/me/invoices/{id}/pay-now` (body `{ "payment_method_id": "pm_…" }`,
+required) and `POST /v1/me/subscriptions/{id}/retry-now` (body
+`{ "payment_method_id": "pm_…" }` optional; when given it must be the
+subscription's current method) require an `Idempotency-Key` (1–255 bytes).
+Each request creates one new immutable attempt through the engine's own
+durable collection machinery: the invoice's `invoice_collection` operation, or
+the period's `manual_rebill` operation the dunning worker itself derives, so a
+customer retry and the schedule can never submit twice for one attempt. The
+same key replays the same attempt (`replayed: true`) without another charge.
+History is never rewritten.
+
+Only rails where OpenRails both drives dunning and charges saved methods are
+accepted (today: NMI with an OpenRails-driven rebill); Stripe, CCBill, Solana
+and provider-billed NMI subscriptions are refused `409
+payment_recovery_rail_unsupported` before any provider traffic.
+
+Answers:
+
+| Status | Meaning |
+|---|---|
+| `200` | Terminal. Invoice: `InvoicePayNowResult { invoice, attempt (status settled), operation, replayed }`, invoice `paid`. Subscription: `SubscriptionRetryNowResult { subscription (active, dunning schedule cleared), payment, operation, replayed }` |
+| `202` | Unresolved: the same result with `operation.status` `pending`, `in_flight` or `unknown_needs_verify` and no money moved yet. Poll `GET /v1/me/invoices/{id}` (+ `/payments`) or `GET /v1/me/subscriptions/{id}`: `recovery.operation` names the operation until it resolves; the verifier settles it from an exact provider receipt or an operator resolves it (`openrails intents resolve`). Nothing is resent |
+| `402 card_declined` | The provider refused; the attempt is recorded. Metadata: `decline_reason` (normalized category), `failure_code` (verbatim), `attempt_id`/`invoice_id` or `subscription_id`/`subscription_status`, `operation_id`, `retryable`, `attempt_count`, `next_attempt_at` |
+| `409 invoice_retry_in_progress` / `invoice_retry_outcome_unknown` / `subscription_retry_in_progress` / `subscription_retry_outcome_unknown` | A live operation exists (this key did not start it); nothing is resent |
+| `409 invoice_not_retryable` / `subscription_not_retryable` | Nothing to collect (paid, voided, uncollectible, not past due) or the saved method cannot be charged |
+| `409 invoice_retry_idempotency_conflict` | The key already names a different method or invoice |
+| `400 collection_payment_method_invalid` | The method is not the payer's, is parked, or (retry-now) is not the subscription's current method |
+| `404` | The invoice or subscription is not the caller's |
+
+`recovery` (`PaymentRecovery`, on every `/v1/me` invoice and subscription):
+`retryable`, `blocked_reason` (`not_due`, `uncollectible`, `in_progress`,
+`outcome_unknown`, `rail_unsupported`, `no_compatible_payment_method`),
+`next_attempt_at` (the engine's own next scheduled attempt), `attempt_count`,
+`failure_category`, `last_failure_code`, `last_failed_at`,
+`compatible_payment_method_ids`, `operation`. Hosts read these flags; they do
+not re-derive rail policy.
 
 Solana on-chain lifecycle (mounted only when OpenRails has a Solana signer;
 prepare → wallet signs → confirm):
@@ -350,6 +392,8 @@ Full request and state-transition details are in
 | GET | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:read` | List collection and remittance history |
 | POST | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:update` | Record an idempotent external remittance; does not charge a provider |
 | POST | `/v1/merchant/invoices/{id}/retry-collection` | `merchant:invoices:collect` | Start or replay one durable collection operation with an explicit saved method and idempotency key (202 while unresolved) |
+| POST | `/v1/merchant/customers/{customer_id}/invoices/{id}/pay-now` | `merchant:invoices:collect` | The customer's own pay-now, run by a host that authenticated the customer (Client `PayInvoiceNow`). Same contract and answers as `/v1/me/invoices/{id}/pay-now` |
+| POST | `/v1/merchant/customers/{customer_id}/subscriptions/{id}/retry-now` | `merchant:subscriptions:update` | The customer's own retry-now, run by a host (Client `RetrySubscriptionNow`). Same contract as `/v1/me/subscriptions/{id}/retry-now` |
 | POST | `/v1/merchant/invoices/{id}/uncollectible` | `merchant:invoices:update` | Stop collection while retaining the debt |
 | POST | `/v1/merchant/invoices/{id}/void` | `merchant:invoices:update` | Void an eligible invoice and write off its remaining debt |
 

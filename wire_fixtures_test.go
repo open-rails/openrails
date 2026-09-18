@@ -85,6 +85,24 @@ func canonicalWireFixtures() map[string]any {
 			ID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), CustomerID: customerFixture, EventType: "subscription_reprice_scheduled", CreatedAt: when,
 			Data: NotificationData{SubscriptionID: subscriptionFixture, FromPriceID: priceFixture, ToPriceID: scheduledPriceFixture, OldAmount: &maxMoney, NewAmount: &minMoney, Currency: "USD", EffectiveAt: &when},
 		},
+		"invoice_pay_now.json": InvoicePayNowResult{
+			Invoice: InvoiceDTO{
+				ID: invoiceFixture, Currency: "USD", PeriodFrom: when, PeriodTo: when, UsageTotal: maxMoney, SubtotalAmount: maxMoney, TotalAmount: maxMoney, AmountDue: maxMoney,
+				LineItems: []InvoiceLineItemDTO{{EventType: "api_call", Amount: maxMoney, Count: 1}}, Status: "past_due", CollectionMethod: "charge_automatically",
+				IssuedAt: &when, DueAt: &when, CollectionFailureCount: 1, CollectionFailedAt: &when, CollectionIntentID: &operationFixture, CreatedAt: when,
+				Recovery: &PaymentRecovery{
+					BlockedReason: RecoveryBlockedOutcomeUnknown, NextAttemptAt: nil, AttemptCount: 2, FailureCategory: "insufficient_funds", LastFailureCode: "201", LastFailedAt: &when,
+					CompatiblePaymentMethodIDs: []PaymentMethodID{methodFixture}, Operation: &PaymentOperation{ID: operationFixture, Status: "unknown_needs_verify"},
+				},
+			},
+			Attempt:   InvoicePaymentAttemptDTO{ID: attemptFixture, InvoiceID: invoiceFixture, Currency: "USD", Amount: maxMoney, Status: "attempted", PaymentMethodID: &methodFixture, Rail: ptr("nmi"), AttemptedAt: when},
+			Operation: PaymentOperation{ID: operationFixture, Status: "unknown_needs_verify"},
+		},
+		"subscription_retry_now.json": SubscriptionRetryNowResult{
+			Subscription: subscriptionFixtureValue(when, maxMoney, expMonth, expYear),
+			Payment:      &SubscriptionPayment{ID: paymentFixture, Status: "completed", Amount: maxMoney, Currency: "USD", Rail: "nmi", TransactionID: "txn-1", PurchasedAt: when},
+			Operation:    PaymentOperation{ID: operationFixture, Status: "succeeded"},
+		},
 		"catalog_price.json": CatalogPrice{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, CreatedAt: when, UpdatedAt: when},
 		"checkout_session.json": CheckoutSession{
 			ID: sessionFixture, Status: "succeeded", Mode: "subscription", PriceID: priceFixture, Amount: maxMoney, Currency: "USD", PaymentStatus: "paid",
@@ -114,6 +132,7 @@ func subscriptionFixtureValue(when time.Time, maxMoney int64, expMonth, expYear 
 		ScheduledProduct: &SubscriptionProduct{ID: productFixture, Key: "pro", DisplayName: "Pro"},
 		Card:             &SubscriptionCard{Brand: "visa", Last4: "4242", ExpMonth: &expMonth, ExpYear: &expYear},
 		Access:           &SubscriptionAccess{Kind: "subscription", Entitlement: "premium", SubscriptionID: subscriptionFixture, Rail: "nmi", StartAt: when, EndAt: &when},
+		Recovery:         &PaymentRecovery{BlockedReason: RecoveryBlockedNotDue, CompatiblePaymentMethodIDs: []PaymentMethodID{methodFixture}},
 		Payments:         []Payment{{ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, Currency: "USD", CustomerID: customerFixture, SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, CreatedAt: when}},
 	}
 }
@@ -128,6 +147,9 @@ var (
 	methodFixture         = PaymentMethodID(uuid.MustParse("dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 	paymentFixture        = PaymentID(uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
 	sessionFixture        = CheckoutSessionID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
+	invoiceFixture        = uuid.MustParse("88888888-8888-4888-8888-888888888888")
+	attemptFixture        = uuid.MustParse("99999999-9999-4999-8999-999999999999")
+	operationFixture      = uuid.MustParse("01999999-9999-7999-8999-999999999999")
 )
 
 func TestCanonicalWireFixtures(t *testing.T) {

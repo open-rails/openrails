@@ -30,6 +30,11 @@ var (
 	ErrInvoiceRetryInProgress          = errors.New("invoice collection is in progress")
 	ErrInvoiceRetryOutcomeUnknown      = errors.New("invoice collection outcome is unknown; resolve the operation before another attempt")
 	ErrInvoiceRetryIdempotencyConflict = errors.New("invoice retry idempotency conflict")
+	// ErrPaymentRecoveryRailUnsupported refuses a customer recovery charge on
+	// a rail that drives its own dunning or cannot charge a saved method:
+	// OpenRails cannot know the provider is not about to charge the same
+	// obligation. Raised before any provider traffic.
+	ErrPaymentRecoveryRailUnsupported = errors.New("payment recovery is not supported on this rail")
 )
 
 type InvoiceCollectionRetryRequest struct {
@@ -39,9 +44,10 @@ type InvoiceCollectionRetryRequest struct {
 }
 
 type InvoiceCollectionRetryResult struct {
-	Invoice  *models.Invoice
-	Attempt  models.InvoicePaymentAttempt
-	Replayed bool
+	Invoice     *models.Invoice
+	Attempt     models.InvoicePaymentAttempt
+	OperationID uuid.UUID
+	Replayed    bool
 }
 
 // ListInvoicePaymentAttempts returns one payer-owned invoice's collection
@@ -257,6 +263,15 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Ru
 // operation's durable state without another provider charge; a different
 // method under the same key is a conflict.
 func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request InvoiceCollectionRetryRequest) (*InvoiceCollectionRetryResult, error) {
+	return s.runInvoiceCollectionRequest(ctx, runner, payer, request, invoiceCollectionEnqueue{
+		manual: true, origin: intents.OriginAdmin, originReason: "manual invoice collection retry",
+	})
+}
+
+// runInvoiceCollectionRequest binds a client key to one saved payment method,
+// enqueues (or replays) the durable operation and executes it inline; the
+// answer is the invoice and the attempt as they stand once execution returns.
+func (s *MoneyService) runInvoiceCollectionRequest(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request InvoiceCollectionRetryRequest, opts invoiceCollectionEnqueue) (*InvoiceCollectionRetryResult, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -279,9 +294,9 @@ func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *inten
 	}
 	key := invoiceRetryOperationKey(request.InvoiceID, request.IdempotencyKey)
 	pm := request.PaymentMethodID
-	intentID, replayed, err := s.enqueueInvoiceCollection(ctx, payer, request.InvoiceID, invoiceCollectionEnqueue{
-		manual: true, paymentMethodID: &pm, operationKey: key, origin: intents.OriginAdmin, originReason: "manual invoice collection retry",
-	})
+	opts.paymentMethodID = &pm
+	opts.operationKey = key
+	intentID, replayed, err := s.enqueueInvoiceCollection(ctx, payer, request.InvoiceID, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +318,19 @@ func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *inten
 	if err != nil {
 		return nil, fmt.Errorf("load invoice retry outcome: %w", err)
 	}
-	return &InvoiceCollectionRetryResult{Invoice: invoice, Attempt: invoicePaymentAttemptFromGen(attemptRow), Replayed: replayed}, nil
+	return &InvoiceCollectionRetryResult{Invoice: invoice, Attempt: invoicePaymentAttemptFromGen(attemptRow), OperationID: intentID, Replayed: replayed}, nil
+}
+
+// PayInvoiceNow is the customer's own pay-now (#809): the payer charges one
+// open or past-due invoice through a saved method they own, on a rail
+// OpenRails drives (RecoveryRailSupported). It is the manual collection
+// operation under a user origin: same durable claim under the invoice lock,
+// same client-key replay, same exact-receipt convergence. Unlike the merchant
+// retry it needs no prior failure and never reopens an uncollectible invoice.
+func (s *MoneyService) PayInvoiceNow(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request InvoiceCollectionRetryRequest) (*InvoiceCollectionRetryResult, error) {
+	return s.runInvoiceCollectionRequest(ctx, runner, payer, request, invoiceCollectionEnqueue{
+		manual: true, payNow: true, origin: intents.OriginUser, originReason: "customer invoice pay-now",
+	})
 }
 
 // invoiceRetryOperationKey binds one client retry key to one invoice.
@@ -314,6 +341,16 @@ func invoiceRetryOperationKey(invoiceID uuid.UUID, clientKey string) string {
 
 func scheduledInvoiceCollectionKey(invoiceID uuid.UUID, ordinal int64) string {
 	return fmt.Sprintf("%s:%s:attempt:%d", TypeInvoiceCollection, invoiceID, ordinal)
+}
+
+// invoicePayableNow gates the customer pay-now surface (#809): an open or
+// past-due invoice with money due and no live operation. A never-attempted
+// invoice qualifies (paying early is the point); an uncollectible one does
+// not (a merchant closed it; only the merchant retry reopens it).
+func invoicePayableNow(invoice *models.Invoice) bool {
+	return invoice != nil && invoice.CollectionIntentID == nil &&
+		(invoice.Status == "open" || invoice.Status == "past_due") &&
+		invoice.AmountDue > 0
 }
 
 // invoiceCollectionRetryable gates the MANUAL retry surface. `open` counts once
@@ -341,8 +378,11 @@ func scheduledInvoiceCollectionEligible(invoice *models.Invoice, minThreshold in
 }
 
 type invoiceCollectionEnqueue struct {
-	minThreshold    int64
-	manual          bool
+	minThreshold int64
+	manual       bool
+	// payNow is the customer surface: pay-now eligibility and the
+	// OpenRails-driven rail gate on the bound method.
+	payNow          bool
 	paymentMethodID *uuid.UUID
 	operationKey    string
 	origin          intents.Origin
@@ -403,7 +443,10 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			return ErrInvoiceRetryInProgress
 		}
 		eligible := scheduledInvoiceCollectionEligible(invoice, opts.minThreshold, now)
-		if opts.manual {
+		switch {
+		case opts.payNow:
+			eligible = invoicePayableNow(invoice)
+		case opts.manual:
 			eligible = invoiceCollectionRetryable(invoice)
 		}
 		if !eligible {
@@ -499,8 +542,19 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 	if method.MerchantID != merchantID || method.CustomerID != payerID || strings.TrimSpace(method.ParkReason) != "" {
 		return nil, ErrCollectionPaymentMethodInvalid
 	}
-	if descriptor, ok := rails.Lookup(models.Rail(method.Rail)); !ok || !descriptor.SupportsChargeSavedMethod {
+	descriptor, ok := rails.Lookup(models.Rail(method.Rail))
+	if !ok || !descriptor.SupportsChargeSavedMethod {
 		return nil, ErrCollectionPaymentMethodInvalid
 	}
+	if opts.payNow && !RecoveryRailSupported(descriptor) {
+		return nil, fmt.Errorf("%w: rail %q", ErrPaymentRecoveryRailUnsupported, method.Rail)
+	}
 	return &method, nil
+}
+
+// RecoveryRailSupported reports whether a customer recovery charge may run on
+// the rail: OpenRails owns its retry timing AND can charge a saved method, so
+// no provider-side retry can collide with ours. Today that is NMI.
+func RecoveryRailSupported(descriptor rails.Descriptor) bool {
+	return descriptor.OpenRailsDrivenDunning && descriptor.SupportsChargeSavedMethod
 }

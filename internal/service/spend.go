@@ -223,7 +223,7 @@ func invoicePaymentAttemptToDTO(attempt models.InvoicePaymentAttempt) InvoicePay
 }
 
 // ListInvoices lists an payer's finalized invoices, newest period first,
-// paginated (issue #303). Like GetUsage it pins a merchant-scoped connection so the
+// paginated (issue #303), each with its customer recovery state (#809). Like GetUsage it pins a merchant-scoped connection so the
 // read runs RLS-scoped under the openrails_app role (#227); RunInMerchantConn
 // reuses the request's already-pinned connection when one is set. Returns the
 // page of public DTOs plus the total count for pagination.
@@ -239,9 +239,19 @@ func (s *Service) ListInvoices(ctx context.Context, payer identity.CustomerID, l
 			return err
 		}
 		total = t
-		out = make([]InvoiceDTO, 0, len(rows))
+		invoices := make([]*models.Invoice, 0, len(rows))
 		for i := range rows {
-			out = append(out, invoiceToDTO(&rows[i]))
+			invoices = append(invoices, &rows[i])
+		}
+		recovery, err := s.moneyService().InvoiceRecovery(ctx, payer, invoices)
+		if err != nil {
+			return err
+		}
+		out = make([]InvoiceDTO, 0, len(rows))
+		for _, invoice := range invoices {
+			dto := invoiceToDTO(invoice)
+			dto.Recovery = recovery[invoice.ID]
+			out = append(out, dto)
 		}
 		return nil
 	})
@@ -264,7 +274,12 @@ func (s *Service) GetInvoice(ctx context.Context, payer identity.CustomerID, id 
 		if err != nil {
 			return err
 		}
+		recovery, err := s.moneyService().InvoiceRecovery(ctx, payer, []*models.Invoice{inv})
+		if err != nil {
+			return err
+		}
 		dto := invoiceToDTO(inv)
+		dto.Recovery = recovery[inv.ID]
 		out = &dto
 		return nil
 	})

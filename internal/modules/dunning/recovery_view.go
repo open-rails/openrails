@@ -1,0 +1,134 @@
+package dunning
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jonboulle/clockwork"
+
+	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/timeutil"
+	"github.com/open-rails/openrails/pkg/merchant"
+)
+
+// RecoveryView projects a customer's retry-now state onto their subscription.
+type RecoveryView struct {
+	DB    *db.DB
+	Money *money.MoneyService
+	Clock clockwork.Clock
+}
+
+// Subscription is the retry-now state of one subscription the payer owns:
+// what blocks a retry, the schedule's own next attempt, the recorded failures
+// this period and the saved methods a rebill may run through.
+func (v RecoveryView) Subscription(ctx context.Context, sub *models.Subscription) (*openrails.PaymentRecovery, error) {
+	if v.DB == nil || v.Money == nil || sub == nil {
+		return nil, fmt.Errorf("recovery view not initialized")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now := timeutil.FirstClock(v.Clock).Now().UTC()
+	q := v.DB.Gen(ctx)
+	rows, err := v.Money.RecoveryPaymentMethodRows(ctx, identity.CustomerID(sub.CustomerID))
+	if err != nil {
+		return nil, err
+	}
+	recovery := &openrails.PaymentRecovery{
+		AttemptCount:               AttemptOrdinal(sub),
+		CompatiblePaymentMethodIDs: make([]openrails.PaymentMethodID, 0, len(rows)),
+	}
+	for _, row := range rows {
+		if row.PspID == sub.PspID && strings.TrimSpace(row.RailMethodRef) != "" {
+			recovery.CompatiblePaymentMethodIDs = append(recovery.CompatiblePaymentMethodIDs, openrails.PaymentMethodID(row.ID))
+		}
+	}
+	pastDue := sub.Status == models.StatusPastDue && sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.IsZero()
+	if pastDue {
+		if failed, err := q.GetLatestFailedPaymentBySubscription(ctx, gen.GetLatestFailedPaymentBySubscriptionParams{MerchantID: mid.UUID(), SubscriptionID: sub.ID}); err == nil {
+			recovery.FailureCategory = derefString(failed.FailureReason)
+			recovery.LastFailureCode = derefString(failed.FailureCode)
+			at := failed.PurchasedAt
+			recovery.LastFailedAt = &at
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("load last failed rebill: %w", err)
+		}
+		live, err := v.liveOperation(ctx, q, mid.UUID(), sub)
+		if err != nil {
+			return nil, err
+		}
+		if live != nil {
+			recovery.Operation = live
+			recovery.AttemptCount++
+		}
+		// A scheduled retry is the engine's own next attempt; a lease (the
+		// worker mid-charge) is not a schedule.
+		if sub.NextRetryAt != nil && sub.NextRetryAt.After(now.Add(AttemptLease)) {
+			recovery.NextAttemptAt = sub.NextRetryAt
+		}
+	}
+	recovery.Retryable, recovery.BlockedReason = subscriptionRecoveryEligibility(sub, recovery, now, pastDue)
+	return recovery, nil
+}
+
+// liveOperation is the current period's unresolved rebill operation, if any.
+func (v RecoveryView) liveOperation(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, sub *models.Subscription) (*openrails.PaymentOperation, error) {
+	rows, err := q.ListRailIntentsBySubject(ctx, gen.ListRailIntentsBySubjectParams{MerchantID: merchantID, IntentType: intents.TypeManualRebill, SubscriptionID: sub.ID, RowLimit: 10})
+	if err != nil {
+		return nil, fmt.Errorf("list rebill operations: %w", err)
+	}
+	periodEnd := sub.CurrentPeriodEndsAt.UTC().Unix()
+	for _, row := range rows {
+		var payload intents.ManualRebillPayload
+		if len(row.Payload) == 0 || json.Unmarshal(row.Payload, &payload) != nil || payload.PeriodEnd.UTC().Unix() != periodEnd {
+			continue
+		}
+		switch row.Status {
+		case intents.StatusPending, intents.StatusInFlight, intents.StatusUnknownNeedsVerify, intents.StatusFailedRetryable:
+			return &openrails.PaymentOperation{ID: row.ID, Status: row.Status}, nil
+		}
+	}
+	return nil, nil
+}
+
+func subscriptionRecoveryEligibility(sub *models.Subscription, recovery *openrails.PaymentRecovery, now time.Time, pastDue bool) (bool, string) {
+	descriptor, ok := rails.Lookup(sub.Rail)
+	switch {
+	case !pastDue:
+		return false, openrails.RecoveryBlockedNotDue
+	case !ok || !money.RecoveryRailSupported(descriptor) || rails.AutoBilled(sub.Rail, sub.PaymentMethod):
+		return false, openrails.RecoveryBlockedRailUnsupported
+	case recovery.Operation != nil && recovery.Operation.Status == intents.StatusUnknownNeedsVerify:
+		return false, openrails.RecoveryBlockedOutcomeUnknown
+	case recovery.Operation != nil:
+		return false, openrails.RecoveryBlockedInProgress
+	case sub.NextRetryAt != nil && sub.NextRetryAt.After(now) && !sub.NextRetryAt.After(now.Add(AttemptLease)):
+		// The dunning worker holds the lease.
+		return false, openrails.RecoveryBlockedInProgress
+	case sub.PaymentMethod == nil || strings.TrimSpace(sub.PaymentMethod.RailCustomerRef) == "" ||
+		strings.TrimSpace(sub.PaymentMethod.RailMethodRef) == "" || strings.TrimSpace(sub.PaymentMethod.ParkReason) != "":
+		return false, openrails.RecoveryBlockedNoPaymentMethod
+	}
+	return true, ""
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
