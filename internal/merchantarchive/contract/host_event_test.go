@@ -26,11 +26,17 @@ func TestPaymentHostEventStructuredDedupeKey(t *testing.T) {
 	if ValidateValues(p, []*string{&event, &payment, &dedupe, &delivered}) == nil {
 		t.Error("accepted payment UUID exemption for another event type")
 	}
-	if safeText(dedupe) {
-		t.Error("structured ID exemption leaked into free text")
+	// The key is a UUID-derived id, so the card scan reads it as one wherever
+	// it appears. What confines it to its own row is the coordinate check
+	// above, not a card-shaped accident.
+	if !safeText(dedupe) {
+		t.Error("a UUID-derived id must not read as card data")
 	}
-	if validateJSON("payments.metadata", `{"order_id":"`+dedupe+`"}`) == nil {
-		t.Error("structured ID exemption leaked into arbitrary metadata")
+	if validateJSON("payments.metadata", `{"order_id":"`+dedupe+`"}`) != nil {
+		t.Error("a UUID-derived id must not read as card data in metadata")
+	}
+	if validateJSON("payments.metadata", `{"order_id":"4111111111111111"}`) == nil {
+		t.Error("accepted a card number in metadata")
 	}
 	event, payment = "payment.settled", testMerchant
 	dedupe = "payment:" + payment
