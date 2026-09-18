@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"sort"
 	"strconv"
@@ -131,11 +132,14 @@ type leaf struct {
 	float bool
 }
 
-func (l leaf) add(o leaf) leaf {
+func (l leaf) add(o leaf) (leaf, error) {
 	if l.float || o.float {
-		return leaf{f: l.value() + o.value(), float: true}
+		return leaf{f: l.value() + o.value(), float: true}, nil
 	}
-	return leaf{n: l.n + o.n}
+	if (o.n > 0 && l.n > math.MaxInt64-o.n) || (o.n < 0 && l.n < math.MinInt64-o.n) {
+		return leaf{}, fmt.Errorf("balance aggregate does not fit int64")
+	}
+	return leaf{n: l.n + o.n}, nil
 }
 
 func (l leaf) value() float64 {
@@ -293,8 +297,7 @@ func scanStmt(ctx context.Context, tx pgx.Tx, plan *Plan, st stmt, groups map[st
 	}
 
 	if st.balance && plan.HasTime {
-		foldBalance(plan, st, raws, groups)
-		return nil
+		return foldBalance(plan, st, raws, groups)
 	}
 
 	for _, r := range raws {
@@ -326,7 +329,7 @@ func scanStmt(ctx context.Context, tx pgx.Tx, plan *Plan, st stmt, groups map[st
 // foldBalance turns per-bucket transfer deltas (NULL bucket = before the first
 // edge) into running balances at each bucket label: balance(e_i) = base +
 // sum(deltas of buckets before e_i). Strictly-before semantics.
-func foldBalance(plan *Plan, st stmt, raws []rawRow, groups map[string]*group) {
+func foldBalance(plan *Plan, st stmt, raws []rawRow, groups map[string]*group) error {
 	type combo struct {
 		dims  []string
 		base  []leaf
@@ -345,7 +348,11 @@ func foldBalance(plan *Plan, st stmt, raws []rawRow, groups map[string]*group) {
 		}
 		if r.bucket == nil {
 			for i := range c.base {
-				c.base[i] = c.base[i].add(r.vals[i])
+				value, err := c.base[i].add(r.vals[i])
+				if err != nil {
+					return fmt.Errorf("metrics %s: %w", st.leaves[i].Name, err)
+				}
+				c.base[i] = value
 			}
 			continue
 		}
@@ -354,24 +361,37 @@ func foldBalance(plan *Plan, st stmt, raws []rawRow, groups map[string]*group) {
 			d = make([]leaf, len(st.leaves))
 		}
 		for i := range d {
-			d[i] = d[i].add(r.vals[i])
+			value, err := d[i].add(r.vals[i])
+			if err != nil {
+				return fmt.Errorf("metrics %s: %w", st.leaves[i].Name, err)
+			}
+			d[i] = value
 		}
 		c.delta[*r.bucket] = d
 	}
 	for _, c := range combos {
 		running := append([]leaf(nil), c.base...)
-		for _, label := range plan.Buckets {
+		for index, label := range plan.Buckets {
 			g := ensureGroup(groups, label, c.dims)
 			for i, m := range st.leaves {
 				g.vals[m.Name] = running[i]
 			}
+			// The last bucket's delta is outside every requested snapshot.
+			if index == len(plan.Buckets)-1 {
+				break
+			}
 			if d, ok := c.delta[label]; ok {
 				for i := range running {
-					running[i] = running[i].add(d[i])
+					value, err := running[i].add(d[i])
+					if err != nil {
+						return fmt.Errorf("metrics %s: %w", st.leaves[i].Name, err)
+					}
+					running[i] = value
 				}
 			}
 		}
 	}
+	return nil
 }
 
 // toFloat reads a cell for ordering; money and counts compare exactly as
