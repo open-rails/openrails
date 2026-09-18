@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -137,15 +138,15 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		require.Equal(t, http.StatusOK, status, string(body))
 	}
 	getByKey := func(token string) struct {
-		ID        uuid.UUID `json:"id"`
-		ProductID uuid.UUID `json:"product_id"`
+		ID        openrails.PriceID   `json:"id"`
+		ProductID openrails.ProductID `json:"product_id"`
 	} {
 		t.Helper()
 		status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices/by-key/"+priceKey, token, nil)
 		require.Equal(t, http.StatusOK, status, string(body))
 		var p struct {
-			ID        uuid.UUID `json:"id"`
-			ProductID uuid.UUID `json:"product_id"`
+			ID        openrails.PriceID   `json:"id"`
+			ProductID openrails.ProductID `json:"product_id"`
 		}
 		require.NoError(t, json.Unmarshal(body, &p))
 		return p
@@ -260,7 +261,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 				CreatePrice   struct {
 					ProductID  string `json:"product_id"`
 					Key        string `json:"key"`
-					UnitAmount int64  `json:"unit_amount"`
+					UnitAmount int64  `json:"unit_amount,string"`
 					Currency   string `json:"currency"`
 				} `json:"create_price"`
 			} `json:"price_change"`
@@ -284,7 +285,7 @@ func TestMerchantCatalogCopilotAsk(t *testing.T) {
 		status, priceBody := requestJSON(t, http.MethodGet, draftSurface.BaseURL+"/v1/merchant/catalog/prices/by-key/"+incPriceKey, draftToken, nil)
 		require.Equal(t, http.StatusOK, status)
 		var live struct {
-			UnitAmount int64 `json:"unit_amount"`
+			UnitAmount int64 `json:"unit_amount,string"`
 		}
 		require.NoError(t, json.Unmarshal(priceBody, &live))
 		require.EqualValues(t, 10_000_000, live.UnitAmount, "drafting must never mutate the live price")

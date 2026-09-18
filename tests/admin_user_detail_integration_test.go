@@ -13,14 +13,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	openrails "github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 type testDelegatedResolver struct {
@@ -112,7 +112,7 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 	methods, ok := resp["payment_methods"].([]any)
 	require.True(t, ok, "payment_methods must be an array: %s", w.Body.String())
 	require.Len(t, methods, 1)
-	require.Equal(t, api.FormatPaymentMethodID(pm.ID), methods[0].(map[string]any)["id"])
+	require.Equal(t, openrails.PaymentMethodID(pm.ID).String(), methods[0].(map[string]any)["id"])
 	_, ok = resp["subscription"]
 	require.False(t, ok, "legacy singular subscription field should be gone: %s", w.Body.String())
 	subs, ok := resp["subscriptions"].([]any)
@@ -126,10 +126,10 @@ func TestAdminUserDetailComposite_Delegated(t *testing.T) {
 		row := item.(map[string]any)
 		byCurrency[row["currency"].(string)] = row
 	}
-	require.EqualValues(t, 1200, byCurrency[money.DefaultCurrency]["balance"])
-	require.EqualValues(t, 0, byCurrency[money.DefaultCurrency]["outstanding_owed_amount"])
-	require.EqualValues(t, 0, byCurrency["EUR"]["balance"])
-	require.EqualValues(t, 700, byCurrency["EUR"]["outstanding_owed_amount"])
+	require.Equal(t, "1200", byCurrency[money.DefaultCurrency]["balance"], "balances are decimal strings")
+	require.Equal(t, "0", byCurrency[money.DefaultCurrency]["outstanding_owed_amount"])
+	require.Equal(t, "0", byCurrency["EUR"]["balance"])
+	require.Equal(t, "700", byCurrency["EUR"]["outstanding_owed_amount"])
 	_, ok = resp["product_access"]
 	require.True(t, ok, "composite must embed a product_access section")
 }

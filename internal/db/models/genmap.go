@@ -206,6 +206,7 @@ func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
 		LastRetryAt:           s.LastRetryAt,
 		RetryAttempts:         DerefIntPtr(s.RetryAttempts),
 		NextRetryAt:           s.NextRetryAt,
+		DunningClaimedUntil:   s.DunningClaimedUntil,
 		GraceEndsAt:           s.GraceEndsAt,
 		CancelFeedback:        s.CancelFeedback,
 		CancelledAt:           s.CancelledAt,

@@ -9,12 +9,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"

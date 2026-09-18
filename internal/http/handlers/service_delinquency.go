@@ -4,45 +4,47 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// serviceDelinquencyResponse is one payer's delinquency state on the wire.
+// serviceDelinquencyResponse is one payer's delinquency state on the wire;
+// instants are time.Time so they encode at full RFC3339 precision.
 type serviceDelinquencyResponse struct {
-	CustomerID      string `json:"customer_id"`
-	Currency        string `json:"currency"`
-	State           string `json:"state"`
-	OverdueSince    string `json:"overdue_since,omitempty"`
-	OverdueAmount   int64  `json:"overdue_amount"`
-	OverdueInvoices int    `json:"overdue_invoices"`
-	EnteredAt       string `json:"entered_at"`
-	EvaluatedAt     string `json:"evaluated_at"`
+	CustomerID      openrails.CustomerID `json:"customer_id"`
+	Currency        string               `json:"currency"`
+	State           string               `json:"state"`
+	OverdueSince    *time.Time           `json:"overdue_since,omitempty"`
+	OverdueAmount   int64                `json:"overdue_amount,string"`
+	OverdueInvoices int                  `json:"overdue_invoices"`
+	EnteredAt       time.Time            `json:"entered_at"`
+	EvaluatedAt     time.Time            `json:"evaluated_at"`
 }
 
 func serviceDelinquencyRows(rows []billingservice.DelinquencySnapshot) []serviceDelinquencyResponse {
 	out := make([]serviceDelinquencyResponse, 0, len(rows))
 	for _, r := range rows {
 		row := serviceDelinquencyResponse{
-			CustomerID:      r.CustomerID.String(),
+			CustomerID:      openrails.CustomerID(r.CustomerID),
 			Currency:        r.Currency,
 			State:           r.State.String(),
 			OverdueAmount:   r.OverdueAmount,
 			OverdueInvoices: r.OverdueInvoices,
-			EnteredAt:       r.EnteredAt.UTC().Format(rfc3339),
-			EvaluatedAt:     r.EvaluatedAt.UTC().Format(rfc3339),
+			EnteredAt:       r.EnteredAt.UTC(),
+			EvaluatedAt:     r.EvaluatedAt.UTC(),
 		}
 		if r.OverdueSince != nil {
-			row.OverdueSince = r.OverdueSince.UTC().Format(rfc3339)
+			since := r.OverdueSince.UTC()
+			row.OverdueSince = &since
 		}
 		out = append(out, row)
 	}
 	return out
 }
-
-const rfc3339 = "2006-01-02T15:04:05Z07:00"
 
 // ServiceListDelinquency returns the merchant's overdue roster (or#878) plus
 // the effective policy it was judged against, so an operator reading "23 payers
@@ -80,7 +82,7 @@ func ServiceListDelinquency(r *httprequest.Request) {
 		"delinquency": serviceDelinquencyRows(rows),
 		"policy": map[string]any{
 			"grace_days":   policy.GraceDays,
-			"amount_floor": policy.AmountFloor,
+			"amount_floor": strconv.FormatInt(policy.AmountFloor, 10),
 		},
 	})
 }

@@ -18,7 +18,7 @@ beforeEach(() => {
 })
 
 const input = {
-  amount: 1000000,
+  amount: "1000000",
   currency: "USD",
   source: "admin" as const,
   source_id: "stable-operation",
@@ -111,7 +111,7 @@ describe("credit support queries", () => {
     client.setQueryData(key, { balance: 100 })
     const invalidate = vi.spyOn(client, "invalidateQueries").mockResolvedValue()
     const result = {
-      grant: { id: "grant-a", revoked_amount: 70 },
+      grant: { id: "grant-a", revoked_amount: "70" },
       replayed: false,
     }
     state.api.mockResolvedValue(result)

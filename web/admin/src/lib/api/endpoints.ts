@@ -143,7 +143,7 @@ export const revokeProductAccess = (customerId: string, grantId: string) =>
 export interface OffChannelPaymentRequest {
   price_id: string
   transaction_id: string
-  amount?: number
+  amount?: string
   currency?: string
   purchased_at?: string
   discount_code?: string
@@ -164,7 +164,7 @@ export const createOffChannelPayment = (
 export interface SubscriptionFilters {
   status?: string
   rail?: string
-  user_id?: string
+  customer_id?: string
   price_id?: string
   sort_by?: string
   sort_order?: string
@@ -218,16 +218,23 @@ export const previewSubscriptionTierChange = (id: string, priceId: string) =>
     body: { price_id: priceId },
   })
 
-export const changeSubscriptionTier = (id: string, priceId: string) =>
+// A tier change is a durable operation keyed by this header: the same key
+// replays its result, so a retry must reuse the key of the reviewed change.
+export const changeSubscriptionTier = (
+  id: string,
+  priceId: string,
+  idempotencyKey: string
+) =>
   api<TierChangeResult>(`/merchant/subscriptions/${id}/change-tier`, {
     method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
     body: { price_id: priceId },
   })
 
 // --- Payments ---
 
 export interface PaymentFilters {
-  user_id?: string
+  customer_id?: string
   rail?: string
   subscription_id?: string
   transaction_id?: string
@@ -252,7 +259,7 @@ export const getPayment = (id: string, signal?: AbortSignal) =>
 
 export const refundPayment = (
   id: string,
-  amount: number,
+  amount: string,
   reason: string,
   revokeAccess: boolean
 ) =>
@@ -387,11 +394,11 @@ export const listPrices = (
 
 export interface PriceRequest {
   product_id: string
-  unit_amount: number
+  unit_amount: string
   currency: string
   access_duration_hours?: number
   auto_renew?: boolean
-  trial_unit_amount?: number
+  trial_unit_amount?: string
   trial_duration_hours?: number
   // Key (#774): declaring the SAME key as an existing live price with a
   // DIFFERENT amount is a version bump (the #777 wizard's whole mechanism) —
@@ -612,12 +619,19 @@ export const dryRunCheckoutRouting = (
     signal,
   })
 
-export const deletePaymentProvider = (rail: string, environment?: string) =>
+// archivePaymentProviderAccount (#655) archives exactly this account by its
+// immutable id, without contacting the provider. The rail's last active
+// account is refused (409 provider_account_last_active) unless allowLast.
+export const archivePaymentProviderAccount = (
+  rail: string,
+  id: string,
+  allowLast = false
+) =>
   api<{ payment_provider: PaymentProviderConfig }>(
-    `/merchant/payment-providers/${rail}`,
+    `/merchant/payment-providers/${rail}/accounts/${id}/archive`,
     {
-      method: "DELETE",
-      query: environment ? { environment } : undefined,
+      method: "POST",
+      body: allowLast ? { allow_last: true } : {},
     }
   )
 

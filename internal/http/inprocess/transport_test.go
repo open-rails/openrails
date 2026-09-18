@@ -72,8 +72,10 @@ func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 	host := context.WithValue(t.Context(), privateKey{}, "host-private")
 	host = requestauth.WithHostPrincipal(host, &requestauth.HostPrincipal{MerchantID: merchant.ID(uuid.New()), Permissions: []string{"platform:*"}})
 	host = billingauth.SetUserContext(host, billingauth.UserContext{UserID: uuid.NewString()})
+	// #445: the client carries its construction-time binding on the context.
+	client := merchant.WithID(host, bound)
 	for _, path := range []string{"/v1/merchant/ordinary", "/v1/merchant/billing-archive"} {
-		req, _ := http.NewRequestWithContext(host, http.MethodGet, "http://openrails.invalid"+path, nil)
+		req, _ := http.NewRequestWithContext(client, http.MethodGet, "http://openrails.invalid"+path, nil)
 		resp, err := transport.RoundTrip(req)
 		require.NoError(t, err)
 		body, err := io.ReadAll(resp.Body)
@@ -81,21 +83,23 @@ func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 		require.Equal(t, "ok", string(body))
 		require.NoError(t, resp.Body.Close())
 	}
-	bound = merchant.ID(uuid.New()) // live constructor binding, not cached
-	req, _ := http.NewRequestWithContext(host, http.MethodGet, "http://openrails.invalid/ordinary", nil)
-	resp, err := transport.RoundTrip(req)
+	unbound, _ := http.NewRequestWithContext(host, http.MethodGet, "http://openrails.invalid/ordinary", nil)
+	resp, err := transport.RoundTrip(unbound)
 	require.NoError(t, err)
-	_ = resp.Body.Close()
-	require.Equal(t, 3, called)
+	require.NoError(t, resp.Body.Close())
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, 2, called, "an unbound client must not reach the handler")
+	bound = merchant.ID(uuid.New()) // live constructor binding, not cached
 	conflict, _ := http.NewRequestWithContext(merchant.WithID(host, original), http.MethodGet, "http://openrails.invalid/ordinary", nil)
 	resp, err = transport.RoundTrip(conflict)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusConflict, resp.StatusCode)
-	require.Equal(t, 3, called, "conflicting pin must not reach handler")
+	require.Equal(t, 2, called, "a client bound to another merchant must not reach the handler")
 }
 
 func TestTransportImportCancellationClosesRequestBody(t *testing.T) {
+	bound := merchant.ID(uuid.New())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	reader, writer := io.Pipe()
@@ -107,8 +111,8 @@ func TestTransportImportCancellationClosesRequestBody(t *testing.T) {
 		_, err := io.Copy(io.Discard, r.Body)
 		finished <- err
 		w.WriteHeader(http.StatusBadRequest)
-	}), func() merchant.ID { return merchant.ID(uuid.New()) })
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/merchant/billing-archive", reader)
+	}), func() merchant.ID { return bound })
+	req, err := http.NewRequestWithContext(merchant.WithID(ctx, bound), http.MethodPost, "http://openrails.invalid/v1/merchant/billing-archive", reader)
 	require.NoError(t, err)
 	roundTripDone := make(chan struct{})
 	go func() {

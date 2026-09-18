@@ -74,10 +74,10 @@ func (h *HostTransactions) GetProviderBillingQualification(ctx context.Context, 
 
 // bind applies the runtime's merchant exactly as the in-process Client does.
 func (h *HostTransactions) bind(ctx context.Context) (context.Context, error) {
-	if h == nil || h.rt == nil || h.rt.emb == nil || h.rt.svc == nil {
+	if h == nil || h.rt == nil || h.rt.app == nil || h.rt.svc == nil {
 		return ctx, fmt.Errorf("openrails embed: runtime is not initialized")
 	}
-	bound := h.rt.emb.App().Runtime.ConfiguredMerchant()
+	bound := h.rt.app.Runtime.ConfiguredMerchant()
 	if bound.IsZero() {
 		return ctx, fmt.Errorf("openrails embed: no merchant is bound")
 	}

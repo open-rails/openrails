@@ -1,9 +1,11 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 )
 
 // NotificationEventType represents the type of notification event
@@ -64,14 +66,23 @@ const (
 // NotificationQueue stores in-app notification attempts
 // Used for rebill failures and other user notifications
 type NotificationQueue struct {
-	ID uuid.UUID `json:"id"`
+	ID uuid.UUID
 	// CustomerID is the OpenRails payable merchant subject for this row (#317).
 	// The ID is the host subject UUID within MerchantID; customers stores issuer metadata.
-	CustomerID uuid.UUID             `json:"customer_id,omitempty"`
-	EventType  NotificationEventType `json:"event_type"`
-	Data       map[string]any        `json:"data,omitempty"`
-	Seen       bool                  `json:"seen"` // Whether user has seen this notification
-	CreatedAt  time.Time             `json:"created_at"`
+	CustomerID uuid.UUID
+	EventType  NotificationEventType
+	// Data is the typed event payload; it is stored as JSONB and served verbatim.
+	Data      openrails.NotificationData
+	Seen      bool
+	CreatedAt time.Time
+}
+
+// DataJSONB is the stored form of Data.
+func (nq *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(nq.Data) }
+
+// View is the wire shape of the row.
+func (nq *NotificationQueue) View() openrails.Notification {
+	return openrails.Notification{ID: nq.ID, CustomerID: openrails.CustomerID(nq.CustomerID), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, CreatedAt: nq.CreatedAt}
 }
 
 // IsSeen checks if the notification has been seen by the user

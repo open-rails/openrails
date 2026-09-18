@@ -18,10 +18,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -86,17 +87,24 @@ func hostedTestConfig(t *testing.T, dsn, issuer string) *config.Config {
 	}
 }
 
-func newHostApp(t *testing.T, cfg *config.Config) *embedded.Embedded {
+// hostApp is an embed.Runtime plus the graph accessor the operator functions
+// take; tests attach and provision through the internal package directly.
+type hostApp struct{ rt *embed.Runtime }
+
+func (h *hostApp) App() *app.App                   { return app.HostGraph(h.rt) }
+func (h *hostApp) Close(ctx context.Context) error { return h.rt.Close(ctx) }
+
+func newHostApp(t *testing.T, cfg *config.Config) *hostApp {
 	t.Helper()
-	e, err := embedded.New(context.Background(), embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()})
-	require.NoError(t, err, "embedded.New")
-	t.Cleanup(func() { _ = e.Close(context.Background()) })
-	return e
+	rt, err := embed.New(context.Background(), embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
+	require.NoError(t, err, "embed.New")
+	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	return &hostApp{rt: rt}
 }
 
 // mountAuthRoutes serves the attached control plane's AuthKit route surface the
 // way an external host mounts it (RouteSpecs are native ServeMux patterns).
-func mountAuthRoutes(t *testing.T, e *embedded.Embedded) *httptest.Server {
+func mountAuthRoutes(t *testing.T, e *hostApp) *httptest.Server {
 	t.Helper()
 	cp := embcp.Get(e.App())
 	require.NotNil(t, cp, "control plane attached")

@@ -2376,6 +2376,10 @@ CREATE INDEX idx_rail_intents_subscription ON openrails.rail_intents USING btree
 
 CREATE UNIQUE INDEX uq_rail_intents_merchant_idempotency_key ON openrails.rail_intents USING btree (merchant_id, idempotency_key);
 
+CREATE UNIQUE INDEX uq_rail_intents_request_key ON openrails.rail_intents USING btree (merchant_id, ((payload ->> 'request_key'::text))) WHERE ((payload ->> 'request_key'::text) IS NOT NULL);
+
+COMMENT ON INDEX openrails.uq_rail_intents_request_key IS 'One operation per customer recovery request key (#809): a payer-scoped client Idempotency-Key binds exactly one rebill.';
+
 ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES openrails.custodians(id, merchant_id) ON DELETE RESTRICT;
 
@@ -3222,6 +3226,8 @@ CREATE TABLE openrails.subscriptions (
     last_retry_at timestamp with time zone,
     retry_attempts integer DEFAULT 0,
     next_retry_at timestamp with time zone,
+    dunning_claim_holder text,
+    dunning_claimed_until timestamp with time zone,
     cancelled_at timestamp with time zone,
     cancel_type text,
     cancel_feedback text,
@@ -3241,6 +3247,7 @@ CREATE TABLE openrails.subscriptions (
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
     CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::openrails.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
     CONSTRAINT chk_ended_not_before_cancelled CHECK (((ended_at IS NULL) OR (cancelled_at IS NULL) OR (ended_at >= cancelled_at))),
+    CONSTRAINT chk_dunning_claim_pair CHECK (((dunning_claim_holder IS NULL) = (dunning_claimed_until IS NULL))),
     CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due'::openrails.subscription_status) OR (current_period_ends_at IS NOT NULL))),
     CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
 );
@@ -3273,6 +3280,8 @@ CREATE INDEX idx_subscriptions_customer ON openrails.subscriptions USING btree (
 CREATE INDEX idx_subscriptions_customer_active_created ON openrails.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active'::openrails.subscription_status);
 
 CREATE INDEX idx_subscriptions_destructive_run ON openrails.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+
+COMMENT ON COLUMN openrails.subscriptions.dunning_claim_holder IS 'Who holds the rebill attempt claim (#809 R4): a dunning worker pass or a customer retry-now request. next_retry_at is the schedule only; the claim is this pair, acquired and expired on the database clock.';
 
 CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
 
@@ -4432,9 +4441,10 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO openrail
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_collection_intent_fk FOREIGN KEY (merchant_id, collection_intent_id) REFERENCES openrails.rail_intents(merchant_id, id) ON DELETE RESTRICT;
 
--- One unresolved upgrade owns the predecessor's provider mutation sequence.
-CREATE UNIQUE INDEX uq_rail_intents_upgrade_predecessor ON openrails.rail_intents(merchant_id, subscription_id)
-WHERE intent_type='nmi_upgrade' AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable');
+-- One unresolved tier change (NMI upgrade or Stripe tier change) owns its
+-- subscription's provider mutation sequence.
+CREATE UNIQUE INDEX uq_rail_intents_tier_change_subscription ON openrails.rail_intents(merchant_id, subscription_id)
+WHERE intent_type IN ('nmi_upgrade', 'stripe_tier_change') AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable');
 
 -- #293: one receipt, on the existing maintenance ledger, protects the narrow
 -- restore-only trigger suppression. An application-set GUC alone does nothing.

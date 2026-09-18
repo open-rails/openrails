@@ -58,8 +58,11 @@ var excludedColumns = map[string]string{
 // credential watermarks, or explicitly excluded raw/operational
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
-	"custodians":        "credential_versions",
-	"subscriptions":     "destructive_run_class",
+	"custodians": "credential_versions",
+	// dunning_claim_* is the rebill attempt lease (#809 R4): a worker/request
+	// holder and an expiry on the SOURCE deployment's clock. Preflight already
+	// refuses unresolved operations, so a claim never describes portable state.
+	"subscriptions":     "destructive_run_class dunning_claim_holder dunning_claimed_until",
 	"payments":          "discount_metadata destructive_run_class",
 	"payment_methods":   "metadata",
 	"checkout_sessions": "destructive_run_class",

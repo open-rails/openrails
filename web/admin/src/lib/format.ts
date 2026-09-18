@@ -130,21 +130,14 @@ export function amountFromInput(
   return signed.toString()
 }
 
-// unitsFromInput is amountFromInput for JSON-number wires: null beyond the
-// safe-integer range rather than a rounded amount.
-export function unitsFromInput(major: string, decimals: number): number | null {
-  const exact = amountFromInput(major, decimals)
-  if (exact === null) return null
-  const amount = Number(exact)
-  return Number.isSafeInteger(amount) ? amount : null
-}
-
+// nativeAmountFromInput converts a major-unit input to exact native units at
+// the currency's registered scale, as the int64 decimal string money wires use.
 export function nativeAmountFromInput(
   major: string,
   currency: string
-): number | null {
+): string | null {
   const scale = currencyScale(currency)
-  return scale === undefined ? null : unitsFromInput(major, scale)
+  return scale === undefined ? null : amountFromInput(major, scale)
 }
 
 // nativeAmountToInput prefills an editable major-unit amount. An unsafe JSON
@@ -168,14 +161,6 @@ export function formatDate(iso?: string | null): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return "—"
   return d.toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  })
-}
-
-export function formatUnix(seconds?: number): string {
-  if (!seconds) return "—"
-  return new Date(seconds * 1000).toLocaleString(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
   })

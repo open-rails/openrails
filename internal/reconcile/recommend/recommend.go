@@ -12,19 +12,23 @@ package recommend
 import (
 	"bytes"
 	"encoding/json"
+
+	"github.com/open-rails/openrails"
 )
 
-// Known actions. Params are plain JSON objects; ids travel as strings.
+// Known actions. Params are plain JSON objects; ids travel in their typed
+// wire spelling (sub_, pay_, prod_; customers as plain UUIDs).
 const (
 	// ActionCancelAndRefund cancels a local subscription (the remote side
 	// rides the durable rail-intents ledger — queue-always #679,
 	// breaker-guarded) and refunds one payment through the rail's refund API
 	// via the intents log. CCBill refund requests are refused before either leg;
 	// cancellation-only remains supported.
-	// Params: subscription_id (uuid, optional — no cancel when absent, e.g. a
-	// pure one-off ownership duplicate); refund_payment_id (uuid, optional —
-	// no refund when absent); at least one of the two is required; amount
-	// (micros number, optional — defaults to the payment's full amount).
+	// Params: subscription_id (sub_<uuid>, optional — no cancel when absent,
+	// e.g. a pure one-off ownership duplicate); refund_payment_id (pay_<uuid>,
+	// optional — no refund when absent); at least one of the two is required;
+	// amount (decimal string of the payment currency's native unit, optional —
+	// defaults to the payment's full amount).
 	ActionCancelAndRefund = "cancel_and_refund"
 	// ActionRevokeEntitlement revokes one entitlement window as-of a time via
 	// the existing entitlement service.
@@ -32,7 +36,7 @@ const (
 	ActionRevokeEntitlement = "revoke_entitlement"
 	// ActionRecordAdminGrant records an admin-sourced product-access grant
 	// (makes freeloader access legitimate).
-	// Params: customer_id (string user id, required); product_id (uuid,
+	// Params: customer_id (plain UUID, required); product_id (prod_<uuid>,
 	// required); reason (string, optional — recorded in operator notes).
 	ActionRecordAdminGrant = "record_admin_grant"
 	// ActionAckResume is a plain resolution with no side effects; machinery
@@ -139,11 +143,11 @@ func RevokeEntitlementRec(entitlementID, asOf string, alternative *Recommendatio
 }
 
 // RecordAdminGrantRec recommends legitimizing access with an admin-sourced
-// grant. productID may be empty when the source is gone (operator overrides).
-func RecordAdminGrantRec(customerID, productID, reason string) Recommendation {
-	params := map[string]any{"customer_id": customerID}
-	if productID != "" {
-		params["product_id"] = productID
+// grant. productID may be zero when the source is gone (operator overrides).
+func RecordAdminGrantRec(customerID openrails.CustomerID, productID openrails.ProductID, reason string) Recommendation {
+	params := map[string]any{"customer_id": customerID.String()}
+	if !productID.IsZero() {
+		params["product_id"] = productID.String()
 	}
 	if reason != "" {
 		params["reason"] = reason
@@ -155,13 +159,13 @@ func RecordAdminGrantRec(customerID, productID, reason string) Recommendation {
 // one payment. Either id may be empty (refund-only for one-off duplicates
 // without a subscription; cancel-only when no payment linkage exists) — the
 // executor treats both as optional but requires at least one.
-func CancelAndRefundRec(subscriptionID, refundPaymentID string) Recommendation {
+func CancelAndRefundRec(subscriptionID openrails.SubscriptionID, refundPaymentID openrails.PaymentID) Recommendation {
 	params := map[string]any{}
-	if subscriptionID != "" {
-		params["subscription_id"] = subscriptionID
+	if !subscriptionID.IsZero() {
+		params["subscription_id"] = subscriptionID.String()
 	}
-	if refundPaymentID != "" {
-		params["refund_payment_id"] = refundPaymentID
+	if !refundPaymentID.IsZero() {
+		params["refund_payment_id"] = refundPaymentID.String()
 	}
 	return Recommendation{Action: ActionCancelAndRefund, Params: params}
 }

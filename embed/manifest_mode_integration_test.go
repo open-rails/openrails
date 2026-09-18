@@ -14,6 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,11 +31,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
-	"github.com/open-rails/openrails/pkg/service"
 )
 
 // #723 MODE 1 conformance: merchant_source=manifest — the boot YAML (+ mounted
@@ -86,13 +86,13 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 	cfg := manifestModeConfig(dsn)
 	manifest, err := embed.LoadMerchantConfigManifestWithOverlays(manifestRaw, overlays...)
 	require.NoError(t, err)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, manifest.Merchants[slug])
 	require.NoError(t, err)
 	require.False(t, id.IsZero())
-	runtime := rt.Embedded().App().Runtime
+	runtime := app.HostGraph(rt).Runtime
 	require.NotNil(t, runtime.SolanaPlanService,
 		"embedded provisioning arms recurring Solana services")
 	runtime.CollectionResolver = &money.MerchantCollectionAdapterBuilder{
@@ -101,8 +101,7 @@ func bootManifestRuntime(t *testing.T, ctx context.Context, dsn, slug, nmiV5Base
 		MerchantsFn: func() *merchants.Service { return runtime.Merchants },
 		Endpoints:   money.CollectionEndpoints{NMIV5BaseURL: nmiV5BaseURL},
 	}
-	require.NoError(t, embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
-		Runtime:  rt.Embedded(),
+	require.NoError(t, rt.PushCatalog(ctx, embed.PushCatalogOptions{
 		Manifest: catalogRaw,
 		Insert:   true, Overwrite: true, Prune: true,
 	}))
@@ -181,7 +180,7 @@ func fakeNMI(t *testing.T) (*httptest.Server, *[]string) {
 // mode 1 reads the in-memory manifest plane), pointed at the fake gateway.
 func chargeViaStorePlane(t *testing.T, ctx context.Context, rt *embed.Runtime, id merchant.ID, baseURL string) error {
 	t.Helper()
-	runtime := rt.Embedded().App().Runtime
+	runtime := app.HostGraph(rt).Runtime
 	require.NotNil(t, runtime.Merchants, "mode 1 arms Runtime.Merchants at UpsertMerchantConfig")
 	builder := &money.MerchantCollectionAdapterBuilder{
 		Config:      runtime.Config,
@@ -252,7 +251,7 @@ func TestManifestMode_Loop(t *testing.T) {
 	})
 
 	// Rails armed from the manifest plane (#699 semantics).
-	runtime := rt1.Embedded().App().Runtime
+	runtime := app.HostGraph(rt1).Runtime
 	armed := reconcile.MerchantFetcherBuilder{
 		Config:    runtime.Config,
 		Merchants: runtime.Merchants,
@@ -274,27 +273,21 @@ func TestManifestMode_Loop(t *testing.T) {
 	require.NoError(t, chargeViaStorePlane(t, ctx, rt1, id, server.URL))
 	require.Equal(t, []string{keyV1}, *seenKeys)
 
-	// An entitlement (the converged product's entitlement string) lands.
-	svc := rt1.Service()
+	// An entitlement (the converged product's entitlement string) lands
+	// through the shared Client, the only in-process business surface.
 	mctx := merchant.WithID(ctx, id)
-	userID := uuid.NewString()
-	_, err := svc.EntitlementGrantEntitlement(mctx, "manifest-loop-admin", service.EntitlementGrantEntitlementRequest{
-		UserID:      userID,
-		Entitlement: "pro-access",
-		Reason:      "#723 conformance",
-	})
+	client, err := rt1.Client()
 	require.NoError(t, err)
-	// The read runs inside a merchant-scoped connection because it is a plain
-	// RLS-scoped SELECT (no MerchantTx of its own): in production the HTTP layer
-	// pins it, and this test stands in for that layer. Without the pin it reads
-	// the base pool and the openrails_app role answers with an empty list.
-	var ents []string
-	require.NoError(t, runtime.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
-		var err error
-		ents, err = svc.ListActiveEntitlements(ctx, userID, time.Now().UTC())
-		return err
-	}))
-	require.Contains(t, ents, "pro-access")
+	userID := openrails.CustomerID(uuid.New())
+	_, err = client.GrantEntitlement(ctx, userID, openrails.GrantEntitlementRequest{Entitlement: "pro-access"})
+	require.NoError(t, err)
+	ents, err := client.ListEntitlements(ctx, userID, time.Time{})
+	require.NoError(t, err)
+	var names []string
+	for _, ent := range ents {
+		names = append(names, ent.Entitlement)
+	}
+	require.Contains(t, names, "pro-access")
 
 	// Runtime writes against the plane are refused: rotation is file+reboot.
 	_, err = runtime.Merchants.Secrets().Put(mctx, id, "psps/nmi/live/"+gatewayID+"/security_key", "sneaky")
@@ -340,16 +333,16 @@ func TestManifestMode_MutationRoutesRejected405(t *testing.T) {
 	nano := time.Now().UnixNano()
 	slug := fmt.Sprintf("m405%d", nano)
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetCatalog, embed.RouteSetPaymentProviders},
 		Gate:           allowAllGate{id: id},
-		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
+		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
 	})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
@@ -413,15 +406,15 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		ProviderWriteMode: config.ProviderWriteModeFull,
 		DB:                &config.DBConfig{URL: dsn},
 	}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	// API mode still allows the bare identity bind.
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
 	require.NoError(t, err)
 	// Arm the store-backed merchants service the way worker registration does.
-	rt.Embedded().App().Runtime.EnsureMerchantsService(ctx)
-	require.NotNil(t, rt.Embedded().App().Runtime.Merchants)
+	app.HostGraph(rt).Runtime.EnsureMerchantsService(ctx)
+	require.NotNil(t, app.HostGraph(rt).Runtime.Merchants)
 	t.Cleanup(func() {
 		for _, stmt := range []string{
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
@@ -432,10 +425,10 @@ func TestAPIMode_MutationRoutesWork(t *testing.T) {
 		}
 	})
 
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets:      []embed.RouteSet{embed.RouteSetPaymentProviders},
 		Gate:           allowAllGate{id: id},
-		ProviderRoutes: &embedded.ProviderRoutes{Webhooks: true},
+		ProviderRoutes: &embed.ProviderRoutes{Webhooks: true},
 	})
 	require.NoError(t, err)
 	server := httptest.NewServer(handler)
@@ -476,7 +469,7 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 
 	manifest, err := embed.LoadMerchantConfigManifestWithOverlays(manifestModeManifestYAML(slug, gatewayID))
 	require.NoError(t, err)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -492,7 +485,7 @@ func TestManifestMode_MissingSecretFailsClosed(t *testing.T) {
 		}
 	})
 
-	runtime := rt.Embedded().App().Runtime
+	runtime := app.HostGraph(rt).Runtime
 	armed := reconcile.MerchantFetcherBuilder{
 		Config:    runtime.Config,
 		Merchants: runtime.Merchants,
@@ -521,7 +514,7 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 
 	// Writer host (host-one shape) declares the merchant.
 	writerCfg := manifestModeConfig(dsn)
-	writer, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: writerCfg, River: embedded.RiverManagedByOpenRails()}})
+	writer, err := embed.New(ctx, embed.Options{Config: writerCfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = writer.Close(context.Background()) })
 	id, err := writer.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{DisplayName: slug})
@@ -532,13 +525,13 @@ func TestManifestMode_ReadSideBindKeepsWorking(t *testing.T) {
 
 	// Reader host (host-two shape): empty MerchantConfig — pure bind.
 	readerCfg := manifestModeConfig(dsn)
-	reader, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: readerCfg, River: embedded.RiverManagedByOpenRails()}})
+	reader, err := embed.New(ctx, embed.Options{Config: readerCfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = reader.Close(context.Background()) })
 	boundID, err := reader.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{})
 	require.NoError(t, err)
 	require.Equal(t, id, boundID, "the empty upsert binds to the same merchant")
-	require.Equal(t, boundID, reader.Embedded().App().Runtime.ConfiguredMerchant())
+	require.Equal(t, boundID, app.HostGraph(reader).Runtime.ConfiguredMerchant())
 }
 
 // bootManifestRuntimeWithRailAccounts boots a MODE-1 runtime declaring
@@ -551,7 +544,7 @@ func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn,
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	cfg := manifestModeConfig(dsn)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	id, err := rt.UpsertMerchantConfig(ctx, slug, embed.MerchantConfig{
@@ -574,7 +567,7 @@ func bootManifestRuntimeWithRailAccounts(t *testing.T, ctx context.Context, dsn,
 // TestManifestMode_CheckoutPreGateAcceptsDBArmedRail is #775's RED/GREEN pin:
 // before the fix, checkoutRailConfigured only consulted the DB for NMI, so a
 // MODE-1 host with a manifest-armed ccbill account (and no
-// embedded.Options.PaymentProviders, since manifest hosts deliberately don't
+// embed.Options rail declarations, since manifest hosts deliberately don't
 // use it) 400s "unsupported rail" on POST /v1/me/checkout with rail=ccbill —
 // even though the deeper checkout service would resolve the account fine.
 //
@@ -605,7 +598,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	authn := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: uuid.NewString()}, nil
 	})
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
 		DelegatedAuthenticator: authn,
 	})
@@ -613,7 +606,7 @@ func TestManifestMode_CheckoutPreGateAcceptsDBArmedRail(t *testing.T) {
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
-	body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":"ccbill"}}`, api.FormatPriceID(uuid.New()))
+	body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":"ccbill"}}`, openrails.PriceID(uuid.New()).String())
 	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/me/checkout", strings.NewReader(body))
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
@@ -660,7 +653,7 @@ func TestManifestMode_ProviderRoutesDeriveWebhooksFromDBArmedAccounts(t *testing
 	// (validateAuthBoundary only requires them for checkout/customer/merchant-admin
 	// route sets) — and ProviderRoutes is left nil, so MountHandler must derive it
 	// via ProviderRoutesForRuntime.
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets: []embed.RouteSet{embed.RouteSetWebhooks},
 	})
 	require.NoError(t, err)

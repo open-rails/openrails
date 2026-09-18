@@ -227,8 +227,10 @@ func (p *planner) instrumentPinned(ctx context.Context, methodID uuid.UUID) (str
 //     unknown_needs_verify = SENT, outcome unknown): moving custody underneath
 //     leaves the verifier resolving an attempt whose instrument no longer
 //     describes how the charge was made;
-//   - any operation whose frozen payload names it, in any unresolved state
-//     (an invoice collection has no subscription to join through).
+//   - any operation whose frozen payload names it, in any unresolved state,
+//     on either side of a payment-source swap (an invoice collection has no
+//     subscription to join through; a swap's subscription link only moves at
+//     finalize, so the frozen method ids are what pins it — #657).
 //
 // Both clear on their own or by operator resolution, so this is "come back
 // later", not a failure.

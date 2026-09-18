@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
@@ -15,6 +17,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/integrationharness"
+	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // TestHostTransactionsCommitAndRollBackWithHostRows proves the embedded
@@ -28,7 +31,7 @@ func TestHostTransactionsCommitAndRollBackWithHostRows(t *testing.T) {
 	client, err := runtime.Client()
 	require.NoError(t, err)
 	hostTx := runtime.HostTransactions()
-	pool := runtime.Embedded().App().Runtime.DB.Pool()
+	pool := app.HostGraph(runtime).Runtime.DB.Pool()
 
 	_, err = h.Pool().Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS public.host_provider_obligation_facts (
@@ -266,7 +269,7 @@ func TestHostTransactionsCommitAndRollBackWithHostRows(t *testing.T) {
 			var unscoped *db.ErrUnscopedMerchantWork
 			require.True(t, errors.As(err, &unscoped), "got %v", err)
 		})
-		_, err := hostTx.GetOperationAuthorization(openrails.WithMerchant(ctx, openrails.MerchantID(uuid.New())), nil, a.OperationID)
+		_, err := hostTx.GetOperationAuthorization(merchant.WithID(ctx, merchant.ID(uuid.New())), nil, a.OperationID)
 		require.ErrorIs(t, err, openrails.ErrConflict)
 	})
 }

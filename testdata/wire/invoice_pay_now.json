@@ -1,0 +1,62 @@
+{
+  "invoice": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "currency": "USD",
+    "period_from": "2026-09-16T00:00:00.123456789Z",
+    "period_to": "2026-09-16T00:00:00.123456789Z",
+    "usage_total": "9223372036854775807",
+    "deposits_total": "0",
+    "owed_accrued": "0",
+    "owed_paid": "0",
+    "closing_balance": "0",
+    "subtotal_amount": "9223372036854775807",
+    "total_amount": "9223372036854775807",
+    "amount_paid": "0",
+    "amount_due": "9223372036854775807",
+    "line_items": [
+      {
+        "event_type": "api_call",
+        "amount": "9223372036854775807",
+        "count": 1
+      }
+    ],
+    "status": "past_due",
+    "collection_method": "charge_automatically",
+    "issued_at": "2026-09-16T00:00:00.123456789Z",
+    "due_at": "2026-09-16T00:00:00.123456789Z",
+    "collection_failure_count": 1,
+    "collection_failed_at": "2026-09-16T00:00:00.123456789Z",
+    "collection_intent_id": "01999999-9999-7999-8999-999999999999",
+    "recovery": {
+      "retryable": false,
+      "blocked_reason": "outcome_unknown",
+      "attempt_count": 2,
+      "failure_category": "insufficient_funds",
+      "last_failure_code": "201",
+      "last_failed_at": "2026-09-16T00:00:00.123456789Z",
+      "compatible_payment_method_ids": [
+        "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+      ],
+      "operation": {
+        "id": "01999999-9999-7999-8999-999999999999",
+        "status": "unknown_needs_verify"
+      }
+    },
+    "created_at": "2026-09-16T00:00:00.123456789Z"
+  },
+  "attempt": {
+    "id": "99999999-9999-4999-8999-999999999999",
+    "invoice_id": "88888888-8888-4888-8888-888888888888",
+    "currency": "USD",
+    "amount": "9223372036854775807",
+    "status": "attempted",
+    "payment_method_id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    "rail": "nmi",
+    "attempted_at": "2026-09-16T00:00:00.123456789Z"
+  },
+  "operation": {
+    "id": "01999999-9999-7999-8999-999999999999",
+    "status": "unknown_needs_verify"
+  },
+  "replayed": false
+}

@@ -15,11 +15,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // #848: the checkout wire contract speaks PSP vocabulary. The pre-gate must
@@ -64,7 +63,7 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 	authn := billingauth.DelegatedAuthenticatorFunc(func(context.Context, *http.Request) (*billingauth.DelegatedPrincipal, error) {
 		return &billingauth.DelegatedPrincipal{MerchantID: id.UUID().String(), SubjectID: uuid.NewString()}, nil
 	})
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
 		DelegatedAuthenticator: authn,
 	})
@@ -77,7 +76,7 @@ func TestCheckoutPreGate_PSPKeySelector(t *testing.T) {
 	// every group here carries a hex letter, so no 13-digit run can form.
 	fabricatedPrice := uuid.MustParse("a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d")
 	post := func(rail string) (int, string) {
-		body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":%q}}`, api.FormatPriceID(fabricatedPrice), rail)
+		body := fmt.Sprintf(`{"price_id":%q,"payment":{"rail":%q}}`, openrails.PriceID(fabricatedPrice).String(), rail)
 		req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/me/checkout", strings.NewReader(body))
 		require.NoError(t, err)
 		req.Header.Set("Content-Type", "application/json")

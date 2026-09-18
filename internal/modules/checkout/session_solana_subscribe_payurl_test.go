@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/db"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/db"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"

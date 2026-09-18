@@ -76,7 +76,7 @@ func (r *NotificationQueueRepo) createParams(ctx context.Context, notification *
 	if err := db.EnsureCustomerRow(ctx, r.db.Qx(ctx), uuid.Nil, notification.CustomerID); err != nil {
 		return gen.CreateNotificationParams{}, err
 	}
-	data, err := models.ToJSONB(notification.Data)
+	data, err := notification.DataJSONB()
 	if err != nil {
 		return gen.CreateNotificationParams{}, err
 	}
@@ -133,7 +133,7 @@ func (r *NotificationQueueRepo) MarkAsSeen(ctx context.Context, id, customerID u
 }
 
 func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models.NotificationQueue) error {
-	data, err := models.ToJSONB(notification.Data)
+	data, err := notification.DataJSONB()
 	if err != nil {
 		return err
 	}

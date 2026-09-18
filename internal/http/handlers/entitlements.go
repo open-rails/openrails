@@ -11,16 +11,16 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // convergeAfterMutation runs the inline Convergence Engine for one customer after
@@ -299,9 +299,9 @@ func GrantAdminEntitlement(r *httprequest.Request) {
 }
 
 func entitlementRecordFromModel(e *models.Entitlement) openrails.EntitlementRecord {
-	rec := openrails.EntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+	rec := openrails.EntitlementRecord{ID: e.ID.String(), CustomerID: openrails.CustomerID(e.CustomerID), Entitlement: e.Entitlement, StartAt: e.StartAt, EndAt: e.EndAt, SourceType: string(e.SourceType), RevokedAt: e.RevokedAt, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 	if e.SourceID != nil {
-		source := e.SourceID.String()
+		source := openrails.SourceRef(string(e.SourceType), e.SourceID.String())
 		rec.SourceID = &source
 	}
 	if e.RevokeReason != nil {
@@ -362,7 +362,7 @@ func RevokeAdminEntitlement(r *httprequest.Request) {
 func serviceEntitlementRecordsFromService(entitlements []billingservice.EntitlementRecord) []ServiceEntitlementRecord {
 	result := make([]ServiceEntitlementRecord, 0, len(entitlements))
 	for _, e := range entitlements {
-		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: e.CustomerID.String(), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
+		rec := ServiceEntitlementRecord{ID: e.ID.String(), CustomerID: openrails.CustomerID(e.CustomerID), Entitlement: e.Entitlement, StartAt: e.StartAt, SourceType: e.SourceType, CreatedAt: e.CreatedAt, UpdatedAt: e.UpdatedAt}
 		if e.EndAt != nil {
 			rec.EndAt = e.EndAt
 		}

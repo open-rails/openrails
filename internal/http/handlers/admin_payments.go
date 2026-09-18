@@ -16,6 +16,7 @@ import (
 	"github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -36,7 +37,7 @@ type paymentPath struct {
 }
 
 type refundRequest struct {
-	Amount       int64  `json:"amount" binding:"required,gt=0"`
+	Amount       int64  `json:"amount,string" binding:"required,gt=0"`
 	Reason       string `json:"reason,omitempty"`
 	RevokeAccess bool   `json:"revoke_access,omitempty"`
 }
@@ -59,7 +60,7 @@ type adminOffChannelPaymentPath struct {
 type adminOffChannelPaymentRequest struct {
 	PriceID          string         `json:"price_id" binding:"required"`
 	TransactionID    string         `json:"transaction_id" binding:"required"`
-	Amount           *int64         `json:"amount,omitempty"`
+	Amount           *int64         `json:"amount,omitempty,string"`
 	Currency         string         `json:"currency,omitempty"`
 	PurchasedAt      string         `json:"purchased_at,omitempty"`
 	DiscountCode     *string        `json:"discount_code,omitempty"`
@@ -73,11 +74,12 @@ func AdminRefundPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	paymentID, err := api.ParsePaymentID(path.PaymentID)
-	if err != nil {
+	typedPaymentID, err := openrails.ParsePaymentID(path.PaymentID)
+	if err != nil || typedPaymentID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
 		return
 	}
+	paymentID := typedPaymentID.UUID()
 	var req refundRequest
 	if !r.BindJSON(&req) {
 		return
@@ -388,11 +390,12 @@ func GetAdminPayment(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	paymentID, err := api.ParsePaymentID(path.PaymentID)
-	if err != nil {
+	typedPaymentID, err := openrails.ParsePaymentID(path.PaymentID)
+	if err != nil || typedPaymentID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment ID")
 		return
 	}
+	paymentID := typedPaymentID.UUID()
 	payment, refunds, err := r.State.PaymentService.GetByIDWithDetails(r.Request.Context(), paymentID)
 	if err != nil {
 		r.ErrorJSON(http.StatusNotFound, "payment not found")
@@ -443,11 +446,12 @@ func AdminCreateOffChannelPayment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	priceID, err := api.ParsePriceID(strings.TrimSpace(req.PriceID))
-	if err != nil {
+	typedPriceID, err := openrails.ParsePriceID(strings.TrimSpace(req.PriceID))
+	if err != nil || typedPriceID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return
 	}
+	priceID := typedPriceID.UUID()
 	transactionID := strings.TrimSpace(req.TransactionID)
 	if transactionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "transaction_id is required")

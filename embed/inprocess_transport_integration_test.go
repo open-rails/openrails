@@ -13,10 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -36,12 +34,12 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := New(ctx, Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	rt.app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
-	handler := newServiceHandler(rt.emb.App().Runtime)
+	handler := newServiceHandler(rt.app.Runtime)
 
 	// 1) Network-shaped request: NO context principal. The real gate rejects it
 	// 401 even with a bearer and a spoofed header — nothing wire-supplied can
@@ -82,5 +80,5 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 	}
 	_, err = c.GetMerchantSettings(ctx)
 	require.NoError(t, err, "unified client through in-process transport")
-	require.NoError(t, openrails.Verify(ctx, c), "Verify through in-process transport")
+	require.NoError(t, c.Verify(ctx), "Verify through in-process transport")
 }

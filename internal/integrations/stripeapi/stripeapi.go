@@ -15,6 +15,7 @@ package stripeapi
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/open-rails/openrails/config"
@@ -133,6 +134,26 @@ var baseTransportOverride http.RoundTripper
 // serially (-p 1 -parallel 1).
 func SetBaseTransport(rt http.RoundTripper) {
 	baseTransportOverride = rt
+}
+
+// HostRewriteTransport sends every request to target regardless of the
+// original host, preserving method, path, query, body and headers: the shape
+// a loopback Stripe (config.ProviderSandbox.StripeAPIURL, embed
+// Options.StripeTransport) is installed with under the guard.
+func HostRewriteTransport(target string) http.RoundTripper {
+	return hostRewriteTransport{target: target}
+}
+
+type hostRewriteTransport struct{ target string }
+
+func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	u, err := url.Parse(h.target)
+	if err != nil {
+		return nil, err
+	}
+	clone := req.Clone(req.Context())
+	clone.URL.Scheme, clone.URL.Host, clone.Host = u.Scheme, u.Host, u.Host
+	return http.DefaultTransport.RoundTrip(clone)
 }
 
 func defaultBaseTransport() http.RoundTripper {

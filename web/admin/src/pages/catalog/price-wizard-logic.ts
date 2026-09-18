@@ -6,11 +6,13 @@ import { formatNativeAmount } from "@/lib/format"
 export type PriceDirection = "increase" | "decrease" | "unchanged"
 
 export function detectDirection(
-  newAmount: number,
-  currentAmount: number
+  newAmount: string,
+  currentAmount: string
 ): PriceDirection {
-  if (newAmount > currentAmount) return "increase"
-  if (newAmount < currentAmount) return "decrease"
+  const next = BigInt(newAmount)
+  const current = BigInt(currentAmount)
+  if (next > current) return "increase"
+  if (next < current) return "decrease"
   return "unchanged"
 }
 
@@ -88,8 +90,8 @@ const dateLabel = (iso: string) =>
 // keep $10 until Sep 1, then move to $12 at their next renewal. Notices go
 // out on confirm."
 export function buildReviewText(params: {
-  newAmount: number
-  currentAmount: number
+  newAmount: string
+  currentAmount: string
   currency: string
   affectedCount: number
   plan: MigrationPlan

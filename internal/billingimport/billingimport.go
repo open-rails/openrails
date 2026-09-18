@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -71,7 +72,10 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		ctx = context.Background()
 	}
 	if opts.Book.AsOf.IsZero() {
-		return res, fmt.Errorf("import billing: Book.AsOf (evidence horizon) is required")
+		return res, apperr.Invalidf("import billing: Book.AsOf (evidence horizon) is required")
+	}
+	if err := rejectDeclaredPANs(opts.Book); err != nil {
+		return res, err
 	}
 	asOf := opts.Book.AsOf.UTC()
 
@@ -111,25 +115,25 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		// Customers first (subscriptions FK them).
 		seen := map[uuid.UUID]struct{}{}
 		for _, c := range opts.Book.Customers {
-			if c.Customer == uuid.Nil {
+			if c.Customer.IsZero() {
 				continue
 			}
-			if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), c.Customer); err != nil {
+			if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), c.Customer.UUID()); err != nil {
 				return fmt.Errorf("ensure customer %s: %w", c.Customer, err)
 			}
-			seen[c.Customer] = struct{}{}
+			seen[c.Customer.UUID()] = struct{}{}
 		}
 		for _, s := range opts.Book.Subscriptions {
-			if s.Customer == uuid.Nil {
+			if s.Customer.IsZero() {
 				continue
 			}
-			if _, ok := seen[s.Customer]; ok {
+			if _, ok := seen[s.Customer.UUID()]; ok {
 				continue
 			}
-			if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), s.Customer); err != nil {
+			if err := db.EnsureCustomerRow(ctx, qx, merchantID.UUID(), s.Customer.UUID()); err != nil {
 				return fmt.Errorf("ensure customer %s: %w", s.Customer, err)
 			}
-			seen[s.Customer] = struct{}{}
+			seen[s.Customer.UUID()] = struct{}{}
 		}
 
 		// Payment methods: idempotent by the PSP-scoped instrument identity. An
@@ -140,8 +144,8 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			return psp.String() + "\x1f" + rail + "\x1f" + custRef + "\x1f" + methodRef
 		}
 		for _, pm := range opts.Book.PaymentMethods {
-			if pm.Rail == "" || pm.RailCustomerRef == "" || pm.Customer == uuid.Nil {
-				return fmt.Errorf("declared payment method requires rail, rail_customer_ref and customer")
+			if pm.Rail == "" || pm.RailCustomerRef == "" || pm.Customer.IsZero() {
+				return apperr.Invalidf("declared payment method requires rail, rail_customer_ref and customer")
 			}
 			pmPSP, err := psps.resolve(pm.PSP, pm.Rail, fmt.Sprintf("payment method %s/%s", pm.Rail, pm.RailCustomerRef))
 			if err != nil {
@@ -163,7 +167,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				if _, err := q.CreatePaymentMethod(ctx, gen.CreatePaymentMethodParams{
 					ID:                   id,
 					MerchantID:           merchantID.UUID(),
-					CustomerID:           pm.Customer,
+					CustomerID:           pm.Customer.UUID(),
 					Rail:                 pm.Rail,
 					RailCustomerRef:      pm.RailCustomerRef,
 					RailMethodRef:        pm.RailMethodRef,
@@ -180,10 +184,10 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 				}
 			} else if err != nil {
 				return fmt.Errorf("lookup payment method %s/%s: %w", pm.Rail, pm.RailCustomerRef, err)
-			} else if owner != pm.Customer {
-				return fmt.Errorf("payment method %s/%s already belongs to customer %s, not %s", pm.Rail, pm.RailCustomerRef, owner, pm.Customer)
+			} else if owner != pm.Customer.UUID() {
+				return apperr.Conflictf("payment method %s/%s already belongs to customer %s, not %s", pm.Rail, pm.RailCustomerRef, owner, pm.Customer)
 			} else if !strings.EqualFold(existingRail, pm.Rail) {
-				return fmt.Errorf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
+				return apperr.Conflictf("payment method %s/%s is stored on rail %q, not %q", pm.Rail, pm.RailCustomerRef, existingRail, pm.Rail)
 			}
 			pmIDs[pmKey(pmPSP, pm.Rail, pm.RailCustomerRef, pm.RailMethodRef)] = id
 		}
@@ -214,8 +218,8 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 			}
 			f := reconcile.DeclaredSubscriptionFact{
 				SourceID:           s.SourceID,
-				Customer:           s.Customer,
-				PriceID:            s.Price,
+				Customer:           s.Customer.UUID(),
+				PriceID:            s.Price.UUID(),
 				Rail:               s.Rail,
 				RailSubscriptionID: s.RailSubscriptionID,
 				PspID:              subPSP,
@@ -245,8 +249,8 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 						merchantID.UUID(), subPSP, s.PaymentMethod.Rail, s.PaymentMethod.RailCustomerRef, s.PaymentMethod.RailMethodRef).
 						Scan(&existing, &owner)
 					if err == nil {
-						if owner != s.Customer {
-							return fmt.Errorf("resolve payment method ref %s: instrument belongs to customer %s, not %s", s.SourceID, owner, s.Customer)
+						if owner != s.Customer.UUID() {
+							return apperr.Conflictf("resolve payment method ref %s: instrument belongs to customer %s, not %s", s.SourceID, owner, s.Customer)
 						}
 						id, ok = existing, true
 						pmIDs[key] = existing
@@ -290,21 +294,36 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	return res, err
 }
 
-// openDB wraps a caller pool (borrowed; Close is a no-op) or opens from config.
+// openDB wraps a caller pool (borrowed; Close is a no-op) or opens from
+// config, and enforces the RLS posture either way: an import runs
+// merchant-scoped writes, and a privileged role skips the policies that make
+// that scoping real.
 func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
+	var (
+		database *db.DB
+		err      error
+	)
 	if pool != nil {
 		schema := config.DefaultSchema
 		if cfg != nil && cfg.DB != nil {
 			schema = cfg.DB.SchemaName()
 		}
-		return db.NewWithPGXPool(pool, schema)
+		database, err = db.NewWithPGXPool(pool, schema)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if cfg == nil || cfg.DB == nil {
+			return nil, fmt.Errorf("config database is required")
+		}
+		database, err = db.NewDB(ctx, cfg.DB)
+		if err != nil {
+			return nil, fmt.Errorf("open postgres: %w", err)
+		}
 	}
-	if cfg == nil || cfg.DB == nil {
-		return nil, fmt.Errorf("config database is required")
-	}
-	database, err := db.NewDB(ctx, cfg.DB)
-	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
+	if err := database.EnforceRLSPosture(ctx); err != nil {
+		_ = database.Close()
+		return nil, err
 	}
 	return database, nil
 }
@@ -326,27 +345,27 @@ func importAdminGrants(ctx context.Context, q *gen.Queries, merchantID uuid.UUID
 	ledger := grants.New(q, merchantID)
 	specs := map[uuid.UUID][]string{}
 	for _, g := range declared {
-		if g.Customer == uuid.Nil || g.Product == uuid.Nil || strings.TrimSpace(g.SourceID) == "" || g.StartsAt.IsZero() {
-			return fmt.Errorf("declared admin grant requires customer, product, source_id and starts_at")
+		if g.Customer.IsZero() || g.Product.IsZero() || strings.TrimSpace(g.SourceID) == "" || g.StartsAt.IsZero() {
+			return apperr.Invalidf("declared admin grant requires customer, product, source_id and starts_at")
 		}
-		if err := db.EnsureCustomerRowQ(ctx, q, merchantID, g.Customer); err != nil {
+		if err := db.EnsureCustomerRowQ(ctx, q, merchantID, g.Customer.UUID()); err != nil {
 			return fmt.Errorf("ensure customer %s: %w", g.Customer, err)
 		}
-		feats, ok := specs[g.Product]
+		feats, ok := specs[g.Product.UUID()]
 		if !ok {
-			product, err := q.GetProductByID(ctx, g.Product)
+			product, err := q.GetProductByID(ctx, g.Product.UUID())
 			if err != nil {
 				return fmt.Errorf("import admin grant %s: load product %s: %w", g.SourceID, g.Product, err)
 			}
 			feats = productEntitlementKeys(product.EntitlementsSpec)
-			specs[g.Product] = feats
+			specs[g.Product.UUID()] = feats
 		}
 		if len(feats) == 0 {
 			res.Blocked = append(res.Blocked, g.SourceID)
 			res.Reasons[g.SourceID] = "product has no entitlements_spec"
 			continue
 		}
-		created, alreadyExists, err := ledger.GrantAdmin(ctx, g.Customer, g.SourceID, feats, g.StartsAt.UTC(), g.EndsAt)
+		created, alreadyExists, err := ledger.GrantAdmin(ctx, g.Customer.UUID(), g.SourceID, feats, g.StartsAt.UTC(), g.EndsAt)
 		if err != nil {
 			return fmt.Errorf("import admin grant %s: %w", g.SourceID, err)
 		}

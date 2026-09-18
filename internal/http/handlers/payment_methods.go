@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -21,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -320,11 +320,12 @@ func UpdatePaymentMethod(r *httprequest.Request) {
 		return
 	}
 
-	methodID, err := api.ParsePaymentMethodID(path.ID)
-	if err != nil {
+	typedMethodID, err := openrails.ParsePaymentMethodID(path.ID)
+	if err != nil || typedMethodID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
 		return
 	}
+	methodID := typedMethodID.UUID()
 
 	trimmedToken := strings.TrimSpace(body.PaymentToken)
 	if trimmedToken == "" {
@@ -513,7 +514,7 @@ func DeletePaymentMethod(r *httprequest.Request) {
 // AdminDeletePaymentMethod uses the same ownership and durable provider path as
 // self-service, after merchant permission and customer scope have been checked.
 func AdminDeletePaymentMethod(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, r.Param("customer_id"))
+	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
 	if !ok {
 		return
 	}
@@ -526,12 +527,13 @@ func deletePaymentMethodForCustomer(r *httprequest.Request, customerID string) {
 		return
 	}
 
-	id, err := api.ParsePaymentMethodID(path.ID)
-	if err != nil {
+	typedId, err := openrails.ParsePaymentMethodID(path.ID)
+	if err != nil || typedId.IsZero() {
 		log.WithError(err).WithField("id", path.ID).Error("Invalid payment method ID format")
 		r.ErrorJSON(http.StatusBadRequest, "Invalid payment method ID format")
 		return
 	}
+	id := typedId.UUID()
 
 	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(r.Request.Context(), id, customerID)
 	if err != nil {
@@ -612,7 +614,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 
 	var subs []subscriptionSummary
 	for _, s := range pm.Subscriptions {
-		summary := subscriptionSummary{ID: api.FormatSubscriptionID(s.ID), CreatedAt: s.CreatedAt}
+		summary := subscriptionSummary{ID: openrails.SubscriptionID(s.ID), CreatedAt: s.CreatedAt}
 		if s.Product != nil {
 			summary.DisplayName = s.Product.DisplayName
 			summary.Description = s.Product.Description
@@ -622,7 +624,7 @@ func paymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 
 	metadata := paymentMethodMetadataToAPI(pm.Metadata)
 	return paymentMethodResponse{
-		ID:             api.FormatPaymentMethodID(pm.ID),
+		ID:             openrails.PaymentMethodID(pm.ID),
 		Object:         "payment_method",
 		Type:           "card",
 		Rail:           string(pm.Rail),

@@ -26,17 +26,33 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ri.status = ANY (ARRAY['in_flight'::text, 'unknown_needs_verify'::text]);
 
 -- name: CountUnresolvedOperationsNamingPaymentMethod :one
--- or#297 refusal predicate, second arm: an operation pins the instrument its
--- frozen payload names (payment_method_id) until it resolves, whether or not
--- a subscription links it (an invoice collection has none). Every unresolved
--- state counts: pending and failed_retryable re-run from the executor,
--- in_flight is mid-attempt, unknown_needs_verify was sent. Its submission,
--- verification and operator resolution are all judged against the custody it
--- froze; moving custody underneath would strand them on a dead instrument.
+-- or#297 / #657 refusal predicate, second arm: an operation pins EVERY
+-- instrument its frozen payload names — payment_method_id, and a payment-source
+-- update's new/old sides — until it resolves, whether or not a subscription
+-- links it (an invoice collection has none; a swap's subscription link only
+-- moves at finalize). Every unresolved state counts: pending and
+-- failed_retryable re-run from the executor, in_flight is mid-attempt,
+-- unknown_needs_verify was sent. Submission, verification and operator
+-- resolution are all judged against the custody frozen there, so moving custody
+-- underneath would strand them on a dead instrument, or finalize a subscription
+-- onto a method another provider account now owns.
 SELECT count(*)::bigint FROM openrails.rail_intents ri
 WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
-  AND ri.payload->>'payment_method_id' = sqlc.arg(payment_method_id)::uuid::text;
+  AND sqlc.arg(payment_method_id)::uuid::text IN (
+        ri.payload->>'payment_method_id',
+        ri.payload->>'new_payment_method_id',
+        ri.payload->>'old_payment_method_id');
+
+-- name: LockPaymentMethodForProviderAccountCheck :one
+-- #657: the payment-source update's shared lock on its target instrument. It
+-- conflicts with LockPaymentMethodForCustodyRemap (FOR UPDATE), so the
+-- provider-account comparison and a custody flip are serialized: whichever
+-- commits first is what the other one sees.
+SELECT * FROM openrails.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id = sqlc.arg(id)::uuid
+FOR SHARE;
 
 -- name: RemapPaymentMethodCustody :execrows
 -- The custody flip. What moves: who holds the card (custodian), the handle that

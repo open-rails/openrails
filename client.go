@@ -19,8 +19,6 @@
 package openrails
 
 import (
-	"context"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,152 +39,11 @@ const (
 // MerchantID is an OpenRails merchant identifier.
 type MerchantID = merchant.ID
 
-// WithMerchant asserts the expected merchant for one call. Both transports
-// reject a different authenticated merchant. WithMerchantID binds the client
-// once and also rejects conflicting per-call assertions before sending.
-// The assertion never grants access to another merchant.
-func WithMerchant(ctx context.Context, id MerchantID) context.Context {
-	return merchant.WithID(ctx, id)
-}
-
-// AdmissionClient is the metered-usage hot path: batch admission, settle, release,
-// wasted-spend reporting, and trust-level read.
-type AdmissionClient interface {
-	AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitBatchVerdict, error)
-	// Capture settles the admission/authorize hold request_id at the actual
-	// amount, optionally recording a usage analytics event (#311/#410).
-	Capture(ctx context.Context, requestID string, capturedAmount int64, usage *CaptureUsage) (*CaptureReceipt, error)
-	// Release frees the admission/authorize hold request_id without charging.
-	Release(ctx context.Context, requestID string) error
-	// ExtendHold re-declares the deadline of the live hold request_id: the job
-	// it covers is still running and will now finish by expiresAt. A hold
-	// lives exactly as long as its owner declared (AdmitRequest.ExpiresAt,
-	// required with EstimatedAmount) — there is no default — so a job that
-	// outlives its estimate extends before the deadline or loses the hold.
-	// ErrNotFound when nothing live exists to extend (captured, released, or
-	// lapsed): re-admit; a lapsed hold is never resurrected.
-	ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error
-	// GetTrustLevel returns the host-assigned account level for one currency.
-	// Empty means the host treats it as the lowest/default trust level.
-	GetTrustLevel(ctx context.Context, customerID, currency string) (string, error)
-	// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
-	// accrue toward their flat cutoff; direct payer credentials use trust-level
-	// grace and charge overage through the normal ledger. Source+SourceID are
-	// required for retry idempotency.
-	ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error)
-}
-
-// UsageReportClient reports metered usage events outside the admission
-// hold/capture cycle (#797): the host records a usage_events row (optionally
-// host-priced via Amount; 0 = free/metered-only) that the rate-card rating
-// sweep aggregates into arrears invoice lines. Gauge meters (GB-month style)
-// report unit-second segment quantities in Dimensions.
-type UsageReportClient interface {
-	RecordUsage(ctx context.Context, report UsageReport) error
-}
-
-// PolicySyncClient installs merchant-owned admission policy in one settings
-// document.
-type PolicySyncClient interface {
-	GetMerchantSettings(ctx context.Context) (*MerchantSettings, error)
-	SetMerchantSettings(ctx context.Context, settings MerchantSettings) error
-	// SetCustomerSpendDelegations explicitly replaces the customer's complete
-	// delegation document.
-	SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error
-	// SetCustomerSpendDelegation atomically upserts one delegation without
-	// reading or replacing unrelated customer delegations.
-	SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error
-	// DeleteCustomerSpendDelegation revokes exactly ONE addressed delegation
-	// (or#911) and leaves every sibling untouched. A missing grant (already
-	// revoked or never granted) returns an error matching ErrNotFound.
-	DeleteCustomerSpendDelegation(ctx context.Context, customerID, scope, scopeKey string) error
-}
-
-// AdminFundingClient is the small non-hot-path funding/reporting surface used
-// by standalone admin jobs.
-type AdminFundingClient interface {
-	// DepositCredits mints a credit block for a payer (admin funding, promotions,
-	// money-in settlement). Returns the ledger transaction created.
-	DepositCredits(ctx context.Context, req DepositCreditsRequest) (*CreditTransaction, error)
-	// GetDeposit answers "what did this deposit key do" (or#906): the grant
-	// committed at (customerID, sourceID) — id, amount, created_at, with
-	// Replayed=true — or an error matching ErrNotFound when the key never
-	// committed. Key-qualified: sourceID is the caller half of the deposit
-	// idempotency key; the operation half is deposit by construction.
-	GetDeposit(ctx context.Context, customerID, sourceID string) (*CreditTransaction, error)
-	// SetCreditLimit sets the admin-managed arrears credit line for a payer in one
-	// currency. A zero limit removes the credit line.
-	SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error
-	// GetCreditLimit reads the admin-managed arrears credit line for a payer in one
-	// currency (0 = no credit line). Read counterpart of SetCreditLimit (#489); the
-	// limit is not surfaced by GetCreditAccount/settings, hence its own call.
-	GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error)
-	// UsageRollup returns grouped spend aggregates for a payer and currency over
-	// [from, to]. groupBy selects the aggregation dimension (e.g. "resource", "invoker").
-	UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error)
-	// ResourceRevenueDaily returns per-day revenue for a resource across all
-	// payers in the merchant (#410).
-	ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) (*ResourceRevenueResponse, error)
-}
-
-// CustomerLookupClient reads customer-forward billing state.
-type CustomerLookupClient interface {
-	// Balance returns the payer's balance snapshot.
-	Balance(ctx context.Context, customerID string) (*BalanceResponse, error)
-	// GetCreditAccount reads a payer's balance snapshot for one currency.
-	GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error)
-	// ListActiveEntitlements returns the entitlement records active at `at`
-	// for subjects addressed by their EXTERNAL identity — the subject ids the
-	// host's auth system already holds, scoped to the request credential's
-	// merchant (#555: no issuer; identity is (merchant, subject)). Always batch (#354):
-	// one engine query answers the whole list, keyed by subject with an entry
-	// per requested subject after trim + dedupe; an unknown subject — a user
-	// who has never touched billing — is an empty slice, never an error.
-	// Single lookup = an array of one. Max 500 subjects per call; over-cap
-	// errors, never silently truncates. A zero `at` means "now". For
-	// token-issuance enrichment and list renders: bake names into token
-	// claims and gate per-request from the token, not from this call.
-	ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error)
-	// ListEntitlements is the single-subject form of ListActiveEntitlements.
-	ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error)
-	// HasEntitlement checks one entitlement for one subject at `at`.
-	HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error)
-	// ListCustomersWithEntitlement is the REVERSE of ListActiveEntitlements (#535):
-	// the customer ids (== external subject ids, #364 UUID-only) holding an ACTIVE
-	// window of `entitlement` for the merchant. It walks the keyset-paginated
-	// reverse query to completion and returns the full set. A zero `at` means
-	// "now". Backs a host directory's filter-by-entitlement (the authkit
-	// EntitlementFilterProvider).
-	ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error)
-	// ListProductAccess lists active product-access grants for one subject.
-	ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error)
-	// HasProductAccess checks one product id for one subject.
-	HasProductAccess(ctx context.Context, subject, productID string) (bool, error)
-}
-
-// Verify checks a client's authenticated readiness. Prefer client.Verify directly.
-func Verify(ctx context.Context, c *Client) error {
-	if c == nil {
-		return fmt.Errorf("openrails: client is nil")
-	}
-	return c.Verify(ctx)
-}
-
 // SelfIssuer is the issuer keying customers rows for self-service
 // identities whose subject is the user's own UUID — what an embedded host
 // passes to ListActiveEntitlements for its own users (internal/db
 // EnsureCustomerID materializes rows under it).
 const SelfIssuer = "openrails:self"
-
-// CustomerID is the OpenRails customer UUID a charge is billed to.
-type CustomerID uuid.UUID
-
-func (id CustomerID) MarshalText() ([]byte, error)     { return uuid.UUID(id).MarshalText() }
-func (id *CustomerID) UnmarshalText(data []byte) error { return (*uuid.UUID)(id).UnmarshalText(data) }
-
-func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
-func (id CustomerID) String() string  { return uuid.UUID(id).String() }
-func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
 
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
 // promotions, money-in settlement). Amount is in the currency's native integer unit.
@@ -222,7 +79,7 @@ type DepositCreditsRequest struct {
 // native integer precision, and timestamps are RFC3339 instants.
 type CreditTransaction struct {
 	ID              uuid.UUID  `json:"id"`
-	CustomerID      uuid.UUID  `json:"customer_id"`
+	CustomerID      CustomerID `json:"customer_id"`
 	Invoker         string     `json:"invoker"`
 	Currency        string     `json:"currency"`
 	Amount          int64      `json:"amount,string"`
@@ -254,13 +111,13 @@ type CreditTransaction struct {
 // EstimatedAmount is the upper-bound charge to hold. A zero EstimatedAmount runs
 // the limit checks without placing a money hold.
 type AdmitRequest struct {
-	CustomerID      string `json:"customer_id"`
-	Invoker         string `json:"invoker"`
-	InvokerType     string `json:"invoker_type,omitempty"`
-	TrustLevel      string `json:"trust_level,omitempty"`
-	Resource        string `json:"resource,omitempty"`
-	Currency        string `json:"currency,omitempty"`
-	EstimatedAmount int64  `json:"estimated_amount,string"`
+	CustomerID      CustomerID `json:"customer_id"`
+	Invoker         string     `json:"invoker"`
+	InvokerType     string     `json:"invoker_type,omitempty"`
+	TrustLevel      string     `json:"trust_level,omitempty"`
+	Resource        string     `json:"resource,omitempty"`
+	Currency        string     `json:"currency,omitempty"`
+	EstimatedAmount int64      `json:"estimated_amount,string"`
 	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
 	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
 	// the host knows it. Zero means the request adds no ongoing rate, which
@@ -279,7 +136,7 @@ type AdmitRequest struct {
 	Roles []uuid.UUID `json:"roles,omitempty"`
 }
 
-// AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
+// AdmitResponse is the admission verdict (internal/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
 // DenyCode when available. A successful money-bearing admit creates a request_id
 // keyed SQL operation. A deny is returned as (Allowed=false, nil error) on both
@@ -331,9 +188,9 @@ type BalanceResponse = CreditAccount
 // customer + currency pair. All amounts are in the currency's internal
 // precision (micros for USD).
 type CreditAccount struct {
-	CustomerID  string `json:"customer_id"`
-	Currency    string `json:"currency"`
-	BillingMode string `json:"billing_mode"`
+	CustomerID  CustomerID `json:"customer_id"`
+	Currency    string     `json:"currency"`
+	BillingMode string     `json:"billing_mode"`
 	// BalanceAmount is the total prepaid credit balance (excluding holds).
 	BalanceAmount int64 `json:"balance_amount,string"`
 	// HeldAmount is the sum of outstanding authorization holds not yet captured or released.
@@ -434,9 +291,9 @@ type BillingPolicyInput struct {
 // GetMerchantSettings returns only the DECLARATIVE rungs (default + tier):
 // per-customer bindings are runtime segmentation state and are not enumerated.
 type BillingPolicyBindingInput struct {
-	PolicyName string `json:"policy"`
-	CustomerID string `json:"customer_id,omitempty"`
-	Tier       string `json:"tier,omitempty"`
+	PolicyName string     `json:"policy"`
+	CustomerID CustomerID `json:"customer_id,omitzero"`
+	Tier       string     `json:"tier,omitempty"`
 }
 
 // WastedSpendReport is one host-reported failed attempt that cost money.
@@ -449,10 +306,10 @@ type BillingPolicyBindingInput struct {
 // keyed structurally in the usage ledger — and a replay with a changed Amount is
 // refused rather than answered with the first result (or#891).
 type WastedSpendReport struct {
-	CustomerID  string `json:"customer_id"`
-	Invoker     string `json:"invoker"`
-	InvokerType string `json:"invoker_type,omitempty"`
-	Currency    string `json:"currency,omitempty"`
+	CustomerID  CustomerID `json:"customer_id"`
+	Invoker     string     `json:"invoker"`
+	InvokerType string     `json:"invoker_type,omitempty"`
+	Currency    string     `json:"currency,omitempty"`
 	// Amount is the wasted spend in the currency's internal precision.
 	Amount int64 `json:"amount,string"`
 	// Source identifies the system reporting the waste (e.g. "inference-gateway").
@@ -473,7 +330,7 @@ type WastedSpendReport struct {
 // through rate-card rating). OccurredAt (nil = now) places the event in its
 // rating window — gauge segment reporters set it to segment end.
 type UsageReport struct {
-	CustomerID string           `json:"customer_id"`
+	CustomerID CustomerID       `json:"customer_id"`
 	Invoker    string           `json:"invoker"`
 	Currency   string           `json:"currency,omitempty"`
 	EventType  string           `json:"event_type"`
@@ -503,7 +360,7 @@ type WastedSpendResponse struct {
 
 // SpendLimitWindow is one fixed money-budget window in a hierarchical
 // budget-scope policy (#473) — same shape as BudgetWindowInput
-// (pkg/service.SpendLimitWindowInput on the wire).
+// (internal/service.SpendLimitWindowInput on the wire).
 type SpendLimitWindow = BudgetWindowInput
 
 // SpendDelegationInput is one payer-owned spend delegation. Machine clients use
@@ -532,10 +389,13 @@ type ResourceRevenueResponse struct {
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
 }
 
-// EntitlementRecord is one entitlement window.
+// EntitlementRecord is one entitlement window. SourceID is the source
+// resource's own wire id beside SourceType (see SourceRef): sub_… for
+// subscription and grace sources, pay_… for one_off sources, the host's
+// declared id for admin sources.
 type EntitlementRecord struct {
 	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id,omitempty"`
+	CustomerID   CustomerID `json:"customer_id,omitzero"`
 	Entitlement  string     `json:"entitlement"`
 	StartAt      time.Time  `json:"start_at"`
 	EndAt        *time.Time `json:"end_at,omitempty"`
@@ -548,16 +408,17 @@ type EntitlementRecord struct {
 }
 
 // ProductAccessGrant is one active product-access row from the merchant lookup
-// API.
+// API. SourceID follows the EntitlementRecord rule (pay_… for purchase,
+// sub_… for subscription, the declared id for admin).
 type ProductAccessGrant struct {
 	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id"`
-	ProductID    string     `json:"product_id"`
+	CustomerID   CustomerID `json:"customer_id"`
+	ProductID    ProductID  `json:"product_id"`
 	ProductKey   string     `json:"product_key,omitempty"`
 	ProductName  string     `json:"product_name,omitempty"`
 	SourceType   string     `json:"source_type"`
 	SourceID     string     `json:"source_id,omitempty"`
-	PaymentID    *string    `json:"payment_id,omitempty"`
+	PaymentID    *PaymentID `json:"payment_id,omitempty"`
 	Status       string     `json:"status"`
 	StartsAt     time.Time  `json:"starts_at"`
 	EndsAt       *time.Time `json:"ends_at,omitempty"`
@@ -569,9 +430,9 @@ type ProductAccessGrant struct {
 
 // ProductAccessCheck is the response from a single product-access check.
 type ProductAccessCheck struct {
-	CustomerID string `json:"customer_id"`
-	ProductID  string `json:"product_id"`
-	HasAccess  bool   `json:"has_access"`
+	CustomerID CustomerID `json:"customer_id"`
+	ProductID  ProductID  `json:"product_id"`
+	HasAccess  bool       `json:"has_access"`
 }
 
 // AdmitBatchVerdict is one per-item verdict from POST /v1/merchant/admissions.
@@ -592,7 +453,7 @@ func (v AdmitBatchVerdict) Allowed() bool {
 
 // CreditLimitRequest carries an exact native-currency arrears limit.
 type CreditLimitRequest struct {
-	CustomerID        string `json:"customer_id"`
-	Currency          string `json:"currency"`
-	CreditLimitAmount int64  `json:"credit_limit_amount,string"`
+	CustomerID        CustomerID `json:"customer_id"`
+	Currency          string     `json:"currency"`
+	CreditLimitAmount int64      `json:"credit_limit_amount,string"`
 }

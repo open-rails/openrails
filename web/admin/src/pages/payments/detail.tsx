@@ -34,7 +34,7 @@ import { REFUNDABLE_RAILS } from "@/lib/api/endpoints"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import {
   formatNativeAmount,
-  formatUnix,
+  formatDate,
   nativeAmountFromInput,
   nativeAmountToInput,
   shortId,
@@ -86,8 +86,8 @@ export function PaymentDetailPage() {
         <div className="ml-auto">
           <RefundDialog
             payment={payment}
-            customerId={payment.user.replace(/^usr_/, "")}
-            subscriptionId={payment.subscription?.replace(/^sub_/, "")}
+            customerId={payment.customer_id}
+            subscriptionId={payment.subscription_id}
             disabled={!refundable}
             disabledNote={railRefundNote}
           />
@@ -106,24 +106,24 @@ export function PaymentDetailPage() {
         <Fact label="Customer">
           <Link
             className="text-xs underline-offset-2 hover:underline"
-            to={`/customers/${payment.user.replace(/^usr_/, "")}`}
+            to={`/customers/${payment.customer_id}`}
           >
-            {shortId(payment.user, 16)}
+            {shortId(payment.customer_id, 16)}
           </Link>
         </Fact>
         <Fact label="Subscription">
-          {payment.subscription ? (
+          {payment.subscription_id ? (
             <Link
               className="text-xs underline-offset-2 hover:underline"
-              to={`/subscriptions/${payment.subscription.replace(/^sub_/, "")}`}
+              to={`/subscriptions/${payment.subscription_id}`}
             >
-              {shortId(payment.subscription, 16)}
+              {shortId(payment.subscription_id, 16)}
             </Link>
           ) : (
             "—"
           )}
         </Fact>
-        <Fact label="Created">{formatUnix(payment.created)}</Fact>
+        <Fact label="Created">{formatDate(payment.created_at)}</Fact>
         <Fact label="Type">{payment.object}</Fact>
         {payment.failure_message && (
           <Fact label="Failure">{payment.failure_message}</Fact>
@@ -167,7 +167,7 @@ export function PaymentDetailPage() {
                     <TableCell>
                       {formatNativeAmount(r.amount, r.currency)}
                     </TableCell>
-                    <TableCell>{formatUnix(r.created)}</TableCell>
+                    <TableCell>{formatDate(r.created_at)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -188,8 +188,8 @@ function RefundDialog({
 }: {
   payment: {
     id: string
-    amount: number
-    amount_refunded: number
+    amount: string
+    amount_refunded: string
     currency: string
     rail: string
   }
@@ -199,7 +199,9 @@ function RefundDialog({
   disabledNote?: string
 }) {
   const [open, setOpen] = React.useState(false)
-  const remaining = payment.amount - payment.amount_refunded
+  const remaining = (
+    BigInt(payment.amount) - BigInt(payment.amount_refunded)
+  ).toString()
   const queryClient = useQueryClient()
   const refund = useMutation(
     adminMutations.refundPayment(
@@ -217,7 +219,12 @@ function RefundDialog({
     },
     onSubmit: async ({ value }) => {
       const amount = nativeAmountFromInput(value.amount, payment.currency)
-      if (amount === null || amount <= 0 || amount > remaining) return
+      if (
+        amount === null ||
+        BigInt(amount) <= 0n ||
+        BigInt(amount) > BigInt(remaining)
+      )
+        return
       try {
         await refund.mutateAsync({
           amount,
@@ -283,10 +290,10 @@ function RefundDialog({
                       value,
                       payment.currency
                     )
-                    if (amount === null || amount <= 0) {
+                    if (amount === null || BigInt(amount) <= 0n) {
                       return "Enter an amount greater than zero"
                     }
-                    return amount > remaining
+                    return BigInt(amount) > BigInt(remaining)
                       ? "Amount exceeds the remaining refundable balance"
                       : undefined
                   },

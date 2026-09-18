@@ -16,12 +16,12 @@ import (
 
 	"github.com/open-rails/openrails/cmd/openrails/consoleassets"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/bootstrap"
 	"github.com/open-rails/openrails/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/internal/migrate"
-	embcp "github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 func main() {
@@ -155,12 +155,12 @@ func runServer(cmd *cobra.Command, args []string) error {
 
 	// ConsoleAssets is nil unless this binary was built with
 	// `-tags console_assets` (#754: `task build-console-binary` / Dockerfile).
-	embeddedApp, err := embedded.New(bootCtx, embedded.Options{
+	embeddedApp, err := embed.New(bootCtx, embed.Options{
 		Config:        cfg,
 		ConsoleAssets: consoleassets.FS(),
 		// Standalone keeps self-provisioning (#895): OpenRails builds and runs
 		// its own River client in RunWorkers. The declaration is now explicit.
-		River: embedded.RiverManagedByOpenRails(),
+		River: embed.RiverManagedByOpenRails(),
 	})
 	if err != nil {
 		if bootCtx.Err() != nil {
@@ -182,15 +182,17 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Attach the OpenRails-owned AuthKit control plane (#284). MANDATORY in
 	// standalone mode (#469): construction failure exits non-zero — there is no
 	// verifier-only downgrade.
-	if err := embcp.Attach(context.Background(), embeddedApp.App(), cfg, nil); err != nil {
+	cp, err := controlplane.Attach(context.Background(), embeddedApp, controlplane.Options{})
+	if err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("attach control plane: %w", err)
 	}
+	graph := app.HostGraph(embeddedApp)
 
 	// Startup bootstrap (#327/#531): if the conventional bootstrap manifest is
 	// mounted, apply control-plane authority on first run only. Catalog
 	// reconciliation stays an explicit CLI/init-job operation.
-	if err := applyStartupBootstrap(context.Background(), cfg, embeddedApp.App()); err != nil {
+	if err := applyStartupBootstrap(context.Background(), cfg, graph); err != nil {
 		cleanupOnError = true
 		return fmt.Errorf("startup bootstrap: %w", err)
 	}
@@ -204,7 +206,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), cfg, embeddedApp.App(), manifestPath, bootNMIProbeV5BaseURL); err != nil {
+	if err := serverboot.ReconcileBootMerchantManifest(context.Background(), cfg, graph, manifestPath, bootNMIProbeV5BaseURL); err != nil {
 		cleanupOnError = true
 		return err
 	}
@@ -217,7 +219,7 @@ func runServer(cmd *cobra.Command, args []string) error {
 	// Public API server (user/admin JWT auth). The full standalone surface is
 	// the framework-neutral net/http stack (#670) — the same stack embedded
 	// hosts mount.
-	publicHandler, err := embedded.StandaloneHandler(embeddedApp)
+	publicHandler, err := cp.Handler()
 	if err != nil {
 		return fmt.Errorf("build billing http handler: %w", err)
 	}

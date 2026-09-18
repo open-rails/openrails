@@ -9,7 +9,9 @@ deployment shapes:
 - **SaaS (hosted)** — identical to standalone from the browser's perspective; everything
   below that says "standalone" applies unchanged.
 
-All money amounts are **micros** (millionths of a currency unit): `$5.00 = 5_000_000`.
+Money amounts are integers in the currency's native units (micros for USD:
+`$5.00 = 5_000_000`), carried as decimal strings — parse with `BigInt`, never
+`Number` ([money-wire.md](money-wire.md)).
 A **rail** is the gateway kind (`nmi`, `ccbill`, `stripe`, `solana`); a **PSP** is the
 merchant's account on a rail, named by its key (`mobius` = an NMI account). Checkout's
 `payment.rail` value is the PSP key; a bare rail kind is also accepted when the merchant
@@ -73,7 +75,7 @@ GET  /v1/me/invoices[/:id]                itemized statements
 GET  /v1/me/payments                      one-off payment history
 GET  /v1/me/entitlements/active           active entitlements
 PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}: invoice collection method
-GET  /v1/me/subscriptions[/:id]           own subscriptions (enriched with product/price)
+GET  /v1/me/subscriptions[/:id]           own subscriptions: the shared Subscription shape (typed ids, price/product, scheduled change, card, access)
 POST /v1/me/subscriptions/:id/cancel      body {"feedback": "..."} → 202 {"status":"queued"}
 POST /v1/me/subscriptions/:id/resume      cancelled Stripe subscriptions → 202
 POST /v1/me/subscriptions/:id/change-tier body {"price_id":"price_..."} — upgrades/downgrades

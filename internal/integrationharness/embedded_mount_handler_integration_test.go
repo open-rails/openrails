@@ -20,7 +20,6 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
@@ -43,22 +42,20 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	})
 
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{
-			Config: &config.Config{
-				Env:      "dev",
-				TestMode: config.CredentialPostureSandbox,
-				DB:       &config.DBConfig{URL: h.DSN},
-			},
-			Redis: h.Redis,
-			River: embedded.RiverManagedByOpenRails(),
+		Config: &config.Config{
+			Env:      "dev",
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: h.DSN},
 		},
+		Redis: h.Redis,
+		River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		MountPrefix:            "/api/openrails",
-		RouteSets:              []embedded.RouteSet{embedded.RouteSetMerchantAPI, embedded.RouteSetCustomer},
+		RouteSets:              []embed.RouteSet{embed.RouteSetMerchantAPI, embed.RouteSetCustomer},
 		Gate:                   httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),
 		DelegatedAuthenticator: authn,
 	})
@@ -81,7 +78,7 @@ func TestEmbeddedMountHandlerEndToEnd(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var balance struct {
 		Currency      string `json:"currency"`
-		BalanceAmount int64  `json:"balance_amount"`
+		BalanceAmount int64  `json:"balance_amount,string"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &balance), w.Body.String())
 	require.Equal(t, "USD", balance.Currency)

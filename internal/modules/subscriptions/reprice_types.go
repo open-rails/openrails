@@ -1,48 +1,58 @@
 package subscriptions
 
 import (
-	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // #773 typed sentinels (the #750 pattern): one sentinel per constraint class,
 // wrapped by a detail struct so callers can either errors.Is() the class or
 // errors.As() for the specifics. Fail-closed — every reprice attempt that
-// violates a constraint is refused, never silently coerced.
+// violates a constraint is refused, never silently coerced. Each carries its
+// HTTP status and wire code (#983): constraints are 422, scheduling state 409.
 var (
 	// ErrRepriceCrossProduct: to_price must belong to the SAME product as the
 	// subscription's current price. Cross-product moves are plan changes (a
 	// different feature set) — out of scope for v1 (#778).
-	ErrRepriceCrossProduct = errors.New("reprice: to_price must be on the same product")
+	ErrRepriceCrossProduct = apperr.New(http.StatusUnprocessableEntity, "reprice_cross_product", "reprice: to_price must be on the same product")
 
 	// ErrRepriceCrossCurrency: to_price must match the subscription's current
 	// currency — no FX surprises on a merchant-initiated transaction.
-	ErrRepriceCrossCurrency = errors.New("reprice: to_price must be in the same currency")
+	ErrRepriceCrossCurrency = apperr.New(http.StatusUnprocessableEntity, "reprice_cross_currency", "reprice: to_price must be in the same currency")
 
 	// ErrRepriceInactivePrice: to_price must be active (purchasable) — an
 	// archived price cannot be scheduled as a reprice target.
-	ErrRepriceInactivePrice = errors.New("reprice: to_price must be active")
+	ErrRepriceInactivePrice = apperr.New(http.StatusUnprocessableEntity, "reprice_inactive_price", "reprice: to_price must be active")
 
 	// ErrRepriceAlreadyScheduled: at most one scheduled reprice may exist per
 	// subscription at a time (uq_subscription_reprices_one_scheduled) — cancel
 	// the existing one first.
-	ErrRepriceAlreadyScheduled = errors.New("reprice: subscription already has a scheduled reprice")
+	ErrRepriceAlreadyScheduled = apperr.New(http.StatusConflict, "reprice_already_scheduled", "reprice: subscription already has a scheduled reprice")
 
 	// ErrRepriceNotScheduled: the reprice is not (or is no longer) in
 	// status=scheduled — it was already applied, canceled, or never existed.
 	// Surfaced by both Cancel (cancel-before-effective) and the renewal-boundary
 	// pickup (safe to retry).
-	ErrRepriceNotScheduled = errors.New("reprice: not in scheduled status")
+	ErrRepriceNotScheduled = apperr.New(http.StatusConflict, "reprice_not_scheduled", "reprice: not in scheduled status")
 
 	// ErrRepriceNoticeWindowViolation (#781): an INCREASE reprice (to_price
 	// amount > from_price amount) whose effective_at is nearer than the
 	// merchant's configured notice window (default DefaultRepriceNoticeWindowDays).
 	// Decreases are exempt. Bypassed only by an explicit
 	// AcknowledgeShortNotice on the request — never silently coerced.
-	ErrRepriceNoticeWindowViolation = errors.New("reprice: effective_at is inside the merchant's configured notice window for a price increase")
+	ErrRepriceNoticeWindowViolation = apperr.New(http.StatusUnprocessableEntity, "reprice_notice_window_violation", "reprice: effective_at is inside the merchant's configured notice window for a price increase")
+
+	// ErrRepriceNotFound: no reprice row has that id for this merchant.
+	ErrRepriceNotFound = apperr.New(http.StatusNotFound, "reprice_not_found", "reprice not found")
+	// ErrRepriceTargetPriceNotFound: to_price names no price of this merchant.
+	ErrRepriceTargetPriceNotFound = apperr.New(http.StatusNotFound, "reprice_target_price_not_found", "reprice: to_price not found")
+	// ErrRepricePriceKeyNotFound: the bulk key names no current price.
+	ErrRepricePriceKeyNotFound = apperr.New(http.StatusNotFound, "reprice_price_key_not_found", "reprice: price key not found")
 )
 
 // DefaultRepriceNoticeWindowDays (#781) is the notice window used when a
@@ -104,18 +114,18 @@ type RepriceAllPriorVersionsRequest struct {
 // tags match the shape documented for #777 console consumers: {batch_id,
 // to_price_id, matched, scheduled:[...], skipped:[...]}.
 type RepriceBatchResult struct {
-	BatchID   uuid.UUID        `json:"batch_id"`
-	ToPriceID uuid.UUID        `json:"to_price_id"`
-	Matched   int              `json:"matched"`
-	Scheduled []RepriceOutcome `json:"scheduled"`
-	Skipped   []RepriceOutcome `json:"skipped"`
+	BatchID   uuid.UUID         `json:"batch_id"`
+	ToPriceID openrails.PriceID `json:"to_price_id"`
+	Matched   int               `json:"matched"`
+	Scheduled []RepriceOutcome  `json:"scheduled"`
+	Skipped   []RepriceOutcome  `json:"skipped"`
 }
 
 // RepriceOutcome is one subscription's result within a bulk reprice.
 type RepriceOutcome struct {
-	SubscriptionID uuid.UUID `json:"subscription_id"`
-	RepriceID      uuid.UUID `json:"reprice_id,omitempty"` // zero when Skipped
-	Reason         string    `json:"reason,omitempty"`     // set when skipped (constraint violation)
+	SubscriptionID openrails.SubscriptionID `json:"subscription_id"`
+	RepriceID      uuid.UUID                `json:"reprice_id,omitempty"` // zero when Skipped
+	Reason         string                   `json:"reason,omitempty"`     // set when skipped (constraint violation)
 	// AcknowledgedShortNotice (#781) is true when this scheduled item's
 	// effective_at was inside the merchant's notice window and was scheduled
 	// anyway via the batch's AcknowledgeShortNotice override — audit evidence
@@ -131,7 +141,7 @@ type RepriceOutcome struct {
 // the new version — at that moment every existing subscriber on the key is
 // still, by definition, a "prior version" candidate once the bump lands.
 type RepricePreviewResult struct {
-	PriceKey  string    `json:"price_key"`
-	ToPriceID uuid.UUID `json:"to_price_id"`
-	Matched   int       `json:"matched"`
+	PriceKey  string            `json:"price_key"`
+	ToPriceID openrails.PriceID `json:"to_price_id"`
+	Matched   int               `json:"matched"`
 }

@@ -37,15 +37,15 @@ type adminBillingProfileSnapshot struct {
 	CustomerID    string `json:"customer_id"`
 	CreditBalance []struct {
 		Currency        string `json:"currency"`
-		Balance         int64  `json:"balance"`
-		HeldBalance     int64  `json:"held_balance"`
-		OutstandingOwed int64  `json:"outstanding_owed_amount"`
+		Balance         int64  `json:"balance,string"`
+		HeldBalance     int64  `json:"held_balance,string"`
+		OutstandingOwed int64  `json:"outstanding_owed_amount,string"`
 	} `json:"credit_balance"`
 }
 
 type selfAccountSnapshot struct {
 	Currency      string `json:"currency"`
-	BalanceAmount int64  `json:"balance_amount"`
+	BalanceAmount int64  `json:"balance_amount,string"`
 }
 
 // TestAPIKeyCrossMerchantIsolationHTTP: merchant A's API key sees only

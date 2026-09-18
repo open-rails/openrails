@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -74,7 +73,7 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
 		Auth: &config.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()},
 	}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -153,10 +152,10 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	settings, err := client.GetMerchantSettings(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, settings)
-	customer := uuid.NewString()
+	customer := openrails.CustomerID(uuid.New())
 	_, err = client.GrantEntitlement(ctx, customer, openrails.GrantEntitlementRequest{Entitlement: "premium"})
 	require.NoError(t, err)
-	members, err := cp.ListMerchantsForSubject(ctx, customer)
+	members, err := cp.ListMerchantsForSubject(ctx, customer.String())
 	require.NoError(t, err)
 	require.Len(t, members, 1)
 	require.Equal(t, created.MerchantID, members[0].ID)
@@ -172,6 +171,35 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	checkout, err := client.GetCheckoutConfig(ctx)
 	require.NoError(t, err)
 	require.Len(t, checkout.PSPs, 1)
+
+	// #655/#656 lifecycle through the handle: list by status, archive by the
+	// immutable id with no provider call, last-active refusal, idempotence.
+	active, err := cp.ListPaymentProviderConfigs(ctx, created.MerchantID, "ccbill", "active")
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	require.Equal(t, provider.ID, active[0].ID)
+	_, err = cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", provider.ID, controlplane.ArchivePaymentProviderAccountRequest{})
+	var lastActive *controlplane.LastActiveProviderAccountError
+	require.ErrorAs(t, err, &lastActive, "the rail's only active account needs the explicit override")
+	require.Equal(t, provider.ID, lastActive.Account.ID)
+	archived, err := cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", provider.ID, controlplane.ArchivePaymentProviderAccountRequest{AllowLast: true})
+	require.NoError(t, err)
+	require.True(t, archived.Archived)
+	require.Equal(t, provider.ID, archived.ID)
+	repeat, err := cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", provider.ID, controlplane.ArchivePaymentProviderAccountRequest{})
+	require.NoError(t, err, "archiving an archived account is a no-op")
+	require.True(t, repeat.Archived)
+	_, err = cp.ArchivePaymentProviderAccount(ctx, created.MerchantID, "ccbill", uuid.New(), controlplane.ArchivePaymentProviderAccountRequest{AllowLast: true})
+	require.ErrorIs(t, err, controlplane.ErrPaymentProviderAccountNotFound)
+	_, err = cp.GetPaymentProviderConfig(ctx, created.MerchantID, "ccbill", "test")
+	require.ErrorIs(t, err, controlplane.ErrPaymentProviderNotFound, "no active account remains on the rail")
+	drained, err := cp.ListPaymentProviderConfigs(ctx, created.MerchantID, "", "archived")
+	require.NoError(t, err)
+	require.Len(t, drained, 1)
+	require.True(t, drained[0].Drained, "archived with no obligations is drained, and still listed")
+	checkout, err = client.GetCheckoutConfig(ctx)
+	require.NoError(t, err)
+	require.Empty(t, checkout.PSPs, "an archived account is not advertised for new checkout")
 
 	ids, err := cp.ListActiveMerchantIDs(ctx, 1000, 0)
 	require.NoError(t, err)

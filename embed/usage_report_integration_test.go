@@ -9,17 +9,19 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/app"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
+	"github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/stretchr/testify/require"
 )
 
 // TestRecordUsage_UnifiedClient_RatesIntoInvoice proves #797 end to end on
 // BOTH transports: host-reported usage lands in openrails.usage_events through
-// the unified client (idempotent on source+source_id), and the pkg/service
+// the unified client (idempotent on source+source_id), and the internal/service
 // FinalizeInvoice export rates it through a gauge rate card into an invoice.
 func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	ctx := context.Background()
@@ -51,7 +53,8 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	})
 
 	// Arrears so rated usage becomes an open receivable.
-	svc := embedded.Runtime().Service()
+	svc, err := service.New(app.HostGraph(embedded.Runtime()).Runtime)
+	require.NoError(t, err)
 	mode := money.BillingModeArrears
 	require.NoError(t, svc.SetCreditAccountSettings(dbtest.WithTestMerchant(ctx), payer, currency,
 		money.AccountSettingsInput{BillingMode: &mode}))
@@ -68,7 +71,7 @@ func TestRecordUsage_UnifiedClient_RatesIntoInvoice(t *testing.T) {
 	// Two gauge segment events via the EMBEDDED unified client; the first is
 	// replayed and must not double-record.
 	report := openrails.UsageReport{
-		CustomerID: payerID.String(),
+		CustomerID: openrails.CustomerID(payerID),
 		Invoker:    "usage-report-test",
 		Currency:   currency,
 		EventType:  meterKey,
@@ -123,7 +126,7 @@ INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, mete
 VALUES ($1, $2, 1, $3, 'in_arrears', jsonb_build_object(
     'model', 'per_unit',
     'currency', 'USD',
-    'per_unit', jsonb_build_object('unit_amount', $4::bigint, 'divide_by', $5::bigint)))`,
+    'per_unit', jsonb_build_object('unit_amount', $4::bigint::text, 'divide_by', $5::bigint)))`,
 		merchantID, productID, meterKey, rateMicros, divideBy)
 	require.NoError(t, err)
 

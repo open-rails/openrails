@@ -14,12 +14,10 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/examples/billingapp"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -43,14 +41,14 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, tenant.MerchantID, ccbill("999981-0001"))
 
 	newRuntime := func() *embed.Runtime {
-		rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+		rt, err := embed.New(ctx, embed.Options{
 			Config: &config.Config{
 				Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI,
 				SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 				DB: &config.DBConfig{URL: h.DSN},
 			},
-			Redis: h.Redis, River: embedded.RiverManagedByOpenRails(),
-		}})
+			Redis: h.Redis, River: embed.RiverManagedByOpenRails(),
+		})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt
@@ -65,6 +63,14 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	unbound := newRuntime()
 	sharedEngineClient, err := unbound.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
 	require.NoError(t, err)
+	// SaaS: two merchants provisioned by registered owners on one shared
+	// engine behind the real hosted control plane. One integrates over HTTP
+	// with an owner-minted API key; the host drives the other in process.
+	hosted := h.StartHosted("USD")
+	saasHTTP := hosted.ProvisionMerchant(hosted.RegisterUser("owner-a"), "billingapp-saas-"+uuid.NewString()[:8])
+	saasEngine := hosted.ProvisionMerchant(hosted.RegisterUser("owner-b"), "billingapp-saas-"+uuid.NewString()[:8])
+	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasHTTP.ID, ccbill("999981-0003"))
+	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), saasEngine.ID, ccbill("999981-0004"))
 
 	deployments := []struct {
 		name     string
@@ -78,6 +84,8 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 			openrails.WithTokenProvider(func(context.Context) (string, error) { return tenant.APIKey, nil }),
 			openrails.WithMerchantID(tenant.MerchantID),
 		)},
+		{"saas_http", saasHTTP.ID, saasHTTP.Client()},
+		{"saas_engine", saasEngine.ID, saasEngine.EngineClient()},
 	}
 	var want *billingapp.Report
 	for _, deployment := range deployments {
@@ -143,7 +151,7 @@ func seedMerchantFacts(ctx context.Context, t *testing.T, h *integrationharness.
 	}))
 	return billingapp.Inputs{
 		Currency: "USD", Run: run, CheckoutPriceKey: priceKey, CheckoutRail: "ccbill",
-		SubscriberID: subscriber.String(), SubscriptionID: api.FormatSubscriptionID(subscription), InvoiceID: invoiceID,
+		SubscriberID: openrails.CustomerID(subscriber), SubscriptionID: openrails.SubscriptionID(subscription), InvoiceID: invoiceID,
 	}, price
 }
 
@@ -153,9 +161,7 @@ func assertDurableFacts(ctx context.Context, t *testing.T, h *integrationharness
 	pool := h.Pool()
 	var intents, sessions int
 	var status string
-	subscription, err := api.ParseSubscriptionID(in.SubscriptionID)
-	require.NoError(t, err)
-	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2`, mid.UUID(), subscription).Scan(&intents))
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.rail_intents WHERE merchant_id=$1 AND subscription_id=$2`, mid.UUID(), in.SubscriptionID).Scan(&intents))
 	require.Positive(t, intents, "cancellation is a durable provider intent")
 	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.checkout_sessions WHERE merchant_id=$1 AND price_id=$2`, mid.UUID(), price).Scan(&sessions))
 	require.Equal(t, 1, sessions, "checkout replay creates one session")

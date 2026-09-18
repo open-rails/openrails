@@ -11,9 +11,8 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // Regression: the transcribed SetCustomerSpendDelegations bypasses the
@@ -30,16 +29,16 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	customerID := dbtest.EnsureCustomerIDPgx(ctx, t, dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID()), "b6b6b6b6-0000-4000-8000-000000000042")
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := New(ctx, Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	rt.app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	client, clientErr := rt.Client()
 	if clientErr != nil {
 		t.Fatal(clientErr)
 	}
-	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
+	err = client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{
 		{
 			Scope:    "invoker",
 			ScopeKey: "test-invoker",
@@ -55,14 +54,14 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	})
 	require.NoError(t, err, "embedded SetCustomerSpendDelegations must pin the bound merchant itself")
 
-	require.NoError(t, client.SetCustomerSpendDelegation(ctx, customerID.String(), openrails.SpendDelegationInput{
+	require.NoError(t, client.SetCustomerSpendDelegation(ctx, openrails.CustomerID(customerID), openrails.SpendDelegationInput{
 		Scope:    "invoker",
 		ScopeKey: "test-invoker",
 		// Currency is intentionally omitted: spend limits are also valid for
 		// non-monetary units, and the singular upsert must preserve that contract.
 		Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 123}},
 	}))
-	stored, err := rt.Service().InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
+	stored, err := rt.svc.InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
 	require.NoError(t, err)
 	require.Len(t, stored, 2, "single embedded upsert must preserve unrelated rows")
 	limits := map[string]int64{}
@@ -72,7 +71,7 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	require.EqualValues(t, 123, limits["invoker\x00test-invoker"])
 	require.EqualValues(t, 9_000_000, limits["role\x00test-role"])
 
-	err = client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{
+	err = client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{
 		{
 			Scope: " role ", ScopeKey: " test-role ",
 			Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 1}},
@@ -87,10 +86,10 @@ func TestEmbeddedClientSetCustomerSpendDelegations(t *testing.T) {
 	require.ErrorAs(t, err, &embeddedStatus)
 	require.Equal(t, 400, embeddedStatus.Status)
 	require.Contains(t, err.Error(), "duplicate delegation for role")
-	stored, err = rt.Service().InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
+	stored, err = rt.svc.InvokerSpendLimits(dbtest.WithTestMerchant(ctx), identity.CustomerID(customerID))
 	require.NoError(t, err)
 	require.Len(t, stored, 2, "rejected embedded duplicate document must not mutate policy")
 
 	// Replace-with-empty exercises the delete lane through the same ctx path.
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customerID.String(), nil))
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), nil))
 }

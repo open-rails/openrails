@@ -40,6 +40,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/entitlements/",
 		"internal/modules/checkout/",
 		"internal/modules/subscriptions/",
+		"internal/modules/dunning/",
 		"internal/modules/admission/",
 		"internal/modules/solana/",
 		"internal/modules/webhooks/",
@@ -63,7 +64,7 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/integrations/stripeapi/",
 		"pkg/pricing/",
 		"pkg/catalog/",
-		"pkg/service/",
+		"internal/service/",
 		"pkg/api/",
 	}
 
@@ -100,29 +101,26 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/integrations/pyth/client.go:PriceUSD":                        "returns the token's USD RATE; no amount is computed here",
 		"internal/integrations/pyth/client.go:validateParsedPrice":             "sanity-bounds the parsed RATE",
 		"internal/integrations/pyth/client.go:parsePythNumber":                 "parses the feed's mantissa+exponent RATE encoding; the boundary where float starts, never an amount",
-		"internal/http/handlers/solana_supported_tokens.go:TokenInfo":          "TokenInfo.Price is the token's USD RATE for display",
-		"internal/http/handlers/solana_supported_tokens.go:TokenQuote":         "TokenPriceUSD/FXRate are RATES; the quoted units are a decimal string",
+		"internal/http/handlers/solana_supported_tokens.go:rateString":         "spells a provider RATE (token USD price, FX) as the exact decimal string of the float the feed quoted",
 		"internal/http/handlers/solana_supported_tokens.go:GetSupportedTokens": "builds a symbol -> RATE map for the token list response",
 
 		// --- reconcile: fractions, counts and durations --------------------
-		"internal/reconcile/cancel_budget.go:DefaultMaxCancelsPerPass":    "0.05 / 0.10 are cancel-budget FRACTIONS of a roster, not amounts",
-		"internal/reconcile/cancel_budget.go:CancelBudget":                "Fraction is a share of the local live roster",
-		"internal/reconcile/cancel_budget.go:fraction":                    "returns that share",
-		"internal/reconcile/cancel_budget.go:Limit":                       "math.Floor over a COUNT of subscriptions the pass may cancel",
-		"internal/reconcile/cancel_budget.go:RosterBreaker":               "Ratio is a remote/local roster-size ratio",
-		"internal/reconcile/cancel_budget.go:ratio":                       "returns that ratio",
-		"internal/reconcile/cancel_budget.go:ratioOf":                     "remote/local roster-size ratio emitted as an alerting metric, not an amount",
-		"internal/reconcile/cancel_budget.go:Implausible":                 "compares two roster COUNTS against the ratio",
-		"internal/reconcile/engine.go:Engine":                             "CircuitBreakerRatio is the roster-size ratio above",
-		"internal/reconcile/store.go:EpisodeSummary":                      "TotalDays is an error-day DURATION total, not an amount",
-		"internal/reconcile/mutations.go:mutationRecordsForFinding":       "decodes rows_affected from evidence — a ROW COUNT",
-		"internal/river/jobs_dunning.go:manualRebillEvidenceResponseCode": "decodes the gateway RESPONSE CODE from intent evidence — not an amount",
+		"internal/reconcile/cancel_budget.go:DefaultMaxCancelsPerPass": "0.05 / 0.10 are cancel-budget FRACTIONS of a roster, not amounts",
+		"internal/reconcile/cancel_budget.go:CancelBudget":             "Fraction is a share of the local live roster",
+		"internal/reconcile/cancel_budget.go:fraction":                 "returns that share",
+		"internal/reconcile/cancel_budget.go:Limit":                    "math.Floor over a COUNT of subscriptions the pass may cancel",
+		"internal/reconcile/cancel_budget.go:RosterBreaker":            "Ratio is a remote/local roster-size ratio",
+		"internal/reconcile/cancel_budget.go:ratio":                    "returns that ratio",
+		"internal/reconcile/cancel_budget.go:ratioOf":                  "remote/local roster-size ratio emitted as an alerting metric, not an amount",
+		"internal/reconcile/cancel_budget.go:Implausible":              "compares two roster COUNTS against the ratio",
+		"internal/reconcile/engine.go:Engine":                          "CircuitBreakerRatio is the roster-size ratio above",
+		"internal/reconcile/store.go:EpisodeSummary":                   "TotalDays is an error-day DURATION total, not an amount",
+		"internal/reconcile/mutations.go:mutationRecordsForFinding":    "decodes rows_affected from evidence — a ROW COUNT",
 
 		// --- Not amounts at all -------------------------------------------
 		"internal/http/handlers/admin_findings_actions.go:paramAmountMicros":   "names float64/float32 only to REJECT them: this is the or#863 fix, the guard seeing its own refusal",
 		"internal/http/handlers/merchant_metrics.go:MerchantMetricsAsk":        "math.Ceil over a Retry-After DURATION in seconds, not an amount",
 		"internal/http/handlers/merchant_catalog_copilot.go:CatalogCopilotAsk": "math.Ceil over a Retry-After DURATION in seconds, not an amount",
-		"pkg/service/types.go:SolanaToken":                                     "SolanaToken.Price is the token's USD RATE for display, not an amount",
 	}
 
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))

@@ -1,18 +1,18 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // #773 reprice HTTP surface: schedule/list/cancel a subscription price move,
@@ -21,44 +21,7 @@ import (
 // existing route patterns — see routes.go registerMerchantSupportRoutes).
 
 func writeRepriceError(r *httprequest.Request, err error) {
-	if err == nil {
-		return
-	}
-	var constraintErr *subscriptions.RepriceConstraintError
-	if errors.As(err, &constraintErr) {
-		r.APIError(&api.APIError{
-			HTTPStatus: http.StatusUnprocessableEntity,
-			Type:       api.ErrorTypeInvalidRequest,
-			Code:       repriceErrorCode(constraintErr.Sentinel),
-			Message:    err.Error(),
-		})
-		return
-	}
-	switch {
-	case errors.Is(err, subscriptions.ErrRepriceAlreadyScheduled):
-		r.APIError(&api.APIError{HTTPStatus: http.StatusConflict, Type: api.ErrorTypeInvalidRequest, Code: "reprice_already_scheduled", Message: err.Error()})
-	case errors.Is(err, subscriptions.ErrRepriceNotScheduled):
-		r.APIError(&api.APIError{HTTPStatus: http.StatusConflict, Type: api.ErrorTypeInvalidRequest, Code: "reprice_not_scheduled", Message: err.Error()})
-	case strings.Contains(strings.ToLower(err.Error()), "not found"):
-		r.ErrorJSON(http.StatusNotFound, err.Error())
-	default:
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-	}
-}
-
-func repriceErrorCode(sentinel error) string {
-	switch {
-	case errors.Is(sentinel, subscriptions.ErrRepriceCrossProduct):
-		return "reprice_cross_product"
-	case errors.Is(sentinel, subscriptions.ErrRepriceCrossCurrency):
-		return "reprice_cross_currency"
-	case errors.Is(sentinel, subscriptions.ErrRepriceInactivePrice):
-		return "reprice_inactive_price"
-	case errors.Is(sentinel, subscriptions.ErrRepriceNoticeWindowViolation):
-		return "reprice_notice_window_violation"
-	default:
-		return "reprice_constraint_violation"
-	}
+	writeRefusal(r, err, "reprice operation failed")
 }
 
 type createSubscriptionRepriceRequest struct {
@@ -74,11 +37,12 @@ type createSubscriptionRepriceRequest struct {
 // CreateSubscriptionReprice schedules subscription.PriceID -> to_price,
 // effective at the subscription's first renewal on/after effective_at.
 func CreateSubscriptionReprice(r *httprequest.Request) {
-	subscriptionID, err := api.ParseSubscriptionID(r.Param("id"))
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription id")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 	var req createSubscriptionRepriceRequest
 	if !r.BindJSON(&req) {
 		return
@@ -98,7 +62,10 @@ func CreateSubscriptionReprice(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	toPrice, err := catalog.ResolveReference(ctx, r.State.PriceService, req.ToPrice)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "to_price not found")
+		if db.IsNotFound(err) {
+			err = subscriptions.ErrRepriceTargetPriceNotFound
+		}
+		writeRefusal(r, err, "failed to resolve to_price")
 		return
 	}
 	out, err := r.State.RepriceService.Reprice(ctx, subscriptions.RepriceRequest{
@@ -111,7 +78,7 @@ func CreateSubscriptionReprice(r *httprequest.Request) {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusCreated, out)
+	r.JSON(http.StatusCreated, subscriptions.SubscriptionRepriceViewOf(out))
 }
 
 type repriceAllPriorVersionsRequest struct {
@@ -196,8 +163,8 @@ func ListRepriceBatchesByKey(r *httprequest.Request) {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[*models.RepriceBatch]{
-		Items:  items,
+	r.JSON(http.StatusOK, paginatedResponse[subscriptions.RepriceBatchView]{
+		Items:  subscriptions.RepriceBatchViews(items),
 		Total:  int64(len(items)),
 		Limit:  limit,
 		Offset: offset,
@@ -214,12 +181,13 @@ func ListSubscriptionReprices(r *httprequest.Request) {
 	}
 	var filter subscriptions.SubscriptionRepriceFilter
 	if raw := strings.TrimSpace(r.Query("subscription_id")); raw != "" {
-		id, err := api.ParseSubscriptionID(raw)
-		if err != nil {
+		id, err := openrails.ParseSubscriptionID(raw)
+		if err != nil || id.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid subscription_id")
 			return
 		}
-		filter.SubscriptionID = &id
+		subscriptionID := id.UUID()
+		filter.SubscriptionID = &subscriptionID
 	}
 	if raw := strings.TrimSpace(r.Query("reprice_batch_id")); raw != "" {
 		id, err := uuid.Parse(raw)
@@ -240,8 +208,8 @@ func ListSubscriptionReprices(r *httprequest.Request) {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, paginatedResponse[*models.SubscriptionReprice]{
-		Items:  items,
+	r.JSON(http.StatusOK, paginatedResponse[subscriptions.SubscriptionRepriceView]{
+		Items:  subscriptions.SubscriptionRepriceViews(items),
 		Total:  int64(len(items)),
 		Limit:  limit,
 		Offset: offset,
@@ -262,10 +230,10 @@ func GetSubscriptionReprice(r *httprequest.Request) {
 	}
 	out, err := r.State.RepriceService.GetByID(r.Request.Context(), id)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "reprice not found")
+		writeRefusal(r, err, "failed to load reprice")
 		return
 	}
-	r.JSON(http.StatusOK, out)
+	r.JSON(http.StatusOK, subscriptions.SubscriptionRepriceViewOf(out))
 }
 
 // CancelSubscriptionReprice cancels a SCHEDULED reprice before it takes

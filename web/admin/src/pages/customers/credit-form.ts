@@ -1,5 +1,5 @@
 import type { CreditGrant, CreditGrantInput } from "@/lib/api/credit-types"
-import { unitsFromInput } from "@/lib/format"
+import { amountFromInput } from "@/lib/format"
 
 export function creditGrantInput(
   input: {
@@ -14,19 +14,19 @@ export function creditGrantInput(
   now = Date.now()
 ): CreditGrantInput {
   if (!allowed) throw new Error("Your role cannot grant credit.")
-  const amount = unitsFromInput(input.amount, input.decimals)
-  if (amount === null || amount <= 0)
+  const amount = amountFromInput(input.amount, input.decimals)
+  if (amount === null || BigInt(amount) <= 0n)
     throw new Error(
       `Enter a positive amount with at most ${input.decimals} decimal places, within the supported range.`
     )
   const currency = input.currency.trim()
   if (!currency) throw new Error("Select a currency.")
-  let expires: number | undefined
+  let expires: string | undefined
   if (input.expires) {
     const time = new Date(input.expires).getTime()
     if (!Number.isFinite(time) || time <= now)
       throw new Error("Expiry must be a valid future date.")
-    expires = Math.floor(time / 1000)
+    expires = new Date(time).toISOString()
   }
   return {
     amount,
@@ -42,8 +42,8 @@ export function canRevokeCredit(grant: CreditGrant, allowed: boolean): boolean {
   return (
     allowed &&
     (grant.state === "active" || grant.state === "scheduled") &&
-    Number.isSafeInteger(grant.remaining_amount) &&
-    grant.remaining_amount > 0
+    /^\d+$/.test(grant.remaining_amount) &&
+    BigInt(grant.remaining_amount) > 0n
   )
 }
 

@@ -222,7 +222,7 @@ func observeEntitlements(ents []openrails.EntitlementRecord, payer uuid.UUID) []
 			Entitlement:  e.Entitlement,
 			SourceType:   e.SourceType,
 			HasEnd:       e.EndAt != nil,
-			PayerMatches: e.CustomerID == payer.String(),
+			PayerMatches: e.CustomerID == openrails.CustomerID(payer),
 		})
 	}
 	return out
@@ -250,7 +250,7 @@ func observeBatchVerdicts(verdicts []openrails.AdmitBatchVerdict) []obsBatchVerd
 	return out
 }
 
-func admitOne(ctx context.Context, c openrails.AdmissionClient, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
+func admitOne(ctx context.Context, c *openrails.Client, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{req})
 	if err != nil {
 		return nil, err
@@ -275,7 +275,7 @@ type scriptEnv struct {
 	// issuer/subject are the payer's EXTERNAL identity (its
 	// openrails.customers row) for the entitlements steps.
 	issuer  string
-	subject string
+	subject openrails.CustomerID
 	product uuid.UUID
 }
 
@@ -284,7 +284,7 @@ type scriptEnv struct {
 func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scriptEnv) scriptResult {
 	t.Helper()
 	var r scriptResult
-	payerID := env.payer.String()
+	payerID := openrails.CustomerID(env.payer)
 	pid := openrails.CustomerID(env.payer)
 	requestPrefix := env.side + "-" + uuid.NewString()
 
@@ -386,8 +386,8 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	})
 	r.ErrDepositBadType = observeErr(t, env.side+" deposit unknown credit type", err)
 
-	_, err = c.Balance(ctx, "not-a-uuid")
-	r.ErrBalanceBadID = observeErr(t, env.side+" balance bad payer id", err)
+	_, err = c.Balance(ctx, openrails.CustomerID{})
+	r.ErrBalanceBadID = observeErr(t, env.side+" balance zero payer id", err)
 
 	_, err = c.UsageRollup(ctx, payerID, money.DefaultCurrency, env.from, env.to, "bogus")
 	r.ErrRollupBadGroup = observeErr(t, env.side+" rollup bad group_by", err)
@@ -397,7 +397,7 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{
 		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 0, RequestID: requestPrefix + "-batch-1", Source: "admit"},
 		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 10_000_000_000, ExpiresAt: holdDeadline(), RequestID: requestPrefix + "-batch-2"},
-		{CustomerID: "not-a-uuid", Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: requestPrefix + "-batch-3"},
+		{Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: 1, ExpiresAt: holdDeadline(), RequestID: requestPrefix + "-batch-3"},
 		{CustomerID: payerID, Invoker: env.invoker, InvokerType: openrails.InvokerTypePayer, Currency: env.currency, EstimatedAmount: -1, RequestID: requestPrefix + "-batch-4"},
 	})
 	require.NoError(t, err, "%s admit-batch", env.side)
@@ -414,9 +414,9 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	// in one call (dupes deduped), an entry per requested subject, plus the
 	// empty-subjects / over-cap validation errors (#555: merchant from the
 	// credential, no issuer).
-	ghost := uuid.NewString()
+	ghost := openrails.CustomerID(uuid.New())
 	ents, err := c.ListActiveEntitlements(ctx,
-		[]string{env.subject, " " + env.subject, ghost}, time.Time{})
+		[]openrails.CustomerID{env.subject, env.subject, ghost}, time.Time{})
 	require.NoError(t, err, "%s entitlements", env.side)
 	r.Entitlements = observeEntitlements(ents[env.subject], env.payer)
 	singleEnts, err := c.ListEntitlements(ctx, env.subject, time.Time{})
@@ -431,11 +431,11 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	ghostRecs, ghostPresent := ents[ghost]
 	r.EntitlementsUnknownEmpty = ghostPresent && len(ghostRecs) == 0
 	r.EntitlementsKeyCount = len(ents)
-	_, err = c.ListActiveEntitlements(ctx, []string{" ", ""}, time.Time{})
+	_, err = c.ListActiveEntitlements(ctx, []openrails.CustomerID{{}, {}}, time.Time{})
 	r.ErrEntitlementsNoSubjects = observeErr(t, env.side+" entitlements empty subjects", err)
-	overCap := make([]string, 501)
+	overCap := make([]openrails.CustomerID, 501)
 	for i := range overCap {
-		overCap[i] = uuid.NewString()
+		overCap[i] = openrails.CustomerID(uuid.New())
 	}
 	_, err = c.ListActiveEntitlements(ctx, overCap, time.Time{})
 	r.ErrEntitlementsOverCap = observeErr(t, env.side+" entitlements over cap", err)
@@ -443,12 +443,12 @@ func runScript(t *testing.T, ctx context.Context, c *openrails.Client, env scrip
 	productAccess, err := c.ListProductAccess(ctx, env.subject)
 	require.NoError(t, err, "%s product access", env.side)
 	r.ProductAccess = observeProductAccess(productAccess, env.product)
-	r.HasProductAccess, err = c.HasProductAccess(ctx, env.subject, env.product.String())
+	r.HasProductAccess, err = c.HasProductAccess(ctx, env.subject, openrails.ProductID(env.product))
 	require.NoError(t, err, "%s has product access", env.side)
-	r.HasNoProductAccess, err = c.HasProductAccess(ctx, env.subject, uuid.NewString())
+	r.HasNoProductAccess, err = c.HasProductAccess(ctx, env.subject, openrails.ProductID(uuid.New()))
 	require.NoError(t, err, "%s has missing product access", env.side)
-	_, err = c.HasProductAccess(ctx, env.subject, "not-a-uuid")
-	r.ErrProductAccessBadID = observeErr(t, env.side+" product access bad product id", err)
+	_, err = c.HasProductAccess(ctx, env.subject, openrails.ProductID{})
+	r.ErrProductAccessBadID = observeErr(t, env.side+" product access zero product id", err)
 
 	// 11) Merchant settings sync: install profile, a named billing policy + its
 	// tier binding and the delegated wasted-spend
@@ -502,7 +502,7 @@ func observeMerchantProfile(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	}
 }
 
-func observeAccount(a *openrails.CreditAccount, payerID string) obsAccount {
+func observeAccount(a *openrails.CreditAccount, payerID openrails.CustomerID) obsAccount {
 	return obsAccount{
 		Currency:              a.Currency,
 		BillingMode:           a.BillingMode,
@@ -518,8 +518,8 @@ func observeProductAccess(grants []openrails.ProductAccessGrant, productID uuid.
 	out := make([]obsProductAccess, 0, len(grants))
 	for _, g := range grants {
 		out = append(out, obsProductAccess{
-			ProductMatches: g.ProductID == productID.String(),
-			CustomerIDSet:  g.CustomerID != "",
+			ProductMatches: g.ProductID == openrails.ProductID(productID),
+			CustomerIDSet:  !g.CustomerID.IsZero(),
 			ProductKeySet:  g.ProductKey != "",
 			SourceType:     g.SourceType,
 			Status:         g.Status,
@@ -553,9 +553,9 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 
 	const issuer = "conformance"
 	productAccessSvc := productaccess.NewService(dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()))
-	newPayer := func(side string) (uuid.UUID, string, uuid.UUID) {
+	newPayer := func(side string) (uuid.UUID, openrails.CustomerID, uuid.UUID) {
 		id := uuid.New()
-		subject := id.String()
+		subject := openrails.CustomerID(id)
 		// The external subject is UUID-only (#364) and product-access grants FK the
 		// customer id, so this fixture pins customer.id == subject UUID.
 		_, err := pool.Exec(ctx, `
@@ -576,7 +576,7 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 			productID, dbtest.TestMerchantID.UUID(), "conf-product-"+side+"-"+productID.String(), "Conformance Product "+side)
 		require.NoError(t, err)
 		_, _, err = productAccessSvc.GrantProductAccess(dbtest.WithTestMerchant(ctx), productaccess.GrantParams{
-			UserID:     subject,
+			UserID:     subject.String(),
 			ProductID:  productID,
 			SourceType: models.ProductAccessSourceAdmin,
 			SourceID:   "conformance:" + side + ":" + productID.String(),
@@ -615,7 +615,7 @@ func TestConformance_EmbeddedAndStandaloneAreObservablyIdentical(t *testing.T) {
 	badStandalone := standalone.Client(
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return "openrails_st_wrong_token", nil }),
 	)
-	_, err := badStandalone.Balance(ctx, payerStandalone.String())
+	_, err := badStandalone.Balance(ctx, openrails.CustomerID(payerStandalone))
 	require.ErrorIs(t, err, openrails.ErrUnauthorized)
 }
 

@@ -1,8 +1,9 @@
 # Embedding OpenRails in your Go server
 
-The full guide to running the OpenRails billing engine in-process. The README's
-"Embedded Mode: How To Integrate" is the quickstart; this covers the depth it skips.
-All money amounts are **micros** (millionths of a currency unit). Vocabulary: a
+The full guide to running the OpenRails billing engine in-process;
+`examples/embedded` is the runnable quickstart. Money is an integer in the
+currency's native units (`GET /v1/currencies`; micros for USD), a decimal string
+on the wire ([money-wire.md](money-wire.md)). Vocabulary: a
 **rail** is a gateway kind (`nmi` / `ccbill` / `stripe` / `solana`); a **PSP** is your
 concrete account on a rail (e.g. `mobius` on nmi).
 
@@ -19,7 +20,9 @@ network hop, no second credential. Concretely:
   Parity is structural: one client implementation, one handler surface, joined by an
   in-process `http.RoundTripper` instead of a socket (enforced by a dual-mode
   conformance test).
-- One embedded engine serves **one merchant** (#770).
+- A runtime bound by `UpsertMerchantConfig` serves **one merchant**; a
+  multi-merchant runtime (`examples/multimerchant`) binds each Client with
+  `openrails.WithMerchantID`.
 
 ```mermaid
 flowchart LR
@@ -93,11 +96,10 @@ returns *rows* instead of the empty result the policy would give it. That is the
 "the worker ran and did nothing" class: scheduled work that silently matches
 nothing in production while looking healthy on a privileged connection.
 
-Where it is checked: `embedded.New` (and `embed.New`), plus every entry point
-that takes a pool or opens one from `Config.DB` — `PushMerchantCatalog`,
-`DumpMerchantCatalog`, `ConvergeMerchant`, `PruneRollback`/`PruneList`,
-`ImportAdminGrants`, `ImportBilling`, `PullProvider`/`PullProviderReport`. Each
-refuses with the role name in the error.
+Where it is checked: `embed.New`, plus every operator entry point that takes a
+pool (`rt.PushCatalog`, `rt.Converge`, `rt.PullProvider`, the standalone CLI's
+dump/prune/undo commands, the declared-facts import). Each refuses with the
+role name in the error.
 
 What to do:
 
@@ -131,7 +133,7 @@ probe: a conclusively-live gateway is refused under sandbox (a probe error only
 warns). See [operations.md](operations.md).
 
 **Rate limiting is on by default** (#742): if you leave `RateLimits`/`Captcha` nil,
-`embedded.New` seeds the same curated defaults `config.Load` applies — per-IP and
+`embed.New` seeds the same curated defaults `config.Load` applies — per-IP and
 per-authenticated-user buckets, tight on checkout (10/min) to deter card-testing,
 Redis-backed when `Redis` is set, in-memory otherwise. Override `cfg.RateLimits`, or
 set `cfg.RateLimitsDisabled = true` if your own gateway fronts billing. See
@@ -143,16 +145,13 @@ set `cfg.RateLimitsDisabled = true` if your own gateway fronts billing. See
 import (
     "github.com/open-rails/openrails/config"
     "github.com/open-rails/openrails/embed"
-    "github.com/open-rails/openrails/pkg/embedded"
 )
 
 rt, err := embed.New(ctx, embed.Options{
-    Options: embedded.Options{
-        Config:  cfg,
-        PGXPool: pool, // share your app's pgx/v5 pool; nil = engine opens its own from Config.DB
-        Redis:   rdb,  // optional — Redis-backed rate limits; omit for in-memory
-        River:   embedded.RiverManagedByOpenRails(), // required; or RiverFromHost below
-    },
+    Config:     cfg,
+    PGXPool:    pool, // share your app's pgx/v5 pool; nil = engine opens its own from Config.DB
+    Redis:      rdb,  // optional — Redis-backed rate limits; omit for in-memory
+    River:      embed.RiverManagedByOpenRails(), // required; or RiverFromHost below
     RunWorkers: true,
 })
 if err != nil { log.Fatal(err) }
@@ -165,14 +164,19 @@ defer rt.Close(ctx)
 | `PGXPool` | `*pgxpool.Pool` | Host-supplied pool (pgx/v5). |
 | `Redis` | `*redis.Client` | Optional (rate limits, admission holds). |
 | `Cache` | `cache.Cache` | Optional cache override. |
-| `River` | `embedded.RiverOwnership` | Required. `RiverManagedByOpenRails()` or `RiverFromHost(bind)`; construction refuses without it. |
+| `River` | `embed.RiverOwnership` | Required. `RiverManagedByOpenRails()` or `RiverFromHost(bind)`; construction refuses without it. |
 | `RunWorkers` | `bool` | Runs the River background workers (renewals, dunning, credit/hold expiry, reconciliation) on a Runtime-owned goroutine, detached from the ctx you pass to `New` — `Close` stops them. Leave false to drive `rt.RunWorkers(ctx)` yourself. |
-| `embed.WithAdminConsole(fs.FS)` | variadic `embed.Option` | Host-built admin console SPA (see §6). |
+| `ConsoleAssets` | `fs.FS` | Host-built admin console SPA (see §6). |
+| `StripeTransport` | `http.RoundTripper` | Test seam under the Stripe API choke point; refused with a live posture. |
 
-**Runtime surface**: `rt.Client()` (the shared `*openrails.Client`),
-`rt.UpsertMerchantConfig`, `rt.Handler(MountOptions)`, `rt.SelfHandler`,
-`rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`, `rt.HasExternalRiverClient()`,
-`rt.DeclarePSP`, `rt.ActiveRouteSets()`, `rt.RunWorkers(ctx)`, `rt.Close(ctx)`.
+**Runtime surface**: `rt.Client()` (the shared `*openrails.Client`, the only
+in-process business API), `rt.UpsertMerchantConfig`, `rt.Handler(MountOptions)`,
+`rt.SelfHandler`, `rt.Ready(ctx)`, `rt.CheckJobProgress(ctx)`,
+`rt.HasExternalRiverClient()`, `rt.DeclarePSP`, `rt.ActiveRouteSets()`,
+`rt.RunWorkers(ctx)`, `rt.Close(ctx)`, the manifest tooling (`rt.PushCatalog`,
+`rt.Converge`, `rt.PullProvider`, `rt.PullProviderReport`, `rt.ResolveMerchant`)
+and the host transaction extension `rt.HostTransactions()`. There is no
+`Service()` or `Embedded()` escape: storage and application types stay internal.
 Hosts that use OpenRails' own AuthKit control plane (standalone-shaped or
 hosted products) attach it with `embed/controlplane`:
 
@@ -192,9 +196,9 @@ return; you start and stop that client:
 
 ```go
 var jobs *river.Client[pgx.Tx]
-rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+rt, err := embed.New(ctx, embed.Options{
     Config: cfg, PGXPool: pool,
-    River: embedded.RiverFromHost(func(ctx context.Context, fleet *embedded.RiverFleet) (*river.Client[pgx.Tx], error) {
+    River: embed.RiverFromHost(func(ctx context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
         river.AddWorker(fleet.Workers, &MyAppWorker{})
         jobs, err = river.NewClient(riverpgxv5.New(pool), &river.Config{
             Workers: fleet.Workers,
@@ -277,8 +281,10 @@ Semantics by mode:
   immediately. Change credentials = change the config + reboot.
 - **Mode 2 (`merchant_source=api`)**: a manifest-shaped upsert (PSPs, profile,
   invoice, remote-application trust) refuses loudly — two truths. Only a bare
-  identity bind (slug + top-level `DisplayName`) is legal; provision providers via
-  `PUT /v1/merchant/payment-providers` and the catalog APIs instead.
+  identity bind (slug + top-level `DisplayName`) is legal; arm providers through
+  `embed/controlplane` (`cp.UpsertPaymentProviderConfig`) or
+  `PUT /v1/merchant/payment-providers/{provider}` (`RouteSetPaymentProviders`),
+  and author the catalog through the Client.
 
 YAML-first hosts can keep the merchant in a file: `embed.ParseMerchantConfig` (one
 merchant, strict — unknown fields rejected) or
@@ -286,22 +292,25 @@ merchant, strict — unknown fields rejected) or
 manifest plus the host's mounted YAML secret overlays, so committed files hold
 placeholders and the host supplies real secrets from its own config tree).
 
-**Catalog push at boot**: products/prices/entitlements converge from a catalog
-manifest via `embedded.PushMerchantCatalog`:
+**Catalog authoring**: manifest hosts (`merchant_source=manifest`) author their
+catalog through `rt.PushCatalog`; the Client's catalog writes are refused for
+them (405 `manifest_driven`). API hosts author through the Client
+(`CreateProduct`, `CreatePrice`, `SetPriceKey`, ...).
 
 ```go
-err := embedded.PushMerchantCatalog(ctx, embedded.CatalogPushOptions{
-    Config:   cfg,
-    PGXPool:  pool,
+err := rt.PushCatalog(ctx, embed.PushCatalogOptions{
     Manifest: catalogYAML, // or File: "catalog.yaml"
     Insert:   true,        // zero mutation flags = plan-only
 })
 ```
 
-In mode 1 a mutating push always upgrades to full converge (insert+overwrite+prune —
-the YAML is the truth); in mode 2 a mutating push refuses (plan-only diff stays
-legal). The manifest is `version: 1` + `catalogs: [{merchant, tier_groups, products,
-meters}]`.
+A product may carry several prices (for example two monthly tiers) by giving
+each an explicit `key`; the key is the durable handle repricing and checkout
+refer to. In mode 1 a mutating push always upgrades to full converge
+(insert+overwrite+prune — the YAML is the truth); in mode 2 a mutating push
+refuses (plan-only diff stays legal). `rt.Converge(ctx, merchantID)` runs the
+merchant-wide derive pass on demand after an import. The manifest is
+`version: 1` + `catalogs: [{merchant, tier_groups, products, meters}]`.
 
 ### 6. Mounting HTTP
 
@@ -334,7 +343,7 @@ interfaces over whatever auth you already have:
 - `billingauth.Gate` (merchant-admin routes only): `Authorize(ctx, r, permission)
   (Principal, error)` — checks a live `merchant:*` permission per request.
 
-AuthKit hosts should not hand-write these. `pkg/embedded/authkit` ships the
+AuthKit hosts should not hand-write these. `embed/authkit` ships the
 bridges, in two flavours that differ only in where the verifier comes from:
 
 | your situation | use |
@@ -380,13 +389,13 @@ Mount everything as one framework-neutral `net/http` handler (gin hosts use
 `gin.WrapH`, chi `Mount`, …):
 
 ```go
-handler, err := rt.Handler(embedded.MountOptions{
+handler, err := rt.Handler(embed.MountOptions{
     MountPrefix:            "/billing", // routes arrive at /billing/v1/*
     Authenticator:          myAuth,
     DelegatedAuthenticator: myDelegatedAuth,
     // RouteSets: nil,      // = EmbeddedDefaultRouteSets
     // Gate:                // required for RouteSetMerchantAdmin
-    // ProviderRoutes:      // *embedded.ProviderRoutes{StripePortal, Solana, Webhooks} — nil derives from armed accounts
+    // ProviderRoutes:      // *embed.ProviderRoutes{StripePortal, Solana, Webhooks} — nil derives from armed accounts
 })
 mux.Handle("/billing/", handler)
 ```
@@ -409,15 +418,14 @@ client.
 **Admin console** (optional, #754): the engine ships zero frontend bytes. The host
 builds the SPA (`scripts/build-admin-console.sh` from the module cache into a
 gitignored `dist`, wrapped in a 3-line `//go:embed all:dist` package) and passes it
-via `embed.WithAdminConsole(sub)`; gate mounting on `admin_console.enabled`. See
+via `embed.Options.ConsoleAssets`; gate mounting on `admin_console.enabled`. See
 [admin-console.md](admin-console.md).
 
 ### 7. Calling the engine
 
 ```go
-client, err := rt.Client()
+client, err := rt.Client() // bound to the merchant UpsertMerchantConfig bound
 if err != nil { log.Fatal(err) }
-ctx = openrails.WithMerchant(ctx, mid) // per-call pin; must agree with the bound merchant
 if err := client.Verify(ctx); err != nil { log.Fatal(err) } // fail fast at boot
 ```
 
@@ -425,21 +433,28 @@ The shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `AdmitBatch`, `Capture`, `Release`, `GetTrustLevel`, `ReportWastedSpend` |
+| Admission (hot path) | `Admit`, `AdmitBatch`, `Capture`, `Release`, `ExtendHold`, `GetTrustLevel`, `ReportWastedSpend` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle) |
-| Policy | `GetMerchantSettings`, `SetMerchantSettings`, `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation` |
-| Funding / reporting | `DepositCredits`, `SetCreditLimit`, `GetCreditLimit`, `UsageRollup`, `ResourceRevenueDaily` |
-| Lookups / entitlements | `Balance`, `GetCreditAccount`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `ListProductAccess`, `HasProductAccess` |
+| Policy | `GetMerchantSettings`, `SetMerchantSettings`, `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` |
+| Funding / reporting | `DepositCredits`, `GetDeposit`, `SetCreditLimit`, `GetCreditLimit`, `UsageRollup`, `ResourceRevenueDaily` |
+| Customers / entitlements | `EnsureCustomer`, `Balance`, `GetCreditAccount`, `ListActiveEntitlements`, `ListEntitlements`, `HasEntitlement`, `ListCustomersWithEntitlement`, `GrantEntitlement`, `RevokeEntitlement`, `ListProductAccess`, `HasProductAccess` |
+| Catalog (API hosts) | `CreateProduct`, `UpdateProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `CreatePrice`, `UpdatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `SetPriceKey`, `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `EnsureUsageProduct`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` |
+| Checkout | `CreateCheckoutSession`, `GetCheckoutSession`, `ConfirmCheckoutSession`, `ListCheckoutRailOptions`, `GetCheckoutConfig`, `ResolveEffectiveTier` |
+| Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `UpdateSubscriptionPaymentMethod`, `CreatePlanMigration`, `PreviewPlanMigration`, `CancelPlanMigration` |
+| Payments | `GetPayment`, `ListPayments`, `HasSettledPayment`, `ListPaymentMethods`, `DeletePaymentMethod` |
+| Invoices | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice`, `GetCustomerInvoiceProfile`, `SetCustomerInvoiceProfile`, `EnsureCustomerInvoiceProfile` |
 | Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification` |
+| Host feed / import | `ListHostEvents`, `AcknowledgeHostEvent`, `ImportBilling` |
 
 ```go
 verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-    CustomerID:      customerID,
+    CustomerID:      openrails.CustomerID(customerID), // the host's subject UUID
     Invoker:         userID,
-    EstimatedAmount: 50_000,    // micros
+    EstimatedAmount: 50_000,    // native units (USD: micros)
+    ExpiresAt:       &deadline, // required with a hold: the job's deadline
     RequestID:       requestID, // idempotency key
 }})
-err = client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
+receipt, err := client.Capture(ctx, requestID, 43_000, &openrails.CaptureUsage{EventType: "chat.completion"})
 ents, err := client.ListActiveEntitlements(ctx, []string{userID}, time.Now())
 ```
 
@@ -460,12 +475,9 @@ A host that must commit its own provider obligation atomically with the OpenRail
 authorization, release or settlement uses `rt.HostTransactions()` with a transaction
 from its pool. See [provider obligations](architecture/provider-obligation-contract.md).
 
-Every `rt.Service()` method pins its own merchant-scoped connection, so a bare Go
-call reads the merchant's rows without ceremony — and one with no merchant on the
-context fails loudly instead of answering an empty result. Wrapping a *block* of
-calls in `emb.RunInMerchant(ctx, …)` is still worth it (one connection for the
-whole block instead of one per call), but it is an optimization, not a
-prerequisite.
+The in-process Client pins the runtime's bound merchant on every call, so
+application code never scopes connections itself; a multi-merchant runtime
+binds each Client at construction with `openrails.WithMerchantID`.
 
 ### 8. Acting on delinquency
 

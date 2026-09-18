@@ -9,10 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/google/uuid"
-
+	"github.com/open-rails/openrails"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // ProductAction is the per-product change a plan records.
@@ -71,7 +70,7 @@ type ProductPlan struct {
 	// CreateReq / UpdateReq / UpdateID are prepared for apply.
 	CreateReq billingservice.CreateProductRequest `json:"create_req,omitempty"`
 	UpdateReq billingservice.UpdateProductRequest `json:"update_req,omitempty"`
-	UpdateID  uuid.UUID                           `json:"update_id,omitempty"`
+	UpdateID  openrails.ProductID                 `json:"update_id,omitzero"`
 
 	Prices []PricePlan `json:"prices,omitempty"`
 }
@@ -81,8 +80,8 @@ type PricePlan struct {
 	Label  string      `json:"label"`
 	Action PriceAction `json:"action"`
 
-	// ExistingID is the matched OpenRails price (uuid.Nil when creating).
-	ExistingID uuid.UUID                         `json:"existing_id,omitempty"`
+	// ExistingID is the matched OpenRails price (zero when creating).
+	ExistingID openrails.PriceID                 `json:"existing_id,omitzero"`
 	CreateReq  billingservice.CreatePriceRequest `json:"create_req,omitempty"`
 
 	// Key (#774) is this declared price's resolved key (explicit or
@@ -263,7 +262,7 @@ func productUnchanged(existing *billingservice.CatalogProduct, product Product, 
 // is being created, in which case no OpenRails prices can exist yet).
 func planPrices(ctx context.Context, applier Applier, m *Manifest, product Product, existing *billingservice.CatalogProduct, pp *ProductPlan, opts PlanOptions) error {
 	var current []billingservice.CatalogPrice
-	if existing != nil && existing.ID != uuid.Nil {
+	if existing != nil && !existing.ID.IsZero() {
 		var err error
 		current, err = applier.ListPricesByProduct(ctx, existing.ID, false)
 		if err != nil {
@@ -271,7 +270,7 @@ func planPrices(ctx context.Context, applier Applier, m *Manifest, product Produ
 		}
 	}
 
-	claimed := map[uuid.UUID]struct{}{}
+	claimed := map[openrails.PriceID]struct{}{}
 
 	// #774: resolve every declared price's key (explicit or auto-defaulted
 	// "<product-key>-<interval>") up front, over the WHOLE declared set, so an
@@ -429,7 +428,7 @@ func pspLinksToRotate(declared map[string]map[string]string, current map[string]
 // forbids two prices that differ only by provider, so a provider-set drift is a
 // mutation of the matched price, never a reason to create a second row (doing so
 // collides on the unique key).
-func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurationHours, trialHours *int, trialAmount *int64, claimed map[uuid.UUID]struct{}) *billingservice.CatalogPrice {
+func matchPrice(current []billingservice.CatalogPrice, price Price, accessDurationHours, trialHours *int, trialAmount *int64, claimed map[openrails.PriceID]struct{}) *billingservice.CatalogPrice {
 	var best *billingservice.CatalogPrice
 	for i := range current {
 		c := &current[i]
@@ -477,9 +476,9 @@ func samePtrInt64(a, b *int64) bool {
 	return *a == *b
 }
 
-func productID(p *billingservice.CatalogProduct) uuid.UUID {
+func productID(p *billingservice.CatalogProduct) openrails.ProductID {
 	if p == nil {
-		return uuid.Nil
+		return openrails.ProductID{}
 	}
 	return p.ID
 }

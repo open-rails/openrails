@@ -2,16 +2,17 @@ package checkout
 
 import (
 	"context"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 
 	solanago "github.com/gagliardetto/solana-go"

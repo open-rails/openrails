@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -20,8 +22,6 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // fakeMintReader serves an initialized SPL mint at a fixed decimals count so
@@ -53,13 +53,13 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 	owned := remote.ProvisionOwnedMerchant("facts-" + uuid.NewString()[:8])
 	mid := owned.MerchantID
 	integrationharness.SeedPSPs(ctx, t, remote.App().Runtime, mid, rails)
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
-	runtime.Embedded().App().Runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(fakeMintReader{decimals: 6})
+	app.HostGraph(runtime).Runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(fakeMintReader{decimals: 6})
 	local, err := runtime.Client(openrails.WithMerchantID(mid))
 	require.NoError(t, err)
 	standalone := remote.Client(openrails.WithTokenProvider(func(context.Context) (string, error) { return owned.APIKey, nil }))
@@ -106,14 +106,14 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 			book := openrails.DeclaredBilling{
 				AsOf:       now,
 				DefaultPSP: openrails.PSPRef{Key: "ccbill"},
-				Customers:  []openrails.DeclaredCustomer{{Customer: subscriber}},
+				Customers:  []openrails.DeclaredCustomer{{Customer: openrails.CustomerID(subscriber)}},
 				Subscriptions: []openrails.DeclaredSubscription{{
-					SourceID: trial, Customer: subscriber, Price: price.ID, Rail: "ccbill", RailSubscriptionID: trial,
+					SourceID: trial, Customer: openrails.CustomerID(subscriber), Price: price.ID, Rail: "ccbill", RailSubscriptionID: trial,
 					StartedAt: now.Add(-time.Hour), PaidThrough: &end,
 				}},
 				AdminGrants: []openrails.DeclaredAdminGrant{
-					{Customer: comped, Product: product.ID, SourceID: source, StartsAt: now.Add(-time.Hour), EndsAt: &end},
-					{Customer: comped, Product: bare.ID, SourceID: source + "-nospec", StartsAt: now},
+					{Customer: openrails.CustomerID(comped), Product: product.ID, SourceID: source, StartsAt: now.Add(-time.Hour), EndsAt: &end},
+					{Customer: openrails.CustomerID(comped), Product: bare.ID, SourceID: source + "-nospec", StartsAt: now},
 				},
 			}
 			result, err := client.ImportBilling(ctx, book)
@@ -121,13 +121,13 @@ func TestDeclaredFactsAndCustomerOpsThroughSharedClient(t *testing.T) {
 			require.ElementsMatch(t, []string{source, trial}, result.Imported)
 			require.Equal(t, []string{source + "-nospec"}, result.Blocked)
 			require.Equal(t, "product has no entitlements_spec", result.Reasons[source+"-nospec"])
-			has, err := client.HasEntitlement(ctx, comped.String(), "premium", time.Time{})
+			has, err := client.HasEntitlement(ctx, openrails.CustomerID(comped), "premium", time.Time{})
 			require.NoError(t, err)
 			require.True(t, has, "the comp materialized its entitlement window")
-			subscriptions, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: subscriber.String()})
+			subscriptions, err := client.ListSubscriptions(ctx, openrails.SubscriptionFilter{CustomerID: openrails.CustomerID(subscriber)})
 			require.NoError(t, err)
 			require.Len(t, subscriptions.Data, 1)
-			require.Equal(t, api.FormatPriceID(price.ID), subscriptions.Data[0].Price.ID)
+			require.Equal(t, price.ID, subscriptions.Data[0].Price.ID)
 
 			replay, err := client.ImportBilling(ctx, book)
 			require.NoError(t, err)

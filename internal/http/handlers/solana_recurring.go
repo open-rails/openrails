@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -16,8 +17,8 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -30,8 +31,8 @@ import (
 // subscribe (#255). The financial terms are NOT taken from the client — they are
 // read server-side from the price's published plan config.
 type confirmSolanaEnrollmentRequest struct {
-	PriceID          string `json:"price_id" binding:"required"`
-	SubscriberWallet string `json:"subscriber_wallet" binding:"required"`
+	PriceID          openrails.PriceID `json:"price_id" binding:"required"`
+	SubscriberWallet string            `json:"subscriber_wallet" binding:"required"`
 	// Signature is the confirmed atomic subscribe-bundle tx signature the wallet
 	// submitted (#286). Optional; recorded on the membership/row when present.
 	Signature string `json:"signature,omitempty"`
@@ -54,11 +55,11 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	priceID, err := uuid.Parse(req.PriceID)
-	if err != nil {
+	if req.PriceID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid price_id")
 		return
 	}
+	priceID := req.PriceID.UUID()
 	if r.State.PriceService == nil {
 		r.ErrorJSON(http.StatusServiceUnavailable, "catalog is not configured")
 		return
@@ -113,7 +114,7 @@ func ConfirmSolanaEnrollment(r *httprequest.Request) {
 		r.ErrorJSON(solanaClientError(err, http.StatusBadRequest))
 		return
 	}
-	r.SuccessJSON(sub)
+	r.SuccessJSON(subscriptions.SubscriptionView(sub, sub.Price, r.Clock.Now()))
 }
 
 // PrepareSolanaCancelTx builds the UNSIGNED on-chain cancel_subscription
@@ -142,11 +143,12 @@ func PrepareSolanaCancelTx(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
 	}
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	// Authorize: the acting user must own the lifecycle subscription before we
 	// reveal its on-chain identifiers.
@@ -216,11 +218,12 @@ func ConfirmSolanaCancel(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return
 	}
-	subscriptionID, err := api.ParseSubscriptionID(subscriptionIDStr)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(subscriptionIDStr)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 
 	var req confirmSolanaCancelRequest
 	if !r.BindJSON(&req) {
@@ -330,10 +333,11 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	}
 
 	// Resolve the NEW price + its published plan terms.
-	newPriceID, err := api.ParsePriceID(newPriceIDStr)
-	if err != nil {
+	typedNewPriceID, err := openrails.ParsePriceID(newPriceIDStr)
+	if err != nil || typedNewPriceID.IsZero() {
 		return nil, http.StatusBadRequest, "invalid new_price_id"
 	}
+	newPriceID := typedNewPriceID.UUID()
 	newPrice, err := r.State.PriceService.GetByID(r.Request.Context(), newPriceID)
 	if err != nil || newPrice == nil {
 		return nil, http.StatusNotFound, "target price not found"
@@ -647,10 +651,11 @@ func parseSubscriptionIDParam(r *httprequest.Request) (uuid.UUID, bool) {
 		r.ErrorJSON(http.StatusBadRequest, "subscription ID required")
 		return uuid.Nil, false
 	}
-	id, err := api.ParseSubscriptionID(idStr)
-	if err != nil {
+	typedId, err := openrails.ParseSubscriptionID(idStr)
+	if err != nil || typedId.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "Invalid subscription ID format")
 		return uuid.Nil, false
 	}
+	id := typedId.UUID()
 	return id, true
 }

@@ -72,3 +72,75 @@ describe("canonical wire fixtures in the browser", () => {
     expect(empty.has_more).toBe(false)
   })
 })
+
+describe("typed ids on the wire", () => {
+  const prefixed = (prefix: string) =>
+    new RegExp(
+      `^${prefix}[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`
+    )
+
+  it("spell every prefixed kind with its prefix and customers as plain UUIDs", () => {
+    const sub = JSON.parse(fixture("subscription.json"))
+    expect(sub.id).toMatch(prefixed("sub_"))
+    expect(sub.customer_id).toMatch(prefixed(""))
+    expect(sub.product_id).toMatch(prefixed("prod_"))
+    expect(sub.price_id).toMatch(prefixed("price_"))
+    expect(sub.scheduled_price_id).toMatch(prefixed("price_"))
+    expect(sub.payment_method_id).toMatch(prefixed("pm_"))
+    expect(sub.payments[0].id).toMatch(prefixed("pay_"))
+    expect(sub.price.id).toBe(sub.price_id)
+    expect(sub.product.id).toBe(sub.product_id)
+
+    const price = JSON.parse(fixture("catalog_price.json"))
+    expect(price.id).toBe(sub.price_id)
+    expect(price.product_id).toBe(sub.product_id)
+
+    const session = JSON.parse(fixture("checkout_session.json"))
+    expect(session.id).toMatch(prefixed("cs_"))
+    expect(session.subscription_id).toBe(sub.id)
+    expect(session.payment_id).toBe(sub.payments[0].id)
+
+    const payment = JSON.parse(fixture("payment.json"))
+    expect(payment.id).toBe(sub.payments[0].id)
+    expect(payment.customer_id).toBe(sub.customer_id)
+    expect(payment.subscription_id).toBe(sub.id)
+    expect(payment.price.product).toBe(sub.product_id)
+
+    // The self routes serve the same subscription shape: the ids it lists
+    // are the ids its action routes take, and its access grant names them.
+    expect(sub.scheduled_price.id).toBe(sub.scheduled_price_id)
+    expect(sub.access.subscription_id).toBe(sub.id)
+    expect(BigInt(sub.price.unit_amount)).toBe(maxInt64)
+    const status = JSON.parse(fixture("billing_status.json"))
+    expect(status.subscription.id).toBe(sub.id)
+    expect(status.access.subscription_id).toBe(sub.id)
+    expect(status.entitlements[0].source_id).toBe(sub.id)
+
+    // Customer payment recovery (#809): the recovery block names methods by
+    // their typed id, and the pay-now / retry-now results carry the same
+    // invoice and subscription shapes with a durable operation.
+    expect(sub.recovery.compatible_payment_method_ids[0]).toBe(
+      sub.payment_method_id
+    )
+    const payNow = JSON.parse(fixture("invoice_pay_now.json"))
+    expect(payNow.invoice.recovery.operation.id).toBe(payNow.operation.id)
+    expect(payNow.attempt.payment_method_id).toBe(sub.payment_method_id)
+    expect(BigInt(payNow.invoice.amount_due)).toBe(maxInt64)
+    const retryNow = JSON.parse(fixture("subscription_retry_now.json"))
+    expect(retryNow.subscription.id).toBe(sub.id)
+    expect(retryNow.payment.id).toBe(sub.payments[0].id)
+    expect(retryNow.operation.status).toBe("succeeded")
+
+    const hosted = JSON.parse(fixture("hosted_checkout_session.json"))
+    expect(hosted.saved_methods[0].id).toBe(sub.payment_method_id)
+    expect(hosted.payment_id).toBe(sub.payments[0].id)
+    expect(hosted.subscription_id).toBe(sub.id)
+
+    const notification = JSON.parse(fixture("notification.json"))
+    expect(notification.customer_id).toBe(sub.customer_id)
+    expect(notification.data.subscription_id).toBe(sub.id)
+    expect(notification.data.from_price_id).toBe(sub.price_id)
+    expect(BigInt(notification.data.old_amount)).toBe(maxInt64)
+    expect(BigInt(notification.data.new_amount)).toBe(minInt64)
+  })
+})

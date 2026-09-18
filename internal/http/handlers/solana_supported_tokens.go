@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -21,7 +21,6 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -50,12 +49,16 @@ type SolanaRuntimeConfigResponse struct {
 	} `json:"features"`
 }
 
+// TokenInfo is one Solana token the merchant accepts. Price is the token's
+// USD price as the feed quoted it, spelled as a decimal string (rates travel
+// exactly like money; the browser never parses a JSON float); "" when the
+// feed has no quote.
 type TokenInfo struct {
-	Symbol   string  `json:"symbol"`
-	Name     string  `json:"name"`
-	Mint     string  `json:"mint"`
-	Decimals int     `json:"decimals"`
-	Price    float64 `json:"price"`
+	Symbol   string `json:"symbol"`
+	Name     string `json:"name"`
+	Mint     string `json:"mint"`
+	Decimals int    `json:"decimals"`
+	Price    string `json:"price,omitempty"`
 	// Preferred marks the default stablecoin the frontend should present first
 	// for Solana purchase options (USDC).
 	Preferred bool `json:"preferred"`
@@ -66,19 +69,31 @@ type TokenInfo struct {
 	Balance           *TokenBalance `json:"balance,omitempty"`
 }
 
+// TokenQuote prices one purchase in a token: Units is the exact on-chain
+// amount; TokenPriceUSD and FXRate are the rates that produced it, spelled
+// as decimal strings (see TokenInfo.Price).
 type TokenQuote struct {
-	Amount        string  `json:"amount"`
-	Units         uint64  `json:"units"`
-	TokenPriceUSD float64 `json:"token_price_usd"`
-	FXRate        float64 `json:"fx_rate"`
-	FXCurrency    string  `json:"fx_currency"`
-	QuotedAt      string  `json:"quoted_at"`
-	ExpiresAt     string  `json:"expires_at"`
+	Amount        string    `json:"amount"`
+	Units         uint64    `json:"units,string"`
+	TokenPriceUSD string    `json:"token_price_usd"`
+	FXRate        string    `json:"fx_rate"`
+	FXCurrency    string    `json:"fx_currency"`
+	QuotedAt      time.Time `json:"quoted_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
+}
+
+// rateString spells a provider rate exactly as the float the feed handed us:
+// the shortest decimal that round-trips, never scientific notation.
+func rateString(rate float64) string {
+	if rate == 0 {
+		return ""
+	}
+	return strconv.FormatFloat(rate, 'f', -1, 64)
 }
 
 type TokenBalance struct {
 	Amount     string `json:"amount"`
-	Units      uint64 `json:"units"`
+	Units      uint64 `json:"units,string"`
 	Sufficient bool   `json:"sufficient"`
 }
 
@@ -210,7 +225,7 @@ func GetSupportedTokens(r *httprequest.Request) {
 			Name:              name,
 			Mint:              mint,
 			Decimals:          decimals,
-			Price:             price,
+			Price:             rateString(price),
 			Preferred:         symbol == solanatokens.PreferredStablecoin,
 			RecurringEligible: recurring.IsRecurringStablecoinSymbol(symbol),
 		}
@@ -361,10 +376,11 @@ func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr 
 		return 0, "", "price service unavailable"
 	}
 
-	priceID, err := api.ParsePriceID(priceIDStr)
-	if err != nil {
+	typedPriceID, err := openrails.ParsePriceID(priceIDStr)
+	if err != nil || typedPriceID.IsZero() {
 		return 0, "", fmt.Sprintf("invalid price_id: %v", err)
 	}
+	priceID := typedPriceID.UUID()
 
 	price, err := r.State.PriceService.GetByID(ctx, priceID)
 	if err != nil {
@@ -379,10 +395,11 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 		return 0, "", "checkout session service unavailable"
 	}
 
-	sessionID, err := uuid.Parse(strings.TrimPrefix(sessionIDStr, "cs_"))
-	if err != nil {
+	typedSessionID, err := openrails.ParseCheckoutSessionID(sessionIDStr)
+	if err != nil || typedSessionID.IsZero() {
 		return 0, "", fmt.Sprintf("invalid checkout_session_id: %v", err)
 	}
+	sessionID := typedSessionID.UUID()
 
 	user := r.GetUser()
 	if user == nil {
@@ -394,7 +411,7 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 		return 0, "", fmt.Sprintf("session not found: %v", err)
 	}
 
-	return resolvePriceFromID(ctx, r, session.PriceID)
+	return resolvePriceFromID(ctx, r, session.PriceID.String())
 }
 
 // merchantSolanaRPC arms the ctx merchant's Solana RPC client through the
@@ -456,11 +473,11 @@ func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSy
 	return &TokenQuote{
 		Amount:        quote.Amount, // rendered from Units (integer), display only
 		Units:         quote.Units,
-		TokenPriceUSD: quote.TokenPriceUSD,
-		FXRate:        quote.FXRate,
+		TokenPriceUSD: rateString(quote.TokenPriceUSD),
+		FXRate:        rateString(quote.FXRate),
 		FXCurrency:    quote.FXCurrency,
-		QuotedAt:      quotedAt.Format(time.RFC3339),
-		ExpiresAt:     expiresAt.Format(time.RFC3339),
+		QuotedAt:      quotedAt.UTC(),
+		ExpiresAt:     expiresAt.UTC(),
 	}
 }
 

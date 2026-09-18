@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // TestTierGroupDetection tests that the checkout service correctly detects tier groups
@@ -238,7 +239,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 	t.Run("requires authentication", func(t *testing.T) {
 		dummySubID := "sub_" + uuid.New().String()
 		body := map[string]string{
-			"price_id": premiumPlusPriceID.String(),
+			"price_id": openrails.PriceID(premiumPlusPriceID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
@@ -258,13 +259,14 @@ func TestChangeTierEndpoint(t *testing.T) {
 
 		nonExistentSubID := "sub_" + uuid.New().String()
 		body := map[string]string{
-			"price_id": premiumPlusPriceID.String(),
+			"price_id": openrails.PriceID(premiumPlusPriceID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+nonExistentSubID+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -288,13 +290,14 @@ func TestChangeTierEndpoint(t *testing.T) {
 
 		// Try to change to same price
 		body := map[string]string{
-			"price_id": premiumPriceID.String(),
+			"price_id": openrails.PriceID(premiumPriceID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -332,13 +335,14 @@ func TestChangeTierEndpoint(t *testing.T) {
 
 		// Request upgrade to Premium+
 		body := map[string]string{
-			"price_id": premiumPlusPriceID.String(),
+			"price_id": openrails.PriceID(premiumPlusPriceID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -384,13 +388,14 @@ func TestChangeTierEndpoint(t *testing.T) {
 
 		// Request downgrade to Premium
 		body := map[string]string{
-			"price_id": premiumPriceID.String(),
+			"price_id": openrails.PriceID(premiumPriceID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -487,11 +492,11 @@ func TestAdminChangeTierParity(t *testing.T) {
 			self := preview(t, suite.Server.Handler(),
 				"/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier/preview",
 				suite.MintUserToken(userID, email),
-				tc.targetPrice.String())
+				openrails.PriceID(tc.targetPrice).String())
 			merchant := preview(t, admin,
 				"/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier/preview",
 				merchantDelegatedTestToken,
-				tc.targetPrice.String())
+				openrails.PriceID(tc.targetPrice).String())
 
 			require.Equal(t, tc.expectedAction, merchant.Action)
 			require.Equal(t, self.Action, merchant.Action)
@@ -506,13 +511,14 @@ func TestAdminChangeTierParity(t *testing.T) {
 			require.Equal(t, self.Effective, merchant.Effective)
 			require.Equal(t, self.IsEstimate, merchant.IsEstimate)
 
-			body, err := json.Marshal(map[string]string{"price_id": tc.targetPrice.String()})
+			body, err := json.Marshal(map[string]string{"price_id": openrails.PriceID(tc.targetPrice).String()})
 			require.NoError(t, err)
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost,
 				"/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier",
 				bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", uuid.NewString())
 			req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 			admin.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -527,9 +533,7 @@ func TestAdminChangeTierParity(t *testing.T) {
 				require.Equal(t, tc.targetPrice, *updated.ScheduledPriceID)
 			} else {
 				require.NotNil(t, changed.SubscriptionID)
-				newSubscriptionID, err := api.ParseSubscriptionID(*changed.SubscriptionID)
-				require.NoError(t, err)
-				updated := suite.GetSubscription(newSubscriptionID)
+				updated := suite.GetSubscription(changed.SubscriptionID.UUID())
 				require.NotNil(t, updated.UserEmail)
 				require.Equal(t, email, *updated.UserEmail)
 			}
@@ -547,13 +551,14 @@ func TestAdminChangeTierGuards(t *testing.T) {
 
 	post := func(t *testing.T, subID uuid.UUID, suffix string) *httptest.ResponseRecorder {
 		t.Helper()
-		body, err := json.Marshal(map[string]string{"price_id": premiumPlusPriceID.String()})
+		body, err := json.Marshal(map[string]string{"price_id": openrails.PriceID(premiumPlusPriceID).String()})
 		require.NoError(t, err)
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost,
 			"/v1/merchant/subscriptions/sub_"+subID.String()+"/change-tier"+suffix,
 			bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(rec, req)
 		return rec
@@ -570,12 +575,24 @@ func TestAdminChangeTierGuards(t *testing.T) {
 		rec := post(t, sub.ID, "")
 		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 
+		// A missing Idempotency-Key is refused before any admission guard.
+		body, err := json.Marshal(map[string]string{"price_id": openrails.PriceID(premiumPlusPriceID).String()})
+		require.NoError(t, err)
+		unkeyed := httptest.NewRecorder()
+		unkeyedReq := httptest.NewRequest(http.MethodPost, "/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(body))
+		unkeyedReq.Header.Set("Content-Type", "application/json")
+		unkeyedReq.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+		admin.ServeHTTP(unkeyed, unkeyedReq)
+		require.Equal(t, http.StatusBadRequest, unkeyed.Code, unkeyed.Body.String())
+		require.Contains(t, unkeyed.Body.String(), openrails.CodeTierChangeIdempotencyKeyRequired)
+
 		serviceRequest := &checkout.TierChangeRequest{
-			PriceID:        premiumPlusPriceID.String(),
+			PriceID:        openrails.PriceID(premiumPlusPriceID).String(),
 			SubscriptionID: sub.ID,
+			IdempotencyKey: uuid.NewString(),
 		}
 		customer := &checkout.UserIdentity{ID: userID}
-		_, err := suite.App.Runtime.CheckoutService.TierChange(suite.MerchantCtx(), serviceRequest, customer)
+		_, err = suite.App.Runtime.CheckoutService.TierChange(suite.MerchantCtx(), serviceRequest, customer)
 		require.ErrorContains(t, err, "only active or past-due subscriptions")
 		_, err = suite.App.Runtime.CheckoutService.TierChangePreview(suite.MerchantCtx(), serviceRequest, customer)
 		require.ErrorContains(t, err, "only active or past-due subscriptions")
@@ -655,7 +672,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 
 		// Try to checkout Premium+ (should be blocked)
 		body := map[string]any{
-			"price_id": premiumPlusPriceID.String(),
+			"price_id": openrails.PriceID(premiumPlusPriceID).String(),
 			"payment": map[string]any{
 				"rail":          "nmi",
 				"payment_token": "tok_test_123",
@@ -700,7 +717,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 
 		// Try to checkout Premium (should be blocked)
 		body := map[string]any{
-			"price_id": premiumPriceID.String(),
+			"price_id": openrails.PriceID(premiumPriceID).String(),
 			"payment": map[string]any{
 				"rail":          "nmi",
 				"payment_token": "tok_test_123",
@@ -736,7 +753,7 @@ func TestCheckoutBlocksTierChanges(t *testing.T) {
 
 		// Checkout Premium (new subscription, should work)
 		body := map[string]any{
-			"price_id": premiumPriceID.String(),
+			"price_id": openrails.PriceID(premiumPriceID).String(),
 			"payment": map[string]any{
 				"rail":          "nmi",
 				"payment_token": "tok_test_123",

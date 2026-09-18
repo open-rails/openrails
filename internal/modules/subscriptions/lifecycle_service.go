@@ -10,7 +10,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -22,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/identity"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -1074,12 +1075,9 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 
 		// Notify user
 		eventType := models.NotificationPremiumRenewed
-		var notifData map[string]any
+		var notifData openrails.NotificationData
 		if applyingDowngrade && newProduct != nil {
-			notifData = map[string]any{
-				"downgrade_applied": true,
-				"new_product":       newProduct.DisplayName,
-			}
+			notifData = openrails.NotificationData{DowngradeApplied: true, NewProduct: newProduct.DisplayName}
 		}
 
 		notification := &models.NotificationQueue{
@@ -1429,7 +1427,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
-		Data:       map[string]any{"reason": string(reason)},
+		Data:       openrails.NotificationData{Reason: string(reason)},
 	}
 	if err := notificationRepo.Create(ctx, notification); err != nil {
 		log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")
@@ -1867,7 +1865,7 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 			ID:         uuidutil.NewV7(),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumEnded,
-			Data:       map[string]any{"reason": string(PremiumEndReasonExpired)},
+			Data:       openrails.NotificationData{Reason: string(PremiumEndReasonExpired)},
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).Error("failed to create membership expired notification")
@@ -1976,6 +1974,20 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// A late event must preserve the existing cancellation and its terminal reason.
 		if subscription.Status == models.StatusCancelled {
 			return nil
+		}
+		if params.ForAttempt != nil || params.ForPeriodEnd != nil {
+			recorded := 0
+			if subscription.RetryAttempts != nil {
+				recorded = *subscription.RetryAttempts
+			}
+			samePeriod := params.ForPeriodEnd == nil || (subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.Unix() == params.ForPeriodEnd.Unix())
+			sameAttempt := params.ForAttempt == nil || recorded == *params.ForAttempt
+			if subscription.Status != models.StatusPastDue || !samePeriod || !sameAttempt {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID, "status": subscription.Status, "retry_attempts": recorded, "for_attempt": params.ForAttempt, "for_period_end": params.ForPeriodEnd,
+				}).Info("decline for this dunning attempt already applied, or its period is over; no-op")
+				return nil
+			}
 		}
 
 		// Capture values for event logging
@@ -2272,20 +2284,18 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		//   bucket 3                -> premium_ended / non_recoverable ("the
 		//                              mandate is gone; re-subscribe")
 		eventType := models.NotificationPaymentMethodFailed
-		var data map[string]any
+		var data openrails.NotificationData
 		switch {
 		case needsPaymentMethodUpdate:
 			eventType = models.NotificationPaymentMethodUpdateRequired
-			data = map[string]any{
-				"failure_code": normalize.FromPtr(params.FailureCode),
-			}
+			data.FailureCode = normalize.FromPtr(params.FailureCode)
 		case subscription.Status == models.StatusCancelled:
 			eventType = models.NotificationPremiumEnded
 			endReason := PremiumEndReasonExpired
 			if params.Decline == collection.DeclineNonRecoverable {
 				endReason = PremiumEndReasonNonRecoverable
 			}
-			data = map[string]any{"reason": string(endReason)}
+			data.Reason = string(endReason)
 		}
 
 		notification := &models.NotificationQueue{

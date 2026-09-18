@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/migrate"
 	embcp "github.com/open-rails/openrails/internal/operator"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -51,7 +50,7 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 	deposit, err := sourceOwner.DepositCredits(ctx, depositRequest)
 	require.NoError(t, err)
 	require.False(t, deposit.Replayed)
-	before, err := sourceOwner.Balance(ctx, payer.String())
+	before, err := sourceOwner.Balance(ctx, payer)
 	require.NoError(t, err)
 	require.Equal(t, amount, before.BalanceAmount)
 
@@ -134,10 +133,10 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 	require.True(t, embeddedReplay.AlreadyImported)
 	require.Equal(t, receipt.Digest, embeddedReplay.Digest)
 	for _, client := range []*openrails.Client{targetOwner, targetEmbedded} {
-		balance, err := client.Balance(ctx, payer.String())
+		balance, err := client.Balance(ctx, payer)
 		require.NoError(t, err)
 		require.Equal(t, before.BalanceAmount, balance.BalanceAmount)
-		restored, err := client.GetDeposit(ctx, payer.String(), depositRequest.SourceID)
+		restored, err := client.GetDeposit(ctx, payer, depositRequest.SourceID)
 		require.NoError(t, err)
 		require.Equal(t, deposit.ID, restored.ID)
 		require.Equal(t, deposit.Amount, restored.Amount)
@@ -165,10 +164,10 @@ func TestMerchantArchiveRealAuthKitHTTPAndEmbeddedParity(t *testing.T) {
 
 func archiveEmbeddedClient(t *testing.T, dsn, schema string, mid merchant.ID) *openrails.Client {
 	t.Helper()
-	rt, err := embed.New(t.Context(), embed.Options{Options: embedded.Options{
+	rt, err := embed.New(t.Context(), embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn, Schema: schema}},
-		River:  embedded.RiverManagedByOpenRails(),
-	}})
+		River:  embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	client, err := rt.Client(openrails.WithMerchantID(mid), openrails.WithCurrency("USD"), openrails.WithTimeout(0))

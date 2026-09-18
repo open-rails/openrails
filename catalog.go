@@ -1,13 +1,9 @@
 package openrails
 
-import (
-	"time"
-
-	"github.com/google/uuid"
-)
+import "time"
 
 type CatalogProduct struct {
-	ID               uuid.UUID       `json:"id"`
+	ID               ProductID       `json:"id"`
 	Key              string          `json:"key"`
 	DisplayName      string          `json:"display_name"`
 	Description      string          `json:"description"`
@@ -65,19 +61,19 @@ type DriftField struct {
 }
 
 type CatalogPrice struct {
-	ID uuid.UUID `json:"id"`
+	ID PriceID `json:"id"`
 	// Key (#774) is the durable, per-merchant-unique movable-pointer handle for
 	// this price's substance-version chain — the stable name to check out
 	// against, reprice by, or reference in support conversations. ID stays the
 	// #662 immutable substance UUID.
 	Key                 string    `json:"key"`
-	ProductID           uuid.UUID `json:"product_id"`
+	ProductID           ProductID `json:"product_id"`
 	Archived            bool      `json:"archived"`
-	UnitAmount          int64     `json:"unit_amount"`
+	UnitAmount          int64     `json:"unit_amount,string"`
 	Currency            string    `json:"currency"`
 	AccessDurationHours *int      `json:"access_duration_hours,omitempty"`
 	AutoRenew           bool      `json:"auto_renew"`
-	TrialUnitAmount     *int64    `json:"trial_unit_amount,omitempty"`
+	TrialUnitAmount     *int64    `json:"trial_unit_amount,omitempty,string"`
 	TrialDurationHours  *int      `json:"trial_duration_hours,omitempty"`
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -96,7 +92,7 @@ type CatalogPrice struct {
 }
 
 type CreatePriceRequest struct {
-	ProductID uuid.UUID `json:"product_id"`
+	ProductID ProductID `json:"product_id"`
 
 	// Key (#774) is the durable, per-merchant-unique MOVABLE POINTER handle for
 	// this price's substance-version chain — distinct from ID, which stays the
@@ -112,7 +108,7 @@ type CreatePriceRequest struct {
 	// provider keys are derived from (product_key, currency, unit_amount,
 	// access duration, renewal flag, and trial terms), so they are stable across
 	// DB rebuilds and a different amount is, by construction, a different price.
-	UnitAmount int64  `json:"unit_amount"`
+	UnitAmount int64  `json:"unit_amount,string"`
 	Currency   string `json:"currency"`
 
 	// AccessDurationHours (#622): the access window a purchase grants, in HOURS
@@ -128,7 +124,7 @@ type CreatePriceRequest struct {
 	// differs from the recurring terms. TrialUnitAmount 0 = free trial; both nil =
 	// a flat price. Must be set together and require AutoRenew (there is a "then
 	// recurring" part).
-	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty"`
+	TrialUnitAmount    *int64 `json:"trial_unit_amount,omitempty,string"`
 	TrialDurationHours *int   `json:"trial_duration_hours,omitempty"`
 
 	// Providers is the list of provider names to attach (e.g. ["stripe",

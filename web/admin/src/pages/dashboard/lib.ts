@@ -20,13 +20,9 @@ export function formatMeasure(
   currency?: string
 ): string {
   if (value === null || value === undefined) return "—"
-  // "micros" money cells are native units at the currency's registered scale.
-  // Metrics aggregate in float64, so a fractional ratio shows its nearest unit.
-  if (unit === "micros")
-    return formatNativeAmount(
-      typeof value === "number" ? Math.round(value) : value,
-      currency ?? ""
-    )
+  // "money" cells are exact decimal strings of native units at the
+  // currency's registered scale (a money-unit ratio arrives already rounded).
+  if (unit === "money") return formatNativeAmount(value, currency ?? "")
   const n = typeof value === "number" ? value : Number(value)
   if (!Number.isFinite(n)) return String(value)
   switch (unit) {
@@ -137,14 +133,14 @@ export function groupSeries<T extends PivotSeries>(
 ): { key: string; label: string; series: T[] }[] {
   const groups = new Map<string, { key: string; label: string; series: T[] }>()
   for (const item of series) {
-    const currency = item.unit === "micros" ? item.currency : undefined
+    const currency = item.unit === "money" ? item.currency : undefined
     const key = JSON.stringify([item.unit ?? "number", currency ?? null])
     let group = groups.get(key)
     if (!group) {
       group = {
         key,
         label:
-          item.unit === "micros"
+          item.unit === "money"
             ? currency || "Amount (currency not supplied)"
             : item.unit || "Values",
         series: [],
@@ -159,6 +155,13 @@ export function groupSeries<T extends PivotSeries>(
 export interface Pivoted {
   data: Record<string, number | string>[]
   series: PivotSeries[]
+}
+
+// exactKey names the pivoted row field that keeps a series' exact wire cell
+// (a money decimal string) beside the Number recharts plots, so tooltips
+// format the exact value rather than a Number-coerced one.
+export function exactKey(seriesKey: string): string {
+  return `${seriesKey}:exact`
 }
 
 // pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
@@ -198,11 +201,13 @@ export function pivotTimeSeries(
           dimensions,
           unit: m.unit,
           currency:
-            m.unit === "micros" ? rowCurrency(row, idx, currency) : undefined,
+            m.unit === "money" ? rowCurrency(row, idx, currency) : undefined,
         }
         series.set(identity, item)
       }
-      entry[item.key] = Number(row[m.index] ?? 0)
+      const cell = row[m.index]
+      entry[item.key] = Number(cell ?? 0)
+      entry[exactKey(item.key)] = cell ?? 0
     }
   }
   const data = [...buckets.entries()]
@@ -210,9 +215,54 @@ export function pivotTimeSeries(
     .map(([, entry]) => entry)
   const keys = [...series.values()]
   for (const entry of data) {
-    for (const s of keys) if (!(s.key in entry)) entry[s.key] = 0
+    for (const s of keys)
+      if (!(s.key in entry)) {
+        entry[s.key] = 0
+        entry[exactKey(s.key)] = 0
+      }
   }
   return { data, series: keys }
+}
+
+// DonutSlice is one pie slice: the plotted Number beside the exact wire cell
+// (under exactKey) the tooltip formats, as the time-series rows do.
+export type DonutSlice = PivotSeries & {
+  value: number
+  [exact: string]: unknown
+}
+
+// donutSlices turns the result's rows into slices for the primary measure,
+// dropping zero slices.
+export function donutSlices(
+  result: MetricsResult,
+  currency?: string
+): DonutSlice[] {
+  const idx = indexColumns(result.columns)
+  const primary = idx.measures[0]
+  if (!primary) return []
+  return result.rows
+    .map((row, i) => {
+      const key = `slice-${i}`
+      const cell = row[primary.index]
+      return {
+        key,
+        label:
+          idx.dims
+            .map((d) => String(row[d.index] ?? ""))
+            .filter(Boolean)
+            .join(" · ") || primary.name,
+        measure: primary.name,
+        dimensions: idx.dims.map((d) => row[d.index]),
+        unit: primary.unit,
+        currency:
+          primary.unit === "money"
+            ? rowCurrency(row, idx, currency)
+            : undefined,
+        value: Number(cell ?? 0),
+        [exactKey(key)]: cell ?? 0,
+      }
+    })
+    .filter((slice) => slice.value !== 0)
 }
 
 // chartColor cycles the shadcn --chart-N tokens.

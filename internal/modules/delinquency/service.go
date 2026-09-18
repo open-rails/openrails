@@ -12,13 +12,14 @@ import (
 	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -348,15 +349,14 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 	default:
 		return
 	}
-	data := map[string]any{
-		"currency":         t.Currency,
-		"overdue_amount":   exposure.OverdueAmount,
-		"overdue_invoices": exposure.OverdueInvoices,
-		"from_state":       t.From.String(),
-		"to_state":         t.To.String(),
+	overdue := exposure.OverdueAmount
+	data := openrails.NotificationData{
+		Currency: t.Currency, OverdueAmount: &overdue, OverdueInvoices: exposure.OverdueInvoices,
+		FromState: t.From.String(), ToState: t.To.String(),
 	}
 	if exposure.Owes() {
-		data["overdue_since"] = exposure.OverdueSince.UTC().Format(time.RFC3339)
+		since := exposure.OverdueSince.UTC()
+		data.OverdueSince = &since
 	}
 	if err := subscriptions.NewNotificationQueueRepo(s.db).Create(ctx, &models.NotificationQueue{
 		ID:         uuidutil.NewV7(),

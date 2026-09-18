@@ -4,9 +4,12 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -18,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
@@ -34,6 +38,17 @@ type fakeNMIRebillGateway struct {
 	saleAuthKey atomic.Value // security_key the last sale authenticated with (#730)
 	saleForm    atomic.Value // url.Values: full form of the last sale (#297 wire assertions)
 	txnID       string
+	// exact is the v5 read of txnID: what NMI recorded for the landed sale.
+	exactVault, exactAmount, exactCurrency atomic.Value
+}
+
+// recordSale overrides what the v5 exact read reports for the landed sale. By
+// default it is what NMI records: the vault the sale was sent with, at the
+// plan amount (the fixture's $9.99 USD).
+func (f *fakeNMIRebillGateway) recordSale(vault, amount, currency string) {
+	f.exactVault.Store(vault)
+	f.exactAmount.Store(amount)
+	f.exactCurrency.Store(currency)
 }
 
 func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClient) {
@@ -41,7 +56,27 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 	f := &fakeNMIRebillGateway{txnID: "txn-rebill-" + uuid.NewString()[:8]}
 	f.saleBody.Store("response=1&transactionid=" + f.txnID)
 
+	f.recordSale("", rebillAmountWire, "USD")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/payments/"+f.txnID) && f.charged.Load() {
+			amount := f.exactAmount.Load().(string)
+			vault := f.exactVault.Load().(string)
+			if form, ok := f.saleForm.Load().(url.Values); ok && vault == "" {
+				vault = form.Get("customer_vault_id")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "transaction", "id": f.txnID, "response": "1", "response_code": "100",
+				"amount": amount, "currency": f.exactCurrency.Load().(string), "customer_vault_id": vault,
+				"actions": []map[string]any{{"id": f.txnID, "type": "sale", "amount": amount, "success": true}},
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"transaction not found"}`)
+			return
+		}
 		_ = r.ParseForm()
 		if r.Form.Get("report_type") == "transaction" || r.URL.Query().Get("report_type") == "transaction" {
 			f.queryCalls.Add(1)
@@ -78,6 +113,7 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 	return f, client
 }
 
@@ -88,7 +124,17 @@ type rebillFixture struct {
 	periodEnd time.Time
 	orderRef  string
 	pspID     uuid.UUID
+	methodID  uuid.UUID
+	vault     string
+	billingID string
 }
+
+// The fixture price is $9.99 (native micros); the rebill freezes it.
+const (
+	rebillAmount      = 9_990_000
+	rebillAmountMinor = 999
+	rebillAmountWire  = "9.99"
+)
 
 // seedPastDueSubscription inserts product/price/payment-method/subscription
 // in the dunning posture: past_due, missed period end in the recent past.
@@ -120,7 +166,8 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, $3, 'USD', 720, true, $4)`, priceID, productID, rebillAmount, tenantID)
+	fx.methodID, fx.vault, fx.billingID = paymentMethodID, "vault-"+suffix, "bill-"+suffix
 	exec(`INSERT INTO openrails.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
@@ -157,11 +204,16 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 		IntentType:     TypeManualRebill,
 		SubscriptionID: &subID,
 		Payload: ManualRebillPayload{
-			SubscriptionID: fx.subID,
-			PeriodEnd:      fx.periodEnd,
-			Rail:           "mobius",
-			OrderReference: fx.orderRef,
-			Attempt:        attempt,
+			SubscriptionID:  fx.subID,
+			PeriodEnd:       fx.periodEnd,
+			Rail:            "mobius",
+			OrderReference:  fx.orderRef,
+			Attempt:         attempt,
+			PaymentMethodID: fx.methodID,
+			Instrument:      RebillInstrument{PSPID: fx.pspID, Custodian: models.CustodianPSP, RailCustomerRef: fx.vault, RailMethodRef: fx.billingID},
+			Currency:        "USD",
+			Amount:          rebillAmount,
+			AmountMinor:     rebillAmountMinor,
 		},
 		IdempotencyKey: ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "mobius", fx.orderRef, attempt),
 		NextAttemptAt:  time.Now().UTC(),
@@ -271,7 +323,7 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	require.Equal(t, OutcomeAmbiguous, outcome.Class)
 	require.EqualValues(t, 1, fake.saleCalls.Load())
 
-	// The charge actually landed at NMI.
+	// The charge actually landed at NMI, exactly as frozen.
 	fake.charged.Store(true)
 	_, err = fx.db.Pool().Exec(context.Background(),
 		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
@@ -385,4 +437,151 @@ func TestManualRebillWindowExpiryNeverFires(t *testing.T) {
 	assert.Equal(t, StatusExpired, got.Status)
 	assert.Zero(t, fake.saleCalls.Load(), "expired dunning charges never fire")
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
+}
+
+// TestManualRebillContradictedReceiptStaysUnknown (#809 R4 P1): a rebill whose
+// response was lost converges only on the exact frozen charge. A sale under
+// the period's order reference on another vault, for another amount, or in
+// another currency keeps the operation unknown with the contradiction
+// retained: no payment, no renewal, no resend; the operator can neither name
+// it as the receipt nor attest non-execution. The exact sale then settles —
+// through the verifier, or through the operator's receipt.
+func TestManualRebillContradictedReceiptStaysUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name, vault, amount, currency string
+		byOperator                    bool
+	}{
+		{name: "another vault", vault: "someone-elses-vault", amount: rebillAmountWire, currency: "USD"},
+		{name: "another amount", amount: "0.01", currency: "USD"},
+		{name: "another currency", amount: rebillAmountWire, currency: "EUR", byOperator: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := seedPastDueSubscription(t)
+			fake, client := newFakeNMIRebillGateway(t)
+			fake.saleStatus.Store(http.StatusBadGateway)
+			runner := fx.rebillRunner(client, fullModeConfig())
+			ctx := dbtest.WithTestMerchant(context.Background())
+			row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+			require.NoError(t, err)
+			require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+
+			fake.charged.Store(true)
+			fake.recordSale(tc.vault, tc.amount, tc.currency)
+			_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			require.NoError(t, err)
+			_, err = runner.RunVerifyOnce(context.Background())
+			require.NoError(t, err)
+			got := fx.intentByID(t, row.ID)
+			require.Equal(t, StatusUnknownNeedsVerify, got.Status, "a contradicting sale never settles")
+			require.Contains(t, string(got.ResultEvidence), rebillEvidenceContradiction)
+			require.Equal(t, "past_due", string(fx.subscription(t).Status), "no renewal")
+			require.Zero(t, fx.paymentsFor(t, fake.txnID), "no payment recorded")
+
+			_, err = runner.Resolve(ctx, row.ID, Resolution{ProviderReference: fake.txnID, Actor: "ops", Reason: "portal"})
+			require.ErrorIs(t, err, ErrResolutionRejected, "the contradicting sale is not this rebill's receipt")
+			_, err = runner.Resolve(ctx, row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "portal"})
+			require.ErrorIs(t, err, ErrResolutionRejected, "non-execution cannot be attested against provider evidence")
+			require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
+			require.EqualValues(t, 1, fake.saleCalls.Load(), "nothing is resent")
+
+			fake.recordSale("", rebillAmountWire, "USD")
+			if tc.byOperator {
+				resolved, err := runner.Resolve(ctx, row.ID, Resolution{ProviderReference: fake.txnID, Actor: "ops", Reason: "portal"})
+				require.NoError(t, err)
+				require.Equal(t, StatusSucceeded, resolved.Status)
+			} else {
+				_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+				require.NoError(t, err)
+				_, err = runner.RunVerifyOnce(context.Background())
+				require.NoError(t, err)
+				require.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
+			}
+			require.Equal(t, "active", string(fx.subscription(t).Status))
+			require.Equal(t, 1, fx.paymentsFor(t, fake.txnID))
+			var amount int64
+			require.NoError(t, fx.db.Pool().QueryRow(ctx, "SELECT amount FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2", fx.subID, fake.txnID).Scan(&amount))
+			require.EqualValues(t, rebillAmount, amount, "the renewal records the frozen amount")
+			require.EqualValues(t, 1, fake.saleCalls.Load())
+		})
+	}
+}
+
+// TestManualRebillCustodyFlipIsNeverChargedOrSettled (#809 R4 re-review P2):
+// a rebill is sent on, and judged against, the instrument frozen at enqueue —
+// provider account, custody, customer vault and billing reference. A #297
+// custody flip keeps the provider account and leaves the old vault reference
+// behind while moving custody, rail_method_ref and charge_via, so neither the
+// vault nor the PSP alone notices it.
+//
+//   - mid-flight: the flip cannot make verification switch to the unvaulted
+//     rule (which skips the vault check) and accept a contradicted receipt.
+//   - fresh attempt: the period's next rebill is superseded under the
+//     instrument's row lock instead of being sent on the stale vault/billing
+//     pair; re-deriving it after the instrument is repaired freezes it anew.
+func TestManualRebillCustodyFlipIsNeverChargedOrSettled(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	flipCustody := func(t *testing.T, fx rebillFixture) {
+		t.Helper()
+		custodian := dbtest.EnsureTestCustodian(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID())
+		_, err := fx.db.Pool().Exec(ctx, `
+			UPDATE openrails.payment_methods
+			   SET custodian = 'basis_theory', custodian_id = $2, rail_method_ref = $3, charge_via = 'pan_proxy'
+			 WHERE id = $1`, fx.methodID, custodian, "bt-token-"+uuid.NewString()[:8])
+		require.NoError(t, err)
+	}
+
+	t.Run("mid-flight: a contradicted receipt never settles", func(t *testing.T) {
+		fx := seedPastDueSubscription(t)
+		fake, client := newFakeNMIRebillGateway(t)
+		fake.saleStatus.Store(http.StatusBadGateway) // the answer is lost
+		runner := fx.rebillRunner(client, fullModeConfig())
+		row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+		require.NoError(t, err)
+		require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+
+		flipCustody(t, fx)
+		fake.charged.Store(true)
+		fake.recordSale("someone-elses-vault", rebillAmountWire, "USD")
+		_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		require.NoError(t, err)
+		_, err = runner.RunVerifyOnce(context.Background())
+		require.NoError(t, err)
+
+		got := fx.intentByID(t, row.ID)
+		require.Equal(t, StatusUnknownNeedsVerify, got.Status, "custody is frozen, so the vault check still applies")
+		require.Contains(t, string(got.ResultEvidence), rebillEvidenceContradiction)
+		require.Equal(t, "past_due", string(fx.subscription(t).Status))
+		require.Zero(t, fx.paymentsFor(t, fake.txnID))
+		require.EqualValues(t, 1, fake.saleCalls.Load())
+	})
+
+	t.Run("fresh attempt: superseded, never sent on the stale pair", func(t *testing.T) {
+		fx := seedPastDueSubscription(t)
+		fake, client := newFakeNMIRebillGateway(t)
+		flipCustody(t, fx)
+
+		row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+		require.NoError(t, err)
+		require.Equal(t, StatusSuperseded, row.Status, "the frozen instrument no longer matches the method")
+		require.NotNil(t, row.LastFailureReason)
+		require.Contains(t, *row.LastFailureReason, "instrument_changed")
+		require.Zero(t, fake.saleCalls.Load(), "nothing is sent on the stale vault/billing pair")
+		require.Equal(t, "past_due", string(fx.subscription(t).Status))
+
+		// Repaired: the period's attempt is re-derived and freezes the
+		// instrument as it now is, and that charge goes out.
+		_, err = fx.db.Pool().Exec(ctx, `
+			UPDATE openrails.payment_methods
+			   SET custodian = 'psp', custodian_id = NULL, rail_method_ref = $2, charge_via = 'pan_proxy'
+			 WHERE id = $1`, fx.methodID, fx.billingID)
+		require.NoError(t, err)
+		row, err = fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+		require.NoError(t, err)
+		require.Equal(t, StatusSucceeded, row.Status)
+		require.EqualValues(t, 1, fake.saleCalls.Load())
+		form, _ := fake.saleForm.Load().(url.Values)
+		require.Equal(t, fx.vault, form.Get("customer_vault_id"), "charged on the frozen vault")
+		require.Equal(t, fx.billingID, form.Get("billing_id"))
+		require.Equal(t, "active", string(fx.subscription(t).Status))
+	})
 }

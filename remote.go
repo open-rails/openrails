@@ -51,6 +51,10 @@ func WithMerchantID(id MerchantID) ClientOption {
 	}
 }
 
+// MerchantID returns the merchant this client is bound to, or zero when a
+// remote client relies on its credential's merchant.
+func (c *Client) MerchantID() MerchantID { return c.merchantID }
+
 // WithHTTPClient injects a transport (tests, custom TLS/conn pooling). When
 // unset a client bounded by the configured timeout is created. The per-call
 // timeout (WithTimeout) is enforced via a per-request context deadline
@@ -184,9 +188,24 @@ func pathID(field, value string) (string, error) {
 	return url.PathEscape(value), nil
 }
 
-// requireUUID is requireID for a typed identifier: the zero UUID names nothing.
+// requireUUID is requireID for a plain UUID identifier: the zero UUID names nothing.
 func requireUUID(field string, id uuid.UUID) (string, error) {
 	if id == uuid.Nil {
+		return "", invalidErr(field + " is required")
+	}
+	return id.String(), nil
+}
+
+// wireID is any typed identifier of the id family (ids.go).
+type wireID interface {
+	IsZero() bool
+	String() string
+}
+
+// requireTypedID is requireID for a typed identifier: the zero id names
+// nothing; the result is the id's wire spelling, safe as one path segment.
+func requireTypedID(field string, id wireID) (string, error) {
+	if id.IsZero() {
 		return "", invalidErr(field + " is required")
 	}
 	return id.String(), nil
@@ -224,19 +243,19 @@ func (c *Client) DepositCredits(ctx context.Context, req DepositCreditsRequest) 
 
 // GetDeposit implements Client (handler ServiceGetDeposit, or#906). A key that
 // never committed returns an error matching ErrNotFound.
-func (c *Client) GetDeposit(ctx context.Context, customerID, sourceID string) (*CreditTransaction, error) {
-	customerID, err := requireID("customer_id", customerID)
+func (c *Client) GetDeposit(ctx context.Context, customerID CustomerID, sourceID string) (*CreditTransaction, error) {
+	customer, err := requireTypedID("customer_id", customerID)
 	if err != nil {
 		return nil, err
 	}
 	// A deposit source is an opaque idempotency key carried in the query,
-	// so dot strings are valid keys, not traversal components.
+	// so dot strings are valid keys, not traversal components (#484).
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return nil, invalidErr("source_id is required")
 	}
 	q := url.Values{}
-	q.Set("customer_id", customerID)
+	q.Set("customer_id", customer)
 	q.Set("source_id", sourceID)
 	var out CreditTransaction
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/deposit?"+q.Encode(), nil, &out); err != nil {
@@ -283,7 +302,8 @@ func (c *Client) Release(ctx context.Context, requestID string) error {
 	return c.do(ctx, http.MethodPost, path, nil, nil)
 }
 
-// ExtendHold implements Client (handler ServiceExtendHold).
+// ExtendHold moves a live hold's deadline to expiresAt. ErrNotFound means the
+// hold was captured, released or lapsed; re-admit instead.
 func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt time.Time) error {
 	if strings.TrimSpace(requestID) == "" {
 		return invalidErr("request_id is required")
@@ -297,13 +317,13 @@ func (c *Client) ExtendHold(ctx context.Context, requestID string, expiresAt tim
 }
 
 // Balance implements Client (handler ServiceGetCreditsBalance).
-func (c *Client) Balance(ctx context.Context, customerID string) (*BalanceResponse, error) {
-	customerID, err := requireID("customer_id", customerID)
+func (c *Client) Balance(ctx context.Context, customerID CustomerID) (*BalanceResponse, error) {
+	customer, err := requireTypedID("customer_id", customerID)
 	if err != nil {
 		return nil, err
 	}
 	q := url.Values{}
-	q.Set("customer_id", customerID)
+	q.Set("customer_id", customer)
 	if c.currency != "" {
 		q.Set("currency", c.currency)
 	}
@@ -315,13 +335,13 @@ func (c *Client) Balance(ctx context.Context, customerID string) (*BalanceRespon
 }
 
 // GetCreditAccount implements Client (handler ServiceGetCreditsBalance).
-func (c *Client) GetCreditAccount(ctx context.Context, customerID, currency string) (*CreditAccount, error) {
-	customerID, err := requireID("customer_id", customerID)
+func (c *Client) GetCreditAccount(ctx context.Context, customerID CustomerID, currency string) (*CreditAccount, error) {
+	customer, err := requireTypedID("customer_id", customerID)
 	if err != nil {
 		return nil, err
 	}
 	q := url.Values{}
-	q.Set("customer_id", customerID)
+	q.Set("customer_id", customer)
 	q.Set("currency", normalizeCurrency(currency))
 	var out CreditAccount
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/credits/balance?"+q.Encode(), nil, &out); err != nil {
@@ -331,8 +351,8 @@ func (c *Client) GetCreditAccount(ctx context.Context, customerID, currency stri
 }
 
 // UsageRollup implements Client (handler ServiceUsageRollup).
-func (c *Client) UsageRollup(ctx context.Context, customerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
-	customerID, err := requireID("customer_id", customerID)
+func (c *Client) UsageRollup(ctx context.Context, customerID CustomerID, currency string, from, to time.Time, groupBy string) ([]UsageRollupRow, error) {
+	customer, err := requireTypedID("customer_id", customerID)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +360,7 @@ func (c *Client) UsageRollup(ctx context.Context, customerID, currency string, f
 		Rows []UsageRollupRow `json:"rows"`
 	}
 	body := map[string]any{
-		"customer_id": customerID,
+		"customer_id": customer,
 		"currency":    normalizeCurrency(currency),
 		"from":        from.UTC().Format(time.RFC3339Nano),
 		"to":          to.UTC().Format(time.RFC3339Nano),
@@ -353,13 +373,13 @@ func (c *Client) UsageRollup(ctx context.Context, customerID, currency string, f
 }
 
 // GetTrustLevel implements Client (handler ServiceGetTrustLevel, #477).
-func (c *Client) GetTrustLevel(ctx context.Context, customerID, currency string) (string, error) {
-	customerID, err := requireID("customer_id", customerID)
+func (c *Client) GetTrustLevel(ctx context.Context, customerID CustomerID, currency string) (string, error) {
+	customer, err := requireTypedID("customer_id", customerID)
 	if err != nil {
 		return "", err
 	}
 	q := url.Values{}
-	q.Set("customer_id", customerID)
+	q.Set("customer_id", customer)
 	q.Set("currency", strings.TrimSpace(currency))
 	var resp struct {
 		Currency   string `json:"currency"`
@@ -373,8 +393,6 @@ func (c *Client) GetTrustLevel(ctx context.Context, customerID, currency string)
 
 // ReportWastedSpend implements Client (handler ServiceReportWastedSpend, #488).
 func (c *Client) ReportWastedSpend(ctx context.Context, report WastedSpendReport) (*WastedSpendResponse, error) {
-	report.CustomerID = strings.TrimSpace(report.CustomerID)
-
 	var out WastedSpendResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/wasted-spend", report, &out); err != nil {
 		return nil, err
@@ -388,16 +406,14 @@ func (c *Client) RecordUsage(ctx context.Context, report UsageReport) error {
 	if currency == "" {
 		currency = normalizeCurrency(c.currency)
 	}
-	report.CustomerID = strings.TrimSpace(report.CustomerID)
 	report.Currency = currency
 
 	return c.do(ctx, http.MethodPost, "/v1/merchant/usage/report", report, nil)
 }
 
 // SetCreditLimit implements Client (handler ServiceSetCreditLimit, #489).
-func (c *Client) SetCreditLimit(ctx context.Context, customerID, currency string, creditLimit int64) error {
-	customerID, err := requireID("customer_id", customerID)
-	if err != nil {
+func (c *Client) SetCreditLimit(ctx context.Context, customerID CustomerID, currency string, creditLimit int64) error {
+	if _, err := requireTypedID("customer_id", customerID); err != nil {
 		return err
 	}
 	body := CreditLimitRequest{CustomerID: customerID, Currency: normalizeCurrency(currency), CreditLimitAmount: creditLimit}
@@ -405,13 +421,13 @@ func (c *Client) SetCreditLimit(ctx context.Context, customerID, currency string
 }
 
 // GetCreditLimit implements Client (handler ServiceGetCreditLimit, #489).
-func (c *Client) GetCreditLimit(ctx context.Context, customerID, currency string) (int64, error) {
-	customerID, err := requireID("customer_id", customerID)
+func (c *Client) GetCreditLimit(ctx context.Context, customerID CustomerID, currency string) (int64, error) {
+	customer, err := requireTypedID("customer_id", customerID)
 	if err != nil {
 		return 0, err
 	}
 	q := url.Values{}
-	q.Set("customer_id", customerID)
+	q.Set("customer_id", customer)
 	q.Set("currency", normalizeCurrency(currency))
 	var resp struct {
 		CreditLimitAmount int64 `json:"credit_limit_amount,string"`
@@ -455,7 +471,7 @@ func (c *Client) AdmitBatch(ctx context.Context, items []AdmitRequest) ([]AdmitB
 	return out.Items, nil
 }
 
-// GetMerchantSettings implements PolicySyncClient.
+// GetMerchantSettings reads the merchant settings document.
 func (c *Client) GetMerchantSettings(ctx context.Context) (*MerchantSettings, error) {
 	var out MerchantSettings
 	if err := c.do(ctx, http.MethodGet, "/v1/merchant/settings", nil, &out); err != nil {
@@ -464,73 +480,74 @@ func (c *Client) GetMerchantSettings(ctx context.Context) (*MerchantSettings, er
 	return &out, nil
 }
 
-// SetMerchantSettings implements PolicySyncClient.
+// SetMerchantSettings replaces merchant-owned settings in one validated document.
 func (c *Client) SetMerchantSettings(ctx context.Context, settings MerchantSettings) error {
 	return c.do(ctx, http.MethodPut, "/v1/merchant/settings", settings, nil)
 }
 
-// SetCustomerSpendDelegations implements PolicySyncClient over the
-// machine-authenticated merchant surface. The /v1/customers counterpart is
-// reserved for a customer-owned delegated browser principal.
-func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID string, delegations []SpendDelegationInput) error {
-	if strings.TrimSpace(customerID) == "" {
-		return invalidErr("customer_id required")
+// SetCustomerSpendDelegations replaces the customer's complete delegation
+// document over the machine-authenticated merchant surface.
+func (c *Client) SetCustomerSpendDelegations(ctx context.Context, customerID CustomerID, delegations []SpendDelegationInput) error {
+	path, err := customerPath(customerID)
+	if err != nil {
+		return err
 	}
-	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations"
+	path += "/spend-delegations"
 	return c.do(ctx, http.MethodPut, path, map[string]any{"delegations": delegations}, nil)
 }
 
 // SetCustomerSpendDelegation atomically upserts one customer delegation.
-func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID string, delegation SpendDelegationInput) error {
-	if strings.TrimSpace(customerID) == "" {
-		return invalidErr("customer_id required")
+func (c *Client) SetCustomerSpendDelegation(ctx context.Context, customerID CustomerID, delegation SpendDelegationInput) error {
+	path, err := customerPath(customerID)
+	if err != nil {
+		return err
 	}
-	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) + "/spend-delegations:upsert"
+	path += "/spend-delegations:upsert"
 	return c.do(ctx, http.MethodPut, path, delegation, nil)
 }
 
-// DeleteCustomerSpendDelegation implements PolicySyncClient (handler
-// ServiceDeleteCustomerSpendDelegation): single-grant revocation (or#911).
-func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID, scope, scopeKey string) error {
-	if strings.TrimSpace(customerID) == "" {
-		return invalidErr("customer_id required")
+// DeleteCustomerSpendDelegation revokes exactly one delegation (or#911); a
+// missing grant returns ErrNotFound.
+func (c *Client) DeleteCustomerSpendDelegation(ctx context.Context, customerID CustomerID, scope, scopeKey string) error {
+	path, err := customerPath(customerID)
+	if err != nil {
+		return err
 	}
 	if strings.TrimSpace(scope) == "" || strings.TrimSpace(scopeKey) == "" {
 		return invalidErr("scope and scope_key required")
 	}
-	path := "/v1/merchant/customers/" + url.PathEscape(strings.TrimSpace(customerID)) +
-		"/spend-delegations/" + url.PathEscape(strings.TrimSpace(scope)) +
+	path += "/spend-delegations/" + url.PathEscape(strings.TrimSpace(scope)) +
 		"/" + url.PathEscape(strings.TrimSpace(scopeKey))
 	return c.do(ctx, http.MethodDelete, path, nil, nil)
 }
 
-// ListActiveEntitlements implements Client (handler
-// ServiceGetExternalSubjectEntitlements, entitlements.go).
-func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []string, at time.Time) (map[string][]EntitlementRecord, error) {
+// ListActiveEntitlements returns active records for up to 500 subjects, keyed
+// by every requested subject after trim and dedupe; unknown subjects map to an
+// empty slice. A zero at means now.
+func (c *Client) ListActiveEntitlements(ctx context.Context, subjects []CustomerID, at time.Time) (map[CustomerID][]EntitlementRecord, error) {
 	body := map[string]any{
 		"subjects": subjects,
 	}
 	if !at.IsZero() {
 		body["at"] = at.UTC().Format(time.RFC3339Nano)
 	}
-	var out map[string][]EntitlementRecord
+	var out map[CustomerID][]EntitlementRecord
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/customers/entitlements:batch", body, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
-		out = map[string][]EntitlementRecord{}
+		out = map[CustomerID][]EntitlementRecord{}
 	}
 	return out, nil
 }
 
 // ListEntitlements implements Client as the single-subject form of
 // ListActiveEntitlements.
-func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.Time) ([]EntitlementRecord, error) {
-	subject = strings.TrimSpace(subject)
-	if subject == "" {
+func (c *Client) ListEntitlements(ctx context.Context, subject CustomerID, at time.Time) ([]EntitlementRecord, error) {
+	if subject.IsZero() {
 		return nil, invalidErr("subject is required")
 	}
-	out, err := c.ListActiveEntitlements(ctx, []string{subject}, at)
+	out, err := c.ListActiveEntitlements(ctx, []CustomerID{subject}, at)
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +556,7 @@ func (c *Client) ListEntitlements(ctx context.Context, subject string, at time.T
 
 // HasEntitlement implements Client by checking the single-subject entitlement
 // list returned from /v1/merchant/customers/entitlements:batch.
-func (c *Client) HasEntitlement(ctx context.Context, subject, entitlement string, at time.Time) (bool, error) {
+func (c *Client) HasEntitlement(ctx context.Context, subject CustomerID, entitlement string, at time.Time) (bool, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return false, invalidErr("entitlement is required")
@@ -559,7 +576,7 @@ func (c *Client) HasEntitlement(ctx context.Context, subject, entitlement string
 // ListCustomersWithEntitlement implements Client (handler
 // ServiceGetCustomersWithEntitlement). It walks the keyset-paginated reverse
 // route to completion.
-func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]string, error) {
+func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement string, at time.Time) ([]CustomerID, error) {
 	entitlement = strings.TrimSpace(entitlement)
 	if entitlement == "" {
 		return nil, invalidErr("entitlement is required")
@@ -568,7 +585,7 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 	if !at.IsZero() {
 		base += "&at=" + url.QueryEscape(at.UTC().Format(time.RFC3339Nano))
 	}
-	var all []string
+	var all []CustomerID
 	cursor := ""
 	for {
 		path := base
@@ -576,9 +593,9 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 			path += "&cursor=" + url.QueryEscape(cursor)
 		}
 		var out struct {
-			Customers  []string `json:"customers"`
-			NextCursor string   `json:"next_cursor"`
-			HasMore    bool     `json:"has_more"`
+			Customers  []CustomerID `json:"customers"`
+			NextCursor string       `json:"next_cursor"`
+			HasMore    bool         `json:"has_more"`
 		}
 		if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 			return nil, err
@@ -593,13 +610,13 @@ func (c *Client) ListCustomersWithEntitlement(ctx context.Context, entitlement s
 }
 
 // ListProductAccess implements Client (handler ServiceGetUserProductAccess).
-func (c *Client) ListProductAccess(ctx context.Context, subject string) ([]ProductAccessGrant, error) {
-	subject = strings.TrimSpace(subject)
-	if subject == "" {
-		return nil, invalidErr("subject is required")
+func (c *Client) ListProductAccess(ctx context.Context, subject CustomerID) ([]ProductAccessGrant, error) {
+	customer, err := requireTypedID("subject", subject)
+	if err != nil {
+		return nil, err
 	}
 	var out []ProductAccessGrant
-	if err := c.do(ctx, http.MethodGet, "/v1/merchant/users/"+url.PathEscape(subject)+"/product-access", nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/users/"+customer+"/product-access", nil, &out); err != nil {
 		return nil, err
 	}
 	if out == nil {
@@ -610,16 +627,16 @@ func (c *Client) ListProductAccess(ctx context.Context, subject string) ([]Produ
 
 // HasProductAccess implements Client (handler ServiceGetUserProductAccess with
 // ?product_id=...).
-func (c *Client) HasProductAccess(ctx context.Context, subject, productID string) (bool, error) {
-	subject = strings.TrimSpace(subject)
-	productID = strings.TrimSpace(productID)
-	switch {
-	case subject == "":
-		return false, invalidErr("subject is required")
-	case productID == "":
-		return false, invalidErr("product_id is required")
+func (c *Client) HasProductAccess(ctx context.Context, subject CustomerID, productID ProductID) (bool, error) {
+	customer, err := requireTypedID("subject", subject)
+	if err != nil {
+		return false, err
 	}
-	path := "/v1/merchant/users/" + url.PathEscape(subject) + "/product-access?product_id=" + url.QueryEscape(productID)
+	product, err := requireTypedID("product_id", productID)
+	if err != nil {
+		return false, err
+	}
+	path := "/v1/merchant/users/" + customer + "/product-access?product_id=" + url.QueryEscape(product)
 	var out ProductAccessCheck
 	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
 		return false, err
@@ -754,8 +771,12 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 // decoding, but cannot outlive the request or leak its body.
 func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error) error {
 	expectedMerchant := c.merchantID
-	if pinned, ok := merchant.FromContext(ctx); ok {
-		if !expectedMerchant.IsZero() && expectedMerchant != pinned {
+	if pinned, ok := merchant.FromContext(ctx); ok && !pinned.IsZero() {
+		// A merchant on the caller's context is never a selection. Against a
+		// bound client it must agree with the construction-time binding
+		// (#772); an unbound remote client forwards it as the assertion the
+		// server verifies against the credential's authority.
+		if !expectedMerchant.IsZero() && pinned != expectedMerchant {
 			return &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
 				Type: "invalid_request_error", Code: "resource_conflict", Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant),
 			}}
@@ -763,7 +784,7 @@ func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr 
 		expectedMerchant = pinned
 	}
 	if !expectedMerchant.IsZero() {
-		// The local transport uses this explicit host-selected binding; HTTP
+		// The local transport uses this construction-time binding; HTTP
 		// servers resolve authority independently and verify the header.
 		ctx = merchant.WithID(ctx, expectedMerchant)
 	}

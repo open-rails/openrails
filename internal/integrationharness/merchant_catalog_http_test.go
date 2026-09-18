@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/open-rails/openrails/internal/testauth"
 
 	"github.com/goccy/go-yaml"
@@ -23,16 +25,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
-	openrails "github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/money"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/catalog"
-	"github.com/open-rails/openrails/pkg/identity"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 func intPtr(v int) *int { return &v }
@@ -201,7 +202,7 @@ func TestStandaloneMerchantCatalogApplyOptionsOverHTTP(t *testing.T) {
 	pruned, err := catalog.ApplyWithOptions(ctx, applier, plan, catalog.ApplyOptions{Prune: true})
 	require.NoError(t, err)
 	require.Equal(t, 1, pruned.ProductsArchived)
-	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/"+extra.ID.String(), token, nil)
+	status, body := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(extra.ID).String(), token, nil)
 	require.Equal(t, http.StatusOK, status, string(body))
 	var archived billingservice.CatalogProduct
 	require.NoError(t, json.Unmarshal(body, &archived))
@@ -369,7 +370,7 @@ func TestStandaloneMerchantCatalogPriceKeyVersionBumpHTTP(t *testing.T) {
 	require.EqualValues(t, 1200000, bumped.UnitAmount)
 	require.NotEqual(t, original.ID, bumped.ID)
 
-	oldStatus, oldBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices/"+original.ID.String(), token, nil)
+	oldStatus, oldBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(original.ID).String(), token, nil)
 	require.Equal(t, http.StatusOK, oldStatus, string(oldBody))
 	var oldRow billingservice.CatalogPrice
 	require.NoError(t, json.Unmarshal(oldBody, &oldRow))
@@ -384,7 +385,7 @@ func TestStandaloneMerchantCatalogPriceKeyVersionBumpHTTP(t *testing.T) {
 	reactivated := getByKey()
 	require.Equal(t, original.ID, reactivated.ID, "reactivated the SAME row (#662 deterministic id)")
 
-	pricesStatus, pricesBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices?product_id="+bumped.ProductID.String(), token, nil)
+	pricesStatus, pricesBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/catalog/prices?product_id="+openrails.ProductID(bumped.ProductID).String(), token, nil)
 	require.Equal(t, http.StatusOK, pricesStatus, string(pricesBody))
 	var page struct {
 		Items []billingservice.CatalogPrice `json:"items"`
@@ -653,7 +654,7 @@ func TestNativeCatalogLifecycleHTTP(t *testing.T) {
 
 	for _, surface := range []*Surface{standalone, embedded} {
 		t.Run(surface.Name, func(t *testing.T) {
-			proveNativeCatalogLifecycle(t, h, surface, product.ID)
+			proveNativeCatalogLifecycle(t, h, surface, product.ID.UUID())
 		})
 	}
 }
@@ -847,13 +848,13 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 		SourceID:   depositSourceID,
 	})
 	require.NoError(t, err)
-	balance, err := client.Balance(ctx, payerID.String())
+	balance, err := client.Balance(ctx, openrails.CustomerID(payerID))
 	require.NoError(t, err)
 	require.Equal(t, int64(10_000), balance.BalanceAmount)
 
 	requestID := "native-lifecycle-" + surface.Name + "-" + uuid.NewString()
 	verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-		CustomerID:      payerID.String(),
+		CustomerID:      openrails.CustomerID(payerID),
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",
@@ -879,7 +880,7 @@ func proveNativeCatalogLifecycle(t *testing.T, h *Harness, surface *Surface, pro
 	from := time.Now().Add(-time.Hour)
 	to := time.Now().Add(time.Hour)
 
-	rows, err := client.UsageRollup(ctx, payerID.String(), "usd", from, to, "resource")
+	rows, err := client.UsageRollup(ctx, openrails.CustomerID(payerID), "usd", from, to, "resource")
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, "vm-small", rows[0].Key)
@@ -974,8 +975,8 @@ func (a httpCatalogApplier) CreateProduct(_ context.Context, req billingservice.
 	return &out, nil
 }
 
-func (a httpCatalogApplier) UpdateProduct(_ context.Context, id uuid.UUID, req billingservice.UpdateProductRequest) (*billingservice.CatalogProduct, error) {
-	status, body := requestJSON(a.t, http.MethodPatch, a.baseURL+"/v1/merchant/catalog/products/"+id.String(), a.token, req)
+func (a httpCatalogApplier) UpdateProduct(_ context.Context, id openrails.ProductID, req billingservice.UpdateProductRequest) (*billingservice.CatalogProduct, error) {
+	status, body := requestJSON(a.t, http.MethodPatch, a.baseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(id).String(), a.token, req)
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("update product: status %d: %s", status, string(body))
 	}
@@ -984,8 +985,8 @@ func (a httpCatalogApplier) UpdateProduct(_ context.Context, id uuid.UUID, req b
 	return &out, nil
 }
 
-func (a httpCatalogApplier) DeactivateProduct(_ context.Context, id uuid.UUID) (*billingservice.CatalogProduct, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/products/"+id.String()+"/deactivate", a.token, nil)
+func (a httpCatalogApplier) DeactivateProduct(_ context.Context, id openrails.ProductID) (*billingservice.CatalogProduct, error) {
+	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(id).String()+"/deactivate", a.token, nil)
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("deactivate product: status %d: %s", status, string(body))
 	}
@@ -994,7 +995,7 @@ func (a httpCatalogApplier) DeactivateProduct(_ context.Context, id uuid.UUID) (
 	return &out, nil
 }
 
-func (a httpCatalogApplier) ListPricesByProduct(_ context.Context, productID uuid.UUID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
+func (a httpCatalogApplier) ListPricesByProduct(_ context.Context, productID openrails.ProductID, activeOnly bool) ([]billingservice.CatalogPrice, error) {
 	q := url.Values{"product_id": []string{productID.String()}}
 	if activeOnly {
 		q.Set("archived", "false")
@@ -1020,8 +1021,8 @@ func (a httpCatalogApplier) CreatePrice(_ context.Context, req billingservice.Cr
 	return &out, nil
 }
 
-func (a httpCatalogApplier) UpdatePrice(_ context.Context, id uuid.UUID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPatch, a.baseURL+"/v1/merchant/catalog/prices/"+id.String(), a.token, req)
+func (a httpCatalogApplier) UpdatePrice(_ context.Context, id openrails.PriceID, req billingservice.UpdatePriceRequest) (*billingservice.CatalogPrice, error) {
+	status, body := requestJSON(a.t, http.MethodPatch, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String(), a.token, req)
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("update price: status %d: %s", status, string(body))
 	}
@@ -1030,8 +1031,8 @@ func (a httpCatalogApplier) UpdatePrice(_ context.Context, id uuid.UUID, req bil
 	return &out, nil
 }
 
-func (a httpCatalogApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+id.String()+"/activate", a.token, nil)
+func (a httpCatalogApplier) ActivatePrice(_ context.Context, id openrails.PriceID) (*billingservice.CatalogPrice, error) {
+	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String()+"/activate", a.token, nil)
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("activate price: status %d: %s", status, string(body))
 	}
@@ -1040,8 +1041,8 @@ func (a httpCatalogApplier) ActivatePrice(_ context.Context, id uuid.UUID) (*bil
 	return &out, nil
 }
 
-func (a httpCatalogApplier) DeactivatePrice(_ context.Context, id uuid.UUID) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+id.String()+"/deactivate", a.token, nil)
+func (a httpCatalogApplier) DeactivatePrice(_ context.Context, id openrails.PriceID) (*billingservice.CatalogPrice, error) {
+	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String()+"/deactivate", a.token, nil)
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("deactivate price: status %d: %s", status, string(body))
 	}
@@ -1050,8 +1051,8 @@ func (a httpCatalogApplier) DeactivatePrice(_ context.Context, id uuid.UUID) (*b
 	return &out, nil
 }
 
-func (a httpCatalogApplier) SetPriceKey(_ context.Context, id uuid.UUID, key string) (*billingservice.CatalogPrice, error) {
-	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+id.String()+"/key", a.token, map[string]string{"key": key})
+func (a httpCatalogApplier) SetPriceKey(_ context.Context, id openrails.PriceID, key string) (*billingservice.CatalogPrice, error) {
+	status, body := requestJSON(a.t, http.MethodPost, a.baseURL+"/v1/merchant/catalog/prices/"+openrails.PriceID(id).String()+"/key", a.token, map[string]string{"key": key})
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("set price key: status %d: %s", status, string(body))
 	}
@@ -1368,9 +1369,10 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	grantLedger := grants.New(gen.New(pool), dbtest.TestMerchantID.UUID())
 
 	pastEnd := time.Now().Add(-24 * time.Hour)
+	premiumProduct := premium.ID.UUID()
 	firstSub, err := grantLedger.Grant(ctx, grants.GrantInput{
 		Customer: customerID,
-		Product:  &premium.ID,
+		Product:  &premiumProduct,
 		Kind:     grants.Entitlement,
 		Source:   grants.Subscription,
 		SourceID: uuid.NewString(),
@@ -1383,7 +1385,7 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	futureEnd := time.Now().Add(30 * 24 * time.Hour)
 	renewal, err := grantLedger.Grant(ctx, grants.GrantInput{
 		Customer: customerID,
-		Product:  &premium.ID,
+		Product:  &premiumProduct,
 		Kind:     grants.Entitlement,
 		Source:   grants.Subscription,
 		SourceID: uuid.NewString(),
@@ -1402,14 +1404,15 @@ func TestNativeCatalogRemainingProductUseCasesHTTP(t *testing.T) {
 	require.Len(t, entitlementRows, 1)
 	require.Equal(t, "premium", entitlementRows[0].Entitlement)
 
+	movieProduct := movie.ID.UUID()
 	ownership, err := grantLedger.Grant(ctx, grants.GrantInput{
 		Customer: customerID,
-		Product:  &movie.ID,
+		Product:  &movieProduct,
 		Kind:     grants.Ownership,
 		Source:   grants.Purchase,
 		SourceID: uuid.NewString(),
 	})
 	require.NoError(t, err)
 	require.NoError(t, grantLedger.MaterializeGrant(ctx, ownership))
-	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customerID, movie.ID))
+	require.Equal(t, 1, liveOwnershipGrantCount(t, ctx, pool, customerID, movie.ID.UUID()))
 }

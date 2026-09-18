@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { askCatalogCopilot, confirmCopilotDraft } from "@/lib/api/copilot"
 import {
+  archivePaymentProviderAccount,
   cancelReprice,
   cancelSubscription,
   changeSubscriptionPaymentMethod,
@@ -64,7 +65,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   deactivateProduct: vi.fn(),
   deleteCustomerUsageRateOverride: vi.fn(),
   deleteDefaultUsageRateCard: vi.fn(),
-  deletePaymentProvider: vi.fn(),
+  archivePaymentProviderAccount: vi.fn(),
   deleteWebhook: vi.fn(),
   getCreditLimit: vi.fn(),
   getPriceByKey: vi.fn(),
@@ -390,7 +391,7 @@ describe("list export mutations", () => {
 
   it("stops payment export when the API returns an empty page", async () => {
     const queryClient = new QueryClient()
-    const filters = { refunds_only: true, user_id: "customer-1" }
+    const filters = { refunds_only: true, customer_id: "customer-1" }
     vi.mocked(listPayments)
       .mockResolvedValueOnce({
         data: [{ id: "payment-1" }],
@@ -502,14 +503,14 @@ describe("payment mutations", () => {
         )
       )
       .execute({
-        amount: 5_000_000,
+        amount: "5000000",
         reason: "requested",
         revokeAccess: true,
       })
 
     expect(refundPayment).toHaveBeenCalledWith(
       "payment-1",
-      5_000_000,
+      "5000000",
       "requested",
       true
     )
@@ -553,7 +554,7 @@ describe("payment mutations", () => {
     await queryClient
       .getMutationCache()
       .build(queryClient, options)
-      .execute({ amount: 5_000_000, reason: "", revokeAccess: false })
+      .execute({ amount: "5000000", reason: "", revokeAccess: false })
 
     expect(queryClient.getQueryState(paymentAKey)?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(customerAKey)?.isInvalidated).toBe(true)
@@ -661,7 +662,7 @@ describe("subscription mutations", () => {
           "customer-1"
         )
       )
-      .execute("price-2")
+      .execute({ priceId: "price-2", idempotencyKey: "tier-key-1" })
 
     expect(previewSubscriptionTierChange).toHaveBeenCalledWith(
       "subscription-1",
@@ -669,7 +670,8 @@ describe("subscription mutations", () => {
     )
     expect(changeSubscriptionTier).toHaveBeenCalledWith(
       "subscription-1",
-      "price-2"
+      "price-2",
+      "tier-key-1"
     )
     expect(queryClient.getQueryState(subscriptionsKey)?.isInvalidated).toBe(
       true
@@ -833,7 +835,7 @@ describe("customer mutations", () => {
     const payment = {
       price_id: "price-1",
       transaction_id: "external-1",
-      amount: 12_500_000,
+      amount: "12500000",
     }
 
     await queryClient
@@ -925,6 +927,24 @@ describe("settings mutations", () => {
       .execute({ rail: "nmi", provider })
 
     expect(putPaymentProvider).toHaveBeenCalledWith("nmi", provider)
+    expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(true)
+  })
+
+  it("archives one provider account by id and invalidates the provider list", async () => {
+    const queryClient = new QueryClient()
+    const providersKey = [...queryKeys.settings(), "payment-providers"] as const
+    queryClient.setQueryData(providersKey, { data: [] })
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.archivePaymentProvider(queryClient))
+      .execute({ rail: "nmi", id: "psp-a", allowLast: true })
+
+    expect(archivePaymentProviderAccount).toHaveBeenCalledWith(
+      "nmi",
+      "psp-a",
+      true
+    )
     expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(true)
   })
 
@@ -1067,7 +1087,7 @@ describe("catalog mutations", () => {
     const price = {
       product_id: "product-1",
       key: "pro-monthly",
-      unit_amount: 12_000_000,
+      unit_amount: "12000000",
       currency: "usd",
       auto_renew: true,
     }
@@ -1144,7 +1164,7 @@ describe("catalog mutations", () => {
     queryClient.setQueryData(catalogKey, { items: [] })
     const price = {
       product_id: "product-1",
-      unit_amount: 20_000_000,
+      unit_amount: "20000000",
       currency: "usd",
       access_duration_hours: 720,
       auto_renew: true,
@@ -1194,7 +1214,7 @@ describe("catalog mutations", () => {
         .execute({
           price: {
             product_id: "product-1",
-            unit_amount: 20_000_000,
+            unit_amount: "20000000",
             currency: "usd",
             access_duration_hours: 720,
             auto_renew: true,
@@ -1262,7 +1282,7 @@ describe("catalog mutations", () => {
       price: {
         model: "per_unit" as const,
         currency: "USD",
-        per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+        per_unit: { unit_amount: "1000000", divide_by: 1 },
       },
     }
 
@@ -1307,7 +1327,7 @@ describe("catalog mutations", () => {
       price: {
         model: "per_unit" as const,
         currency: "USD",
-        per_unit: { unit_amount: 500_000, divide_by: 1 },
+        per_unit: { unit_amount: "500000", divide_by: 1 },
       },
     }
 

@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -53,7 +53,7 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	// or#868 B2: this was a bare RunInTx under the comment "privileged (no-GUC)
 	// transaction". No such pool exists — it worked only where an HTTP request
 	// had already pinned a merchant connection and pgxBegin inherited its GUC.
-	// Off that path (pkg/service.FinalizeInvoice, MoneyService.SweepUsage, both
+	// Off that path (internal/service.FinalizeInvoice, MoneyService.SweepUsage, both
 	// embedded seams) the transaction carried no app.merchant_id and every
 	// insert below was denied 42501, so metered/arrears billing was inoperable
 	// there. MerchantTx sets the GUC transaction-locally from the context's

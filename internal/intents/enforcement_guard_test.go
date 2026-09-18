@@ -67,6 +67,7 @@ var providerWriteSurface = map[string]string{
 
 	// --- reads ----------------------------------------------------------
 	"ConfirmApprovedSale":          "read",
+	"ConfirmOrderSale":             "read",
 	"ConfirmApprovedUnvaultedSale": "read",
 	"ConfirmLiveSubscription":      "read",
 	"ConfirmRefund":                "read",
@@ -129,7 +130,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/paymentmethods/rail_payment_method_service.go:cleanupVaultBestEffort":    "reactive decline-cleanup (shared-vault scope); see deletePaymentMethodDirect",
 
 	// --- catalog push + plan migration ----------------------------------
-	"pkg/service/catalog_provider_nmi.go:createPlan":                      "catalog push: creates the remote plan a price is billed against (the provider adapter, mirror of the Stripe AutoCreate)",
+	"internal/service/catalog_provider_nmi.go:createPlan":                 "catalog push: creates the remote plan a price is billed against (the provider adapter, mirror of the Stripe AutoCreate)",
 	"internal/modules/subscriptions/plan_migration_nmi.go:PushPlanAmount": "or#815 plan migration: repoints a live schedule at the successor plan",
 
 	// --- solana: the three sign+submit entry points of the ONE Submitter ---

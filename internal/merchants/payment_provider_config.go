@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -33,10 +35,24 @@ type PaymentProviderCredentialStatus struct {
 	RotationVersion int `json:"rotation_version,omitempty"`
 }
 
-// PaymentProviderConfig is one merchant-owned payment-PSP.
 // ErrPaymentProviderNotFound reports that the merchant has no active provider
 // account on the requested rail and environment.
-var ErrPaymentProviderNotFound = fmt.Errorf("merchants: payment provider not configured: %w", ErrSecretNotFound)
+var ErrPaymentProviderNotFound error = apperr.New(http.StatusNotFound, "payment_provider_not_found", "merchants: payment provider not configured")
+
+// ErrPaymentProviderCredentialsRejected is the typed refusal (#983) for
+// credentials the provider itself would not accept for this deployment posture.
+var ErrPaymentProviderCredentialsRejected = apperr.New(http.StatusBadRequest, "payment_provider_credentials_rejected", "payment provider rejected the credentials")
+
+// providerCredentialError types a provider-side credential rejection; any
+// other probe outcome (transport, indeterminate) stays an internal failure.
+func providerCredentialError(err error) error {
+	if errors.Is(err, nmi.ErrCredentialsRejected) || errors.Is(err, nmi.ErrLiveCredentialsUnderTestMode) {
+		return fmt.Errorf("%w: %v", ErrPaymentProviderCredentialsRejected, err)
+	}
+	return err
+}
+
+// PaymentProviderConfig is one merchant-owned payment-PSP.
 
 type PaymentProviderConfig struct {
 	ID              uuid.UUID                                  `json:"id"`
@@ -118,7 +134,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 	if strings.TrimSpace(environment) == "" {
 		environment = s.providerEnvironment // deployment posture (#681)
 	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
-		return nil, errors.New("merchants: provider environment must be live or test")
+		return nil, apperr.Invalidf("merchants: provider environment must be live or test")
 	}
 	status = strings.ToLower(strings.TrimSpace(status))
 	// or#893: the lifecycle filter has ONE vocabulary. It used to accept four
@@ -128,7 +144,7 @@ func (s *Service) ListPaymentProviderConfigs(ctx context.Context, id merchant.ID
 	switch status {
 	case "", pspLifecycleAll, pspLifecycleActive, pspLifecycleArchived:
 	default:
-		return nil, fmt.Errorf("merchants: unknown status %q (use %q, %q, or omit for all)", status, pspLifecycleActive, pspLifecycleArchived)
+		return nil, apperr.Invalidf("merchants: unknown status %q (use %q, %q, or omit for all)", status, pspLifecycleActive, pspLifecycleArchived)
 	}
 
 	var rows []gen.OpenrailsPsp
@@ -180,7 +196,7 @@ func (s *Service) GetPaymentProviderConfig(ctx context.Context, id merchant.ID, 
 	if strings.TrimSpace(environment) == "" {
 		environment = s.providerEnvironment // deployment posture (#681)
 	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
-		return PaymentProviderConfig{}, errors.New("merchants: provider environment must be live or test")
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: provider environment must be live or test")
 	}
 	items, err := s.ListPaymentProviderConfigs(ctx, id, rail, environment, pspLifecycleActive)
 	if err != nil {
@@ -200,15 +216,15 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	}
 	rail = normalizeProviderSecretType(rail)
 	if !supportedPaymentProvider(rail) {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: unsupported payment rail %q", rail)
 	}
 	if strings.TrimSpace(req.LegacyEnvironment) != "" {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: `environment` was removed (#882): the environment is derived from the deployment's test_mode (currently %q) — drop the field", s.providerEnvironment)
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: `environment` was removed (#882): the environment is derived from the deployment's test_mode (currently %q) — drop the field", s.providerEnvironment)
 	}
 	environment := s.providerEnvironment // derived from test_mode (#681/#882)
 	accountID := strings.TrimSpace(req.AccountID)
 	if accountID == "" {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: provider account_id required")
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: provider account_id required")
 	}
 	if err := s.refuseLiveNMIUnderTestMode(ctx, id, rail, environment, accountID, req.Credentials); err != nil {
 		return PaymentProviderConfig{}, err
@@ -288,20 +304,104 @@ func (s *Service) UpsertPaymentProviderConfig(ctx context.Context, id merchant.I
 	return cfg, nil
 }
 
-// DeletePaymentProviderConfig archives one provider environment. Scoped
-// credentials remain so existing obligations and inbound webhooks can drain.
-func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
-	if s == nil || s.pool == nil || s.secrets == nil {
+// ArchivePaymentProviderAccountRequest is the body of the explicit per-account
+// archive (#655/#656).
+type ArchivePaymentProviderAccountRequest struct {
+	// AllowLast must be explicit to archive the ONLY active account on the
+	// rail: afterwards new checkout on that rail is refused until another
+	// account is armed. Absent, the archive fails closed.
+	AllowLast bool `json:"allow_last"`
+}
+
+// ProviderAccountRef identifies one PSP row inside a lifecycle refusal.
+type ProviderAccountRef struct {
+	ID        uuid.UUID `json:"id"`
+	AccountID string    `json:"account_id"`
+}
+
+// ErrPaymentProviderAccountNotFound reports a PSP id the merchant does not own
+// on the named rail.
+var ErrPaymentProviderAccountNotFound = errors.New("merchants: payment provider account not found")
+
+// LastActiveProviderAccountError refuses to archive the only active account on
+// a rail without the explicit AllowLast override.
+type LastActiveProviderAccountError struct {
+	Rail        string
+	Environment string
+	Account     ProviderAccountRef
+}
+
+func (e *LastActiveProviderAccountError) Error() string {
+	return fmt.Sprintf("merchants: %s account %s is the only active account on rail %q (%s); pass allow_last=true to archive it and refuse new checkout on the rail", e.Rail, e.Account.AccountID, e.Rail, e.Environment)
+}
+
+// MultipleActiveProviderAccountsError refuses the rail-level archive when the
+// rail selector is ambiguous: the caller must name the PSP id.
+type MultipleActiveProviderAccountsError struct {
+	Rail        string
+	Environment string
+	Accounts    []ProviderAccountRef
+}
+
+func (e *MultipleActiveProviderAccountsError) Error() string {
+	ids := make([]string, 0, len(e.Accounts))
+	for _, account := range e.Accounts {
+		ids = append(ids, account.ID.String())
+	}
+	return fmt.Sprintf("merchants: rail %q (%s) has %d active accounts (%s); archive one by its psp id", e.Rail, e.Environment, len(e.Accounts), strings.Join(ids, ", "))
+}
+
+// ArchivePaymentProviderAccount archives exactly the named account (#655
+// lifecycle, #656 emergency step 3). It never contacts the provider — a
+// terminated or dark account must still be archivable — and never touches the
+// stored credentials, so existing obligations and inbound webhooks keep
+// draining. Archiving an already-archived account is a no-op that returns the
+// current row. The only active account on the rail is refused unless
+// req.AllowLast is set.
+func (s *Service) ArchivePaymentProviderAccount(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
+	if s == nil || s.pool == nil {
 		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
 	}
-	current, err := s.GetPaymentProviderConfig(ctx, id, rail, environment)
+	rail = normalizeProviderSecretType(rail)
+	if !supportedPaymentProvider(rail) {
+		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
+	}
+	if pspID == uuid.Nil {
+		return PaymentProviderConfig{}, errors.New("merchants: provider account id required")
+	}
+	row, err := s.archivePSP(ctx, id, rail, pspID, req.AllowLast)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
-	row, err := s.disablePSP(ctx, id, current.ID)
+	return s.paymentProviderConfigWithObligations(ctx, id, row)
+}
+
+// DeletePaymentProviderConfig is the rail-level archive: it archives the rail's
+// single active account and fails closed when the rail has more than one
+// (MultipleActiveProviderAccountsError) — the caller must then name the PSP id
+// through ArchivePaymentProviderAccount. Credentials remain so existing
+// obligations and inbound webhooks can drain; no provider call is made.
+func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.ID, rail, environment string) (PaymentProviderConfig, error) {
+	if s == nil || s.pool == nil {
+		return PaymentProviderConfig{}, errors.New("merchants: provider config storage unavailable")
+	}
+	rail = normalizeProviderSecretType(rail)
+	if !supportedPaymentProvider(rail) {
+		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
+	}
+	if strings.TrimSpace(environment) == "" {
+		environment = s.providerEnvironment
+	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
+		return PaymentProviderConfig{}, errors.New("merchants: provider environment must be live or test")
+	}
+	row, err := s.archiveSoleActivePSP(ctx, id, rail, environment)
 	if err != nil {
 		return PaymentProviderConfig{}, err
 	}
+	return s.paymentProviderConfigWithObligations(ctx, id, row)
+}
+
+func (s *Service) paymentProviderConfigWithObligations(ctx context.Context, id merchant.ID, row gen.OpenrailsPsp) (PaymentProviderConfig, error) {
 	statuses, err := s.ListSecretStatuses(ctx, id)
 	if err != nil {
 		return PaymentProviderConfig{}, err
@@ -380,24 +480,134 @@ func (s *Service) upsertPSP(ctx context.Context, id merchant.ID, rail, environme
 	return row, err
 }
 
-func (s *Service) disablePSP(ctx context.Context, id merchant.ID, accountID uuid.UUID) (gen.OpenrailsPsp, error) {
-	var row gen.OpenrailsPsp
+const pspRowColumns = `id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived`
+
+func scanPSPRow(row pgx.Row) (gen.OpenrailsPsp, error) {
+	var out gen.OpenrailsPsp
+	err := row.Scan(
+		&out.ID, &out.MerchantID, &out.Rail, &out.Environment, &out.AccountID,
+		&out.Key, &out.Evidence,
+		&out.FirstSeenAt, &out.LastVerifiedAt, &out.ReplacedAt, &out.CreatedAt, &out.UpdatedAt,
+		&out.Archived,
+	)
+	return out, err
+}
+
+// lockRailPSPs locks every PSP row of the merchant on (rail, environment) for
+// the transaction, so two concurrent archives cannot each see the other as the
+// remaining active account and leave the rail with none.
+func lockRailPSPs(ctx context.Context, tx pgx.Tx, id merchant.ID, rail, environment string) ([]gen.OpenrailsPsp, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT `+pspRowColumns+`
+		  FROM openrails.psps
+		 WHERE merchant_id = $1 AND rail = $2 AND environment = $3
+		 ORDER BY created_at, id
+		   FOR UPDATE`, id.UUID(), rail, environment)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []gen.OpenrailsPsp
+	for rows.Next() {
+		row, err := scanPSPRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func markPSPArchived(ctx context.Context, tx pgx.Tx, id merchant.ID, pspID uuid.UUID) (gen.OpenrailsPsp, error) {
+	return scanPSPRow(tx.QueryRow(ctx, `
+		UPDATE openrails.psps
+		   SET archived = true,
+		       replaced_at = COALESCE(replaced_at, now()),
+		       updated_at = now()
+		 WHERE id = $1 AND merchant_id = $2
+		RETURNING `+pspRowColumns, pspID, id.UUID()))
+}
+
+// archivePSP archives the named account inside one transaction that holds the
+// rail's rows locked (in one order, so concurrent archives serialize instead
+// of deadlocking). An already-archived account is returned unchanged.
+func (s *Service) archivePSP(ctx context.Context, id merchant.ID, rail string, pspID uuid.UUID, allowLast bool) (gen.OpenrailsPsp, error) {
+	var out gen.OpenrailsPsp
 	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `
-				UPDATE openrails.psps
-				   SET archived = true,
-				       replaced_at = COALESCE(replaced_at, now()),
-				       updated_at = now()
-				 WHERE id = $1 AND merchant_id = $2
-				RETURNING id, merchant_id, rail, environment, account_id, key, evidence, first_seen_at, last_verified_at, replaced_at, created_at, updated_at, archived
-			`, accountID, id.UUID()).Scan(
-			&row.ID, &row.MerchantID, &row.Rail, &row.Environment, &row.AccountID,
-			&row.Key, &row.Evidence,
-			&row.FirstSeenAt, &row.LastVerifiedAt, &row.ReplacedAt, &row.CreatedAt, &row.UpdatedAt,
-			&row.Archived,
-		)
+		var environment string
+		err := tx.QueryRow(ctx, `SELECT environment FROM openrails.psps WHERE id = $1 AND merchant_id = $2 AND rail = $3`,
+			pspID, id.UUID(), rail).Scan(&environment)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrPaymentProviderAccountNotFound
+		}
+		if err != nil {
+			return err
+		}
+		rows, err := lockRailPSPs(ctx, tx, id, rail, environment)
+		if err != nil {
+			return err
+		}
+		var target *gen.OpenrailsPsp
+		otherActive := 0
+		for i := range rows {
+			switch {
+			case rows[i].ID == pspID:
+				target = &rows[i]
+			case !rows[i].Archived:
+				otherActive++
+			}
+		}
+		if target == nil {
+			return ErrPaymentProviderAccountNotFound
+		}
+		if target.Archived {
+			out = *target
+			return nil
+		}
+		if otherActive == 0 && !allowLast {
+			return &LastActiveProviderAccountError{
+				Rail:        target.Rail,
+				Environment: target.Environment,
+				Account:     ProviderAccountRef{ID: target.ID, AccountID: target.AccountID},
+			}
+		}
+		out, err = markPSPArchived(ctx, tx, id, target.ID)
+		return err
 	})
-	return row, err
+	return out, err
+}
+
+// archiveSoleActivePSP is the rail-level archive: exactly one active account
+// on (rail, environment) is archived; none is ErrPaymentProviderNotFound and
+// several is MultipleActiveProviderAccountsError.
+func (s *Service) archiveSoleActivePSP(ctx context.Context, id merchant.ID, rail, environment string) (gen.OpenrailsPsp, error) {
+	var out gen.OpenrailsPsp
+	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := lockRailPSPs(ctx, tx, id, rail, environment)
+		if err != nil {
+			return err
+		}
+		var active []gen.OpenrailsPsp
+		for _, row := range rows {
+			if !row.Archived {
+				active = append(active, row)
+			}
+		}
+		switch len(active) {
+		case 0:
+			return ErrPaymentProviderNotFound
+		case 1:
+			out, err = markPSPArchived(ctx, tx, id, active[0].ID)
+			return err
+		default:
+			refs := make([]ProviderAccountRef, 0, len(active))
+			for _, row := range active {
+				refs = append(refs, ProviderAccountRef{ID: row.ID, AccountID: row.AccountID})
+			}
+			return &MultipleActiveProviderAccountsError{Rail: rail, Environment: environment, Accounts: refs}
+		}
+	})
+	return out, err
 }
 
 func (s *Service) pspOpenObligations(ctx context.Context, id merchant.ID, accountIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
@@ -694,7 +904,7 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id merchant.ID
 		client.V5BaseURL = s.nmiProbeV5BaseURL
 	}
 	if err := nmi.CheckTestModeArm(ctx, client); err != nil {
-		return fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err)
+		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err))
 	}
 	return nil
 }

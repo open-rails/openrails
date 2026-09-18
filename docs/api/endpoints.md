@@ -63,8 +63,8 @@ admin responses are never replayed by global middleware.
 | GET | `/v1/captcha/status` | none | Captcha challenge status for the browser tier |
 | GET | `/v1/captcha/client.js` | none | Captcha client script |
 | GET | `/v1/products` | optional | List products with embedded active prices. Query: `limit` (1-100, default 20), `offset` |
-| GET | `/v1/prices` | optional | List prices. Query: `currency`, `product` (`prod_` ID or raw UUID), `type` (`recurring`/`one_time`), `limit`, `offset` |
-| GET | `/v1/currencies` | none | The currency scale registry: `{object:"currencies", currencies:[{code, decimals, minor_decimals}]}`. Every monetary string on the wire is in native units (`10^decimals` per major unit); providers settle in `10^minor_decimals`. System-fixed, merchant-independent; `openrails.Currencies()` is the same table in Go |
+| GET | `/v1/prices` | optional | List prices. Query: `currency`, `product` (`prod_` id), `type` (`recurring`/`one_time`), `limit`, `offset` |
+| GET | `/v1/currencies` | none | The currency scale registry: `{object:"currencies", currencies:[{code, decimals, minor_decimals}]}`. Every monetary string on the wire is in native units (`10^decimals` per major unit); providers settle in `10^minor_decimals`. System-fixed, merchant-independent; `openrails.Currencies()` is the same table in Go. Hosts stamp it into the hosted checkout document as `plan.unit_decimals` ([commerce](commerce.md#hosted-checkout-document)) |
 | GET | `/v1/checkout-config` | none | Per-merchant checkout discovery: the merchant's **armed** PSPs as `{key, rail, display_name, flow, config}`, where `key` is checkout's `payment.rail` value, `flow` is `tokenize`/`redirect`/`wallet`, and `config` carries only public-by-nature values (NMI `tokenization_key` + `tokenization_url`; Basis Theory `public_api_key`). Merchant resolved from `Host`. ETagged, `Cache-Control: public, max-age=60`. Serves a fixed per-rail whitelist — no merchant secret can appear. When a Solana PSP is armed, `solana` carries `{network, chain, preferred_token, tokens[]}` (the same acceptance policy as `/v1/solana/config`) |
 | GET | `/v1/solana/config` | none | Solana network/recipient config (mounted only when a Solana rail is configured) |
 | GET | `/v1/solana/tokens` | none | Supported Solana tokens with live pricing: `{ tokens: [{symbol, name, mint, decimals, price}] }` |
@@ -111,20 +111,22 @@ scoped to the token's subject — no `:user_id` appears in any path.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (amounts in micros). Query: `currency` |
+| GET | `/v1/me/balance` | Per-currency balance `{ currency, balance_amount }` (decimal string, native units). Query: `currency` |
 | GET | `/v1/me/transactions` | Ledger transactions, newest first. Query: `currency`, `limit`, `offset` |
 | PUT | `/v1/me/collection-payment-method` | Choose the saved method for automatic invoice collection in one currency. Body: `currency`, `payment_method_id`. The method must belong to the payer and support saved-method charges; otherwise `400` |
-| GET | `/v1/me/status` | Aggregated premium status: `has_active_subscription`, enriched `subscription`, `next_renewal_at`, `entitlements` |
+| GET | `/v1/me/status` | Aggregated premium status (`openrails.BillingStatus`): `has_active_subscription`, `subscription` (the shared `Subscription` shape), `access` (the standing grant, from the subscription or a one-off entitlement), `next_renewal_at`, `entitlements` (`EntitlementRecord[]`) |
 | GET | `/v1/me/usage` | Usage breakdown for the token's subject |
 | GET | `/v1/me/spend-limits` | The spend windows the AUTHENTICATED INVOKER is enforced against at admission, with live metering: `{ currency, invoker, windows: [{ scope, key, window_seconds, limit, currency, used, reserved, remaining, resets_at }] }`. Query: `currency` (required). Windows are estimate-based, so `used` already includes in-flight reservations and `reserved` names that part (what a release hands back); `resets_at` is the window's real staggered boundary. Self-scoped by construction — both the payer account and the invoker come from the credential, and naming another subject (`invoker`, `customer_id`, `scope_key`, `subject`) is refused `400 spend_scope_not_addressable`. The payer's admin view of every delegation it granted stays on `GET /v1/customers/{id}/spend-delegations` |
-| GET | `/v1/me/invoices` | List the subject's invoices |
-| GET | `/v1/me/invoices/{id}` | One invoice |
+| GET | `/v1/me/invoices` | List the subject's invoices, each with its `recovery` state (see Customer payment recovery) |
+| GET | `/v1/me/invoices/{id}` | One invoice with `recovery` |
+| GET | `/v1/me/invoices/{id}/payments` | The invoice's immutable attempt history (`InvoicePaymentAttemptDTO` page, newest first): the read behind a `202` pay-now |
+| POST | `/v1/me/invoices/{id}/pay-now` | Pay the invoice now through a saved method the payer owns. See Customer payment recovery |
 | GET | `/v1/me/payments` | One-off payment history. Query: `type` (rail filter), `limit`, `offset` |
 | GET | `/v1/me/entitlements/active` | The subject's currently-active entitlements |
 | GET | `/v1/me/tier` | THE effective tier in one tier group (or#912): highest tier_rank among products whose entitlements intersect the subject's active windows; `tier: null` when none. Query: `group` (required), `at` (RFC3339, optional). Tier carries the immutable `entitlement` identifier + mutable `display_name` + `tier_rank` + product ref |
 | GET | `/v1/me/products` | Products relevant to the subject |
 | GET | `/v1/me/products/{product_id}/access` | Whether the subject currently has access to a product |
-| GET | `/v1/me/notifications` | Notifications. Query: `limit`, `offset`, `seen` |
+| GET | `/v1/me/notifications` | Notifications (`openrails.Notification`: typed `data`, money as decimal strings, ids typed). Query: `limit`, `offset`, `seen` |
 | GET | `/v1/me/notifications/unread-count` | `{ unread_count }` |
 | POST | `/v1/me/notifications/{id}/read` | Mark one notification read |
 | POST | `/v1/me/billing-portal` | Provider billing-portal session `{ url }` (mounted only when a Stripe rail is configured) |
@@ -133,13 +135,71 @@ scoped to the token's subject — no `:user_id` appears in any path.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/v1/me/subscriptions` | Subscription history. Query: `status` (`pending`,`active`,`past_due`,`cancelled`,`all`), `limit`, `offset` |
-| GET | `/v1/me/subscriptions/{id}` | One subscription with enriched product/price/access (404 if not the caller's) |
+| GET | `/v1/me/subscriptions` | Subscription history as the shared `Subscription` shape (typed ids, `price.unit_amount` string, `scheduled_price`/`scheduled_product`, `card`, `cancel_portal_url`, `access`). Query: `status` (`pending`,`active`,`past_due`,`cancelled`,`all`), `limit`, `offset` |
+| GET | `/v1/me/subscriptions/{id}` | One subscription, same shape (404 if not the caller's); `{id}` is the listed `sub_…` id |
 | POST | `/v1/me/subscriptions/{id}/cancel` | Cancel. Body `{ "feedback": "..." }` (4-500 chars, required). Returns `202 { "status": "queued" }` on EVERY rail — the cancel is recorded locally and the remote cancel executes as a durable intent (CCBill included; the old portal-only 422 is retired) |
 | POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
 | POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
 | POST | `/v1/me/subscriptions/{id}/change-tier/preview` | Dry-run of the tier change (proration/effect preview), no mutation |
-| PUT | `/v1/me/subscriptions/{id}/payment-method` | Reassign an NMI-backed subscription to another saved method. Body `{ "payment_method_id": "..." }` |
+| PUT | `/v1/me/subscriptions/{id}/payment-method` | Reassign an NMI-backed subscription to another saved method. Body `{ "payment_method_id": "..." }`. A method vaulted by a different provider account is `409 payment_method_psp_mismatch` |
+| POST | `/v1/me/subscriptions/{id}/retry-now` | Rebill a past-due subscription now through its current saved method. See Customer payment recovery |
+
+### Customer payment recovery (#809)
+
+`POST /v1/me/invoices/{id}/pay-now` (body `{ "payment_method_id": "pm_…" }`,
+required) and `POST /v1/me/subscriptions/{id}/retry-now` (body
+`{ "payment_method_id": "pm_…" }` optional; when given it must be the
+subscription's current method) require an `Idempotency-Key` (1–255 bytes).
+Each request creates one new immutable attempt through the engine's own
+durable collection machinery: the invoice's `invoice_collection` operation, or
+the period's `manual_rebill` operation the dunning worker itself derives, so a
+customer retry and the schedule can never submit twice for one attempt.
+History is never rewritten.
+
+The key is the payer's, bound to the first request it was accepted for (the
+invoice or subscription, the route and the `payment_method_id` as sent). The
+same request replays its attempt (`replayed: true`) without another charge;
+the same key with another invoice, subscription or method is `409
+…_idempotency_conflict` and charges nothing. A refused request binds nothing.
+
+The charge is frozen when the operation is created (instrument and its vault,
+amount, currency, provider account). An unresolved operation settles only on
+an exact provider receipt: the order reference's sale, approved, on that
+vault, for that amount and currency. A sale that contradicts any of them is
+retained as evidence and keeps the operation unknown; nothing is recorded,
+renewed or resent, and an operator cannot name it as the receipt
+(`openrails intents resolve` takes the same path).
+
+Only rails where OpenRails both drives dunning and charges saved methods are
+accepted (today: NMI with an OpenRails-driven rebill); Stripe, CCBill, Solana
+and provider-billed NMI subscriptions are refused `409
+payment_recovery_rail_unsupported` before any provider traffic. Retry-now
+also requires the subscription's method to be vaulted by the subscription's
+own provider account (#657) and the missed renewal to be inside the dunning
+window (#839); the operation expires at the window's end.
+
+Answers:
+
+| Status | Meaning |
+|---|---|
+| `200` | Terminal. Invoice: `InvoicePayNowResult { invoice, attempt (status settled), operation, replayed }`, invoice `paid`. Subscription: `SubscriptionRetryNowResult { subscription (active, dunning schedule cleared), payment, operation, replayed }` |
+| `202` | Unresolved: the same result with `operation.status` `pending`, `in_flight`, `failed_retryable` or `unknown_needs_verify` and no money moved yet. Poll `GET /v1/me/invoices/{id}` (+ `/payments`) or `GET /v1/me/subscriptions/{id}`: `recovery.operation` names the operation until the verifier settles it from the exact receipt or an operator resolves it. Nothing is resent |
+| `402 card_declined` | The provider refused; the attempt is recorded. Metadata: `decline_reason` (normalized category), `failure_code` (verbatim), `attempt_id`/`invoice_id` or `subscription_id`/`subscription_status`, `operation_id`, `retryable`, `attempt_count`, `next_attempt_at` |
+| `409 invoice_retry_in_progress` / `invoice_retry_outcome_unknown` / `subscription_retry_in_progress` / `subscription_retry_outcome_unknown` | A live operation or attempt lease exists (this key did not start it); nothing is resent |
+| `409 invoice_not_retryable` / `subscription_not_retryable` | Nothing to collect (paid, voided, uncollectible, not past due, outside the dunning window) or the saved method cannot be charged |
+| `409 invoice_retry_idempotency_conflict` / `subscription_retry_idempotency_conflict` | The key already names a different request |
+| `409 payment_method_psp_mismatch` | Retry-now: the subscription's method was vaulted by another provider account; collect the card again on the subscription's account. Nothing was sent |
+| `400 collection_payment_method_invalid` | The method is not the payer's, is parked, or (retry-now) is not the subscription's current method |
+| `404` | The invoice or subscription is not the caller's |
+
+`recovery` (`PaymentRecovery`, on every `/v1/me` invoice and subscription):
+`retryable`, `blocked_reason` (`not_due`, `uncollectible`, `in_progress`,
+`outcome_unknown`, `rail_unsupported`, `no_compatible_payment_method`,
+`payment_method_psp_mismatch`, `dunning_window_expired`), `next_attempt_at`
+(the engine's own next scheduled attempt), `attempt_count`,
+`failure_category`, `last_failure_code`, `last_failed_at`,
+`compatible_payment_method_ids`, `operation`. Hosts read these flags; they do
+not re-derive rail policy.
 
 Solana on-chain lifecycle (mounted only when OpenRails has a Solana signer;
 prepare → wallet signs → confirm):
@@ -151,15 +211,25 @@ prepare → wallet signs → confirm):
 | POST | `/v1/me/subscriptions/{id}/solana-tier-change` | Prepare the on-chain tier-change transaction |
 | POST | `/v1/me/subscriptions/{id}/solana-tier-change/confirm` | Confirm the signed tier change |
 
-Tier-change response: `{ object: "tier_change", status: "succeeded"|"requires_action"|"blocked", action, price_id, url?, subscription_id?, next_action?, delayed_start?, message? }`.
+Tier-change response: `{ object: "tier_change", status: "succeeded"|"processing"|"requires_action"|"blocked", action, price_id, url?, subscription_id?, next_action?, delayed_start?, message?, operation_id? }`.
 Stripe/NMI upgrades succeed immediately with proration; downgrades succeed with
 a `delayed_start` at period end; CCBill upgrades return `requires_action` with a
 redirect `url`, downgrades are `blocked`; Solana tier changes go through the
-on-chain prepare/confirm routes above. An NMI upgrade whose provider outcome is
-unresolved answers `409` (retry with the same `Idempotency-Key` to read the
-durable result); a second upgrade of a subscription with an unresolved upgrade
-also answers `409`. Checkout confirmation uses the same `409` for an unresolved
-sale.
+on-chain prepare/confirm routes above. **A tier change requires an
+`Idempotency-Key`**: without one it answers `400
+tier_change_idempotency_key_required` before any admission or provider call,
+because the key is the client's only handle on a lost response. A key that
+already names a different tier change (another customer, subscription or
+target) answers `409 tier_change_idempotency_conflict` and never that
+operation's result. A Stripe tier change and an NMI upgrade are durable
+operations keyed by that header, with one contract on both rails: the same key
+replays the stored result (`200`); while the provider outcome is unresolved it
+answers `202` with `status: "processing"` and `operation_id`; a request under
+another key while one is unresolved answers `409 tier_change_in_flight` with
+`metadata.operation_id`; a definitive provider refusal answers `400`/`402`
+(`tier_change_refused`, or the card decline code) and an operator-attested
+non-execution `409 tier_change_refused`. Checkout confirmation answers `409`
+for an unresolved sale.
 
 ### Payment methods
 
@@ -265,7 +335,7 @@ Server-to-server billing operations. Every route is gated on the listed
 | POST | `/v1/merchant/usage/rollup` | `merchant:usage:read` | Usage rollup query |
 | POST | `/v1/merchant/usage/resource-revenue` | `merchant:usage:read` | Resource-revenue query |
 | GET | `/v1/merchant/settings` | `merchant:settings:read` | Merchant billing settings |
-| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Update merchant billing settings, incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
+| PUT | `/v1/merchant/settings` | `merchant:settings:update` | Replace the merchant settings document atomically ([merchant-settings.md](merchant-settings.md)), incl. `billing_policies` + `billing_policy_bindings` ([billing-policies.md](../billing-policies.md)) |
 | GET | `/v1/merchant/api-host` | `merchant:settings:read` | The merchant's canonical API host (#734 Host routing); `api_host` null when unset |
 | PUT | `/v1/merchant/api-host` | `merchant:settings:update` | Assign the canonical API host: `{ api_host }` (bare lowercase hostname; `""` clears). Owner-only in the fixed role catalog; 409 when taken by another merchant |
 | GET | `/v1/merchant/trust-level` | `merchant:customer-settings:read` | Customer trust level |
@@ -316,10 +386,10 @@ for those routes.
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters |
-| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history |
+| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`customer_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
+| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; `Client.GetPayment` |
 | POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail; `revoke_access` must be explicit to also revoke one-off access |
-| GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters |
+| GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters (`customer_id`, `status`, `rail`, `price_id`, ...); `Client.ListSubscriptions` |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
 | POST | `/v1/merchant/subscriptions/{id}/cancel` | `merchant:subscriptions:update` | Cancel; `revoke_access` must be explicit to revoke entitlements immediately |
 | POST | `/v1/merchant/subscriptions/{id}/resume` | `merchant:subscriptions:update` | Resume where the rail supports it |
@@ -340,6 +410,8 @@ Full request and state-transition details are in
 | GET | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:read` | List collection and remittance history |
 | POST | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:update` | Record an idempotent external remittance; does not charge a provider |
 | POST | `/v1/merchant/invoices/{id}/retry-collection` | `merchant:invoices:collect` | Start or replay one durable collection operation with an explicit saved method and idempotency key (202 while unresolved) |
+| POST | `/v1/merchant/customers/{customer_id}/invoices/{id}/pay-now` | `merchant:invoices:collect` | The customer's own pay-now, run by a host that authenticated the customer (Client `PayInvoiceNow`). Same contract and answers as `/v1/me/invoices/{id}/pay-now` |
+| POST | `/v1/merchant/customers/{customer_id}/subscriptions/{id}/retry-now` | `merchant:subscriptions:update` | The customer's own retry-now, run by a host (Client `RetrySubscriptionNow`). Same contract as `/v1/me/subscriptions/{id}/retry-now` |
 | POST | `/v1/merchant/invoices/{id}/uncollectible` | `merchant:invoices:update` | Stop collection while retaining the debt |
 | POST | `/v1/merchant/invoices/{id}/void` | `merchant:invoices:update` | Void an eligible invoice and write off its remaining debt |
 
@@ -412,9 +484,18 @@ manifest-guarded like catalog writes).
 |---|---|---|
 | GET | `/v1/merchant/payment-providers` | List configured providers |
 | GET | `/v1/merchant/payment-providers/{provider}` | One provider's config (redacted) |
-| PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets |
-| DELETE | `/v1/merchant/payment-providers/{provider}` | Remove provider config |
+| PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets. Live-probes the supplied or stored credentials before writing, including `{"account_id","enabled":false}` — it cannot archive an account whose provider is dark |
+| POST | `/v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive` | Archive exactly this account by its immutable `id`. No provider call, credentials kept, idempotent; optional body `{"allow_last": true}` |
+| DELETE | `/v1/merchant/payment-providers/{provider}` | Archive the rail's single active account (no provider call). More than one active: `409 provider_accounts_ambiguous` — use the per-account archive |
 | POST | `/v1/merchant/payment-providers/routing/dry-run` | Explain which PSP a checkout would get, and why every other candidate was skipped. Read permission — creates nothing (or#288) |
+
+Archive is not deletion (#655): the row, its `id`, credentials and history
+remain, existing obligations and inbound webhooks keep resolving to it, and
+new checkout selects only active accounts. Archiving the rail's last active
+account answers `409 provider_account_last_active` (metadata: `psp_id`)
+unless `allow_last` is `true`; new checkout on that rail is then refused until
+another account is armed. Both archives are lifecycle writes: they stay
+mounted when the secret backend is read-only.
 
 ### Metrics, dashboard, webhooks, notifications
 
@@ -535,7 +616,7 @@ The list is merchant-scoped and bounded (`limit` defaults to 100, maximum 1000).
 after idempotent host processing commits, then fetch again; a UUID high-water
 mark can miss transactions that commit late. Acknowledgment is idempotent and
 independent of customer and merchant notification read state. A payment event
-contains the original payment UUID, its payer (`customer_id`), `price_id`, the
+contains the original `pay_` payment id, its payer (`customer_id`), `price_id`, the
 renewed `subscription_id` when any, amount, currency, merchant and settlement
 time, preserving the fee-attribution coordinate.
 

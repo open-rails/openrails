@@ -74,7 +74,7 @@ func GetAdminRepairAlerts(r *httprequest.Request) {
 		}
 		items = append(items, m)
 	}
-	r.SuccessJSONPaginated(items, total, limit, offset)
+	r.SuccessJSONPaginated(notificationViews(items), total, limit, offset)
 }
 
 // #528: GetAdminProviderIntents (the #358 provider-intent ledger debug view) was

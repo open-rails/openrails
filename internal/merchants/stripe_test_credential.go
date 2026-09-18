@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // defaultStripeBalanceCheck verifies a Stripe secret key works WITHOUT charging,
@@ -18,7 +19,7 @@ import (
 func defaultStripeBalanceCheck(ctx context.Context, secretKey string) error {
 	secretKey = strings.TrimSpace(secretKey)
 	if secretKey == "" {
-		return fmt.Errorf("merchants: empty stripe secret key")
+		return apperr.Invalidf("merchants: empty stripe secret key")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.stripe.com/v1/balance", nil)
 	if err != nil {
@@ -37,7 +38,7 @@ func defaultStripeBalanceCheck(ctx context.Context, secretKey string) error {
 		return nil
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("merchants: stripe key rejected (%d)", resp.StatusCode)
+		return fmt.Errorf("%w: stripe key rejected (%d)", ErrPaymentProviderCredentialsRejected, resp.StatusCode)
 	}
 	return fmt.Errorf("merchants: stripe balance check failed (%d)", resp.StatusCode)
 }

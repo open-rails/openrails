@@ -200,10 +200,35 @@ Rules:
   `account_id` would silently lie). Declare a NEW `psps` entry and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
+  Archive by id: `POST /v1/merchant/payment-providers/{rail}/accounts/{psp_id}/archive`
+  (`embed/controlplane`: `ArchivePaymentProviderAccount`) makes no provider
+  call, so it works when the old provider is terminated or unreachable. The
+  rail-level `DELETE` refuses (`provider_accounts_ambiguous`) while two
+  accounts are active, and `PUT … {"enabled": false}` live-probes the stored
+  credentials, so neither archives a dark account.
 - **Pending intents stamped with the old PSP do not follow** a credential
   move: keep (or restore) the old PSP's credentials until its queue drains,
   or let stale intents expire/supersede via their relevance windows. There is
   no rebind command.
+- **Per-subscriber cutover off an archived PSP is report-only (#657).**
+  `cp.PlanProviderAccountCutover(ctx, merchantID, query)` on
+  `embed/controlplane` reads the subscription, the card the subscriber
+  re-entered (`ReplacementPaymentMethodID`) and/or a `TargetPSPID` (default:
+  the card's PSP), and both PSP rows, and writes nothing. `Executable` is true
+  only for the durable payment-source update: an NMI subscription that is
+  active or past_due with a provider recurring record, a non-archived target
+  equal to its own account, and a PSP-vaulted, unparked card of the payer on
+  that account (`code: ready`; provider availability is checked when the
+  update runs). Everything else is a coded, non-executable plan
+  (`rail_unsupported`, `subscription_not_rebilling`, `target_archived`,
+  `replacement_card_required`, `replacement_card_psp_mismatch`, ...);
+  cross-account moves report `cross_account_requires_card_reentry` and are
+  never executed. The durable update itself refuses a cross-account target
+  at enqueue and again in the executor under the method's row lock
+  (`failed_terminal`, evidence `code: psp_mismatch`, no provider call), and a
+  custody remap (or#297) refuses an instrument any unresolved operation names, a
+  payment-source update's frozen new/old sides included
+  (`operation_unresolved`).
 
 ### Custodians (or#880)
 
@@ -634,9 +659,11 @@ credential guarantees attach — a live Stripe key (`sk_live_`/`rk_live_`)
 refuses to boot; each NMI account is probed when armed with one auth on the
 canonical non-issued test PAN (only a simulator approves it — a decline
 proves a live account and refuses the arm); CCBill uses the sandbox API host;
-Solana derives devnet. Each NMI arm requires a fresh probe; unavailable,
-indeterminate or live responses refuse the arm. No persistent verdict cache can
-substitute for qualification. Production mode does not run the sandbox probe.
+Solana derives devnet. Each NMI arm requires a fresh probe (manifest
+reconciliation and the provider API alike); unavailable, indeterminate or live
+responses refuse the arm, and an update that omits credentials re-probes the
+stored key — a secret-backend failure cannot bypass it. Nothing caches a
+verdict. Production mode does not run the sandbox probe.
 Sandbox is allowed in every environment (#762) — what keeps it honest is
 rail-credential validation (the live-key refusal and the NMI live-gateway
 probe, which ask the credential itself), not the environment string.
@@ -829,4 +856,4 @@ route tier:
 
 ## Payment-method update notices
 
-A recoverable stored-card failure sends an immediate `payment_method_update_required` payer notice and parks collection until the method is fixed. Core does not schedule repeated payment-method reminder ladders. Hosts may own additional reminders. Normal retry/dunning, provider verification, stored-card account updates and paid-period access are unchanged.
+A recoverable stored-card failure sends one `payment_method_update_required` payer notice and parks collection until the method is fixed; any follow-up is the host's. Retry/dunning, provider verification, stored-card account updates and paid-period access continue unchanged.

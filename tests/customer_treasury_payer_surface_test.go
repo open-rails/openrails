@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+
+	"github.com/open-rails/openrails"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -18,9 +22,8 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/modules/money"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/identity"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // #567 customer-as-PAYER treasury surface, exercised over HTTP against a real
@@ -112,7 +115,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	newest, ok := list[0].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, customerPayer.UUID().String(), newest["customer_id"], "transaction is scoped to the customer payable subject")
-	require.EqualValues(t, deposit, newest["amount"])
+	require.Equal(t, strconv.FormatInt(deposit, 10), newest["amount"])
 
 	// --- GET usage / payments / invoices / payment-methods: all reachable and
 	// scoped, returning the customer's (empty) payer state. ---
@@ -129,7 +132,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	// --- PUT collection-payment-method: gated by customer:billing:update and
 	// refuses a method the customer payer does not own. ---
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/collection-payment-method"), map[string]any{
-		"currency": currency, "payment_method_id": uuid.NewString(),
+		"currency": currency, "payment_method_id": openrails.PaymentMethodID(uuid.New()).String(),
 	})
 	require.Equal(t, http.StatusBadRequest, resp.status, resp.body)
 	require.Contains(t, resp.body, "not eligible for invoice collection")
@@ -165,7 +168,7 @@ func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{http.MethodPut, "/collection-payment-method", map[string]any{"currency": "USD", "payment_method_id": uuid.NewString()}},
+		{http.MethodPut, "/collection-payment-method", map[string]any{"currency": "USD", "payment_method_id": openrails.PaymentMethodID(uuid.New()).String()}},
 		{http.MethodGet, "/payment-methods", nil},
 		{http.MethodPost, "/checkout", map[string]any{"payment": map[string]any{"rail": "stripe"}}},
 		{http.MethodPut, "/spend-delegations", map[string]any{"delegations": []any{}}},
@@ -241,7 +244,7 @@ func TestCustomerTreasuryPayerSurface_SubjectPayer(t *testing.T) {
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+orgSubject+"/balance?currency=EUR", nil)
 	require.Equal(t, http.StatusOK, resp.status, "subject payer must read its own balance: %s", resp.body)
 	body := decodeJSONObject(t, resp.body)
-	require.EqualValues(t, deposit, body["balance_amount"], "balance must be keyed on the SUBJECT payer, not the merchant")
+	require.Equal(t, strconv.FormatInt(deposit, 10), body["balance_amount"], "balance must be keyed on the SUBJECT payer, not the merchant")
 
 	// Spend-delegation reads are keyed on the subject payer too (empty, not the
 	// merchant's policy document).
@@ -285,9 +288,11 @@ func getCustomerBalance(t *testing.T, srv *httptest.Server, currency string) int
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/balance?currency="+currency), nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	body := decodeJSONObject(t, resp.body)
-	amt, ok := body["balance_amount"].(float64)
+	raw, ok := body["balance_amount"].(string)
 	require.True(t, ok, resp.body)
-	return int64(amt)
+	amount, err := strconv.ParseInt(raw, 10, 64)
+	require.NoError(t, err, resp.body)
+	return amount
 }
 
 func decodeJSONObject(t *testing.T, body string) map[string]any {

@@ -41,7 +41,9 @@ import type {
 import { cn } from "@/lib/utils"
 
 import {
+  donutSlices,
   chartColor,
+  exactKey,
   filteredCurrency,
   groupSeries,
   rowCurrency,
@@ -162,7 +164,10 @@ function StatViz({
   )
 }
 
-function MetricTooltip({
+// MetricTooltip formats a hovered value from the exact wire cell the series
+// row carries under exactKey (a money decimal string), falling back to the
+// plotted Number only for series that never had one. Exported for tests.
+export function MetricTooltip({
   series,
   ...props
 }: ComponentProps<typeof ChartTooltipContent> & { series: PivotSeries[] }) {
@@ -170,16 +175,29 @@ function MetricTooltip({
   return (
     <ChartTooltipContent
       {...props}
-      formatter={(value, name) => (
-        <div className="flex w-full items-center justify-between gap-3">
-          <span className="text-muted-foreground">
-            {series.find((item) => item.key === String(name))?.label ?? name}
-          </span>
-          <span className="font-mono font-medium tabular-nums">
-            {formatMeasure(Number(value), measure.unit, measure.currency)}
-          </span>
-        </div>
-      )}
+      formatter={(value, name, item) => {
+        // item.payload is the pivoted row, which carries each series' exact
+        // wire cell beside the Number recharts plots.
+        const row = (item as { payload?: unknown }).payload
+        const exact =
+          row && typeof row === "object"
+            ? (row as Record<string, unknown>)[exactKey(String(name))]
+            : undefined
+        const cell =
+          typeof exact === "string" || typeof exact === "number"
+            ? exact
+            : Number(value)
+        return (
+          <div className="flex w-full items-center justify-between gap-3">
+            <span className="text-muted-foreground">
+              {series.find((item) => item.key === String(name))?.label ?? name}
+            </span>
+            <span className="font-mono font-medium tabular-nums">
+              {formatMeasure(cell, measure.unit, measure.currency)}
+            </span>
+          </div>
+        )
+      }}
     />
   )
 }
@@ -243,7 +261,7 @@ function TimeSeriesChart({
       <YAxis
         tickLine={false}
         axisLine={false}
-        width={unit === "micros" ? 80 : 52}
+        width={unit === "money" ? 80 : 52}
         tickFormatter={tickFormatter}
       />
     </>
@@ -310,25 +328,9 @@ function DonutViz({
   result: MetricsResult
   currency?: string
 }) {
-  const idx = indexColumns(result.columns)
-  const primary = idx.measures[0]
+  const primary = indexColumns(result.columns).measures[0]
   if (!primary) return <Empty label="no measure" />
-  const slices = result.rows
-    .map((row, i) => ({
-      key: `slice-${i}`,
-      label:
-        idx.dims
-          .map((d) => String(row[d.index] ?? ""))
-          .filter(Boolean)
-          .join(" · ") || primary.name,
-      measure: primary.name,
-      dimensions: idx.dims.map((d) => row[d.index]),
-      unit: primary.unit,
-      currency:
-        primary.unit === "micros" ? rowCurrency(row, idx, currency) : undefined,
-      value: Number(row[primary.index] ?? 0),
-    }))
-    .filter((slice) => slice.value !== 0)
+  const slices = donutSlices(result, currency)
   if (slices.length === 0) return <Empty label="no data in range" />
   const groups = groupSeries(slices)
   const charts = groups.map((group) => {

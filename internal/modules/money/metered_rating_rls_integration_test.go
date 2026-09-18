@@ -9,9 +9,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -59,7 +59,7 @@ VALUES ($1, $2, $3, 'seconds', 'sum', 'second')`, merchantID, meterKey, eventTyp
 	require.NoError(t, err)
 	_, err = superPool.Exec(ctx, `
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
-VALUES ($1, $2, 1, $3, 'in_arrears', '{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":10000}}'::jsonb)`,
+VALUES ($1, $2, 1, $3, 'in_arrears', '{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"10000"}}'::jsonb)`,
 		merchantID, productID, meterKey)
 	require.NoError(t, err)
 	occurred := time.Now().UTC()

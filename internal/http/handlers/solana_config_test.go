@@ -2,10 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/stretchr/testify/require"
 
@@ -18,6 +19,7 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 
 	"context"
+
 	solanago "github.com/gagliardetto/solana-go"
 )
 

@@ -324,7 +324,7 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 // forensic and was already durably logged to rail_mutation_logs before the
 // success transition, so it is safe to drop from the intent row — UNLESS the handler asks to
 // keep its evidence (PrunePolicy), which the catalog archive/sunset handlers do
-// because pkg/service/catalog_extras.go renders their verification booleans.
+// because internal/service/catalog_extras.go renders their verification booleans.
 var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
 
 // PruneSucceeded slims a just-succeeded intent down to a dedupe tombstone:
@@ -556,4 +556,14 @@ func (s *Store) GetByIdempotencyKey(ctx context.Context, key string) (gen.Openra
 		return gen.OpenrailsRailIntent{}, err
 	}
 	return s.db.Gen(ctx).GetRailIntentByIdempotencyKey(ctx, gen.GetRailIntentByIdempotencyKeyParams{MerchantID: mid.UUID(), IdempotencyKey: key})
+}
+
+// LiveTierChange returns the unresolved tier change (NMI upgrade or Stripe
+// tier change) that owns the subscription; db.IsNotFound when none does.
+func (s *Store) LiveTierChange(ctx context.Context, subscriptionID uuid.UUID) (gen.OpenrailsRailIntent, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
+	return s.db.Gen(ctx).GetLiveTierChangeRailIntent(ctx, gen.GetLiveTierChangeRailIntentParams{MerchantID: mid.UUID(), SubscriptionID: subscriptionID})
 }

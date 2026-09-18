@@ -86,8 +86,8 @@ func newIntentsResolveCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
-	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration)")
-	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription or refund id")
+	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration; stripe_tier_change: update, schedule or phases)")
+	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription, schedule or refund id")
 	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record provider-confirmed non-execution")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")
@@ -106,6 +106,12 @@ func runIntentsResolve(ctx context.Context, cfg *config.Config, merchantSlug str
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
 	defer func() { _ = application.Close(context.Background()) }()
+	// A receipt is confirmed by reading the provider through the merchant's
+	// store-armed credentials; without the merchants service every rail
+	// reports "no armed provider read" and no resolution can be accepted.
+	if err := application.Runtime.EnsureMerchantsService(ctx); err != nil {
+		return fmt.Errorf("arm merchant credentials: %w", err)
+	}
 	mid, err := resolveCLIMerchant(ctx, application.Runtime.DB, merchantSlug)
 	if err != nil {
 		return err

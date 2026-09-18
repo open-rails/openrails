@@ -16,9 +16,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 

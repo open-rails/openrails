@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
@@ -238,7 +240,7 @@ func TestCrossMerchantSubscriptionIsolationHTTP(t *testing.T) {
 	ctx := context.Background()
 	p := newIsolationPair(t, ctx)
 	rows := seedMerchantBillingRows(t, ctx, p.h.MerchantPool(p.bID.UUID()), p.bID)
-	subID := rows.subscriptionID.String()
+	subID := openrails.SubscriptionID(rows.subscriptionID).String()
 
 	status, body := requestJSON(t, http.MethodGet, p.url("/v1/merchant/subscriptions?limit=100"), p.bToken, nil)
 	require.Equalf(t, http.StatusOK, status, "B lists its own subscriptions: %s", string(body))
@@ -269,7 +271,7 @@ func TestCrossMerchantPaymentIsolationHTTP(t *testing.T) {
 	ctx := context.Background()
 	p := newIsolationPair(t, ctx)
 	rows := seedMerchantBillingRows(t, ctx, p.h.MerchantPool(p.bID.UUID()), p.bID)
-	payID := rows.paymentID.String()
+	payID := openrails.PaymentID(rows.paymentID).String()
 
 	status, body := requestJSON(t, http.MethodGet, p.url("/v1/merchant/payments?limit=100"), p.bToken, nil)
 	require.Equalf(t, http.StatusOK, status, "B lists its own payments: %s", string(body))
@@ -284,7 +286,7 @@ func TestCrossMerchantPaymentIsolationHTTP(t *testing.T) {
 
 	// A refund moves money out of B's account — the write that must never cross.
 	status, body = requestJSON(t, http.MethodPost, p.url("/v1/merchant/payments/"+payID+"/refunds"), p.aToken, map[string]any{
-		"amount": 1000000,
+		"amount": "1000000",
 		"reason": "cross-merchant refund attempt",
 	})
 	require.NotContainsf(t, []int{http.StatusOK, http.StatusCreated, http.StatusAccepted}, status,

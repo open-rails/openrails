@@ -4,13 +4,13 @@ import "time"
 
 type TierChangeResponse struct {
 	Object         string                         `json:"object"`                    // "tier_change"
-	Status         string                         `json:"status"`                    // succeeded, requires_action, blocked
+	Status         string                         `json:"status"`                    // succeeded, processing, requires_action, blocked
 	Mode           string                         `json:"mode"`                      // "tier_change"
 	Action         string                         `json:"action,omitempty"`          // upgrade, downgrade
-	PriceID        string                         `json:"price_id"`                  // Target price ID
+	PriceID        PriceID                        `json:"price_id"`                  // Target price ID
 	URL            string                         `json:"url,omitempty"`             // Hosted redirect URL when required
 	Payment        CheckoutSessionPaymentResponse `json:"payment"`                   // Rail info
-	SubscriptionID *string                        `json:"subscription_id,omitempty"` // Affected subscription
+	SubscriptionID *SubscriptionID                `json:"subscription_id,omitempty"` // Affected subscription
 	NextAction     *CheckoutSessionNextAction     `json:"next_action,omitempty"`     // For redirects
 	Message        string                         `json:"message,omitempty"`         // User-friendly message
 	DelayedStart   *time.Time                     `json:"delayed_start,omitempty"`   // For scheduled downgrades
@@ -20,19 +20,39 @@ type TierChangeResponse struct {
 	// For Stripe upgrades AmountDueNow is the local Model B estimate (Stripe
 	// finalizes the exact proration on its side), so treat it as approximate.
 	Currency         string     `json:"currency,omitempty"`
-	AmountDueNow     int64      `json:"amount_due_now"`
-	NextChargeAmount int64      `json:"next_charge_amount"`
+	AmountDueNow     int64      `json:"amount_due_now,string"`
+	NextChargeAmount int64      `json:"next_charge_amount,string"`
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
+	// OperationID names the durable provider operation behind a Stripe tier
+	// change or an NMI upgrade. A "processing" answer (HTTP 202) carries it
+	// while the provider outcome is unresolved; the same Idempotency-Key
+	// replays the stored result.
+	OperationID string `json:"operation_id,omitempty"`
 }
+
+// Tier-change refusals carry these StatusError.Code values.
+const (
+	// CodeTierChangeInFlight: another unresolved tier change owns the
+	// subscription; metadata.operation_id names it.
+	CodeTierChangeInFlight = "tier_change_in_flight"
+	// CodeTierChangeRefused: the provider definitively refused the change.
+	CodeTierChangeRefused = "tier_change_refused"
+	// CodeTierChangeIdempotencyConflict: the Idempotency-Key already names a
+	// different tier change (another customer, subscription or target).
+	CodeTierChangeIdempotencyConflict = "tier_change_idempotency_conflict"
+	// CodeTierChangeIdempotencyKeyRequired: a tier change needs a client
+	// Idempotency-Key; it is the only way to read back a lost response.
+	CodeTierChangeIdempotencyKeyRequired = "tier_change_idempotency_key_required"
+)
 
 type TierChangePreviewResponse struct {
 	Object           string     `json:"object"` // "tier_change_preview"
 	Action           string     `json:"action"` // upgrade | downgrade
-	PriceID          string     `json:"price_id"`
+	PriceID          PriceID    `json:"price_id"`
 	Rail             string     `json:"rail"`
 	Currency         string     `json:"currency"`
-	AmountDueNow     int64      `json:"amount_due_now"`     // cents charged immediately (0 for downgrade)
-	NextChargeAmount int64      `json:"next_charge_amount"` // cents at next renewal (new plan price)
+	AmountDueNow     int64      `json:"amount_due_now,string"`     // native units charged immediately (0 for downgrade)
+	NextChargeAmount int64      `json:"next_charge_amount,string"` // native units at next renewal (new plan price)
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
 	Effective        string     `json:"effective"`   // "now" (upgrade) | "period_end" (downgrade)
 	IsEstimate       bool       `json:"is_estimate"` // true when the rail finalizes the exact amount (Stripe upgrades)
@@ -64,5 +84,5 @@ type CheckoutSessionPaymentResponse struct {
 }
 
 type ChangeTierRequest struct {
-	PriceID string `json:"price_id" binding:"required"`
+	PriceID PriceID `json:"price_id"`
 }

@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest"
-import { nativeAmountFromInput } from "@/lib/format"
 import type { CreditGrant } from "@/lib/api/credit-types"
 import {
   canRevokeCredit,
@@ -18,7 +17,7 @@ const input = {
 const grant = {
   id: "grant-a",
   state: "active",
-  remaining_amount: 70,
+  remaining_amount: "70",
 } as CreditGrant
 
 describe("credit grant form", () => {
@@ -28,13 +27,13 @@ describe("credit grant form", () => {
         { ...input, amount: "1.2345", currency: "JPY", decimals: 4 },
         true
       ).amount
-    ).toBe(12345)
+    ).toBe("12345")
     expect(
       creditGrantInput(
         { ...input, amount: "12", currency: "shop/points", decimals: 0 },
         true
       ).amount
-    ).toBe(12)
+    ).toBe("12")
     expect(() =>
       creditGrantInput(
         { ...input, amount: "1.23456", currency: "JPY", decimals: 4 },
@@ -44,18 +43,20 @@ describe("credit grant form", () => {
   })
   it("preserves decimal precision and the caller's idempotency key", () => {
     expect(creditGrantInput(input, true)).toEqual({
-      amount: 1000001,
+      amount: "1000001",
       currency: "USD",
       source: "admin",
       source_id: "stable",
       description: "support",
       expires_at: undefined,
     })
-    expect(nativeAmountFromInput("9007199254.740991", "USD")).toBe(
-      Number.MAX_SAFE_INTEGER
+    expect(
+      creditGrantInput({ ...input, amount: "9223372036854.775807" }, true)
+        .amount
+    ).toBe("9223372036854775807")
+    expect(creditGrantInput({ ...input, amount: ".25" }, true).amount).toBe(
+      "250000"
     )
-    expect(nativeAmountFromInput(".25", "USD")).toBe(250000)
-    expect(nativeAmountFromInput("-0.25", "USD")).toBe(-250000)
   })
   it.each([
     "",
@@ -65,7 +66,7 @@ describe("credit grant form", () => {
     "Infinity",
     "1e3",
     "1.0000001",
-    "9007199254.740992",
+    "9223372036854.775808",
   ])("rejects invalid or unrepresentable amount %s", (amount) => {
     expect(() => creditGrantInput({ ...input, amount }, true)).toThrow(
       "positive amount"
@@ -73,6 +74,13 @@ describe("credit grant form", () => {
   })
   it("requires grant permission", () => {
     expect(() => creditGrantInput(input, false)).toThrow("cannot grant")
+  })
+  it("sends a future expiry as an RFC3339 instant", () => {
+    const out = creditGrantInput(
+      { ...input, expires: "2099-01-02T03:04" },
+      true
+    )
+    expect(out.expires_at).toBe(new Date("2099-01-02T03:04").toISOString())
   })
   it("rejects an expired or malformed expiry", () => {
     expect(() => creditGrantInput({ ...input, expires: "bad" }, true)).toThrow(
@@ -89,7 +97,9 @@ describe("credit revoke form", () => {
     expect(canRevokeCredit(grant, false)).toBe(false)
     for (const state of ["expired", "revoked", "spent", "terminated"] as const)
       expect(canRevokeCredit({ ...grant, state }, true)).toBe(false)
-    expect(canRevokeCredit({ ...grant, remaining_amount: 0 }, true)).toBe(false)
+    expect(canRevokeCredit({ ...grant, remaining_amount: "0" }, true)).toBe(
+      false
+    )
     expect(canRevokeCredit({ ...grant, state: "scheduled" }, true)).toBe(true)
   })
   it("requires a reason and preserves the selected grant", () => {

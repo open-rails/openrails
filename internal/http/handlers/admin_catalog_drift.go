@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // Catalog drift handlers (issue #209/#510). Mounted under /merchant/catalog/*

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	openrails "github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/pkg/api"
 )
@@ -174,12 +175,13 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify subscription data
-		assert.Equal(t, sub.ID.String(), subscriptions[0]["id"])
+		assert.Equal(t, openrails.SubscriptionID(sub.ID).String(), subscriptions[0]["id"])
 		assert.Equal(t, string(models.StatusActive), subscriptions[0]["status"])
 		price, ok := subscriptions[0]["price"].(map[string]any)
 		require.True(t, ok, "Should include price details")
-		assert.Equal(t, float64(9_990_000), price["unit_amount"], "unit_amount should be 9990000 micros")
-		assert.NotContains(t, price, "amount", "public subscription price should not expose amount")
+		assert.Equal(t, "9990000", price["unit_amount"], "unit_amount should be 9990000 micros")
+		assert.Equal(t, openrails.PriceID(priceID).String(), price["id"])
+		assert.NotContains(t, price, "amount", "the price shape spells money unit_amount")
 	})
 
 	t.Run("requires authentication", func(t *testing.T) {
@@ -251,11 +253,11 @@ func TestGetSubscriptionHistoryEndpoint(t *testing.T) {
 			status := sub["status"].(string)
 			if status == string(models.StatusActive) {
 				hasActive = true
-				assert.Equal(t, activeSub.ID.String(), sub["id"])
+				assert.Equal(t, openrails.SubscriptionID(activeSub.ID).String(), sub["id"])
 			}
 			if status == string(models.StatusCancelled) {
 				hasCancelled = true
-				assert.Equal(t, cancelledSub.ID.String(), sub["id"])
+				assert.Equal(t, openrails.SubscriptionID(cancelledSub.ID).String(), sub["id"])
 			}
 		}
 		assert.True(t, hasActive, "Should have active subscription")
@@ -313,12 +315,11 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 		paymentIDs := make(map[string]bool)
 		for _, p := range resp.Data {
 			paymentIDs[p["id"].(string)] = true
-			// JSON unmarshals numbers as float64, but we compare against int64 value
-			assert.Equal(t, float64(9_990_000), p["amount"], "Amount should be 9990000 micros")
+			assert.Equal(t, "9990000", p["amount"], "amount is an exact native-unit string")
 			assert.Equal(t, "USD", p["currency"])
 		}
-		assert.True(t, paymentIDs[api.FormatPaymentID(payment1.ID)], "Should include payment 1")
-		assert.True(t, paymentIDs[api.FormatPaymentID(payment2.ID)], "Should include payment 2")
+		assert.True(t, paymentIDs[openrails.PaymentID(payment1.ID).String()], "Should include payment 1")
+		assert.True(t, paymentIDs[openrails.PaymentID(payment2.ID).String()], "Should include payment 2")
 	})
 }
 

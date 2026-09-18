@@ -70,3 +70,21 @@ func TestNMIClientForExistingSubscriptionFailsClosed(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok)
 }
+
+func TestValidatePaymentMethodProviderAccountFailsClosedAcrossPSPs(t *testing.T) {
+	source, target := uuid.New(), uuid.New()
+	err := ValidatePaymentMethodProviderAccount(
+		&models.PaymentMethod{PspID: target},
+		&models.Subscription{PspID: source},
+	)
+	require.ErrorIs(t, err, ErrPaymentMethodProviderAccountMismatch)
+	require.Contains(t, err.Error(), "card re-entry")
+}
+
+func TestValidatePaymentMethodProviderAccountAllowsSamePSP(t *testing.T) {
+	psp := uuid.New()
+	require.NoError(t, ValidatePaymentMethodProviderAccount(
+		&models.PaymentMethod{PspID: psp},
+		&models.Subscription{PspID: psp},
+	))
+}

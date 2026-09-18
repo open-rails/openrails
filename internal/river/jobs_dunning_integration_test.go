@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -20,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,7 +72,7 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 		ID:                  priceID,
 		ProductID:           productID,
 		Archived:            false,
-		Amount:              999,
+		Amount:              9_990_000,
 		Currency:            "USD",
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -82,7 +82,7 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  priceID,
 		ProductID:           productID,
-		Amount:              999,
+		Amount:              9_990_000,
 		Currency:            "USD",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		Archived:            false,
@@ -101,6 +101,7 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 		CustomerID:           tenantSubjectID,
 		Rail:                 models.RailNMI,
 		PspID:                pspID,
+		Custodian:            models.CustodianPSP, // what CreatePaymentMethod writes
 		RailCustomerRef:      "vault_" + uuid.New().String(),
 		RailMethodRef:        billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills

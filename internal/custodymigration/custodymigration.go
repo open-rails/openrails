@@ -42,6 +42,8 @@
 //  4. No charge may straddle the flip. An instrument whose subscription has a
 //     charge intent in_flight or unknown_needs_verify is REFUSED for this run,
 //     not failed: both states clear on their own, so the operator re-runs.
+//     Likewise no payment-source update may straddle it: an unresolved swap
+//     naming the instrument refuses the flip (#657).
 //
 // DRY RUN FIRST. Options.Apply defaults to false: a plan performs every read
 // and every refusal check and writes nothing, so the operator sees the counts
@@ -193,9 +195,12 @@ const (
 	// the flip. Transient by construction — re-run.
 	ReasonChargeInFlight = "charge_in_flight"
 	// ReasonOperationUnresolved: an unresolved operation (an invoice
-	// collection, a rebill, a vault update...) froze this instrument in its
-	// payload. Its outcome is judged against the custody it froze, so the flip
-	// waits for it to resolve. Transient by construction — re-run.
+	// collection, a rebill, a vault update, a payment-source swap...) froze this
+	// instrument in its payload, on either side of a swap. Its outcome is judged
+	// against the custody it froze, so the flip waits for it to resolve:
+	// re-attributing the instrument under it would strand the operation on a dead
+	// instrument, or finalize a subscription onto a method another provider
+	// account now owns (#657). Transient by construction — re-run.
 	ReasonOperationUnresolved = "operation_unresolved"
 	// ReasonTokenConflict: another instrument already holds this custodian
 	// token. Two instruments pointing at one card is never right.

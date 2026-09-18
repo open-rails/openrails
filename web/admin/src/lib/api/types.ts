@@ -1,5 +1,6 @@
 // Types mirror the Go handlers' JSON shapes exactly (see internal/http/handlers).
-// All money fields are MICROS (millionths of a currency unit).
+// Money is native units at the currency registry scale; exact wires send int64
+// decimal strings (docs/money-wire.md).
 
 export type SubscriptionStatus =
   "pending" | "active" | "past_due" | "cancelled" | "unknown"
@@ -15,15 +16,17 @@ export interface CustomerSummary {
   last_seen_at: string
 }
 
-// --- Raw DB models (returned verbatim by profile/subscription endpoints) ---
+// --- Shared Client DTOs (subscription and profile endpoints) ---
 
+// RawSubscription mirrors openrails.Subscription: ids of prefixed kinds are
+// typed (sub_, prod_, price_, pm_, pay_); customer_id and psp_id are plain UUIDs.
 export interface RawSubscription {
-  id: string // bare UUID
-  merchant_id: string
-  customer_id?: string
-  product_id: string
-  price_id: string
-  scheduled_price_id?: string | null
+  id: string // sub_...
+  customer_id: string
+  psp_id?: string
+  product_id: string // prod_...
+  price_id: string // price_...
+  scheduled_price_id?: string | null // price_...
   status: SubscriptionStatus
   started_at: string
   ended_at: string | null
@@ -32,7 +35,7 @@ export interface RawSubscription {
   rail: Rail
   rail_subscription_id: string
   user_email?: string
-  payment_method_id: string | null
+  payment_method_id: string | null // pm_...
   retry_attempts: number | null
   next_retry_at: string | null
   grace_ends_at: string | null
@@ -44,13 +47,13 @@ export interface RawSubscription {
   updated_at: string
 }
 
-// RawPrice mirrors internal/db/models.Price verbatim — the shape embedded on
-// subscription responses (distinct from CatalogPrice, the catalog
-// endpoints' own view: NOTE the field is "amount" here, not "unit_amount").
+// RawPrice mirrors openrails.SubscriptionPrice, the price embedded on
+// subscription responses. Money is unit_amount, an exact decimal string, as
+// on every price shape.
 export interface RawPrice {
   id: string
   product_id?: string
-  amount?: number
+  unit_amount?: string
   currency?: string
   archived?: boolean
   // Key (#774): the durable, movable-pointer handle for this price's
@@ -59,24 +62,6 @@ export interface RawPrice {
   access_duration_hours?: number
   auto_renew?: boolean
   [k: string]: unknown
-}
-
-export interface RawPayment {
-  id: string
-  customer_id?: string
-  price_id: string
-  subscription_id?: string
-  refunded_payment_id?: string
-  rail: Rail
-  transaction_id: string
-  amount: number
-  list_amount: number
-  currency: string
-  status: string // "pending" | "completed" | "failed" | "refunded"
-  card_brand?: string
-  card_last4?: string
-  purchased_at: string
-  created_at: string
 }
 
 export interface RawEntitlement {
@@ -119,8 +104,7 @@ export interface PaymentMethodResponse {
     exp_month?: number
     exp_year?: number
   }
-  livemode: boolean
-  created: number
+  created_at: string
   health?: {
     expiry_status?: "valid" | "expiring_soon" | "expired"
     last_charged_at?: string
@@ -135,24 +119,26 @@ export interface PaymentMethodResponse {
   }[]
 }
 
+// CreditBalance amounts are exact decimal strings of native units.
 export interface CreditBalance {
-
   currency: string
   display_name: string
   unit: string
   decimal_places: number
-  balance: number
-  held_balance: number
-  outstanding_owed_amount: number
+  balance: string
+  held_balance: string
+  outstanding_owed_amount: string
 }
 
+// CustomerBillingProfile composes the shared Client DTOs each dedicated
+// route serves (subscriptions, payments, entitlements, product access).
 export interface CustomerBillingProfile {
   customer_id: string
   email?: string
   trust_level?: string
-  subscriptions: RawSubscription[]
+  subscriptions: AdminSubscription[]
   entitlements: RawEntitlement[]
-  payments: RawPayment[]
+  payments: PaymentObject[]
   payment_methods: PaymentMethodResponse[]
   credit_balance: CreditBalance[]
   product_access: RawProductAccessGrant[]
@@ -165,11 +151,11 @@ export interface PaymentObject {
   object: "charge" | "refund"
   status?:
     "succeeded" | "pending" | "failed" | "refunded" | "partially_refunded"
-  amount: number
-  amount_refunded: number
+  amount: string
+  amount_refunded: string
   currency: string
-  user: string // usr_...
-  subscription?: string // sub_...
+  customer_id: string // plain UUID
+  subscription_id?: string // sub_...
   rail: Rail
   transaction_id: string
   refunded: boolean
@@ -177,13 +163,14 @@ export interface PaymentObject {
   failure_code?: string
   failure_message?: string
   refunds?: { object: "list"; data: PaymentObject[] }
-  created: number
+  created_at: string
 }
 
 // --- Subscription admin response (list/detail) ---
 
 export interface AdminSubscription extends RawSubscription {
-  payments?: RawPayment[]
+  // Recovery history: the same Payment shape the payments endpoints serve.
+  payments?: PaymentObject[]
 }
 
 export interface TierChangePreview {
@@ -192,8 +179,8 @@ export interface TierChangePreview {
   price_id: string
   rail: Rail
   currency: string
-  amount_due_now: number
-  next_charge_amount: number
+  amount_due_now: string
+  next_charge_amount: string
   next_charge_date?: string
   effective: "now" | "period_end"
   is_estimate: boolean
@@ -202,7 +189,9 @@ export interface TierChangePreview {
 
 export interface TierChangeResult {
   object: "tier_change"
-  status: "succeeded" | "requires_action" | "blocked"
+  // "processing": the provider outcome is unresolved (HTTP 202); retrying
+  // with the same Idempotency-Key reads the stored result.
+  status: "succeeded" | "processing" | "requires_action" | "blocked"
   mode: "tier_change"
   action: "upgrade" | "downgrade"
   price_id: string
@@ -216,9 +205,10 @@ export interface TierChangeResult {
   message?: string
   delayed_start?: string
   currency?: string
-  amount_due_now: number
-  next_charge_amount: number
+  amount_due_now: string
+  next_charge_amount: string
   next_charge_date?: string
+  operation_id?: string
 }
 
 // --- Catalog ---
@@ -242,13 +232,13 @@ export type UsagePriceModel = "per_unit" | "tiered" | "package"
 
 export interface UsageRateTier {
   up_to: number | null
-  unit_amount?: number
-  flat_amount?: number
+  unit_amount?: string
+  flat_amount?: string
 }
 
 export interface UsageRateMatrixCell {
-  unit_amount: number
-  maximum_amount?: number
+  unit_amount: string
+  maximum_amount?: string
   included?: number
 }
 
@@ -256,10 +246,10 @@ export interface UsageRatePrice {
   model: UsagePriceModel
   currency: string
   per_unit?: {
-    unit_amount?: number
+    unit_amount?: string
     divide_by?: number
     round?: "up" | "down" | "half_up"
-    maximum_amount?: number
+    maximum_amount?: string
     matrix?: {
       dimension: string
       cells: Record<string, UsageRateMatrixCell>
@@ -270,7 +260,7 @@ export interface UsageRatePrice {
     tiers: UsageRateTier[]
   }
   package?: {
-    amount: number
+    amount: string
     package_size: number
     free_units?: number
   }
@@ -396,11 +386,11 @@ export interface CatalogPrice {
   key: string
   product_id: string
   archived: boolean
-  unit_amount: number
+  unit_amount: string
   currency: string
   access_duration_hours?: number
   auto_renew: boolean
-  trial_unit_amount?: number
+  trial_unit_amount?: string
   trial_duration_hours?: number
   created_at: string
   updated_at: string
@@ -541,11 +531,59 @@ export interface FindingsListResponse {
   gauges: FindingsGauges
 }
 
+// NotificationData mirrors openrails.NotificationData: every event fills the
+// fields it has; money is an exact decimal string, ids are typed.
+export interface NotificationData {
+  reason?: string
+  message?: string
+  source?: string
+  entitlement?: string
+  ended_at?: string
+  currency?: string
+  subscription_id?: string // sub_...
+  from_price_id?: string // price_...
+  to_price_id?: string // price_...
+  to_product_id?: string // prod_...
+  to_product_name?: string
+  old_amount?: string
+  new_amount?: string
+  effective_at?: string
+  downgrade_applied?: boolean
+  new_product?: string
+  overdue_amount?: string
+  overdue_invoices?: number
+  overdue_since?: string
+  from_state?: string
+  to_state?: string
+  invoice_id?: string
+  invoice_number?: string
+  amount_due?: string
+  due_at?: string
+  failure_code?: string
+  failure_reason?: string
+  decline_outcome?: string
+  next_attempt_at?: string
+  rail?: string
+  rail_subscription_id?: string
+  transaction_id?: string
+  amount?: string
+  product_name?: string
+  payment_method?: string
+  kind?: string
+  provider?: string
+  operation?: string
+  affected_customer_id?: string
+  original_payment_id?: string // pay_...
+  error?: string
+  metadata?: Record<string, unknown>
+}
+
+// RepairAlert mirrors openrails.Notification (system_alert rows).
 export interface RepairAlert {
   id: string
-  customer_id?: string
+  customer_id: string
   event_type: string
-  data?: Record<string, unknown>
+  data: NotificationData
   seen: boolean
   created_at: string
 }

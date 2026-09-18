@@ -26,7 +26,7 @@ import type { PaymentObject } from "@/lib/api/types"
 import {
   currencyScale,
   formatNativeAmount,
-  formatUnix,
+  formatDate,
   shortId,
   unitsToDecimal,
 } from "@/lib/format"
@@ -78,7 +78,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
     header: "Created",
     cell: ({ row }) => (
       <span className="text-muted-foreground tabular-nums">
-        {formatUnix(row.original.created)}
+        {formatDate(row.original.created_at)}
       </span>
     ),
   },
@@ -86,7 +86,7 @@ const columns: ColumnDef<PaymentObject, unknown>[] = [
 
 // csvAmount exports an exact major-unit decimal; an amount that cannot be
 // represented exactly aborts the export rather than writing a wrong figure.
-function csvAmount(amount: number, currency: string): string {
+function csvAmount(amount: string, currency: string): string {
   const scale = currencyScale(currency)
   const decimal = scale === undefined ? null : unitsToDecimal(amount, scale)
   if (decimal === null)
@@ -103,7 +103,7 @@ export function PaymentsPage() {
   const [params, setParams] = useSearchParams()
   const rail = params.get("rail") ?? ""
   const view = params.get("view") ?? ""
-  const userId = params.get("user_id") ?? ""
+  const userId = params.get("customer_id") ?? ""
   const customerLabel = params.get("customer") ?? ""
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
@@ -114,7 +114,7 @@ export function PaymentsPage() {
   const filters = {
     rail: rail || undefined,
     refunds_only: view === "refunds" ? true : undefined,
-    user_id: userId || undefined,
+    customer_id: userId || undefined,
   }
   const { data, isPending: loading } = useQuery(
     adminQueries.payments(filters, PAGE, offset)
@@ -140,7 +140,7 @@ export function PaymentsPage() {
         return
       }
       const p = new URLSearchParams(params)
-      p.set("user_id", c.id)
+      p.set("customer_id", c.id)
       p.set("customer", c.email || c.subject || shortId(c.id, 13))
       p.delete("offset")
       setParams(p)
@@ -152,7 +152,7 @@ export function PaymentsPage() {
 
   const clearCustomer = () => {
     const p = new URLSearchParams(params)
-    p.delete("user_id")
+    p.delete("customer_id")
     p.delete("customer")
     p.delete("offset")
     setParams(p)
@@ -170,9 +170,9 @@ export function PaymentsPage() {
           "amount_refunded",
           "currency",
           "rail",
-          "user",
+          "customer_id",
           "transaction_id",
-          "created",
+          "created_at",
         ].join(","),
         ...rows.map((r) =>
           [
@@ -183,9 +183,9 @@ export function PaymentsPage() {
             csvAmount(r.amount_refunded, r.currency),
             r.currency,
             r.rail,
-            r.user,
+            r.customer_id,
             r.transaction_id,
-            new Date(r.created * 1000).toISOString(),
+            r.created_at,
           ]
             .map(csvEscape)
             .join(",")

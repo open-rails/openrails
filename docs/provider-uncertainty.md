@@ -40,9 +40,9 @@ subscription on the vault and plan, unowned locally; refund: approved refund of
 the reserved amount on the original sale's vault) before local effects commit
 through the normal receipt path. `--not-executed` records provider-confirmed
 non-execution and takes the type's definitive-refusal path; it is refused while
-the operation's exact order reference shows a successful sale. Rebills and
-custodian sales accept only non-execution because their receipts correlate
-exactly by order reference. Every resolution records actor and reason on the
+the operation's exact order reference shows a successful sale. Custodian
+sales accept only non-execution because their receipts correlate exactly by
+order reference. Every resolution records actor and reason on the
 operation and in the mutation log. NMI subscription enrollment follows the
 upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.
@@ -99,6 +99,21 @@ resolve --not-executed` releases it on the strength of the absent fence, and
 refuses one that carries the fence. There is no evidence-free unpark/force-resend method. No automatic
 compensating cancel or refund is triggered by uncertainty.
 
+A manual rebill (scheduled dunning or a customer retry-now, #809) freezes its
+charge at enqueue: the subscription's instrument and customer vault, the price
+amount and currency, and the provider account on the operation. It converges
+through the same exact-receipt path as invoice collection
+(`nmi.ConfirmOrderSale`): the verifier and `intents resolve --receipt` accept
+only the order reference's sale approved on the frozen vault for the frozen
+amount and currency; a contradicting sale is retained as
+`provider_contradiction`, keeps the operation unknown and refuses
+`--not-executed`. The renewal records the frozen amount. Before any provider
+traffic the operation is re-checked under the instrument's shared row lock
+(the #297 custody remap takes it exclusively and refuses while the rebill is
+in flight): an instrument moved to another provider account (#657), a changed
+subscription method or vault supersedes the operation, and re-deriving the
+period's attempt revives it with a fresh freeze.
+
 A manual rebill confirmed after dunning parked or the customer cancelled the
 subscription still records its payment exactly once: a parked (`unknown`) or
 active subscription renews from the confirmed charge; a terminally cancelled
@@ -117,6 +132,40 @@ its [Query API](https://docs.nmi.com/reference/query) does not establish a
 terminal-negative guarantee for a missing search result. The engine therefore
 uses absence as inconclusive evidence rather than assuming a provider guarantee.
 
+A Stripe tier change is a `stripe_tier_change` operation on the same ledger,
+keyed by the request's `Idempotency-Key`. The payload freezes the
+subscription, the from/to prices (local and Stripe), the proration decision
+(`always_invoice` with the cycle reset for an upgrade; a two-phase schedule
+with no proration for a downgrade), the local now-amount estimate and the
+period before anything is sent; Stripe is read once beforehand and must bill
+the price the local subscription records. Each Stripe request carries an
+idempotency key rooted in the operation id and stamps it on the object
+(`metadata[openrails_tier_change]`), behind a write-ahead fence. The receipt
+is the subscription (or schedule) Stripe answers with or that the verifier
+reads back by exact id, and it must match the frozen facts — the operation
+key, the frozen Stripe price, the frozen local price (and for a downgrade
+the frozen switch date) — before the local subscription changes; a 2xx
+object that does not match commits nothing. The update also carries
+`payment_behavior=error_if_incomplete`, so a 2xx receipt means the change
+applied with its invoice paid and a 402 that nothing changed. A lost response
+answers `202` with the operation id; the verifier reads the exact object back,
+and while Stripe still holds the key (23h) the executor replays the identical
+request;
+after that only `intents resolve` closes it (`--receipt` is the exact
+subscription or schedule id, read back and matched; `--not-executed` is
+refused while the provider shows the change). A parsed Stripe 4xx is a
+definitive refusal (coded `tier_change_refused`, a 402 keeps its decline
+code); an operator closure answers `409`. The same key replays the stored
+result byte for byte; another key while the operation is unresolved is
+refused `409 tier_change_in_flight` naming it. One unresolved tier change
+(NMI upgrade or Stripe) owns its subscription. The local commit uses the
+period the receipt carries, so a webhook-first convergence (the converger
+mirrors the price before the verifier runs) settles the operation instead of
+stranding it. Every tier change requires the client's `Idempotency-Key`, and a
+key already naming a different request is refused
+(`409 tier_change_idempotency_conflict`) before that operation can run or
+answer.
+
 NMI upgrades use the same intent runner with separate write-ahead step markers
 and durable receipts for successor creation and proration. The frozen payload
 owns the prices, billing period, instrument and account. A lost successor
@@ -125,4 +174,8 @@ proof that this operation created it. Proration can recover through its stable
 account-scoped order reference. Both receipts commit the local subscription
 swap, payment, access effects and predecessor delete intent atomically. A
 parsed proration refusal preserves the old subscription and queues a durable
-delete for the unpaid successor. See [upgrade recovery](architecture/upgrade-recovery.md).
+delete for the unpaid successor. The route answers exactly as for a Stripe tier
+change: `202` with the operation id while unresolved, the stored result under
+the same key, `409 tier_change_in_flight` under another key, and a coded
+`tier_change_refused` (a card decline keeps its code) once terminal. See
+[upgrade recovery](architecture/upgrade-recovery.md).

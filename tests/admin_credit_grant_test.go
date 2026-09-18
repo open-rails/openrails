@@ -8,17 +8,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprouter "github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // or#906 behavioural contract, end to end through the REAL routes: the
@@ -46,22 +47,29 @@ func TestAdminCreditGrant_OnceOnlyAndChangedAmountConflict(t *testing.T) {
 	customerID := uuid.NewString()
 	sourceID := "or906-admin-" + uuid.NewString()
 	path := "/v1/merchant/customers/" + customerID + "/credits"
+	expires := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Microsecond)
 	body := map[string]any{
-		"currency": money.DefaultCurrency, "amount": 5_000, "source_id": sourceID,
-		"description": "or906 goodwill",
+		"currency": money.DefaultCurrency, "amount": "5000", "source_id": sourceID,
+		"description": "or906 goodwill", "expires_at": expires.Format(time.RFC3339Nano),
 	}
 
-	// First grant applies.
+	// First grant applies; expires_at is an RFC3339 instant in and out.
 	w := adminCreditPost(t, admin, path, body)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	var first struct {
-		ID       uuid.UUID
-		Amount   int64 `json:"amount,string"`
-		Replayed bool
+		ID        uuid.UUID
+		Amount    int64 `json:"amount,string"`
+		Replayed  bool
+		ExpiresAt *time.Time `json:"expires_at"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &first))
 	require.Equal(t, int64(5_000), first.Amount)
 	require.False(t, first.Replayed)
+	require.NotNil(t, first.ExpiresAt)
+	require.True(t, expires.Equal(*first.ExpiresAt), "expires_at round-trips at full precision: %s", w.Body.String())
+	epoch := map[string]any{"currency": money.DefaultCurrency, "amount": "5000", "source_id": sourceID + "-epoch", "expires_at": expires.Unix()}
+	w = adminCreditPost(t, admin, path, epoch)
+	require.Equal(t, http.StatusBadRequest, w.Code, "an epoch number is not an instant: %s", w.Body.String())
 
 	// The identical retry is a replay, not a second credit.
 	w = adminCreditPost(t, admin, path, body)
@@ -76,7 +84,7 @@ func TestAdminCreditGrant_OnceOnlyAndChangedAmountConflict(t *testing.T) {
 	require.Equal(t, first.ID, again.ID)
 
 	// A changed-amount retry at the same key is a 409 caller bug.
-	body["amount"] = 10_000
+	body["amount"] = "10000"
 	w = adminCreditPost(t, admin, path, body)
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "idempotency_key_reused")
@@ -132,7 +140,7 @@ func TestAdminCreditGrant_RequiresCreditsGrantPermission(t *testing.T) {
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate})
 
 	body := map[string]any{
-		"currency": money.DefaultCurrency, "amount": 5_000,
+		"currency": money.DefaultCurrency, "amount": "5000",
 		"source_id": "or906-denied-" + uuid.NewString(),
 	}
 	w := adminCreditPost(t, support, "/v1/merchant/customers/"+uuid.NewString()+"/credits", body)

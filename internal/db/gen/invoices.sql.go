@@ -155,6 +155,55 @@ func (q *Queries) CountInvoicePaymentAttemptsByPayer(ctx context.Context, arg Co
 	return count, err
 }
 
+const countInvoicePaymentAttemptsByPayerForInvoices = `-- name: CountInvoicePaymentAttemptsByPayerForInvoices :many
+SELECT invoice_id, count(*)::bigint AS attempt_count
+FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = ANY($3::uuid[])
+GROUP BY invoice_id
+LIMIT $4::int
+`
+
+type CountInvoicePaymentAttemptsByPayerForInvoicesParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceIds []uuid.UUID
+	RowLimit   int32
+}
+
+type CountInvoicePaymentAttemptsByPayerForInvoicesRow struct {
+	InvoiceID    uuid.UUID
+	AttemptCount int64
+}
+
+// Customer recovery view (#809): every recorded attempt per invoice. One row
+// per requested invoice; row_limit is the request's own size.
+func (q *Queries) CountInvoicePaymentAttemptsByPayerForInvoices(ctx context.Context, arg CountInvoicePaymentAttemptsByPayerForInvoicesParams) ([]CountInvoicePaymentAttemptsByPayerForInvoicesRow, error) {
+	rows, err := q.db.Query(ctx, countInvoicePaymentAttemptsByPayerForInvoices,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceIds,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountInvoicePaymentAttemptsByPayerForInvoicesRow
+	for rows.Next() {
+		var i CountInvoicePaymentAttemptsByPayerForInvoicesRow
+		if err := rows.Scan(&i.InvoiceID, &i.AttemptCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countInvoicesByPayer = `-- name: CountInvoicesByPayer :one
 SELECT count(*) FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2
@@ -1060,6 +1109,72 @@ func (q *Queries) ListInvoicesByPayer(ctx context.Context, arg ListInvoicesByPay
 			&i.LastCollectionFailureCode,
 			&i.LastCollectionFailureMessage,
 			&i.CollectionIntentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLatestFailedInvoicePaymentAttemptsByPayer = `-- name: ListLatestFailedInvoicePaymentAttemptsByPayer :many
+SELECT DISTINCT ON (invoice_id) id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key
+FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = ANY($3::uuid[])
+  AND status = 'failed'
+ORDER BY invoice_id, attempted_at DESC, id DESC
+LIMIT $4::int
+`
+
+type ListLatestFailedInvoicePaymentAttemptsByPayerParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	InvoiceIds []uuid.UUID
+	RowLimit   int32
+}
+
+// Customer recovery view (#809): the newest failed attempt per invoice. One
+// row per requested invoice; row_limit is the request's own size.
+func (q *Queries) ListLatestFailedInvoicePaymentAttemptsByPayer(ctx context.Context, arg ListLatestFailedInvoicePaymentAttemptsByPayerParams) ([]OpenrailsInvoicePayment, error) {
+	rows, err := q.db.Query(ctx, listLatestFailedInvoicePaymentAttemptsByPayer,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.InvoiceIds,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsInvoicePayment
+	for rows.Next() {
+		var i OpenrailsInvoicePayment
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.InvoiceID,
+			&i.LedgerTransferID,
+			&i.Currency,
+			&i.Amount,
+			&i.Status,
+			&i.Rail,
+			&i.RailPaymentID,
+			&i.FailureCode,
+			&i.FailureMessage,
+			&i.AttemptedAt,
+			&i.SettledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.FailureReason,
+			&i.PaymentMethodID,
+			&i.IdempotencyKey,
 		); err != nil {
 			return nil, err
 		}

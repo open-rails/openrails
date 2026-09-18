@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -26,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -152,7 +152,7 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 
 	cycleHours32 := int32(simCycleHours)
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-		ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: dbtest.TestMerchantID.UUID(),
+		ID: priceID, ProductID: productID, Amount: 9_990_000, Currency: "USD", MerchantID: dbtest.TestMerchantID.UUID(),
 		Archived: false, AccessDurationHours: &cycleHours32, AutoRenew: true,
 		CreatedAt: now, UpdatedAt: now,
 	})
@@ -197,8 +197,8 @@ func seedSimSubscription(t *testing.T, ctx context.Context, dbi *db.DB, periodSt
 			// moved; the signup payment is a real rail settlement.
 			MoneyMovement: models.MoneyMovementRail,
 			TransactionID: "txn_signup_" + uuid.New().String(),
-			Amount:        999,
-			ListAmount:    999,
+			Amount:        9_990_000,
+			ListAmount:    9_990_000,
 			Currency:      "USD",
 			Status:        payments.PaymentStatusCompletedValue,
 			PurchasedAt:   periodStart,

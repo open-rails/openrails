@@ -22,6 +22,8 @@ The fixed viewer role reads invoices. Support also retries collection. Invoice u
 
 Successful local actions return 200; an unresolved collection answers 202 with its live attempt. Invalid state, conflicting remittance/reference, a live collection operation and a new retry key while an operation is unresolved return 409. Invalid input returns 400; foreign or missing invoice/customer IDs return 404; insufficient permissions return 403. The existing HTTP idempotency cache may return the original successful response verbatim on replay.
 
+The customer's own surface (#809) runs the same operation under a user origin: `POST /v1/me/invoices/{id}/pay-now` (and `POST /v1/merchant/customers/{customer_id}/invoices/{id}/pay-now` for a host acting for its authenticated customer) charges an open or past-due invoice through a saved method the payer owns, on OpenRails-driven saved-method rails only (NMI); it needs no prior failure and never reopens an uncollectible invoice. See [endpoints](api/endpoints.md#customer-payment-recovery-809).
+
 A never-attempted open invoice is not manually retryable. Retry eligibility applies to past-due/uncollectible automatic invoices and open automatic invoices with a prior failure. While `collection_intent_id` names a live operation the invoice accepts no support mutation; an operation the verifier cannot settle is resolved with `openrails intents resolve` (exact provider receipt or provider-confirmed non-execution, see [provider uncertainty](provider-uncertainty.md)). There is no unpark/force-resend operation.
 
 ## Amount units
@@ -32,8 +34,6 @@ The JPY acceptance test proves: 120000 native units = 12 JPY; a 20000-native man
 
 ## Invoice notifications
 
-Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. The first overdue transition queues `invoice_overdue` atomically. Repeating either operation does not repeat its notification. These ordinary payer notices require no business profile, onboarding, KYC or terms-acceptance record. Collection and delinquency discover work from invoices and account policy.
+Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. The first overdue transition queues `invoice_overdue` atomically. Repeating either operation does not repeat its notification. Collection and delinquency discover work from invoices and account policy; hosts own onboarding and any further notification policy.
 
-The enterprise onboarding routes, business profiles, repeated business reminder ladder, budget-alert thresholds and suspension-recommendation product are unavailable. Hosts own onboarding and any extra notification policy. Core invoice collection, negotiated rates, invoice profiles and delinquency remain available independently.
-
-Invoice collection uses the explicit `collection_payment_method_id` for the payer and currency. There is no fallback to an automatic top-up instrument. Automatic balance refill, its safety policy/panel and self-service auto-top-up settings routes are unavailable. Fiat deposits, manual funding, invoice collection and ordinary recurring subscription payments remain available.
+Invoice collection charges only the payer's explicit `collection_payment_method_id` for that currency; there is no fallback instrument.

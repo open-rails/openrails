@@ -5,12 +5,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
-
-func ptrTime(t time.Time) *time.Time { return &t }
 
 func baseSub(rail models.Rail, status models.SubscriptionStatus) *models.Subscription {
 	return &models.Subscription{

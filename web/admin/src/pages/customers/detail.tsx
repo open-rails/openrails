@@ -162,9 +162,6 @@ export function CustomerDetailPage() {
                       <TableHead className="text-muted-foreground">
                         Period ends
                       </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Email
-                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -185,7 +182,6 @@ export function CustomerDetailPage() {
                         <TableCell className="tabular-nums">
                           {formatDate(s.current_period_ends_at)}
                         </TableCell>
-                        <TableCell>{s.user_email ?? "—"}</TableCell>
                       </LinkedTableRow>
                     ))}
                   </TableBody>
@@ -241,7 +237,7 @@ export function CustomerDetailPage() {
                         </TableCell>
                         <TableCell>{p.rail}</TableCell>
                         <TableCell className="tabular-nums">
-                          {formatDate(p.purchased_at)}
+                          {formatDate(p.created_at)}
                         </TableCell>
                       </LinkedTableRow>
                     ))}
@@ -794,7 +790,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
       const amount = value.amount
         ? receivedAmount(value.amount, value.priceId)
         : undefined
-      if (amount === null || (amount !== undefined && amount < 0)) {
+      if (amount === null || amount?.startsWith("-")) {
         toast.error("Enter a non-negative amount in the price's currency")
         return
       }
@@ -924,7 +920,7 @@ function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
                     value,
                     fieldApi.form.getFieldValue("priceId")
                   )
-                  return amount !== null && amount >= 0
+                  return amount !== null && !amount.startsWith("-")
                     ? undefined
                     : "Enter a non-negative amount"
                 },

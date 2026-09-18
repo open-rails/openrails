@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -24,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -781,11 +781,11 @@ func parseCheckoutSessionID(metadata map[string]string) uuid.UUID {
 	if raw == "" {
 		return uuid.Nil
 	}
-	id, err := api.ParseCheckoutSessionID(raw)
+	id, err := openrails.ParseCheckoutSessionID(raw)
 	if err != nil {
 		return uuid.Nil
 	}
-	return id
+	return id.UUID()
 }
 
 func stripeEntitlementSet(spec map[string]*int) map[string]bool {

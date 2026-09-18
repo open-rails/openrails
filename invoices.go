@@ -61,28 +61,30 @@ type InvoiceDTO struct {
 	// CollectionIntentID names the live collection operation (`openrails
 	// intents`); no competing collection or admin mutation runs while set.
 	CollectionIntentID *uuid.UUID `json:"collection_intent_id,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
+	// Recovery is the customer's pay-now state; the customer routes fill it.
+	Recovery  *PaymentRecovery `json:"recovery,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
 }
 
 type InvoicePaymentAttemptDTO struct {
-	ID              uuid.UUID  `json:"id"`
-	InvoiceID       uuid.UUID  `json:"invoice_id"`
-	Currency        string     `json:"currency"`
-	Amount          int64      `json:"amount,string"`
-	Status          string     `json:"status"`
-	PaymentMethodID *uuid.UUID `json:"payment_method_id,omitempty"`
-	Rail            *string    `json:"rail,omitempty"`
-	RailPaymentID   *string    `json:"rail_payment_id,omitempty"`
-	FailureCode     *string    `json:"failure_code,omitempty"`
-	FailureReason   *string    `json:"failure_reason,omitempty"`
-	AttemptedAt     time.Time  `json:"attempted_at"`
-	SettledAt       *time.Time `json:"settled_at,omitempty"`
+	ID              uuid.UUID        `json:"id"`
+	InvoiceID       uuid.UUID        `json:"invoice_id"`
+	Currency        string           `json:"currency"`
+	Amount          int64            `json:"amount,string"`
+	Status          string           `json:"status"`
+	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
+	Rail            *string          `json:"rail,omitempty"`
+	RailPaymentID   *string          `json:"rail_payment_id,omitempty"`
+	FailureCode     *string          `json:"failure_code,omitempty"`
+	FailureReason   *string          `json:"failure_reason,omitempty"`
+	AttemptedAt     time.Time        `json:"attempted_at"`
+	SettledAt       *time.Time       `json:"settled_at,omitempty"`
 }
 
 type InvoiceCollectionRetryRequest struct {
-	InvoiceID       uuid.UUID `json:"invoice_id"`
-	IdempotencyKey  string    `json:"-"`
-	PaymentMethodID uuid.UUID `json:"payment_method_id"`
+	InvoiceID       uuid.UUID       `json:"invoice_id"`
+	IdempotencyKey  string          `json:"-"`
+	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
 
 type InvoiceCollectionRetryResult struct {
@@ -122,12 +124,12 @@ type InvoiceProfileDTO struct {
 type MerchantInvoiceDTO struct {
 	InvoiceDTO
 	UnitDecimals     int                  `json:"unit_decimals"`
-	CustomerID       uuid.UUID            `json:"customer_id"`
+	CustomerID       CustomerID           `json:"customer_id"`
 	AvailableActions []InvoiceAdminAction `json:"available_actions"`
 }
 
 type MerchantInvoiceFilter struct {
-	CustomerID *uuid.UUID
+	CustomerID CustomerID
 	Currency   *string
 	Status     *string
 	PeriodFrom *time.Time

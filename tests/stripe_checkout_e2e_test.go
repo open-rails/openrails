@@ -27,13 +27,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // fakeStripeAPI serves the minimal set of real Stripe wire shapes the hosted
@@ -202,7 +203,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 	token := suite.MintUserToken(userID, email)
 
 	body := map[string]any{
-		"price_id":    priceID.String(),
+		"price_id":    openrails.PriceID(priceID).String(),
 		"success_url": "https://app.test.example.com/billing/success",
 		"cancel_url":  "https://app.test.example.com/billing/cancel",
 		"payment": map[string]any{
@@ -232,7 +233,7 @@ func TestCheckoutSessionStripeRedirect(t *testing.T) {
 		"redirect_url should be the hosted-checkout URL Stripe returned")
 
 	// The session row is the durable artifact the webhook leg later resolves.
-	sessionID, err := api.ParseCheckoutSessionID(resp["id"].(string))
+	sessionID, err := openrails.ParseCheckoutSessionID(resp["id"].(string))
 	require.NoError(t, err)
 	var status, rail, redirectURL string
 	require.NoError(t, suite.Pool.QueryRow(context.Background(), `

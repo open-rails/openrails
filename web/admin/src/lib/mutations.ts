@@ -21,7 +21,7 @@ import {
   rotateWebhookURL,
   deactivatePrice,
   deactivateProduct,
-  deletePaymentProvider,
+  archivePaymentProviderAccount,
   deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
   deleteWebhook,
@@ -283,7 +283,7 @@ export const adminMutations = {
         reason,
         revokeAccess,
       }: {
-        amount: number
+        amount: string
         reason: string
         revokeAccess: boolean
       }) => refundPayment(paymentId, amount, reason, revokeAccess),
@@ -386,8 +386,12 @@ export const adminMutations = {
     const paymentsKey = queryKeys.payments()
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "change-tier"],
-      mutationFn: (priceId: string) =>
-        changeSubscriptionTier(subscriptionId, priceId),
+      mutationFn: (change: { priceId: string; idempotencyKey: string }) =>
+        changeSubscriptionTier(
+          subscriptionId,
+          change.priceId,
+          change.idempotencyKey
+        ),
       onSuccess: () =>
         Promise.all([
           queryClient.invalidateQueries({ queryKey: subscriptionsKey }),
@@ -757,11 +761,13 @@ export const adminMutations = {
       mutationKey: [...queryKeys.settings(), "payment-providers", "archive"],
       mutationFn: ({
         rail,
-        environment,
+        id,
+        allowLast,
       }: {
         rail: string
-        environment?: string
-      }) => deletePaymentProvider(rail, environment),
+        id: string
+        allowLast?: boolean
+      }) => archivePaymentProviderAccount(rail, id, allowLast),
       onSuccess: invalidateExactOnSuccess(queryClient, [
         ...queryKeys.settings(),
         "payment-providers",

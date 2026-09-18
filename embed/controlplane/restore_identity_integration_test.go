@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -25,7 +24,7 @@ func TestControlPlaneProvisionsRestoreIdentityUnderDestinationAuthority(t *testi
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dbtest.SharedPostgresDSN(t)},
 		Auth: &config.AuthConfig{Issuer: "https://restore.openrails.test", KeysPath: t.TempDir()},
 	}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})

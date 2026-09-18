@@ -13,11 +13,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
 
@@ -93,7 +93,7 @@ func proveMerchantMeteringRouteToInvoice(
 		"price": map[string]any{
 			"model":    pricing.ModelPerUnit,
 			"currency": "USD",
-			"per_unit": map[string]any{"unit_amount": 100_000, "divide_by": 1},
+			"per_unit": map[string]any{"unit_amount": "100000", "divide_by": 1},
 		},
 	}
 	status, body = requestJSON(t, http.MethodPut, rateURL, token, defaultCard)
@@ -147,7 +147,7 @@ VALUES ($1, $2)`, customerID, merchantID)
 		"price": map[string]any{
 			"model":    pricing.ModelPerUnit,
 			"currency": "USD",
-			"per_unit": map[string]any{"unit_amount": 40_000, "divide_by": 1},
+			"per_unit": map[string]any{"unit_amount": "40000", "divide_by": 1},
 		},
 		"allowance": map[string]any{"included": 10},
 	})
@@ -187,7 +187,7 @@ VALUES ($1, $2)`, customerID, merchantID)
 	updatedDefault["price"] = map[string]any{
 		"model":    pricing.ModelPerUnit,
 		"currency": "USD",
-		"per_unit": map[string]any{"unit_amount": 200_000, "divide_by": 1},
+		"per_unit": map[string]any{"unit_amount": "200000", "divide_by": 1},
 	}
 	status, body = requestJSON(t, http.MethodPut, rateURL, token, updatedDefault)
 	require.Equal(t, http.StatusOK, status, string(body))

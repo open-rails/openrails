@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/pkg/embedded"
+	"github.com/open-rails/openrails/internal/hosttools"
 )
 
 const defaultCatalogManifestPath = "/etc/openrails/catalog.yaml"
@@ -76,7 +76,7 @@ func runPushCatalog(cmd *cobra.Command, opts catalogOptions) error {
 	}
 
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-	push := embedded.CatalogPushOptions{
+	push := hosttools.CatalogPushOptions{
 		Config:    cfg,
 		File:      opts.file,
 		Out:       cmd.OutOrStdout(),
@@ -92,5 +92,5 @@ func runPushCatalog(cmd *cobra.Command, opts catalogOptions) error {
 		defer close()
 		push.NameAuthority = authority
 	}
-	return embedded.PushMerchantCatalog(cmd.Context(), push)
+	return hosttools.PushMerchantCatalog(cmd.Context(), push)
 }
