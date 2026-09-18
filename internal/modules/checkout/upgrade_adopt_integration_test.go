@@ -4,7 +4,6 @@ package checkout
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -302,9 +301,9 @@ func TestUpgradePositiveSuccessorReceipt_CompletesAtomically(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("approve")
 
-	resp, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
+	resp, err := fx.upgrade(t)
 	require.NoError(t, err, "a positive successor receipt completes the upgrade")
-	require.Equal(t, "success", resp.Status)
+	require.Equal(t, "succeeded", resp.Status)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "never a second blind create")
 
 	// The adopted remote subscription is registered locally and active.
@@ -324,15 +323,13 @@ func TestUpgradePositiveSuccessorReceipt_CompletesAtomically(t *testing.T) {
 }
 
 // Ambiguous successor create with no immediate roster match: the request
-// surfaces ErrCheckoutProcessing and a retry never re-sends the create. An
-// empty provider search is not proof that the first write was unsent.
+// answers "processing" and a retry never re-sends the create. An empty
+// provider search is not proof that the first write was unsent.
 func TestUpgradeAmbiguousCreateUnresolved_NeverRecreates(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
 	fx.gateway.createMode.Store("ambiguousLost")
 
-	_, err := fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrCheckoutProcessing), "unresolved ambiguity is processing, never a decline: %v", err)
+	first := fx.upgradeProcessing(t)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	firstOrder := fx.gateway.lastOrder.Load().(string)
 	require.NotEmpty(t, firstOrder)
@@ -346,9 +343,7 @@ func TestUpgradeAmbiguousCreateUnresolved_NeverRecreates(t *testing.T) {
 	// in processing until an operator/provider reconciliation supplies a
 	// positive receipt; it must not issue a second remote create.
 	fx.gateway.createMode.Store("approve")
-	_, err = fx.svc.processUpgrade(fx.ctx, fx.req, fx.user, fx.newPrice, fx.newProduct, fx.existingSub, fx.target)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrCheckoutProcessing)
+	require.Equal(t, first, fx.upgradeProcessing(t), "the retry answers the same operation")
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load(), "must not resend an unresolved provider write")
 	require.Equal(t, firstOrder, fx.gateway.lastOrder.Load().(string), "the immutable order identity is retained")
 }

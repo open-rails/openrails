@@ -93,6 +93,8 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/checkout/custodian_sale.go:CustodianSalePayload.AmountMicros amount_micros":                                                    notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_sale_intent.go:NMISalePayload.AmountMicros amount_micros":                                                         notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_subscription_intent.go:NMISubscriptionCreatePayload.AmountMicros amount_micros":                                   notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.RecurringAmount recurring_amount":                                notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.AmountDueNow amount_due_now":                                     notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_upgrade_intent.go:NMIUpgradePayload.ProrationAmount proration_amount":                                             notHTTPIntentPayload,
 	"internal/modules/checkout/nmi_upgrade_intent.go:NMIUpgradePayload.RecurringAmount recurring_amount":                                             notHTTPIntentPayload,
 	"internal/modules/delinquency/service.go:Snapshot.OverdueAmount overdue_amount":                                                                  notHTTPInternalRow,

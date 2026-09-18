@@ -282,6 +282,21 @@ func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.Op
 	return r.ExecuteByID(ctx, row.ID)
 }
 
+// EnqueueOwnedAndExecute is EnqueueAndExecute for work whose idempotency key
+// may already name another request: owns sees the canonical row the enqueue
+// returned (the existing row when the key was taken) and refuses it before
+// anything executes or is returned.
+func (r *Runner) EnqueueOwnedAndExecute(ctx context.Context, p EnqueueParams, owns func(gen.OpenrailsRailIntent) error) (gen.OpenrailsRailIntent, error) {
+	row, err := r.Store.Enqueue(ctx, p)
+	if err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
+	if err := owns(row); err != nil {
+		return gen.OpenrailsRailIntent{}, err
+	}
+	return r.ExecuteByID(ctx, row.ID)
+}
+
 // ExecuteByID runs committed work without enqueuing or changing its payload.
 func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.OpenrailsRailIntent, error) {
 	row, err := r.Store.Get(ctx, id)

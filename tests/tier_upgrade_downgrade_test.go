@@ -266,6 +266,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+nonExistentSubID+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -296,6 +297,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -340,6 +342,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -392,6 +395,7 @@ func TestChangeTierEndpoint(t *testing.T) {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("POST", "/v1/me/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -514,6 +518,7 @@ func TestAdminChangeTierParity(t *testing.T) {
 				"/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier",
 				bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", uuid.NewString())
 			req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 			admin.ServeHTTP(w, req)
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -553,6 +558,7 @@ func TestAdminChangeTierGuards(t *testing.T) {
 			"/v1/merchant/subscriptions/sub_"+subID.String()+"/change-tier"+suffix,
 			bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", uuid.NewString())
 		req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 		admin.ServeHTTP(rec, req)
 		return rec
@@ -569,12 +575,24 @@ func TestAdminChangeTierGuards(t *testing.T) {
 		rec := post(t, sub.ID, "")
 		require.Equal(t, http.StatusConflict, rec.Code, rec.Body.String())
 
+		// A missing Idempotency-Key is refused before any admission guard.
+		body, err := json.Marshal(map[string]string{"price_id": openrails.PriceID(premiumPlusPriceID).String()})
+		require.NoError(t, err)
+		unkeyed := httptest.NewRecorder()
+		unkeyedReq := httptest.NewRequest(http.MethodPost, "/v1/merchant/subscriptions/sub_"+sub.ID.String()+"/change-tier", bytes.NewReader(body))
+		unkeyedReq.Header.Set("Content-Type", "application/json")
+		unkeyedReq.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
+		admin.ServeHTTP(unkeyed, unkeyedReq)
+		require.Equal(t, http.StatusBadRequest, unkeyed.Code, unkeyed.Body.String())
+		require.Contains(t, unkeyed.Body.String(), openrails.CodeTierChangeIdempotencyKeyRequired)
+
 		serviceRequest := &checkout.TierChangeRequest{
 			PriceID:        openrails.PriceID(premiumPlusPriceID).String(),
 			SubscriptionID: sub.ID,
+			IdempotencyKey: uuid.NewString(),
 		}
 		customer := &checkout.UserIdentity{ID: userID}
-		_, err := suite.App.Runtime.CheckoutService.TierChange(suite.MerchantCtx(), serviceRequest, customer)
+		_, err = suite.App.Runtime.CheckoutService.TierChange(suite.MerchantCtx(), serviceRequest, customer)
 		require.ErrorContains(t, err, "only active or past-due subscriptions")
 		_, err = suite.App.Runtime.CheckoutService.TierChangePreview(suite.MerchantCtx(), serviceRequest, customer)
 		require.ErrorContains(t, err, "only active or past-due subscriptions")

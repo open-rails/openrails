@@ -39,20 +39,34 @@ type NMISale struct {
 	At            time.Time
 }
 
-// FakeNMIGateway is a loopback NMI: the classic Direct Post sale, the classic
-// Query API search and the v5 exact transaction read — the three wire paths
-// invoice collection, checkout sales and their verifiers use. A recorded sale
-// is reported by search and exact read only while Visible, which models
-// delayed provider visibility. It is a fake provider: nothing here proves live
-// NMI behavior.
+// NMIEnrollment is one recurring enrollment (recurring=add_subscription) the
+// gateway recorded.
+type NMIEnrollment struct {
+	SubscriptionID string
+	OrderID        string
+	Vault          string
+	Plan           string
+	Amount         string
+	Deleted        bool
+}
+
+// FakeNMIGateway is a loopback NMI: the classic Direct Post sale and
+// recurring enrollment, the classic Query API search, and the v5 exact
+// transaction and subscription reads plus subscription delete — the wire
+// paths invoice collection, checkout sales, tier upgrades and their verifiers
+// use. A recorded sale is reported by search and exact read only while
+// Visible, which models delayed provider visibility. Enrollments always
+// approve. It is a fake provider: nothing here proves live NMI behavior.
 type FakeNMIGateway struct {
 	URL string
 
-	server  *httptest.Server
-	mu      sync.Mutex
-	mode    NMISaleMode
-	visible bool
-	sales   []NMISale
+	server      *httptest.Server
+	mu          sync.Mutex
+	mode        NMISaleMode
+	visible     bool
+	sales       []NMISale
+	attempts    int
+	enrollments []NMIEnrollment
 }
 
 // NewFakeNMIGateway starts the gateway approving and visible. Point a runtime
@@ -87,8 +101,24 @@ func (g *FakeNMIGateway) Sales() []NMISale {
 	return append([]NMISale(nil), g.sales...)
 }
 
-// SaleCount is the number of sale submissions that reached the gateway.
+// SaleCount is the number of sales the gateway recorded (declines record
+// nothing).
 func (g *FakeNMIGateway) SaleCount() int { return len(g.Sales()) }
+
+// SaleAttempts counts every sale submission, declines included.
+func (g *FakeNMIGateway) SaleAttempts() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.attempts
+}
+
+// Enrollments returns every recurring enrollment the gateway recorded, in
+// order.
+func (g *FakeNMIGateway) Enrollments() []NMIEnrollment {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return append([]NMIEnrollment(nil), g.enrollments...)
+}
 
 // SaleForOrder returns the recorded sale carrying orderID.
 func (g *FakeNMIGateway) SaleForOrder(orderID string) (NMISale, bool) {
@@ -105,11 +135,17 @@ func (g *FakeNMIGateway) serve(w http.ResponseWriter, r *http.Request) {
 		g.serveExactRead(w, strings.TrimPrefix(r.URL.Path[strings.LastIndex(r.URL.Path, "/payments/"):], "/payments/"))
 		return
 	}
+	if (r.Method == http.MethodGet || r.Method == http.MethodDelete) && strings.Contains(r.URL.Path, "/subscriptions/") {
+		g.serveSubscription(w, r.Method, strings.TrimPrefix(r.URL.Path[strings.LastIndex(r.URL.Path, "/subscriptions/"):], "/subscriptions/"))
+		return
+	}
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	switch {
+	case r.Form.Get("recurring") == "add_subscription":
+		g.serveEnrollment(w, r)
 	case r.Form.Get("type") == "sale":
 		g.serveSale(w, r)
 	case r.Form.Get("report_type") == "transaction":
@@ -122,6 +158,7 @@ func (g *FakeNMIGateway) serve(w http.ResponseWriter, r *http.Request) {
 func (g *FakeNMIGateway) serveSale(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.attempts++
 	if g.mode == NMISaleDecline {
 		fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=200")
 		return
@@ -140,6 +177,46 @@ func (g *FakeNMIGateway) serveSale(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fmt.Fprintf(w, "response=1&responsetext=SUCCESS&authcode=123456&transactionid=%s&orderid=%s&response_code=100", sale.TransactionID, sale.OrderID)
+}
+
+func (g *FakeNMIGateway) serveEnrollment(w http.ResponseWriter, r *http.Request) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	enrollment := NMIEnrollment{
+		SubscriptionID: "rsub-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12],
+		OrderID:        r.Form.Get("orderid"),
+		Vault:          r.Form.Get("customer_vault_id"),
+		Plan:           r.Form.Get("plan_id"),
+		Amount:         r.Form.Get("amount"),
+	}
+	g.enrollments = append(g.enrollments, enrollment)
+	fmt.Fprintf(w, "response=1&responsetext=SUCCESS&subscription_id=%s&response_code=100", enrollment.SubscriptionID)
+}
+
+// serveSubscription is the v5 subscription read (a live enrollment, else
+// 404) and delete.
+func (g *FakeNMIGateway) serveSubscription(w http.ResponseWriter, method, id string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	for i := range g.enrollments {
+		enrollment := &g.enrollments[i]
+		if enrollment.SubscriptionID != id || enrollment.Deleted {
+			continue
+		}
+		if method == http.MethodDelete {
+			enrollment.Deleted = true
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"object": "subscription", "id": enrollment.SubscriptionID, "customer_vault_id": enrollment.Vault,
+			"delayed_condition": "active", "plan": map[string]any{"id": enrollment.Plan},
+		})
+		return
+	}
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"subscription not found"}`)
 }
 
 func (g *FakeNMIGateway) serveSearch(w http.ResponseWriter, orderID string) {

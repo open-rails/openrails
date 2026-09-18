@@ -386,8 +386,12 @@ export const adminMutations = {
     const paymentsKey = queryKeys.payments()
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "change-tier"],
-      mutationFn: (priceId: string) =>
-        changeSubscriptionTier(subscriptionId, priceId),
+      mutationFn: (change: { priceId: string; idempotencyKey: string }) =>
+        changeSubscriptionTier(
+          subscriptionId,
+          change.priceId,
+          change.idempotencyKey
+        ),
       onSuccess: () =>
         Promise.all([
           queryClient.invalidateQueries({ queryKey: subscriptionsKey }),

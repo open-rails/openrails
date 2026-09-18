@@ -142,6 +142,12 @@ func (h *Harness) FireProviderIntentVerify(pool *pgxpool.Pool) {
 // provider receipt (or provider-confirmed non-execution) an operator supplies
 // after checking the gateway portal.
 func (h *Harness) ResolveOperation(nmiGatewayURL string, mid merchant.ID, id uuid.UUID, receipt string, notExecuted bool) (string, error) {
+	return h.ResolveOperationWith(config.ProviderSandboxConfig{NMIGatewayURL: nmiGatewayURL}, mid, id, "", receipt, notExecuted)
+}
+
+// ResolveOperationWith is ResolveOperation against any loopback provider
+// set, naming the provider step of a multi-step operation when step is set.
+func (h *Harness) ResolveOperationWith(sandbox config.ProviderSandboxConfig, mid merchant.ID, id uuid.UUID, step, receipt string, notExecuted bool) (string, error) {
 	h.t.Helper()
 	binary, err := h.openrailsBinary()
 	require.NoError(h.t, err)
@@ -150,9 +156,12 @@ func (h *Harness) ResolveOperation(nmiGatewayURL string, mid merchant.ID, id uui
 	if h.Redis != nil {
 		redisAddr = h.Redis.Options().Addr
 	}
-	cfg := "env: dev\nmerchant_source: api\nsecret_backend: db\ntest_mode: sandbox\nprovider_write_mode: full\ndb:\n  url: " + h.DSN + "\nredis:\n  addr: " + redisAddr + "\nprovider_sandbox:\n  nmi_gateway_url: " + nmiGatewayURL + "\n"
+	cfg := "env: dev\nmerchant_source: api\nsecret_backend: db\ntest_mode: sandbox\nprovider_write_mode: full\ndb:\n  url: " + h.DSN + "\nredis:\n  addr: " + redisAddr + "\n" + providerSandboxYAML(sandbox)
 	require.NoError(h.t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(cfg), 0o600))
 	args := []string{"intents", "resolve", "--config", filepath.Join(dir, "config.yaml"), "--merchant", "id:" + mid.String(), "--intent", id.String(), "--actor", "ops@example.test", "--reason", "gateway portal"}
+	if step != "" {
+		args = append(args, "--step", step)
+	}
 	if notExecuted {
 		args = append(args, "--not-executed")
 	} else {
