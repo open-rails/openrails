@@ -126,3 +126,34 @@ func TestNestedContractsRejectRawFieldsAndPreserveIndefiniteAccess(t *testing.T)
 		}
 	}
 }
+
+func TestCanonicalTimestampAndArraySafety(t *testing.T) {
+	for _, v := range []string{"2026-01-01 00:00:00+00", "2026-01-01 00:00:00.123456+00"} {
+		if err := ValidateValues(Profile{Name: "customers", Columns: []Column{{"created_at", "timestamptz"}}}, []*string{&v}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, v := range []string{"2026-01-01 00:00:00.1234567+00", "2026-01-01 00:00:00.100000+00"} {
+		if ValidateValues(Profile{Name: "customers", Columns: []Column{{"created_at", "timestamptz"}}}, []*string{&v}) == nil {
+			t.Fatal("accepted noncanonical timestamp")
+		}
+	}
+	for _, v := range []string{`{}`, `{USD,daily}`, `{"USD,daily","quoted\"key","back\\slash"}`} {
+		if !safeTextArray(v) {
+			t.Fatal("refused safe array", v)
+		}
+	}
+	for _, v := range []string{`[2:2]={x}`, `{{x}}`, `{NULL}`, `{x,}`, `{x,4111111111111111}`, `{sk_live_test}`, `{"unclosed}`} {
+		if safeTextArray(v) {
+			t.Fatal("accepted invalid or sensitive array", v)
+		}
+	}
+	for _, field := range []string{"catalog_meters.group_by", "catalog_rate_cards.filter"} {
+		if err := validateJSON(field, "null"); err != nil {
+			t.Fatal(field, err)
+		}
+	}
+	if !safeText("12345678-1234-1234-1234-123456789012") {
+		t.Fatal("UUID mistaken for PAN")
+	}
+}

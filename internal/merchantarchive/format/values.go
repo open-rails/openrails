@@ -16,7 +16,7 @@ func ValidateValues(p Profile, values []*string) error {
 			continue
 		}
 		v := *values[i]
-		if c.Type != "bigint" && c.Type != "integer" && c.Type != "jsonb" && !safeText(v) {
+		if (c.Type == "text" || strings.HasPrefix(c.Type, "character varying")) && !safeText(v) {
 			return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)
 		}
 		bad := func() error { return fmt.Errorf("unsupported or invalid value in %s.%s", p.Name, c.Name) }
@@ -42,8 +42,12 @@ func ValidateValues(p Profile, values []*string) error {
 				return bad()
 			}
 		case "timestamp with time zone", "timestamptz":
-			_, err := time.Parse("2006-01-02 15:04:05.999999999-07", v)
-			if err != nil || !strings.HasSuffix(v, "+00") {
+			parsed, err := time.Parse("2006-01-02 15:04:05.999999-07", v)
+			if err != nil || !strings.HasSuffix(v, "+00") || parsed.Format("2006-01-02 15:04:05.999999-07") != v {
+				return bad()
+			}
+		case "text[]":
+			if !safeTextArray(v) {
 				return bad()
 			}
 		case "jsonb":
@@ -58,6 +62,10 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		case "invoice_payments.status":
 			if v == "attempted" {
+				return bad()
+			}
+		case "checkout_sessions.status":
+			if v != "succeeded" && v != "failed" && v != "expired" && v != "canceled" {
 				return bad()
 			}
 		case "admission_operations.state":
@@ -80,6 +88,9 @@ func ValidateValues(p Profile, values []*string) error {
 	}
 	if p.Name == "webhook_events" && value(p, values, "completed_at") == nil {
 		return fmt.Errorf("unfinished webhook event")
+	}
+	if p.Name == "host_outbox" && value(p, values, "delivered_at") == nil {
+		return fmt.Errorf("undelivered host event")
 	}
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")

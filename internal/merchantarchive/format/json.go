@@ -92,7 +92,7 @@ var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds"
 var profileJSON = object(map[string]jsonRule{"display_name": textValue, "logo_url": textValue, "from_email": textValue, "support_url": textValue, "signup_url": textValue})
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
 var invoiceLineJSON = array(object(map[string]jsonRule{"event_type": textValue, "amount": integerValue, "count": integerValue, "dimensions": dictionary(integerValue)}))
-var pspSettingsJSON = object(map[string]jsonRule{"tokenization_key": textValue, "rpc_provider": textValue, "recipient_wallet": textValue, "tokens": dictionary(object(map[string]jsonRule{"mint": textValue, "name": textValue}))})
+var pspSettingsJSON = object(map[string]jsonRule{"tokenization_key": textValue, "tokenization_url": textValue, "rpc_provider": textValue, "recipient_wallet": textValue, "tokens": dictionary(object(map[string]jsonRule{"mint": textValue, "name": textValue}))})
 var rateJSON = object(map[string]jsonRule{
 	"model": textValue, "currency": textValue,
 	"flat":           object(map[string]jsonRule{"amount": integerValue}),
@@ -113,14 +113,14 @@ var jsonRules = map[string]jsonRule{
 	"billing_policies.policy": object(map[string]jsonRule{
 		"kind": textValue, "outstanding_cap_amount": integerValue, "spend_windows": array(budgetWindow), "bad_spend_windows": array(budgetWindow), "accrual_rate_cap_per_hour": integerValue, "accrual_rate_window_seconds": integerValue, "collection_threshold_amount": nullable(integerValue), "collection_cycle_boundary": func(v any) bool { return v == "" }, "delinquency_grace_days": nullable(integerValue), "delinquency_amount_floor": nullable(integerValue), "policy_currency": textValue,
 	}),
-	"catalog_meters.group_by": dictionary(textValue),
+	"catalog_meters.group_by": nullable(dictionary(textValue)),
 	"merchant_configurations.config": object(map[string]jsonRule{
 		"profile": profileJSON, "collection_threshold": nullable(integerValue), "monthly_floor": nullable(integerValue), "billing_period_boundary": textValue, "arrears_grace_days": nullable(integerValue), "arrears_delinquency_floor": nullable(integerValue), "delegated_invoker_wasted_spend_windows": array(budgetWindow), "alert_email": textValue, "reprice_notice_window_days": nullable(integerValue),
 		"checkout_routing": array(object(map[string]jsonRule{"match": object(map[string]jsonRule{"currency": textValue, "product": textValue, "price": textValue, "mode": textValue, "country": textValue}), "prefer": array(textValue)})),
 	}),
-	"psps.evidence":                    object(map[string]jsonRule{"settings": pspSettingsJSON, "signer": object(map[string]jsonRule{"mode": textValue, "key": textValue})}),
+	"psps.evidence":                    object(map[string]jsonRule{"settings": pspSettingsJSON, "public_config": object(map[string]jsonRule{"publishable_key": textValue, "tokenization_key": textValue}), "signer": object(map[string]jsonRule{"mode": textValue, "key": textValue})}),
 	"price_psp_bindings.configuration": emptyObject,
-	"catalog_rate_cards.filter":        dictionary(array(textValue)),
+	"catalog_rate_cards.filter":        nullable(dictionary(array(textValue))),
 	"catalog_rate_cards.allowance":     nullable(object(map[string]jsonRule{"included": integerValue, "accrue_from": textValue, "cap": textValue})),
 	"catalog_rate_cards.price":         rateJSON,
 	"invoices.line_items":              invoiceLineJSON, "invoices.money_movements": dictionary(integerValue), "invoices.tax": emptyObject, "invoices.billing_contacts": contactsJSON,
@@ -128,6 +128,11 @@ var jsonRules = map[string]jsonRule{
 	"invoker_spend_limits.windows":       array(budgetWindow),
 	"grants.spec_snapshot":               nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue})})),
 	"usage_events.dimensions":            dictionary(integerValue),
+	"checkout_sessions.metadata":         nullable(emptyObject),
+	"checkout_sessions.rail_fields":      nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
+	"checkout_sessions.rail_state":       nullable(object(map[string]jsonRule{"_openrails_request_fingerprint": textValue, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
+	"checkout_sessions.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
+	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_since": textValue, "overdue_amount": integerValue, "overdue_invoices": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
 	"rail_intents.payload":               nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"rail_intents.result_evidence":       nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
 	"admission_operations.terms":         object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),
@@ -202,6 +207,9 @@ func readJSON(d *json.Decoder, depth int) (any, error) {
 }
 
 func safeText(s string) bool {
+	if uuidPattern.MatchString(s) {
+		return true
+	}
 	if strings.Contains(s, "-----BEGIN ") || strings.Contains(s, "sk_live_") || strings.Contains(s, "sk_test_") {
 		return false
 	}
