@@ -98,7 +98,11 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 				w.WriteHeader(int(st))
 				return
 			}
-			_, _ = w.Write([]byte(f.saleBody.Load().(string)))
+			body := f.saleBody.Load().(string)
+			if strings.HasPrefix(body, "response=1&") {
+				f.charged.Store(true)
+			}
+			_, _ = w.Write([]byte(body))
 			return
 		}
 		_, _ = w.Write([]byte("response=1"))
@@ -117,14 +121,15 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 }
 
 type rebillFixture struct {
-	db        *db.DB
-	store     *Store
-	subID     uuid.UUID
-	periodEnd time.Time
-	orderRef  string
-	pspID     uuid.UUID
-	methodID  uuid.UUID
-	vault     string
+	db               *db.DB
+	store            *Store
+	subID            uuid.UUID
+	periodEnd        time.Time
+	orderRef         string
+	pspID            uuid.UUID
+	methodID         uuid.UUID
+	vault            string
+	billing, railSub string
 }
 
 // The fixture price is $9.99 (native micros); the rebill freezes it.
@@ -166,6 +171,7 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, $3, 'USD', 720, true, $4)`, priceID, productID, rebillAmount, tenantID)
 	fx.methodID, fx.vault = paymentMethodID, "vault-"+suffix
+	fx.billing, fx.railSub = "bill-"+suffix, "psid-"+suffix
 	exec(`INSERT INTO openrails.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
@@ -195,6 +201,20 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 	subID := fx.subID
 	windowEnd := fx.periodEnd.Add(14 * 24 * time.Hour)
+	// Match production admission: capture the credential sequence now. Later
+	// changes to the method cannot refresh an already accepted operation.
+	var anchor, legacy string
+	if err := fx.db.Pool().QueryRow(context.Background(),
+		`SELECT stored_credential_recurring_ref, initial_transaction_id FROM openrails.payment_methods WHERE id=$1`, fx.methodID).Scan(&anchor, &legacy); err != nil {
+		panic(err)
+	}
+	anchorSource := "agreement"
+	if anchor == "" {
+		anchor, anchorSource = legacy, "legacy_initial_transaction_id"
+	}
+	if anchor == "" {
+		anchorSource = "unavailable"
+	}
 	return EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
@@ -202,16 +222,20 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 		IntentType:     TypeManualRebill,
 		SubscriptionID: &subID,
 		Payload: ManualRebillPayload{
-			SubscriptionID:  fx.subID,
-			PeriodEnd:       fx.periodEnd,
-			Rail:            "mobius",
-			OrderReference:  fx.orderRef,
-			Attempt:         attempt,
-			PaymentMethodID: fx.methodID,
-			CustomerVaultID: fx.vault,
-			Currency:        "USD",
-			Amount:          rebillAmount,
-			AmountMinor:     rebillAmountMinor,
+			SubscriptionID:         fx.subID,
+			PeriodEnd:              fx.periodEnd,
+			Rail:                   "mobius",
+			OrderReference:         fx.orderRef,
+			Attempt:                attempt,
+			PaymentMethodID:        fx.methodID,
+			CustomerVaultID:        fx.vault,
+			BillingID:              fx.billing,
+			RailSubscriptionID:     fx.railSub,
+			CredentialReference:    anchor,
+			CredentialAnchorSource: anchorSource,
+			Currency:               "USD",
+			Amount:                 rebillAmount,
+			AmountMinor:            rebillAmountMinor,
 		},
 		IdempotencyKey: ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "mobius", fx.orderRef, attempt),
 		NextAttemptAt:  time.Now().UTC(),
@@ -331,11 +355,9 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 
 	got := fx.intentByID(t, row.ID)
 	assert.Equal(t, StatusSucceeded, got.Status)
-	// #607: the tombstone is slimmed to the dunning pointer keys — the
-	// transaction_id the repair path reads survives; the verified_existing
-	// forensic marker is dropped (retained in the mutation log).
+	// The persisted qualification survives terminalization for audit and replay.
 	assert.Contains(t, string(got.ResultEvidence), fake.txnID, "transaction_id pointer retained for the dunning repair path")
-	assert.NotContains(t, string(got.ResultEvidence), "verified_existing", "forensic evidence pruned")
+	assert.Contains(t, string(got.ResultEvidence), rebillReceiptKey, "qualified receipt retained")
 	assert.EqualValues(t, 1, fake.saleCalls.Load(), "exactly one charge attempt ever reached the gateway")
 
 	sub := fx.subscription(t)
