@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
@@ -14,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,13 +27,13 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 	remote := h.StartStandalone("USD", integrationharness.WithRails(config.PSPSet{
 		"ccbill": {AccountID: "999981-0000", CCBill: &config.CCBillRailConfig{Salt: "issue981-local-fixture"}},
 	}))
-	local, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	local, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, local.Close(context.Background())) })
-	local.Embedded().App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	app.HostGraph(local).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 	productID, priceID := uuid.New(), uuid.New()
 	priceKey := "commerce-" + priceID.String()
 	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Commerce fixture')`, productID, dbtest.TestMerchantID.UUID(), "commerce-"+productID.String())
@@ -74,9 +75,7 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 			require.ErrorIs(t, err, openrails.ErrDenied)
 			_, err = client.ConfirmCheckoutSession(ctx, first.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: uuid.NewString(), Payment: openrails.ConfirmPayment{Rail: "solana"}})
 			require.ErrorIs(t, err, openrails.ErrDenied)
-			require.NoError(t, client.Verify(openrails.WithMerchant(ctx, dbtest.TestMerchantID)))
-			err = client.Verify(openrails.WithMerchant(ctx, openrails.MerchantID(uuid.New())))
-			require.ErrorIs(t, err, openrails.ErrConflict, "remote and embedded must reject merchant mismatch")
+			require.NoError(t, client.Verify(ctx))
 			tier, err := client.ResolveEffectiveTier(ctx, user, "membership")
 			require.NoError(t, err)
 			require.Nil(t, tier, "checkout redirect alone has not bought access")

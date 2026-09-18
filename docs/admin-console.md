@@ -78,12 +78,13 @@ Then hand the FS to the engine:
 
 ```go
 sub, _ := fs.Sub(consoleassets.FS, "dist")
-rt, err := embed.New(ctx, opts, embed.WithAdminConsole(sub))
+opts.ConsoleAssets = sub
+rt, err := embed.New(ctx, opts)
 ```
 
-`WithAdminConsole` feeds the standalone surface (`embedded.StandaloneServer`),
+`ConsoleAssets` feeds the standalone surface (`controlplane.Attach(...).Handler()`),
 which mounts `/admin/` per the table above. The embedded mount surface
-(`embedded.MountHandler` / `Runtime.Client()`) does NOT serve `/admin` — hosts
+(`rt.Handler` / `rt.Client()`) does NOT serve `/admin` — hosts
 that mount billing under their own mux serve the console themselves by mounting
 `adminconsole.Handler(cfg, assets)` (package `pkg/adminconsole`), gated on
 `adminconsole.Present(assets)`, with `APIBaseURL` set to their billing mount

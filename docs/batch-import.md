@@ -41,12 +41,13 @@ What import does **not** do:
 
 ### The import surface
 
-**Embedded**: `pkg/embedded.ImportBilling(ctx, BillingImportOptions{Config,
-PGXPool, MerchantID, Book})`. Resolve public names once with
-`embedded.ResolveMerchantName` and pass its captured UUID. **HTTP**:
-`POST /v1/import/billing` with the identical JSON body — merchant from the
-authenticated credential, gated on the owner-level `merchant:billing:import`
-permission. The HTTP body cap (1 MiB) forces large books to batch.
+**Client**: `client.ImportBilling(ctx, openrails.DeclaredBilling{...})` on the
+merchant-bound Client, in every deployment (`rt.Client()` in process, or
+`openrails.NewRemote`). Resolve public names once with `rt.ResolveMerchant`
+and bind the Client to the captured UUID. **HTTP**: `POST /v1/import/billing`
+with the identical JSON body — merchant from the authenticated credential,
+gated on the owner-level `merchant:billing:import` permission. The HTTP body
+cap (1 MiB) forces large books to batch.
 
 The book (`DeclaredBilling`) carries four record kinds:
 
@@ -103,7 +104,7 @@ batch — it stays parked and is reported loudly.
 
 **Entitlements are derived, not imported.** The book has no entitlement
 record kind. Subscription access follows from subscription standing and from
-the derive pass: run `embedded.ConvergeMerchant` (the operator-triggerable
+the derive pass: run `rt.Converge` (the operator-triggerable
 merchant-wide convergence) after import to materialize grants + entitlement
 windows from the imported subscriptions/payments immediately. Operator/manual
 comps — access with no payment behind it — ride the same book as

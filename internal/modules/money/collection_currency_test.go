@@ -7,12 +7,12 @@ import (
 
 	"github.com/google/uuid"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // or#864. Both collection adapters used to substitute money.DefaultCurrency

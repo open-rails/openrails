@@ -5,7 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/internal/service"
 )
 
 func ServicePaymentSettlementStatus(r *httprequest.Request) {

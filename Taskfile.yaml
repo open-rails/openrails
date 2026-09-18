@@ -275,7 +275,7 @@ tasks:
   test-integration-core:
     desc: Run the local core integration tier against the shared compose stack
     cmds:
-      - bash scripts/test_integration.sh ./tests ./embed ./internal/river ./pkg/service
+      - bash scripts/test_integration.sh ./tests ./embed ./internal/river ./internal/service
 
   test-integration-all:
     desc: Run every integration package serially against the shared compose stack

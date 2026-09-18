@@ -25,7 +25,7 @@ PERMANENT internal/controlplane/fleet_timeseries.go # cross-merchant time series
 PERMANENT internal/merchantarchive/archive.go      # typed archive profiles, dynamic projection/insertion and restore transaction controls
 PERMANENT internal/merchantarchive/checks.go       # catalog introspection and checks over classified archive tables/columns
 PERMANENT internal/bootstrap/merchant_manifest.go   # dump/restore over a dynamic table list
-PERMANENT pkg/embedded/catalog_dump.go              # dump/restore over a dynamic table list
+PERMANENT internal/hosttools/catalog_dump.go              # dump/restore over a dynamic table list
 PERMANENT internal/river/progress.go                # reads River's OWN river_job table (not OpenRails' schema)
 PERMANENT internal/river/job_liveness.go            # beats River's OWN river_job.attempted_at (River has no heartbeat API)
 
@@ -54,5 +54,5 @@ DEBT internal/modules/solana/solanasubs/subscription_repo.go
 DEBT internal/river/jobs_ledger_integrity.go
 DEBT internal/river/jobs_provider_refresh.go
 DEBT internal/river/jobs_stripe_webhooks.go
-DEBT pkg/service/catalog_sidecars.go
+DEBT internal/service/catalog_sidecars.go
 DEBT internal/operator/admission.go

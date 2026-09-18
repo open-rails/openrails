@@ -16,11 +16,10 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // TestMountedHandlerResolvesMerchantBoundAfterMount pins the #744 fix: the
-// embedded HTTP surface (pkg/embedded.MountHandler -> embedhttp.NewHTTPHandler)
+// embedded HTTP surface (Runtime.Handler -> embedhttp.NewHTTPHandler)
 // resolves Runtime.ConfiguredMerchant() PER REQUEST rather than baking a
 // snapshot into the middleware chain at mount time. Before the fix, mounting
 // the handler BEFORE UpsertMerchantConfig bound the merchant pinned the
@@ -34,7 +33,7 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 
 	slug := fmt.Sprintf("mount-order-%d", time.Now().UnixNano())
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -45,8 +44,8 @@ func TestMountedHandlerResolvesMerchantBoundAfterMount(t *testing.T) {
 	noAuth := billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 	})
-	handler, err := rt.Handler(embedded.MountOptions{
-		RouteSets:     []embedded.RouteSet{embedded.RouteSetCheckout},
+	handler, err := rt.Handler(embed.MountOptions{
+		RouteSets:     []embed.RouteSet{embed.RouteSetCheckout},
 		Authenticator: noAuth,
 	})
 	require.NoError(t, err)
