@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/riverqueue/river"
+	"github.com/riverqueue/river/riverdriver/riverpgxv5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/app"
@@ -16,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -295,13 +299,50 @@ func (h *Harness) AgePastDunningWindow(f SubscriptionFixture) {
 	require.NoError(h.t, err)
 }
 
-// SkewedWorkerLease writes the dunning worker's attempt lease as a node whose
-// clock runs ten minutes ahead would: next_retry_at is AttemptLease after
-// last_retry_at, both in the database's future.
-func (h *Harness) SkewedWorkerLease(f SubscriptionFixture) {
+// ScheduleDunningIn puts the subscription's scheduled retry at now+in on the
+// database clock (in <= 0 makes it due). The schedule is only a schedule: a
+// live attempt claim is a separate column.
+func (h *Harness) ScheduleDunningIn(f SubscriptionFixture, in time.Duration) {
 	h.t.Helper()
-	_, err := h.sharedPool().Exec(h.ctx, `UPDATE openrails.subscriptions SET last_retry_at = now() + interval '10 minutes', next_retry_at = now() + interval '25 minutes' WHERE id = $1`, f.Subscription)
+	_, err := h.sharedPool().Exec(h.ctx, `UPDATE openrails.subscriptions SET last_retry_at = now() - interval '2 hours', next_retry_at = now() + make_interval(secs => $2) WHERE id = $1`, f.Subscription, in.Seconds())
 	require.NoError(h.t, err)
+}
+
+// DunningClaim is the subscription's live attempt claim, if any.
+func (h *Harness) DunningClaim(id uuid.UUID) (holder string, live bool) {
+	h.t.Helper()
+	var who *string
+	var until *time.Time
+	var now time.Time
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `SELECT dunning_claim_holder, dunning_claimed_until, now() FROM openrails.subscriptions WHERE id = $1`, id).Scan(&who, &until, &now))
+	if who == nil || until == nil {
+		return "", false
+	}
+	return *who, until.After(now)
+}
+
+// FireDunning inserts the dunning job the four-hourly schedule inserts and
+// returns its id, so a test can wait for that exact pass to finish.
+func (h *Harness) FireDunning(pool *pgxpool.Pool) int64 {
+	h.t.Helper()
+	client, err := river.NewClient(riverpgxv5.New(pool), &river.Config{})
+	require.NoError(h.t, err)
+	res, err := client.Insert(h.ctx, riverjobs.DunningArgs{}, &river.InsertOpts{Queue: riverjobs.QueueBilling})
+	require.NoError(h.t, err)
+	return res.Job.ID
+}
+
+// WaitForRiverJob blocks until the job reaches a terminal state and returns it.
+func (h *Harness) WaitForRiverJob(id int64) string {
+	h.t.Helper()
+	var state string
+	require.Eventually(h.t, func() bool {
+		if err := h.sharedPool().QueryRow(h.ctx, `SELECT state::text FROM public.river_job WHERE id = $1`, id).Scan(&state); err != nil {
+			return false
+		}
+		return state == "completed" || state == "discarded" || state == "cancelled"
+	}, 90*time.Second, 250*time.Millisecond, "dunning pass %d finished (last state %s)", id, state)
+	return state
 }
 
 // OperationEvidence is the operation's retained result evidence.
@@ -344,4 +385,37 @@ func (h *Harness) SeedAnotherInvoice(rt *app.Runtime, f CollectionFixture, amoun
 		return err
 	}))
 	return invoice
+}
+
+// FailPeriod puts a renewed subscription into its NEXT period's first dunning
+// failure: past due at that period's end, one recorded attempt, a schedule
+// days out. It returns the new period end.
+func (h *Harness) FailPeriod(f SubscriptionFixture) time.Time {
+	h.t.Helper()
+	var periodEnd time.Time
+	require.NoError(h.t, h.sharedPool().QueryRow(h.ctx, `
+		UPDATE openrails.subscriptions
+		SET status = 'past_due',
+		    current_period_starts_at = now() - interval '30 days',
+		    current_period_ends_at = now() - interval '1 hour',
+		    retry_attempts = 1,
+		    last_retry_at = now() - interval '1 hour',
+		    next_retry_at = now() + interval '2 days',
+		    dunning_claim_holder = NULL,
+		    dunning_claimed_until = NULL,
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING current_period_ends_at`, f.Subscription).Scan(&periodEnd))
+	return periodEnd
+}
+
+// salesForOrder is every sale the gateway recorded for one order reference.
+func salesForOrder(g *FakeNMIGateway, orderID string) []NMISale {
+	var out []NMISale
+	for _, sale := range g.Sales() {
+		if sale.OrderID == orderID {
+			out = append(out, sale)
+		}
+	}
+	return out
 }

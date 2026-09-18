@@ -80,9 +80,10 @@ func RequestKey(payer identity.CustomerID, clientKey string) string {
 // (FreezeRebill) and confirmed only by an exact provider receipt. The client
 // key is serialized by an advisory lock and bound to its first request (the
 // subscription and the named method) through the frozen payload, so the same
-// request replays its attempt and a different one is a conflict. The lease is
-// the worker's own (ClaimSubscriptionRetryNow, on the database clock); a
-// decline runs the one decline doctrine.
+// request replays its attempt and a different one is a conflict. The attempt
+// holds the worker's own explicit claim (holder + expiry on the database
+// clock, never the schedule) until it has an answer; a decline runs the one
+// decline doctrine, bound to its period and ordinal.
 func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowResult, error) {
 	if r == nil || r.DB == nil || r.Runner == nil || r.Lifecycle == nil {
 		return nil, fmt.Errorf("retry-now not initialized")
@@ -119,8 +120,9 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 	var (
 		row      gen.OpenrailsRailIntent
 		replayed bool
-		claimed  *models.Subscription
+		claimed  bool
 	)
+	holder := "retry-now:" + requestKey
 	err = r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		txDB := r.DB.NewWithPgxTx(tx)
@@ -200,17 +202,16 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 				}
 			}
 		}
-		lease, err := q.ClaimSubscriptionRetryNow(ctx, gen.ClaimSubscriptionRetryNowParams{
-			ID: sub.ID, MerchantID: mid.UUID(), CustomerID: sub.CustomerID, LeaseSeconds: int32(AttemptLease / time.Second),
+		_, err = q.ClaimSubscriptionRetryNow(ctx, gen.ClaimSubscriptionRetryNowParams{
+			ID: sub.ID, MerchantID: mid.UUID(), CustomerID: sub.CustomerID, Holder: holder, LeaseSeconds: int32(AttemptLease / time.Second),
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("%w: the dunning schedule holds this subscription", ErrSubscriptionRetryInProgress)
+			return fmt.Errorf("%w: a rebill attempt claim is live", ErrSubscriptionRetryInProgress)
 		}
 		if err != nil {
 			return fmt.Errorf("claim subscription for retry-now: %w", err)
 		}
-		sub.LastRetryAt, sub.NextRetryAt = lease.LastRetryAt, lease.NextRetryAt
-		claimed = sub
+		claimed = true
 		row, err = intents.NewStore(txDB).Enqueue(ctx, intents.EnqueueParams{
 			MerchantID:     mid.UUID(),
 			Provider:       string(sub.Rail),
@@ -232,6 +233,15 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 	})
 	if err != nil {
 		return nil, err
+	}
+	if claimed {
+		defer func() {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			if err := ReleaseClaim(releaseCtx, r.DB, mid.UUID(), sub.ID, holder); err != nil {
+				log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).Warn("retry-now: claim release failed; it expires on its own")
+			}
+		}()
 	}
 
 	// The operation is durable; execute it inline (a replay of a still
@@ -256,9 +266,6 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 	case intents.StatusSuperseded, intents.StatusExpired:
 		// Relevance moved on under us (renewed, cancelled, period advanced,
 		// or the instrument drifted — its re-check runs under the row lock).
-		if releaseErr := ReleaseAttempt(ctx, r.DB, mid.UUID(), claimed); releaseErr != nil {
-			log.WithContext(ctx).WithError(releaseErr).WithField("subscription_id", sub.ID).Warn("retry-now: release after superseded rebill failed")
-		}
 		if current, err := repo.GetByID(ctx, sub.ID); err == nil {
 			if err := eligible(current, request.PaymentMethodID); err != nil {
 				return nil, err
@@ -266,10 +273,7 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 		}
 		return nil, fmt.Errorf("%w: %s", ErrSubscriptionNotRetryable, strings.TrimSpace(normalizeReason(executed.LastFailureReason)))
 	case intents.StatusFailedTerminal:
-		if _, err := ApplyDecline(ctx, r.DB, r.Lifecycle, claimed, sub.Rail, executed); err != nil {
-			if releaseErr := ReleaseAttempt(ctx, r.DB, mid.UUID(), claimed); releaseErr != nil {
-				err = errors.Join(err, releaseErr)
-			}
+		if _, err := ApplyDecline(ctx, r.DB, r.Lifecycle, sub, sub.Rail, executed); err != nil {
 			return nil, err
 		}
 	}

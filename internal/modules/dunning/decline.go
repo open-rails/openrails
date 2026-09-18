@@ -113,12 +113,14 @@ func ApplyDecline(ctx context.Context, database *db.DB, lifecycle Lifecycle, sub
 		entry.Warn("Dunning: retryable decline (or#870 bucket 1); will retry on schedule")
 	}
 	reason := decline.Reason
-	// The operation's own ordinal makes a second observer of this decline a
-	// no-op: the worker, a customer retry-now and its replay may all see it.
+	// The operation's own period and ordinal make a second observer of this
+	// decline — or a replay after the subscription moved to a later period —
+	// a no-op, checked inside FailMembership's row lock.
 	var forAttempt *int
+	var forPeriodEnd *time.Time
 	var payload intents.ManualRebillPayload
 	if len(intent.Payload) > 0 && json.Unmarshal(intent.Payload, &payload) == nil {
-		forAttempt = &payload.Attempt
+		forAttempt, forPeriodEnd = &payload.Attempt, &payload.PeriodEnd
 	}
 	if err := lifecycle.FailMembership(ctx, &subscriptions.FailMembershipParams{
 		Rail:                rail,
@@ -130,6 +132,7 @@ func ApplyDecline(ctx context.Context, database *db.DB, lifecycle Lifecycle, sub
 		TerminalCertainty:   certainty,
 		TerminalBlocked:     blocked,
 		ForAttempt:          forAttempt,
+		ForPeriodEnd:        forPeriodEnd,
 	}); err != nil {
 		return decline, fmt.Errorf("apply failure policy after declined rebill: %w", err)
 	}
@@ -157,22 +160,11 @@ func evidenceResponseCode(intent gen.OpenrailsRailIntent) int {
 	return int(code)
 }
 
-// ReleaseAttempt makes an exact claimed lease immediately due again without
-// advancing the attempt ordinal (a decline whose lifecycle transition rolled
-// back).
-func ReleaseAttempt(ctx context.Context, database *db.DB, merchantID uuid.UUID, sub *models.Subscription) error {
-	if sub == nil || sub.LastRetryAt == nil || sub.NextRetryAt == nil {
-		return fmt.Errorf("release dunning attempt requires its claimed subscription")
+// ReleaseClaim releases the rebill attempt claim holder took. The schedule
+// was never moved, so a row that is still due is picked up again as is.
+func ReleaseClaim(ctx context.Context, database *db.DB, merchantID, subscriptionID uuid.UUID, holder string) error {
+	if _, err := database.Gen(ctx).ReleaseDunningClaim(ctx, gen.ReleaseDunningClaimParams{ID: subscriptionID, MerchantID: merchantID, Holder: holder}); err != nil {
+		return fmt.Errorf("release dunning claim: %w", err)
 	}
-	rows, err := database.Gen(ctx).ReleaseDunningAttempt(ctx, gen.ReleaseDunningAttemptParams{
-		ID: sub.ID, MerchantID: merchantID, ClaimedAt: *sub.LastRetryAt, LeaseUntil: *sub.NextRetryAt,
-	})
-	if err != nil {
-		return fmt.Errorf("release dunning attempt claim: %w", err)
-	}
-	if rows == 0 {
-		return fmt.Errorf("release dunning attempt claim: subscription claim changed before release")
-	}
-	sub.NextRetryAt = sub.LastRetryAt
 	return nil
 }

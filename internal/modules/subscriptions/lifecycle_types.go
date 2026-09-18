@@ -162,6 +162,10 @@ type FailMembershipParams struct {
 	// many recorded failures (the ordinal the declined operation was keyed
 	// on). A second observer of the same declined operation is a no-op.
 	ForAttempt *int
+	// ForPeriodEnd binds the decline to the period its operation dunned: it
+	// applies only while the subscription's current period ends there. A
+	// replay of an earlier period's decline never touches a later period.
+	ForPeriodEnd *time.Time
 }
 
 func NormalizeCancelType(cancelType *models.CancelType) string {

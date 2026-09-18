@@ -469,7 +469,7 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 			require.Equal(t, 1, h.RebillOperations(fixture.Subscription))
 		})
 
-		t.Run("dunning_window_and_skewed_lease", func(t *testing.T) {
+		t.Run("dunning_window_and_scheduled_retry", func(t *testing.T) {
 			gateway.SetMode(NMISaleApprove)
 			gateway.SetVisible(true)
 			sales := gateway.SaleCount()
@@ -479,12 +479,114 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 			requireRefusal(t, err, openrails.ErrSubscriptionNotRetryable, openrails.CodeSubscriptionNotRetryable)
 			require.Zero(t, h.RebillOperations(stale.Subscription))
 
-			leased := seed()
-			h.SkewedWorkerLease(leased)
-			_, err = retryNow(leased, "leased-"+uuid.NewString()[:8])
+			// A scheduled retry ten minutes out is a schedule, not a live
+			// attempt: the customer may pay now (Astra batch-4 P2).
+			soon := seed()
+			h.ScheduleDunningIn(soon, 10*time.Minute)
+			result, err := retryNow(soon, "soon-"+uuid.NewString()[:8])
+			require.NoError(t, err)
+			require.Equal(t, "active", result.Subscription.Status)
+			require.Equal(t, sales+1, gateway.SaleCount())
+		})
+
+		// Real contention with the dunning worker, both directions: whoever
+		// holds the attempt claim owns the charge, and the other never sends a
+		// second one. The worker runs its own job, through its own code path,
+		// against a gateway that holds the sale in flight.
+		t.Run("worker_holds_the_claim", func(t *testing.T) {
+			gateway.SetMode(NMISaleApprove)
+			gateway.SetVisible(true)
+			fixture := seed()
+			h.ScheduleDunningIn(fixture, -time.Minute)
+			order := "rebill-" + fixture.Subscription.String() + "-" + strconv.FormatInt(fixture.PeriodEnd.Unix(), 10)
+			release := gateway.HoldSales()
+			job := h.FireDunning(h.Pool())
+			require.Eventually(t, func() bool { return gateway.HeldSales() >= 1 }, 60*time.Second, 100*time.Millisecond, "the worker is mid-charge at the provider")
+			holder, live := h.DunningClaim(fixture.Subscription)
+			require.True(t, live, "the worker holds the attempt claim")
+			require.True(t, strings.HasPrefix(holder, "dunning:"), "holder %q", holder)
+
+			_, err := retryNow(fixture, "contended-"+uuid.NewString()[:8])
 			requireRefusal(t, err, openrails.ErrSubscriptionRetryInProgress, openrails.CodeSubscriptionRetryInProgress)
-			require.Zero(t, h.RebillOperations(leased.Subscription), "a live worker lease is never taken over")
-			require.Equal(t, sales, gateway.SaleCount())
+			release()
+			require.Equal(t, "completed", h.WaitForRiverJob(job))
+			require.Eventually(t, func() bool { return h.SubscriptionState(fixture.Subscription).Status == "active" }, 60*time.Second, 250*time.Millisecond, "the worker's charge renews it")
+			require.Len(t, salesForOrder(gateway, order), 1, "exactly one submission for the period")
+			require.Equal(t, 1, h.RebillOperations(fixture.Subscription))
+			_, live = h.DunningClaim(fixture.Subscription)
+			require.False(t, live, "the claim is released when the attempt has its answer")
+		})
+
+		t.Run("customer_holds_the_claim", func(t *testing.T) {
+			gateway.SetMode(NMISaleApprove)
+			gateway.SetVisible(true)
+			fixture := seed()
+			h.ScheduleDunningIn(fixture, -time.Minute)
+			order := "rebill-" + fixture.Subscription.String() + "-" + strconv.FormatInt(fixture.PeriodEnd.Unix(), 10)
+			release := gateway.HoldSales()
+			type answer struct {
+				result *openrails.SubscriptionRetryNowResult
+				err    error
+			}
+			answers := make(chan answer, 1)
+			go func() {
+				result, err := retryNow(fixture, "customer-first-"+uuid.NewString()[:8])
+				answers <- answer{result, err}
+			}()
+			require.Eventually(t, func() bool { return gateway.HeldSales() >= 1 }, 60*time.Second, 100*time.Millisecond, "the customer's charge is mid-flight")
+			holder, live := h.DunningClaim(fixture.Subscription)
+			require.True(t, live)
+			require.True(t, strings.HasPrefix(holder, "retry-now:"), "holder %q", holder)
+
+			job := h.FireDunning(h.Pool())
+			require.Equal(t, "completed", h.WaitForRiverJob(job), "the worker's pass runs while the customer holds the claim")
+			require.Len(t, salesForOrder(gateway, order), 1, "the worker sent nothing")
+			require.Equal(t, 1, h.RebillOperations(fixture.Subscription))
+
+			release()
+			got := <-answers
+			require.NoError(t, got.err)
+			require.Equal(t, "active", got.result.Subscription.Status)
+			require.Len(t, salesForOrder(gateway, order), 1)
+			require.Equal(t, 1, h.RebillOperations(fixture.Subscription))
+		})
+
+		// Astra batch-4 P1: a declined key from an earlier period must never
+		// touch a later one. Period A declines, a fresh attempt renews it,
+		// period B falls past due at its own first attempt, and the old key's
+		// replay returns A's stored decline and changes nothing on B.
+		t.Run("old_declined_key_never_touches_a_later_period", func(t *testing.T) {
+			gateway.SetVisible(true)
+			fixture := seed()
+			gateway.SetMode(NMISaleDecline)
+			keyA := "period-a-" + uuid.NewString()[:8]
+			_, err := retryNow(fixture, keyA)
+			declinedA := requireDeclined(t, err)
+			require.EqualValues(t, 2, *h.SubscriptionState(fixture.Subscription).RetryAttempts)
+
+			gateway.SetMode(NMISaleApprove)
+			renewed, err := retryNow(fixture, "period-a-fix-"+uuid.NewString()[:8])
+			require.NoError(t, err)
+			require.Equal(t, "active", renewed.Subscription.Status)
+			periodB := h.FailPeriod(fixture)
+			gateway.RegisterPlan(fixture.RailSubscriptionID, "12.00", "USD")
+			before := h.SubscriptionState(fixture.Subscription)
+			require.Equal(t, "past_due", before.Status)
+			require.EqualValues(t, 1, *before.RetryAttempts)
+			payments := h.SubscriptionPayments(fixture.Subscription)
+			sales := gateway.SaleCount()
+
+			_, err = retryNow(fixture, keyA)
+			replay := requireDeclined(t, err)
+			require.Equal(t, declinedA.Metadata["operation_id"], replay.Metadata["operation_id"], "the replay answers with period A's own operation")
+			require.Equal(t, true, replay.Metadata["replayed"])
+			after := h.SubscriptionState(fixture.Subscription)
+			require.Equal(t, "past_due", after.Status)
+			require.EqualValues(t, 1, *after.RetryAttempts, "period B's failure count is untouched")
+			require.True(t, after.PeriodEnd.Equal(periodB), "period B is untouched")
+			require.Equal(t, payments, h.SubscriptionPayments(fixture.Subscription), "no payment recorded for B")
+			require.Equal(t, sales, gateway.SaleCount(), "nothing charged")
+			require.Equal(t, before.NextRetryAt.UTC(), after.NextRetryAt.UTC(), "B's schedule is untouched")
 		})
 
 		t.Run("decline_records_attempt_and_keeps_schedule", func(t *testing.T) {

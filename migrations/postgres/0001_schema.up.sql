@@ -3226,6 +3226,8 @@ CREATE TABLE openrails.subscriptions (
     last_retry_at timestamp with time zone,
     retry_attempts integer DEFAULT 0,
     next_retry_at timestamp with time zone,
+    dunning_claim_holder text,
+    dunning_claimed_until timestamp with time zone,
     cancelled_at timestamp with time zone,
     cancel_type text,
     cancel_feedback text,
@@ -3245,6 +3247,7 @@ CREATE TABLE openrails.subscriptions (
     CONSTRAINT chk_cancelled_has_type CHECK (((status <> 'cancelled'::openrails.subscription_status) OR (cancel_type IS NOT NULL))),
     CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::openrails.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
     CONSTRAINT chk_ended_not_before_cancelled CHECK (((ended_at IS NULL) OR (cancelled_at IS NULL) OR (ended_at >= cancelled_at))),
+    CONSTRAINT chk_dunning_claim_pair CHECK (((dunning_claim_holder IS NULL) = (dunning_claimed_until IS NULL))),
     CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due'::openrails.subscription_status) OR (current_period_ends_at IS NOT NULL))),
     CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
 );
@@ -3277,6 +3280,8 @@ CREATE INDEX idx_subscriptions_customer ON openrails.subscriptions USING btree (
 CREATE INDEX idx_subscriptions_customer_active_created ON openrails.subscriptions USING btree (customer_id, created_at DESC) WHERE (status = 'active'::openrails.subscription_status);
 
 CREATE INDEX idx_subscriptions_destructive_run ON openrails.subscriptions USING btree (destructive_run_id) WHERE (destructive_run_id IS NOT NULL);
+
+COMMENT ON COLUMN openrails.subscriptions.dunning_claim_holder IS 'Who holds the rebill attempt claim (#809 R4): a dunning worker pass or a customer retry-now request. next_retry_at is the schedule only; the claim is this pair, acquired and expired on the database clock.';
 
 CREATE INDEX idx_subscriptions_due_dunning ON openrails.subscriptions USING btree (next_retry_at, rail) WHERE ((status = 'past_due'::openrails.subscription_status) AND (next_retry_at IS NOT NULL));
 

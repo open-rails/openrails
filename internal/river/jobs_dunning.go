@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -458,15 +459,18 @@ func (w *DunningWorker) processSubscription(
 	}
 	payload.Rail = railName
 
-	claimed, err := w.claimDunningAttempt(ctx, sub, w.now())
+	holder, claimed, err := w.claimDunningAttempt(ctx, sub, w.now())
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to claim subscription for rebill")
 		return dunningOutcomeFailed, nil
 	}
 	if !claimed {
-		logEntry.Info("Dunning: subscription was already claimed or no longer due")
+		logEntry.Info("Dunning: subscription's rebill attempt is claimed (a customer retry-now or another pass) or no longer due")
 		return dunningOutcomeFailed, nil
 	}
+	// The claim is released once the attempt has an answer, whatever it is;
+	// the schedule was never moved, so a still-due row is picked up again.
+	defer w.releaseDunningClaim(ctx, logEntry, sub, holder)
 
 	// The provider-side charge flows through the intent ledger (#358 phase C):
 	// one system-origin intent per (subscription, period end, attempt
@@ -536,9 +540,9 @@ func (w *DunningWorker) processSubscription(
 }
 
 // applyDeclinedRebill applies the one decline doctrine (dunning.ApplyDecline)
-// for a terminally-failed rebill intent, releasing the claim if the
-// lifecycle transition rolled back so River's retry re-derives the same
-// charge intent instead of a fresh one.
+// for a terminally-failed rebill intent. If the lifecycle transition rolls
+// back, the released claim and the unmoved schedule let River's retry
+// re-derive the same charge intent instead of a fresh one.
 func (w *DunningWorker) applyDeclinedRebill(
 	ctx context.Context,
 	logEntry *log.Entry,
@@ -548,9 +552,6 @@ func (w *DunningWorker) applyDeclinedRebill(
 	intent gen.OpenrailsRailIntent,
 ) (dunningOutcome, error) {
 	if _, err := dunning.ApplyDecline(ctx, w.DB, lifecycle, sub, rail, intent); err != nil {
-		if releaseErr := w.releaseDunningAttempt(ctx, sub); releaseErr != nil {
-			return dunningOutcomeFailed, errors.Join(err, releaseErr)
-		}
 		return dunningOutcomeFailed, err
 	}
 	logEntry.Debug("Dunning: decline doctrine applied")
@@ -584,41 +585,40 @@ func (w *DunningWorker) parkStaleSubscription(
 	return dunningOutcomeWindowExpired
 }
 
-func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Subscription, now time.Time) (bool, error) {
+// claimDunningAttempt takes the explicit rebill attempt claim (#809 R4) a
+// customer retry-now contends for too: a holder and an expiry on the database
+// clock, never the schedule.
+func (w *DunningWorker) claimDunningAttempt(ctx context.Context, sub *models.Subscription, now time.Time) (string, bool, error) {
 	if w == nil || w.DB == nil || sub == nil {
-		return false, errors.New("dunning worker database and subscription are required")
+		return "", false, errors.New("dunning worker database and subscription are required")
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
-		return false, fmt.Errorf("claim dunning attempt: %w", err)
+		return "", false, fmt.Errorf("claim dunning attempt: %w", err)
 	}
-
+	holder := "dunning:" + uuid.NewString()
 	claimedAt := now.UTC()
-	leaseUntil := claimedAt.Add(dunning.AttemptLease)
 	rowsAffected, err := w.DB.Gen(ctx).ClaimDunningAttempt(ctx, gen.ClaimDunningAttemptParams{
-		ID: sub.ID, MerchantID: merchantID.UUID(), LeaseUntil: leaseUntil, ClaimedAt: claimedAt,
+		ID: sub.ID, MerchantID: merchantID.UUID(), Holder: holder, LeaseSeconds: int32(dunning.AttemptLease / time.Second), ClaimedAt: claimedAt,
 	})
 	if err != nil {
-		return false, fmt.Errorf("read dunning claim result: %w", err)
+		return "", false, fmt.Errorf("read dunning claim result: %w", err)
 	}
 	if rowsAffected == 0 {
-		return false, nil
+		return "", false, nil
 	}
-
 	sub.LastRetryAt = &claimedAt
-	sub.NextRetryAt = &leaseUntil
-	return true, nil
+	return holder, true, nil
 }
 
-func (w *DunningWorker) releaseDunningAttempt(ctx context.Context, sub *models.Subscription) error {
-	if w == nil || w.DB == nil || sub == nil {
-		return errors.New("release dunning attempt requires its claimed subscription")
-	}
+func (w *DunningWorker) releaseDunningClaim(ctx context.Context, logEntry *log.Entry, sub *models.Subscription, holder string) {
 	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return fmt.Errorf("release dunning attempt: %w", err)
+	if err == nil {
+		err = dunning.ReleaseClaim(ctx, w.DB, merchantID.UUID(), sub.ID, holder)
 	}
-	return dunning.ReleaseAttempt(ctx, w.DB, merchantID.UUID(), sub)
+	if err != nil {
+		logEntry.WithError(err).Warn("Dunning: claim release failed; it expires on its own")
+	}
 }
 
 func rebillOrderReference(sub *models.Subscription) string { return dunning.OrderReference(sub) }

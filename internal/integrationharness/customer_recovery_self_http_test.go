@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -274,11 +275,17 @@ func TestCustomerRecoverySelfRoutes(t *testing.T) {
 			stale := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
 			h.AgePastDunningWindow(stale)
 			require.Equal(t, openrails.RecoveryBlockedWindowExpired, blocked(stale).BlockedReason)
-			leased := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
-			h.SkewedWorkerLease(leased)
-			leasedView := blocked(leased)
-			require.Equal(t, openrails.RecoveryBlockedInProgress, leasedView.BlockedReason)
-			require.Nil(t, leasedView.NextAttemptAt, "a lease is not a schedule")
+			// A scheduled retry ten minutes out is a SCHEDULE, not a live
+			// attempt: the customer may still pay now, and the schedule is
+			// reported as the engine's own next attempt.
+			soon := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
+			h.ScheduleDunningIn(soon, 10*time.Minute)
+			status, body = s.call(http.MethodGet, "/v1/me/subscriptions/sub_"+soon.Subscription.String(), nil, nil)
+			require.Equal(t, http.StatusOK, status, string(body))
+			var soonView openrails.Subscription
+			require.NoError(t, json.Unmarshal(body, &soonView))
+			require.True(t, soonView.Recovery.Retryable, "%+v", soonView.Recovery)
+			require.NotNil(t, soonView.Recovery.NextAttemptAt, "the schedule is the engine's own next attempt")
 
 			// One key, one request: reusing it on another subscription conflicts.
 			reused := key()
@@ -288,7 +295,7 @@ func TestCustomerRecoverySelfRoutes(t *testing.T) {
 			fresh := h.SeedPastDueSubscription(s.runtime, merchant.ID(mid), SubscriptionForCustomer(mine.Customer))
 			status, body = s.call(http.MethodPost, "/v1/me/subscriptions/sub_"+fresh.Subscription.String()+"/retry-now", reused, nil)
 			require.Equal(t, http.StatusOK, status, string(body))
-			status, body = s.call(http.MethodPost, "/v1/me/subscriptions/sub_"+leased.Subscription.String()+"/retry-now", reused, nil)
+			status, body = s.call(http.MethodPost, "/v1/me/subscriptions/sub_"+soon.Subscription.String()+"/retry-now", reused, nil)
 			require.Equal(t, http.StatusConflict, status, string(body))
 			require.Contains(t, string(body), openrails.CodeSubscriptionRetryIdempotencyConflict)
 		})

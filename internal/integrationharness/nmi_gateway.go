@@ -70,6 +70,35 @@ type FakeNMIGateway struct {
 	// plans are the recurring subscriptions' plan amounts: a rebill sale
 	// names the subscription and NMI charges its plan.
 	plans map[string]plan
+	// hold blocks sales in flight (the charger is mid-request at the
+	// provider), so a claim the caller took is genuinely held meanwhile.
+	hold chan struct{}
+	held int
+}
+
+// HoldSales blocks every sale in flight until the returned release is called.
+// A held sale is recorded first: it landed at the provider.
+func (g *FakeNMIGateway) HoldSales() (release func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	hold := make(chan struct{})
+	g.hold = hold
+	var once sync.Once
+	return func() {
+		g.mu.Lock()
+		if g.hold == hold {
+			g.hold = nil
+		}
+		g.mu.Unlock()
+		once.Do(func() { close(hold) })
+	}
+}
+
+// HeldSales is the number of sales blocked in flight right now.
+func (g *FakeNMIGateway) HeldSales() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.held
 }
 
 type plan struct{ amount, currency string }
@@ -205,6 +234,14 @@ func (g *FakeNMIGateway) serveSale(w http.ResponseWriter, r *http.Request) {
 		sale.Amount, sale.Currency = p.amount, p.currency
 	}
 	g.sales = append(g.sales, sale)
+	if hold := g.hold; hold != nil {
+		// Mid-request at the provider: unlock so reads can proceed, and wait.
+		g.held++
+		g.mu.Unlock()
+		<-hold
+		g.mu.Lock()
+		g.held--
+	}
 	if g.mode == NMISaleUncertain {
 		fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
 		return
