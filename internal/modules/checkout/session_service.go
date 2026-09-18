@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
@@ -331,7 +332,9 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	if err := s.requireProviderWrites(); err != nil {
 		return nil, err
 	}
-	if looksLikePAN(req.IdempotencyKey) {
+	// The idempotency key is an opaque client token, but it is persisted and
+	// replayed, so a card number pasted into it would land in our storage.
+	if cardguard.ContainsPAN(req.IdempotencyKey) {
 		return nil, fmt.Errorf("%w: idempotency key contains invalid card input", ErrCheckoutSessionValidation)
 	}
 	canonicalizeCheckoutPaymentName(&req.Payment)
@@ -886,17 +889,9 @@ func rejectCheckoutSessionPAN(req *CheckoutSessionCreateRequest) error {
 		"success_url":          req.SuccessURL,
 		"cancel_url":           req.CancelURL,
 		"mode":                 req.Mode,
-	}
-	// Typed id handles (plain or prefixed UUIDs) can contain a Luhn-valid
-	// digit run across their groups; a key or malformed handle keeps the scan.
-	for name, handle := range map[string]struct{ value, prefix string }{
-		"subscription_id": {req.SubscriptionID, api.PrefixSubscription},
-		"new_price_id":    {req.NewPriceID, api.PrefixPrice},
-		"price_id":        {req.PriceID, api.PrefixPrice},
-	} {
-		if !canonicalUUIDHandle(strings.TrimPrefix(strings.TrimSpace(handle.value), handle.prefix)) {
-			extraFields[name] = handle.value
-		}
+		"subscription_id":      req.SubscriptionID,
+		"new_price_id":         req.NewPriceID,
+		"price_id":             req.PriceID,
 	}
 	if err := RejectPANShapedFields(&CheckoutRequest{Metadata: extraFields}); err != nil {
 		return fmt.Errorf("%w: invalid checkout input: %v", ErrCheckoutSessionValidation, err)

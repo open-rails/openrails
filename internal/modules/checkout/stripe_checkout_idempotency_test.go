@@ -77,11 +77,9 @@ func TestRejectCheckoutSessionPAN(t *testing.T) {
 	}
 
 	// A typed price/subscription handle whose digit groups happen to form a
-	// Luhn-valid run is an id, not a PAN; a price key with one keeps the scan.
+	// Luhn-valid run is an id, not a PAN. It is scanned like every other
+	// field — the detector reads the UUID grouping, so it passes on its shape.
 	const luhnUUID = "a4111111-1111-4111-8119-abcdefabcdef" // digits 4111111111141118119 pass Luhn
-	if !looksLikePAN(luhnUUID) {
-		t.Fatalf("fixture %s must read as card-number-shaped for this test to prove the exemption", luhnUUID)
-	}
 	if err := rejectCheckoutSessionPAN(&CheckoutSessionCreateRequest{
 		Payment: CheckoutSessionPaymentRequest{Rail: "nmi", PaymentToken: "safe-token"},
 		PriceID: "price_" + luhnUUID,
