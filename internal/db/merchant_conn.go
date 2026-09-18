@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -55,6 +56,30 @@ func (d *DB) WithMerchantConn(ctx context.Context) (context.Context, func(), err
 	lazy := &lazyMerchantPgxConn{pool: d.pool, tenantID: id.String(), schema: d.rw.schema()}
 	newCtx := context.WithValue(ctx, merchantPgxConnKey{}, lazy)
 	return newCtx, lazy.release, nil
+}
+
+// detachedWriteKey marks a context built by DetachedWriteContext.
+type detachedWriteKey struct{}
+
+// DetachedWriteContext is for a write that records what already happened — a
+// provider receipt, an intent outcome — after its caller may be gone. It drops
+// the caller's cancellation, keeps every value (merchant, PSP, the request's
+// pinned connection) and bounds the write by timeout.
+//
+// The caller's cancellation can close the pinned connection: pgx closes a
+// connection whose BEGIN or in-flight query is interrupted. A detached write
+// then re-pins: the dead connection goes back to the pool (which destroys it,
+// freeing its slot) before a fresh one is acquired and scoped to the same
+// merchant, so a one-connection pool never waits on itself. A live pin is always
+// reused. Ordinary request queries never re-pin; they keep failing on a dead
+// connection rather than silently continuing on a new session.
+func DetachedWriteContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithValue(context.WithoutCancel(ctx), detachedWriteKey{}, true), timeout)
+}
+
+func isDetachedWrite(ctx context.Context) bool {
+	_, ok := ctx.Value(detachedWriteKey{}).(bool)
+	return ok
 }
 
 // RunInMerchantConn pins a merchant connection for the duration of fn. It is the

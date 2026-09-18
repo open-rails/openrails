@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,11 +36,15 @@ type fakeNMICardUpdateGateway struct {
 	updateMode atomic.Value
 	getCalls   atomic.Int64
 	patchCalls atomic.Int64
+	// sent closes once the first timeout_landed PATCH has been received: the
+	// replacement is past the provider fence and the caller may be cancelled.
+	sent     chan struct{}
+	sentOnce sync.Once
 }
 
 func newFakeNMICardUpdateGateway(t *testing.T, vaultID, billingID string, oldCard, target nmiCard) (*fakeNMICardUpdateGateway, *nmi.NMIClient) {
 	t.Helper()
-	gateway := &fakeNMICardUpdateGateway{vaultID: vaultID, billingID: billingID, target: target}
+	gateway := &fakeNMICardUpdateGateway{vaultID: vaultID, billingID: billingID, target: target, sent: make(chan struct{})}
 	gateway.card.Store(oldCard)
 	gateway.updateMode.Store("ok")
 
@@ -70,6 +75,7 @@ func newFakeNMICardUpdateGateway(t *testing.T, vaultID, billingID string, oldCar
 				w.WriteHeader(http.StatusBadGateway)
 			case "timeout_landed":
 				gateway.card.Store(gateway.target)
+				gateway.sentOnce.Do(func() { close(gateway.sent) })
 				<-r.Context().Done()
 			case "ambiguous_lost":
 				w.WriteHeader(http.StatusBadGateway)
@@ -176,6 +182,27 @@ func (fx *paymentMethodUpdateFixture) intent(t *testing.T) (status string, paylo
 	return status, payload, evidence
 }
 
+func (fx *paymentMethodUpdateFixture) mutationPhases(t *testing.T) []string {
+	t.Helper()
+	var id uuid.UUID
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
+		`SELECT id FROM openrails.rail_intents WHERE intent_type = $1 AND idempotency_key = $2`,
+		TypeNMIPaymentMethodUpdate, NMIPaymentMethodUpdateIdempotencyKey(fx.pm.ID, *fx.request.PaymentToken),
+	).Scan(&id))
+	rows, err := fx.db.Pool().Query(fx.ctx,
+		`SELECT phase FROM openrails.rail_mutation_logs WHERE rail_intent_id = $1 ORDER BY created_at, id`, id)
+	require.NoError(t, err)
+	defer rows.Close()
+	var phases []string
+	for rows.Next() {
+		var phase string
+		require.NoError(t, rows.Scan(&phase))
+		phases = append(phases, phase)
+	}
+	require.NoError(t, rows.Err())
+	return phases
+}
+
 func (fx *paymentMethodUpdateFixture) localCard(t *testing.T) nmiCard {
 	t.Helper()
 	pm, err := paymentmethods.NewPaymentMethodRepo(fx.db).GetByID(fx.ctx, fx.pm.ID)
@@ -276,21 +303,39 @@ func TestNMIPaymentMethodUpdateIntent_AmbiguousLandedVerifierFinalizes(t *testin
 	require.EqualValues(t, 1, fx.gateway.patchCalls.Load(), "single-use token is never resubmitted")
 }
 
+// The caller's context is cancelled the moment the replacement crosses the
+// provider fence. The send honours that cancellation (ambiguous outcome), but
+// the ledger must still hold the unknown mark and the submission evidence: a
+// caller timeout must never leave the intent looking like it is still
+// executing, and the verifier — not a lease-expiry re-execution — resolves it
+// from provider truth.
 func TestNMIPaymentMethodUpdateIntent_TimeoutAfterSendRecoversFromProviderTruth(t *testing.T) {
 	fx := newPaymentMethodUpdateFixture(t)
 	fx.gateway.updateMode.Store("timeout_landed")
-	requestCtx, cancel := context.WithTimeout(fx.ctx, 100*time.Millisecond)
+	requestCtx, cancel := context.WithCancel(fx.ctx)
 	defer cancel()
+	go func() {
+		<-fx.gateway.sent
+		cancel()
+	}()
 
 	_, err := fx.through.ExecutePaymentMethodUpdate(requestCtx, fx.pm, fx.request)
-	require.Error(t, err)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, nmiCard{LastFour: "1111", CardType: "Visa", ExpiryDate: "01/29"}, fx.localCard(t))
 
-	fx.advanceClock(3 * time.Minute)
-	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	status, payload, evidence := fx.intent(t)
+	require.Equal(t, StatusUnknownNeedsVerify, status, "unknown mark must be durable despite the cancelled caller")
+	require.NotEmpty(t, payload)
+	var progress nmiPaymentMethodUpdateProgress
+	require.NoError(t, json.Unmarshal(evidence, &progress))
+	require.True(t, progress.SubmissionStarted)
+	require.Equal(t, nmiCard{LastFour: "1111", CardType: "Visa", ExpiryDate: "01/29"}, progress.OldCard)
+	require.Equal(t, []string{"attempting", "unknown"}, fx.mutationPhases(t))
+
+	fx.advanceClock(2 * time.Minute)
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
 	require.NoError(t, err)
-	status, payload, _ := fx.intent(t)
+	status, payload, _ = fx.intent(t)
 	require.Equal(t, StatusSucceeded, status)
 	require.Empty(t, payload)
 	require.Equal(t, fx.gateway.target, fx.localCard(t))

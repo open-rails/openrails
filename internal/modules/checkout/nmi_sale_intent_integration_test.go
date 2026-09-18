@@ -557,8 +557,9 @@ func TestNMISaleIntent_ExpiredClaimReconcilesButUnsentQueueExpires(t *testing.T)
 	require.Equal(t, intents.StatusExpired, expired.Status)
 }
 
-// A caller deadline can interrupt both the response and the local outcome write.
-// The original durable lease/attempt still prevents a resend after restart.
+// A caller deadline interrupts the provider response but never the ledger
+// write: the sale is durably unknown the moment the call returns, the executor
+// has nothing to re-run, and the verifier resolves it from provider truth.
 func TestNMISaleIntent_DeadlineAfterAcceptanceReconcilesClaim(t *testing.T) {
 	fx := newSaleIntentFixture(t)
 	fx.gateway.saleMode.Store("hold-response")
@@ -573,10 +574,14 @@ func TestNMISaleIntent_DeadlineAfterAcceptanceReconcilesClaim(t *testing.T) {
 	require.True(t, fx.gateway.charged.Load())
 	var id uuid.UUID
 	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT id FROM openrails.rail_intents WHERE merchant_id=$1 AND idempotency_key=$2`, dbtest.TestMerchantID.UUID(), key).Scan(&id))
-	fx.advanceClock(5 * time.Minute)
-	_, err = fx.runner.RunExecuteOnce(fx.ctx)
-	require.NoError(t, err)
 	pending, err := intents.NewStore(fx.db).Get(fx.ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status, "unknown mark must be durable despite the caller deadline")
+	fx.advanceClock(5 * time.Minute)
+	stats, err := fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	require.Zero(t, stats.Claimed, "an unknown sale is the verifier's, never re-executed")
+	pending, err = intents.NewStore(fx.db).Get(fx.ctx, id)
 	require.NoError(t, err)
 	require.Equal(t, intents.StatusUnknownNeedsVerify, pending.Status)
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())

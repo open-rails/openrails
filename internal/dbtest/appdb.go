@@ -3,9 +3,11 @@
 package dbtest
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
@@ -33,6 +35,24 @@ func OpenAppDB(t *testing.T, dsn string) *db.DB {
 func OpenMerchantDB(t *testing.T, merchantID uuid.UUID) *db.DB {
 	t.Helper()
 	d, err := db.NewWithPGXPool(SharedMerchantPool(t, merchantID), config.DefaultSchema)
+	require.NoError(t, err)
+	return d
+}
+
+// OpenOneConnAppDB is a ONE-connection pool on the RLS-enforcing app role with
+// no ambient merchant pin — the production request shape at its tightest.
+// Merchant rows are visible only on a connection the code pinned itself
+// (WithMerchantConn), and any path that needs a second connection while the
+// request holds its pin stalls until the acquire bound fails it.
+func OpenOneConnAppDB(t *testing.T) *db.DB {
+	t.Helper()
+	cfg, err := pgxpool.ParseConfig(SharedPostgresDSN(t))
+	require.NoError(t, err, "parse shared app dsn")
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	require.NoError(t, err, "open one-connection app pool")
+	t.Cleanup(pool.Close)
+	d, err := db.NewWithPGXPool(pool, config.DefaultSchema)
 	require.NoError(t, err)
 	return d
 }

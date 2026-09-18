@@ -132,7 +132,9 @@ func (r *Runner) Resolve(ctx context.Context, id uuid.UUID, resolution Resolutio
 	outcome, rerr := resolver.Resolve(ctx, claimed, resolution)
 	stopBeat()
 	if rerr != nil {
-		if _, err := r.Store.ReleaseUnknownClaim(ctx, claimed.ID); err != nil {
+		releaseCtx, cancel := LedgerWriteContext(ctx)
+		defer cancel()
+		if _, err := r.Store.ReleaseUnknownClaim(releaseCtx, claimed.ID); err != nil {
 			logEntry.WithError(err).Error("operator resolution: lease release failed; lease expiry will re-surface the operation")
 		}
 		return claimed, rerr
@@ -187,11 +189,8 @@ func (r *Runner) applyResolution(ctx context.Context, logEntry *log.Entry, claim
 	if outcome.Reason != "" {
 		reason += "; " + outcome.Reason
 	}
-	if err := r.logExternalMutation(ctx, claimed, mutationLogPhase(outcome), reason, evidence); err != nil {
-		logEntry.WithError(err).Error("operator resolution: mutation log failed")
-	}
 	logEntry.WithField("outcome", outcome.Class.String()).Warn("operator resolution applied")
 	var stats Stats
-	r.apply(ctx, logEntry, &stats, r.Registry.Lookup(claimed.IntentType), claimed, outcome, true)
+	r.record(ctx, logEntry, &stats, r.Registry.Lookup(claimed.IntentType), claimed, outcome, reason, true)
 	return r.Store.Get(ctx, claimed.ID)
 }
