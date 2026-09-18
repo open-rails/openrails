@@ -21,7 +21,7 @@ import {
   rotateWebhookURL,
   deactivatePrice,
   deactivateProduct,
-  deletePaymentProvider,
+  archivePaymentProviderAccount,
   deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
   deleteWebhook,
@@ -757,11 +757,13 @@ export const adminMutations = {
       mutationKey: [...queryKeys.settings(), "payment-providers", "archive"],
       mutationFn: ({
         rail,
-        environment,
+        id,
+        allowLast,
       }: {
         rail: string
-        environment?: string
-      }) => deletePaymentProvider(rail, environment),
+        id: string
+        allowLast?: boolean
+      }) => archivePaymentProviderAccount(rail, id, allowLast),
       onSuccess: invalidateExactOnSuccess(queryClient, [
         ...queryKeys.settings(),
         "payment-providers",
