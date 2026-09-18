@@ -5,6 +5,7 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Badge } from "@/components/ui/badge"
+import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { FormFieldErrors } from "@/components/form-field-errors"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,6 +48,7 @@ import {
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
+import { ApiError } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
 import { NotificationsTab } from "./notifications"
 import { ApiKeysTab } from "./api-keys"
@@ -518,7 +520,19 @@ function ProviderRow({
   const archiveProvider = useMutation(
     adminMutations.archivePaymentProvider(queryClient)
   )
+  const [confirmLastOpen, setConfirmLastOpen] = React.useState(false)
   const definition = providerDefinitions.find((d) => d.rail === provider.rail)
+  // Archive exactly this row's account (#655). It never contacts the
+  // provider, so a terminated account archives too. The rail's last active
+  // account needs an explicit confirmation.
+  const archive = async (allowLast: boolean) => {
+    await archiveProvider.mutateAsync({
+      rail: provider.rail,
+      id: provider.id,
+      allowLast,
+    })
+    toast.success("Provider archived")
+  }
   return (
     <TableRow className={provider.archived ? "opacity-60" : undefined}>
       <TableCell className="py-3">
@@ -591,18 +605,36 @@ function ProviderRow({
               disabled={archiveProvider.isPending}
               onClick={async () => {
                 try {
-                  await archiveProvider.mutateAsync({
-                    rail: provider.rail,
-                    environment: provider.environment,
-                  })
-                  toast.success("Provider archived")
+                  await archive(false)
                 } catch (err) {
+                  if (
+                    err instanceof ApiError &&
+                    err.code === "provider_account_last_active"
+                  ) {
+                    setConfirmLastOpen(true)
+                    return
+                  }
                   toastApiError(err, "Archive provider")
                 }
               }}
             >
               Archive
             </Button>
+            <TypedConfirmDialog
+              open={confirmLastOpen}
+              onOpenChange={setConfirmLastOpen}
+              title={`Archive the last active ${definition?.display_name ?? provider.rail} account?`}
+              description="New checkout on this rail is refused until another account is armed. Existing subscriptions, refunds and webhooks keep using this account."
+              confirmationWord="ARCHIVE"
+              actionLabel="Archive account"
+              onConfirm={async () => {
+                try {
+                  await archive(true)
+                } catch (err) {
+                  toastApiError(err, "Archive provider")
+                }
+              }}
+            />
           </div>
         )}
       </TableCell>
