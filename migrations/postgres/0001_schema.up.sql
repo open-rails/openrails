@@ -4526,3 +4526,74 @@ END;
 $$;
 CREATE CONSTRAINT TRIGGER require_finished_billing_restore AFTER INSERT OR UPDATE ON openrails.maintenance_runs
     DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION openrails.require_finished_billing_restore();
+
+-- #657: an unresolved account cutover owns the subscription and both cards.
+-- These fences cover all local writers, including lifecycle and custody remap,
+-- while provider steps commit their receipts in independent transactions.
+CREATE FUNCTION openrails.guard_provider_cutover_subscription() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE op record;
+BEGIN
+ FOR op IN SELECT * FROM openrails.rail_intents
+   WHERE merchant_id=OLD.merchant_id AND subscription_id=OLD.id
+     AND intent_type='nmi_provider_cutover'
+     AND status NOT IN ('succeeded','failed_terminal','superseded','expired')
+ LOOP
+   IF TG_OP='UPDATE'
+      AND op.result_evidence->>'source_canceled'='true'
+      AND op.result_evidence->>'target_active'='true'
+      AND NEW.psp_id=(op.payload->'request'->>'expected_target_psp_id')::uuid
+      AND NEW.payment_method_id=(op.payload->'request'->>'target_payment_method_id')::uuid
+      AND NEW.rail_subscription_id=op.result_evidence->'target'->>'id'
+      AND (to_jsonb(NEW)-ARRAY['psp_id','payment_method_id','rail_subscription_id','updated_at'])
+         =(to_jsonb(OLD)-ARRAY['psp_id','payment_method_id','rail_subscription_id','updated_at'])
+   THEN RETURN NEW; END IF;
+   RAISE EXCEPTION 'subscription has an unresolved provider cutover' USING ERRCODE='55000';
+ END LOOP;
+ IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER guard_provider_cutover_subscription BEFORE UPDATE OR DELETE ON openrails.subscriptions
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_provider_cutover_subscription();
+
+CREATE FUNCTION openrails.guard_provider_cutover_card() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM openrails.rail_intents i
+   WHERE i.merchant_id=OLD.merchant_id AND i.intent_type='nmi_provider_cutover'
+   AND i.status NOT IN ('succeeded','failed_terminal','superseded','expired')
+   AND (i.payload->'request'->>'target_payment_method_id'=OLD.id::text
+        OR i.payload->>'source_payment_method_id'=OLD.id::text)) THEN
+   RAISE EXCEPTION 'payment method has an unresolved provider cutover' USING ERRCODE='55000';
+ END IF;
+ IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER guard_provider_cutover_card BEFORE UPDATE OR DELETE ON openrails.payment_methods
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_provider_cutover_card();
+
+CREATE FUNCTION openrails.guard_provider_cutover_intent() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+ IF NEW.intent_type IN ('nmi_vault_delete','nmi_payment_method_update') THEN
+   PERFORM 1 FROM openrails.payment_methods WHERE merchant_id=NEW.merchant_id AND id=(NEW.payload->>'payment_method_id')::uuid FOR UPDATE;
+   IF EXISTS(SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=NEW.merchant_id AND i.intent_type='nmi_provider_cutover'
+      AND i.status NOT IN ('succeeded','failed_terminal','superseded','expired')
+      AND (i.payload->'request'->>'target_payment_method_id'=NEW.payload->>'payment_method_id' OR i.payload->>'source_payment_method_id'=NEW.payload->>'payment_method_id')) THEN
+     RAISE EXCEPTION 'payment method has an unresolved provider cutover' USING ERRCODE='55000';
+   END IF;
+ END IF;
+ IF NEW.subscription_id IS NOT NULL THEN
+   PERFORM 1 FROM openrails.subscriptions WHERE id=NEW.subscription_id AND merchant_id=NEW.merchant_id FOR UPDATE;
+   IF EXISTS(SELECT 1 FROM openrails.rail_intents i WHERE i.merchant_id=NEW.merchant_id
+     AND i.subscription_id=NEW.subscription_id AND i.id<>NEW.id
+     AND i.idempotency_key<>NEW.idempotency_key
+     AND i.status NOT IN ('succeeded','failed_terminal','superseded','expired')
+     AND (i.intent_type='nmi_provider_cutover' OR NEW.intent_type='nmi_provider_cutover')) THEN
+     RAISE EXCEPTION 'subscription has an unresolved provider operation' USING ERRCODE='55000';
+   END IF;
+ END IF;
+ RETURN NEW;
+END $$;
+CREATE TRIGGER guard_provider_cutover_intent BEFORE INSERT OR UPDATE OF status ON openrails.rail_intents
+FOR EACH ROW EXECUTE FUNCTION openrails.guard_provider_cutover_intent();

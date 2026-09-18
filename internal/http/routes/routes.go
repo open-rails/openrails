@@ -789,6 +789,9 @@ func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Optio
 	subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.AdminChangeTier), tierChangeWrite...)
 	subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.AdminChangeTierPreview), subWrite...)
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.AdminUpdateSubscriptionPaymentMethod), subWrite...)
+	subs.Handle(http.MethodPost, "/:id/provider-cutover", h(httphandlers.ProviderCutover), subWrite...)
+	subs.Handle(http.MethodGet, "/:id/provider-cutover", h(httphandlers.ProviderCutover), subRead...)
+	subs.Handle(http.MethodPost, "/:id/provider-cutover/preview", h(httphandlers.PreviewProviderCutover), subRead...)
 	// #773 reprice: schedule a single subscription's price move at its next
 	// renewal on/after effective_at.
 	subs.Handle(http.MethodPost, "/:id/reprice", h(httphandlers.CreateSubscriptionReprice), subWrite...)
