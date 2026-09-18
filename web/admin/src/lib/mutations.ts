@@ -81,7 +81,7 @@ import type {
   PaymentObject,
   AdminSubscription,
 } from "@/lib/api/types"
-import { queryKeys } from "@/lib/queries"
+import { merchantQueryKeys } from "@/lib/queries"
 
 const EXPORT_PAGE = 200
 
@@ -146,9 +146,16 @@ const updateNotificationReadCache = (
   )
 }
 
+// Every factory pins the selected merchant once, up front, with
+// merchantQueryKeys(). Callbacks fire after the request returns, by which time
+// the operator may have switched merchants, so a key built inside onSuccess /
+// onSettled from the live queryKeys would name the wrong merchant: the
+// initiating merchant's screens stay stale and an untouched merchant's cache is
+// invalidated. Importing the live queryKeys here is blocked by lint.
 export const adminMutations = {
   markNotificationRead: (queryClient: QueryClient) => {
-    const notificationsKey = queryKeys.notifications()
+    const keys = merchantQueryKeys()
+    const notificationsKey = keys.notifications()
     const unreadKey = [...notificationsKey, "unread-count"] as const
     return mutationOptions({
       mutationKey: [...notificationsKey, "mark-read"],
@@ -160,7 +167,8 @@ export const adminMutations = {
     })
   },
   markNotificationsRead: (queryClient: QueryClient) => {
-    const notificationsKey = queryKeys.notifications()
+    const keys = merchantQueryKeys()
+    const notificationsKey = keys.notifications()
     const unreadKey = [...notificationsKey, "unread-count"] as const
     return mutationOptions({
       mutationKey: [...notificationsKey, "mark-all-read"],
@@ -182,7 +190,8 @@ export const adminMutations = {
     })
   },
   saveDashboard: (queryClient: QueryClient) => {
-    const dashboardKey = queryKeys.dashboard()
+    const keys = merchantQueryKeys()
+    const dashboardKey = keys.dashboard()
     return mutationOptions({
       mutationKey: [...dashboardKey, "save"],
       mutationFn: (widgets: Widget[]) => putDashboard(widgets),
@@ -190,14 +199,16 @@ export const adminMutations = {
     })
   },
   askMetrics: () => {
-    const dashboardKey = queryKeys.dashboard()
+    const keys = merchantQueryKeys()
+    const dashboardKey = keys.dashboard()
     return mutationOptions({
       mutationKey: [...dashboardKey, "metrics", "ask"],
       mutationFn: (question: string) => askMetrics(question),
     })
   },
   generateDashboardWidget: () => {
-    const dashboardKey = queryKeys.dashboard()
+    const keys = merchantQueryKeys()
+    const dashboardKey = keys.dashboard()
     return mutationOptions({
       mutationKey: [...dashboardKey, "widgets", "generate"],
       mutationFn: ({
@@ -210,7 +221,8 @@ export const adminMutations = {
     })
   },
   findCustomer: () => {
-    const customersKey = queryKeys.customers()
+    const keys = merchantQueryKeys()
+    const customersKey = keys.customers()
     return mutationOptions({
       mutationKey: [...customersKey, "find"],
       mutationFn: async (term: string) => {
@@ -220,7 +232,8 @@ export const adminMutations = {
     })
   },
   exportCustomers: () => {
-    const customersKey = queryKeys.customers()
+    const keys = merchantQueryKeys()
+    const customersKey = keys.customers()
     return mutationOptions({
       mutationKey: [...customersKey, "export"],
       mutationFn: (q: string) =>
@@ -230,7 +243,8 @@ export const adminMutations = {
     })
   },
   exportSubscriptions: () => {
-    const subscriptionsKey = queryKeys.subscriptions()
+    const keys = merchantQueryKeys()
+    const subscriptionsKey = keys.subscriptions()
     return mutationOptions({
       mutationKey: [...subscriptionsKey, "export"],
       mutationFn: (filters: SubscriptionFilters) =>
@@ -240,7 +254,8 @@ export const adminMutations = {
     })
   },
   exportPayments: () => {
-    const paymentsKey = queryKeys.payments()
+    const keys = merchantQueryKeys()
+    const paymentsKey = keys.payments()
     return mutationOptions({
       mutationKey: [...paymentsKey, "export"],
       mutationFn: (filters: PaymentFilters) =>
@@ -250,7 +265,8 @@ export const adminMutations = {
     })
   },
   resolveFinding: (queryClient: QueryClient) => {
-    const opsKey = queryKeys.ops()
+    const keys = merchantQueryKeys()
+    const opsKey = keys.ops()
     return mutationOptions({
       mutationKey: [...opsKey, "findings", "resolve"],
       mutationFn: ({
@@ -271,10 +287,11 @@ export const adminMutations = {
     customerId?: string,
     subscriptionId?: string
   ) => {
-    const paymentsKey = queryKeys.payments()
-    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    const keys = merchantQueryKeys()
+    const paymentsKey = keys.payments()
+    const customerKey = customerId ? keys.customer(customerId) : undefined
     const subscriptionKey = subscriptionId
-      ? queryKeys.subscription(subscriptionId)
+      ? keys.subscription(subscriptionId)
       : undefined
     return mutationOptions({
       mutationKey: [...paymentsKey, paymentId, "refund"],
@@ -304,8 +321,9 @@ export const adminMutations = {
     subscriptionId: string,
     customerId?: string
   ) => {
-    const subscriptionsKey = queryKeys.subscriptions()
-    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    const keys = merchantQueryKeys()
+    const subscriptionsKey = keys.subscriptions()
+    const customerKey = customerId ? keys.customer(customerId) : undefined
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "cancel"],
       mutationFn: ({
@@ -329,8 +347,9 @@ export const adminMutations = {
     subscriptionId: string,
     customerId?: string
   ) => {
-    const subscriptionsKey = queryKeys.subscriptions()
-    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    const keys = merchantQueryKeys()
+    const subscriptionsKey = keys.subscriptions()
+    const customerKey = customerId ? keys.customer(customerId) : undefined
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "resume"],
       mutationFn: () => resumeSubscription(subscriptionId),
@@ -348,8 +367,9 @@ export const adminMutations = {
     subscriptionId: string,
     customerId?: string
   ) => {
-    const subscriptionsKey = queryKeys.subscriptions()
-    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
+    const keys = merchantQueryKeys()
+    const subscriptionsKey = keys.subscriptions()
+    const customerKey = customerId ? keys.customer(customerId) : undefined
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "payment-method"],
       mutationFn: (paymentMethodId: string) =>
@@ -364,7 +384,8 @@ export const adminMutations = {
     })
   },
   previewSubscriptionTierChange: (subscriptionId: string) => {
-    const subscriptionsKey = queryKeys.subscriptions()
+    const keys = merchantQueryKeys()
+    const subscriptionsKey = keys.subscriptions()
     return mutationOptions({
       mutationKey: [
         ...subscriptionsKey,
@@ -381,9 +402,10 @@ export const adminMutations = {
     subscriptionId: string,
     customerId?: string
   ) => {
-    const subscriptionsKey = queryKeys.subscriptions()
-    const customerKey = customerId ? queryKeys.customer(customerId) : undefined
-    const paymentsKey = queryKeys.payments()
+    const keys = merchantQueryKeys()
+    const subscriptionsKey = keys.subscriptions()
+    const customerKey = customerId ? keys.customer(customerId) : undefined
+    const paymentsKey = keys.payments()
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "change-tier"],
       mutationFn: (change: { priceId: string; idempotencyKey: string }) =>
@@ -406,8 +428,9 @@ export const adminMutations = {
     queryClient: QueryClient,
     subscriptionId: string
   ) => {
-    const subscriptionsKey = queryKeys.subscriptions()
-    const catalogKey = queryKeys.catalog()
+    const keys = merchantQueryKeys()
+    const subscriptionsKey = keys.subscriptions()
+    const catalogKey = keys.catalog()
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "reprices", "cancel"],
       mutationFn: (repriceId: string) => cancelReprice(repriceId),
@@ -419,7 +442,8 @@ export const adminMutations = {
     })
   },
   grantCustomerEntitlement: (queryClient: QueryClient, customerId: string) => {
-    const customerKey = queryKeys.customer(customerId)
+    const keys = merchantQueryKeys()
+    const customerKey = keys.customer(customerId)
     return mutationOptions({
       mutationKey: [...customerKey, "entitlements", "grant"],
       mutationFn: ({
@@ -433,7 +457,8 @@ export const adminMutations = {
     })
   },
   revokeCustomerEntitlement: (queryClient: QueryClient, customerId: string) => {
-    const customerKey = queryKeys.customer(customerId)
+    const keys = merchantQueryKeys()
+    const customerKey = keys.customer(customerId)
     return mutationOptions({
       mutationKey: [...customerKey, "entitlements", "revoke"],
       mutationFn: (entitlementId: string) =>
@@ -445,7 +470,8 @@ export const adminMutations = {
     queryClient: QueryClient,
     customerId: string
   ) => {
-    const customerKey = queryKeys.customer(customerId)
+    const keys = merchantQueryKeys()
+    const customerKey = keys.customer(customerId)
     return mutationOptions({
       mutationKey: [...customerKey, "product-access", "grant"],
       mutationFn: ({
@@ -462,7 +488,8 @@ export const adminMutations = {
     queryClient: QueryClient,
     customerId: string
   ) => {
-    const customerKey = queryKeys.customer(customerId)
+    const keys = merchantQueryKeys()
+    const customerKey = keys.customer(customerId)
     return mutationOptions({
       mutationKey: [...customerKey, "product-access", "revoke"],
       mutationFn: (grantId: string) => revokeProductAccess(customerId, grantId),
@@ -473,8 +500,9 @@ export const adminMutations = {
     queryClient: QueryClient,
     customerId: string
   ) => {
-    const customerKey = queryKeys.customer(customerId)
-    const paymentsKey = queryKeys.payments()
+    const keys = merchantQueryKeys()
+    const customerKey = keys.customer(customerId)
+    const paymentsKey = keys.payments()
     return mutationOptions({
       mutationKey: [...customerKey, "payments", "off-channel"],
       mutationFn: (payment: OffChannelPaymentRequest) =>
@@ -486,23 +514,28 @@ export const adminMutations = {
         ]),
     })
   },
-  askCatalogCopilot: () =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "copilot", "ask"],
+  askCatalogCopilot: () => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "copilot", "ask"],
       mutationFn: (question: string) => askCatalogCopilot(question),
-    }),
-  loadCatalogPriceDraft: () =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "copilot", "load-price-draft"],
+    })
+  },
+  loadCatalogPriceDraft: () => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "copilot", "load-price-draft"],
       mutationFn: async (priceKey: string) => {
         const price = await getPriceByKey(priceKey)
         const product = await getProduct(price.product_id)
         return { price, productName: product.display_name }
       },
-    }),
-  createCatalogDraftPrice: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "copilot", "create-price"],
+    })
+  },
+  createCatalogDraftPrice: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "copilot", "create-price"],
       mutationFn: async ({
         draftId,
         price,
@@ -516,10 +549,12 @@ export const adminMutations = {
         )
         return created
       },
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
   publishCatalog: (queryClient: QueryClient) => {
-    const catalogKey = queryKeys.catalog()
+    const keys = merchantQueryKeys()
+    const catalogKey = keys.catalog()
     return mutationOptions({
       mutationKey: [...catalogKey, "publish"],
       mutationFn: ({
@@ -542,21 +577,26 @@ export const adminMutations = {
       },
     })
   },
-  refreshCatalogDrift: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalogDrift(), "refresh"],
+  refreshCatalogDrift: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalogDrift(), "refresh"],
       mutationFn: () => refreshCatalogDrift(),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalogDrift()),
-    }),
-  createProduct: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "products", "create"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalogDrift()),
+    })
+  },
+  createProduct: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "products", "create"],
       mutationFn: (product: ProductRequest) => createProduct(product),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
-  updateProduct: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "products", "update"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
+  updateProduct: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "products", "update"],
       mutationFn: ({
         id,
         product,
@@ -564,30 +604,38 @@ export const adminMutations = {
         id: string
         product: Partial<ProductRequest> & { set_entitlements?: boolean }
       }) => updateProduct(id, product),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
-  setProductActive: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "products", "set-active"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
+  setProductActive: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "products", "set-active"],
       mutationFn: ({ id, active }: { id: string; active: boolean }) =>
         active ? activateProduct(id) : deactivateProduct(id),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
-  createPrice: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "prices", "create"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
+  createPrice: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "prices", "create"],
       mutationFn: (price: PriceRequest) => createPrice(price),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
-  setPriceActive: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "prices", "set-active"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
+  setPriceActive: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "prices", "set-active"],
       mutationFn: ({ id, active }: { id: string; active: boolean }) =>
         active ? activatePrice(id) : deactivatePrice(id),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
   putUsageMeter: (queryClient: QueryClient) => {
-    const metersKey = queryKeys.usageMeters()
+    const keys = merchantQueryKeys()
+    const metersKey = keys.usageMeters()
     return mutationOptions({
       mutationKey: [...metersKey, "put"],
       mutationFn: ({ key, meter }: { key: string; meter: UsageMeterRequest }) =>
@@ -596,13 +644,14 @@ export const adminMutations = {
         Promise.all([
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.usageMeter(key),
+            queryKey: keys.usageMeter(key),
           }),
         ]),
     })
   },
   putDefaultUsageRateCard: (queryClient: QueryClient) => {
-    const metersKey = queryKeys.usageMeters()
+    const keys = merchantQueryKeys()
+    const metersKey = keys.usageMeters()
     return mutationOptions({
       mutationKey: [...metersKey, "rate-card", "put"],
       mutationFn: ({
@@ -616,13 +665,14 @@ export const adminMutations = {
         Promise.all([
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.usageMeter(key),
+            queryKey: keys.usageMeter(key),
           }),
         ]),
     })
   },
   deleteDefaultUsageRateCard: (queryClient: QueryClient) => {
-    const metersKey = queryKeys.usageMeters()
+    const keys = merchantQueryKeys()
+    const metersKey = keys.usageMeters()
     return mutationOptions({
       mutationKey: [...metersKey, "rate-card", "delete"],
       mutationFn: (key: string) => deleteDefaultUsageRateCard(key),
@@ -630,13 +680,14 @@ export const adminMutations = {
         Promise.all([
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.usageMeter(key),
+            queryKey: keys.usageMeter(key),
           }),
         ]),
     })
   },
   putCustomerUsageRateOverride: (queryClient: QueryClient) => {
-    const metersKey = queryKeys.usageMeters()
+    const keys = merchantQueryKeys()
+    const metersKey = keys.usageMeters()
     return mutationOptions({
       mutationKey: [...metersKey, "customer-override", "put"],
       mutationFn: ({
@@ -651,20 +702,21 @@ export const adminMutations = {
       onSuccess: (_result, { customerId, meterKey }) =>
         Promise.all([
           queryClient.invalidateQueries({
-            queryKey: queryKeys.customer(customerId),
+            queryKey: keys.customer(customerId),
           }),
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.usageMeter(meterKey),
+            queryKey: keys.usageMeter(meterKey),
           }),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.dashboard(),
+            queryKey: keys.dashboard(),
           }),
         ]),
     })
   },
   deleteCustomerUsageRateOverride: (queryClient: QueryClient) => {
-    const metersKey = queryKeys.usageMeters()
+    const keys = merchantQueryKeys()
+    const metersKey = keys.usageMeters()
     return mutationOptions({
       mutationKey: [...metersKey, "customer-override", "delete"],
       mutationFn: ({
@@ -677,27 +729,30 @@ export const adminMutations = {
       onSuccess: (_result, { customerId, meterKey }) =>
         Promise.all([
           queryClient.invalidateQueries({
-            queryKey: queryKeys.customer(customerId),
+            queryKey: keys.customer(customerId),
           }),
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.usageMeter(meterKey),
+            queryKey: keys.usageMeter(meterKey),
           }),
           queryClient.invalidateQueries({
-            queryKey: queryKeys.dashboard(),
+            queryKey: keys.dashboard(),
           }),
         ]),
     })
   },
-  previewPriceChange: () =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "prices", "preview-change"],
+  previewPriceChange: () => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "prices", "preview-change"],
       mutationFn: (priceKey: string) =>
         previewRepriceAllPriorVersions(priceKey),
-    }),
-  changePrice: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "prices", "change"],
+    })
+  },
+  changePrice: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "prices", "change"],
       mutationFn: async ({
         price,
         migration,
@@ -725,25 +780,31 @@ export const adminMutations = {
       },
       // The price can be created before scheduling fails. Always refresh so
       // the UI reflects that partial server-side success.
-      onSettled: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
-  cancelReprices: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.catalog(), "reprices", "cancel"],
+      onSettled: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
+  cancelReprices: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.catalog(), "reprices", "cancel"],
       mutationFn: (repriceIds: string[]) =>
         Promise.all(repriceIds.map((id) => cancelReprice(id))),
       // A batch can be partially canceled before one request fails.
-      onSettled: invalidateTreeOnSuccess(queryClient, queryKeys.catalog()),
-    }),
-  updateMerchantSettings: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.settings(), "update"],
+      onSettled: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+    })
+  },
+  updateMerchantSettings: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "update"],
       mutationFn: (settings: MerchantSettings) => putMerchantSettings(settings),
-      onSuccess: invalidateExactOnSuccess(queryClient, queryKeys.settings()),
-    }),
-  savePaymentProvider: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.settings(), "payment-providers", "save"],
+      onSuccess: invalidateExactOnSuccess(queryClient, keys.settings()),
+    })
+  },
+  savePaymentProvider: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "payment-providers", "save"],
       mutationFn: ({
         rail,
         provider,
@@ -752,13 +813,15 @@ export const adminMutations = {
         provider: UpsertProviderRequest
       }) => putPaymentProvider(rail, provider),
       onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.settings(),
+        ...keys.settings(),
         "payment-providers",
       ]),
-    }),
-  archivePaymentProvider: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.settings(), "payment-providers", "archive"],
+    })
+  },
+  archivePaymentProvider: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "payment-providers", "archive"],
       mutationFn: ({
         rail,
         id,
@@ -769,62 +832,72 @@ export const adminMutations = {
         allowLast?: boolean
       }) => archivePaymentProviderAccount(rail, id, allowLast),
       onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.settings(),
+        ...keys.settings(),
         "payment-providers",
       ]),
-    }),
-  createApiKey: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.settings(), "api-keys", "create"],
+    })
+  },
+  createApiKey: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "api-keys", "create"],
       mutationFn: ({ name, role }: { name: string; role: string }) =>
         createApiKey(name, role),
       onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.settings(),
+        ...keys.settings(),
         "api-keys",
       ]),
-    }),
-  revokeApiKey: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.settings(), "api-keys", "revoke"],
+    })
+  },
+  revokeApiKey: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "api-keys", "revoke"],
       mutationFn: (id: string) => revokeApiKey(id),
       onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.settings(),
+        ...keys.settings(),
         "api-keys",
       ]),
-    }),
-  inviteTeamMember: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.team(), "invite"],
+    })
+  },
+  inviteTeamMember: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.team(), "invite"],
       mutationFn: ({ email, role }: { email: string; role: string }) =>
         inviteTeamMember(email, role),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
-    }),
-  revokeTeamInvite: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.team(), "invites", "revoke"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
+    })
+  },
+  revokeTeamInvite: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.team(), "invites", "revoke"],
       mutationFn: (id: string) => revokeTeamInvite(id),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
-    }),
-  changeTeamRole: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.team(), "role"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
+    })
+  },
+  changeTeamRole: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.team(), "role"],
       mutationFn: ({ userId, role }: { userId: string; role: string }) =>
         changeTeamRole(userId, role),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
-    }),
-  removeTeamMember: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.team(), "remove"],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
+    })
+  },
+  removeTeamMember: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.team(), "remove"],
       mutationFn: (userId: string) => removeTeamMember(userId),
-      onSuccess: invalidateTreeOnSuccess(queryClient, queryKeys.team()),
-    }),
-  setCreditLimit: () =>
-    mutationOptions({
-      mutationKey: [
-        ...queryKeys.settings(),
-        "customer-controls",
-        "credit-limit",
-      ],
+      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
+    })
+  },
+  setCreditLimit: () => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "customer-controls", "credit-limit"],
       mutationFn: ({
         customerId,
         currency,
@@ -834,10 +907,12 @@ export const adminMutations = {
         currency: string
         amount: string
       }) => setCreditLimit(customerId, currency, amount),
-    }),
-  lookupCustomerControls: () =>
-    mutationOptions({
-      mutationKey: [...queryKeys.settings(), "customer-controls", "lookup"],
+    })
+  },
+  lookupCustomerControls: () => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.settings(), "customer-controls", "lookup"],
       mutationFn: async ({
         customerId,
         currency,
@@ -851,33 +926,40 @@ export const adminMutations = {
         ])
         return { credit, trust }
       },
-    }),
-  createWebhook: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.alerts(), "webhooks", "create"],
+    })
+  },
+  createWebhook: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.alerts(), "webhooks", "create"],
       mutationFn: (webhook: WebhookRequest) => createWebhook(webhook),
       onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.alerts(),
+        ...keys.alerts(),
         "webhooks",
       ]),
-    }),
-  rotateWebhookURL: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.alerts(), "webhooks", "rotate"],
+    })
+  },
+  rotateWebhookURL: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.alerts(), "webhooks", "rotate"],
       mutationFn: ({ id, url }: { id: string; url: string }) =>
         rotateWebhookURL(id, url),
       onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.alerts(),
+        ...keys.alerts(),
         "webhooks",
       ]),
-    }),
-  deleteWebhook: (queryClient: QueryClient) =>
-    mutationOptions({
-      mutationKey: [...queryKeys.alerts(), "webhooks", "delete"],
+    })
+  },
+  deleteWebhook: (queryClient: QueryClient) => {
+    const keys = merchantQueryKeys()
+    return mutationOptions({
+      mutationKey: [...keys.alerts(), "webhooks", "delete"],
       mutationFn: (id: string) => deleteWebhook(id),
       onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...queryKeys.alerts(),
+        ...keys.alerts(),
         "webhooks",
       ]),
-    }),
+    })
+  },
 }

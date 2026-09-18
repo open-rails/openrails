@@ -75,34 +75,50 @@ export async function collectCatalogPages<Page extends ItemsEnvelope<unknown>>(
   return { ...first, items, limit: items.length, offset: 0 }
 }
 
-const merchantRoot = () =>
+type MerchantRoot = readonly ["merchant", string]
+
+const currentMerchantRoot = (): MerchantRoot =>
   ["merchant", getTokens()?.merchant ?? "unselected"] as const
+
+// One vocabulary of merchant-scoped keys, bound to a root that is either read
+// live or pinned once. Nothing below reaches for the selected merchant itself.
+const buildQueryKeys = (root: () => MerchantRoot) => ({
+  merchant: () => root(),
+  customers: () => [...root(), "customers"] as const,
+  customer: (id: string) => [...root(), "customers", id] as const,
+  customerUsageRates: (id: string) =>
+    [...root(), "customers", id, "usage-rates"] as const,
+  subscriptions: () => [...root(), "subscriptions"] as const,
+  subscription: (id: string) => [...root(), "subscriptions", id] as const,
+  payments: () => [...root(), "payments"] as const,
+  payment: (id: string) => [...root(), "payments", id] as const,
+  catalog: () => [...root(), "catalog"] as const,
+  catalogDrift: () => [...root(), "catalog", "drift"] as const,
+  usageMeters: () => [...root(), "catalog", "meters"] as const,
+  usageMeter: (key: string) => [...root(), "catalog", "meters", key] as const,
+  settings: () => [...root(), "settings"] as const,
+  team: () => [...root(), "team"] as const,
+  alerts: () => [...root(), "alerts"] as const,
+  ops: () => [...root(), "ops"] as const,
+  dashboard: () => [...root(), "dashboard"] as const,
+  notifications: () => [...root(), "notifications"] as const,
+})
+
+export type MerchantQueryKeys = ReturnType<typeof buildQueryKeys>
 
 const queryErrorMeta = (errorAction?: string) =>
   errorAction ? { errorAction } : undefined
 
-export const queryKeys = {
-  merchant: merchantRoot,
-  customers: () => [...merchantRoot(), "customers"] as const,
-  customer: (id: string) => [...merchantRoot(), "customers", id] as const,
-  customerUsageRates: (id: string) =>
-    [...queryKeys.customer(id), "usage-rates"] as const,
-  subscriptions: () => [...merchantRoot(), "subscriptions"] as const,
-  subscription: (id: string) =>
-    [...merchantRoot(), "subscriptions", id] as const,
-  payments: () => [...merchantRoot(), "payments"] as const,
-  payment: (id: string) => [...merchantRoot(), "payments", id] as const,
-  catalog: () => [...merchantRoot(), "catalog"] as const,
-  catalogDrift: () => [...merchantRoot(), "catalog", "drift"] as const,
-  usageMeters: () => [...merchantRoot(), "catalog", "meters"] as const,
-  usageMeter: (key: string) =>
-    [...merchantRoot(), "catalog", "meters", key] as const,
-  settings: () => [...merchantRoot(), "settings"] as const,
-  team: () => [...merchantRoot(), "team"] as const,
-  alerts: () => [...merchantRoot(), "alerts"] as const,
-  ops: () => [...merchantRoot(), "ops"] as const,
-  dashboard: () => [...merchantRoot(), "dashboard"] as const,
-  notifications: () => [...merchantRoot(), "notifications"] as const,
+// Live keys: every call names whichever merchant is selected right now. That is
+// what reads want, because a query key is built by the render that shows it.
+export const queryKeys: MerchantQueryKeys = buildQueryKeys(currentMerchantRoot)
+
+// Pinned keys: the selected merchant is read once, here. Keys derived from the
+// result name that merchant forever, so work started under one merchant can
+// never invalidate under another that the operator selected while it ran.
+export const merchantQueryKeys = (): MerchantQueryKeys => {
+  const root = currentMerchantRoot()
+  return buildQueryKeys(() => root)
 }
 
 export const adminQueries = {
