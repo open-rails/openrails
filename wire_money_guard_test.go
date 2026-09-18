@@ -179,6 +179,8 @@ var pendingDynamicMoney = map[string]string{
 	"internal/http/handlers/self_usage_invoices.go:func GetMyInvoices \"limit\"":                                   notMoneyPageSize,
 	"internal/http/request/request.go:func SuccessJSONPaginated \"limit\"":                                         notMoneyPageSize,
 	"internal/integrationharness/nmi_gateway.go:func serveExactRead \"amount\"":                                    notHTTPProviderWire,
+	"internal/integrationharness/stripe_gateway.go:func handle \"price\"":                                          notHTTPProviderWire,
+	"internal/integrationharness/stripe_gateway.go:func subscriptionJSON \"price\"":                                notHTTPProviderWire,
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                                 notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                                        notMoneyPurgeInventory,
 	"internal/modules/checkout/session_service.go:func confirmSolanaSession \"solana_token_amount\"":               notHTTPStoredMetadata,

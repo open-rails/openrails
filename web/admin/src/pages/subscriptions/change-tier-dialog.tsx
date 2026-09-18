@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { Rail, SubscriptionStatus } from "@/lib/api/types"
+import { ApiError, getTokens } from "@/lib/api/client"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
 import { formatDate, formatNativeAmount } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
@@ -45,7 +46,16 @@ interface ChangeTierDialogProps {
   status: SubscriptionStatus
 }
 
-export function ChangeTierDialog({
+export function ChangeTierDialog(props: ChangeTierDialogProps) {
+  return (
+    <ChangeTierForm
+      key={`${getTokens()?.merchant ?? ""}:${props.subscriptionId}`}
+      {...props}
+    />
+  )
+}
+
+function ChangeTierForm({
   subscriptionId,
   customerId,
   productId,
@@ -59,9 +69,16 @@ export function ChangeTierDialog({
   const [open, setOpen] = React.useState(false)
   const [selectedPriceId, setSelectedPriceId] = React.useState("")
   const [reviewedPriceId, setReviewedPriceId] = React.useState("")
-  // The key of the reviewed change: every confirm and retry sends it, so a
-  // lost response is read back instead of charging twice.
-  const [changeKey, setChangeKey] = React.useState("")
+  // A dismissed dialog or another preview cannot establish non-execution.
+  // Retain each submitted request's key until its outcome is definitive.
+  const attempts = React.useRef(new Map<string, string>())
+  const view = React.useRef(0)
+  React.useEffect(
+    () => () => {
+      view.current++
+    },
+    []
+  )
   const queryClient = useQueryClient()
   const preview = useMutation(
     adminMutations.previewSubscriptionTierChange(subscriptionId)
@@ -103,20 +120,14 @@ export function ChangeTierDialog({
   })
 
   const handleOpenChange = (next: boolean) => {
+    view.current++
     setOpen(next)
-    if (!next) {
-      setSelectedPriceId("")
-      setReviewedPriceId("")
-      setChangeKey("")
-      preview.reset()
-      change.reset()
-    }
   }
 
   const handleSelect = (value: string | null) => {
+    view.current++
     setSelectedPriceId(value ?? "")
     setReviewedPriceId("")
-    setChangeKey("")
     preview.reset()
     change.reset()
   }
@@ -134,7 +145,7 @@ export function ChangeTierDialog({
           <Button
             variant="outline"
             size="sm"
-            disabled={Boolean(blockReason)}
+            disabled={Boolean(blockReason) && !change.variables}
             title={blockReason}
           >
             Change tier
@@ -281,12 +292,15 @@ export function ChangeTierDialog({
               type="button"
               disabled={!selectedPriceId || preview.isPending}
               onClick={async () => {
+                const currentView = view.current
                 try {
                   await preview.mutateAsync(selectedPriceId)
+                  if (view.current !== currentView) return
                   setReviewedPriceId(selectedPriceId)
-                  setChangeKey(crypto.randomUUID())
                 } catch (error) {
-                  toastApiError(error, "Preview tier change")
+                  if (view.current === currentView) {
+                    toastApiError(error, "Preview tier change")
+                  }
                 }
               }}
             >
@@ -300,11 +314,27 @@ export function ChangeTierDialog({
                 (Boolean(change.data) && change.data?.status !== "processing")
               }
               onClick={async () => {
+                const currentView = view.current
+                const changeKey =
+                  attempts.current.get(selectedPriceId) ?? crypto.randomUUID()
+                attempts.current.set(selectedPriceId, changeKey)
+                const completeAttempt = () => {
+                  if (attempts.current.get(selectedPriceId) === changeKey) {
+                    attempts.current.delete(selectedPriceId)
+                  }
+                }
                 try {
                   const result = await change.mutateAsync({
                     priceId: selectedPriceId,
                     idempotencyKey: changeKey,
                   })
+                  if (
+                    result.status === "succeeded" ||
+                    result.status === "blocked"
+                  ) {
+                    completeAttempt()
+                  }
+                  if (view.current !== currentView) return
                   if (result.status === "succeeded") {
                     toast.success(
                       result.action === "upgrade"
@@ -312,6 +342,10 @@ export function ChangeTierDialog({
                         : "Downgrade scheduled"
                     )
                     handleOpenChange(false)
+                    setSelectedPriceId("")
+                    setReviewedPriceId("")
+                    preview.reset()
+                    change.reset()
                   }
                   if (result.status === "processing") {
                     toast.info(
@@ -319,7 +353,21 @@ export function ChangeTierDialog({
                     )
                   }
                 } catch (error) {
-                  toastApiError(error, "Change subscription tier")
+                  // 402 is a final provider refusal regardless of its code.
+                  // Other refusals can reject a readback of an already accepted
+                  // operation, so retire only explicitly terminal outcomes.
+                  if (
+                    error instanceof ApiError &&
+                    (error.status === 402 ||
+                      (error.status === 409 &&
+                        (error.code === "tier_change_refused" ||
+                          error.code === "tier_change_idempotency_conflict")))
+                  ) {
+                    completeAttempt()
+                  }
+                  if (view.current === currentView) {
+                    toastApiError(error, "Change subscription tier")
+                  }
                 }
               }}
             >
