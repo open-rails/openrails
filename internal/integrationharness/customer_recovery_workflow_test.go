@@ -365,7 +365,9 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 			require.NotNil(t, result.Subscription.CurrentPeriodEndsAt)
 			require.True(t, result.Subscription.CurrentPeriodEndsAt.After(fixture.PeriodEnd), "the period advanced")
 			require.NotNil(t, result.Payment, "the confirmed charge is the renewal payment")
-			require.Equal(t, "completed", result.Payment.Status)
+			// The shared Payment shape spells the DB's "completed" as "succeeded",
+			// exactly as GET /v1/merchant/payments serves it (#983 F23 review).
+			require.Equal(t, "succeeded", result.Payment.Status)
 			require.Equal(t, fixture.Amount, result.Payment.Amount)
 			require.NotNil(t, result.Subscription.Recovery)
 			require.False(t, result.Subscription.Recovery.Retryable)
