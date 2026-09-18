@@ -60,7 +60,7 @@ var deferredBoundaries = map[string]string{
 	"internal/modules/checkout/nmi_sale_intent.go":         "same: converts, then hands off to the pinned nmi client",
 	"internal/modules/checkout/nmi_subscription_intent.go": "same",
 	"internal/modules/checkout/custodian_sale.go":          "same",
-	"internal/modules/money/arrears.go":                    "same",
+	"internal/modules/money/invoice_collection.go":         "invoice collection freezes the rail minor amount at enqueue; it reaches the wire through the pinned nmi client / Stripe adapter",
 	"internal/modules/subscriptions/plan_migration.go":     "or#815 plan migration: successor amount reaches NMI through the pinned client",
 	"internal/modules/subscriptions/plan_migration_nmi.go": "same",
 	"internal/http/handlers/admin_payments.go":             "admin-initiated refund amount; reaches the wire through the pinned nmi/stripe clients",

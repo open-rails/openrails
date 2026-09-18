@@ -41,6 +41,32 @@ func (q *Queries) CountInFlightChargeIntentsForPaymentMethod(ctx context.Context
 	return column_1, err
 }
 
+const countUnresolvedOperationsNamingPaymentMethod = `-- name: CountUnresolvedOperationsNamingPaymentMethod :one
+SELECT count(*)::bigint FROM openrails.rail_intents ri
+WHERE ri.merchant_id = $1::uuid
+  AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
+  AND ri.payload->>'payment_method_id' = $2::uuid::text
+`
+
+type CountUnresolvedOperationsNamingPaymentMethodParams struct {
+	MerchantID      uuid.UUID
+	PaymentMethodID uuid.UUID
+}
+
+// or#297 refusal predicate, second arm: an operation pins the instrument its
+// frozen payload names (payment_method_id) until it resolves, whether or not
+// a subscription links it (an invoice collection has none). Every unresolved
+// state counts: pending and failed_retryable re-run from the executor,
+// in_flight is mid-attempt, unknown_needs_verify was sent. Its submission,
+// verification and operator resolution are all judged against the custody it
+// froze; moving custody underneath would strand them on a dead instrument.
+func (q *Queries) CountUnresolvedOperationsNamingPaymentMethod(ctx context.Context, arg CountUnresolvedOperationsNamingPaymentMethodParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnresolvedOperationsNamingPaymentMethod, arg.MerchantID, arg.PaymentMethodID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const getPaymentMethodForCustodianToken = `-- name: GetPaymentMethodForCustodianToken :one
 SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
 WHERE merchant_id = $1::uuid

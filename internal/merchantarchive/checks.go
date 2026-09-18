@@ -65,7 +65,6 @@ var omittedColumns = map[string]string{
 	"checkout_sessions": "destructive_run_class",
 	"entitlements":      "period destructive_run_class",
 	"usage_events":      "metadata",
-	"invoice_items":     "metadata",
 	"maintenance_runs":  "run_class coverage affected note summary error inventory_manifest inventory_total_rows",
 	"rail_intents":      "destructive_run_class",
 }
@@ -193,6 +192,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		{"checkout_sessions", "status NOT IN ('succeeded','failed','expired','canceled')"},
 		{"rail_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
 		{"payments", "status='pending'"}, {"invoice_payments", "status='attempted'"},
+		{"invoices", "collection_intent_id IS NOT NULL"},
 		{"admission_operations", "state='open'"},
 		{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
 		{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
@@ -208,7 +208,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	// metadata may carry replay terms or financial facts; never erase it.
 	for table, columns := range map[string][]string{
 		"payments": {"discount_metadata"}, "payment_methods": {"metadata"},
-		"usage_events": {"metadata"}, "invoice_items": {"metadata"},
+		"usage_events": {"metadata"},
 	} {
 		for _, column := range columns {
 			if err := refuseRows(ctx, tx, id, table, "coalesce("+column+",'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)"); err != nil {
@@ -216,32 +216,34 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 			}
 		}
 	}
-	// Payment writers retain typed correlation metadata. Validate it with the
+	// Payment and invoice writers retain typed correlation metadata. Validate it with the
 	// same archive contract before writing the header, including unsafe values
 	// hidden under otherwise supported keys.
-	rows, err := tx.Query(ctx, `SELECT metadata::text FROM openrails.payments WHERE merchant_id=$1 AND coalesce(metadata,'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)`, id.UUID())
-	if err != nil {
-		return err
-	}
-	profile := contract.Profile{Name: "payments", Columns: []contract.Column{{Name: "metadata", Type: "jsonb"}}}
-	var invalid int64
-	for rows.Next() {
-		var metadata string
-		if err := rows.Scan(&metadata); err != nil {
-			rows.Close()
+	for _, table := range []string{"payments", "invoice_items"} {
+		rows, err := tx.Query(ctx, "SELECT metadata::text FROM openrails."+table+" WHERE merchant_id=$1 AND coalesce(metadata,'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)", id.UUID())
+		if err != nil {
 			return err
 		}
-		if contract.ValidateValues(profile, []*string{&metadata}) != nil {
-			invalid++
+		profile := contract.Profile{Name: table, Columns: []contract.Column{{Name: "metadata", Type: "jsonb"}}}
+		var invalid int64
+		for rows.Next() {
+			var metadata string
+			if err := rows.Scan(&metadata); err != nil {
+				rows.Close()
+				return err
+			}
+			if contract.ValidateValues(profile, []*string{&metadata}) != nil {
+				invalid++
+			}
 		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	if invalid > 0 {
-		return &Error{Code: "unsupported_state", Table: "payments", Count: invalid}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if invalid > 0 {
+			return &Error{Code: "unsupported_state", Table: table, Count: invalid}
+		}
 	}
 	return validateReferences(ctx, tx, id)
 }

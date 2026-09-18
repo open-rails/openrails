@@ -1,31 +1,25 @@
 package money
 
 import (
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
-func TestInvoiceRetryIdempotencyKey(t *testing.T) {
+func TestInvoiceRetryOperationKey(t *testing.T) {
 	t.Parallel()
 	invoiceID := uuid.New()
-	key := invoiceRetryIdempotencyKey(invoiceID, "client-key")
-	if len(key) > 50 {
-		t.Fatalf("provider key length = %d, want at most 50", len(key))
+	key := invoiceRetryOperationKey(invoiceID, "client-key")
+	if key != invoiceRetryOperationKey(invoiceID, "client-key") {
+		t.Fatal("operation key is not deterministic")
 	}
-	if key != invoiceRetryIdempotencyKey(invoiceID, "client-key") {
-		t.Fatal("provider key is not deterministic")
+	if key == invoiceRetryOperationKey(uuid.New(), "client-key") {
+		t.Fatal("operation key does not include invoice scope")
 	}
-	if key == invoiceRetryIdempotencyKey(uuid.New(), "client-key") {
-		t.Fatal("provider key does not include invoice scope")
-	}
-	methodID := uuid.New()
-	if attemptKey := invoiceRetryAttemptKey(key, methodID); attemptKey != key+":"+methodID.String() {
-		t.Fatalf("attempt key = %q, want immutable method binding", attemptKey)
+	if key == invoiceRetryOperationKey(invoiceID, "other-key") {
+		t.Fatal("operation key does not include the client key")
 	}
 }
 
@@ -70,17 +64,10 @@ func TestInvoiceCollectionRetryable(t *testing.T) {
 			},
 		},
 		{
-			name: "retry already in progress",
+			name: "collection operation live",
 			invoice: &models.Invoice{
 				Status: "past_due", CollectionMethod: CollectionChargeAutomatically, AmountDue: 100,
-				LastCollectionFailureCode: stringPointer(collectionAttemptInProgress),
-			},
-		},
-		{
-			name: "provider outcome unknown",
-			invoice: &models.Invoice{
-				Status: "past_due", CollectionMethod: CollectionChargeAutomatically, AmountDue: 100,
-				LastCollectionFailureCode: stringPointer(collectionOutcomeUnknown),
+				CollectionIntentID: uuidPointer(uuid.New()),
 			},
 		},
 		{name: "nil invoice"},
@@ -93,18 +80,6 @@ func TestInvoiceCollectionRetryable(t *testing.T) {
 				t.Fatalf("invoiceCollectionRetryable() = %v, want %v", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestIsCollectionOutcomeAmbiguous(t *testing.T) {
-	t.Parallel()
-
-	ambiguous := &nmi.TransportAmbiguousError{Err: errors.New("connection reset after send")}
-	if !isCollectionOutcomeAmbiguous(ambiguous) {
-		t.Fatal("transport-ambiguous provider error must be classified as ambiguous")
-	}
-	if isCollectionOutcomeAmbiguous(errors.New("provider unavailable before send")) {
-		t.Fatal("clean provider failure must remain retryable")
 	}
 }
 
@@ -135,17 +110,10 @@ func TestScheduledInvoiceCollectionEligible(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "attempt in progress",
+			name: "collection operation live",
 			invoice: &models.Invoice{
 				Status: "past_due", CollectionMethod: CollectionChargeAutomatically, AmountDue: 100,
-				LastCollectionFailureCode: stringPointer(collectionAttemptInProgress),
-			},
-		},
-		{
-			name: "unknown outcome",
-			invoice: &models.Invoice{
-				Status: "past_due", CollectionMethod: CollectionChargeAutomatically, AmountDue: 100,
-				LastCollectionFailureCode: stringPointer(collectionOutcomeUnknown),
+				CollectionFailureCount: 1, NextCollectionAttemptAt: &past, CollectionIntentID: uuidPointer(uuid.New()),
 			},
 		},
 		{
@@ -167,6 +135,6 @@ func TestScheduledInvoiceCollectionEligible(t *testing.T) {
 	}
 }
 
-func stringPointer(value string) *string {
-	return &value
+func uuidPointer(id uuid.UUID) *uuid.UUID {
+	return &id
 }

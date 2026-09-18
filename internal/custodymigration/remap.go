@@ -29,12 +29,12 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 	// The plan leg stops here: it has performed every read the apply leg makes
 	// its decision from, EXCEPT the in-flight check, which is the one thing
 	// that can change under it. Run it too, so the plan's counts are honest.
-	blocked, err := p.chargeInFlight(ctx, existing.ID)
+	blockedReason, err := p.instrumentPinned(ctx, existing.ID)
 	if err != nil {
 		return out, err
 	}
-	if blocked {
-		out.Outcome, out.Reason = OutcomeBlocked, ReasonChargeInFlight
+	if blockedReason != "" {
+		out.Outcome, out.Reason = OutcomeBlocked, blockedReason
 		return out, nil
 	}
 	if !p.apply {
@@ -61,14 +61,12 @@ func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.Ope
 			out.Outcome, out.Reason = OutcomeBlocked, ReasonCustodyConflict
 			return nil
 		}
-		n, cerr := q.CountInFlightChargeIntentsForPaymentMethod(ctx, gen.CountInFlightChargeIntentsForPaymentMethodParams{
-			MerchantID: p.merchantID.UUID(), PaymentMethodID: existing.ID,
-		})
-		if cerr != nil {
-			return fmt.Errorf("count in-flight charge intents for %s: %w", existing.ID, cerr)
+		reason, perr := pinnedBy(ctx, q, p.merchantID.UUID(), existing.ID)
+		if perr != nil {
+			return perr
 		}
-		if n > 0 {
-			out.Outcome, out.Reason = OutcomeBlocked, ReasonChargeInFlight
+		if reason != "" {
+			out.Outcome, out.Reason = OutcomeBlocked, reason
 			return nil
 		}
 
@@ -210,22 +208,48 @@ func (p *planner) create(ctx context.Context, tk ImportedToken, out RowResult) (
 	return out, nil
 }
 
-// chargeInFlight answers the refusal predicate: is a charge on this
-// instrument's book mid-attempt right now? in_flight = being executed;
-// unknown_needs_verify = SENT, outcome unknown. Moving custody underneath
-// either one leaves the verifier resolving an attempt whose instrument no
-// longer describes how the charge was made.
-func (p *planner) chargeInFlight(ctx context.Context, methodID uuid.UUID) (bool, error) {
-	var n int64
+// instrumentPinned answers the refusal predicate outside the lock (the plan
+// leg): the blocking reason, or "" when the flip may proceed.
+func (p *planner) instrumentPinned(ctx context.Context, methodID uuid.UUID) (string, error) {
+	var reason string
 	err := p.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var cerr error
-		n, cerr = p.db.Gen(ctx).CountInFlightChargeIntentsForPaymentMethod(ctx, gen.CountInFlightChargeIntentsForPaymentMethodParams{
-			MerchantID: p.merchantID.UUID(), PaymentMethodID: methodID,
-		})
-		return cerr
+		var perr error
+		reason, perr = pinnedBy(ctx, p.db.Gen(ctx), p.merchantID.UUID(), methodID)
+		return perr
+	})
+	return reason, err
+}
+
+// pinnedBy is the refusal predicate proper, re-run under the instrument's row
+// lock by the apply leg. Two things pin an instrument:
+//
+//   - a charge on its subscription mid-attempt (in_flight = being executed;
+//     unknown_needs_verify = SENT, outcome unknown): moving custody underneath
+//     leaves the verifier resolving an attempt whose instrument no longer
+//     describes how the charge was made;
+//   - any operation whose frozen payload names it, in any unresolved state
+//     (an invoice collection has no subscription to join through).
+//
+// Both clear on their own or by operator resolution, so this is "come back
+// later", not a failure.
+func pinnedBy(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUID) (string, error) {
+	charges, err := q.CountInFlightChargeIntentsForPaymentMethod(ctx, gen.CountInFlightChargeIntentsForPaymentMethodParams{
+		MerchantID: merchantID, PaymentMethodID: methodID,
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return false, fmt.Errorf("count in-flight charge intents for %s: %w", methodID, err)
+		return "", fmt.Errorf("count in-flight charge intents for %s: %w", methodID, err)
 	}
-	return n > 0, nil
+	if charges > 0 {
+		return ReasonChargeInFlight, nil
+	}
+	operations, err := q.CountUnresolvedOperationsNamingPaymentMethod(ctx, gen.CountUnresolvedOperationsNamingPaymentMethodParams{
+		MerchantID: merchantID, PaymentMethodID: methodID,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("count unresolved operations naming %s: %w", methodID, err)
+	}
+	if operations > 0 {
+		return ReasonOperationUnresolved, nil
+	}
+	return "", nil
 }

@@ -110,7 +110,7 @@ func TestEnterpriseInvoicing_NetTermsDocumentSnapshotAndDunning(t *testing.T) {
 }
 
 func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
-	svc, pool, payer, cur, ctx := moneyInEnv(t)
+	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
 	t.Cleanup(func() {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
@@ -175,7 +175,7 @@ func testNetTermsDocumentAndDunning(t *testing.T, initialStatus string) {
 
 	// Collection NEVER charges a send_invoice receivable.
 	charger := &fakeCharger{}
-	n, err := svc.ChargeOutstanding(ctx, charger, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, charger, nil), 0)
 	require.NoError(t, err)
 	require.Zero(t, n)
 	require.Empty(t, charger.charges, "manual-remittance invoice must not be auto-charged")
