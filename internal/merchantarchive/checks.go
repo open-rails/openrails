@@ -60,7 +60,7 @@ var excludedColumns = map[string]string{
 var omittedColumns = map[string]string{
 	"custodians":        "credential_versions",
 	"subscriptions":     "destructive_run_class",
-	"payments":          "metadata discount_metadata destructive_run_class",
+	"payments":          "discount_metadata destructive_run_class",
 	"payment_methods":   "metadata",
 	"checkout_sessions": "destructive_run_class",
 	"entitlements":      "period destructive_run_class",
@@ -207,7 +207,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	// These blobs have no v1 portable contract. Even benign-looking nonempty
 	// metadata may carry replay terms or financial facts; never erase it.
 	for table, columns := range map[string][]string{
-		"payments": {"metadata", "discount_metadata"}, "payment_methods": {"metadata"},
+		"payments": {"discount_metadata"}, "payment_methods": {"metadata"},
 		"usage_events": {"metadata"}, "invoice_items": {"metadata"},
 	} {
 		for _, column := range columns {
@@ -215,6 +215,33 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 				return err
 			}
 		}
+	}
+	// Payment writers retain typed correlation metadata. Validate it with the
+	// same archive contract before writing the header, including unsafe values
+	// hidden under otherwise supported keys.
+	rows, err := tx.Query(ctx, `SELECT metadata::text FROM openrails.payments WHERE merchant_id=$1 AND coalesce(metadata,'null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb)`, id.UUID())
+	if err != nil {
+		return err
+	}
+	profile := format.Profile{Name: "payments", Columns: []format.Column{{Name: "metadata", Type: "jsonb"}}}
+	var invalid int64
+	for rows.Next() {
+		var metadata string
+		if err := rows.Scan(&metadata); err != nil {
+			rows.Close()
+			return err
+		}
+		if format.ValidateValues(profile, []*string{&metadata}) != nil {
+			invalid++
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if invalid > 0 {
+		return &Error{Code: "unsupported_state", Table: "payments", Count: invalid}
 	}
 	return validateReferences(ctx, tx, id)
 }

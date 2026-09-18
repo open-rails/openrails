@@ -30,9 +30,11 @@ not sufficient coverage.
 - Operation authorizations, provider billing qualifications/observations,
   destructive before-images and account updater batches refuse any rows. Their
   opaque evidence has no v1 portable contract; provider formats belong to #1010.
-- Payments, payment methods, usage events and invoice items with nonempty opaque
-  metadata refuse export. Payment discount metadata also refuses. Empty/null
-  metadata can be reconstructed without discarding a recorded fact.
+- Payment metadata retains declared order, provider transaction, Stripe invoice
+  and test-run correlation strings. Unknown keys, nested provider bodies and
+  unsafe values refuse before the export header. Payment discount metadata,
+  payment method metadata, usage event metadata and invoice item metadata refuse
+  when nonempty; empty/null values can be reconstructed without losing facts.
 - Maintenance history retains every prune/converge-enforce/merchant-purge row,
   including unreferenced runs. Nonempty coverage, affected, summary or inventory
   fields refuse. Reconciliation runs are diagnostic and excluded. Other run
@@ -61,9 +63,11 @@ coordinates, request fingerprints and declared safe rail fields/routing facts;
 unknown rail state or metadata refuses. The currently supported checkout state
 covers NMI completion/failure and its request fingerprint. Redirect/Solana quote
 or transaction blobs require a separate safe contract. Terminal intent payloads
-and evidence are never filtered: known safe refund/result shapes are preserved
-verbatim, and other nonempty shapes refuse. This is deliberately narrower than
-supporting every production provider workflow.
+and evidence are never filtered: known safe refund/result shapes and typed NMI
+sale/subscription creation receipts are preserved verbatim. Successful NMI
+checkout intents prune their submission payloads in the ordinary runner; any
+nonempty retained NMI purchase payload still refuses. Other provider workflows
+require their own safe contract.
 
 ## Restore guard
 
@@ -86,8 +90,15 @@ activity; a different artifact refuses. Lost responses therefore do not create
 additional rows or provider work.
 
 Integration tests use the RLS-enforcing application role and isolated PostgreSQL
-18 databases. They cover populated profiles across three schemas, checkout
-repository/service completion, new destination authority, atomic tamper refusal,
+18 databases. They cover populated profiles across three schemas, production NMI
+one-off sale and recurring creation through CheckoutSessionService/CheckoutService
+against a loopback provider, new destination authority, atomic tamper refusal,
 unknown tables/columns, receipt tampering and temporary-catalog shadowing,
 concurrent restore receipts, balanced exact-integer ledgers and lost-response
-retry. Public Client/HTTP/CLI and live-provider qualification are separate gates.
+retry. Purchase proofs create payments, subscriptions, grants and entitlements
+through production writers, then archive/restore into another schema. A fresh
+session service with an empty process cache reads, recreates with the same key
+and confirms the original result; the retained intent also replays. Provider
+request counts, payments, subscriptions, paid periods and benefits remain
+unchanged. Public Client/HTTP/CLI and live-provider qualification are separate
+gates.

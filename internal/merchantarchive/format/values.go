@@ -51,7 +51,13 @@ func ValidateValues(p Profile, values []*string) error {
 				return bad()
 			}
 		case "jsonb":
-			if err := validateJSON(p.Name+"."+c.Name, v); err != nil {
+			field := p.Name + "." + c.Name
+			if p.Name == "rail_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == "nmi_sale" || *typ == "nmi_subscription_create") {
+					field = p.Name + "." + *typ + "." + c.Name
+				}
+			}
+			if err := validateJSON(field, v); err != nil {
 				return bad()
 			}
 		}

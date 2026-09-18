@@ -11,6 +11,7 @@ import (
 type jsonRule func(any) bool
 
 func textValue(v any) bool { s, ok := v.(string); return ok && safeText(s) }
+func uuidValue(v any) bool { s, ok := v.(string); return ok && uuidPattern.MatchString(s) }
 func integerValue(v any) bool {
 	n, ok := v.(json.Number)
 	if !ok {
@@ -106,6 +107,23 @@ var rateJSON = object(map[string]jsonRule{
 // Exact nested shapes keep raw metadata/provider bodies out of the archive.
 // An unsupported shape is a refusal, never a lossy rewrite of a replay body.
 var jsonRules = map[string]jsonRule{
+	// Engine-authored payment correlation, not an arbitrary provider body.
+	"payments.metadata": nullable(object(map[string]jsonRule{
+		"order_id": textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
+	})),
+	// Successful checkout intents prune their submission payloads. Nonempty
+	// payloads remain unqualified; retain only the exact typed replay results.
+	"rail_intents.nmi_sale.payload": nullable(emptyObject),
+	"rail_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
+		"transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue, "verified_existing": booleanValue,
+		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue,
+	})),
+	"rail_intents.nmi_subscription_create.payload": nullable(emptyObject),
+	"rail_intents.nmi_subscription_create.result_evidence": nullable(object(map[string]jsonRule{
+		"transaction_id": textValue, "subscription_id": uuidValue, "status": textValue, "message": textValue, "delayed_start": textValue, "verified_existing": booleanValue,
+		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue, "provider_subscription_id": textValue,
+	})),
+
 	"custodians.settings":                      object(map[string]jsonRule{"public_api_key": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
 	"products.entitlements_spec":               nullable(dictionary(nullable(integerValue))),
 	"subscriptions.entitlements_spec_snapshot": nullable(dictionary(nullable(integerValue))),
