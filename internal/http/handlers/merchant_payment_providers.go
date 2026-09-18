@@ -1,13 +1,28 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
+)
+
+// Machine-readable codes of the provider-account lifecycle refusals (#655).
+const (
+	// CodeProviderAccountLastActive: the account is the only active one on its
+	// rail; repeat with `allow_last: true` to archive it anyway.
+	CodeProviderAccountLastActive = "provider_account_last_active"
+	// CodeProviderAccountsAmbiguous: the rail-level DELETE found more than one
+	// active account; archive by PSP id instead.
+	CodeProviderAccountsAmbiguous = "provider_accounts_ambiguous"
 )
 
 // MerchantListPaymentProviders handles GET /v1/merchant/payment-providers.
@@ -66,7 +81,9 @@ func MerchantPutPaymentProvider(r *httprequest.Request) {
 	r.JSON(http.StatusOK, map[string]any{"payment_provider": out})
 }
 
-// MerchantDeletePaymentProvider handles DELETE /v1/merchant/payment-providers/:provider.
+// MerchantDeletePaymentProvider handles DELETE /v1/merchant/payment-providers/:provider:
+// archive the rail's single active account. With several active accounts it
+// answers 409 provider_accounts_ambiguous instead of guessing.
 func MerchantDeletePaymentProvider(r *httprequest.Request) {
 	svc, id, provider, ok := merchantProviderPathContext(r)
 	if !ok {
@@ -78,6 +95,51 @@ func MerchantDeletePaymentProvider(r *httprequest.Request) {
 		return
 	}
 	r.JSON(http.StatusOK, map[string]any{"payment_provider": out})
+}
+
+// MerchantArchivePaymentProviderAccount handles
+// POST /v1/merchant/payment-providers/:provider/accounts/:psp_id/archive. The
+// body is optional: `{"allow_last": true}` archives the rail's last active
+// account. No provider call is made, so a dark account archives too.
+func MerchantArchivePaymentProviderAccount(r *httprequest.Request) {
+	svc, id, provider, ok := merchantProviderPathContext(r)
+	if !ok {
+		return
+	}
+	pspID, err := uuid.Parse(strings.TrimSpace(r.Param("psp_id")))
+	if err != nil || pspID == uuid.Nil {
+		r.ErrorJSON(http.StatusBadRequest, "psp_id must be the account's uuid")
+		return
+	}
+	var req merchants.ArchivePaymentProviderAccountRequest
+	if !decodeOptionalJSONBody(r, &req) {
+		return
+	}
+	out, err := svc.ArchivePaymentProviderAccount(r.Request.Context(), id, provider, pspID, req)
+	if err != nil {
+		writeMerchantProviderError(r, err)
+		return
+	}
+	r.JSON(http.StatusOK, map[string]any{"payment_provider": out})
+}
+
+// decodeOptionalJSONBody strictly decodes at most one JSON object; an empty
+// body leaves body at its zero value.
+func decodeOptionalJSONBody(r *httprequest.Request, body any) bool {
+	decoder := json.NewDecoder(r.Request.Body)
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(body)
+	if errors.Is(err, io.EOF) {
+		return true
+	}
+	if err == nil && decoder.Decode(&json.RawMessage{}) != io.EOF {
+		err = errors.New("request body must contain exactly one JSON object")
+	}
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, err.Error())
+		return false
+	}
+	return true
 }
 
 func merchantProviderPathContext(r *httprequest.Request) (*merchants.Service, merchant.ID, string, bool) {
@@ -107,7 +169,26 @@ func merchantProviderContext(r *httprequest.Request) (*merchants.Service, mercha
 }
 
 func writeMerchantProviderError(r *httprequest.Request, err error) {
+	var lastActive *merchants.LastActiveProviderAccountError
+	var ambiguous *merchants.MultipleActiveProviderAccountsError
 	switch {
+	case errors.As(err, &lastActive):
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, CodeProviderAccountLastActive, err.Error()).
+			WithMetadata(map[string]any{
+				"rail":        lastActive.Rail,
+				"environment": lastActive.Environment,
+				"psp_id":      lastActive.Account.ID.String(),
+				"account_id":  lastActive.Account.AccountID,
+			}))
+	case errors.As(err, &ambiguous):
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, CodeProviderAccountsAmbiguous, err.Error()).
+			WithMetadata(map[string]any{
+				"rail":        ambiguous.Rail,
+				"environment": ambiguous.Environment,
+				"accounts":    ambiguous.Accounts,
+			}))
+	case errors.Is(err, merchants.ErrPaymentProviderAccountNotFound):
+		r.ErrorJSON(http.StatusNotFound, "payment provider account not found")
 	case errors.Is(err, merchants.ErrSecretNotFound):
 		r.ErrorJSON(http.StatusNotFound, "payment provider not configured")
 	case errors.Is(err, merchants.ErrSecretBackendUnavailable):

@@ -726,8 +726,12 @@ func registerPaymentProviderActionRoutes(providers router.Router, rt *app.Runtim
 	// can actually write them (#661). Nil ProviderRoutes = permissive (standalone).
 	if opts.ProviderRoutes == nil || opts.ProviderRoutes.SecretWrite {
 		providers.Handle(http.MethodPut, "/:provider", h(httphandlers.MerchantPutPaymentProvider), writeMW...)
-		providers.Handle(http.MethodDelete, "/:provider", h(httphandlers.MerchantDeletePaymentProvider), writeMW...)
 	}
+	// Lifecycle archives (#655/#656) write only the PSP row — never a secret,
+	// never the provider — so they stay mounted when the secret backend is
+	// read-only: a terminated account must be archivable from any deployment.
+	providers.Handle(http.MethodDelete, "/:provider", h(httphandlers.MerchantDeletePaymentProvider), writeMW...)
+	providers.Handle(http.MethodPost, "/:provider/accounts/:psp_id/archive", h(httphandlers.MerchantArchivePaymentProviderAccount), writeMW...)
 }
 
 func registerMerchantSupportRoutes(rr router.Router, rt *app.Runtime, opts Options, dbMW ...router.Middleware) {
