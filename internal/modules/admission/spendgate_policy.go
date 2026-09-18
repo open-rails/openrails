@@ -51,18 +51,6 @@ func (l *SpendgatePolicyLoader) Load(ctx context.Context, payer identity.Custome
 	if len(pw) > 0 {
 		scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopePayer, Windows: pw})
 	}
-	productLimits, err := l.policies.GetProductUsageLimitWindows(ctx, payer, req.Measure)
-	if err != nil {
-		return spendgate.Policy{}, false, err
-	}
-	plw, err := l.convert(ctx, spendgate.ScopePayer, productLimits, requestCurrency)
-	if err != nil {
-		return spendgate.Policy{}, false, err
-	}
-	if len(plw) > 0 {
-		scopes = append(scopes, spendgate.ScopedWindows{Scope: spendgate.ScopePayer, Windows: plw})
-	}
-
 	delegated, hasDelegatedGrant, err := l.LoadDelegatedWindows(ctx, payer, trustLevel, requestCurrency, req)
 	if err != nil {
 		return spendgate.Policy{}, false, err

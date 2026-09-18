@@ -1,38 +1,28 @@
 package api
 
 import (
-	"github.com/open-rails/openrails"
 	"time"
+
+	"github.com/open-rails/openrails"
 )
 
 // ProductObject represents a product resource
 type ProductObject struct {
-	ID               string                           `json:"id"`
-	Object           string                           `json:"object"` // Always "product"
-	Key              string                           `json:"key"`
-	Name             string                           `json:"name"`
-	Description      string                           `json:"description"`
-	EntitlementsSpec map[string]*int                  `json:"entitlements_spec,omitempty"`
-	CreditsSpec      map[string]CreditGrantSpecObject `json:"credits_spec,omitempty"`
-	TierGroup        *string                          `json:"tier_group,omitempty"`
-	TierRank         int                              `json:"tier_rank"`
-	Active           bool                             `json:"active"`
-	Metadata         map[string]string                `json:"metadata,omitempty"`
-	Created          int64                            `json:"created"`
-	Updated          int64                            `json:"updated"`
-	Prices           []PriceObject                    `json:"prices,omitempty"`
+	ID               string            `json:"id"`
+	Object           string            `json:"object"` // Always "product"
+	Key              string            `json:"key"`
+	Name             string            `json:"name"`
+	Description      string            `json:"description"`
+	EntitlementsSpec map[string]*int   `json:"entitlements_spec,omitempty"`
+	TierGroup        *string           `json:"tier_group,omitempty"`
+	TierRank         int               `json:"tier_rank"`
+	Active           bool              `json:"active"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	Created          int64             `json:"created"`
+	Updated          int64             `json:"updated"`
+	Prices           []PriceObject     `json:"prices,omitempty"`
 }
 
-// CreditGrantSpecObject describes a product-bundled credit grant. A null/absent
-// expiry_hours means the granted balance never expires (#857).
-type CreditGrantSpecObject struct {
-	Unit        string `json:"unit,omitempty"`
-	Amount      int64  `json:"amount"`
-	ExpiryHours *int   `json:"expiry_hours,omitempty"`
-	Cadence     string `json:"cadence,omitempty"`
-}
-
-// PriceObject represents a price resource
 type PriceObject struct {
 	ID string `json:"id"`
 	// Key (#774) is the durable, merchant-unique movable-pointer handle for

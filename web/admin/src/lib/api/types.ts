@@ -229,10 +229,6 @@ export interface CatalogProduct {
   display_name: string
   description: string
   entitlements_spec?: Record<string, number | null>
-  credits_spec?: Record<
-    string,
-    { unit?: string; amount: number; expiry_hours?: number; cadence?: string }
-  >
   tier_group?: string
   tier_rank: number
   archived: boolean

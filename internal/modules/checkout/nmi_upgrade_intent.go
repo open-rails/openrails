@@ -32,33 +32,32 @@ func NMIUpgradeIdempotencyKey(key string) string {
 // NMIUpgradePayload freezes the complete commercial decision before either
 // provider submission. Replays never recalculate proration or the billing date.
 type NMIUpgradePayload struct {
-	RequestedPrice            string             `json:"requested_price"`
-	PSP                       string             `json:"psp"`
-	UserID                    string             `json:"user_id"`
-	Email                     string             `json:"email"`
-	OldSubscriptionID         uuid.UUID          `json:"old_subscription_id"`
-	OldPriceID                uuid.UUID          `json:"old_price_id"`
-	OldProviderSubscriptionID string             `json:"old_provider_subscription_id"`
-	NewSubscriptionID         uuid.UUID          `json:"new_subscription_id"`
-	NewPaymentID              uuid.UUID          `json:"new_payment_id"`
-	PriceID                   uuid.UUID          `json:"price_id"`
-	ProductID                 uuid.UUID          `json:"product_id"`
-	ProductName               string             `json:"product_name"`
-	PlanID                    string             `json:"plan_id"`
-	VaultID                   string             `json:"vault_id"`
-	BillingID                 string             `json:"billing_id"`
-	PaymentMethodID           uuid.UUID          `json:"payment_method_id"`
-	RecurringAmount           int64              `json:"recurring_amount"`
-	ProrationAmount           int64              `json:"proration_amount"`
-	Currency                  string             `json:"currency"`
-	PeriodStart               time.Time          `json:"period_start"`
-	PeriodEnd                 time.Time          `json:"period_end"`
-	StartDate                 string             `json:"start_date"`
-	RecurringAnchor           string             `json:"recurring_anchor"`
-	UnscheduledAnchor         string             `json:"unscheduled_anchor"`
-	Entitlements              map[string]*int    `json:"entitlements"`
-	Credits                   models.CreditsSpec `json:"credits"`
-	Card                      nmi.CardUserData   `json:"card"`
+	RequestedPrice            string           `json:"requested_price"`
+	PSP                       string           `json:"psp"`
+	UserID                    string           `json:"user_id"`
+	Email                     string           `json:"email"`
+	OldSubscriptionID         uuid.UUID        `json:"old_subscription_id"`
+	OldPriceID                uuid.UUID        `json:"old_price_id"`
+	OldProviderSubscriptionID string           `json:"old_provider_subscription_id"`
+	NewSubscriptionID         uuid.UUID        `json:"new_subscription_id"`
+	NewPaymentID              uuid.UUID        `json:"new_payment_id"`
+	PriceID                   uuid.UUID        `json:"price_id"`
+	ProductID                 uuid.UUID        `json:"product_id"`
+	ProductName               string           `json:"product_name"`
+	PlanID                    string           `json:"plan_id"`
+	VaultID                   string           `json:"vault_id"`
+	BillingID                 string           `json:"billing_id"`
+	PaymentMethodID           uuid.UUID        `json:"payment_method_id"`
+	RecurringAmount           int64            `json:"recurring_amount"`
+	ProrationAmount           int64            `json:"proration_amount"`
+	Currency                  string           `json:"currency"`
+	PeriodStart               time.Time        `json:"period_start"`
+	PeriodEnd                 time.Time        `json:"period_end"`
+	StartDate                 string           `json:"start_date"`
+	RecurringAnchor           string           `json:"recurring_anchor"`
+	UnscheduledAnchor         string           `json:"unscheduled_anchor"`
+	Entitlements              map[string]*int  `json:"entitlements"`
+	Card                      nmi.CardUserData `json:"card"`
 }
 
 type nmiUpgradeStep struct {
@@ -383,13 +382,13 @@ func (h *NMIUpgradeIntentHandler) finalize(ctx context.Context, in gen.Openrails
 	if err != nil {
 		return err
 	}
-	next := &models.Subscription{ID: p.NewSubscriptionID, CustomerID: customer, PspID: *in.PspID, ProductID: p.ProductID, PriceID: p.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: progress.Successor.Enrollment.SubscriptionID, PaymentMethodID: &p.PaymentMethodID, EntitlementsSpecSnapshot: p.Entitlements, CreditsSpecSnapshot: p.Credits, Status: models.StatusActive, StartedAt: p.PeriodStart, CurrentPeriodStartsAt: &p.PeriodStart, CurrentPeriodEndsAt: &p.PeriodEnd}
+	next := &models.Subscription{ID: p.NewSubscriptionID, CustomerID: customer, PspID: *in.PspID, ProductID: p.ProductID, PriceID: p.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: progress.Successor.Enrollment.SubscriptionID, PaymentMethodID: &p.PaymentMethodID, EntitlementsSpecSnapshot: p.Entitlements, Status: models.StatusActive, StartedAt: p.PeriodStart, CurrentPeriodStartsAt: &p.PeriodStart, CurrentPeriodEndsAt: &p.PeriodEnd}
 	if p.Email != "" {
 		next.UserEmail = &p.Email
 	}
 	var payment *models.Payment
 	if progress.Proration != nil && progress.Proration.Sale != nil {
-		payment = &models.Payment{ID: p.NewPaymentID, CustomerID: customer, PriceID: p.PriceID, SubscriptionID: &next.ID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: progress.Proration.Sale.TransactionID, Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, EntitlementsSpecSnapshot: p.Entitlements, CreditsSpecSnapshot: p.Credits, Metadata: map[string]any{"upgrade_intent_id": in.ID.String()}}
+		payment = &models.Payment{ID: p.NewPaymentID, CustomerID: customer, PriceID: p.PriceID, SubscriptionID: &next.ID, Rail: models.Rail(in.Rail), PspID: in.PspID, TransactionID: progress.Proration.Sale.TransactionID, Amount: p.ProrationAmount, ListAmount: p.RecurringAmount, Currency: p.Currency, Status: "completed", MoneyMovement: models.MoneyMovementRail, PurchasedAt: p.PeriodStart, EntitlementsSpecSnapshot: p.Entitlements, Metadata: map[string]any{"upgrade_intent_id": in.ID.String()}}
 	}
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := database.NewWithPgxTx(tx)

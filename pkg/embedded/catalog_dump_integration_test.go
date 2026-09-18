@@ -38,25 +38,10 @@ catalogs:
       - key: api_calls
         aggregation: sum
         value_property: $.count
-    credit_balances:
-      - key: image_credits
-        unit: credit
-        expires_default: 720h
-    usage_limits:
-      - key: daily_generations
-        measure: generations
-        windows:
-          - window: 1d
-            amount: 50
     products:
       - key: base
         display_name: Base
         entitlements: [base]
-        credits:
-          - key: image_credits
-            amount: 100
-            expires: 720h
-        usage_limits: [daily_generations]
         prices:
           - currency: usd
             unit_amount: 1200000
@@ -73,7 +58,7 @@ catalogs:
                 divide_by: 100
       - key: bundle
         display_name: Bundle
-        includes: [base]
+        entitlements: [bundle]
         prices:
           - currency: usd
             unit_amount: 2500000
@@ -91,13 +76,8 @@ catalogs:
 	require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{
 		Config: cfg, PGXPool: pool, Merchant: merchantSlug, Out: &firstDump,
 	}))
-	require.Contains(t, firstDump.String(), "expires: 30d")
+	require.Contains(t, firstDump.String(), "duration: 30d")
 	require.NotContains(t, firstDump.String(), "credit:", "portable manifest uses local names")
-	var catalogUnit, productUnit string
-	require.NoError(t, dbtest.SharedSuperuserPGXPool(t).QueryRow(ctx, `SELECT 'credit:'||c.id::text,p.credits_spec->'image_credits'->>'unit'
- FROM openrails.custom_credit_types c JOIN openrails.products p ON p.merchant_id=c.merchant_id
- WHERE c.merchant_id=$1 AND c.name='credit' AND p.key='base'`, merchantID).Scan(&catalogUnit, &productUnit))
-	require.Equal(t, catalogUnit, productUnit)
 	require.NotContains(t, firstDump.String(), "expiry_hours")
 	targets, err := loadCatalogPushTargets(CatalogPushOptions{Manifest: firstDump.Bytes()})
 	require.NoError(t, err, "dump should parse as push-merchant-catalog YAML")
@@ -111,11 +91,6 @@ catalogs:
 	}))
 
 	require.Contains(t, secondApply.String(), "no changes — catalog is up to date", "reapplying local names must not report a product edit")
-
-	qualified := bytes.ReplaceAll(manifest, []byte("unit: credit\n"), []byte("unit: "+merchantSlug+"/credit\n"))
-	var qualifiedPlan bytes.Buffer
-	require.NoError(t, PushMerchantCatalog(ctx, CatalogPushOptions{Config: cfg, PGXPool: pool, Manifest: qualified, Out: &qualifiedPlan, Insert: true, Overwrite: true, Prune: true}))
-	require.Contains(t, qualifiedPlan.String(), "no changes — catalog is up to date")
 
 	var secondDump bytes.Buffer
 	require.NoError(t, DumpMerchantCatalog(ctx, CatalogDumpOptions{

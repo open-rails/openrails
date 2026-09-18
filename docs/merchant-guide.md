@@ -36,7 +36,7 @@ admin grants, and grace. See [Entitlements](#entitlements).
 ### Authoring the catalog
 
 The manifest is `catalogs:` → one entry per merchant → `products:` (plus optional
-`meters:`, `credit_balances:`, `usage_limits:`). Full worked examples:
+`meters:`). Full worked examples:
 `config/catalog.example.yaml`.
 
 **A tiered subscription** — `tier_group` + `tier_rank` make products an ordered plan
@@ -72,59 +72,9 @@ Price fields worth knowing:
 | `psps` | explicit PSP list; omitted = OpenRails-native only, no provider sync |
 | `psp_links` | pre-supply provider ids, validated on apply (below) |
 
-**A one-time purchase** — omit `auto_renew`; use a finite `duration` for timed access
-or `indefinite` for ownership:
+Custom credit shops, product-bundled balances, bundles and catalog quotas are deferred. Manual fiat deposits and grants retain their explicit expiration terms.
 
-```yaml
-      - key: prepaid-api-credits
-        display_name: Prepaid API Credits
-        credits:
-          - {key: inference-api, amount: 10_000, cadence: once}
-        prices:
-          - currency: usd
-            unit_amount: 20_000_000
-            duration: indefinite
-            psps: [stripe]
-```
-
-Custom units retain immutable ownership when a merchant renames; public APIs use
-its current or actively forwarded `merchant-slug/unit-name`. See
-[custom credit identity and cutover](custom-credit-identity.md).
-
-Credits reference a top-level balance declaration
-(`credit_balances: [{key: inference-api, unit: api-credit, expires_default: 365d}]`).
-`cadence` is `once` (initial activation) or `per_renewal` (granted on each confirmed
-renewal — webhook-replay safe).
-
-**Credits expire only if you say so.** A grant takes its lifetime from its own
-`expires`, else the balance's `expires_default`. Declare neither and the balance
-never expires — OpenRails will not put a clock on customer money you did not ask
-for.
-
-**A variable credit top-up** — buy *any* amount within bounds; graduated tiers give
-volume discounts and stay monotonic, so the quote inverts cleanly (enter $ → credits,
-or credits → $):
-
-```yaml
-      - key: image-credit-topup
-        display_name: AI Image Credits
-        credits:
-          - key: ai-image-gen
-        prices:
-          - currency: usd
-            psps: [stripe]
-            input_min: 5_000_000        # $5 minimum spend
-            input_max: 500_000_000
-            model: tiered
-            tiered:
-              mode: graduated
-              tiers:
-                - {up_to: 2_000,  unit_amount: 10_000}   # first 2,000 credits at $0.01
-                - {up_to: 10_000, unit_amount: 9_000}
-                - {up_to: null,   unit_amount: 8_000}    # last tier unbounded
-```
-
-**Charge models** (shared by credit purchases and metered rate cards):
+**Charge models** (for metered rate cards):
 
 | Model | Cost | Use for |
 |---|---|---|

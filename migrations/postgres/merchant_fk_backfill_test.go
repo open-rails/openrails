@@ -50,7 +50,6 @@ func TestMerchantFKBackfillConstraintsPresent(t *testing.T) {
 		{"maintenance_runs", "maintenance_runs_merchant_fk"},
 		{"reconciliation_findings", "reconciliation_findings_merchant_fk"},
 		{"reconciliation_state", "reconciliation_state_merchant_fk"},
-		{"custom_credit_types", "custom_credit_types_merchant_fk"},
 		{"notifications", "notifications_merchant_fk"},
 		// payer_spend_limits is gone (or#897); billing_policies /
 		// billing_policy_bindings replaced it and carry the same FK doctrine.

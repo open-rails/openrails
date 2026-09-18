@@ -44,11 +44,9 @@ DEBT internal/merchants/host_config.go
 DEBT internal/merchants/lifecycle.go
 DEBT internal/merchants/payment_provider_config.go
 DEBT internal/modules/admission/policy.go
-DEBT internal/modules/money/credit_purchase.go
 DEBT internal/modules/money/enterprise.go
 DEBT internal/modules/money/metered_rating.go
 DEBT internal/modules/money/money_service.go
-DEBT internal/modules/productaccess/grant_repo.go
 DEBT internal/modules/solana/solanasubs/subscription_repo.go
 DEBT internal/river/jobs_ledger_integrity.go
 DEBT internal/river/jobs_provider_refresh.go

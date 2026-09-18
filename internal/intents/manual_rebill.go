@@ -338,7 +338,6 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uu
 		payments.NewPaymentService(h.DB, h.Clock),
 		h.Clock,
 	)
-	lifecycle.SetCreditGranter(money.NewMoneyService(h.DB, h.Clock))
 	lifecycle.SetConfig(h.Config)
 
 	amount := int64(0)

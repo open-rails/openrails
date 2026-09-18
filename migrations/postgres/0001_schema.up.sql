@@ -278,15 +278,6 @@ COMMENT ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_mer
 REVOKE ALL ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.count_destructive_intents_for_merchant_since(p_merchant uuid, p_origins text[], p_intent_types text[], p_since timestamp with time zone) TO openrails_app;
 
-CREATE FUNCTION openrails.credit_spec_has_canonical_units(spec jsonb) RETURNS boolean
-    LANGUAGE sql IMMUTABLE PARALLEL SAFE
-    AS $_$
- SELECT CASE WHEN spec IS NULL THEN true WHEN jsonb_typeof(spec) <> 'object' THEN false ELSE NOT EXISTS (
-  SELECT 1 FROM jsonb_each(spec) entry
-  WHERE COALESCE(entry.value->>'unit','') !~ '^[A-Z0-9]{3,12}$'
-    AND COALESCE(entry.value->>'unit','') !~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
- ) END
-$_$;
 
 CREATE FUNCTION openrails.current_merchant_id() RETURNS uuid
     LANGUAGE sql STABLE
@@ -1041,7 +1032,7 @@ CREATE TABLE openrails.metered_rating_watermarks (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT metered_rating_watermarks_accrued_nonneg CHECK ((accrued_amount >= 0)),
-    CONSTRAINT metered_rating_watermarks_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
+    CONSTRAINT metered_rating_watermarks_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
 );
 
 ALTER TABLE ONLY openrails.metered_rating_watermarks FORCE ROW LEVEL SECURITY;
@@ -1070,21 +1061,18 @@ CREATE TABLE openrails.products (
     display_name text NOT NULL,
     description text,
     entitlements_spec jsonb,
-    credits_spec jsonb,
     tier_group character varying(100),
     tier_rank integer DEFAULT 0 NOT NULL,
     archived boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    merchant_id uuid NOT NULL,
-    CONSTRAINT products_credit_units_canonical CHECK (openrails.credit_spec_has_canonical_units(credits_spec))
+    merchant_id uuid NOT NULL
 );
 
 ALTER TABLE ONLY openrails.products FORCE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE openrails.products IS 'Product definitions that can be purchased or subscribed to';
 
-COMMENT ON COLUMN openrails.products.credits_spec IS 'Bundled promo credits spec (amount, expiry, cadence) for subscriptions';
 
 COMMENT ON COLUMN openrails.products.tier_group IS 'Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.';
 
@@ -1115,38 +1103,6 @@ CREATE POLICY merchant_isolation ON openrails.products USING ((merchant_id = (NU
 ALTER TABLE openrails.products ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.products TO openrails_app;
-
-CREATE TABLE openrails.product_includes (
-    merchant_id uuid NOT NULL,
-    product_id uuid NOT NULL,
-    included_product_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT product_includes_not_self CHECK ((product_id <> included_product_id))
-);
-
-ALTER TABLE ONLY openrails.product_includes FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.product_includes IS '#611 catalog bundle includes: parent product grants/owns included catalog products when materialized.';
-
-ALTER TABLE ONLY openrails.product_includes
-    ADD CONSTRAINT product_includes_pkey PRIMARY KEY (merchant_id, product_id, included_product_id);
-
-CREATE INDEX idx_product_includes_included_product ON openrails.product_includes USING btree (merchant_id, included_product_id);
-
-ALTER TABLE ONLY openrails.product_includes
-    ADD CONSTRAINT product_includes_included_product_fk FOREIGN KEY (merchant_id, included_product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
-
-ALTER TABLE ONLY openrails.product_includes
-    ADD CONSTRAINT product_includes_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE ONLY openrails.product_includes
-    ADD CONSTRAINT product_includes_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.product_includes USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.product_includes ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_includes TO openrails_app;
 
 CREATE TABLE openrails.maintenance_runs (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1415,75 +1371,6 @@ CREATE POLICY merchant_isolation ON openrails.billing_policies USING ((merchant_
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.billing_policies TO openrails_app;
 
-CREATE TABLE openrails.catalog_credit_balances (
-    merchant_id uuid NOT NULL,
-    key text NOT NULL,
-    unit text NOT NULL,
-    expires_hours integer,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT catalog_credit_balances_expires_positive CHECK (((expires_hours IS NULL) OR (expires_hours > 0))),
-    CONSTRAINT catalog_credit_balances_key_nonempty CHECK ((btrim(key) <> ''::text)),
-    CONSTRAINT catalog_credit_balances_unit_identity CHECK (((unit ~ '^[A-Z0-9]{3,12}$'::text) OR (unit ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
-    CONSTRAINT catalog_credit_balances_unit_nonempty CHECK ((btrim(unit) <> ''::text))
-);
-
-ALTER TABLE ONLY openrails.catalog_credit_balances FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE ONLY openrails.catalog_credit_balances
-    ADD CONSTRAINT catalog_credit_balances_pkey PRIMARY KEY (merchant_id, key);
-
-ALTER TABLE ONLY openrails.catalog_credit_balances
-    ADD CONSTRAINT catalog_credit_balances_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.catalog_credit_balances ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.catalog_credit_balances USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_credit_balances TO openrails_app;
-
-CREATE TABLE openrails.catalog_credit_purchase_prices (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    merchant_id uuid NOT NULL,
-    product_id uuid NOT NULL,
-    ordinal integer NOT NULL,
-    credit_key text NOT NULL,
-    currency text NOT NULL,
-    rails text[] DEFAULT ARRAY[]::text[] NOT NULL,
-    input_min bigint DEFAULT 0 NOT NULL,
-    input_max bigint DEFAULT 0 NOT NULL,
-    price jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT catalog_credit_purchase_prices_currency_nonempty CHECK ((btrim(currency) <> ''::text)),
-    CONSTRAINT catalog_credit_purchase_prices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
-    CONSTRAINT catalog_credit_purchase_prices_input_nonnegative CHECK (((input_min >= 0) AND (input_max >= 0))),
-    CONSTRAINT catalog_credit_purchase_prices_input_order CHECK (((input_max = 0) OR (input_min <= input_max))),
-    CONSTRAINT catalog_credit_purchase_prices_ordinal_positive CHECK ((ordinal >= 1))
-);
-
-ALTER TABLE ONLY openrails.catalog_credit_purchase_prices FORCE ROW LEVEL SECURITY;
-
-ALTER TABLE ONLY openrails.catalog_credit_purchase_prices
-    ADD CONSTRAINT catalog_credit_purchase_prices_pkey PRIMARY KEY (id);
-
-CREATE UNIQUE INDEX uq_catalog_credit_purchase_prices_product_ordinal ON openrails.catalog_credit_purchase_prices USING btree (merchant_id, product_id, ordinal);
-
-ALTER TABLE ONLY openrails.catalog_credit_purchase_prices
-    ADD CONSTRAINT catalog_credit_purchase_prices_balance_fk FOREIGN KEY (merchant_id, credit_key) REFERENCES openrails.catalog_credit_balances(merchant_id, key) ON DELETE RESTRICT;
-
-ALTER TABLE ONLY openrails.catalog_credit_purchase_prices
-    ADD CONSTRAINT catalog_credit_purchase_prices_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE ONLY openrails.catalog_credit_purchase_prices
-    ADD CONSTRAINT catalog_credit_purchase_prices_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
-
-ALTER TABLE openrails.catalog_credit_purchase_prices ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.catalog_credit_purchase_prices USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_credit_purchase_prices TO openrails_app;
-
 CREATE TABLE openrails.catalog_meters (
     merchant_id uuid NOT NULL,
     key text NOT NULL,
@@ -1521,36 +1408,6 @@ ALTER TABLE openrails.catalog_meters ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.catalog_meters USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_meters TO openrails_app;
-
-CREATE TABLE openrails.catalog_usage_limits (
-    merchant_id uuid NOT NULL,
-    key text NOT NULL,
-    measure text NOT NULL,
-    windows jsonb DEFAULT '[]'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT catalog_usage_limits_key_nonempty CHECK ((btrim(key) <> ''::text)),
-    CONSTRAINT catalog_usage_limits_measure_nonempty CHECK ((btrim(measure) <> ''::text)),
-    CONSTRAINT catalog_usage_limits_windows_array CHECK ((jsonb_typeof(windows) = 'array'::text))
-);
-
-ALTER TABLE ONLY openrails.catalog_usage_limits FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.catalog_usage_limits IS '#594 catalog usage-limit registry. Durable config only; Redis/Garnet owns request-time counters.';
-
-COMMENT ON COLUMN openrails.catalog_usage_limits.measure IS 'Host-reported event stream key composed into admission policy; not a money meter.';
-
-ALTER TABLE ONLY openrails.catalog_usage_limits
-    ADD CONSTRAINT catalog_usage_limits_pkey PRIMARY KEY (merchant_id, key);
-
-ALTER TABLE ONLY openrails.catalog_usage_limits
-    ADD CONSTRAINT catalog_usage_limits_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.catalog_usage_limits ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.catalog_usage_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.catalog_usage_limits TO openrails_app;
 
 CREATE TABLE openrails.custodians (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1605,40 +1462,6 @@ ALTER TABLE openrails.custodians ENABLE ROW LEVEL SECURITY;
 CREATE POLICY merchant_isolation ON openrails.custodians USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.custodians TO openrails_app;
-
-CREATE TABLE openrails.custom_credit_types (
-    id uuid DEFAULT uuidv7() NOT NULL,
-    merchant_id uuid NOT NULL,
-    name text NOT NULL,
-    decimals integer DEFAULT 0 NOT NULL,
-    active boolean DEFAULT true NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT custom_credit_types_decimals_check CHECK (((decimals >= 0) AND (decimals <= 18)))
-);
-
-ALTER TABLE ONLY openrails.custom_credit_types FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.custom_credit_types IS 'Merchant-owned custom credit identities and scales. Financial rows reference credit:<id>; external names resolve through the current merchant namespace.';
-
-COMMENT ON COLUMN openrails.custom_credit_types.decimals IS 'Minor-unit scale for presentation (10^decimals minor units per major unit). Storage is always integer minor units.';
-
-ALTER TABLE ONLY openrails.custom_credit_types
-    ADD CONSTRAINT custom_credit_types_merchant_name_key UNIQUE (merchant_id, name);
-
-ALTER TABLE ONLY openrails.custom_credit_types
-    ADD CONSTRAINT custom_credit_types_pkey PRIMARY KEY (id);
-
-CREATE INDEX idx_custom_credit_types_merchant_id ON openrails.custom_credit_types USING btree (merchant_id);
-
-ALTER TABLE ONLY openrails.custom_credit_types
-    ADD CONSTRAINT custom_credit_types_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE openrails.custom_credit_types ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY merchant_isolation ON openrails.custom_credit_types USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.custom_credit_types TO openrails_app;
 
 CREATE TABLE openrails.customers (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -1708,7 +1531,7 @@ CREATE TABLE openrails.host_outbox (
     data jsonb DEFAULT '{}'::jsonb NOT NULL,
     delivered_at timestamp with time zone,
     dedupe_key text NOT NULL,
-    CONSTRAINT host_outbox_currency_shape CHECK (((currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT host_outbox_currency_shape CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text)),
     CONSTRAINT host_outbox_payload CHECK (
         (event_type = 'payment.settled' AND subject_type = 'payment' AND payment_id IS NOT NULL
          AND subject_id = payment_id AND amount IS NOT NULL AND amount > 0 AND data = '{}'::jsonb)
@@ -1787,7 +1610,7 @@ CREATE TABLE openrails.invoices (
     CONSTRAINT invoices_amounts_nonneg_chk CHECK (((subtotal_amount >= 0) AND (total_amount >= 0) AND (amount_paid >= 0) AND (amount_due >= 0))),
     CONSTRAINT invoices_collection_failure_count_nonneg CHECK ((collection_failure_count >= 0)),
     CONSTRAINT invoices_collection_method_check CHECK ((collection_method = ANY (ARRAY['charge_automatically'::text, 'send_invoice'::text]))),
-    CONSTRAINT invoices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT invoices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT invoices_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'open'::text, 'paid'::text, 'past_due'::text, 'voided'::text, 'uncollectible'::text, 'finalized'::text])))
 );
 
@@ -1888,7 +1711,7 @@ CREATE TABLE openrails.ledger_accounts (
     credits_posted bigint DEFAULT 0 NOT NULL,
     debits_posted bigint DEFAULT 0 NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT ledger_accounts_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT ledger_accounts_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT ledger_accounts_type_check CHECK ((account_type = ANY (ARRAY['customer_balance'::text, 'platform_revenue'::text, 'processor_clearing'::text, 'arrears_liability'::text, 'expired_credits'::text, 'revoked_credits'::text, 'fx_liquidity'::text, 'world'::text])))
 );
 
@@ -1956,7 +1779,7 @@ CREATE TABLE openrails.ledger_transfers (
     CONSTRAINT chk_ledger_transfers_coordinate_not_blank CHECK (((operation <> ''::text) AND (source <> ''::text) AND (source_id <> ''::text))),
     CONSTRAINT chk_ledger_transfers_source_present CHECK (((source IS NOT NULL) AND (source_id IS NOT NULL))),
     CONSTRAINT ledger_transfers_amount_positive CHECK ((amount > 0)),
-    CONSTRAINT ledger_transfers_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT ledger_transfers_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT ledger_transfers_debit_floor_nonnegative CHECK ((allow_debit_negative_up_to >= 0)),
     CONSTRAINT ledger_transfers_distinct_accounts CHECK ((debit_account_id <> credit_account_id)),
     CONSTRAINT ledger_transfers_type_check CHECK ((transfer_type = ANY (ARRAY['deposit'::text, 'credit_spend'::text, 'credit_expire'::text, 'credit_revoke'::text, 'credit_reinstate'::text, 'owed_accrual'::text, 'owed_payment'::text, 'owed_writeoff'::text])))
@@ -2230,7 +2053,7 @@ CREATE TABLE openrails.prices (
     CONSTRAINT prices_access_duration_positive_chk CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0))),
     CONSTRAINT prices_amount_nonneg_chk CHECK ((amount >= 0)),
     CONSTRAINT prices_auto_renew_needs_duration_chk CHECK (((NOT auto_renew) OR (access_duration_hours IS NOT NULL))),
-    CONSTRAINT prices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT prices_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT prices_trial_amount_nonneg_chk CHECK (((trial_unit_amount IS NULL) OR (trial_unit_amount >= 0))),
     CONSTRAINT prices_trial_both_or_neither_chk CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL))),
     CONSTRAINT prices_trial_needs_auto_renew_chk CHECK (((trial_unit_amount IS NULL) OR auto_renew)),
@@ -2321,80 +2144,6 @@ CREATE POLICY merchant_isolation ON openrails.price_key_movements USING ((mercha
 ALTER TABLE openrails.price_key_movements ENABLE ROW LEVEL SECURITY;
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.price_key_movements TO openrails_app;
-
-CREATE TABLE openrails.product_usage_limit_bindings (
-    id uuid NOT NULL,
-    merchant_id uuid NOT NULL,
-    customer_id uuid NOT NULL,
-    usage_limit_key text NOT NULL,
-    measure text NOT NULL,
-    windows jsonb DEFAULT '[]'::jsonb NOT NULL,
-    grant_id uuid,
-    starts_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    ends_at timestamp with time zone,
-    revoked_at timestamp with time zone,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT product_usage_limit_bindings_key_nonempty CHECK ((btrim(usage_limit_key) <> ''::text)),
-    CONSTRAINT product_usage_limit_bindings_measure_nonempty CHECK ((btrim(measure) <> ''::text)),
-    CONSTRAINT product_usage_limit_bindings_time_check CHECK (((ends_at IS NULL) OR (ends_at > starts_at))),
-    CONSTRAINT product_usage_limit_bindings_windows_array CHECK ((jsonb_typeof(windows) = 'array'::text))
-);
-
-ALTER TABLE ONLY openrails.product_usage_limit_bindings FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.product_usage_limit_bindings IS '#594 materialized product-derived usage-limit bindings. Loaded into admission policy; live counters stay in Redis.';
-
-ALTER TABLE ONLY openrails.product_usage_limit_bindings
-    ADD CONSTRAINT product_usage_limit_bindings_pkey PRIMARY KEY (id);
-
-CREATE INDEX idx_product_usage_limit_bindings_active ON openrails.product_usage_limit_bindings USING btree (merchant_id, customer_id, measure) WHERE (revoked_at IS NULL);
-
-CREATE INDEX idx_product_usage_limit_bindings_grant ON openrails.product_usage_limit_bindings USING btree (merchant_id, grant_id, usage_limit_key);
-
-ALTER TABLE ONLY openrails.product_usage_limit_bindings
-    ADD CONSTRAINT product_usage_limit_bindings_customer_fk FOREIGN KEY (merchant_id, customer_id) REFERENCES openrails.customers(merchant_id, id) ON DELETE RESTRICT;
-
-ALTER TABLE ONLY openrails.product_usage_limit_bindings
-    ADD CONSTRAINT product_usage_limit_bindings_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-CREATE POLICY merchant_isolation ON openrails.product_usage_limit_bindings USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.product_usage_limit_bindings ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_usage_limit_bindings TO openrails_app;
-
-CREATE TABLE openrails.product_usage_limits (
-    merchant_id uuid NOT NULL,
-    product_id uuid NOT NULL,
-    usage_limit_key text NOT NULL,
-    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    CONSTRAINT product_usage_limits_key_nonempty CHECK ((btrim(usage_limit_key) <> ''::text))
-);
-
-ALTER TABLE ONLY openrails.product_usage_limits FORCE ROW LEVEL SECURITY;
-
-COMMENT ON TABLE openrails.product_usage_limits IS '#617 catalog product usage-limit memberships. Grants materialize these into customer product_usage_limit_bindings.';
-
-ALTER TABLE ONLY openrails.product_usage_limits
-    ADD CONSTRAINT product_usage_limits_pkey PRIMARY KEY (merchant_id, product_id, usage_limit_key);
-
-CREATE INDEX idx_product_usage_limits_key ON openrails.product_usage_limits USING btree (merchant_id, usage_limit_key);
-
-ALTER TABLE ONLY openrails.product_usage_limits
-    ADD CONSTRAINT product_usage_limits_limit_fk FOREIGN KEY (merchant_id, usage_limit_key) REFERENCES openrails.catalog_usage_limits(merchant_id, key) ON DELETE CASCADE;
-
-ALTER TABLE ONLY openrails.product_usage_limits
-    ADD CONSTRAINT product_usage_limits_merchant_fk FOREIGN KEY (merchant_id) REFERENCES openrails.merchants(id) ON DELETE RESTRICT;
-
-ALTER TABLE ONLY openrails.product_usage_limits
-    ADD CONSTRAINT product_usage_limits_product_fk FOREIGN KEY (merchant_id, product_id) REFERENCES openrails.products(merchant_id, id) ON DELETE CASCADE;
-
-CREATE POLICY merchant_isolation ON openrails.product_usage_limits USING ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid)) WITH CHECK ((merchant_id = (NULLIF(current_setting('app.merchant_id'::text, true), ''::text))::uuid));
-
-ALTER TABLE openrails.product_usage_limits ENABLE ROW LEVEL SECURITY;
-
-GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE openrails.product_usage_limits TO openrails_app;
 
 CREATE TABLE openrails.psps (
     id uuid DEFAULT uuidv7() NOT NULL,
@@ -2896,7 +2645,7 @@ CREATE TABLE openrails.usage_events (
     occurred_at timestamp with time zone DEFAULT now() NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT usage_events_amount_check CHECK ((amount >= 0)),
-    CONSTRAINT usage_events_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
+    CONSTRAINT usage_events_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
 );
 
 ALTER TABLE ONLY openrails.usage_events FORCE ROW LEVEL SECURITY;
@@ -3096,7 +2845,7 @@ CREATE TABLE openrails.customer_delinquency (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT customer_delinquency_amount_chk CHECK (((overdue_amount >= 0) AND (overdue_invoices >= 0))),
-    CONSTRAINT customer_delinquency_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT customer_delinquency_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT customer_delinquency_since_chk CHECK ((((state = 'current'::text) AND (overdue_since IS NULL)) OR ((state <> 'current'::text) AND (overdue_since IS NOT NULL)))),
     CONSTRAINT customer_delinquency_state_chk CHECK ((state = ANY (ARRAY['current'::text, 'grace'::text, 'delinquent'::text])))
 );
@@ -3217,7 +2966,7 @@ CREATE TABLE openrails.invoice_items (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT invoice_items_amount_nonneg_chk CHECK ((amount >= 0)),
-    CONSTRAINT invoice_items_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT invoice_items_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT invoice_items_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'invoiced'::text, 'voided'::text])))
 );
 
@@ -3444,7 +3193,6 @@ CREATE TABLE openrails.subscriptions (
     cancel_type text,
     cancel_feedback text,
     entitlements_spec_snapshot jsonb,
-    credits_spec_snapshot jsonb,
     gateway_response jsonb,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -3461,8 +3209,7 @@ CREATE TABLE openrails.subscriptions (
     CONSTRAINT chk_cancelled_no_retry_schedule CHECK (((status <> 'cancelled'::openrails.subscription_status) OR ((next_retry_at IS NULL) AND (grace_ends_at IS NULL)))),
     CONSTRAINT chk_ended_not_before_cancelled CHECK (((ended_at IS NULL) OR (cancelled_at IS NULL) OR (ended_at >= cancelled_at))),
     CONSTRAINT chk_past_due_has_period_end CHECK (((status <> 'past_due'::openrails.subscription_status) OR (current_period_ends_at IS NOT NULL))),
-    CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at))),
-    CONSTRAINT subscriptions_credit_units_canonical CHECK (openrails.credit_spec_has_canonical_units(credits_spec_snapshot))
+    CONSTRAINT chk_valid_period CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
 );
 
 ALTER TABLE ONLY openrails.subscriptions FORCE ROW LEVEL SECURITY;
@@ -3596,7 +3343,7 @@ CREATE TABLE openrails.invoice_payments (
     payment_method_id uuid,
     idempotency_key text,
     CONSTRAINT invoice_payments_amount_positive_chk CHECK ((amount > 0)),
-    CONSTRAINT invoice_payments_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT invoice_payments_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT invoice_payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text])))),
     CONSTRAINT invoice_payments_status_check CHECK ((status = ANY (ARRAY['attempted'::text, 'settled'::text, 'failed'::text])))
 );
@@ -3654,7 +3401,7 @@ CREATE TABLE openrails.money_settings (
     collection_payment_method_id uuid,
     CONSTRAINT money_settings_billing_mode_chk CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text]))),
     CONSTRAINT money_settings_credit_limit_amount_nonneg_chk CHECK ((credit_limit_amount >= 0)),
-    CONSTRAINT money_settings_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)))
+    CONSTRAINT money_settings_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text)))
 );
 
 ALTER TABLE ONLY openrails.money_settings FORCE ROW LEVEL SECURITY;
@@ -3850,7 +3597,6 @@ CREATE TABLE openrails.payments (
     discount_reason text,
     discount_metadata jsonb,
     entitlements_spec_snapshot jsonb,
-    credits_spec_snapshot jsonb,
     metadata jsonb,
     purchased_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -3873,8 +3619,7 @@ CREATE TABLE openrails.payments (
     CONSTRAINT chk_payments_money_movement CHECK ((money_movement = ANY (ARRAY['rail'::text, 'none'::text]))),
     CONSTRAINT chk_payments_reversal_kind CHECK (((reversal_kind IS NULL) OR (reversal_kind = ANY (ARRAY['refund'::text, 'chargeback'::text, 'dispute_reversal'::text])))),
     CONSTRAINT chk_payments_token_type CHECK (((token_type IS NULL) OR (token_type = ANY (ARRAY['network_token'::text, 'pan_via_proxy'::text, 'psp_token'::text])))),
-    CONSTRAINT payments_credit_units_canonical CHECK (openrails.credit_spec_has_canonical_units(credits_spec_snapshot)),
-    CONSTRAINT payments_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT payments_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT payments_psp_required_on_rail CHECK (((psp_id IS NOT NULL) OR (rail = ANY (ARRAY['manual'::text, 'admin'::text]))))
 );
 
@@ -4001,7 +3746,7 @@ CREATE TABLE openrails.checkout_sessions (
     destructive_run_id uuid,
     destructive_run_class text GENERATED ALWAYS AS (CASE WHEN destructive_run_id IS NOT NULL THEN 'destructive' END) STORED,
     routing_reason jsonb,
-    CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT checkout_sessions_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT checkout_sessions_mode_check CHECK ((mode = ANY (ARRAY['one_off'::text, 'subscription'::text, 'solana_cancel'::text, 'solana_tier_change'::text])))
 );
 
@@ -4083,7 +3828,7 @@ CREATE TABLE openrails.grants (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     CONSTRAINT grants_amount_positive CHECK (((amount IS NULL) OR (amount > 0))),
     CONSTRAINT grants_credit_amount CHECK (((kind <> 'credit'::text) OR ((amount IS NOT NULL) AND (currency IS NOT NULL)))),
-    CONSTRAINT grants_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text) OR (currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text))),
+    CONSTRAINT grants_currency_shape CHECK (((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))),
     CONSTRAINT grants_event_check CHECK ((event = ANY (ARRAY['grant'::text, 'revoke'::text, 'expire'::text, 'supersede'::text, 'adjust'::text]))),
     CONSTRAINT grants_event_supersedes CHECK (((event = 'grant'::text) = (supersedes_id IS NULL))),
     CONSTRAINT grants_kind_check CHECK ((kind = ANY (ARRAY['entitlement'::text, 'ownership'::text, 'credit'::text]))),
@@ -4566,7 +4311,7 @@ CREATE TABLE openrails.admission_operations (
     merchant_id uuid NOT NULL,
     request_id text NOT NULL CHECK (octet_length(request_id) BETWEEN 1 AND 255),
     payer_id uuid NOT NULL,
-    currency text NOT NULL CONSTRAINT admission_operations_currency_shape CHECK (currency ~ '^[A-Z]{3,12}$' OR currency ~ '^credit:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'),
+    currency text NOT NULL CONSTRAINT admission_operations_currency_shape CHECK (currency ~ '^[A-Z]{3,12}$'),
     estimated_amount bigint NOT NULL CHECK (estimated_amount >= 0),
     available_amount bigint NOT NULL CHECK (available_amount >= 0),
     terms jsonb NOT NULL CHECK (jsonb_typeof(terms) = 'object' AND octet_length(terms::text) <= 65536),

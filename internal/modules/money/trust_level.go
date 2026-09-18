@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/pkg/identity"
@@ -28,8 +30,8 @@ func (s *MoneyService) SetTrustLevelOverride(ctx context.Context, payer identity
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return err
 	}
 	tid, err := merchant.Require(ctx)

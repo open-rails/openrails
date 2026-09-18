@@ -123,14 +123,12 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	)
 
 	manifest := catalog.Manifest{
-		Version:        catalog.SupportedVersion,
-		CreditBalances: []catalog.CreditBalance{{Key: creditKey, Unit: "USD"}},
+		Version: catalog.SupportedVersion,
 		Products: []catalog.Product{{
 			Key:          productKey,
 			DisplayName:  displayName,
 			Description:  description,
 			Entitlements: []string{entitlement},
-			Credits:      []catalog.CreditGrant{{Key: creditKey, Currency: "USD", Amount: solanaPtrI64(50_000)}},
 			Prices: []catalog.Price{{
 				UnitAmount: priceMicros,
 				Currency:   "USD",
@@ -152,19 +150,18 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	// source of truth) — read it straight from the products table.
 	var (
 		dbProductKey, dbDisplayName, dbDescription string
-		entitlementsSpec, creditsSpec              []byte
+		entitlementsSpec                           []byte
 	)
 	err = h.Pool().QueryRow(ctx, `
-		SELECT key, display_name, description, entitlements_spec, credits_spec
+		SELECT key, display_name, description, entitlements_spec
           FROM openrails.products
 		 WHERE merchant_id = $1::uuid AND key = $2
-	`, dbtest.TestMerchantID.String(), productKey).Scan(&dbProductKey, &dbDisplayName, &dbDescription, &entitlementsSpec, &creditsSpec)
+	`, dbtest.TestMerchantID.String(), productKey).Scan(&dbProductKey, &dbDisplayName, &dbDescription, &entitlementsSpec)
 	require.NoError(t, err, "product metadata must be persisted in openrails.products")
 	require.Equal(t, productKey, dbProductKey)
 	require.Equal(t, displayName, dbDisplayName)
 	require.Equal(t, description, dbDescription)
 	require.Contains(t, string(entitlementsSpec), entitlement, "granted benefit (entitlement) stored in DB")
-	require.Contains(t, string(creditsSpec), creditKey, "granted benefit (credits) stored in DB")
 
 	// Resolve the published product + price ids (used by the DB payment row below).
 	getStatus, getBody := requestJSON(t, "GET", surface.BaseURL+"/v1/merchant/catalog/products/by-key/"+productKey, catalogToken, nil)

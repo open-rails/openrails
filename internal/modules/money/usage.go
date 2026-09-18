@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -71,8 +73,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	if params.Amount < 0 {
 		return nil, fmt.Errorf("amount must be >= 0")
 	}
-	cur := normalizeUnit(params.Currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(params.Currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	payer, err := resolveCustomer(params.Payer, params.Invoker)
@@ -241,8 +243,8 @@ func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.Custom
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)
@@ -296,8 +298,8 @@ func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.Custom
 	if payer.IsZero() {
 		return nil, fmt.Errorf("payer required")
 	}
-	cur := normalizeUnit(currency)
-	if err := s.validateUnit(ctx, cur); err != nil {
+	cur := normalizeCurrency(currency)
+	if err := moneyutil.ValidateCurrency(cur); err != nil {
 		return nil, err
 	}
 	tid, err := merchant.Require(ctx)

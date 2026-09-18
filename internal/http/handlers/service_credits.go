@@ -160,9 +160,6 @@ func serviceRequiredCurrency(r *httprequest.Request, raw string) (string, bool) 
 		r.ErrorJSON(http.StatusBadRequest, "currency required")
 		return "", false
 	}
-	if money.IsQualifiedUnit(currency) {
-		return currency, true
-	}
 	return money.NormalizeCurrency(currency), true
 }
 
@@ -381,7 +378,7 @@ func ServiceDepositCredits(r *httprequest.Request) {
 	})
 	if err != nil {
 		// #483: an unknown/invalid currency is a client error (parity with local), not a 500.
-		if errors.Is(err, money.ErrBillingUnitRequired) || strings.Contains(err.Error(), "unknown currency") {
+		if strings.Contains(err.Error(), "unknown currency") {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
@@ -464,7 +461,7 @@ func AdminGrantCredits(r *httprequest.Request) {
 		Description: req.Description,
 	})
 	if err != nil {
-		if errors.Is(err, money.ErrBillingUnitRequired) || strings.Contains(err.Error(), "unknown currency") {
+		if strings.Contains(err.Error(), "unknown currency") {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
