@@ -18,7 +18,7 @@ import (
 var moneyJSONName = regexp.MustCompile(`^units$|(^|_)(amount|amounts|price|limit|cap|threshold|floor|balance|revenue|fee|cost|refunded|due|owed|spent|used|reserved|remaining|captured|authorized)(_|$)`)
 
 // wireDTODirs hold types that the shared Client or HTTP handlers encode.
-var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "pkg/embedded/controlplane", "pkg/pricing", "pkg/service", "internal/http/handlers", "internal/modules/copilot", "internal/modules/money"}
+var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "internal/operator", "pkg/pricing", "pkg/service", "internal/http/handlers", "internal/modules/copilot", "internal/modules/money"}
 
 // pendingNumericMoney lists monetary integers still encoded as JSON numbers.
 // Every entry is a known #983 gap or a type that never reaches the HTTP wire;
@@ -74,17 +74,14 @@ var pendingNumericMoney = map[string]string{
 	"pkg/service/spend.go:UsageRow.TotalAmount total_amount":                                                                                         pendingBalance,
 	"internal/http/handlers/solana_supported_tokens.go:TokenBalance.Units units":                                                                     pendingSolanaUnits,
 	"internal/http/handlers/solana_supported_tokens.go:TokenQuote.Units units":                                                                       pendingSolanaUnits,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetCurrencyRevenue.SettledAmount settled_amount_micros":                                          pendingFleet,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetMRR.MonthlyAmount monthly_amount_micros":                                                      pendingFleet,
-	"pkg/embedded/controlplane/fleet_timeseries.go:FleetWeeklyVolume.SettledAmount settled_amount_micros":                                            pendingFleet,
 	"pkg/api/response.go:CreditGrantSpecObject.Amount amount":                                                                                        deletedByCatalogCut,
 	"pkg/catalog/manifest.go:CreditGrant.Amount amount":                                                                                              deletedByCatalogCut,
 	"pkg/catalog/manifest.go:UsageLimitWindow.Amount amount":                                                                                         deletedByCatalogCut,
 	"pkg/service/catalog_recovery_metadata.go:credit.Amount amount":                                                                                  deletedByCatalogCut,
 	"pkg/service/catalog_sidecars.go:CatalogUsageLimitWindowSpec.Amount amount":                                                                      deletedByCatalogCut,
 	"pkg/service/service_definition_catalog.go:CreditGrantSpec.Amount amount":                                                                        deletedByCatalogCut,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                  notMoneyCount,
-	"pkg/embedded/controlplane/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                    notMoneyCount,
+	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.ActiveRevenue active_revenue":                                                          notMoneyCount,
+	"internal/operator/fleet_analytics.go:FleetMerchantFunnel.FirstRevenue first_revenue":                                                            notMoneyCount,
 	"internal/modules/copilot/tools_draft.go:draftCatalogDiffArgs.UnitAmount unit_amount":                                                            notHTTPToolArgs,
 	"internal/modules/copilot/tools_draft.go:draftPriceChangeArgs.NewAmount new_amount":                                                              notHTTPToolArgs,
 	"internal/modules/money/enterprise.go:PendingCharge.Amount amount":                                                                               notHTTPPendingCharges,
@@ -101,6 +98,7 @@ var pendingNumericMoney = map[string]string{
 	"pkg/service/spend.go:CreditAccountSnapshot.OutstandingOwedAmount outstanding_owed_amount":                                                       notHTTPInternalRow,
 	"pkg/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                        notHTTPStoredPayload,
 	"pkg/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                                    notHTTPStoredPayload,
+	"internal/modules/money/invoice_collection_intent.go:InvoiceCollectionPayload.Amount amount":                                                     notHTTPIntentPayload,
 }
 
 const (
@@ -110,7 +108,6 @@ const (
 	pendingRateCard         = "pending #983: rate card (also catalog_rate_cards JSONB)"
 	pendingBalance          = "pending #983: balance, ledger, grant and delinquency"
 	pendingSolanaUnits      = "pending #983: Solana token base units"
-	pendingFleet            = "pending #983: fleet analytics encoded by the SaaS host"
 	deletedByCatalogCut     = "deleted with catalog credit/usage-limit features (#1008 PR438)"
 	notMoneyCount           = "not HTTP: merchant counts"
 	notHTTPToolArgs         = "not HTTP: LLM tool-call arguments"
@@ -119,6 +116,11 @@ const (
 	notHTTPProviderEvidence = "not HTTP: provider billing evidence digest"
 	notHTTPInternalRow      = "not HTTP: internal rows converted by pkg/service"
 	notHTTPStoredPayload    = "not HTTP: stored host_outbox payload decoded before the Client re-encodes it"
+	// The invoice collection operation freezes its charge in a rail_intents
+	// payload row under internal/modules/money, which this guard scans. It is
+	// internal persisted intent data, never an HTTP body: an internal
+	// exception, not permission to leave HTTP money numeric.
+	notHTTPIntentPayload = "not HTTP: internal persisted rail_intents data; the pinned provider wire is asserted separately"
 )
 
 func TestEveryWireMoneyIntegerIsADecimalString(t *testing.T) {
