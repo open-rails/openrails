@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -112,7 +113,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	newest, ok := list[0].(map[string]any)
 	require.True(t, ok)
 	require.Equal(t, customerPayer.UUID().String(), newest["customer_id"], "transaction is scoped to the customer payable subject")
-	require.EqualValues(t, deposit, newest["amount"])
+	require.Equal(t, strconv.FormatInt(deposit, 10), newest["amount"])
 
 	// --- GET usage / payments / invoices / payment-methods: all reachable and
 	// scoped, returning the customer's (empty) payer state. ---
@@ -241,7 +242,7 @@ func TestCustomerTreasuryPayerSurface_SubjectPayer(t *testing.T) {
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, "/v1/customers/"+orgSubject+"/balance?currency=EUR", nil)
 	require.Equal(t, http.StatusOK, resp.status, "subject payer must read its own balance: %s", resp.body)
 	body := decodeJSONObject(t, resp.body)
-	require.EqualValues(t, deposit, body["balance_amount"], "balance must be keyed on the SUBJECT payer, not the merchant")
+	require.Equal(t, strconv.FormatInt(deposit, 10), body["balance_amount"], "balance must be keyed on the SUBJECT payer, not the merchant")
 
 	// Spend-delegation reads are keyed on the subject payer too (empty, not the
 	// merchant's policy document).
@@ -285,9 +286,11 @@ func getCustomerBalance(t *testing.T, srv *httptest.Server, currency string) int
 	resp := requestCustomerTreasuryJSON(t, srv, http.MethodGet, customerPath("/balance?currency="+currency), nil)
 	require.Equal(t, http.StatusOK, resp.status, resp.body)
 	body := decodeJSONObject(t, resp.body)
-	amt, ok := body["balance_amount"].(float64)
+	raw, ok := body["balance_amount"].(string)
 	require.True(t, ok, resp.body)
-	return int64(amt)
+	amount, err := strconv.ParseInt(raw, 10, 64)
+	require.NoError(t, err, resp.body)
+	return amount
 }
 
 func decodeJSONObject(t *testing.T, body string) map[string]any {

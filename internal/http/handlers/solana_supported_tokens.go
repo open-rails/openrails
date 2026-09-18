@@ -68,7 +68,7 @@ type TokenInfo struct {
 
 type TokenQuote struct {
 	Amount        string  `json:"amount"`
-	Units         uint64  `json:"units"`
+	Units         uint64  `json:"units,string"`
 	TokenPriceUSD float64 `json:"token_price_usd"`
 	FXRate        float64 `json:"fx_rate"`
 	FXCurrency    string  `json:"fx_currency"`
@@ -78,7 +78,7 @@ type TokenQuote struct {
 
 type TokenBalance struct {
 	Amount     string `json:"amount"`
-	Units      uint64 `json:"units"`
+	Units      uint64 `json:"units,string"`
 	Sufficient bool   `json:"sufficient"`
 }
 
