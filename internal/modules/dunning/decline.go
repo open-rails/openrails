@@ -5,6 +5,7 @@
 package dunning
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -141,14 +142,19 @@ func evidenceResponseCode(intent gen.OpenrailsRailIntent) int {
 	if len(intent.ResultEvidence) == 0 {
 		return 0
 	}
-	var evidence map[string]any
-	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
+	var evidence struct {
+		ResponseCode json.Number `json:"response_code"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(intent.ResultEvidence))
+	decoder.UseNumber()
+	if err := decoder.Decode(&evidence); err != nil {
 		return 0
 	}
-	if code, ok := evidence["response_code"].(float64); ok {
-		return int(code)
+	code, err := evidence.ResponseCode.Int64()
+	if err != nil {
+		return 0
 	}
-	return 0
+	return int(code)
 }
 
 // ReleaseAttempt makes an exact claimed lease immediately due again without
