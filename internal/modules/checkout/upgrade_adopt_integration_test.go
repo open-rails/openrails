@@ -238,19 +238,7 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 		_, _ = pool.Exec(ctx, "DELETE FROM openrails.products WHERE id = ANY($1)", []uuid.UUID{oldProductID, newProductID})
 	})
 
-	priceSvc := catalog.NewPriceService(dbi)
-	productSvc := catalog.NewProductService(dbi)
-	paymentSvc := payments.NewPaymentService(dbi, clock)
-	entSvc := entitlements.NewEntitlementService(dbi, clock)
-	pmSvc := paymentmethods.NewPaymentMethodService(dbi)
-	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock)
-	svc := NewCheckoutService(subSvc, productSvc, priceSvc, paymentSvc, entSvc,
-		pmSvc, nil, nil, nil, nil, nil, clock)
-	// #788: the scoped resolver is the ONLY NMI client source; the fixture
-	// overrides it with the fake-gateway client.
-	svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
-	svc.SetSubscriptionLifecycleService(subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, subscriptions.NewNotificationService(dbi, nil), paymentSvc, clock))
-	svc.Intents = &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(NewNMIUpgradeIntentHandler(svc)), Config: fullModeConfig(), Clock: clock}
+	svc := newUpgradeCheckoutService(dbi, clock, client)
 
 	existingSub, err := subscriptions.NewSubscriptionRepo(dbi).GetByID(ctx, oldSubID)
 	require.NoError(t, err)
@@ -289,6 +277,24 @@ func newUpgradeAdoptFixture(t *testing.T) *upgradeAdoptFixture {
 		},
 		ctx: ctx,
 	}
+}
+
+// newUpgradeCheckoutService wires the checkout, lifecycle and upgrade-intent
+// runner on dbi, with the NMI client pinned to the fake gateway (#788: the
+// scoped resolver is the only NMI client source).
+func newUpgradeCheckoutService(dbi *db.DB, clock clockwork.Clock, client *nmi.NMIClient) *CheckoutService {
+	priceSvc := catalog.NewPriceService(dbi)
+	productSvc := catalog.NewProductService(dbi)
+	paymentSvc := payments.NewPaymentService(dbi, clock)
+	entSvc := entitlements.NewEntitlementService(dbi, clock)
+	pmSvc := paymentmethods.NewPaymentMethodService(dbi)
+	subSvc := subscriptions.NewSubscriptionService(dbi, priceSvc, productSvc, nil, clock)
+	svc := NewCheckoutService(subSvc, productSvc, priceSvc, paymentSvc, entSvc,
+		pmSvc, nil, nil, nil, nil, nil, clock)
+	svc.ResolveNMIClientOverride = func(context.Context, string) (*nmi.NMIClient, error) { return client, nil }
+	svc.SetSubscriptionLifecycleService(subscriptions.NewSubscriptionLifecycleService(dbi, productSvc, priceSvc, entSvc, subscriptions.NewNotificationService(dbi, nil), paymentSvc, clock))
+	svc.Intents = &intents.Runner{Store: intents.NewStore(dbi), Registry: intents.NewRegistry(NewNMIUpgradeIntentHandler(svc)), Config: fullModeConfig(), Clock: clock}
+	return svc
 }
 
 // A positive successor receipt completes the upgrade with one remote create.

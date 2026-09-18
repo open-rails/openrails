@@ -58,16 +58,16 @@ const (
 	ledgerWriteTimeout = 10 * time.Second
 )
 
-// LedgerWriteContext detaches a ledger write from the caller's cancellation.
-// The caller's deadline governs the provider call; once that call has been made
-// its result must reach the ledger regardless. A synchronous caller that timed
-// out mid-send otherwise lost the unknown mark and the handler's evidence, and
-// the row sat in_flight until lease expiry handed it back to the executor
-// instead of the verifier. Handlers use it for the same reason when they
-// persist a provider receipt mid-flight. Values (merchant, PSP pins) survive;
-// only cancellation is dropped.
+// LedgerWriteContext detaches a ledger write from the caller's cancellation
+// (db.DetachedWriteContext). The caller's deadline governs the provider call;
+// once that call has been made its result must reach the ledger regardless. A
+// synchronous caller that timed out mid-send otherwise lost the unknown mark and
+// the handler's evidence, and the row sat in_flight until lease expiry handed it
+// back to the executor instead of the verifier. Handlers use it for the same
+// reason when they persist a provider receipt mid-flight. Merchant and PSP
+// survive, and a request connection the cancellation closed is re-pinned.
 func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
+	return db.DetachedWriteContext(ctx, ledgerWriteTimeout)
 }
 
 // Runner drains the intent ledger: RunExecuteOnce is the executor pass,
