@@ -161,16 +161,15 @@ tier_change_idempotency_key_required` before any admission or provider call,
 because the key is the client's only handle on a lost response. A key that
 already names a different tier change (another customer, subscription or
 target) answers `409 tier_change_idempotency_conflict` and never that
-operation's result. A Stripe tier change is a durable operation keyed by that
-header: the same key replays the stored result (`200`); while the provider
-outcome is unresolved it answers `202` with `status: "processing"` and
-`operation_id`; a request under another key while one is unresolved answers
-`409 tier_change_in_flight` with `metadata.operation_id`; a definitive Stripe
-refusal answers `400`/`402` (`tier_change_refused`, or the card decline code).
-An NMI upgrade whose provider outcome is unresolved answers `409` (retry with
-the same `Idempotency-Key` to read the durable result); a second upgrade of a
-subscription with an unresolved upgrade also answers `409`. Checkout
-confirmation uses the same `409` for an unresolved sale.
+operation's result. A Stripe tier change and an NMI upgrade are durable
+operations keyed by that header, with one contract on both rails: the same key
+replays the stored result (`200`); while the provider outcome is unresolved it
+answers `202` with `status: "processing"` and `operation_id`; a request under
+another key while one is unresolved answers `409 tier_change_in_flight` with
+`metadata.operation_id`; a definitive provider refusal answers `400`/`402`
+(`tier_change_refused`, or the card decline code) and an operator-attested
+non-execution `409 tier_change_refused`. Checkout confirmation answers `409`
+for an unresolved sale.
 
 ### Payment methods
 

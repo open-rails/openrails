@@ -92,6 +92,13 @@ func TestStripeTierChangeReplayAcrossDeployments(t *testing.T) {
 		require.Len(t, gateway.Posts("/v1/subscriptions/"+lost.StripeSub), 1)
 		require.Equal(t, 1, h.TierChangeOperations(lost.SubscriptionID))
 
+		// A tier change without the client's key never mutates.
+		unkeyed := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
+		_, err = client.ChangeTier(ctx, unkeyed.Subscription, "", openrails.ChangeTierRequest{PriceID: unkeyed.ProPrice})
+		requireRefusal(t, err, openrails.ErrInvalid, openrails.CodeTierChangeIdempotencyKeyRequired)
+		require.Empty(t, gateway.Posts("/v1/subscriptions/"+unkeyed.StripeSub))
+		require.Equal(t, unkeyed.BasicPrice, h.LocalSubscriptionPrice(unkeyed.SubscriptionID))
+
 		// A definitive decline is coded, replays as itself and is never resent.
 		declined := h.SeedStripeTierSubscription(d.runtime(), d.merchant, gateway)
 		declinedRequest := openrails.ChangeTierRequest{PriceID: declined.ProPrice}
