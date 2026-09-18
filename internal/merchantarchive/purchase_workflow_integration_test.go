@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -31,7 +32,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/productaccess"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/railresolve"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -136,7 +136,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	sessionService := newPurchaseArchiveSession(source, checkoutService, clock)
 	clientKey := "archive-checkout-" + uuid.NewString()
 	sessionRequest := func() *checkout.CheckoutSessionCreateRequest {
-		return &checkout.CheckoutSessionCreateRequest{PriceID: api.FormatPriceID(price), Payment: checkout.CheckoutSessionPaymentRequest{Rail: "writer-account", PaymentMethodID: api.FormatPaymentMethodID(methodID)}, IdempotencyKey: clientKey}
+		return &checkout.CheckoutSessionCreateRequest{PriceID: openrails.PriceID(price).String(), Payment: checkout.CheckoutSessionPaymentRequest{Rail: "writer-account", PaymentMethodID: openrails.PaymentMethodID(methodID).String()}, IdempotencyKey: clientKey}
 	}
 	user := &checkout.UserIdentity{ID: customer.String()}
 	firstRequest := sessionRequest()
@@ -145,8 +145,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	require.Equal(t, "succeeded", first.Status)
 	require.Equal(t, transaction, first.Payment.TransactionID)
 	require.EqualValues(t, 1, gatewayCalls.Load())
-	sessionID, err := api.ParseCheckoutSessionID(first.ID)
-	require.NoError(t, err)
+	sessionID := first.ID.UUID()
 	first, err = sessionService.GetSession(ctx, sessionID, user)
 	require.NoError(t, err)
 	payment, err := services.payments.GetByPSPTransactionID(ctx, rail, transaction)
@@ -155,8 +154,7 @@ func testPurchaseWorkflowArchive(t *testing.T, recurring bool) {
 	var subscriptionID uuid.UUID
 	if recurring {
 		require.NotNil(t, first.SubscriptionID)
-		subscriptionID, err = api.ParseSubscriptionID(*first.SubscriptionID)
-		require.NoError(t, err)
+		subscriptionID = first.SubscriptionID.UUID()
 	}
 	operationKey := checkout.NMISaleIdempotencyKey("checkout_session:" + firstRequest.IdempotencyKey)
 	if recurring {
