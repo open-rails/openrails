@@ -48,11 +48,12 @@ type NMISale struct {
 type FakeNMIGateway struct {
 	URL string
 
-	server  *httptest.Server
-	mu      sync.Mutex
-	mode    NMISaleMode
-	visible bool
-	sales   []NMISale
+	server   *httptest.Server
+	mu       sync.Mutex
+	mode     NMISaleMode
+	visible  bool
+	sales    []NMISale
+	requests int
 	// plans are the recurring subscriptions' plan amounts: a rebill sale
 	// names the subscription and NMI charges its plan.
 	plans map[string]plan
@@ -146,8 +147,15 @@ func (g *FakeNMIGateway) Sales() []NMISale {
 	return append([]NMISale(nil), g.sales...)
 }
 
-// SaleCount is the number of sale submissions that reached the gateway.
+// SaleCount is the number of recorded sale receipts (declines record none).
 func (g *FakeNMIGateway) SaleCount() int { return len(g.Sales()) }
+
+// SaleRequestCount includes declined submissions as well as recorded sales.
+func (g *FakeNMIGateway) SaleRequestCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.requests
+}
 
 // SaleForOrder returns the recorded sale carrying orderID.
 func (g *FakeNMIGateway) SaleForOrder(orderID string) (NMISale, bool) {
@@ -181,6 +189,7 @@ func (g *FakeNMIGateway) serve(w http.ResponseWriter, r *http.Request) {
 func (g *FakeNMIGateway) serveSale(w http.ResponseWriter, r *http.Request) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.requests++
 	if g.mode == NMISaleDecline {
 		fmt.Fprint(w, "response=2&responsetext=DECLINED&response_code=200")
 		return
