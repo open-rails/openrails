@@ -364,10 +364,10 @@ func (s *Service) ArchivePaymentProviderAccount(ctx context.Context, id merchant
 	}
 	rail = normalizeProviderSecretType(rail)
 	if !supportedPaymentProvider(rail) {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: unsupported payment rail %q", rail)
 	}
 	if pspID == uuid.Nil {
-		return PaymentProviderConfig{}, errors.New("merchants: provider account id required")
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: provider account id required")
 	}
 	row, err := s.archivePSP(ctx, id, rail, pspID, req.AllowLast)
 	if err != nil {
@@ -387,12 +387,12 @@ func (s *Service) DeletePaymentProviderConfig(ctx context.Context, id merchant.I
 	}
 	rail = normalizeProviderSecretType(rail)
 	if !supportedPaymentProvider(rail) {
-		return PaymentProviderConfig{}, fmt.Errorf("merchants: unsupported payment rail %q", rail)
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: unsupported payment rail %q", rail)
 	}
 	if strings.TrimSpace(environment) == "" {
 		environment = s.providerEnvironment
 	} else if environment = normalizeProviderSecretEnvironment(environment); environment == "" {
-		return PaymentProviderConfig{}, errors.New("merchants: provider environment must be live or test")
+		return PaymentProviderConfig{}, apperr.Invalidf("merchants: provider environment must be live or test")
 	}
 	row, err := s.archiveSoleActivePSP(ctx, id, rail, environment)
 	if err != nil {

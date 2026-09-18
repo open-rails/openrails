@@ -307,6 +307,22 @@ func TestNMIPaymentSourceUpdateIntent_CrossPSPRefusesBeforeProviderCall(t *testi
 	require.Zero(t, fx.intentCount(t), "a refused request leaves no durable intent behind")
 }
 
+func TestNMIPaymentSourceUpdateIntent_CustodianHeldTargetRefusesBeforeProviderCall(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	custodian := uuid.New()
+	_, err := fx.db.Pool().Exec(fx.ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, fx.newPM.ID, custodian)
+	require.NoError(t, err)
+	// The PSP remains unchanged, and the old vault reference remains for
+	// forensic correlation. It must never be used as a live NMI address.
+	_, err = fx.through.ExecutePaymentSourceUpdate(fx.ctx, fx.sub, fx.newPM, OriginUser, "custodian-held target")
+	require.Error(t, err)
+	require.Zero(t, fx.gateway.updateCalls.Load())
+	require.Zero(t, fx.gateway.getCalls.Load())
+	require.Zero(t, fx.intentCount(t))
+}
+
 // The producer's check is made against the CURRENT row, not the caller's
 // stale copy: a method re-attributed between the HTTP pre-check and the
 // durable seam is refused with zero writes.

@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // ErrPaymentMethodProviderAccountMismatch is returned when a durable
@@ -19,6 +21,17 @@ import (
 // unrepairable split. Cross-account cutover must use the explicit card
 // re-entry workflow described by ProviderAccountCutoverPlan.
 var ErrPaymentMethodProviderAccountMismatch = errors.New("payment method belongs to a different provider account")
+
+// A custody remap retains the old PSP vault reference for correlation only.
+// NMI's payment-source update cannot address a third-party custodian token.
+var ErrPaymentMethodNotPSPVaulted = apperr.New(http.StatusConflict, "payment_method_not_psp_vaulted", "payment method is not held in the provider vault; collect the replacement card on this provider account")
+
+func ValidatePaymentMethodSourceCustody(pm *models.PaymentMethod) error {
+	if pm == nil || pm.Custodian != models.CustodianPSP || pm.CustodianID != nil {
+		return ErrPaymentMethodNotPSPVaulted
+	}
+	return nil
+}
 
 // NMIClientForExistingSubscription resolves the NMI client that owns an already
 // recorded subscription. New-work selectors must not be used for rows pinned to

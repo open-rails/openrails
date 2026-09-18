@@ -116,6 +116,10 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		writePaymentMethodPSPMismatch(r)
 		return
 	}
+	if err := subscriptions.ValidatePaymentMethodSourceCustody(paymentMethod); err != nil {
+		writeRefusal(r, err, "Failed to update payment method")
+		return
+	}
 
 	// Pre-flight: resolve the rail read-only so misconfiguration surfaces as
 	// 503 immediately (the intent handler re-resolves at execution time).
@@ -159,7 +163,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			}
 			r.APIError(refusal)
 		default:
-			r.InternalError("Failed to update payment method", err)
+			writeRefusal(r, err, "Failed to update payment method")
 		}
 		return
 	}
@@ -170,6 +174,8 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	case out.Terminal && out.Code == intents.EvidenceCodePSPMismatch:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Info("Payment-source update refused: provider-account mismatch at execution")
 		writePaymentMethodPSPMismatch(r)
+	case out.Terminal && out.Code == subscriptions.ErrPaymentMethodNotPSPVaulted.Code:
+		writeRefusal(r, subscriptions.ErrPaymentMethodNotPSPVaulted, "Failed to update payment method")
 	case out.Terminal:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.RailCustomerRef, "payment_method_id": paymentMethod.ID, "reason": out.Reason}).Error("Failed to update subscription payment source with NMI")
 		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment rail")
