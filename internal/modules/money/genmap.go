@@ -153,6 +153,7 @@ func invoiceFromGen(r gen.OpenrailsInvoice) (*models.Invoice, error) {
 		NextCollectionAttemptAt:      r.NextCollectionAttemptAt,
 		LastCollectionFailureCode:    r.LastCollectionFailureCode,
 		LastCollectionFailureMessage: r.LastCollectionFailureMessage,
+		CollectionIntentID:           r.CollectionIntentID,
 		CreatedAt:                    r.CreatedAt,
 		UpdatedAt:                    r.UpdatedAt,
 	}

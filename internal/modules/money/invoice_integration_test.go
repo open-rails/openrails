@@ -79,13 +79,8 @@ func TestFinalizeInvoice_PrepaidStatement(t *testing.T) {
 }
 
 func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -130,7 +125,7 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 	require.Equal(t, 0, pendingAfter, "finalization attaches pending invoice items")
 
 	ch := &fakeCharger{}
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)
@@ -144,13 +139,8 @@ func TestFinalizeInvoice_ArrearsOwed(t *testing.T) {
 }
 
 func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -168,7 +158,7 @@ func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.
 	require.Equal(t, int64(500), inv.AmountDue)
 
 	ch := &fakeCharger{declineAll: true}
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1)
@@ -193,13 +183,8 @@ func TestInvoiceCollectionDeclineMarksInvoicePastDueAndBlocksArrears(t *testing.
 }
 
 func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T) {
-	svc, pool, payer, _, ctx := moneyInEnv(t)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_payments WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoice_items WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.usage_events WHERE customer_id = $1", payer.UUID())
-		_, _ = pool.Exec(ctx, "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
-	})
+	svc, dbi, pool, payer, _, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -222,7 +207,7 @@ func TestFinalizeThresholdInvoices_CapHitCreatesCollectableInvoice(t *testing.T)
 	require.Equal(t, int64(500), invoices[0].AmountDue)
 
 	ch := &fakeCharger{}
-	n, err = svc.ChargeOutstanding(ctx, ch, 0)
+	n, err = svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)

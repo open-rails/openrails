@@ -444,7 +444,7 @@ func TestCustodianProxyCollectionAdapter_ParkedInstrumentFailsClosed(t *testing.
 	})
 	require.NoError(t, err)
 	adapter := money.NewCustodianProxyCollectionAdapter(charger)
-	_, err = adapter.ChargeSavedMethod(fx.ctx, method, money.ChargeRequest{
+	_, err = adapter.Prepare(fx.ctx, method, money.ChargeRequest{
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		PaymentMethodID: method.ID,
 		AmountCents:     199,

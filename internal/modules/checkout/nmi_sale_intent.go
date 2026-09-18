@@ -256,7 +256,7 @@ func (h *NMISaleIntentHandler) Resolve(ctx context.Context, intent gen.Openrails
 	if err != nil {
 		return intents.Outcome{}, err
 	}
-	if err := client.ConfirmApprovedSale(ctx, resolution.ProviderReference, p.CustomerVaultID, amountCents); err != nil {
+	if err := client.ConfirmApprovedSale(ctx, resolution.ProviderReference, p.CustomerVaultID, amountCents, p.Currency); err != nil {
 		return intents.Outcome{}, intents.RejectResolution("%v", err)
 	}
 	return h.finalize(ctx, intent.MerchantID, p, orderID, resolution.ProviderReference, true), nil
