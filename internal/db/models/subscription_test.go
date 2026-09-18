@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/identity"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 )
 
 // satisfiesEndedNotBeforeCancelled mirrors the DB CHECK constraint

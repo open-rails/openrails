@@ -290,21 +290,36 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 	return res, err
 }
 
-// openDB wraps a caller pool (borrowed; Close is a no-op) or opens from config.
+// openDB wraps a caller pool (borrowed; Close is a no-op) or opens from
+// config, and enforces the RLS posture either way: an import runs
+// merchant-scoped writes, and a privileged role skips the policies that make
+// that scoping real.
 func openDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool) (*db.DB, error) {
+	var (
+		database *db.DB
+		err      error
+	)
 	if pool != nil {
 		schema := config.DefaultSchema
 		if cfg != nil && cfg.DB != nil {
 			schema = cfg.DB.SchemaName()
 		}
-		return db.NewWithPGXPool(pool, schema)
+		database, err = db.NewWithPGXPool(pool, schema)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if cfg == nil || cfg.DB == nil {
+			return nil, fmt.Errorf("config database is required")
+		}
+		database, err = db.NewDB(ctx, cfg.DB)
+		if err != nil {
+			return nil, fmt.Errorf("open postgres: %w", err)
+		}
 	}
-	if cfg == nil || cfg.DB == nil {
-		return nil, fmt.Errorf("config database is required")
-	}
-	database, err := db.NewDB(ctx, cfg.DB)
-	if err != nil {
-		return nil, fmt.Errorf("open postgres: %w", err)
+	if err := database.EnforceRLSPosture(ctx); err != nil {
+		_ = database.Close()
+		return nil, err
 	}
 	return database, nil
 }

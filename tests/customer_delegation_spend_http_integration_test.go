@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -24,7 +25,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // TestCustomerDelegationSpend_HTTP_EndToEnd drives the WHOLE customer-delegation

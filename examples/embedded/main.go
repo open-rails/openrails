@@ -27,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 func main() {
@@ -52,14 +51,14 @@ func run(ctx context.Context, getenv func(string) string) error {
 	// River is mandatory: renewals, dunning, invoices and reconciliation run
 	// there. The host adds its own workers to fleet.Workers before building.
 	var jobs *river.Client[pgx.Tx]
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{
 			Env: "development", TestMode: config.CredentialPostureSandbox,
 			MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB,
 			DB: &config.DBConfig{URL: dsn},
 		},
 		PGXPool: pool,
-		River: embedded.RiverFromHost(func(_ context.Context, fleet *embedded.RiverFleet) (*river.Client[pgx.Tx], error) {
+		River: embed.RiverFromHost(func(_ context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
 			jobs, err = river.NewClient(riverpgxv5.New(pool), &river.Config{
 				Workers: fleet.Workers,
 				Schema:  fleet.Schema,
@@ -70,7 +69,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 			})
 			return jobs, err
 		}),
-	}})
+	})
 	if err != nil {
 		return err
 	}
@@ -95,7 +94,7 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if err := client.Verify(ctx); err != nil {
 		return err
 	}
-	if err := runtime.Embedded().Ready(ctx); err != nil {
+	if err := runtime.Ready(ctx); err != nil {
 		return err
 	}
 	if _, err := client.GetMerchantSettings(ctx); err != nil {
@@ -107,9 +106,9 @@ func run(ctx context.Context, getenv func(string) string) error {
 	if addr == "" {
 		return nil
 	}
-	handler, err := embedded.MountHandler(runtime.Embedded(), embedded.MountOptions{
+	handler, err := runtime.Handler(embed.MountOptions{
 		MountPrefix: "/billing",
-		RouteSets:   []embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetWebhooks},
+		RouteSets:   []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetWebhooks},
 		// Replace with the host's session verifier; subjects must be UUIDs.
 		Authenticator: billingauth.AuthenticatorFunc(func(context.Context, *http.Request) (billingauth.UserContext, error) {
 			return billingauth.UserContext{}, fmt.Errorf("sign in required")

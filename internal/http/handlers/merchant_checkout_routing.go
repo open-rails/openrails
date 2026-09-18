@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // checkoutRoutingDryRunRequest is the dry-run body. Every field is a routing

@@ -47,14 +47,14 @@ type StaticJWKConfig = boot.StaticJWKConfig
 // serves one merchant). Current names and valid forwards for its UUID work.
 // Returns the merchant id.
 func (rt *Runtime) UpsertMerchantConfig(ctx context.Context, slug string, m MerchantConfig) (merchant.ID, error) {
-	if rt == nil || rt.emb == nil {
+	if rt == nil || rt.app == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: runtime not initialized")
 	}
-	a := rt.emb.App()
+	a := rt.app
 	if a == nil || a.Runtime == nil || a.Runtime.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: app database not initialized")
 	}
-	conf := rt.emb.Config()
+	conf := rt.app.Config
 	if conf == nil || conf.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: config/db is required")
 	}
