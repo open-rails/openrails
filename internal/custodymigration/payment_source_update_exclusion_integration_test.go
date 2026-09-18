@@ -124,39 +124,56 @@ func TestCustodyMigration_RefusesUnresolvedPaymentSourceUpdateOnOldSide(t *testi
 	requireMigrationCount(t, fx, oldMethod, 0)
 }
 
-// Real remap vs real executor, started together on a due swap intent whose
-// target the manifest re-attributes. Exactly one of them wins: a remapped
-// instrument implies a terminal psp_mismatch swap with no provider write and
-// the subscription still on its old method; a completed swap implies the
-// remap was refused and the instrument kept its PSP. Never both.
+// Real remap vs the real producer (enqueue + inline execute), started
+// together. Every interleaving must preserve one property: a provider write
+// happens only while the target is still attributed to the subscription's PSP
+// (the fake gateway reads the committed psp_id at the moment of each write).
+// The legal outcomes are then:
+//   - the swap completes first; the remap is refused while it is unresolved,
+//     or applies after it succeeded (#297 moves an instrument's PSP and leaves
+//     subscriptions untouched by design);
+//   - the remap commits first; the producer refuses (no intent, no write), or —
+//     when its check ran just before the flip — the executor's pin refuses the
+//     frozen intent: failed_terminal psp_mismatch, no write.
 func TestCustodyMigration_RemapVersusPaymentSourceUpdateRace(t *testing.T) {
-	var remapped, refused int
-	for i := 0; i < 6; i++ {
+	arms := map[string]int{}
+	for i := 0; i < 8; i++ {
 		fx := newCustodyFixture(t)
 		oldVault, newVault := "vault-"+uuid.NewString()[:8], "vault-"+uuid.NewString()[:8]
 		oldMethod, subID := fx.seedPSPVaultedCard(t, oldVault)
 		newMethod := fx.seedStandaloneCard(t, subID, newVault)
 		gateway, client := newFakeSwapGateway(t, "railsub-"+oldVault, oldVault)
+		gateway.observe = func() uuid.UUID {
+			var psp uuid.UUID // uuid.Nil on a read error fails the assertion below
+			_ = fx.db.Pool().QueryRow(fx.ctx, `SELECT psp_id FROM openrails.payment_methods WHERE id = $1`, newMethod).Scan(&psp)
+			return psp
+		}
 		runner := &intents.Runner{
 			Store:    intents.NewStore(fx.db),
 			Registry: intents.NewRegistry(intents.NewNMIPaymentSourceUpdateHandler(fx.db, staticResolver{client}, nil)),
 			Config:   &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
 		}
-		intentID := seedSwapIntent(t, fx, subID, oldMethod, newMethod, intents.StatusPending)
+		through := &intents.PaymentSourceUpdateThrough{Runner: runner, DB: fx.db}
+		sub, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, subID)
+		require.NoError(t, err)
+		target, err := paymentmethods.NewPaymentMethodRepo(fx.db).GetByID(fx.ctx, newMethod)
+		require.NoError(t, err)
 		exp := fx.export(custodymigration.ImportedToken{SourceRailCustomerRef: newVault, Token: "tok_" + uuid.NewString()[:12]})
 
 		var (
 			wg         sync.WaitGroup
 			res        custodymigration.Result
-			rerr, xerr error
+			swap       intents.PaymentSourceUpdateOutcome
+			rerr, serr error
 		)
 		start := make(chan struct{})
+		delay := time.Duration(i/2) * time.Millisecond
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
 			<-start
 			if i%2 == 1 {
-				time.Sleep(time.Duration(i) * time.Millisecond)
+				time.Sleep(delay)
 			}
 			res, rerr = custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
 		}()
@@ -164,41 +181,52 @@ func TestCustodyMigration_RemapVersusPaymentSourceUpdateRace(t *testing.T) {
 			defer wg.Done()
 			<-start
 			if i%2 == 0 {
-				time.Sleep(time.Duration(i) * time.Millisecond)
+				time.Sleep(delay)
 			}
-			_, xerr = runner.RunExecuteOnce(fx.ctx)
+			swap, serr = through.ExecutePaymentSourceUpdate(fx.ctx, sub, target, intents.OriginUser, "race test")
 		}()
 		close(start)
 		wg.Wait()
 		require.NoError(t, rerr)
-		require.NoError(t, xerr)
 
-		status, code, reason := intentRow(t, fx, intentID)
+		for _, psp := range gateway.writePSPs() {
+			require.Equal(t, fx.oldPSP.ID, psp, "iteration %d: a provider write after the target was re-attributed", i)
+		}
 		var subMethod uuid.UUID
 		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx, `SELECT payment_method_id FROM openrails.subscriptions WHERE id = $1`, subID).Scan(&subMethod))
-		switch res.Rows[0].Outcome {
-		case custodymigration.OutcomeRemapped:
-			remapped++
-			require.Equal(t, intents.StatusFailedTerminal, status, "iteration %d: %s", i, reason)
-			require.Equal(t, intents.EvidenceCodePSPMismatch, code, "iteration %d: %s", i, reason)
-			require.Zero(t, gateway.updateCalls.Load(), "iteration %d: a re-attributed target never reaches the provider", i)
-			require.Equal(t, oldMethod, subMethod, "iteration %d", i)
-			require.Equal(t, fx.newPSP.ID, fx.method(t, newMethod).PspID)
-		case custodymigration.OutcomeBlocked:
-			refused++
-			// Between finalize and MarkSucceeded the subscription already
-			// references the target while the intent is still in_flight, so
-			// the or#297 charge predicate may be the one that fires.
-			require.Contains(t, []string{custodymigration.ReasonOperationUnresolved, custodymigration.ReasonChargeInFlight}, res.Rows[0].Reason, "iteration %d", i)
-			require.Equal(t, intents.StatusSucceeded, status, "iteration %d: %s", i, reason)
+		remap := res.Rows[0]
+		switch {
+		case serr == nil && swap.Done:
 			require.EqualValues(t, 1, gateway.updateCalls.Load(), "iteration %d", i)
 			require.Equal(t, newMethod, subMethod, "iteration %d", i)
-			require.Equal(t, fx.oldPSP.ID, fx.method(t, newMethod).PspID, "iteration %d: a refused instrument keeps its PSP", i)
+			if remap.Outcome == custodymigration.OutcomeRemapped {
+				arms["swap then remap"]++
+			} else {
+				require.Equal(t, custodymigration.OutcomeBlocked, remap.Outcome, "iteration %d", i)
+				// Between finalize and MarkSucceeded the subscription already
+				// references the target while the intent is in_flight, so the
+				// or#297 charge predicate may be the one that fires.
+				require.Contains(t, []string{custodymigration.ReasonOperationUnresolved, custodymigration.ReasonChargeInFlight}, remap.Reason, "iteration %d", i)
+				require.Equal(t, fx.oldPSP.ID, fx.method(t, newMethod).PspID, "iteration %d: a refused instrument keeps its PSP", i)
+				arms["remap refused"]++
+			}
+		case serr != nil:
+			require.ErrorIs(t, serr, subscriptions.ErrPaymentMethodProviderAccountMismatch, "iteration %d", i)
+			require.Equal(t, custodymigration.OutcomeRemapped, remap.Outcome, "iteration %d", i)
+			require.Zero(t, gateway.updateCalls.Load(), "iteration %d", i)
+			require.Equal(t, oldMethod, subMethod, "iteration %d", i)
+			arms["producer refused"]++
+		case swap.Terminal:
+			require.Equal(t, intents.EvidenceCodePSPMismatch, swap.Code, "iteration %d: %s", i, swap.Reason)
+			require.Equal(t, custodymigration.OutcomeRemapped, remap.Outcome, "iteration %d", i)
+			require.Zero(t, gateway.updateCalls.Load(), "iteration %d", i)
+			require.Equal(t, oldMethod, subMethod, "iteration %d", i)
+			arms["executor refused"]++
 		default:
-			t.Fatalf("iteration %d: unexpected remap outcome %s (%s)", i, res.Rows[0].Outcome, res.Rows[0].Reason)
+			t.Fatalf("iteration %d: unexpected outcome swap=%+v remap=%+v", i, swap, remap)
 		}
 	}
-	t.Logf("remap won %d, swap won %d", remapped, refused)
+	t.Logf("arms: %v", arms)
 }
 
 // The other arm, deterministic: the remap has already flipped the target when
@@ -284,6 +312,17 @@ func (r staticResolver) ResolveNMIClient(context.Context, uuid.UUID, *uuid.UUID)
 type fakeSwapGateway struct {
 	vault       atomic.Value
 	updateCalls atomic.Int64
+	// observe, when set, reads the target's committed psp_id at the moment
+	// of each update write.
+	observe func() uuid.UUID
+	mu      sync.Mutex
+	seen    []uuid.UUID
+}
+
+func (f *fakeSwapGateway) writePSPs() []uuid.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]uuid.UUID(nil), f.seen...)
 }
 
 func newFakeSwapGateway(t *testing.T, railSubID, initialVault string) (*fakeSwapGateway, *nmi.NMIClient) {
@@ -297,6 +336,12 @@ func newFakeSwapGateway(t *testing.T, railSubID, initialVault string) (*fakeSwap
 		case r.Method == http.MethodPost:
 			_ = r.ParseForm()
 			if r.PostFormValue("recurring") == "update_subscription" {
+				if f.observe != nil {
+					psp := f.observe()
+					f.mu.Lock()
+					f.seen = append(f.seen, psp)
+					f.mu.Unlock()
+				}
 				f.updateCalls.Add(1)
 				f.vault.Store(r.PostFormValue("customer_vault_id"))
 			}
