@@ -70,18 +70,14 @@ func TestCustomerRetryArchiveRestoresOriginalRequestReplay(t *testing.T) {
 	var sourceClaimsReleased bool
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT dunning_claim_holder IS NULL AND dunning_claimed_until IS NULL FROM openrails.subscriptions WHERE id=$1`, f.Subscription).Scan(&sourceClaimsReleased))
 	require.True(t, sourceClaimsReleased)
-	for _, column := range []string{"dunning_claim_holder", "dunning_claimed_until"} {
-		var value any = "stale-owner"
-		if column == "dunning_claimed_until" {
-			value = time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
-		}
-		_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET `+column+`=$1 WHERE id=$2`, value, f.Subscription)
-		require.NoError(t, err)
-		require.Error(t, merchantarchive.Export(ctx, source.App().Runtime.DB, mid, &archive), "even an expired claim is not portable")
-		require.Empty(t, archive.Bytes())
-		_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET `+column+`=NULL WHERE id=$1`, f.Subscription)
-		require.NoError(t, err)
-	}
+
+	_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET dunning_claim_holder='expired-owner', dunning_claimed_until=$1 WHERE id=$2`, time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), f.Subscription)
+	require.NoError(t, err)
+	require.Error(t, merchantarchive.Export(ctx, source.App().Runtime.DB, mid, &archive), "even an expired claim is not portable")
+	require.Empty(t, archive.Bytes())
+	_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET dunning_claim_holder=NULL, dunning_claimed_until=NULL WHERE id=$1`, f.Subscription)
+	require.NoError(t, err)
+
 	require.NoError(t, merchantarchive.Export(ctx, source.App().Runtime.DB, mid, &archive))
 	adminDSN, appDSN := dbtest.SharedRLSPostgres(t)
 	schema := "rebill_archive_" + uuid.NewString()[:8]
