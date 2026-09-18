@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/idguard"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -120,8 +121,13 @@ func decodeNMIPaymentSourceUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPay
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode nmi payment source update payload: %w", err)
 	}
+	// A zero id in the frozen payload fails closed exactly like a missing one:
+	// it can never be compared to a live PSP, so it must not reach the seam.
 	if p.NewPaymentMethodID == uuid.Nil || strings.TrimSpace(p.NewRailCustomerRef) == "" || p.NewPspID == uuid.Nil {
 		return p, errors.New("nmi payment source update payload is incomplete")
+	}
+	if p.OldPaymentMethodID != nil && *p.OldPaymentMethodID == uuid.Nil {
+		return p, errors.New("nmi payment source update payload carries a zero old payment method id")
 	}
 	return p, nil
 }
@@ -323,11 +329,14 @@ type providerAccountPin struct {
 // backstopped by the frozen payload: its PSP was proven at enqueue and cannot
 // be re-attributed once gone, so the swap still converges.
 func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentSourceUpdatePayload) (pin providerAccountPin, refused *Outcome, err error) {
-	if intent.SubscriptionID == nil {
+	if intent.SubscriptionID == nil || *intent.SubscriptionID == uuid.Nil {
 		return pin, ptr(Terminal("intent has no subscription_id")), nil
 	}
-	if intent.PspID == nil {
+	if intent.PspID == nil || *intent.PspID == uuid.Nil {
 		return pin, ptr(Terminal("intent is not addressed to a PSP; the provider-account invariant cannot be established")), nil
+	}
+	if intent.MerchantID == uuid.Nil {
+		return pin, ptr(Terminal("intent has no merchant_id; the provider-account invariant cannot be established")), nil
 	}
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		currentTargetPSP, targetFound := p.NewPspID, true
@@ -430,6 +439,25 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return PaymentSourceUpdateOutcome{}, err
+	}
+	// Refuse zero identifiers before the row lock: an unattributed subscription
+	// or instrument cannot be compared to a provider account, and a zero id
+	// must never become a "not found" lookup or a durable intent.
+	if err := idguard.RequireMerchant("merchant_id", tid); err != nil {
+		return PaymentSourceUpdateOutcome{}, err
+	}
+	for _, check := range []struct {
+		field string
+		id    uuid.UUID
+	}{
+		{"subscription_id", sub.ID},
+		{"subscription.psp_id", sub.PspID},
+		{"payment_method_id", newPM.ID},
+		{"payment_method.psp_id", newPM.PspID},
+	} {
+		if err := idguard.Require(check.field, check.id); err != nil {
+			return PaymentSourceUpdateOutcome{}, err
+		}
 	}
 	// The account boundary at the durable side-effect seam, whatever the HTTP
 	// caller already checked: the target is re-read under its shared row lock,

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/idguard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -82,11 +83,23 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 	if a.Runtime == nil || a.Runtime.DB == nil {
 		return ProviderAccountCutoverReport{}, errors.New("runtime unavailable")
 	}
-	if merchantID.IsZero() || q.SubscriptionID == uuid.Nil {
-		return ProviderAccountCutoverReport{}, errors.New("merchant and subscription are required")
+	// Identifiers are refused before any lookup: an explicit zero is a
+	// malformed request, never "not supplied" (which would silently re-target
+	// the subscription's own account) and never a "not found" probe.
+	if err := idguard.RequireMerchant("merchant_id", merchantID); err != nil {
+		return ProviderAccountCutoverReport{}, err
+	}
+	if err := idguard.Require("subscription_id", q.SubscriptionID); err != nil {
+		return ProviderAccountCutoverReport{}, err
+	}
+	if err := idguard.RequireOptional("target_psp_id", q.TargetPSPID); err != nil {
+		return ProviderAccountCutoverReport{}, err
+	}
+	if err := idguard.RequireOptional("replacement_payment_method_id", q.ReplacementPaymentMethodID); err != nil {
+		return ProviderAccountCutoverReport{}, err
 	}
 	if q.ReplacementPaymentMethodID == nil && q.TargetPSPID == nil {
-		return ProviderAccountCutoverReport{}, errors.New("a replacement payment method or a target PSP is required")
+		return ProviderAccountCutoverReport{}, idguard.Invalid("target_psp_id", "a replacement payment method or a target PSP is required")
 	}
 	report := ProviderAccountCutoverReport{SubscriptionID: q.SubscriptionID}
 	err := a.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
