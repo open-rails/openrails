@@ -155,15 +155,20 @@ Tier-change response: `{ object: "tier_change", status: "succeeded"|"processing"
 Stripe/NMI upgrades succeed immediately with proration; downgrades succeed with
 a `delayed_start` at period end; CCBill upgrades return `requires_action` with a
 redirect `url`, downgrades are `blocked`; Solana tier changes go through the
-on-chain prepare/confirm routes above. A Stripe tier change is a durable
-operation keyed by the request's `Idempotency-Key`: the same key replays the
-stored result (`200`); while the provider outcome is unresolved it answers
-`202` with `status: "processing"` and `operation_id`; a request under another
-key while one is unresolved answers `409 tier_change_in_flight` with
-`metadata.operation_id`; a definitive Stripe refusal answers `400`/`402`
-(`tier_change_refused`, or the card decline code). An NMI upgrade whose
-provider outcome is unresolved answers `409` (retry with the same
-`Idempotency-Key` to read the durable result); a second upgrade of a
+on-chain prepare/confirm routes above. **A tier change requires an
+`Idempotency-Key`**: without one it answers `400
+tier_change_idempotency_key_required` before any admission or provider call,
+because the key is the client's only handle on a lost response. A key that
+already names a different tier change (another customer, subscription or
+target) answers `409 tier_change_idempotency_conflict` and never that
+operation's result. A Stripe tier change is a durable operation keyed by that
+header: the same key replays the stored result (`200`); while the provider
+outcome is unresolved it answers `202` with `status: "processing"` and
+`operation_id`; a request under another key while one is unresolved answers
+`409 tier_change_in_flight` with `metadata.operation_id`; a definitive Stripe
+refusal answers `400`/`402` (`tier_change_refused`, or the card decline code).
+An NMI upgrade whose provider outcome is unresolved answers `409` (retry with
+the same `Idempotency-Key` to read the durable result); a second upgrade of a
 subscription with an unresolved upgrade also answers `409`. Checkout
 confirmation uses the same `409` for an unresolved sale.
 

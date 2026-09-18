@@ -59,6 +59,9 @@ export function ChangeTierDialog({
   const [open, setOpen] = React.useState(false)
   const [selectedPriceId, setSelectedPriceId] = React.useState("")
   const [reviewedPriceId, setReviewedPriceId] = React.useState("")
+  // The key of the reviewed change: every confirm and retry sends it, so a
+  // lost response is read back instead of charging twice.
+  const [changeKey, setChangeKey] = React.useState("")
   const queryClient = useQueryClient()
   const preview = useMutation(
     adminMutations.previewSubscriptionTierChange(subscriptionId)
@@ -104,6 +107,7 @@ export function ChangeTierDialog({
     if (!next) {
       setSelectedPriceId("")
       setReviewedPriceId("")
+      setChangeKey("")
       preview.reset()
       change.reset()
     }
@@ -112,6 +116,7 @@ export function ChangeTierDialog({
   const handleSelect = (value: string | null) => {
     setSelectedPriceId(value ?? "")
     setReviewedPriceId("")
+    setChangeKey("")
     preview.reset()
     change.reset()
   }
@@ -279,6 +284,7 @@ export function ChangeTierDialog({
                 try {
                   await preview.mutateAsync(selectedPriceId)
                   setReviewedPriceId(selectedPriceId)
+                  setChangeKey(crypto.randomUUID())
                 } catch (error) {
                   toastApiError(error, "Preview tier change")
                 }
@@ -289,10 +295,16 @@ export function ChangeTierDialog({
           ) : (
             <Button
               type="button"
-              disabled={change.isPending || Boolean(change.data)}
+              disabled={
+                change.isPending ||
+                (Boolean(change.data) && change.data?.status !== "processing")
+              }
               onClick={async () => {
                 try {
-                  const result = await change.mutateAsync(selectedPriceId)
+                  const result = await change.mutateAsync({
+                    priceId: selectedPriceId,
+                    idempotencyKey: changeKey,
+                  })
                   if (result.status === "succeeded") {
                     toast.success(
                       result.action === "upgrade"
@@ -300,6 +312,11 @@ export function ChangeTierDialog({
                         : "Downgrade scheduled"
                     )
                     handleOpenChange(false)
+                  }
+                  if (result.status === "processing") {
+                    toast.info(
+                      "The provider is still confirming this change. Check again to read the result."
+                    )
                   }
                 } catch (error) {
                   toastApiError(error, "Change subscription tier")
@@ -309,9 +326,11 @@ export function ChangeTierDialog({
               {change.isPending
                 ? "Applying…"
                 : change.data
-                  ? change.data.status === "blocked"
-                    ? "Change blocked"
-                    : "Action required"
+                  ? change.data.status === "processing"
+                    ? "Check result"
+                    : change.data.status === "blocked"
+                      ? "Change blocked"
+                      : "Action required"
                   : `Confirm ${reviewed.action}`}
             </Button>
           )}

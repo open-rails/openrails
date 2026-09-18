@@ -201,7 +201,9 @@ export interface TierChangePreview {
 
 export interface TierChangeResult {
   object: "tier_change"
-  status: "succeeded" | "requires_action" | "blocked"
+  // "processing": the provider outcome is unresolved (HTTP 202); retrying
+  // with the same Idempotency-Key reads the stored result.
+  status: "succeeded" | "processing" | "requires_action" | "blocked"
   mode: "tier_change"
   action: "upgrade" | "downgrade"
   price_id: string
@@ -218,6 +220,7 @@ export interface TierChangeResult {
   amount_due_now: string
   next_charge_amount: string
   next_charge_date?: string
+  operation_id?: string
 }
 
 // --- Catalog ---
