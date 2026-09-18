@@ -10,7 +10,6 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -21,7 +20,6 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -361,10 +359,11 @@ func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr 
 		return 0, "", "price service unavailable"
 	}
 
-	priceID, err := api.ParsePriceID(priceIDStr)
-	if err != nil {
+	typedPriceID, err := openrails.ParsePriceID(priceIDStr)
+	if err != nil || typedPriceID.IsZero() {
 		return 0, "", fmt.Sprintf("invalid price_id: %v", err)
 	}
+	priceID := typedPriceID.UUID()
 
 	price, err := r.State.PriceService.GetByID(ctx, priceID)
 	if err != nil {
@@ -379,10 +378,11 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 		return 0, "", "checkout session service unavailable"
 	}
 
-	sessionID, err := uuid.Parse(strings.TrimPrefix(sessionIDStr, "cs_"))
-	if err != nil {
+	typedSessionID, err := openrails.ParseCheckoutSessionID(sessionIDStr)
+	if err != nil || typedSessionID.IsZero() {
 		return 0, "", fmt.Sprintf("invalid checkout_session_id: %v", err)
 	}
+	sessionID := typedSessionID.UUID()
 
 	user := r.GetUser()
 	if user == nil {
@@ -394,7 +394,7 @@ func resolvePriceFromSession(ctx context.Context, r *httprequest.Request, sessio
 		return 0, "", fmt.Sprintf("session not found: %v", err)
 	}
 
-	return resolvePriceFromID(ctx, r, session.PriceID)
+	return resolvePriceFromID(ctx, r, session.PriceID.String())
 }
 
 // merchantSolanaRPC arms the ctx merchant's Solana RPC client through the

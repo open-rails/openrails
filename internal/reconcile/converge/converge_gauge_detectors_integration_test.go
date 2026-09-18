@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
@@ -440,7 +441,7 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 		rec, ok := recommend.FromEvidence(ev)
 		require.True(t, ok)
 		require.Equal(t, recommend.ActionCancelAndRefund, rec.Action)
-		require.Equal(t, pay2.String(), rec.Params["refund_payment_id"], "later purchase is the default refund target")
+		require.Equal(t, openrails.PaymentID(pay2).String(), rec.Params["refund_payment_id"], "later purchase is the default refund target")
 		_, hasSub := rec.Params["subscription_id"]
 		require.False(t, hasSub, "pure one-off duplicate is refund-only")
 
@@ -449,8 +450,8 @@ func TestConverge_ConDuplicateOwnership(t *testing.T) {
 		require.True(t, found)
 		rec, ok = recommend.FromEvidence(ev)
 		require.True(t, ok)
-		require.Equal(t, fakeSubID.String(), rec.Params["subscription_id"])
-		require.Equal(t, pay6.String(), rec.Params["refund_payment_id"])
+		require.Equal(t, openrails.SubscriptionID(fakeSubID).String(), rec.Params["subscription_id"])
+		require.Equal(t, openrails.PaymentID(pay6).String(), rec.Params["refund_payment_id"])
 
 		// Negatives.
 		_, _, _, _, found = load(prodSingle)

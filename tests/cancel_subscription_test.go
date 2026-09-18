@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	openrails "github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -34,7 +35,7 @@ func TestCancelSubscriptionRequiresAuth(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			subID := uuid.New().String()
+			subID := openrails.SubscriptionID(uuid.New()).String()
 			w := httptest.NewRecorder()
 			req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+subID+"/cancel", bytes.NewReader(jsonBody))
 			req.Header.Set("Content-Type", "application/json")
@@ -55,7 +56,7 @@ func TestCancelSubscriptionNotFound(t *testing.T) {
 	body := map[string]string{"feedback": "test feedback"}
 	jsonBody, _ := json.Marshal(body)
 
-	subID := uuid.New().String()
+	subID := openrails.SubscriptionID(uuid.New()).String()
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+subID+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
@@ -88,7 +89,7 @@ func TestCancelSubscriptionCCBill(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
+	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+openrails.SubscriptionID(sub.ID).String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
@@ -121,7 +122,7 @@ func TestCancelSubscriptionAlreadyCancelled(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
+	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+openrails.SubscriptionID(sub.ID).String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
@@ -151,7 +152,7 @@ func TestCancelSubscriptionAuthBoundaries(t *testing.T) {
 	jsonBody, _ := json.Marshal(body)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+subB.ID.String()+"/cancel", bytes.NewReader(jsonBody))
+	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+openrails.SubscriptionID(subB.ID).String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 
@@ -182,7 +183,7 @@ func TestCancelSubscriptionSolanaNamesDedicatedEndpoints(t *testing.T) {
 
 	jsonBody, _ := json.Marshal(map[string]string{"feedback": "I want to cancel"})
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+sub.ID.String()+"/cancel", bytes.NewReader(jsonBody))
+	req, _ := http.NewRequest("POST", "/v1/me/subscriptions/"+openrails.SubscriptionID(sub.ID).String()+"/cancel", bytes.NewReader(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)
 	router.ServeHTTP(w, req)

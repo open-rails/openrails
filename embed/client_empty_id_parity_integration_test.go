@@ -58,33 +58,31 @@ func TestClientEmptyIdentifierErrorsAreIdenticalAcrossDeployments(t *testing.T) 
 	clients := map[string]*openrails.Client{"embedded": local, "hosted_http": host.Client(), "standalone": standalone.Client()}
 
 	now := time.Now().UTC()
-	valid := uuid.NewString()
+	valid := openrails.CustomerID(uuid.New())
 	script := func(c *openrails.Client) map[string]idErrorObservation {
 		out := map[string]idErrorObservation{}
-		_, err := c.GetSubscription(ctx, "  ")
-		out["subscription_blank"] = observeIDError(t, "subscription blank", err)
+		_, err := c.GetSubscription(ctx, openrails.SubscriptionID{})
+		out["subscription_zero"] = observeIDError(t, "subscription zero", err)
 		out["entitlement_revoke_blank"] = observeIDError(t, "entitlement revoke blank", c.RevokeEntitlement(ctx, valid, ""))
-		_, err = c.GrantEntitlement(ctx, "", openrails.GrantEntitlementRequest{Entitlement: "pro"})
+		_, err = c.GrantEntitlement(ctx, openrails.CustomerID{}, openrails.GrantEntitlementRequest{Entitlement: "pro"})
 		out["entitlement_grant_blank_customer"] = observeIDError(t, "entitlement grant blank customer", err)
-		_, err = c.PreviewPlanMigration(ctx, openrails.PlanMigrationRequest{SourcePrice: " ", TargetPrice: valid})
+		_, err = c.PreviewPlanMigration(ctx, openrails.PlanMigrationRequest{SourcePrice: " ", TargetPrice: valid.String()})
 		out["plan_migration_blank_source"] = observeIDError(t, "plan migration blank source", err)
 		_, err = c.CancelPlanMigration(ctx, uuid.Nil)
 		out["plan_migration_cancel_nil"] = observeIDError(t, "plan migration cancel nil", err)
-		_, err = c.SetPriceKey(ctx, uuid.Nil, "key")
+		_, err = c.SetPriceKey(ctx, openrails.PriceID{}, "key")
 		out["price_key_nil"] = observeIDError(t, "price key nil", err)
 		_, err = c.GetMerchantInvoice(ctx, uuid.Nil)
 		out["invoice_nil"] = observeIDError(t, "invoice nil", err)
-		_, err = c.Balance(ctx, "\t")
-		out["balance_blank"] = observeIDError(t, "balance blank", err)
+		_, err = c.Balance(ctx, openrails.CustomerID{})
+		out["balance_zero"] = observeIDError(t, "balance zero", err)
 		_, err = c.GetOperationAuthorization(ctx, "..")
 		out["operation_dot"] = observeIDError(t, "operation dot", err)
-		_, err = c.ListEntitlements(ctx, "", now)
+		_, err = c.ListEntitlements(ctx, openrails.CustomerID{}, now)
 		out["entitlements_blank_subject"] = observeIDError(t, "entitlements blank subject", err)
 
-		// Malformed identifiers reach the server; its refusal is the class
-		// the Client mirrors.
-		_, err = c.GetSubscription(ctx, "not-a-uuid")
-		out["subscription_malformed"] = observeIDError(t, "subscription malformed", err)
+		// A malformed free-form identifier reaches the server; its refusal is
+		// the class the Client mirrors.
 		out["entitlement_revoke_malformed"] = observeIDError(t, "entitlement revoke malformed", c.RevokeEntitlement(ctx, valid, "not-a-uuid"))
 		return out
 	}

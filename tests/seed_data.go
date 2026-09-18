@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -899,7 +900,7 @@ func (suite *TestContainerSuite) CreateTestEntitlement(userID string, entitlemen
 }
 
 // CreateTestNotification creates a test notification for a user
-func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType models.NotificationEventType, data map[string]any) *models.NotificationQueue {
+func (suite *TestContainerSuite) CreateTestNotification(userID string, eventType models.NotificationEventType, data openrails.NotificationData) *models.NotificationQueue {
 	suite.t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 	now := time.Now()

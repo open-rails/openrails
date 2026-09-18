@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -162,7 +163,7 @@ func TestResolveProviders_AllLinked(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	req := CreatePriceRequest{
-		ProductID:  productID,
+		ProductID:  openrails.ProductID(productID),
 		UnitAmount: 9_990_000,
 		Currency:   "USD",
 		PSPs:       []string{"stripe", "ccbill", "nmi"},
@@ -194,7 +195,7 @@ func TestResolveProviders_MixedLinkedAndPending(t *testing.T) {
 	productID := uuid.New()
 	priceID := uuid.New()
 	req := CreatePriceRequest{
-		ProductID:  productID,
+		ProductID:  openrails.ProductID(productID),
 		UnitAmount: 9_990_000,
 		Currency:   "USD",
 		PSPs:       []string{"ccbill", "nmi"},
@@ -225,7 +226,7 @@ func TestResolveProviders_SolanaDefaultTokenPendingWhenUnconfigured(t *testing.T
 	s := newUnconfiguredService()
 	hours := 30 * 24
 	req := CreatePriceRequest{
-		ProductID:           uuid.New(),
+		ProductID:           openrails.ProductID(uuid.New()),
 		UnitAmount:          23_000_000,
 		Currency:            "usd",
 		AccessDurationHours: &hours,
@@ -235,7 +236,7 @@ func TestResolveProviders_SolanaDefaultTokenPendingWhenUnconfigured(t *testing.T
 
 	rails, states, pending, err := s.resolveProviders(
 		context.Background(),
-		&models.Product{ID: req.ProductID, Key: "premium"},
+		&models.Product{ID: req.ProductID.UUID(), Key: "premium"},
 		req,
 		uuid.New(),
 	)
@@ -257,7 +258,7 @@ func TestResolveProviders_AllPending(t *testing.T) {
 	s := newUnconfiguredService()
 	productID := uuid.New()
 	req := CreatePriceRequest{
-		ProductID:  productID,
+		ProductID:  openrails.ProductID(productID),
 		UnitAmount: 9_990_000,
 		Currency:   "USD",
 		PSPs:       []string{"ccbill", "nmi"},
@@ -280,7 +281,7 @@ func TestResolveProviders_UnknownProviderErrors(t *testing.T) {
 	s := newUnconfiguredService()
 	productID := uuid.New()
 	req := CreatePriceRequest{
-		ProductID:  productID,
+		ProductID:  openrails.ProductID(productID),
 		UnitAmount: 9_990_000,
 		Currency:   "USD",
 		PSPs:       []string{"paypal"}, // not in dispatch table
@@ -297,7 +298,7 @@ func TestResolveProviders_LinkOnlyInProviderLinks(t *testing.T) {
 	s := newUnconfiguredService()
 	productID := uuid.New()
 	req := CreatePriceRequest{
-		ProductID:  productID,
+		ProductID:  openrails.ProductID(productID),
 		UnitAmount: 9_990_000,
 		Currency:   "USD",
 		PSPLinks: map[string]map[string]string{
@@ -387,7 +388,7 @@ func TestResolveProviders_TrialRefusedOnRailsWithoutFirstPhase(t *testing.T) {
 	newReq := func(psp string) CreatePriceRequest {
 		hours := 30 * 24
 		return CreatePriceRequest{
-			ProductID:           uuid.New(),
+			ProductID:           openrails.ProductID(uuid.New()),
 			UnitAmount:          23_000_000,
 			Currency:            "usd",
 			AccessDurationHours: &hours,
@@ -401,7 +402,7 @@ func TestResolveProviders_TrialRefusedOnRailsWithoutFirstPhase(t *testing.T) {
 	for _, psp := range []string{"nmi", "solana"} {
 		s := newUnconfiguredService()
 		req := newReq(psp)
-		_, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID, Key: "premium"}, req, uuid.New())
+		_, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID.UUID(), Key: "premium"}, req, uuid.New())
 		if err == nil {
 			t.Fatalf("%s: a trial on this rail must be refused, not silently dropped", psp)
 		}
@@ -416,7 +417,7 @@ func TestResolveProviders_TrialRefusedOnRailsWithoutFirstPhase(t *testing.T) {
 	for _, psp := range []string{"stripe", "ccbill"} {
 		s := newUnconfiguredService()
 		req := newReq(psp)
-		if _, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID, Key: "premium"}, req, uuid.New()); err != nil {
+		if _, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID.UUID(), Key: "premium"}, req, uuid.New()); err != nil {
 			t.Errorf("%s: trials are supported here, got %v", psp, err)
 		}
 	}
@@ -426,7 +427,7 @@ func TestResolveProviders_TrialRefusedOnRailsWithoutFirstPhase(t *testing.T) {
 		s := newUnconfiguredService()
 		req := newReq(psp)
 		req.TrialUnitAmount, req.TrialDurationHours = nil, nil
-		if _, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID, Key: "premium"}, req, uuid.New()); err != nil {
+		if _, _, _, err := s.resolveProviders(context.Background(), &models.Product{ID: req.ProductID.UUID(), Key: "premium"}, req, uuid.New()); err != nil {
 			t.Errorf("%s: a price with no trial must still resolve, got %v", psp, err)
 		}
 	}

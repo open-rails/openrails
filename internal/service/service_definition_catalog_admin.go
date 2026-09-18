@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -53,7 +54,7 @@ type CatalogPage[T any] struct {
 }
 
 // GetProduct returns a product by ID.
-func (s *Service) GetProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
+func (s *Service) GetProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -64,9 +65,10 @@ func (s *Service) GetProduct(ctx context.Context, productID uuid.UUID) (*Catalog
 	if err != nil {
 		return nil, err
 	}
-	if productID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("product_id required")
 	}
+	productID := id.UUID()
 	p, err := products.GetByID(ctx, productID)
 	if err != nil {
 		return nil, err
@@ -139,7 +141,7 @@ func (s *Service) ListProducts(ctx context.Context, opts ListProductsOptions) (C
 }
 
 // ActivateProduct sets status=active on a product.
-func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
+func (s *Service) ActivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -150,9 +152,10 @@ func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*Ca
 	if err != nil {
 		return nil, err
 	}
-	if productID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("product_id required")
 	}
+	productID := id.UUID()
 	if err := products.Activate(ctx, productID); err != nil {
 		return nil, err
 	}
@@ -168,7 +171,7 @@ func (s *Service) ActivateProduct(ctx context.Context, productID uuid.UUID) (*Ca
 
 // DeactivateProduct archives a product. Existing subscriptions on its prices
 // are grandfathered and keep billing.
-func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*CatalogProduct, error) {
+func (s *Service) DeactivateProduct(ctx context.Context, id openrails.ProductID) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -179,9 +182,10 @@ func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*
 	if err != nil {
 		return nil, err
 	}
-	if productID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("product_id required")
 	}
+	productID := id.UUID()
 	if err := products.Deactivate(ctx, productID); err != nil {
 		return nil, err
 	}
@@ -195,7 +199,7 @@ func (s *Service) DeactivateProduct(ctx context.Context, productID uuid.UUID) (*
 }
 
 // GetPrice returns a price by ID.
-func (s *Service) GetPrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
+func (s *Service) GetPrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -206,9 +210,10 @@ func (s *Service) GetPrice(ctx context.Context, priceID uuid.UUID) (*CatalogPric
 	if err != nil {
 		return nil, err
 	}
-	if priceID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("price_id required")
 	}
+	priceID := id.UUID()
 	p, err := prices.GetByID(ctx, priceID)
 	if err != nil {
 		return nil, err
@@ -217,7 +222,7 @@ func (s *Service) GetPrice(ctx context.Context, priceID uuid.UUID) (*CatalogPric
 }
 
 // ListPricesByProduct returns all prices belonging to a product. Set activeOnly=true to filter inactive.
-func (s *Service) ListPricesByProduct(ctx context.Context, productID uuid.UUID, activeOnly bool) ([]CatalogPrice, error) {
+func (s *Service) ListPricesByProduct(ctx context.Context, id openrails.ProductID, activeOnly bool) ([]CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -228,9 +233,10 @@ func (s *Service) ListPricesByProduct(ctx context.Context, productID uuid.UUID, 
 	if err != nil {
 		return nil, err
 	}
-	if productID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("product_id required")
 	}
+	productID := id.UUID()
 	var raws []*models.Price
 	if activeOnly {
 		raws, err = prices.GetActiveByProductID(ctx, productID)
@@ -300,7 +306,7 @@ func (s *Service) propagatePriceActiveToStripe(ctx context.Context, price *model
 // (merchant_id, key) WHERE NOT archived allows only one live holder), then
 // this row is un-archived, then one pointer-movement log entry records the
 // move. Activating an already-active row is a no-op (no movement logged).
-func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
+func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -311,9 +317,10 @@ func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*Catalo
 	if err != nil {
 		return nil, err
 	}
-	if priceID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("price_id required")
 	}
+	priceID := id.UUID()
 	current, err := prices.GetByID(ctx, priceID)
 	if err != nil {
 		return nil, err
@@ -356,7 +363,7 @@ func (s *Service) ActivatePrice(ctx context.Context, priceID uuid.UUID) (*Catalo
 
 // DeactivatePrice archives a price. Existing subscriptions on this price are
 // grandfathered and keep billing; new purchases are rejected.
-func (s *Service) DeactivatePrice(ctx context.Context, priceID uuid.UUID) (*CatalogPrice, error) {
+func (s *Service) DeactivatePrice(ctx context.Context, id openrails.PriceID) (*CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -367,9 +374,10 @@ func (s *Service) DeactivatePrice(ctx context.Context, priceID uuid.UUID) (*Cata
 	if err != nil {
 		return nil, err
 	}
-	if priceID == uuid.Nil {
+	if id.IsZero() {
 		return nil, fmt.Errorf("price_id required")
 	}
+	priceID := id.UUID()
 	if err := prices.Deactivate(ctx, priceID); err != nil {
 		return nil, err
 	}

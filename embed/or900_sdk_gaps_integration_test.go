@@ -91,7 +91,7 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 			// --- item 3: the reused-key refusal reaches the host --------------
 			usageSourceID := uuid.NewString()
 			usage := openrails.UsageReport{
-				CustomerID: payer.String(),
+				CustomerID: openrails.CustomerID(payer),
 				Invoker:    invoker,
 				Currency:   currency,
 				EventType:  "or900_event",
@@ -123,7 +123,7 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 			// changed terms, not about retrying.
 			require.NoError(t, tr.client.RecordUsage(ctx, usage), "an unchanged retry is still idempotent")
 
-			_, err = tr.client.Admit(ctx, openrails.AdmitRequest{CustomerID: "invalid", Currency: currency})
+			_, err = tr.client.Admit(ctx, openrails.AdmitRequest{Currency: currency})
 			require.ErrorAs(t, err, &se)
 			require.Equal(t, http.StatusBadRequest, se.Status)
 			require.Equal(t, "invalid_param", se.Code)

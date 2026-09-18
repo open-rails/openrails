@@ -20,6 +20,28 @@ to Number before parsing loses values above 2^53.
 
 Invoice responses include unit_decimals. For USD, "1234567" with scale 6 means
 1.234567 USD. JPY uses its declared scale, not an assumed cents/micros scale.
+Currency codes are the registry's uppercase ISO-4217 spelling on every wire
+surface, whatever case a request sent; requests are read case-insensitively.
+Identifiers are typed (`ids.go`): products, prices, subscriptions, payments,
+payment methods and checkout sessions travel as `prod_`, `price_`, `sub_`,
+`pay_`, `pm_` and `cs_` text on every DTO, path and query parameter that names
+them, and only that spelling is accepted — a bare UUID or another kind's prefix
+is `invalid_param`. Customer, merchant and PSP ids are plain UUIDs. Go callers
+hold `openrails.PriceID` etc.; the zero id marshals as `""` and `IsZero` tells.
+The catalog `by-key` routes, checkout `price_id` on the public (browser)
+checkout route and `plan-migrations` price references still accept a price
+key; the shared Client's typed fields do not. The same spelling holds
+wherever a typed kind appears inside another document: the customer's own
+`/v1/me/subscriptions`, `/v1/me/status` and `/v1/me/notifications` (the
+shared `Subscription`, `BillingStatus` and `Notification` shapes, so the ids
+they list are the ids their action routes take), metrics `product_id` /
+`price_id` dimensions and filters, findings evidence and recommendation
+params, the hosted checkout document's `payment_id` / `subscription_id` /
+`saved_methods[].id` / `payment_method_id`, and entitlement or grant
+`source_id` (the source resource's own id beside `source_type`: `sub_` for
+subscription and grace sources, `pay_` for one-off and purchase sources; an
+admin source is the host's declared id verbatim). Customer filters on the
+merchant list routes are `customer_id`.
 Counts and timestamps are not money: counts remain numbers. Every timestamp on the
 wire — response fields and request parameters alike (`expires_at`, `occurred_at`,
 `at`, rollup `from`/`to`) — is an RFC3339 instant; the Go client sends
@@ -28,11 +50,7 @@ integer seconds (`window_seconds`, `retry_after_seconds`) and day buckets stay
 `YYYY-MM-DD`. Missing optional timestamps are omitted; explicit nullable receipt
 fields use null. Not yet moved: the epoch-seconds `created` on `Payment`,
 `PublicPrice` and the admin catalog objects (tracked with #983).
-Currency codes are the registry's uppercase ISO-4217 spelling on every wire
-surface, whatever case a request sent; requests are read case-insensitively.
-Identifiers of resource kinds `pkg/api` prefixes (`prod_`, `price_`, `sub_`,
-`pay_`, `pm_`, `cs_`) travel prefixed on every DTO that names them, and every
-operation accepts the prefixed form; customer, merchant and PSP ids are plain UUIDs.
+
 
 The registry has one owner. Go consumers read it with `openrails.Currencies()`
 / `openrails.LookupCurrency(code)` (pure, no I/O); browsers fetch the same

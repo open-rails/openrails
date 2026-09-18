@@ -101,7 +101,7 @@ export function SubscriptionsPage() {
   const [params, setParams] = useSearchParams()
   const status = params.get("status") ?? ""
   const rail = params.get("rail") ?? ""
-  const userId = params.get("user_id") ?? ""
+  const userId = params.get("customer_id") ?? ""
   const customerLabel = params.get("customer") ?? ""
   const offset = Number(params.get("offset") ?? 0)
   const [input, setInput] = React.useState("")
@@ -112,7 +112,7 @@ export function SubscriptionsPage() {
   const filters = {
     ...(status ? { status } : {}),
     ...(rail ? { rail } : {}),
-    ...(userId ? { user_id: userId } : {}),
+    ...(userId ? { customer_id: userId } : {}),
   }
   const { data, isPending: loading } = useQuery(
     adminQueries.subscriptions(filters, PAGE, offset)
@@ -138,7 +138,7 @@ export function SubscriptionsPage() {
         return
       }
       const p = new URLSearchParams(params)
-      p.set("user_id", c.id)
+      p.set("customer_id", c.id)
       p.set("customer", c.email || c.subject || shortId(c.id, 13))
       p.delete("offset")
       setParams(p)
@@ -150,7 +150,7 @@ export function SubscriptionsPage() {
 
   const clearCustomer = () => {
     const p = new URLSearchParams(params)
-    p.delete("user_id")
+    p.delete("customer_id")
     p.delete("customer")
     p.delete("offset")
     setParams(p)

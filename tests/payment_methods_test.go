@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	openrails "github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
@@ -68,7 +69,7 @@ func TestPaymentMethodsRequiresAuth(t *testing.T) {
 
 	t.Run("DELETE returns 401 without auth token", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+uuid.New().String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(uuid.New()).String(), nil)
 
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -82,7 +83,7 @@ func TestPaymentMethodsRequiresAuth(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", "/v1/me/payment-methods/"+uuid.New().String(), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", "/v1/me/payment-methods/"+openrails.PaymentMethodID(uuid.New()).String(), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -164,8 +165,8 @@ func TestListPaymentMethods(t *testing.T) {
 			method := item.(map[string]interface{})
 			ids[i] = method["id"].(string)
 		}
-		assert.Contains(t, ids, api.FormatPaymentMethodID(pm1.ID))
-		assert.Contains(t, ids, api.FormatPaymentMethodID(pm2.ID))
+		assert.Contains(t, ids, openrails.PaymentMethodID(pm1.ID).String())
+		assert.Contains(t, ids, openrails.PaymentMethodID(pm2.ID).String())
 	})
 
 	t.Run("supports pagination parameters", func(t *testing.T) {
@@ -283,7 +284,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		).Scan(&methodPSPID))
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(pm.ID).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -317,7 +318,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		defer func() { suite.App.Runtime.RailPaymentMethodService.DeleteIntents = originalDeleteIntents }()
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(pm.ID).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -334,7 +335,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		defer func() { suite.App.Runtime.RailPaymentMethodService.DeleteIntents = originalDeleteIntents }()
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(pm.ID).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -350,7 +351,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		defer func() { suite.App.Runtime.RailPaymentMethodService.DeleteIntents = originalDeleteIntents }()
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(pm.ID).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -363,7 +364,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: userID, Rail: models.RailStripe})
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(pm.ID).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 		suite.Server.Handler().ServeHTTP(w, req)
 
@@ -375,7 +376,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 
 	t.Run("returns 404 for non-existent payment method", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+uuid.New().String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(uuid.New()).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -392,7 +393,7 @@ func TestDeletePaymentMethod(t *testing.T) {
 		})
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+pm.ID.String(), nil)
+		req, _ := http.NewRequest("DELETE", "/v1/me/payment-methods/"+openrails.PaymentMethodID(pm.ID).String(), nil)
 		req.Header.Set("Authorization", "Bearer "+token)
 
 		suite.Server.Handler().ServeHTTP(w, req)
@@ -448,7 +449,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", pm.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", openrails.PaymentMethodID(pm.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -460,7 +461,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		err := json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 
-		assert.Equal(t, api.FormatPaymentMethodID(pm.ID), response["id"], "Should return same payment method ID")
+		assert.Equal(t, openrails.PaymentMethodID(pm.ID).String(), response["id"], "Should return same payment method ID")
 		card, ok := response["card"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "4242", card["last4"])
@@ -482,7 +483,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", pm.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", openrails.PaymentMethodID(pm.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -500,7 +501,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		jsonBody, _ := json.Marshal(map[string]string{"payment_token": "new-token"})
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", pm.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", openrails.PaymentMethodID(pm.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -518,7 +519,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", uuid.New().String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", openrails.PaymentMethodID(uuid.New()).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -541,7 +542,7 @@ func TestUpdatePaymentMethod(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", pm.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", fmt.Sprintf("/v1/me/payment-methods/%s", openrails.PaymentMethodID(pm.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 

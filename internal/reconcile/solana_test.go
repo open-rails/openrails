@@ -18,6 +18,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
+
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
@@ -942,7 +944,7 @@ func TestDiffSolanaDiscoveryRouting(t *testing.T) {
 	require.Equal(t, "USD", b.Currency)
 	require.Equal(t, customerID, b.CustomerID)
 	require.Equal(t, priceID, b.PriceID)
-	require.Equal(t, sessionID.String(), fClean.LocalEvidence["checkout_session_id"])
+	require.Equal(t, openrails.CheckoutSessionID(sessionID).String(), fClean.LocalEvidence["checkout_session_id"])
 	require.Equal(t, "purchase_memo", fClean.LocalEvidence["correlated_via"])
 
 	fPark := byKey[sigPark]

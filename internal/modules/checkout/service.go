@@ -42,7 +42,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -1981,7 +1980,7 @@ func (s *CheckoutService) TierChangePreview(ctx context.Context, req *TierChange
 	now := s.now()
 	resp := &TierChangePreviewResponse{
 		Object:           "tier_change_preview",
-		PriceID:          api.FormatPriceID(newPrice.ID),
+		PriceID:          openrails.PriceID(newPrice.ID),
 		Rail:             rail,
 		Currency:         newPrice.Currency,
 		NextChargeAmount: newPrice.Amount,
@@ -2135,7 +2134,7 @@ func (s *CheckoutService) processTierChangeStripe(
 				Status:  "blocked",
 				Mode:    "tier_change",
 				Action:  action,
-				PriceID: api.FormatPriceID(newPrice.ID),
+				PriceID: openrails.PriceID(newPrice.ID),
 				Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
 				Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 			}, nil
@@ -2176,14 +2175,14 @@ func (s *CheckoutService) processTierChangeStripe(
 			return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to schedule downgrade"}
 		}
 
-		subID := api.FormatSubscriptionID(existingSub.ID)
+		subID := openrails.SubscriptionID(existingSub.ID)
 		effectiveDate := existingSub.CurrentPeriodEndsAt.Format("January 2, 2006")
 		return &TierChangeResponse{
 			Object:           "tier_change",
 			Status:           "succeeded",
 			Mode:             "tier_change",
 			Action:           action,
-			PriceID:          api.FormatPriceID(newPrice.ID),
+			PriceID:          openrails.PriceID(newPrice.ID),
 			Payment:          CheckoutSessionPaymentResponse{Rail: "stripe"},
 			SubscriptionID:   &subID,
 			Message:          fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
@@ -2264,14 +2263,14 @@ func (s *CheckoutService) processTierChangeStripe(
 		return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to update subscription"}
 	}
 
-	subID := api.FormatSubscriptionID(existingSub.ID)
+	subID := openrails.SubscriptionID(existingSub.ID)
 
 	return &TierChangeResponse{
 		Object:           "tier_change",
 		Status:           "succeeded",
 		Mode:             "tier_change",
 		Action:           action,
-		PriceID:          api.FormatPriceID(newPrice.ID),
+		PriceID:          openrails.PriceID(newPrice.ID),
 		Payment:          CheckoutSessionPaymentResponse{Rail: "stripe"},
 		SubscriptionID:   &subID,
 		Message:          "Plan updated",
@@ -2325,7 +2324,7 @@ func (s *CheckoutService) processTierChangeSolana(
 	}
 
 	subID := existingSub.ID
-	subIDStr := api.FormatSubscriptionID(subID)
+	subIDStr := openrails.SubscriptionID(subID)
 
 	// Solana tier changes are a single ATOMIC on-chain transaction the subscriber
 	// signs (cancel-old + subscribe-new [+ prorated transfer for an upgrade]), so
@@ -2352,7 +2351,7 @@ func (s *CheckoutService) processTierChangeSolana(
 		Status:         "requires_action",
 		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        req.PriceID,
+		PriceID:        openrails.PriceID(newPrice.ID),
 		Payment:        CheckoutSessionPaymentResponse{Rail: "solana"},
 		SubscriptionID: &subIDStr,
 		Message:        msg,
@@ -2382,7 +2381,7 @@ func (s *CheckoutService) processTierChangeNMI(
 		checkoutReq.Email = strings.TrimSpace(*user.Email)
 	}
 	if existingSub.PaymentMethodID != nil {
-		checkoutReq.PaymentMethodID = api.FormatPaymentMethodID(*existingSub.PaymentMethodID)
+		checkoutReq.PaymentMethodID = openrails.PaymentMethodID(*existingSub.PaymentMethodID).String()
 	}
 
 	// Route to existing methods which handle the heavy lifting. The existing
@@ -2433,7 +2432,7 @@ func (s *CheckoutService) processTierChangeCCBill(
 			Status:  "blocked",
 			Mode:    "tier_change",
 			Action:  action,
-			PriceID: api.FormatPriceID(newPrice.ID),
+			PriceID: openrails.PriceID(newPrice.ID),
 			Payment: CheckoutSessionPaymentResponse{Rail: "ccbill"},
 			Message: "CCBill subscription downgrades are not supported. Please cancel your current subscription and wait for it to expire, then subscribe to the lower tier.",
 		}, nil
@@ -2446,13 +2445,13 @@ func (s *CheckoutService) processTierChangeCCBill(
 	}
 
 	// Map to TierChangeResponse
-	subID := api.FormatSubscriptionID(existingSub.ID)
+	subID := openrails.SubscriptionID(existingSub.ID)
 	resp := &TierChangeResponse{
 		Object:         "tier_change",
 		Status:         "requires_action",
 		Mode:           "tier_change",
 		Action:         action,
-		PriceID:        api.FormatPriceID(newPrice.ID),
+		PriceID:        openrails.PriceID(newPrice.ID),
 		URL:            checkoutResp.RedirectURL,
 		SubscriptionID: &subID,
 		Payment: CheckoutSessionPaymentResponse{
@@ -2481,7 +2480,7 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 		Object:  "tier_change",
 		Mode:    "tier_change",
 		Action:  action,
-		PriceID: api.FormatPriceID(newPrice.ID),
+		PriceID: openrails.PriceID(newPrice.ID),
 		Payment: CheckoutSessionPaymentResponse{
 			TransactionID: resp.TransactionID,
 		},
@@ -2503,7 +2502,7 @@ func (s *CheckoutService) mapCheckoutToTierChangeResponse(resp *CheckoutResponse
 
 	// Map subscription ID
 	if resp.SubscriptionID != nil {
-		subID := api.FormatSubscriptionID(*resp.SubscriptionID)
+		subID := openrails.SubscriptionID(*resp.SubscriptionID)
 		tierResp.SubscriptionID = &subID
 	}
 

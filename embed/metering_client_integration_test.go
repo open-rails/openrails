@@ -45,7 +45,7 @@ func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 			again, err := client.GetUsageMeter(ctx, key)
 			require.NoError(t, err)
 			require.True(t, first.UpdatedAt.Equal(again.UpdatedAt))
-			card, err := client.SetDefaultUsageRateCard(ctx, key, openrails.DefaultUsageRateCardRequest{ProductID: product, Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})
+			card, err := client.SetDefaultUsageRateCard(ctx, key, openrails.DefaultUsageRateCardRequest{ProductID: openrails.ProductID(product), Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})
 			require.NoError(t, err)
 			require.NotNil(t, card.DefaultRateCard)
 			require.EqualValues(t, 100, card.DefaultRateCard.Price.PerUnit.UnitAmount)
@@ -53,7 +53,7 @@ func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 			mode := money.BillingModeArrears
 			_, err = ms.UpsertAccountSettings(dbtest.WithTestMerchant(ctx), identity.CustomerID(payer), "USD", money.AccountSettingsInput{BillingMode: &mode})
 			require.NoError(t, err)
-			event := openrails.UsageReport{CustomerID: payer.String(), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
+			event := openrails.UsageReport{CustomerID: openrails.CustomerID(payer), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
 			require.NoError(t, client.RecordUsage(ctx, event))
 			require.NoError(t, client.RecordUsage(ctx, event))
 			// Drive the same close used by the invoice worker, then read with the client.

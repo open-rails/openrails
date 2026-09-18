@@ -9,12 +9,13 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // TestUpdateSubscriptionPaymentMethodRequiresAuth tests that the endpoint requires authentication
@@ -22,9 +23,9 @@ func TestUpdateSubscriptionPaymentMethodRequiresAuth(t *testing.T) {
 	suite := getSharedTestSuite(t)
 
 	t.Run("returns 401 without auth token", func(t *testing.T) {
-		subscriptionID := uuid.New().String()
+		subscriptionID := openrails.SubscriptionID(uuid.New()).String()
 		body := map[string]string{
-			"payment_method_id": uuid.New().String(),
+			"payment_method_id": openrails.PaymentMethodID(uuid.New()).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
@@ -83,12 +84,12 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 		mock.Reset()
 
 		body := map[string]string{
-			"payment_method_id": newPM.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(newPM.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(sub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -118,12 +119,12 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 		mock.Reset()
 
 		body := map[string]string{
-			"payment_method_id": api.FormatPaymentMethodID(newPM.ID),
+			"payment_method_id": openrails.PaymentMethodID(newPM.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(api.FormatSubscriptionID(sub.ID)), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(sub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -158,12 +159,12 @@ func TestUpdateSubscriptionPaymentMethodNotOwned(t *testing.T) {
 
 	t.Run("returns 403 for subscription owned by another user", func(t *testing.T) {
 		body := map[string]string{
-			"payment_method_id": pm.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(pm.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(otherSub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(otherSub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -198,12 +199,12 @@ func TestUpdateSubscriptionPaymentMethodNotOwnedPM(t *testing.T) {
 
 	t.Run("returns 403 for payment method owned by another user", func(t *testing.T) {
 		body := map[string]string{
-			"payment_method_id": otherPM.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(otherPM.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(sub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -242,12 +243,12 @@ func TestUpdateSubscriptionPaymentMethodCancelledSub(t *testing.T) {
 
 	t.Run("returns error for cancelled subscription", func(t *testing.T) {
 		body := map[string]string{
-			"payment_method_id": pm.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(pm.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(cancelledSub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(cancelledSub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -286,12 +287,12 @@ func TestUpdateSubscriptionPaymentMethodCCBillNotSupported(t *testing.T) {
 
 	t.Run("returns error for CCBill subscription", func(t *testing.T) {
 		body := map[string]string{
-			"payment_method_id": pm.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(pm.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(ccbillSub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(ccbillSub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -325,12 +326,12 @@ func TestUpdateSubscriptionPaymentMethodNotFound(t *testing.T) {
 
 	t.Run("returns 404 for non-existent subscription", func(t *testing.T) {
 		body := map[string]string{
-			"payment_method_id": pm.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(pm.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(uuid.New().String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(uuid.New()).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -341,12 +342,12 @@ func TestUpdateSubscriptionPaymentMethodNotFound(t *testing.T) {
 
 	t.Run("returns 404 for non-existent payment method", func(t *testing.T) {
 		body := map[string]string{
-			"payment_method_id": uuid.New().String(),
+			"payment_method_id": openrails.PaymentMethodID(uuid.New()).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(sub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -367,7 +368,7 @@ func TestUpdateSubscriptionPaymentMethodInvalidRequest(t *testing.T) {
 
 	t.Run("returns error for invalid subscription ID", func(t *testing.T) {
 		body := map[string]string{
-			"payment_method_id": uuid.New().String(),
+			"payment_method_id": openrails.PaymentMethodID(uuid.New()).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
@@ -386,7 +387,7 @@ func TestUpdateSubscriptionPaymentMethodInvalidRequest(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(uuid.New().String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(uuid.New()).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -402,7 +403,7 @@ func TestUpdateSubscriptionPaymentMethodInvalidRequest(t *testing.T) {
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(uuid.New().String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(uuid.New()).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -444,12 +445,12 @@ func TestUpdateSubscriptionPaymentMethodPastDue(t *testing.T) {
 		mock.Reset()
 
 		body := map[string]string{
-			"payment_method_id": newPM.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(newPM.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(pastDueSub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(pastDueSub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 
@@ -493,12 +494,12 @@ func TestUpdateSubscriptionPaymentMethodNMIFailure(t *testing.T) {
 		mock.FailReason = "Subscription not found"
 
 		body := map[string]string{
-			"payment_method_id": pm.ID.String(),
+			"payment_method_id": openrails.PaymentMethodID(pm.ID).String(),
 		}
 		jsonBody, _ := json.Marshal(body)
 
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(sub.ID.String()), bytes.NewReader(jsonBody))
+		req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(sub.ID).String()), bytes.NewReader(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+token)
 

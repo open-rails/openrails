@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	authkit "github.com/open-rails/authkit"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -216,11 +218,11 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	require.NoError(t, err)
 	charger := &invoiceAdminCharger{}
 	rt.MoneyCharger = charger
-	status, body = invoiceRequest(t, http.MethodPost, yenPath+"/retry-collection", reader, "jpy-retry", map[string]any{"payment_method_id": method})
+	status, body = invoiceRequest(t, http.MethodPost, yenPath+"/retry-collection", reader, "jpy-retry", map[string]any{"payment_method_id": openrails.PaymentMethodID(method)})
 	require.Equal(t, 403, status, string(body))
 	var attemptID uuid.UUID
 	for i := range 2 {
-		status, body = invoiceRequest(t, http.MethodPost, yenPath+"/retry-collection", collector, "jpy-retry", map[string]any{"payment_method_id": method})
+		status, body = invoiceRequest(t, http.MethodPost, yenPath+"/retry-collection", collector, "jpy-retry", map[string]any{"payment_method_id": openrails.PaymentMethodID(method)})
 		require.Equal(t, 200, status, string(body))
 		var result billingservice.InvoiceCollectionRetryResult
 		require.NoError(t, json.Unmarshal(body, &result))
@@ -253,7 +255,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	// A lost response answers 202 with the live attempt; the same key replays
 	// that durable state without another charge.
 	for range 2 {
-		status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "ambiguous-key", map[string]any{"payment_method_id": blockedMethod})
+		status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "ambiguous-key", map[string]any{"payment_method_id": openrails.PaymentMethodID(blockedMethod)})
 		require.Equal(t, 202, status, string(body))
 		var pending billingservice.InvoiceCollectionRetryResult
 		require.NoError(t, json.Unmarshal(body, &pending))
@@ -272,7 +274,7 @@ func TestMerchantInvoiceAdministrationHTTP(t *testing.T) {
 	}
 	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/payments", owner, "", map[string]any{"amount": "1000000", "reference": "unknown-bank"})
 	require.Equal(t, 409, status, string(body))
-	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "new-key", map[string]any{"payment_method_id": blockedMethod})
+	status, body = invoiceRequest(t, http.MethodPost, blockedPath+"/retry-collection", owner, "new-key", map[string]any{"payment_method_id": openrails.PaymentMethodID(blockedMethod)})
 	require.Equal(t, 409, status, string(body))
 	require.Len(t, ambiguous.calls, 1)
 	uncollectibleCustomer := makeCustomer(dbtest.TestMerchantID, "USD")

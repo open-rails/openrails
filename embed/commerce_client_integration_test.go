@@ -47,13 +47,13 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 	require.NoError(t, err)
 	for name, client := range map[string]*openrails.Client{"embedded": inprocess, "remote": remote.Client()} {
 		t.Run(name, func(t *testing.T) {
-			user := uuid.NewString()
+			user := openrails.CustomerID(uuid.New())
 			request := openrails.CreateCheckoutSessionRequest{
 				Customer: openrails.CheckoutCustomerIdentity{ID: user, VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]},
-				PriceID:  priceKey, IdempotencyKey: uuid.NewString(),
+				PriceID:  openrails.PriceID(priceID), IdempotencyKey: uuid.NewString(),
 				Payment: openrails.CheckoutPayment{Rail: "ccbill", NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
 			}
-			options, err := client.ListCheckoutRailOptions(ctx, priceKey)
+			options, err := client.ListCheckoutRailOptions(ctx, openrails.PriceID(priceID))
 			require.NoError(t, err)
 			require.NotEmpty(t, options)
 			first, err := client.CreateCheckoutSession(ctx, request)
@@ -71,9 +71,9 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, first.ID, read.ID)
 			require.Equal(t, first.Amount, read.Amount)
-			_, err = client.GetCheckoutSession(ctx, uuid.NewString(), first.ID)
+			_, err = client.GetCheckoutSession(ctx, openrails.CustomerID(uuid.New()), first.ID)
 			require.ErrorIs(t, err, openrails.ErrDenied)
-			_, err = client.ConfirmCheckoutSession(ctx, first.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: uuid.NewString(), Payment: openrails.ConfirmPayment{Rail: "solana"}})
+			_, err = client.ConfirmCheckoutSession(ctx, first.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: openrails.CustomerID(uuid.New()), Payment: openrails.ConfirmPayment{Rail: "solana"}})
 			require.ErrorIs(t, err, openrails.ErrDenied)
 			require.NoError(t, client.Verify(ctx))
 			tier, err := client.ResolveEffectiveTier(ctx, user, "membership")
@@ -90,6 +90,6 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 	readOnly := remote.MintAPIKey(dbtest.TestMerchantSlug, "commerce-reader", []string{permissions.MerchantCustomerSettingsRead})
 	client, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(readOnly))
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: uuid.NewString()}, IdempotencyKey: uuid.NewString()})
+	_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New())}, IdempotencyKey: uuid.NewString()})
 	require.ErrorIs(t, err, openrails.ErrDenied, "customer-read does not grant merchant checkout creation")
 }

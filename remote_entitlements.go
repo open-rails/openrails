@@ -16,7 +16,7 @@ type GrantEntitlementRequest struct {
 }
 
 // GrantEntitlement records an admin-sourced entitlement for a customer.
-func (c *Client) GrantEntitlement(ctx context.Context, customerID string, request GrantEntitlementRequest) (*EntitlementRecord, error) {
+func (c *Client) GrantEntitlement(ctx context.Context, customerID CustomerID, request GrantEntitlementRequest) (*EntitlementRecord, error) {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return nil, err
@@ -33,7 +33,7 @@ func (c *Client) GrantEntitlement(ctx context.Context, customerID string, reques
 }
 
 // RevokeEntitlement revokes one entitlement window owned by the customer.
-func (c *Client) RevokeEntitlement(ctx context.Context, customerID, entitlementID string) error {
+func (c *Client) RevokeEntitlement(ctx context.Context, customerID CustomerID, entitlementID string) error {
 	path, err := customerPath(customerID)
 	if err != nil {
 		return err
