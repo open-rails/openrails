@@ -259,17 +259,29 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 	return res, nil
 }
 
-// nmiCollectionReceipt runs the ONE exact-receipt path
-// (nmi.ConfirmOrderSale) for an NMI-family collection, shared by autonomous
-// verification and operator resolution and by the subscription rebill
-// verifier: the order reference's sale, approved, for the frozen amount and
-// currency, on the instrument's customer vault (a custodian-held card has
-// none, or#879). An empty search is inconclusive (Settled=false, nil error); a
-// sale that contradicts the frozen facts is an error.
-func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+// nmiCollectionReceipt is the ONE exact-receipt path for an NMI-family
+// charge, shared by autonomous verification, operator resolution and the
+// subscription rebill verifier (nmi.ConfirmOrderSale). The Query API must
+// return a successful sale for the operation's order reference (identity);
+// with providerReference set it must be that very sale. The v5 read of that
+// sale must then be approved, in the frozen currency, for the frozen amount,
+// on the frozen customer vault. A card the frozen instrument held at a
+// custodian (or#879) was charged by card data and has no vault at NMI: its
+// exact read binds approval, currency and amount, and the order reference
+// binds the instrument. The rule comes from the FROZEN custody, never the
+// method's current one. An empty search is inconclusive (Settled=false, nil
+// error); a sale that exists but contradicts the frozen facts is an error.
+func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+	if err := expect.Instrument.validate(); err != nil {
+		return CollectionVerifyResult{}, err
+	}
 	txnID, found, err := client.ConfirmOrderSale(ctx, nmi.OrderSale{
-		OrderID: expect.OperationKey, CustomerVaultID: strings.TrimSpace(method.RailCustomerRef),
-		Unvaulted: method.Custodian == models.CustodianBasisTheory, Amount: expect.Amount, Currency: expect.Currency,
+		OrderID:   expect.OperationKey,
+		Amount:    expect.Amount,
+		Currency:  expect.Currency,
+		Unvaulted: expect.Instrument.custodianHeld(),
+		// The frozen vault, never the method row's current one.
+		CustomerVaultID: expect.Instrument.RailCustomerRef,
 	}, providerReference)
 	if err != nil {
 		return CollectionVerifyResult{}, err

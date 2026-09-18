@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
@@ -125,6 +126,7 @@ type rebillFixture struct {
 	pspID     uuid.UUID
 	methodID  uuid.UUID
 	vault     string
+	billingID string
 }
 
 // The fixture price is $9.99 (native micros); the rebill freezes it.
@@ -165,7 +167,7 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
 	      VALUES ($1, $2, $3, 'USD', 720, true, $4)`, priceID, productID, rebillAmount, tenantID)
-	fx.methodID, fx.vault = paymentMethodID, "vault-"+suffix
+	fx.methodID, fx.vault, fx.billingID = paymentMethodID, "vault-"+suffix, "bill-"+suffix
 	exec(`INSERT INTO openrails.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
@@ -208,7 +210,7 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 			OrderReference:  fx.orderRef,
 			Attempt:         attempt,
 			PaymentMethodID: fx.methodID,
-			CustomerVaultID: fx.vault,
+			Instrument:      RebillInstrument{PSPID: fx.pspID, Custodian: models.CustodianPSP, RailCustomerRef: fx.vault, RailMethodRef: fx.billingID},
 			Currency:        "USD",
 			Amount:          rebillAmount,
 			AmountMinor:     rebillAmountMinor,

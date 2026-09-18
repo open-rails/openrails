@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
 
@@ -43,10 +44,13 @@ func testManualRebillPayload() ManualRebillPayload {
 		OrderReference:  fmt.Sprintf("rebill-%s-%d", subID, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC).Unix()),
 		Attempt:         1,
 		PaymentMethodID: uuid.MustParse("66666666-7777-8888-9999-000000000000"),
-		CustomerVaultID: "vault-frozen",
-		Currency:        "USD",
-		Amount:          12_000_000,
-		AmountMinor:     1200,
+		Instrument: RebillInstrument{
+			PSPID: uuid.MustParse("77777777-7777-4777-8777-777777777777"), Custodian: models.CustodianPSP,
+			RailCustomerRef: "vault-frozen", RailMethodRef: "billing-frozen",
+		},
+		Currency:    "USD",
+		Amount:      12_000_000,
+		AmountMinor: 1200,
 	}
 }
 

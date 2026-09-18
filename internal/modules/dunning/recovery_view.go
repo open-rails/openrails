@@ -56,7 +56,11 @@ func (v RecoveryView) Subscription(ctx context.Context, sub *models.Subscription
 		CompatiblePaymentMethodIDs: make([]openrails.PaymentMethodID, 0, len(rows)),
 	}
 	for _, row := range rows {
-		if row.PspID == sub.PspID && strings.TrimSpace(row.RailMethodRef) != "" {
+		// A rebill charges the subscription's own provider account through its
+		// vault, so a method on another account or held by a custodian is not
+		// one this subscription can be retried on.
+		instrument := intents.RebillInstrument{PSPID: row.PspID, Custodian: row.Custodian, CustodianID: row.CustodianID, RailCustomerRef: strings.TrimSpace(row.RailCustomerRef), RailMethodRef: strings.TrimSpace(row.RailMethodRef)}
+		if row.PspID == sub.PspID && instrument.Validate() == nil {
 			recovery.CompatiblePaymentMethodIDs = append(recovery.CompatiblePaymentMethodIDs, openrails.PaymentMethodID(row.ID))
 		}
 	}
@@ -135,8 +139,8 @@ func subscriptionRecoveryEligibility(sub *models.Subscription, recovery *openrai
 		return false, openrails.RecoveryBlockedInProgress
 	case windowExpired:
 		return false, openrails.RecoveryBlockedWindowExpired
-	case sub.PaymentMethod == nil || strings.TrimSpace(sub.PaymentMethod.RailCustomerRef) == "" ||
-		strings.TrimSpace(sub.PaymentMethod.RailMethodRef) == "" || strings.TrimSpace(sub.PaymentMethod.ParkReason) != "":
+	case sub.PaymentMethod == nil || strings.TrimSpace(sub.PaymentMethod.ParkReason) != "" ||
+		intents.RebillInstrumentOf(sub.PaymentMethod).Validate() != nil:
 		return false, openrails.RecoveryBlockedNoPaymentMethod
 	case !subscriptions.PaymentMethodMatchesSubscriptionProvider(sub.PaymentMethod, sub):
 		return false, openrails.RecoveryBlockedPSPMismatch

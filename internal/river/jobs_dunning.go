@@ -468,9 +468,18 @@ func (w *DunningWorker) processSubscription(
 		logEntry.Info("Dunning: subscription's rebill attempt is claimed (a customer retry-now or another pass) or no longer due")
 		return dunningOutcomeFailed, nil
 	}
-	// The claim is released once the attempt has an answer, whatever it is;
-	// the schedule was never moved, so a still-due row is picked up again.
-	defer w.releaseDunningClaim(ctx, logEntry, sub, holder)
+	// The claim is released once the attempt has a definitive answer; while
+	// the outcome is UNKNOWN it is held to its expiry, so later passes do not
+	// re-claim and re-enqueue a no-op every time (the verifier owns it). The
+	// schedule was never moved, so a released still-due row is picked up again.
+	unresolved := false
+	defer func() {
+		if unresolved {
+			logEntry.Info("Dunning: outcome unknown; the attempt claim is held to its expiry while the verifier resolves it")
+			return
+		}
+		w.releaseDunningClaim(ctx, logEntry, sub, holder)
+	}()
 
 	// The provider-side charge flows through the intent ledger (#358 phase C):
 	// one system-origin intent per (subscription, period end, attempt
@@ -521,6 +530,7 @@ func (w *DunningWorker) processSubscription(
 		// change, no next retry scheduled for this attempt; the intent
 		// verifier resolves it via the NMI Query API, and on late-confirmed
 		// success the handler's finalize repairs the lifecycle.
+		unresolved = true
 		logEntry.Warn("Dunning: manual rebill status unknown; verifier will resolve via provider reads (no further automatic charge for this attempt)")
 		return dunningOutcomeFailed, nil
 

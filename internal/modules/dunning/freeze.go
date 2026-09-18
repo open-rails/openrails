@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -20,19 +19,26 @@ import (
 var ErrNothingToFreeze = errors.New("rebill cannot be frozen")
 
 // FreezeRebill is the period's rebill charge frozen before submission
-// (#809 R4): the subscription's current instrument and its customer vault,
-// and the price amount and currency. The worker and retry-now enqueue exactly
-// this; the verifier and operator resolution accept only a provider sale that
-// matches it, and a confirmed charge records exactly this amount.
+// (#809 R4): the subscription's current instrument in full (provider account,
+// custody, customer vault and billing reference) and the price amount and
+// currency. The worker and retry-now enqueue exactly this; the charge goes out
+// on it, the verifier and operator resolution accept only a provider sale
+// that matches it, and a confirmed charge records exactly this amount. An
+// instrument a rebill cannot be sent on — a custodian-held card, which is
+// charged by card data through its proxy — is refused here, never sent on
+// whatever vault reference the row still carries.
 func FreezeRebill(ctx context.Context, database *db.DB, sub *models.Subscription) (intents.ManualRebillPayload, error) {
 	var p intents.ManualRebillPayload
 	if sub == nil || sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		return p, fmt.Errorf("%w: no current period", ErrNothingToFreeze)
 	}
 	pm := sub.PaymentMethod
-	unvaulted := pm != nil && pm.Custodian == models.CustodianBasisTheory
-	if pm == nil || (!unvaulted && strings.TrimSpace(pm.RailCustomerRef) == "") {
-		return p, fmt.Errorf("%w: no chargeable payment method", ErrNothingToFreeze)
+	if pm == nil {
+		return p, fmt.Errorf("%w: no payment method", ErrNothingToFreeze)
+	}
+	instrument := intents.RebillInstrumentOf(pm)
+	if err := instrument.Validate(); err != nil {
+		return p, fmt.Errorf("%w: %v", ErrNothingToFreeze, err)
 	}
 	price, err := subscriptionPrice(ctx, database, sub)
 	if err != nil {
@@ -45,7 +51,7 @@ func FreezeRebill(ctx context.Context, database *db.DB, sub *models.Subscription
 	return intents.ManualRebillPayload{
 		SubscriptionID: sub.ID, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(), Rail: string(sub.Rail),
 		OrderReference: OrderReference(sub), Attempt: AttemptOrdinal(sub),
-		PaymentMethodID: pm.ID, CustomerVaultID: strings.TrimSpace(pm.RailCustomerRef), Unvaulted: unvaulted,
+		PaymentMethodID: pm.ID, Instrument: instrument,
 		Currency: price.Currency, Amount: price.Amount, AmountMinor: amountMinor,
 	}, nil
 }

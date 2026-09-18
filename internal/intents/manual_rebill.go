@@ -53,17 +53,16 @@ type ManualRebillPayload struct {
 	// must never break.
 	OrderReference string `json:"order_reference"`
 	Attempt        int    `json:"attempt"`
-	// The charge frozen before submission (#809 R4): the instrument and its
-	// customer vault (the intent row names the provider account), and the
-	// amount and currency the period is billed at. The verifier and operator
-	// resolution accept only a provider sale matching every one of them, and
-	// the renewal records exactly this amount.
-	PaymentMethodID uuid.UUID       `json:"payment_method_id"`
-	CustomerVaultID string          `json:"customer_vault_id,omitempty"`
-	Unvaulted       bool            `json:"unvaulted,omitempty"`
-	Currency        string          `json:"currency"`
-	Amount          int64           `json:"amount"`
-	AmountMinor     moneyutil.Cents `json:"amount_minor"`
+	// The charge frozen before submission (#809 R4): the instrument it is sent
+	// on and the amount and currency the period is billed at. The charge goes
+	// out on the frozen instrument, the verifier and operator resolution
+	// accept only a provider sale matching it, and the renewal records exactly
+	// this amount.
+	PaymentMethodID uuid.UUID        `json:"payment_method_id"`
+	Instrument      RebillInstrument `json:"instrument"`
+	Currency        string           `json:"currency"`
+	Amount          int64            `json:"amount"`
+	AmountMinor     moneyutil.Cents  `json:"amount_minor"`
 	// RequestKey binds a customer retry-now request (#809) to the operation
 	// it started, and RequestPaymentMethodID is the method that request named
 	// (nil = the subscription's current one): the same client key with a
@@ -73,9 +72,67 @@ type ManualRebillPayload struct {
 	RequestPaymentMethodID *uuid.UUID `json:"request_payment_method_id,omitempty"`
 }
 
-// Receipt is the exact provider sale this rebill must be confirmed by.
+// RebillInstrument is the saved method a rebill was frozen on, in the shape
+// invoice collection freezes (money.CollectionInstrument): a rebill is sent
+// on THIS instrument and judged against it, never against whatever the
+// method row says later. A #297 custody flip keeps the provider account and
+// the old vault reference while moving custody, rail_method_ref and
+// charge_via, so custody is part of the identity, not a detail.
+type RebillInstrument struct {
+	PSPID           uuid.UUID  `json:"psp_id"`
+	Custodian       string     `json:"custodian"`
+	CustodianID     *uuid.UUID `json:"custodian_id,omitempty"`
+	RailCustomerRef string     `json:"rail_customer_ref"`
+	RailMethodRef   string     `json:"rail_method_ref"`
+}
+
+// RebillInstrumentOf freezes a saved method's instrument.
+func RebillInstrumentOf(pm *models.PaymentMethod) RebillInstrument {
+	if pm == nil {
+		return RebillInstrument{}
+	}
+	return RebillInstrument{
+		PSPID: pm.PspID, Custodian: pm.Custodian, CustodianID: pm.CustodianID,
+		RailCustomerRef: strings.TrimSpace(pm.RailCustomerRef), RailMethodRef: strings.TrimSpace(pm.RailMethodRef),
+	}
+}
+
+// Validate refuses an instrument a rebill cannot be sent on. A rebill is an
+// NMI vault charge (customer vault + billing id); a custodian-held card is
+// charged by card data through its proxy, which this path does not speak, so
+// it is refused here rather than silently sent on a stale vault.
+func (i RebillInstrument) Validate() error {
+	switch {
+	case i.PSPID == uuid.Nil:
+		return errors.New("frozen instrument names no provider account")
+	case i.Custodian != models.CustodianPSP || i.CustodianID != nil:
+		return fmt.Errorf("frozen instrument is held by %q; a rebill charges the provider's own vault", i.Custodian)
+	case i.RailCustomerRef == "" || i.RailMethodRef == "":
+		return errors.New("frozen instrument has no customer vault and billing reference")
+	}
+	return nil
+}
+
+// Matches reports whether the method still is the frozen instrument.
+func (i RebillInstrument) Matches(method gen.OpenrailsPaymentMethod) error {
+	cur := RebillInstrument{
+		PSPID: method.PspID, Custodian: method.Custodian, CustodianID: method.CustodianID,
+		RailCustomerRef: strings.TrimSpace(method.RailCustomerRef), RailMethodRef: strings.TrimSpace(method.RailMethodRef),
+	}
+	sameCustodian := (cur.CustodianID == nil && i.CustodianID == nil) ||
+		(cur.CustodianID != nil && i.CustodianID != nil && *cur.CustodianID == *i.CustodianID)
+	if cur.PSPID != i.PSPID || cur.Custodian != i.Custodian || !sameCustodian ||
+		cur.RailCustomerRef != i.RailCustomerRef || cur.RailMethodRef != i.RailMethodRef {
+		return fmt.Errorf("payment method %s no longer matches the rebill's frozen instrument", method.ID)
+	}
+	return nil
+}
+
+// Receipt is the exact provider sale this rebill must be confirmed by: the
+// order reference's sale on the FROZEN customer vault, for the frozen amount
+// and currency.
 func (p ManualRebillPayload) Receipt() nmi.OrderSale {
-	return nmi.OrderSale{OrderID: p.OrderReference, CustomerVaultID: p.CustomerVaultID, Unvaulted: p.Unvaulted, Amount: p.AmountMinor, Currency: p.Currency}
+	return nmi.OrderSale{OrderID: p.OrderReference, CustomerVaultID: p.Instrument.RailCustomerRef, Amount: p.AmountMinor, Currency: p.Currency}
 }
 
 // ManualRebillIdempotencyKey content-addresses one dunning charge attempt the
@@ -144,9 +201,11 @@ func decodeManualRebillPayload(intent gen.OpenrailsRailIntent) (ManualRebillPayl
 		return p, fmt.Errorf("decode manual rebill payload: %w", err)
 	}
 	if p.SubscriptionID == uuid.Nil || p.PeriodEnd.IsZero() || strings.TrimSpace(p.OrderReference) == "" ||
-		p.PaymentMethodID == uuid.Nil || (!p.Unvaulted && strings.TrimSpace(p.CustomerVaultID) == "") ||
-		strings.TrimSpace(p.Currency) == "" || p.Amount <= 0 || p.AmountMinor <= 0 {
+		p.PaymentMethodID == uuid.Nil || strings.TrimSpace(p.Currency) == "" || p.Amount <= 0 || p.AmountMinor <= 0 {
 		return p, errors.New("manual rebill payload is incomplete")
+	}
+	if err := p.Instrument.Validate(); err != nil {
+		return p, fmt.Errorf("manual rebill payload: %w", err)
 	}
 	return p, nil
 }
@@ -227,12 +286,27 @@ func (h *ManualRebillHandler) pinInstrument(ctx context.Context, intent gen.Open
 			reason = "the subscription's payment method changed since the rebill was frozen"
 		case sub.PspID != *intent.PspID || method.PspID != *intent.PspID:
 			reason = fmt.Sprintf("%s: subscription PSP %s, rebill PSP %s, payment method PSP %s; a cross-PSP rebill is never sent (#657)", EvidenceCodePSPMismatch, sub.PspID, *intent.PspID, method.PspID)
-		case !p.Unvaulted && strings.TrimSpace(method.RailCustomerRef) != p.CustomerVaultID:
-			reason = "the payment method's vault changed since the rebill was frozen"
+		default:
+			// Custody, vault and billing reference are the instrument's
+			// identity: a #297 flip keeps the provider account and the old
+			// vault reference while moving custody, rail_method_ref and
+			// charge_via, so comparing the whole frozen instrument is what
+			// catches it. Superseded, never sent on the stale pair.
+			if err := p.Instrument.Matches(method); err != nil {
+				reason = "instrument_changed: " + err.Error()
+			}
 		}
 		return nil
 	})
 	return reason, err
+}
+
+// paymentMethodGenRow is the row shape RebillInstrument.Matches compares.
+func paymentMethodGenRow(pm *models.PaymentMethod) gen.OpenrailsPaymentMethod {
+	return gen.OpenrailsPaymentMethod{
+		ID: pm.ID, PspID: pm.PspID, Custodian: pm.Custodian, CustodianID: pm.CustodianID,
+		RailCustomerRef: pm.RailCustomerRef, RailMethodRef: pm.RailMethodRef,
+	}
 }
 
 func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
@@ -263,8 +337,10 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	if err != nil && !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 		return Parked("load frozen payment method before submission: " + err.Error())
 	}
-	if pm != nil && (intent.PspID == nil || pm.PspID != *intent.PspID || strings.TrimSpace(pm.RailCustomerRef) != p.CustomerVaultID) {
-		return Parked("frozen payment method no longer matches the rebill; the relevance re-check supersedes it")
+	if pm != nil && intent.PspID != nil && p.Instrument.PSPID == *intent.PspID {
+		if err := p.Instrument.Matches(paymentMethodGenRow(pm)); err != nil {
+			return Parked("frozen instrument no longer matches the payment method; the relevance re-check supersedes it: " + err.Error())
+		}
 	}
 	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
 		// Terminal for the attempt: nothing was sent. The worker (or the next
@@ -311,9 +387,12 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		credentialContext = charge.LegacyUnanchoredRecurringMIT()
 	}
 
+	// The charge goes out on the FROZEN instrument: the vault and billing
+	// reference the operation was created with, which is what its receipt is
+	// judged against.
 	rebillResp, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
-		VaultID:          pm.RailCustomerRef,
-		BillingID:        pm.RailMethodRef,
+		VaultID:          p.Instrument.RailCustomerRef,
+		BillingID:        p.Instrument.RailMethodRef,
 		SubscriptionID:   sub.RailSubscriptionID,
 		OrderID:          p.OrderReference,
 		PONumber:         p.OrderReference,
