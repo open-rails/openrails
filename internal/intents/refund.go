@@ -126,9 +126,12 @@ func (r refundReservations) checkRelevance(ctx context.Context, intent gen.Openr
 // from the reservation (CompleteRefundReservation replaces it wholesale) with
 // the completion stamped in.
 func (r refundReservations) finalize(ctx context.Context, p RefundPayload, providerRefundID string) error {
-	// Keep the exact successful response even if the local transaction fails.
-	// This is the only safe automatic recovery evidence for non-idempotent rails.
-	if err := r.recordReceipt(ctx, p, providerRefundID); err != nil {
+	// Keep the exact successful response even if the local transaction fails or
+	// the caller is gone: it is the only safe automatic recovery evidence for
+	// non-idempotent rails.
+	receiptCtx, cancel := LedgerWriteContext(ctx)
+	defer cancel()
+	if err := r.recordReceipt(receiptCtx, p, providerRefundID); err != nil {
 		return err
 	}
 	return r.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -190,10 +193,18 @@ func (r refundReservations) recoverReceipt(ctx context.Context, intent gen.Openr
 	if ref == "" {
 		return Ambiguous("refund response has no exact operation receipt; operator must resolve it with the exact provider refund or provider-confirmed non-execution")
 	}
+	return r.settle(ctx, p, ref, map[string]any{"recovered_receipt": true})
+}
+
+// settle finalizes a refund the provider confirmed with the exact receipt ref.
+// A failed local finalize keeps ref on the ambiguous outcome's evidence, so the
+// unknown mark retains it even when the receipt write itself did not land.
+func (r refundReservations) settle(ctx context.Context, p RefundPayload, ref string, evidence map[string]any) Outcome {
 	if err := r.finalize(ctx, p, ref); err != nil {
-		return AmbiguousWithEvidence("refund receipt retained but local finalization failed: "+err.Error(), map[string]any{"provider_refund_id": ref})
+		return AmbiguousWithEvidence("provider refund "+ref+" succeeded, but local finalization failed: "+err.Error(), map[string]any{"provider_refund_id": ref})
 	}
-	return Succeeded(map[string]any{"provider_refund_id": ref, "recovered_receipt": true})
+	evidence["provider_refund_id"] = ref
+	return Succeeded(evidence)
 }
 
 // knownReceipt returns the exact provider refund id captured on the
@@ -303,10 +314,7 @@ func (h *NMIRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsRail
 		return Ambiguous("nmi refund outcome unknown: " + err.Error())
 	}
 
-	if err := h.finalize(ctx, p, result.TransactionID); err != nil {
-		return AmbiguousWithEvidence("refunded at provider, but local finalize failed: "+err.Error(), map[string]any{"provider_refund_id": result.TransactionID})
-	}
-	return Succeeded(map[string]any{"provider_refund_id": result.TransactionID})
+	return h.settle(ctx, p, result.TransactionID, map[string]any{})
 }
 
 // Verify resumes known successful responses. NMI does not expose a caller
@@ -456,16 +464,20 @@ func (h *StripeRefundHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	if !strings.EqualFold(result.Status, "succeeded") {
 		return Ambiguous("stripe refund has not succeeded: " + result.Status)
 	}
-	if err := h.finalize(ctx, p, result.ID); err != nil {
-		return Ambiguous("refunded at provider, but local finalize failed: " + err.Error())
-	}
-	return Succeeded(map[string]any{"provider_refund_id": result.ID, "refund_status": result.Status})
+	return h.settle(ctx, p, result.ID, map[string]any{"refund_status": result.Status})
 }
 
 func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeRefundPayload(intent)
 	if err != nil {
 		return Terminal(err.Error())
+	}
+	// A captured successful receipt is exact: settle from it instead of
+	// depending on provider list visibility, whose miss would requeue the create
+	// after the provider's idempotency window may have lapsed. An unreadable
+	// reservation proves nothing either way — the provider read below decides.
+	if ref, rerr := h.knownReceipt(ctx, intent, p); rerr == nil && ref != "" {
+		return h.settle(ctx, p, ref, map[string]any{"recovered_receipt": true})
 	}
 	result, found, err := h.Stripe.FindRefundByIdempotencyKey(ctx, p.ProviderTarget, intent.IdempotencyKey)
 	if err != nil {
@@ -483,10 +495,7 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.OpenrailsRa
 	if !strings.EqualFold(result.Status, "succeeded") {
 		return Ambiguous("stripe refund has not succeeded: " + result.Status)
 	}
-	if err := h.finalize(ctx, p, result.ID); err != nil {
-		return Ambiguous("refund verified at provider, but local finalize failed: " + err.Error())
-	}
-	return Succeeded(map[string]any{"provider_refund_id": result.ID, "refund_status": result.Status, "verified_existing": true})
+	return h.settle(ctx, p, result.ID, map[string]any{"refund_status": result.Status, "verified_existing": true})
 }
 
 // ============================================================================
