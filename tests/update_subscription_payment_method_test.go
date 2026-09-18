@@ -627,6 +627,75 @@ func TestUpdateSubscriptionPaymentMethodCrossPSP(t *testing.T) {
 	})
 }
 
+// Zero and blank identifiers are refused with the coded invalid-parameter
+// envelope before anything is looked up, on the HTTP route and through the
+// Client, and nothing reaches NMI (#657 review).
+func TestUpdateSubscriptionPaymentMethodZeroIdentifiers(t *testing.T) {
+	suite, mock := SetupSuiteWithMockNMI(t)
+	products := suite.SeedProducts()
+	userID := uuid.New().String()
+	token := suite.MintUserToken(userID, "update-pm-zeroid-"+t.Name()+"@test.example.com")
+	pm := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: userID, Rail: models.RailNMI, VaultID: "vault-" + uuid.NewString()})
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{
+		UserID: userID, PriceID: products[0].Prices[0].ID, Status: models.StatusActive, Rail: models.RailNMI,
+		RailSubID: "sub-zeroid-" + uuid.NewString(), PaymentMethodID: &pm.ID,
+	})
+	zeroSub := openrails.SubscriptionIDPrefix + uuid.Nil.String()
+	zeroMethod := openrails.PaymentMethodIDPrefix + uuid.Nil.String()
+
+	for _, tc := range []struct {
+		name         string
+		subscription string
+		method       string
+		// want is the refusal status; an empty path segment never addresses
+		// the route at all, so the router answers before any handler runs.
+		want int
+	}{
+		{"zero subscription uuid", zeroSub, openrails.PaymentMethodID(pm.ID).String(), http.StatusBadRequest},
+		{"zero payment method uuid", openrails.SubscriptionID(sub.ID).String(), zeroMethod, http.StatusBadRequest},
+		{"empty payment method", openrails.SubscriptionID(sub.ID).String(), "", http.StatusBadRequest},
+		{"whitespace payment method", openrails.SubscriptionID(sub.ID).String(), "   ", http.StatusBadRequest},
+		{"empty subscription", "", openrails.PaymentMethodID(pm.ID).String(), http.StatusTemporaryRedirect},
+		{"whitespace subscription", "%20%20", openrails.PaymentMethodID(pm.ID).String(), http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mock.Reset()
+			jsonBody, _ := json.Marshal(map[string]string{"payment_method_id": tc.method})
+			w := httptest.NewRecorder()
+			req, _ := http.NewRequest("PUT", updateSubscriptionPaymentMethodPath(tc.subscription), bytes.NewReader(jsonBody))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Authorization", "Bearer "+token)
+			suite.Server.Handler().ServeHTTP(w, req)
+
+			require.Equal(t, tc.want, w.Code, w.Body.String())
+			if tc.want == http.StatusBadRequest {
+				var envelope struct {
+					Error openrails.ErrorDetails `json:"error"`
+				}
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &envelope))
+				require.Equal(t, "invalid_param", envelope.Error.Code)
+			}
+			require.Empty(t, mock.LastRequest["recurring"], "nothing reaches NMI")
+			require.Equal(t, pm.ID, *suite.GetSubscription(sub.ID).PaymentMethodID)
+		})
+	}
+
+	t.Run("client refuses zero identifiers before I/O", func(t *testing.T) {
+		mock.Reset()
+		client, err := openrails.NewRemote("https://unreachable.invalid", openrails.WithTokenProvider(func(context.Context) (string, error) {
+			return merchantDelegatedTestToken, nil
+		}))
+		require.NoError(t, err)
+		err = client.UpdateSubscriptionPaymentMethod(context.Background(), openrails.SubscriptionID{},
+			openrails.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: openrails.PaymentMethodID(pm.ID)})
+		require.ErrorIs(t, err, openrails.ErrInvalid)
+		err = client.UpdateSubscriptionPaymentMethod(context.Background(), openrails.SubscriptionID(sub.ID),
+			openrails.UpdateSubscriptionPaymentMethodRequest{})
+		require.ErrorIs(t, err, openrails.ErrInvalid)
+		require.Empty(t, mock.LastRequest["recurring"])
+	})
+}
+
 func updateSubscriptionPaymentMethodPath(subscriptionID string) string {
 	return "/v1/me/subscriptions/" + subscriptionID + "/payment-method"
 }

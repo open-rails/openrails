@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
@@ -176,14 +177,41 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	require.Equal(t, active, report.TargetPSPID)
 	require.Equal(t, controlplane.ErrProviderAccountCutoverNotQualified.Error(), report.Plan.Reason)
 
+	// Explicit zero identifiers are refused with the coded invalid-parameter
+	// envelope BEFORE any lookup: never silently "not supplied" (which would
+	// re-target the subscription's own account) and never a "not found" probe.
+	zero := uuid.Nil
+	for _, tc := range []struct {
+		name  string
+		id    merchant.ID
+		q     controlplane.ProviderAccountCutoverQuery
+		param string
+	}{
+		{"zero merchant", merchant.ID{}, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &active}, "merchant_id"},
+		{"zero subscription", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{TargetPSPID: &active}, "subscription_id"},
+		{"zero target psp", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &zero}, "target_psp_id"},
+		{"zero replacement method", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, ReplacementPaymentMethodID: &zero}, "replacement_payment_method_id"},
+		{"neither target nor card", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home}, "target_psp_id"},
+	} {
+		t.Run("refuses "+tc.name, func(t *testing.T) {
+			_, err := cp.PlanProviderAccountCutover(ctx, tc.id, tc.q)
+			require.ErrorIs(t, err, openrails.ErrInvalid)
+			var se *openrails.StatusError
+			require.ErrorAs(t, err, &se)
+			require.Equal(t, 400, se.Status)
+			require.Equal(t, "invalid_param", se.Code)
+			require.NotNil(t, se.Param)
+			require.Equal(t, tc.param, *se.Param)
+			require.NotContains(t, se.Message, "not found", "a zero id is invalid, never a missing row")
+		})
+	}
+
 	// Identity errors: an unknown PSP or subscription, no target at all, and
 	// another merchant's scope.
 	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &missing})
 	require.ErrorContains(t, err, "not found")
 	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: missing, TargetPSPID: &active})
 	require.ErrorContains(t, err, "not found")
-	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home})
-	require.ErrorContains(t, err, "required")
 	_, err = cp.PlanProviderAccountCutover(ctx, merchant.ID(uuid.New()), controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &active})
 	require.Error(t, err, "another merchant's scope sees nothing")
 
