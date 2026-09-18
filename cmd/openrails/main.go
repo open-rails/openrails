@@ -57,7 +57,11 @@ func newRootCmd() *cobra.Command {
 				loadOpts = append(loadOpts, config.WithOverride("test_mode", strings.TrimSpace(posture)))
 			}
 
-			cfg, err := config.Load(configPath, loadOpts...)
+			load := config.Load
+			if isDatabaseOnlyBillingCommand(cmd) {
+				load = config.LoadDatabase
+			}
+			cfg, err := load(configPath, loadOpts...)
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}

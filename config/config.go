@@ -2066,6 +2066,18 @@ func WithOverride(key string, value any) LoadOption {
 }
 
 func Load(configPath string, opts ...LoadOption) (*Config, error) {
+	return load(configPath, false, opts...)
+}
+
+// LoadDatabase loads and validates only database configuration for offline
+// operator commands. It preserves the normal file, mounted-secret, environment
+// and flag precedence, without requiring provider or authentication credentials.
+// The returned config is unsuitable for constructing a server runtime.
+func LoadDatabase(configPath string, opts ...LoadOption) (*Config, error) {
+	return load(configPath, true, opts...)
+}
+
+func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, error) {
 	var options loadOptions
 	for _, opt := range opts {
 		opt(&options)
@@ -2177,6 +2189,26 @@ func Load(configPath string, opts ...LoadOption) (*Config, error) {
 		if err := k.Load(confmap.Provider(options.overrides, "."), nil); err != nil {
 			return nil, fmt.Errorf("loading flag overrides: %w", err)
 		}
+	}
+
+	if databaseOnly {
+		dbConfig := cfg.DB
+		if err := k.UnmarshalWithConf("db", dbConfig, koanf.UnmarshalConf{
+			Tag: "koanf",
+			DecoderConfig: &mapstructure.DecoderConfig{
+				DecodeHook: mapstructure.ComposeDecodeHookFunc(mapstructure.StringToTimeDurationHookFunc(), mapstructure.TextUnmarshallerHookFunc()),
+				Result:     dbConfig, WeaklyTypedInput: true, ErrorUnused: true,
+			},
+		}); err != nil {
+			return nil, fmt.Errorf("unmarshaling database config: %w", err)
+		}
+		databaseConfig := &Config{DB: dbConfig}
+		assembleDBURL(databaseConfig)
+		databaseConfig.DB.Schema = normalizeSchema(databaseConfig.DB.Schema)
+		if err := validateDatabase(databaseConfig.DB); err != nil {
+			return nil, err
+		}
+		return databaseConfig, nil
 	}
 
 	// HARD CUT (#469): the AuthKit control plane is always on in standalone

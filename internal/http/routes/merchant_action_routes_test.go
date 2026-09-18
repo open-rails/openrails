@@ -68,6 +68,8 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 		path   string
 		perm   string
 	}{
+		{name: "billing archive export", method: http.MethodGet, path: "/billing/v1/merchant/billing-archive", perm: controlplane.PermMerchantBillingExport},
+		{name: "billing archive import", method: http.MethodPost, path: "/billing/v1/merchant/billing-archive", perm: controlplane.PermMerchantBillingImport},
 		{
 			name:   "catalog read",
 			method: http.MethodGet,

@@ -721,10 +721,42 @@ type clientResponse struct {
 // the verdict statuses the caller wants to interpret; the caller decides what
 // is an error. Transport failures wrap ErrUnreachable.
 func (c *Client) doRaw(ctx context.Context, method, path string, body any, headers http.Header) (*clientResponse, error) {
+	var rdr io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("openrails: marshal request: %w", err)
+		}
+		rdr = bytes.NewReader(raw)
+		headers = headers.Clone()
+		if headers == nil {
+			headers = make(http.Header)
+		}
+		headers.Set("Content-Type", "application/json")
+	}
+	var response *clientResponse
+	err := c.withHTTPResponse(ctx, method, path, rdr, headers, func(resp *http.Response) error {
+		out, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+		if err != nil {
+			return fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
+		}
+		if len(out) > 1<<20 {
+			return fmt.Errorf("%w: response exceeds 1 MiB", ErrUnreachable)
+		}
+		response = &clientResponse{status: resp.StatusCode, header: resp.Header, body: out}
+		return nil
+	})
+	return response, err
+}
+
+// withHTTPResponse gives JSON and streamed archive operations identical merchant
+// assertions, credentials, cancellation and timeouts. consume owns response
+// decoding, but cannot outlive the request or leak its body.
+func (c *Client) withHTTPResponse(ctx context.Context, method, path string, rdr io.Reader, headers http.Header, consume func(*http.Response) error) error {
 	expectedMerchant := c.merchantID
 	if pinned, ok := merchant.FromContext(ctx); ok {
 		if !expectedMerchant.IsZero() && expectedMerchant != pinned {
-			return nil, &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
+			return &StatusError{Status: http.StatusConflict, ErrorDetails: ErrorDetails{
 				Type: "invalid_request_error", Code: "resource_conflict", Message: fmt.Sprintf("openrails: call pinned to merchant %s but client is bound to merchant %s", pinned, expectedMerchant),
 			}}
 		}
@@ -735,14 +767,6 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 		// servers resolve authority independently and verify the header.
 		ctx = merchant.WithID(ctx, expectedMerchant)
 	}
-	var raw []byte
-	if body != nil {
-		var merr error
-		raw, merr = json.Marshal(body)
-		if merr != nil {
-			return nil, fmt.Errorf("openrails: marshal request: %w", merr)
-		}
-	}
 	// Enforce the per-call timeout via a context deadline so it holds even when
 	// the host injected its own http.Client (which may have no Timeout). Only
 	// shorten, never extend, an existing caller deadline.
@@ -752,47 +776,38 @@ func (c *Client) doRaw(ctx context.Context, method, path string, body any, heade
 		defer cancel()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	bearer, berr := c.bearer(ctx)
 	if berr != nil {
-		return nil, berr
-	}
-	var rdr io.Reader
-	if raw != nil {
-		rdr = bytes.NewReader(raw)
+		return berr
 	}
 	req, rerr := http.NewRequestWithContext(ctx, method, c.baseURL+path, rdr)
 	if rerr != nil {
-		return nil, fmt.Errorf("openrails: build request: %w", rerr)
+		return fmt.Errorf("openrails: build request: %w", rerr)
 	}
 	for name, values := range headers {
 		req.Header[name] = append([]string(nil), values...)
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
-	req.Header.Set("Accept", "application/json")
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
+	}
 	if !expectedMerchant.IsZero() {
 		req.Header.Set(merchant.BindingHeader, expectedMerchant.String())
 	}
-	if raw != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	out, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
-	if err != nil {
-		return nil, fmt.Errorf("%w: read response: %w", ErrUnreachable, err)
+	if err := consume(resp); err != nil {
+		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnreachable, err)
+		return fmt.Errorf("%w: %w", ErrUnreachable, err)
 	}
-	if len(out) > 1<<20 {
-		return nil, fmt.Errorf("%w: response exceeds 1 MiB", ErrUnreachable)
-	}
-	return &clientResponse{status: resp.StatusCode, header: resp.Header, body: out}, nil
+	return nil
 }
 
 // do issues a single authed request, mapping any non-2xx onto the canonical

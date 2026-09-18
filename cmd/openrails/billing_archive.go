@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,12 +13,19 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/http/inprocess"
+	"github.com/open-rails/openrails/internal/http/middleware"
+	"github.com/open-rails/openrails/internal/http/router"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/spf13/cobra"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -184,11 +192,23 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 		client, err := openrails.NewRemote(opts.url, append(clientOpts, openrails.WithAPIKey(token))...)
 		return client, func() {}, err
 	}
-	rt, close, err := openBillingArchiveRuntime(ctx, cfg)
+	database, err := openCLIDB(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	client, err := rt.Client(clientOpts...)
+	close := func() { _ = database.Close() }
+	// A minimal runtime shares the real handlers and merchant gate without
+	// initializing credentials, providers, workers, FX refresh or control plane.
+	rt := &app.Runtime{DB: database, Config: cfg, Clock: clockwork.NewRealClock()}
+	rt.SetConfiguredMerchant(mid)
+	mux := http.NewServeMux()
+	httproutes.RegisterMerchantArchiveRoutes(router.NewMux(mux, "/v1/merchant", rt), rt,
+		httproutes.Options{Gate: httproutes.NewGate(httproutes.GateOptions{})})
+	handler := middleware.BodyLimitHTTP(middleware.DefaultMaxBodyBytes)(mux)
+	clientOpts = append(clientOpts,
+		openrails.WithHTTPClient(&http.Client{Transport: inprocess.NewTransport(handler, rt.ConfiguredMerchant)}),
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }))
+	client, err := openrails.NewRemote("http://openrails.invalid", clientOpts...)
 	if err != nil {
 		close()
 		return nil, nil, err
@@ -196,12 +216,12 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	return client, close, nil
 }
 
-func openBillingArchiveRuntime(ctx context.Context, cfg *config.Config) (*embed.Runtime, func(), error) {
+func openBillingTargetRuntime(ctx context.Context, cfg *config.Config) (*embed.Runtime, func(), error) {
 	database, err := openCLIDB(ctx, cfg)
 	if err != nil {
 		return nil, nil, err
 	}
-	// Archive operations borrow the CLI database pool and never start workers.
+	// Hosted identity preparation needs the control plane to verify live group ownership.
 	opts := embed.Options{}
 	opts.Config = cfg
 	opts.PGXPool = database.Pool()
@@ -333,16 +353,25 @@ func newBillingPrepareTargetCmd() *cobra.Command {
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
 			cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
-			rt, close, err := openBillingArchiveRuntime(ctx, cfg)
-			if err != nil {
-				return err
-			}
-			defer close()
 			if unbound {
-				if _, err := rt.RegisterMerchantForRestore(ctx, mid, strings.TrimSpace(slug)); err != nil {
+				database, err := openCLIDB(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				defer database.Close()
+				directory, err := merchants.NewDirectoryService(database.DataPool())
+				if err != nil {
+					return err
+				}
+				if _, _, err := directory.RegisterForRestore(ctx, mid, strings.TrimSpace(slug)); err != nil {
 					return err
 				}
 			} else {
+				rt, close, err := openBillingTargetRuntime(ctx, cfg)
+				if err != nil {
+					return err
+				}
+				defer close()
 				cp, err := controlplane.Attach(ctx, rt, controlplane.Options{})
 				if err != nil {
 					return err
@@ -375,4 +404,20 @@ func validateBillingPrepareTarget(unbound bool, slug, groupID, ownerID string) e
 		return fmt.Errorf("provide --authkit-group-id and --owner-user-id without --slug, or use --unbound-merchants --slug")
 	}
 	return nil
+}
+
+// Export/import and host-local provisioning need only an RLS-enforcing pool.
+// Hosted provisioning still validates the full AuthKit runtime configuration.
+func isDatabaseOnlyBillingCommand(cmd *cobra.Command) bool {
+	if cmd.Parent() == nil || cmd.Parent().Name() != "billing" {
+		return false
+	}
+	switch cmd.Name() {
+	case "export", "import":
+		return true
+	case "prepare-target":
+		unbound, _ := cmd.Flags().GetBool("unbound-merchants")
+		return unbound
+	}
+	return false
 }

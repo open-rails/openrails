@@ -16,6 +16,20 @@ than the SDK's default request deadline: use `openrails.WithTimeout(0)` with a
 caller-controlled context, or choose an explicit deadline. The CLI defaults to
 caller cancellation and also accepts `--timeout`.
 
+Local export/import and `prepare-target --unbound-merchants` load only the `db`
+configuration and enforce the application role's RLS posture. They do not start
+providers, workers, FX refresh, a secret store, or AuthKit. Hosted
+`prepare-target` still needs normal destination AuthKit configuration to verify
+live group ownership. Remote export/import require only `--url` and
+`--token-file`.
+
+The archive routes are `GET /v1/merchant/billing-archive` (export) and `POST` on
+the same path (import), guarded by `merchant:billing:export` and
+`merchant:billing:import`. Archive transfer streams with a 1 GiB bound; ordinary
+API requests retain their 1 MiB cap. The client verifies the archive footer and
+returns an error for incomplete downloads. The CLI publishes its private output
+file only after that verification succeeds.
+
 ## What moves
 
 The archive preserves the merchant UUID, billing record IDs, customer subject
