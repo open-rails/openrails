@@ -278,6 +278,15 @@ func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 	return exp
 }
 
+// frozenInstrumentOf is what an operation freezes for a saved method: every
+// charge states the instrument it was armed against.
+func frozenInstrumentOf(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pm uuid.UUID) money.CollectionInstrument {
+	t.Helper()
+	row, err := gen.New(pool).GetPaymentMethodByID(ctx, pm)
+	require.NoError(t, err)
+	return money.CollectionInstrumentOf(row)
+}
+
 func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string) uuid.UUID {
 	t.Helper()
 	dbtest.EnsureCustomerIDPgx(ctx, t, pool, payer.UUID().String())
@@ -378,6 +387,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		string(models.RailNMI): adapter,
 	})
 
+	frozen := frozenInstrumentOf(t, pool, ctx, pm)
 	res, err := chargeThrough(ctx, ch, money.ChargeRequest{
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           payer,
@@ -389,6 +399,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		Currency:       money.DefaultCurrency,
 		IdempotencyKey: "scope-ok",
 		Description:    "invoice",
+		Instrument:     frozen,
 	})
 	require.NoError(t, err)
 	require.Equal(t, string(models.RailNMI), res.Rail)
@@ -418,6 +429,33 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "another merchant")
 	require.Len(t, adapter.charges, 1, "merchant scope failure must not dispatch")
+
+	// or#297/#990: the instrument moved (a custody remap, a re-vault) after
+	// the operation froze it. The charge is refused BEFORE the provider.
+	moved := frozen
+	moved.RailCustomerRef = "vault_moved"
+	_, err = ch.Prepare(ctx, money.ChargeRequest{
+		MerchantID:      dbtest.TestMerchantID.UUID(),
+		Payer:           payer,
+		PaymentMethodID: pm,
+		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
+		IdempotencyKey:  "instrument-moved",
+		Instrument:      moved,
+	})
+	require.ErrorIs(t, err, money.ErrCollectionInstrumentChanged)
+	require.Len(t, adapter.charges, 1, "a changed instrument must not dispatch")
+
+	_, err = ch.Prepare(ctx, money.ChargeRequest{
+		MerchantID:      dbtest.TestMerchantID.UUID(),
+		Payer:           payer,
+		PaymentMethodID: pm,
+		AmountCents:     123,
+		Currency:        money.DefaultCurrency,
+		IdempotencyKey:  "no-instrument",
+	})
+	require.ErrorContains(t, err, "frozen instrument", "a charge must state the instrument it was armed against")
+	require.Len(t, adapter.charges, 1)
 }
 
 func TestScopedCharger_RejectsUnsupportedRail(t *testing.T) {
@@ -434,6 +472,7 @@ func TestScopedCharger_RejectsUnsupportedRail(t *testing.T) {
 		AmountCents:     123,
 		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "ccbill",
+		Instrument:      frozenInstrumentOf(t, pool, ctx, pm),
 	})
 	require.ErrorContains(t, err, "does not support invoice collection")
 }
@@ -477,6 +516,7 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "nmi-scope-ok",
 		Description:     "invoice",
+		Instrument:      frozenInstrumentOf(t, pool, ctx, pm),
 	})
 	require.NoError(t, err)
 	require.Equal(t, string(models.RailNMI), res.Rail)
@@ -510,6 +550,7 @@ func TestScopedCharger_NMIAdapterDeclineReturnsStructuredFailure(t *testing.T) {
 		AmountCents:     123,
 		Currency:        money.DefaultCurrency,
 		IdempotencyKey:  "nmi-decline",
+		Instrument:      frozenInstrumentOf(t, pool, ctx, pm),
 	})
 	require.NoError(t, err)
 	require.True(t, res.Declined)
