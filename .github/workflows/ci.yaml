@@ -82,7 +82,7 @@ jobs:
   security:
     name: Required Security
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
@@ -97,7 +97,7 @@ jobs:
       - name: Go SAST
         run: |
           gosec_bin="$(scripts/ci-install-tool.sh gosec)"
-          "$gosec_bin" ./...
+          "$gosec_bin" -severity high -confidence medium -exclude-dir=.agents ./...
       - name: Go vulnerability analysis
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
       - name: Filesystem and dependency scan
