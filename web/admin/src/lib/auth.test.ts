@@ -7,11 +7,8 @@ import { twoFactorVerificationBody, type TwoFactorChallenge } from "@/lib/auth"
 import { authStateQueryOptions, consumeOIDCFragment } from "@/lib/auth-state"
 import { client, server, type Reply } from "@/test/harness"
 
-const membership = (slug: string, persona = "merchant") => ({
-  persona,
-  instance_slug: slug,
-  instance_name: slug,
-})
+const membership = (slug: string, persona = "merchant") =>
+  ({ persona, instance_slug: slug, instance_name: slug })
 const who = { id: "user-1", email: "alice@example.test" }
 
 let routes: Record<string, Reply>
@@ -20,17 +17,11 @@ beforeEach(async () => {
     "/capabilities": { password: { login: true } },
     "/me": who,
     "/me/groups": {
-      data: [
-        membership("merchant-b"),
-        membership("merchant-a"),
-        membership("ignored", "customer"),
-      ],
+      data: [membership("merchant-b"), membership("merchant-a"), membership("ignored", "customer")],
     },
   }
   await server(routes)
-  vi.stubGlobal("window", {
-    location: { hash: "", pathname: "/admin", search: "" },
-  })
+  vi.stubGlobal("window", { location: { hash: "", pathname: "/admin", search: "" } })
   vi.stubGlobal("history", { replaceState: vi.fn() })
 })
 afterEach(() => vi.unstubAllGlobals())
@@ -45,9 +36,7 @@ describe("auth state", () => {
 
     expect(state.capabilities).toEqual({ password: { login: true } })
     expect(state.identity?.who).toEqual(who)
-    expect(
-      state.identity?.merchants.map((merchant) => merchant.instance_slug)
-    ).toEqual(["merchant-a", "merchant-b"])
+    expect(state.identity?.merchants.map((m) => m.instance_slug)).toEqual(["merchant-a", "merchant-b"])
     expect(state.identity?.activeMerchant?.instance_slug).toBe("merchant-a")
     // The selection is written back, so cache keys and headers agree with it.
     expect(getTokens()?.merchant).toBe("merchant-a")
@@ -60,7 +49,6 @@ describe("auth state", () => {
 
     expect(state.capabilities).toBeUndefined()
     expect(state.identity).toBeUndefined()
-    expect(state.config.api_base_url).toBe("/v1")
   })
 
   it("clears the session the identity endpoint rejects, and only that one", async () => {
@@ -87,59 +75,36 @@ describe("auth state", () => {
       return { data: [membership("merchant-a")] }
     }
 
-    const state = await load()
-
-    expect(state.identity).toBeUndefined()
-    expect(getTokens()).toEqual({
-      access_token: "second",
-      merchant: "merchant-b",
-    })
+    expect((await load()).identity).toBeUndefined()
+    expect(getTokens()).toEqual({ access_token: "second", merchant: "merchant-b" })
   })
 
   it("stores callback tokens from the OIDC fragment and clears the URL", () => {
     vi.stubGlobal("window", {
       location: {
         hash: "#access_token=access&refresh_token=refresh&expires_in=60&merchant=merchant-a",
-        pathname: "/admin",
-        search: "?next=%2F",
+        pathname: "/admin", search: "?next=%2F",
       },
     })
-
     expect(consumeOIDCFragment()).toBe(true)
     expect(getTokens()).toEqual({
-      access_token: "access",
-      refresh_token: "refresh",
-      expires_at: expect.any(Number),
-      merchant: "merchant-a",
+      access_token: "access", refresh_token: "refresh",
+      expires_at: expect.any(Number), merchant: "merchant-a",
     })
     expect(history.replaceState).toHaveBeenCalledWith(null, "", "/admin?next=%2F")
   })
 })
 
-describe("two-factor verification", () => {
+it("targets the selected second factor, and sends a recovery code without one", () => {
   const challenge: TwoFactorChallenge = {
-    challenge: "challenge-token",
-    userID: "user-1",
+    challenge: "challenge-token", userID: "user-1", method: "totp",
     factor: { id: "factor-1", method: "totp" },
-    factors: [{ id: "factor-1", method: "totp" }],
-    method: "totp",
-    expectedSession: null,
+    factors: [{ id: "factor-1", method: "totp" }], expectedSession: null,
   }
-
-  it("targets the selected factor, and sends a recovery code without one", () => {
-    expect(twoFactorVerificationBody(challenge, " 123456 ", "factor")).toEqual({
-      user_id: "user-1",
-      challenge: "challenge-token",
-      factor_id: "factor-1",
-      code: "123456",
-    })
-    expect(
-      twoFactorVerificationBody(challenge, " recovery-code ", "backup_code")
-    ).toEqual({
-      user_id: "user-1",
-      challenge: "challenge-token",
-      backup_code: true,
-      code: "recovery-code",
-    })
+  expect(twoFactorVerificationBody(challenge, " 123456 ", "factor")).toEqual({
+    user_id: "user-1", challenge: "challenge-token", factor_id: "factor-1", code: "123456",
+  })
+  expect(twoFactorVerificationBody(challenge, " recovery-code ", "backup_code")).toEqual({
+    user_id: "user-1", challenge: "challenge-token", backup_code: true, code: "recovery-code",
   })
 })

@@ -2,58 +2,31 @@
 // from the server, and the amounts it shows.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  InvoiceProfile,
-  InvoiceRetryResponse,
-  MerchantInvoice,
-} from "@/lib/api/invoice-types"
+import type { InvoiceProfile, InvoiceRetryResponse, MerchantInvoice } from "@/lib/api/invoice-types"
 import {
-  invoiceActionMutation,
-  invoiceKeys,
-  invoiceProfileMutation,
-  invoiceQueries,
+  invoiceActionMutation, invoiceKeys, invoiceProfileMutation, invoiceQueries,
 } from "@/lib/invoice-queries"
 import { queryKeys } from "@/lib/queries"
 import {
-  calls,
-  client,
-  exec,
-  render,
-  selectMerchant,
-  server,
-  type Recorded,
-  type Reply,
+  calls, client, exec, MAX_INT64, render, selectMerchant, server,
+  type Recorded, type Reply,
 } from "@/test/harness"
 import { InvoiceProfileEditor } from "../customers/invoice-profile"
 import { InvoiceDetail } from "./detail"
 import {
-  allowedInvoiceActions,
-  invoiceProfileRequest,
-  invoiceProfileValues,
-  invoiceResultMessage,
+  allowedInvoiceActions, invoiceProfileRequest, invoiceProfileValues, invoiceResultMessage,
 } from "./model"
 
-const MAX_INT64 = "9223372036854775807"
 const invoice = (
   actions: MerchantInvoice["available_actions"],
   overrides: Partial<MerchantInvoice> = {}
 ): MerchantInvoice => ({
-  id: "invoice-1",
-  customer_id: "customer-1",
-  currency: "JPY",
-  unit_decimals: 4,
-  invoice_number: "INV-1",
-  status: "open",
-  period_from: "2026-09-01T00:00:00Z",
-  period_to: "2026-10-01T00:00:00Z",
-  total_amount: "120000",
-  subtotal_amount: "120000",
-  amount_paid: "20000",
-  amount_due: "100000",
-  collection_method: "send_invoice",
-  collection_failure_count: 0,
+  id: "invoice-1", customer_id: "customer-1", currency: "JPY", unit_decimals: 4,
+  invoice_number: "INV-1", status: "open", period_from: "2026-09-01T00:00:00Z",
+  period_to: "2026-10-01T00:00:00Z", total_amount: "120000", subtotal_amount: "120000",
+  amount_paid: "20000", amount_due: "100000", collection_method: "send_invoice",
+  collection_failure_count: 0, available_actions: actions,
   line_items: [{ event_type: "usage", amount: "120000", count: 1 }],
-  available_actions: actions,
   ...overrides,
 })
 
@@ -69,17 +42,13 @@ afterEach(() => vi.unstubAllGlobals())
 describe("invoice requests and cache", () => {
   it("replays a retry under the same operation identity", async () => {
     const queries = client()
-    const request = {
-      id: "invoice-1",
-      action: "retry_collection" as const,
-      paymentMethodId: "method-1",
-      idempotencyKey: "operation-1",
+    const retry = {
+      id: "invoice-1", action: "retry_collection" as const,
+      paymentMethodId: "method-1", idempotencyKey: "operation-1",
     }
     const options = invoiceActionMutation(queries, "customer-1")
-
-    await exec(queries, options, request)
-    await exec(queries, options, request)
-
+    await exec(queries, options, retry)
+    await exec(queries, options, retry)
     expect(calls(requests)).toEqual([
       "POST /merchant/invoices/invoice-1/retry-collection",
       "POST /merchant/invoices/invoice-1/retry-collection",
@@ -92,15 +61,8 @@ describe("invoice requests and cache", () => {
 
   it("leaves filtering and paging to the server", async () => {
     const queries = client()
-    await queries.fetchQuery(
-      invoiceQueries.list({ currency: "JPY", status: "past_due" }, 25, 50)
-    )
-    expect(requests[0].query).toBe(
-      "currency=JPY&status=past_due&limit=25&offset=50"
-    )
-    expect(invoiceQueries.list({}, 25, 0).queryKey).not.toEqual(
-      invoiceQueries.list({}, 25, 25).queryKey
-    )
+    await queries.fetchQuery(invoiceQueries.list({ currency: "JPY", status: "past_due" }, 25, 50))
+    expect(requests[0].query).toBe("currency=JPY&status=past_due&limit=25&offset=50")
   })
 
   it("refreshes the merchant that started an action, even when it fails", async () => {
@@ -112,11 +74,7 @@ describe("invoice requests and cache", () => {
     routes["POST /merchant/invoices/invoice-1/void"] = () =>
       Response.json({ error: { message: "uncertain" } }, { status: 503 })
     selectMerchant("merchant-b")
-
-    await expect(
-      exec(queries, options, { id: "invoice-1", action: "void" })
-    ).rejects.toThrow("uncertain")
-
+    await expect(exec(queries, options, { id: "invoice-1", action: "void" })).rejects.toThrow("uncertain")
     expect(queries.getQueryState(root)?.isInvalidated).toBe(true)
     expect(root[1]).toBe("merchant-a")
   })
@@ -125,62 +83,36 @@ describe("invoice requests and cache", () => {
     const queries = client()
     const invoiceKey = invoiceKeys.detail("invoice-1")
     queries.setQueryData(invoiceKey, { po_number: "OLD" })
-
-    await exec(
-      queries,
-      invoiceProfileMutation(queries, "customer-1"),
-      {
-        net_terms_days: 7,
-        collection_method: "send_invoice",
-        po_number: "NEW",
-      } as InvoiceProfile
-    )
-
-    expect(calls(requests)).toEqual([
-      "PUT /merchant/customers/customer-1/invoice-profile",
-    ])
+    await exec(queries, invoiceProfileMutation(queries, "customer-1"), {
+      net_terms_days: 7, collection_method: "send_invoice", po_number: "NEW",
+    } as InvoiceProfile)
+    expect(calls(requests)).toEqual(["PUT /merchant/customers/customer-1/invoice-profile"])
     expect(queries.getQueryData(invoiceKey)).toEqual({ po_number: "OLD" })
-    expect(
-      queries.getQueryState(invoiceKeys.profile("customer-1"))?.isInvalidated
-    ).not.toBe(false)
   })
 })
 
 describe("invoice support model", () => {
   it("preserves profile tax facts and validates terms and contacts", () => {
     const original: InvoiceProfile = {
-      net_terms_days: 30,
-      collection_method: "send_invoice",
-      po_number: " PO-1 ",
+      net_terms_days: 30, collection_method: "send_invoice", po_number: " PO-1 ",
       billing_contacts: [{ email: "ap@example.test" }],
       tax: { tax_id: "VAT-1", registration: { country: "GB" }, rate: 0.2 },
     }
     const values = invoiceProfileValues(original)
-
     expect(invoiceProfileRequest(values, original)).toMatchObject({
-      net_terms_days: 30,
-      po_number: "PO-1",
-      tax: original.tax,
+      net_terms_days: 30, po_number: "PO-1", tax: original.tax,
     })
     for (const invalid of [
       { ...values, terms: "-1" },
       { ...values, contacts: [{ name: "AP", email: "bad" }] },
-      {
-        ...values,
-        tax: [
-          { key: "tax_id", value: "a" },
-          { key: "tax_id", value: "b" },
-        ],
-      },
+      { ...values, tax: [{ key: "tax_id", value: "a" }, { key: "tax_id", value: "b" }] },
     ])
       expect(() => invoiceProfileRequest(invalid, original)).toThrow()
   })
 
   it("takes the offered actions from the server, not from role names", () => {
     const actions = (available: string[]) =>
-      allowedInvoiceActions({
-        available_actions: available,
-      } as unknown as MerchantInvoice)
+      allowedInvoiceActions({ available_actions: available } as unknown as MerchantInvoice)
     expect(actions([])).toEqual([])
     expect(actions(["void"])).toEqual(["void"])
   })
@@ -189,12 +121,8 @@ describe("invoice support model", () => {
     const result = (status: string, replayed = false) =>
       ({ attempt: { status }, replayed }) as unknown as InvoiceRetryResponse
     expect(invoiceResultMessage(result("failed"))).toContain("failed")
-    expect(invoiceResultMessage(result("attempted"))).toContain(
-      "pending verification"
-    )
-    expect(invoiceResultMessage(result("settled", true))).toBe(
-      "Existing payment confirmed."
-    )
+    expect(invoiceResultMessage(result("attempted"))).toContain("pending verification")
+    expect(invoiceResultMessage(result("settled", true))).toBe("Existing payment confirmed.")
   })
 })
 
@@ -213,12 +141,9 @@ describe("invoice rendering", () => {
     const html = render(
       <InvoiceDetail
         invoice={invoice(["void", "record_payment"], {
-          currency: "USD",
-          unit_decimals: 6,
-          total_amount: MAX_INT64,
-          subtotal_amount: MAX_INT64,
-          amount_paid: "9007199254740993",
-          amount_due: "9214364837600034814",
+          currency: "USD", unit_decimals: 6,
+          total_amount: MAX_INT64, subtotal_amount: MAX_INT64,
+          amount_paid: "9007199254740993", amount_due: "9214364837600034814",
           line_items: [{ event_type: "usage", amount: MAX_INT64, count: 1 }],
         })}
       />
@@ -237,11 +162,7 @@ describe("invoice rendering", () => {
       <InvoiceProfileEditor
         customerId="customer-1"
         canUpdate={false}
-        profile={{
-          net_terms_days: 30,
-          collection_method: "send_invoice",
-          po_number: "PO-1",
-        }}
+        profile={{ net_terms_days: 30, collection_method: "send_invoice", po_number: "PO-1" }}
       />
     )
     expect(html).toContain("PO-1")

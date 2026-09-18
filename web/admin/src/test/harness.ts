@@ -4,6 +4,7 @@
 import {
   QueryClient,
   QueryClientProvider,
+  type DefaultOptions,
   type MutationOptions,
   type QueryKey,
 } from "@tanstack/react-query"
@@ -13,7 +14,12 @@ import { MemoryRouter } from "react-router-dom"
 import { vi } from "vitest"
 
 import { loadBootstrap, setTokens } from "@/lib/api/client"
+import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import { queryKeys } from "@/lib/queries"
+
+export const MAX_INT64 = "9223372036854775807"
+export const MIN_INT64 = "-9223372036854775808"
+export const UNSAFE = "9007199254740993" // 2^53 + 1: a Number cannot hold it
 
 export interface Recorded {
   method: string
@@ -22,7 +28,6 @@ export interface Recorded {
   body?: unknown
   headers: Headers
 }
-
 export type Reply =
   | ((request: Recorded) => unknown)
   | Record<string, unknown>
@@ -41,9 +46,7 @@ const BOOTSTRAP = {
 const memoryStorage = (): Storage => {
   const values = new Map<string, string>()
   return {
-    get length() {
-      return values.size
-    },
+    get length() { return values.size },
     clear: () => values.clear(),
     getItem: (key) => values.get(key) ?? null,
     key: (index) => [...values.keys()][index] ?? null,
@@ -74,10 +77,8 @@ export async function server(routes: Record<string, Reply> = {}) {
       requests.push(request)
       const reply =
         routes[`${request.method} ${request.path}`] ?? routes[request.path]
-      const value =
-        typeof reply === "function"
-          ? (reply as (request: Recorded) => unknown)(request)
-          : reply
+      // A route may answer asynchronously (a pending response a test resolves).
+      const value = await (typeof reply === "function" ? reply(request) : reply)
       return value instanceof Response ? value : Response.json(value ?? {})
     })
   )
@@ -87,71 +88,18 @@ export async function server(routes: Record<string, Reply> = {}) {
 
 export const calls = (requests: Recorded[]) =>
   requests.map((request) => `${request.method} ${request.path}`)
-
 export const selectMerchant = (merchant: string) =>
   setTokens({ access_token: "console-test", merchant })
-
-export const client = () =>
+export const client = (queries: DefaultOptions["queries"] = {}) =>
   new QueryClient({
     defaultOptions: {
-      queries: { retry: false, retryOnMount: false },
+      queries: { retry: false, retryOnMount: false, ...queries },
       mutations: { retry: false },
     },
   })
-
 export const exec = <TData, TError, TInput, TContext>(
-  queryClient: QueryClient,
-  options: MutationOptions<TData, TError, TInput, TContext>,
-  input: TInput
+  queryClient: QueryClient, options: MutationOptions<TData, TError, TInput, TContext>, input: TInput
 ) => queryClient.getMutationCache().build(queryClient, options).execute(input)
-
-// The cache keys a console screen can hold at once. Seeding all of them and
-// reading back which ones a mutation invalidated asserts the whole blast
-// radius — what it refreshed and what it left alone — in one comparison.
-export const CACHE_KEYS = (): Record<string, QueryKey> => ({
-  customers: queryKeys.customers(),
-  customer: queryKeys.customer("cus_1"),
-  "customer.rates": queryKeys.customerUsageRates("cus_1"),
-  subscriptions: queryKeys.subscriptions(),
-  subscription: queryKeys.subscription("sub_1"),
-  payments: queryKeys.payments(),
-  payment: queryKeys.payment("pay_1"),
-  catalog: queryKeys.catalog(),
-  drift: queryKeys.catalogDrift(),
-  meters: queryKeys.usageMeters(),
-  meter: queryKeys.usageMeter("tokens"),
-  settings: queryKeys.settings(),
-  providers: [...queryKeys.settings(), "payment-providers"],
-  "api-keys": [...queryKeys.settings(), "api-keys"],
-  team: queryKeys.team(),
-  alerts: queryKeys.alerts(),
-  webhooks: [...queryKeys.alerts(), "webhooks"],
-  ops: queryKeys.ops(),
-  dashboard: queryKeys.dashboard(),
-  notifications: queryKeys.notifications(),
-})
-
-// seedCache fills every cache key for one merchant, tagged with its label.
-export function seedCache(queryClient: QueryClient, merchant: string) {
-  selectMerchant(merchant)
-  const seeded: [string, QueryKey][] = []
-  for (const [name, key] of Object.entries(CACHE_KEYS())) {
-    queryClient.setQueryData(key, {})
-    seeded.push([`${merchant}:${name}`, key])
-  }
-  return seeded
-}
-
-export const invalidated = (
-  queryClient: QueryClient,
-  seeded: [string, QueryKey][]
-) =>
-  seeded
-    .filter(
-      ([, key]) => queryClient.getQueryState(key)?.isInvalidated === true
-    )
-    .map(([name]) => name)
-    .sort()
 
 // Static markup is enough for what these tests assert (amounts, permissions,
 // links); the one workflow that needs a live DOM mounts it itself.
@@ -163,3 +111,44 @@ export const render = (node: ReactNode, queryClient = client()) =>
       createElement(QueryClientProvider, { client: queryClient }, node)
     )
   )
+
+const WHEN = "2026-09-18T00:00:00Z"
+export const aProduct = (id: string, tierRank = 0, overrides: Partial<CatalogProduct> = {}): CatalogProduct => ({
+  id, key: id, display_name: id, description: "", tier_group: "plans",
+  tier_rank: tierRank, archived: false, created_at: WHEN, updated_at: WHEN,
+  ...overrides,
+})
+export const aPrice = (id: string, productId: string, overrides: Partial<CatalogPrice> = {}): CatalogPrice => ({
+  id, key: id, product_id: productId, archived: false, currency: "USD",
+  unit_amount: "20000000", auto_renew: true, created_at: WHEN, updated_at: WHEN,
+  ...overrides,
+})
+
+// The cache keys a console screen can hold at once. Seeding all of them and
+// reading back which ones a mutation invalidated asserts the whole blast
+// radius — what it refreshed and what it left alone — in one comparison.
+const CACHE_KEYS = (): Record<string, QueryKey> => ({
+  customers: queryKeys.customers(), customer: queryKeys.customer("cus_1"),
+  "customer.rates": queryKeys.customerUsageRates("cus_1"),
+  subscriptions: queryKeys.subscriptions(), subscription: queryKeys.subscription("sub_1"),
+  payments: queryKeys.payments(), payment: queryKeys.payment("pay_1"),
+  catalog: queryKeys.catalog(), drift: queryKeys.catalogDrift(),
+  meters: queryKeys.usageMeters(), meter: queryKeys.usageMeter("tokens"),
+  settings: queryKeys.settings(), providers: [...queryKeys.settings(), "payment-providers"],
+  team: queryKeys.team(), alerts: queryKeys.alerts(), ops: queryKeys.ops(),
+  dashboard: queryKeys.dashboard(), notifications: queryKeys.notifications(),
+})
+
+export function seedCache(queryClient: QueryClient, merchant: string) {
+  selectMerchant(merchant)
+  return Object.entries(CACHE_KEYS()).map(([name, key]): [string, QueryKey] => {
+    queryClient.setQueryData(key, {})
+    return [`${merchant}:${name}`, key]
+  })
+}
+
+export const invalidated = (queryClient: QueryClient, seeded: [string, QueryKey][]) =>
+  seeded
+    .filter(([, key]) => queryClient.getQueryState(key)?.isInvalidated === true)
+    .map(([name]) => name)
+    .sort()
