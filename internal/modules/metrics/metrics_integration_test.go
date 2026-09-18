@@ -396,9 +396,9 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 	// filter takes exactly that spelling: the bare UUID is not an id.
 	byProduct := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"product_id", "price_id"}, Range: juneQ}))
 	product, price := openrails.ProductID(productA).String(), openrails.PriceID(pricePM).String()
-	require.Equal(t, int64(20_000_000), cell(t, byProduct, map[string]string{"product_id": product, "price_id": price}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, byProduct, map[string]string{"product_id": product, "price_id": price}, "gross_revenue"))
 	filtered := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {price}}}))
-	require.Equal(t, int64(20_000_000), cell(t, filtered, map[string]string{}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, filtered, map[string]string{}, "gross_revenue"))
 	_, ve := metrics.Validate(usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {pricePM.String()}}}))
 	require.NotNil(t, ve)
 	require.Equal(t, "invalid_filter_value", ve.Errors[0].Code)
