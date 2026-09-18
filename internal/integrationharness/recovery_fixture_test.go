@@ -419,3 +419,22 @@ func salesForOrder(g *FakeNMIGateway, orderID string) []NMISale {
 	}
 	return out
 }
+
+// FlipCustody moves the instrument to a custodian the way the #297 remap
+// does: the provider account and the old vault reference stay, custody,
+// rail_method_ref and charge_via move. A rebill cannot be sent on it.
+func (h *Harness) FlipCustody(f SubscriptionFixture) {
+	h.t.Helper()
+	pool := h.sharedPool()
+	custodian := dbtest.EnsureTestCustodian(h.ctx, h.t, pool, f.Merchant.UUID())
+	_, err := pool.Exec(h.ctx, `
+		UPDATE openrails.payment_methods
+		   SET custodian = 'basis_theory', custodian_id = $2, rail_method_ref = $3, charge_via = 'pan_proxy'
+		 WHERE id = $1`, f.Method, custodian, "bt-token-"+uuid.NewString()[:8])
+	require.NoError(h.t, err)
+	t := h.t
+	t.Cleanup(func() {
+		_, err := pool.Exec(context.Background(), `UPDATE openrails.payment_methods SET custodian = 'psp', custodian_id = NULL WHERE id = $1`, f.Method)
+		assertNoCleanupError(t, err, "restore custody")
+	})
+}

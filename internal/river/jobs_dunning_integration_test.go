@@ -101,6 +101,7 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 		CustomerID:           tenantSubjectID,
 		Rail:                 models.RailNMI,
 		PspID:                pspID,
+		Custodian:            models.CustodianPSP, // what CreatePaymentMethod writes
 		RailCustomerRef:      "vault_" + uuid.New().String(),
 		RailMethodRef:        billingID,
 		RebillDriver:         "openrails", // #682: legacy-imported shape, OpenRails drives rebills
