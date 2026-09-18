@@ -11,10 +11,6 @@ import (
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Retired feature tables may exist before #438 or be absent afterward. Any
-// remaining merchant rows refuse export; v1 never silently strands their state.
-var retiredTables = []string{"product_includes", "catalog_credit_balances", "catalog_credit_purchase_prices", "catalog_usage_limits", "custom_credit_types", "product_usage_limit_bindings", "product_usage_limits"}
-
 // Every billing-schema table has an explicit decision. These are deployment/operations
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
@@ -58,14 +54,13 @@ var excludedColumns = map[string]string{
 	"provider_billing_observations":   "merchant_id operation_id observation_id normalized_query query_start query_end raw_body_available raw_body_bytes raw_body_digest normalized_records_bytes normalized_records_digest provider_cost_usd_micros has_negative_record refusal_kind covers_lifetime qualification_reason observed_at",
 }
 
-// Omitted columns are either reconstructed by PostgreSQL, retired by #438,
-// deployment credential watermarks, or explicitly excluded raw/operational
+// Omitted columns are either reconstructed by PostgreSQL, deployment
+// credential watermarks, or explicitly excluded raw/operational
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
 	"custodians":        "credential_versions",
-	"products":          "credits_spec",
-	"subscriptions":     "credits_spec_snapshot gateway_response destructive_run_class",
-	"payments":          "credits_spec_snapshot metadata discount_metadata destructive_run_class",
+	"subscriptions":     "gateway_response destructive_run_class",
+	"payments":          "metadata discount_metadata destructive_run_class",
 	"payment_methods":   "metadata",
 	"checkout_sessions": "destructive_run_class",
 	"entitlements":      "period destructive_run_class",
@@ -81,9 +76,6 @@ func checkSchema(ctx context.Context, tx pgx.Tx) error {
 		known[p.Name] = true
 	}
 	for t := range excludedTables {
-		known[t] = true
-	}
-	for _, t := range retiredTables {
 		known[t] = true
 	}
 	rows, err := tx.Query(ctx, `SELECT c.relname,c.relrowsecurity AND c.relforcerowsecurity,a.attname IS NOT NULL FROM pg_class c LEFT JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
@@ -183,12 +175,6 @@ func checkColumns(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-func exists(ctx context.Context, tx pgx.Tx, table string) (bool, error) {
-	var found bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_class WHERE relname=$1 AND relnamespace=(SELECT relnamespace FROM pg_class WHERE oid='openrails.merchants'::regclass))`, table).Scan(&found)
-	return found, err
-}
-
 func refuseRows(ctx context.Context, tx pgx.Tx, id merchant.ID, table, predicate string) error {
 	var count int64
 	if err := tx.QueryRow(ctx, "SELECT count(*) FROM openrails."+table+" WHERE merchant_id=$1 AND ("+predicate+")", id.UUID()).Scan(&count); err != nil {
@@ -201,17 +187,6 @@ func refuseRows(ctx context.Context, tx pgx.Tx, id merchant.ID, table, predicate
 }
 
 func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
-	for _, t := range retiredTables {
-		found, err := exists(ctx, tx, t)
-		if err != nil {
-			return err
-		}
-		if found {
-			if err := refuseRows(ctx, tx, id, t, "true"); err != nil {
-				return err
-			}
-		}
-	}
 	checks := []struct{ table, predicate string }{
 		{"operation_authorizations", "true"}, {"provider_billing_qualifications", "true"}, {"provider_billing_observations", "true"},
 		{"destructive_run_before_images", "true"}, {"account_updater_batches", "true"},
@@ -223,9 +198,6 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		{"maintenance_runs", "status='running' OR kind NOT IN ('billing_restore','reconciliation','prune','converge_enforce','merchant_purge')"},
 		{"maintenance_runs", "kind IN ('prune','converge_enforce','merchant_purge') AND (coverage IS NOT NULL OR affected IS NOT NULL OR summary IS NOT NULL OR inventory_manifest IS NOT NULL OR inventory_total_rows IS NOT NULL)"},
 		{"psps", "jsonb_typeof(evidence)<>'object' OR evidence - ARRAY['settings','signer','public_config','source','credential_versions','credentials_validated','api_key'] <> '{}'::jsonb"},
-		{"products", "coalesce(to_jsonb(products)->'credits_spec','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb,'[]'::jsonb)"},
-		{"subscriptions", "coalesce(to_jsonb(subscriptions)->'credits_spec_snapshot','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb,'[]'::jsonb)"},
-		{"payments", "coalesce(to_jsonb(payments)->'credits_spec_snapshot','null'::jsonb) NOT IN ('null'::jsonb,'{}'::jsonb,'[]'::jsonb)"},
 	}
 	for _, c := range checks {
 		if err := refuseRows(ctx, tx, id, c.table, c.predicate); err != nil {

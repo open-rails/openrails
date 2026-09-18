@@ -19,22 +19,20 @@ ledger accounts/transfers, invoices, grants, entitlements, admission receipts,
 rating and provider-refresh watermarks, webhook deduplication, acknowledged host
 events, and completed checkout and provider-intent coordinates. Scalar money is
 encoded as decimal strings; nested money contracts use integer JSON tokens.
-Unknown tables (including unscoped tables), unknown columns on retained or
-excluded tables, and unsupported nested shapes refuse export. New schema fields
+The archive targets the current fresh schema only. Unknown tables (including
+unscoped tables), unknown columns on retained or excluded tables, and unsupported
+nested shapes refuse export. New schema fields
 require an explicit portability decision; a list of known table names alone is
 not sufficient coverage.
 
 ## Exclusions and refusals
 
-- The seven retired credit/include tables refuse any merchant rows.
 - Operation authorizations, provider billing qualifications/observations,
   destructive before-images and account updater batches refuse any rows. Their
   opaque evidence has no v1 portable contract; provider formats belong to #1010.
 - Payments, payment methods, usage events and invoice items with nonempty opaque
   metadata refuse export. Payment discount metadata also refuses. Empty/null
   metadata can be reconstructed without discarding a recorded fact.
-- Retired credit specs must be absent/null/empty. Currency values in the retired
-  `credit:` namespace refuse export.
 - Maintenance history retains every prune/converge-enforce/merchant-purge row,
   including unreferenced runs. Nonempty coverage, affected, summary or inventory
   fields refuse. Reconciliation runs are diagnostic and excluded. Other run
