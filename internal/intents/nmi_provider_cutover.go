@@ -550,25 +550,17 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 }
 
 func cutoverPaused(v any) (bool, bool) {
-	switch v := v.(type) {
-	case bool:
-		return v, true
-	case float64:
-		if v == 0 || v == 1 {
-			return v == 1, true
-		}
-	case string:
-		if v == "0" || v == "1" {
-			return v == "1", true
-		}
-	case json.Number:
-		if v == "0" || v == "1" {
-			return v == "1", true
-		}
-	case int:
-		if v == 0 || v == 1 {
-			return v == 1, true
-		}
+	// NMI emits the flag as a boolean, JSON number, or quoted 0/1. Compare
+	// the scalar's JSON spelling; it is never a money or arithmetic value.
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return false, false
+	}
+	switch string(raw) {
+	case "true", "1", `"1"`:
+		return true, true
+	case "false", "0", `"0"`:
+		return false, true
 	}
 	return false, false
 }
