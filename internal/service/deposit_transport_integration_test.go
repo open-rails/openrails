@@ -49,7 +49,7 @@ func TestDepositTermsThroughEmbeddedAndRemoteClients(t *testing.T) {
 			require.NoError(t, err)
 			first.Replayed = true
 			require.Equal(t, first, replay)
-			read, err := client.GetDeposit(ctx, uuid.UUID(payer).String(), in.SourceID)
+			read, err := client.GetDeposit(ctx, openrails.CustomerID(uuid.UUID(payer)), in.SourceID)
 			require.NoError(t, err)
 			require.Equal(t, first, read)
 		})

@@ -1,5 +1,11 @@
 package metrics
 
+import (
+	"fmt"
+
+	"github.com/open-rails/openrails"
+)
+
 // The registry is the single source of truth for the metrics vocabulary:
 // it drives validation, SQL compilation, /schema, and the LLM context doc.
 // SQL text comes ONLY from fragments declared here; client strings are bind
@@ -78,6 +84,24 @@ type Dimension struct {
 	Name        string
 	Description string
 	Values      []string // closed vocabulary when non-nil (validated on filters)
+	// Parse validates and canonicalizes one filter value (typed ids); nil
+	// accepts any string.
+	Parse func(string) (string, error)
+}
+
+// typedDimValue accepts exactly the typed id's wire spelling; the bare UUID
+// or another kind's prefix is an invalid filter value.
+func typedDimValue(parse func(string) (fmt.Stringer, error)) func(string) (string, error) {
+	return func(raw string) (string, error) {
+		id, err := parse(raw)
+		if err != nil {
+			return "", err
+		}
+		if id.String() == "" {
+			return "", fmt.Errorf("empty id")
+		}
+		return id.String(), nil
+	}
 }
 
 const (
@@ -116,12 +140,12 @@ var Dimensions = []Dimension{
 	{Name: "rail", Description: "payment rail (e.g. stripe, mobius, ccbill, solana)"},
 	{Name: "rail_account", Description: "operator-declared PSP label; VAMP thresholds apply per account"},
 	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
-	{Name: "product_id", Description: "product UUID"},
-	{Name: "price_id", Description: "price UUID"},
+	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseProductID(s) })},
+	{Name: "price_id", Description: "price id (price_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParsePriceID(s) })},
 	{Name: "billing_cycle", Description: "price cadence: daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "cancelled", "unknown"}},
-	{Name: "payer", Description: "paying customer UUID (usage/admission measures)"},
+	{Name: "payer", Description: "paying customer id (plain UUID; usage/admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseCustomerID(s) })},
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
@@ -150,8 +174,8 @@ var families = map[Family]familySpec{
 			"rail":           `p.rail`,
 			"rail_account":   `COALESCE(rma.account_id, 'unknown')`,
 			"stream":         streamExpr,
-			"product_id":     `COALESCE(pr.product_id::text, '')`,
-			"price_id":       `p.price_id::text`,
+			"product_id":     `COALESCE('prod_' || pr.product_id::text, '')`,
+			"price_id":       `'price_' || p.price_id::text`,
 			"billing_cycle":  billingCycleExpr,
 			"card_brand":     `COALESCE(p.card_brand, '')`,
 			"token_type":     `COALESCE(p.token_type, 'unknown')`,
@@ -173,8 +197,8 @@ var families = map[Family]familySpec{
 			"currency":      `COALESCE(pr.currency, '')`,
 			"rail":          `s.rail`,
 			"rail_account":  `COALESCE(rma.account_id, 'unknown')`,
-			"product_id":    `s.product_id::text`,
-			"price_id":      `COALESCE(s.price_id::text, '')`,
+			"product_id":    `'prod_' || s.product_id::text`,
+			"price_id":      `COALESCE('price_' || s.price_id::text, '')`,
 			"billing_cycle": billingCycleExpr,
 			"subscriber_type": `CASE WHEN EXISTS (
 				SELECT 1 FROM openrails.subscriptions s2
@@ -195,8 +219,8 @@ var families = map[Family]familySpec{
 			"currency":     `COALESCE(pr.currency, '')`,
 			"rail":         `s.rail`,
 			"rail_account": `COALESCE(rma.account_id, 'unknown')`,
-			"product_id":   `s.product_id::text`,
-			"price_id":     `COALESCE(s.price_id::text, '')`,
+			"product_id":   `'prod_' || s.product_id::text`,
+			"price_id":     `COALESCE('price_' || s.price_id::text, '')`,
 			"cancel_type":  `COALESCE(s.cancel_type, 'unknown')`,
 		},
 		BaseWhere: `s.cancelled_at IS NOT NULL`,
@@ -207,8 +231,8 @@ var families = map[Family]familySpec{
 		TimeExpr: `s.ended_at`,
 		DimExprs: map[string]string{
 			"rail":        `s.rail`,
-			"product_id":  `s.product_id::text`,
-			"price_id":    `COALESCE(s.price_id::text, '')`,
+			"product_id":  `'prod_' || s.product_id::text`,
+			"price_id":    `COALESCE('price_' || s.price_id::text, '')`,
 			"cancel_type": `COALESCE(s.cancel_type, 'unknown')`,
 		},
 		BaseWhere: `s.ended_at IS NOT NULL`,
@@ -219,7 +243,7 @@ var families = map[Family]familySpec{
 		TimeExpr: `g.created_at`,
 		DimExprs: map[string]string{
 			"currency":   `g.currency`,
-			"product_id": `COALESCE(g.product_id::text, '')`,
+			"product_id": `COALESCE('prod_' || g.product_id::text, '')`,
 			"payer":      `g.customer_id::text`,
 		},
 		BaseWhere: `g.kind = 'credit' AND g.event = 'grant' AND g.source_type = 'purchase'`,
@@ -264,8 +288,8 @@ var families = map[Family]familySpec{
 			"currency":      `COALESCE(pr.currency, '')`,
 			"rail":          `s.rail`,
 			"rail_account":  `COALESCE(rma.account_id, 'unknown')`,
-			"product_id":    `s.product_id::text`,
-			"price_id":      `COALESCE(s.price_id::text, '')`,
+			"product_id":    `'prod_' || s.product_id::text`,
+			"price_id":      `COALESCE('price_' || s.price_id::text, '')`,
 			"billing_cycle": billingCycleExpr,
 			"status":        `s.status::text`,
 		},

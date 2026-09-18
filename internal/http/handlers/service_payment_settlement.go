@@ -3,19 +3,19 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/service"
 )
 
 func ServicePaymentSettlementStatus(r *httprequest.Request) {
-	customerID, err := uuid.Parse(r.Param("customer_id"))
-	if err != nil || customerID == uuid.Nil {
+	customerID, err := openrails.ParseCustomerID(r.Param("customer_id"))
+	if err != nil || customerID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "customer id is required")
 		return
 	}
-	priceID, err := uuid.Parse(r.Query("price_id"))
-	if err != nil || priceID == uuid.Nil {
+	priceID, err := openrails.ParsePriceID(r.Query("price_id"))
+	if err != nil || priceID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "price id is required")
 		return
 	}
@@ -24,7 +24,7 @@ func ServicePaymentSettlementStatus(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "payment settlement status unavailable")
 		return
 	}
-	settled, err := svc.HasSettledPayment(r.Request.Context(), customerID, priceID)
+	settled, err := svc.HasSettledPayment(r.Request.Context(), customerID.UUID(), priceID.UUID())
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "payment settlement status unavailable")
 		return

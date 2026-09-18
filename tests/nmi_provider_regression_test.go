@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -33,7 +35,7 @@ func TestCheckoutSupportsConfiguredSecondaryNMIProvider(t *testing.T) {
 	token := suite.MintUserToken(userID, email)
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail":          provider,
 			"payment_token": "tok_test_123",

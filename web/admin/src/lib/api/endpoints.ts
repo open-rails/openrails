@@ -164,7 +164,7 @@ export const createOffChannelPayment = (
 export interface SubscriptionFilters {
   status?: string
   rail?: string
-  user_id?: string
+  customer_id?: string
   price_id?: string
   sort_by?: string
   sort_order?: string
@@ -227,7 +227,7 @@ export const changeSubscriptionTier = (id: string, priceId: string) =>
 // --- Payments ---
 
 export interface PaymentFilters {
-  user_id?: string
+  customer_id?: string
   rail?: string
   subscription_id?: string
   transaction_id?: string

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -21,7 +22,7 @@ import (
 )
 
 type GetSubscriptionsFilters struct {
-	UserID          string     `form:"user_id"`
+	CustomerID      string     `form:"customer_id"`
 	Status          string     `form:"status"`
 	PriceID         uuid.UUID  `form:"price_id"`
 	Rail            string     `form:"rail"`
@@ -121,9 +122,7 @@ func (s *SubscriptionService) CancelUserSubscription(ctx context.Context, userID
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		EventType:  models.NotificationPremiumEnded,
-		Data: map[string]any{
-			"reason": "user_cancel",
-		},
+		Data:       openrails.NotificationData{Reason: string(PremiumEndReasonUserCancel)},
 	}
 	if err := s.notificationRepo.Create(ctx, notification); err != nil {
 		log.WithError(err).Error("failed to create cancellation notification")
@@ -253,7 +252,7 @@ func (s *SubscriptionService) ReplaceForTierChange(ctx context.Context, oldSub, 
 func (s *SubscriptionService) GetSubscribers(ctx context.Context, params query.QueryOptions[GetSubscriptionsFilters]) ([]*models.Subscription, int64, error) {
 	repoParams := query.QueryOptions[SubscriptionFilters]{
 		Filters: SubscriptionFilters{
-			UserID:          params.Filters.UserID,
+			UserID:          params.Filters.CustomerID,
 			Status:          params.Filters.Status,
 			PriceID:         params.Filters.PriceID,
 			Rail:            params.Filters.Rail,

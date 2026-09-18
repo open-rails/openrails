@@ -84,7 +84,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	for _, occurred := range []time.Time{periodFrom.Add(3 * 24 * time.Hour), periodTo.Add(-time.Hour)} {
 		occurred := occurred
 		require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
-			CustomerID: payer.String(), Invoker: payer.String(), Currency: "USD", EventType: eventType,
+			CustomerID: openrails.CustomerID(payer), Invoker: payer.String(), Currency: "USD", EventType: eventType,
 			Dimensions: map[string]int64{"amount_micros": settled},
 			Source:     "host-settlement", SourceID: uuid.NewString(), OccurredAt: &occurred,
 		}))
@@ -107,7 +107,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	}
 	listInvoices := func() []openrails.MerchantInvoiceDTO {
 		t.Helper()
-		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: &payer}, 10, 0)
+		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: openrails.CustomerID(payer)}, 10, 0)
 		require.NoError(t, err)
 		require.EqualValues(t, len(invoices), total)
 		return invoices

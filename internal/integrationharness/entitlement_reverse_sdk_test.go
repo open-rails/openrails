@@ -4,7 +4,6 @@ package integrationharness
 
 import (
 	"context"
-	"sort"
 	"testing"
 	"time"
 
@@ -54,8 +53,5 @@ func TestEntitlementReverseLookupSDKClient(t *testing.T) {
 
 	got, err := client.ListCustomersWithEntitlement(ctx, premium, now)
 	require.NoError(t, err)
-	sort.Strings(got)
-	want := []string{a.String(), b.String()}
-	sort.Strings(want)
-	require.Equal(t, want, got)
+	require.ElementsMatch(t, []openrails.CustomerID{openrails.CustomerID(a), openrails.CustomerID(b)}, got)
 }

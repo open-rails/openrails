@@ -34,11 +34,11 @@ type PlanMigrationRequest struct {
 // PlanMigrationOutcome classifies one subscription:
 // scheduled, applied_immediately, skipped or blocked.
 type PlanMigrationOutcome struct {
-	SubscriptionID uuid.UUID  `json:"subscription_id"`
-	RepriceID      *uuid.UUID `json:"reprice_id,omitempty"`
-	Rail           string     `json:"rail"`
-	Disposition    string     `json:"disposition"`
-	Reason         string     `json:"reason,omitempty"`
+	SubscriptionID SubscriptionID `json:"subscription_id"`
+	RepriceID      *uuid.UUID     `json:"reprice_id,omitempty"`
+	Rail           string         `json:"rail"`
+	Disposition    string         `json:"disposition"`
+	Reason         string         `json:"reason,omitempty"`
 }
 
 // PlanMigrationRailCounts summarizes what each rail can migrate server-side.
@@ -52,8 +52,8 @@ type PlanMigrationRailCounts struct {
 // and create.
 type PlanMigrationResult struct {
 	BatchID        *uuid.UUID                          `json:"batch_id,omitempty"`
-	SourcePriceID  uuid.UUID                           `json:"source_price_id"`
-	TargetPriceID  uuid.UUID                           `json:"target_price_id"`
+	SourcePriceID  PriceID                             `json:"source_price_id"`
+	TargetPriceID  PriceID                             `json:"target_price_id"`
 	EffectiveAt    time.Time                           `json:"effective_at"`
 	FallbackPolicy string                              `json:"fallback_policy"`
 	Matched        int                                 `json:"matched"`
@@ -68,9 +68,9 @@ type PlanMigrationResult struct {
 // PlanMigrationCancelResult reports scheduled rows canceled. Subscriptions in
 // RailReleaseRequired still have a provider-side schedule to release.
 type PlanMigrationCancelResult struct {
-	Canceled            int         `json:"canceled"`
-	RailReleaseRequired []uuid.UUID `json:"rail_release_required,omitempty"`
-	Warning             string      `json:"warning,omitempty"`
+	Canceled            int              `json:"canceled"`
+	RailReleaseRequired []SubscriptionID `json:"rail_release_required,omitempty"`
+	Warning             string           `json:"warning,omitempty"`
 }
 
 // PreviewPlanMigration classifies the affected subscriptions without writing.

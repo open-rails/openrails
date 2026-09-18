@@ -92,7 +92,7 @@ func TestClientErrorsAreIdenticalAcrossDeployments(t *testing.T) {
 		StatusError: true, Status: 400, Type: "invalid_request_error", Code: "payment_method_delete_unsupported",
 		Metadata: map[string]any{"rail": "stripe"}, HasRequestID: true, Invalid: true,
 	}, want["delete_unsupported_rail"], "metadata-bearing refusal")
-	require.Equal(t, "customer_id", want["admit_invalid_customer"].Param)
+	require.Equal(t, "customer_id", want["admit_missing_customer"].Param)
 	require.True(t, want["usage_key_reused"].IdempotencyKeyReused)
 	require.Equal(t, errorObservation{Unreachable: true, Canceled: true}, want["canceled"])
 	require.Equal(t, errorObservation{Unreachable: true, DeadlineExceeded: true}, want["deadline"])
@@ -130,23 +130,23 @@ func runErrorScript(t *testing.T, ctx context.Context, h *integrationharness.Har
 	exec(`INSERT INTO openrails.subscriptions(id,merchant_id,customer_id,product_id,price_id,psp_id,rail,status,rail_subscription_id,payment_method_id,current_period_starts_at,current_period_ends_at) VALUES($1,$2,$3,$4,$5,$6,'nmi','active',$7,$8,$9,$10)`, sub, mid, customer, product, price, nmi, sub.String(), card, now, now.Add(48*time.Hour))
 
 	out := map[string]errorObservation{}
-	_, err := client.DeletePaymentMethod(ctx, customer.String(), card.String())
+	_, err := client.DeletePaymentMethod(ctx, openrails.CustomerID(customer), openrails.PaymentMethodID(card))
 	out["delete_in_use"] = observeClientError(t, "delete in use", err)
-	_, err = client.DeletePaymentMethod(ctx, uuid.NewString(), card.String())
+	_, err = client.DeletePaymentMethod(ctx, openrails.CustomerID(uuid.New()), openrails.PaymentMethodID(card))
 	out["delete_foreign_customer"] = observeClientError(t, "delete foreign customer", err)
-	_, err = client.DeletePaymentMethod(ctx, customer.String(), portalCard.String())
+	_, err = client.DeletePaymentMethod(ctx, openrails.CustomerID(customer), openrails.PaymentMethodID(portalCard))
 	out["delete_unsupported_rail"] = observeClientError(t, "delete unsupported rail", err)
-	_, err = client.GetSubscription(ctx, uuid.NewString())
+	_, err = client.GetSubscription(ctx, openrails.SubscriptionID(uuid.New()))
 	out["subscription_not_found"] = observeClientError(t, "subscription not found", err)
-	_, err = client.ListPaymentMethods(ctx, customer.String(), openrails.PageOptions{Limit: 101})
+	_, err = client.ListPaymentMethods(ctx, openrails.CustomerID(customer), openrails.PageOptions{Limit: 101})
 	out["page_limit"] = observeClientError(t, "page limit", err)
-	_, err = client.Admit(ctx, openrails.AdmitRequest{CustomerID: "invalid", Currency: "USD"})
-	out["admit_invalid_customer"] = observeClientError(t, "admit invalid customer", err)
+	_, err = client.Admit(ctx, openrails.AdmitRequest{Currency: "USD"})
+	out["admit_missing_customer"] = observeClientError(t, "admit missing customer", err)
 
 	payer := openrails.CustomerID(customer)
 	_, err = client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: "parity", Currency: "USD", Amount: 1_000_000, Source: "parity", SourceID: uuid.NewString()})
 	require.NoError(t, err)
-	usage := openrails.UsageReport{CustomerID: customer.String(), Invoker: "parity", Currency: "USD", EventType: "parity", Amount: 1, Source: "parity", SourceID: uuid.NewString()}
+	usage := openrails.UsageReport{CustomerID: openrails.CustomerID(customer), Invoker: "parity", Currency: "USD", EventType: "parity", Amount: 1, Source: "parity", SourceID: uuid.NewString()}
 	require.NoError(t, client.RecordUsage(ctx, usage))
 	usage.Amount = 2
 	out["usage_key_reused"] = observeClientError(t, "usage key reused", client.RecordUsage(ctx, usage))

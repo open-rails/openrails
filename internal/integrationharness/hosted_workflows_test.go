@@ -48,8 +48,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 	b := hosted.ProvisionMerchant(ownerB, "isolate-b-"+uuid.NewString()[:8])
 	require.NotEqual(t, a.ID, b.ID)
 
-	subject := uuid.NewString()
-	payer := openrails.CustomerID(uuid.MustParse(subject))
+	subject := openrails.CustomerID(uuid.New())
 	type side struct {
 		merchant *HostedMerchant
 		amount   int64
@@ -63,7 +62,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 	}
 	for _, s := range sides {
 		remote, engine := s.merchant.Client(), s.merchant.EngineClient()
-		request := openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: subject, Currency: "USD", Amount: s.amount, Source: "shared-subject", SourceID: s.sourceID}
+		request := openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: s.amount, Source: "shared-subject", SourceID: s.sourceID}
 		first, err := remote.DepositCredits(ctx, request)
 		require.NoError(t, err)
 		require.False(t, first.Replayed)
@@ -97,7 +96,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 			foreign, err := client.HasEntitlement(ctx, subject, other.feature, time.Time{})
 			require.NoError(t, err)
 			require.False(t, foreign)
-			records, err := client.ListActiveEntitlements(ctx, []string{subject}, time.Time{})
+			records, err := client.ListActiveEntitlements(ctx, []openrails.CustomerID{subject}, time.Time{})
 			require.NoError(t, err)
 			require.Len(t, records[subject], 1)
 			require.Equal(t, s.feature, records[subject][0].Entitlement)
@@ -114,7 +113,7 @@ func TestHostedMerchantsIsolateOneSubject(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status, "%v", body)
 	viewer, err := openrails.NewRemote(hosted.BaseURL, openrails.WithAPIKey(a.MintAPIKey("viewer", "viewer")), openrails.WithMerchantID(a.ID))
 	require.NoError(t, err)
-	_, err = viewer.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: subject, Currency: "USD", Amount: 1, Source: "shared-subject", SourceID: uuid.NewString()})
+	_, err = viewer.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: 1, Source: "shared-subject", SourceID: uuid.NewString()})
 	require.ErrorIs(t, err, openrails.ErrDenied, "an owner-minted viewer key cannot move money")
 }
 
@@ -306,9 +305,8 @@ func TestHostedDelegationSenderBoundClient(t *testing.T) {
 	statusResp.Body.Close()
 	require.Equal(t, http.StatusOK, statusResp.StatusCode)
 
-	subject := uuid.NewString()
-	payer := openrails.CustomerID(uuid.MustParse(subject))
-	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &payer, Invoker: subject, Currency: "USD", Amount: 250_000, Source: "delegated", SourceID: uuid.NewString()})
+	subject := openrails.CustomerID(uuid.New())
+	deposit, err := client.DepositCredits(ctx, openrails.DepositCreditsRequest{CustomerID: &subject, Invoker: subject.String(), Currency: "USD", Amount: 250_000, Source: "delegated", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	require.EqualValues(t, 250_000, deposit.Amount)
 	balance, err := client.Balance(ctx, subject)

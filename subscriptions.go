@@ -16,17 +16,17 @@ type PageOptions struct{ Limit, Offset int }
 
 type SubscriptionFilter struct {
 	PageOptions
-	CustomerID string
+	CustomerID CustomerID
 	Status     string
 	Rail       string
 }
 
 // Subscription exposes lifecycle and recovery state without making provider
-// credentials or mutable storage models part of the client contract. Ids of
-// resource kinds pkg/api prefixes travel prefixed (sub_, prod_, price_, pm_,
-// pay_) as on PaymentMethod and CheckoutSession; the prefixed form is what
-// every subscription and payment-method operation accepts. CustomerID and
-// PSPID are plain UUIDs.
+// credentials or mutable storage models part of the client contract. Ids are
+// the typed family of ids.go; PSPID is the provider account's plain UUID. The
+// merchant routes and the customer's own /v1/me/subscriptions routes serve
+// this one shape; the self routes additionally fill ScheduledPrice,
+// ScheduledProduct, CancelPortalURL and Access.
 type Subscription struct {
 	LastRetryAt           *time.Time            `json:"last_retry_at"`
 	RetryAttempts         *int                  `json:"retry_attempts"`
@@ -34,16 +34,16 @@ type Subscription struct {
 	GraceEndsAt           *time.Time            `json:"grace_ends_at"`
 	DeletionScheduledAt   *time.Time            `json:"deletion_scheduled_at,omitempty"`
 	Payments              []SubscriptionPayment `json:"payments,omitempty"`
-	ID                    string                `json:"id"`
-	CustomerID            string                `json:"customer_id"`
-	ProductID             string                `json:"product_id"`
-	PriceID               string                `json:"price_id"`
+	ID                    SubscriptionID        `json:"id"`
+	CustomerID            CustomerID            `json:"customer_id"`
+	ProductID             ProductID             `json:"product_id"`
+	PriceID               PriceID               `json:"price_id"`
 	PSPID                 string                `json:"psp_id"`
 	Rail                  string                `json:"rail"`
 	RailSubscriptionID    string                `json:"rail_subscription_id"`
 	Status                string                `json:"status"`
-	ScheduledPriceID      *string               `json:"scheduled_price_id,omitempty"`
-	PaymentMethodID       *string               `json:"payment_method_id"`
+	ScheduledPriceID      *PriceID              `json:"scheduled_price_id,omitempty"`
+	PaymentMethodID       *PaymentMethodID      `json:"payment_method_id"`
 	StartedAt             time.Time             `json:"started_at"`
 	EndedAt               *time.Time            `json:"ended_at"`
 	CurrentPeriodStartsAt *time.Time            `json:"current_period_starts_at"`
@@ -56,29 +56,75 @@ type Subscription struct {
 	CancelMode            string                `json:"cancel_mode"`
 	Price                 *SubscriptionPrice    `json:"price,omitempty"`
 	Product               *SubscriptionProduct  `json:"product,omitempty"`
-	CreatedAt             time.Time             `json:"created_at"`
-	UpdatedAt             time.Time             `json:"updated_at"`
+	ScheduledPrice        *SubscriptionPrice    `json:"scheduled_price,omitempty"`
+	ScheduledProduct      *SubscriptionProduct  `json:"scheduled_product,omitempty"`
+	// Card is display data for the card behind PaymentMethodID, when it is one.
+	Card *SubscriptionCard `json:"card,omitempty"`
+	// CancelPortalURL is where the customer cancels when CancelMode is
+	// external_portal (rails that keep cancellation on their own site).
+	CancelPortalURL *string `json:"cancel_portal_url,omitempty"`
+	// Access summarizes the premium access this subscription grants; the self
+	// routes fill it.
+	Access    *SubscriptionAccess `json:"access,omitempty"`
+	CreatedAt time.Time           `json:"created_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
 }
 
+// BillingStatus is GET /v1/me/status: the customer's active subscription (the
+// shared Subscription shape) or the standing access they hold without one,
+// plus their entitlement windows.
+type BillingStatus struct {
+	HasActiveSubscription bool                `json:"has_active_subscription"`
+	Subscription          *Subscription       `json:"subscription,omitempty"`
+	Access                *SubscriptionAccess `json:"access,omitempty"`
+	NextRenewalAt         *time.Time          `json:"next_renewal_at,omitempty"`
+	Entitlements          []EntitlementRecord `json:"entitlements,omitempty"`
+}
+
+// SubscriptionCard is the stored card's display data: no PAN, no token.
+type SubscriptionCard struct {
+	Brand    string `json:"brand,omitempty"`
+	Last4    string `json:"last4,omitempty"`
+	ExpMonth *int   `json:"exp_month,omitempty"`
+	ExpYear  *int   `json:"exp_year,omitempty"`
+}
+
+// SubscriptionAccess is how a customer currently holds premium access: Kind
+// is subscription (the subscription itself) or entitlement (a standing
+// entitlement window, e.g. a one-off purchase or an admin grant). SourceID is
+// the source's own wire id (see SourceRef).
+type SubscriptionAccess struct {
+	Kind           string         `json:"kind"`
+	Entitlement    string         `json:"entitlement"`
+	SourceType     string         `json:"source_type,omitempty"`
+	SourceID       string         `json:"source_id,omitempty"`
+	SubscriptionID SubscriptionID `json:"subscription_id,omitzero"`
+	Rail           string         `json:"rail,omitempty"`
+	StartAt        time.Time      `json:"start_at"`
+	EndAt          *time.Time     `json:"end_at,omitempty"`
+}
+
+// SubscriptionPrice is the price a subscription is on; UnitAmount is spelled
+// unit_amount as on every other price shape.
 type SubscriptionPrice struct {
-	ID                  string `json:"id"`
-	Key                 string `json:"key"`
-	ProductID           string `json:"product_id"`
-	Amount              int64  `json:"amount,string"`
-	Currency            string `json:"currency"`
-	AutoRenew           bool   `json:"auto_renew"`
-	AccessDurationHours *int   `json:"access_duration_hours"`
-	Archived            bool   `json:"archived"`
+	ID                  PriceID   `json:"id"`
+	Key                 string    `json:"key"`
+	ProductID           ProductID `json:"product_id"`
+	UnitAmount          int64     `json:"unit_amount,string"`
+	Currency            string    `json:"currency"`
+	AutoRenew           bool      `json:"auto_renew"`
+	AccessDurationHours *int      `json:"access_duration_hours"`
+	Archived            bool      `json:"archived"`
 }
 
 type SubscriptionProduct struct {
-	ID          string  `json:"id"`
-	Key         string  `json:"key"`
-	DisplayName string  `json:"display_name"`
-	Description string  `json:"description"`
-	TierGroup   *string `json:"tier_group,omitempty"`
-	TierRank    int     `json:"tier_rank"`
-	Archived    bool    `json:"archived"`
+	ID          ProductID `json:"id"`
+	Key         string    `json:"key"`
+	DisplayName string    `json:"display_name"`
+	Description string    `json:"description"`
+	TierGroup   *string   `json:"tier_group,omitempty"`
+	TierRank    int       `json:"tier_rank"`
+	Archived    bool      `json:"archived"`
 }
 
 type CancelSubscriptionRequest struct {
@@ -87,12 +133,12 @@ type CancelSubscriptionRequest struct {
 }
 
 type UpdateSubscriptionPaymentMethodRequest struct {
-	PaymentMethodID string `json:"payment_method_id" binding:"required"`
+	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
 
 // SubscriptionPayment is an immutable payment summary for recovery history.
 type SubscriptionPayment struct {
-	ID            string    `json:"id"`
+	ID            PaymentID `json:"id"`
 	Status        string    `json:"status"`
 	Amount        int64     `json:"amount,string"`
 	Currency      string    `json:"currency"`

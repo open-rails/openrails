@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 

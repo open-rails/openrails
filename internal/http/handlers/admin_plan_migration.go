@@ -130,7 +130,7 @@ func GetPlanMigration(r *httprequest.Request) {
 		writeRepriceError(r, err)
 		return
 	}
-	r.JSON(http.StatusOK, map[string]any{"batch": batch, "subscriptions": rows})
+	r.JSON(http.StatusOK, map[string]any{"batch": subscriptions.RepriceBatchViewOf(batch), "subscriptions": subscriptions.SubscriptionRepriceViews(rows)})
 }
 
 // CancelPlanMigration cancels every still-scheduled row in the batch.

@@ -48,7 +48,7 @@ func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"read": func() error { _, err := early.GetMerchantSettings(ctx); return err },
 		"write": func() error {
-			return early.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{{
+			return early.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{{
 				Scope: "invoker", ScopeKey: "test-invoker-mismatch",
 				Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
 			}})
@@ -69,7 +69,7 @@ func TestInProcessClientBindingIsImmutable(t *testing.T) {
 	require.Equal(t, boundID, client.MerchantID())
 	_, err = client.GetMerchantSettings(ctx)
 	require.NoError(t, err)
-	require.NoError(t, client.SetCustomerSpendDelegations(ctx, customerID.String(), []openrails.SpendDelegationInput{{
+	require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID), []openrails.SpendDelegationInput{{
 		Scope: "invoker", ScopeKey: "test-invoker-match",
 		Windows: []openrails.SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: 5_000_000, Currency: "USD"}},
 	}}))

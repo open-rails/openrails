@@ -42,6 +42,9 @@ Valid body keys (anything else is a 400): `measures` (required), `by`, `grain`, 
 - `by`: group-by dimensions; include `"time"` for a time series (`grain` then required:
   `day|week|month|quarter|year`).
 - `filters`: `{dimension: [values...]}` — OR within a dimension, AND across.
+  `product_id` / `price_id` values (and the `product_id` / `price_id` cells a
+  group-by returns) are the catalog's typed ids (`prod_…`, `price_…`); a bare
+  UUID is an `invalid_filter_value`. `payer` is the customer's plain UUID.
 - `order`: `[{"measure"|"dimension": name, "dir":"asc"|"desc"}]`.
 - `compare`: `"previous_period"` — same query over the immediately preceding period.
 

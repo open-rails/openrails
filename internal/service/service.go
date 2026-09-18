@@ -130,7 +130,7 @@ func (s *Service) WithdrawCredits(ctx context.Context, req WithdrawCreditsReques
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      trx.CustomerID,
+		CustomerID:      openrails.CustomerID(trx.CustomerID),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -224,7 +224,7 @@ func (s *Service) DepositCredits(ctx context.Context, req DepositCreditsRequest)
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      trx.CustomerID,
+		CustomerID:      openrails.CustomerID(trx.CustomerID),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -268,7 +268,7 @@ func (s *Service) GetDeposit(ctx context.Context, customerID identity.CustomerID
 	}
 	return &CreditTransaction{
 		ID:              trx.ID,
-		CustomerID:      trx.CustomerID,
+		CustomerID:      openrails.CustomerID(trx.CustomerID),
 		Invoker:         trx.Invoker,
 		Currency:        trx.Currency,
 		Amount:          trx.Amount,
@@ -489,31 +489,6 @@ func (s *Service) HasActiveIndefiniteEntitlementForCustomer(ctx context.Context,
 		at = s.now().UTC()
 	}
 	return s.entitlementService().HasActiveIndefiniteByCustomer(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
-}
-
-func (s *Service) LatestFiniteEntitlementWindowForCustomer(ctx context.Context, tenantSubjectID identity.CustomerID, entitlement string, at time.Time) (*EntitlementRecord, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	if tenantSubjectID.IsZero() {
-		return nil, fmt.Errorf("customer_id required")
-	}
-	entitlement = strings.TrimSpace(entitlement)
-	if entitlement == "" {
-		return nil, fmt.Errorf("entitlement required")
-	}
-	if at.IsZero() {
-		at = s.now().UTC()
-	}
-	ent, err := s.entitlementService().LatestFiniteWindowByCustomer(ctx, tenantSubjectID.UUID(), entitlement, at.UTC())
-	if err != nil {
-		return nil, err
-	}
-	record := entitlementRecordFromEntitlement(ent)
-	return &record, nil
 }
 
 type EntitlementRecord struct {

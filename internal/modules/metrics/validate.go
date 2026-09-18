@@ -243,6 +243,19 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 				}
 			}
 		}
+		if d.Parse != nil {
+			parsed := make([]string, 0, len(vals))
+			for _, v := range vals {
+				canonical, err := d.Parse(v)
+				if err != nil {
+					add(FieldError{Code: "invalid_filter_value", Param: "filters." + name,
+						Message: fmt.Sprintf("invalid value %q for %q: %v", v, name, err)})
+					continue
+				}
+				parsed = append(parsed, canonical)
+			}
+			vals = parsed
+		}
 		// Filters must be honored by every requested measure (a silently ignored
 		// filter is worse than a 400).
 		for _, m := range measures {

@@ -24,16 +24,16 @@ const (
 // come from the authoritative payment row so a host can route the settlement
 // without a second read; SubscriptionID is set for renewal payments.
 type PaymentSettledEvent struct {
-	PaymentID      uuid.UUID  `json:"payment_id"`
-	CustomerID     uuid.UUID  `json:"customer_id"`
-	PriceID        uuid.UUID  `json:"price_id"`
-	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
-	Amount         int64      `json:"amount,string"`
-	Currency       string     `json:"currency"`
+	PaymentID      PaymentID       `json:"payment_id"`
+	CustomerID     CustomerID      `json:"customer_id"`
+	PriceID        PriceID         `json:"price_id"`
+	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
+	Amount         int64           `json:"amount,string"`
+	Currency       string          `json:"currency"`
 }
 
 type DelinquencyHostEvent struct {
-	CustomerID      uuid.UUID  `json:"customer_id"`
+	CustomerID      CustomerID `json:"customer_id"`
 	Currency        string     `json:"currency"`
 	FromState       string     `json:"from_state"`
 	ToState         string     `json:"to_state"`
@@ -66,7 +66,7 @@ type HostEventListOptions struct {
 	Type                HostEventType
 	Limit               int
 	IncludeAcknowledged bool
-	PaymentID           uuid.UUID
+	PaymentID           PaymentID
 }
 
 func (c *Client) ListHostEvents(ctx context.Context, options HostEventListOptions) ([]HostEvent, error) {
@@ -80,7 +80,7 @@ func (c *Client) ListHostEvents(ctx context.Context, options HostEventListOption
 	if options.IncludeAcknowledged {
 		query.Set("include_acknowledged", "true")
 	}
-	if options.PaymentID != uuid.Nil {
+	if !options.PaymentID.IsZero() {
 		query.Set("payment_id", options.PaymentID.String())
 	}
 	var out []HostEvent

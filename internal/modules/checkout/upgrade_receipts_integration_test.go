@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -203,7 +205,7 @@ func TestUpgradePublicReplayUsesFrozenReceiptAfterCatalogArchive(t *testing.T) {
 	require.NoError(t, err)
 	_, err = fx.db.Qx(fx.ctx).Exec(fx.ctx, `UPDATE openrails.prices SET archived=true WHERE id=$1`, fx.newPrice.ID)
 	require.NoError(t, err)
-	request := &TierChangeRequest{SubscriptionID: fx.existingSub.ID, PriceID: fx.newPrice.ID.String(), IdempotencyKey: fx.req.IdempotencyKey}
+	request := &TierChangeRequest{SubscriptionID: fx.existingSub.ID, PriceID: openrails.PriceID(fx.newPrice.ID).String(), IdempotencyKey: fx.req.IdempotencyKey}
 	replayed, err := fx.svc.TierChange(fx.ctx, request, fx.user)
 	require.NoError(t, err, "the cancelled predecessor and archived price cannot strand a committed receipt")
 	require.Equal(t, "succeeded", replayed.Status)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/open-rails/openrails"
 )
 
 // TestPlan_PriceKeyCollisionRefused: two declared prices at the SAME interval
@@ -74,7 +76,7 @@ products:
 	f.seedPrice(product.ID, 1200, "USD", 30*24, false)
 	// fakeApplier.seedPrice does not set a key; simulate the pre-existing row's
 	// old key directly.
-	f.prices[product.ID][0].Key = "renamed-monthly"
+	f.prices[openrails.ProductID(product.ID.UUID())][0].Key = "renamed-monthly"
 
 	plan, err := Plan(context.Background(), f, m)
 	if err != nil {
