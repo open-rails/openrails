@@ -75,7 +75,7 @@ func seedBook(t *testing.T, d *db.DB, id merchant.ID) {
 		exec(`INSERT INTO openrails.billing_policies(merchant_id,name,policy) VALUES($1,'standard','{"kind":"window_spend_cap","spend_windows":[{"key":"daily","window_seconds":86400,"limit":9007199254740993,"currency":"USD"}]}')`, id.UUID())
 		exec(`INSERT INTO openrails.billing_policy_bindings(merchant_id,customer_id,policy_name) VALUES($1,$2,'standard')`, id.UUID(), customer)
 		exec(`INSERT INTO openrails.catalog_meters(merchant_id,key,event_type,value_property,aggregation,unit,group_by) VALUES($1,'tokens','generation','tokens','sum','token','{"model":"model"}')`, id.UUID())
-		exec(`INSERT INTO openrails.catalog_rate_cards(merchant_id,product_id,ordinal,meter_key,filter,price) VALUES($1,$2,1,'tokens','{"model":["large"]}','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":2}}')`, id.UUID(), product)
+		exec(`INSERT INTO openrails.catalog_rate_cards(merchant_id,product_id,ordinal,meter_key,filter,price) VALUES($1,$2,1,'tokens','{"model":["large"]}','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"2"}}')`, id.UUID(), product)
 		exec(`INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id) VALUES($1,$2,$3,'provider-plan')`, id.UUID(), price, psp)
 		exec(`INSERT INTO openrails.price_key_movements(merchant_id,key,price_id,effective_at) VALUES($1,'monthly',$2,'2026-01-01')`, id.UUID(), price)
 		exec(`INSERT INTO openrails.rail_customer_accounts(merchant_id,customer_id,psp_id,rail,account_id) VALUES($1,$2,$3,'nmi','remote-customer')`, id.UUID(), customer, psp)

@@ -20,6 +20,14 @@ func integerValue(v any) bool {
 	_, err := strconv.ParseInt(n.String(), 10, 64)
 	return err == nil
 }
+func moneyStringValue(v any) bool {
+	s, ok := v.(string)
+	if !ok {
+		return false
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	return err == nil && strconv.FormatInt(n, 10) == s
+}
 func booleanValue(v any) bool { _, ok := v.(bool); return ok }
 func booleanSetting(v any) bool {
 	if booleanValue(v) {
@@ -97,12 +105,13 @@ var invoiceLineJSON = array(object(map[string]jsonRule{"event_type": textValue, 
 var pspSettingsJSON = object(map[string]jsonRule{"tokenization_key": textValue, "tokenization_url": textValue, "rpc_provider": textValue, "recipient_wallet": textValue, "tokens": dictionary(object(map[string]jsonRule{"mint": textValue, "name": textValue}))})
 var rateJSON = object(map[string]jsonRule{
 	"model": textValue, "currency": textValue,
-	"flat":           object(map[string]jsonRule{"amount": integerValue}),
-	"per_unit":       object(map[string]jsonRule{"unit_amount": integerValue, "divide_by": integerValue, "round": textValue}),
-	"tiered":         object(map[string]jsonRule{"mode": textValue, "tiers": array(object(map[string]jsonRule{"up_to": nullable(integerValue), "unit_amount": integerValue, "flat_amount": integerValue}))}),
-	"package":        object(map[string]jsonRule{"amount": integerValue, "package_size": integerValue, "free_units": integerValue}),
-	"maximum_amount": integerValue,
-	"matrix":         object(map[string]jsonRule{"dimension": textValue, "cells": dictionary(object(map[string]jsonRule{"unit_amount": integerValue, "maximum_amount": integerValue, "included": integerValue}))}),
+	"flat": object(map[string]jsonRule{"amount": moneyStringValue}),
+	"per_unit": object(map[string]jsonRule{
+		"unit_amount": moneyStringValue, "divide_by": integerValue, "round": textValue, "maximum_amount": moneyStringValue,
+		"matrix": object(map[string]jsonRule{"dimension": textValue, "cells": dictionary(object(map[string]jsonRule{"unit_amount": moneyStringValue, "maximum_amount": moneyStringValue, "included": integerValue}))}),
+	}),
+	"tiered":  object(map[string]jsonRule{"mode": textValue, "tiers": array(object(map[string]jsonRule{"up_to": nullable(integerValue), "unit_amount": moneyStringValue, "flat_amount": moneyStringValue}))}),
+	"package": object(map[string]jsonRule{"amount": moneyStringValue, "package_size": integerValue, "free_units": integerValue}),
 })
 
 // Exact nested shapes keep raw metadata/provider bodies out of the archive.
