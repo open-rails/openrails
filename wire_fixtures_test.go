@@ -100,7 +100,7 @@ func canonicalWireFixtures() map[string]any {
 		},
 		"subscription_retry_now.json": SubscriptionRetryNowResult{
 			Subscription: subscriptionFixtureValue(when, maxMoney, expMonth, expYear),
-			Payment:      &SubscriptionPayment{ID: paymentFixture, Status: "completed", Amount: maxMoney, Currency: "USD", Rail: "nmi", TransactionID: "txn-1", PurchasedAt: when},
+			Payment:      &Payment{ID: paymentFixture, Object: "charge", Status: "succeeded", Amount: maxMoney, Currency: "USD", CustomerID: customerFixture, SubscriptionID: &subscriptionFixture, Rail: "nmi", TransactionID: "txn-1", Captured: true, CreatedAt: when},
 			Operation:    PaymentOperation{ID: operationFixture, Status: "succeeded"},
 		},
 		"catalog_price.json": CatalogPrice{ID: priceFixture, Key: "pro-monthly", ProductID: productFixture, UnitAmount: maxMoney, Currency: "USD", AutoRenew: true, CreatedAt: when, UpdatedAt: when},

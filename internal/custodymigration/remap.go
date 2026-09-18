@@ -253,14 +253,5 @@ func pinnedBy(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUI
 	if operations > 0 {
 		return ReasonOperationUnresolved, nil
 	}
-	operations, err := q.CountUnresolvedOperationsNamingPaymentMethod(ctx, gen.CountUnresolvedOperationsNamingPaymentMethodParams{
-		MerchantID: merchantID, PaymentMethodID: methodID,
-	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("count unresolved operations naming %s: %w", methodID, err)
-	}
-	if operations > 0 {
-		return ReasonOperationUnresolved, nil
-	}
 	return "", nil
 }

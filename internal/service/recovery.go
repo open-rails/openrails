@@ -193,8 +193,9 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, sub *models.Subscrip
 	return out, err
 }
 
-// confirmedRenewal is the payment row the confirmed rebill wrote.
-func (s *Service) confirmedRenewal(ctx context.Context, sub *models.Subscription, transactionID string) (*openrails.SubscriptionPayment, error) {
+// confirmedRenewal is the payment row the confirmed rebill wrote, in the same
+// Payment shape GET /v1/merchant/payments serves (#983 F23 review).
+func (s *Service) confirmedRenewal(ctx context.Context, sub *models.Subscription, transactionID string) (*openrails.Payment, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
@@ -207,9 +208,15 @@ func (s *Service) confirmedRenewal(ctx context.Context, sub *models.Subscription
 	if err != nil {
 		return nil, fmt.Errorf("load confirmed renewal payment: %w", err)
 	}
-	return &openrails.SubscriptionPayment{
-		ID: openrails.PaymentID(row.ID), Status: string(row.Status), Amount: row.Amount, Currency: row.Currency,
-		Rail: string(row.Rail), TransactionID: row.TransactionID, PurchasedAt: row.PurchasedAt,
+	subID := openrails.SubscriptionID(sub.ID)
+	status := "succeeded"
+	if row.Status != "completed" {
+		status = string(row.Status)
+	}
+	return &openrails.Payment{
+		ID: openrails.PaymentID(row.ID), Object: "charge", Status: status, Amount: row.Amount, Currency: row.Currency,
+		CustomerID: openrails.CustomerID(row.CustomerID), SubscriptionID: &subID, Rail: string(row.Rail),
+		TransactionID: row.TransactionID, Captured: status == "succeeded", CreatedAt: row.CreatedAt,
 	}, nil
 }
 

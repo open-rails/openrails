@@ -114,10 +114,10 @@ type RetrySubscriptionNowRequest struct {
 // unresolved (poll GET /subscriptions/{id}). A decline is the 402
 // card_declined refusal.
 type SubscriptionRetryNowResult struct {
-	Subscription Subscription         `json:"subscription"`
-	Payment      *SubscriptionPayment `json:"payment,omitempty"`
-	Operation    PaymentOperation     `json:"operation"`
-	Replayed     bool                 `json:"replayed"`
+	Subscription Subscription     `json:"subscription"`
+	Payment      *Payment         `json:"payment,omitempty"`
+	Operation    PaymentOperation `json:"operation"`
+	Replayed     bool             `json:"replayed"`
 }
 
 // Payment recovery refusal codes.

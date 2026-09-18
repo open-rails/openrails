@@ -7,10 +7,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+
+	"github.com/open-rails/openrails"
 )
 
 func declaredBook() DeclaredBilling {
-	customer, price, product := uuid.New(), uuid.New(), uuid.New()
+	customer, price, product := openrails.CustomerID(uuid.New()), openrails.PriceID(uuid.New()), openrails.ProductID(uuid.New())
 	return DeclaredBilling{
 		AsOf:       time.Now().UTC(),
 		DefaultPSP: PSPRef{Key: "nmi-main"},
