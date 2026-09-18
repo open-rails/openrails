@@ -255,6 +255,72 @@ type Config struct {
 	// "127.0.0.1/32". Env: CCBILL_WEBHOOK_IP_ALLOWLIST (YAML list or a JSON
 	// array string).
 	CCBillWebhookIPAllowlist []string `koanf:"ccbill_webhook_ip_allowlist,omitempty"`
+
+	// ProviderSandbox points sandbox-posture provider clients at loopback
+	// gateways so a whole process (standalone or embedded) can be qualified
+	// against fake providers over its real wire paths. It is process
+	// configuration only (file, env, flags): no merchant setting or route
+	// writes it. Honored only under test_mode=sandbox and only for a literal
+	// loopback destination; anything else refuses to load.
+	ProviderSandbox *ProviderSandboxConfig `koanf:"provider_sandbox,omitempty"`
+}
+
+// ProviderSandboxConfig names loopback provider gateways for sandbox runs.
+type ProviderSandboxConfig struct {
+	// NMIGatewayURL replaces the NMI sandbox direct-post, query and v5 base
+	// URLs for every store-armed NMI client (checkout sales, invoice
+	// collection, payment-method updates and their verify reads). Store
+	// credentials are sent there, so it must be an absolute http(s) URL whose
+	// host is a loopback IP literal (127.0.0.0/8 or ::1) with no userinfo;
+	// hostnames, even "localhost", are refused because locality must not
+	// depend on a resolver. Env: PROVIDER_SANDBOX_NMI_GATEWAY_URL.
+	NMIGatewayURL string `koanf:"nmi_gateway_url,omitempty"`
+}
+
+// ErrProviderSandboxGateway is the coded refusal for a provider_sandbox
+// gateway declaration: a live posture, or a destination that is not a literal
+// loopback address.
+var ErrProviderSandboxGateway = errors.New("provider_sandbox.nmi_gateway_url refused")
+
+// SandboxNMIGatewayURL is the loopback NMI gateway declared for this sandbox
+// run, or "" for the real sandbox endpoints.
+func (cfg *Config) SandboxNMIGatewayURL() string {
+	if cfg == nil || cfg.ProviderSandbox == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.ProviderSandbox.NMIGatewayURL)
+}
+
+// ValidateLoopbackGatewayURL accepts only a literal loopback destination: an
+// absolute http(s) URL, no userinfo, whose host is an IP literal that
+// net.IP.IsLoopback classifies. A hostname is never enough (no DNS).
+func ValidateLoopbackGatewayURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("%w: %q is not an absolute http(s) URL", ErrProviderSandboxGateway, raw)
+	}
+	if u.User != nil {
+		return fmt.Errorf("%w: %q carries userinfo", ErrProviderSandboxGateway, raw)
+	}
+	ip := net.ParseIP(u.Hostname())
+	if ip == nil {
+		return fmt.Errorf("%w: host %q must be a loopback IP literal, not a hostname", ErrProviderSandboxGateway, u.Hostname())
+	}
+	if !ip.IsLoopback() {
+		return fmt.Errorf("%w: host %q is not a loopback address", ErrProviderSandboxGateway, u.Hostname())
+	}
+	return nil
+}
+
+func validateProviderSandbox(cfg *Config) error {
+	gateway := cfg.SandboxNMIGatewayURL()
+	if gateway == "" {
+		return nil
+	}
+	if cfg.TestMode == CredentialPostureLive {
+		return fmt.Errorf("%w: test_mode=live never talks to a fake provider", ErrProviderSandboxGateway)
+	}
+	return ValidateLoopbackGatewayURL(gateway)
 }
 
 // CatalogReconciliationSchedule resolves the catalog reconciliation loop
@@ -1322,6 +1388,9 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("encryption config validation failed: %w", err)
 	}
 
+	if err := validateProviderSandbox(cfg); err != nil {
+		return err
+	}
 	if err := validateSecretBackend(cfg); err != nil {
 		return fmt.Errorf("secret_backend config validation failed: %w", err)
 	}

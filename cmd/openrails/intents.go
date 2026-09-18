@@ -106,6 +106,12 @@ func runIntentsResolve(ctx context.Context, cfg *config.Config, merchantSlug str
 		return fmt.Errorf("bootstrap application: %w", err)
 	}
 	defer func() { _ = application.Close(context.Background()) }()
+	// A receipt is confirmed by reading the provider through the merchant's
+	// store-armed credentials; without the merchants service every rail
+	// reports "no armed provider read" and no resolution can be accepted.
+	if err := application.Runtime.EnsureMerchantsService(ctx); err != nil {
+		return fmt.Errorf("arm merchant credentials: %w", err)
+	}
 	mid, err := resolveCLIMerchant(ctx, application.Runtime.DB, merchantSlug)
 	if err != nil {
 		return err
