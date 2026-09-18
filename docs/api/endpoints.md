@@ -162,8 +162,10 @@ because the key is the client's only handle on a lost response. A key that
 already names a different tier change (another customer, subscription or
 target) answers `409 tier_change_idempotency_conflict` and never that
 operation's result. A Stripe tier change and an NMI upgrade are durable
-operations keyed by that header, with one contract on both rails: the same key
-replays the stored result (`200`); while the provider outcome is unresolved it
+operations keyed by that header within the merchant, independent of rail:
+concurrent requests cannot claim the same key for separate NMI and Stripe
+operations. With one contract on both rails, the same key replays the stored
+result (`200`); while the provider outcome is unresolved it
 answers `202` with `status: "processing"` and `operation_id`; a request under
 another key while one is unresolved answers `409 tier_change_in_flight` with
 `metadata.operation_id`; a definitive provider refusal answers `400`/`402`

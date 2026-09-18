@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,10 +38,6 @@ const stripeTierChangeReplayWindow = 23 * time.Hour
 // changed (https://docs.stripe.com/api/subscriptions/update). Stripe's default,
 // allow_incomplete, would apply the change with an unpaid invoice.
 const stripePaymentBehaviorPaidOrRefused = "error_if_incomplete"
-
-func StripeTierChangeIdempotencyKey(key string) string {
-	return TypeStripeTierChange + ":" + strings.TrimSpace(key)
-}
 
 // StripeTierChangePayload freezes the commercial decision before the first
 // provider request. Replays never recalculate proration, prices or dates.

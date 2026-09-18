@@ -40,7 +40,7 @@ func (fx *upgradeAdoptFixture) upgradeProcessing(t *testing.T) *TierChangeRespon
 }
 func (fx *upgradeAdoptFixture) operation(t *testing.T) gen.OpenrailsRailIntent {
 	t.Helper()
-	key := NMIUpgradeIdempotencyKey(fx.req.IdempotencyKey)
+	key := tierChangeIdempotencyKey(fx.req.IdempotencyKey)
 	in, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, key)
 	require.NoError(t, err)
 	return in
@@ -293,7 +293,7 @@ func requireSameWire(t *testing.T, want, got *TierChangeResponse) {
 
 func TestUpgradeWireAmountsUseFrozenMicros(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
-	key := NMIUpgradeIdempotencyKey(fx.req.IdempotencyKey)
+	key := tierChangeIdempotencyKey(fx.req.IdempotencyKey)
 	// A sub-cent price has no exact USD rail amount: refused before any
 	// durable operation or provider request.
 	fx.newPrice.Amount = 60_125_000
@@ -481,7 +481,7 @@ func TestUpgradeRequiresIdempotencyKey(t *testing.T) {
 // canonical row is refused as a key conflict before it can run or answer.
 func TestUpgradeKeyReusedByAnotherRequestIsRefused(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
-	key := NMIUpgradeIdempotencyKey(fx.req.IdempotencyKey)
+	key := tierChangeIdempotencyKey(fx.req.IdempotencyKey)
 	other := NMIUpgradePayload{
 		RequestedPrice: openrails.PriceID(fx.newPrice.ID).String(), PSP: "nmi", UserID: uuid.NewString(),
 		OldSubscriptionID: uuid.New(), OldPriceID: uuid.New(), NewSubscriptionID: uuid.New(), NewPaymentID: uuid.New(),

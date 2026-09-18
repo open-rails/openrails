@@ -1545,7 +1545,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		return nil, tierChangeKeyRequired()
 	}
-	key := NMIUpgradeIdempotencyKey(req.IdempotencyKey)
+	key := tierChangeIdempotencyKey(req.IdempotencyKey)
 	// Replays use the original durable payload, even if pricing or time changed.
 	database := s.SubscriptionService.Database()
 	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key)
@@ -2169,7 +2169,7 @@ func (s *CheckoutService) processTierChangeStripe(
 		payload.PaymentBehavior = stripePaymentBehaviorPaidOrRefused
 		payload.PeriodStart, payload.PeriodEnd = now, now.Add(time.Duration(cycleHours)*time.Hour)
 	}
-	return s.enqueueStripeTierChange(ctx, existingSub, payload, StripeTierChangeIdempotencyKey(req.IdempotencyKey))
+	return s.enqueueStripeTierChange(ctx, existingSub, payload, tierChangeIdempotencyKey(req.IdempotencyKey))
 }
 
 // processTierChangeSolana handles recurring-Solana subscription tier changes (#272).

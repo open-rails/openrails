@@ -443,7 +443,7 @@ func (fx *stripeTierFixture) change(key string, price *models.Price) (*TierChang
 
 func (fx *stripeTierFixture) operation(key string) gen.OpenrailsRailIntent {
 	fx.t.Helper()
-	in, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, StripeTierChangeIdempotencyKey(key))
+	in, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, tierChangeIdempotencyKey(key))
 	require.NoError(fx.t, err)
 	return in
 }

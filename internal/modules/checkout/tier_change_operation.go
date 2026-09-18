@@ -27,9 +27,12 @@ import (
 // subscription unique index shared by every durable tier change type.
 const tierChangeSubjectConstraint = "uq_rail_intents_tier_change_subscription"
 
-// tierChangeOperationKeys map a client Idempotency-Key onto each durable tier
-// change type's ledger key.
-var tierChangeOperationKeys = []func(string) string{NMIUpgradeIdempotencyKey, StripeTierChangeIdempotencyKey}
+// One client key names one tier change within a merchant, independent of rail.
+// The ledger's (merchant_id, idempotency_key) unique constraint arbitrates
+// concurrent requests before either provider-specific handler can execute.
+func tierChangeIdempotencyKey(key string) string {
+	return "tier_change:" + strings.TrimSpace(key)
+}
 
 // tierChangeSubject is what a replay must name again: the customer, the
 // subscription the change was requested on and the target price.
@@ -93,18 +96,15 @@ func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeR
 		return nil, false, nil
 	}
 	store := intents.NewStore(s.SubscriptionService.Database())
-	for _, ledgerKey := range tierChangeOperationKeys {
-		in, err := store.GetByIdempotencyKey(ctx, ledgerKey(req.IdempotencyKey))
-		if db.IsNotFound(err) {
-			continue
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		response, err := s.replayTierChangeOperation(ctx, in, req, user)
-		return response, true, err
+	in, err := store.GetByIdempotencyKey(ctx, tierChangeIdempotencyKey(req.IdempotencyKey))
+	if db.IsNotFound(err) {
+		return nil, false, nil
 	}
-	return nil, false, nil
+	if err != nil {
+		return nil, false, err
+	}
+	response, err := s.replayTierChangeOperation(ctx, in, req, user)
+	return response, true, err
 }
 
 // replayTierChangeOperation answers a request that names an existing

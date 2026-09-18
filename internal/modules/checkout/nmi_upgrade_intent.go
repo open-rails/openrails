@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -24,10 +23,6 @@ import (
 )
 
 const TypeNMIUpgrade = "nmi_upgrade"
-
-func NMIUpgradeIdempotencyKey(key string) string {
-	return TypeNMIUpgrade + ":" + strings.TrimSpace(key)
-}
 
 // NMIUpgradePayload freezes the complete commercial decision before either
 // provider submission. Replays never recalculate proration or the billing date.
