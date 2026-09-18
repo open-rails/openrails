@@ -346,7 +346,8 @@ SET dunning_claim_holder = NULL,
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND merchant_id = sqlc.arg(merchant_id)
-  AND dunning_claim_holder = sqlc.arg(holder)::text;
+  AND dunning_claim_holder = sqlc.arg(holder)::text
+  AND deleted_at IS NULL;
 
 -- name: GetLatestResumableCancelledSubscription :one
 SELECT * FROM openrails.subscriptions sub
