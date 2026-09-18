@@ -157,6 +157,15 @@ type FailMembershipParams struct {
 	// normalized failure_reason). Callers set it when a real charge attempt was
 	// declined and no failed row was recorded elsewhere.
 	RecordFailedAttempt bool
+	// ForAttempt, when set, makes the decline idempotent per dunning attempt:
+	// it applies only while the subscription is past_due with exactly this
+	// many recorded failures (the ordinal the declined operation was keyed
+	// on). A second observer of the same declined operation is a no-op.
+	ForAttempt *int
+	// ForPeriodEnd binds the decline to the period its operation dunned: it
+	// applies only while the subscription's current period ends there. A
+	// replay of an earlier period's decline never touches a later period.
+	ForPeriodEnd *time.Time
 }
 
 func NormalizeCancelType(cancelType *models.CancelType) string {

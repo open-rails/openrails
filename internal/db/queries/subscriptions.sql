@@ -315,36 +315,38 @@ SELECT * FROM openrails.subscriptions sub
 WHERE sub.rail = ANY(sqlc.arg(rails)::text[])
   AND sub.status = 'past_due'
   AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz
+  AND (sub.dunning_claimed_until IS NULL OR sub.dunning_claimed_until <= now())
   AND sub.deleted_at IS NULL
 ORDER BY sub.next_retry_at, sub.id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ClaimDunningAttempt :execrows
--- Lease-style claim: pushes next_retry_at out so concurrent dunning runs
--- cannot double-charge; only claims a still-due past_due row.
+-- The worker's rebill attempt claim (#809 R4): an explicit holder and expiry
+-- on the database clock, never the schedule. Only a still-due past_due row
+-- whose claim is free or expired is claimed; next_retry_at stays the
+-- schedule. Release with ReleaseDunningClaim.
 UPDATE openrails.subscriptions
-SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
+SET dunning_claim_holder = sqlc.arg(holder)::text,
+    dunning_claimed_until = now() + make_interval(secs => sqlc.arg(lease_seconds)::int),
     last_retry_at = sqlc.arg(claimed_at)::timestamptz,
     updated_at = sqlc.arg(claimed_at)::timestamptz
 WHERE id = $1
   AND merchant_id = sqlc.arg(merchant_id)
   AND status = 'past_due'
   AND next_retry_at IS NOT NULL AND next_retry_at <= sqlc.arg(claimed_at)::timestamptz
+  AND (dunning_claimed_until IS NULL OR dunning_claimed_until <= now())
   AND deleted_at IS NULL;
 
--- name: ReleaseDunningAttempt :execrows
--- A provider decline is already durable before its lifecycle transition runs.
--- If that transition rolls back, make this exact claim immediately eligible
--- for River's retry without advancing the attempt ordinal (and therefore
--- without deriving a fresh charge intent).
+-- name: ReleaseDunningClaim :execrows
+-- Releases a rebill attempt claim its holder took. The schedule was never
+-- moved, so a released row that is still due is picked up again as is.
 UPDATE openrails.subscriptions
-SET next_retry_at = sqlc.arg(claimed_at)::timestamptz,
-    updated_at = sqlc.arg(claimed_at)::timestamptz
+SET dunning_claim_holder = NULL,
+    dunning_claimed_until = NULL,
+    updated_at = now()
 WHERE id = sqlc.arg(id)
   AND merchant_id = sqlc.arg(merchant_id)
-  AND status = 'past_due'
-  AND last_retry_at = sqlc.arg(claimed_at)::timestamptz
-  AND next_retry_at = sqlc.arg(lease_until)::timestamptz
+  AND dunning_claim_holder = sqlc.arg(holder)::text
   AND deleted_at IS NULL;
 
 -- name: GetLatestResumableCancelledSubscription :one
@@ -366,3 +368,22 @@ WHERE sub.price_id = sqlc.arg(price_id)::uuid
   AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
+
+-- name: ClaimSubscriptionRetryNow :one
+-- Customer retry-now (#809) takes the same rebill attempt claim the dunning
+-- worker takes (ClaimDunningAttempt), ahead of any schedule: a past_due row
+-- whose claim is free or expired. A live claim — the worker mid-charge or
+-- another request — is refused. The schedule (next_retry_at) is untouched;
+-- times are the database's.
+UPDATE openrails.subscriptions
+SET dunning_claim_holder = sqlc.arg(holder)::text,
+    dunning_claimed_until = now() + make_interval(secs => sqlc.arg(lease_seconds)::int),
+    last_retry_at = now(),
+    updated_at = now()
+WHERE id = $1
+  AND merchant_id = sqlc.arg(merchant_id)
+  AND customer_id = sqlc.arg(customer_id)
+  AND status = 'past_due'
+  AND deleted_at IS NULL
+  AND (dunning_claimed_until IS NULL OR dunning_claimed_until <= now())
+RETURNING dunning_claimed_until;

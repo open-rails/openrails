@@ -22,6 +22,8 @@ The fixed viewer role reads invoices. Support also retries collection. Invoice u
 
 Successful local actions return 200; an unresolved collection answers 202 with its live attempt. Invalid state, conflicting remittance/reference, a live collection operation and a new retry key while an operation is unresolved return 409. Invalid input returns 400; foreign or missing invoice/customer IDs return 404; insufficient permissions return 403. The existing HTTP idempotency cache may return the original successful response verbatim on replay.
 
+The customer's own surface (#809) runs the same operation under a user origin: `POST /v1/me/invoices/{id}/pay-now` (and `POST /v1/merchant/customers/{customer_id}/invoices/{id}/pay-now` for a host acting for its authenticated customer) charges an open or past-due invoice through a saved method the payer owns, on OpenRails-driven saved-method rails only (NMI); it needs no prior failure and never reopens an uncollectible invoice. See [endpoints](api/endpoints.md#customer-payment-recovery-809).
+
 A never-attempted open invoice is not manually retryable. Retry eligibility applies to past-due/uncollectible automatic invoices and open automatic invoices with a prior failure. While `collection_intent_id` names a live operation the invoice accepts no support mutation; an operation the verifier cannot settle is resolved with `openrails intents resolve` (exact provider receipt or provider-confirmed non-execution, see [provider uncertainty](provider-uncertainty.md)). There is no unpark/force-resend operation.
 
 ## Amount units

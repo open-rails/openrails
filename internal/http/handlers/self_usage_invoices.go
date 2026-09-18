@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"github.com/open-rails/openrails/pkg/api"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/pkg/service"
 )
@@ -76,6 +78,37 @@ func GetMyInvoice(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(inv)
+}
+
+// GetMyInvoicePayments (GET /v1/me/invoices/:id/payments) is the payer's own
+// attempt history for one invoice, newest first: the self-service read behind
+// a 202 pay-now answer.
+func GetMyInvoicePayments(r *httprequest.Request) {
+	payer, ok := selfAccountPayer(r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(r.Param("id"))
+	if err != nil {
+		r.ErrorJSON(http.StatusBadRequest, "invalid invoice id")
+		return
+	}
+	limit, offset := selfLimitOffset(r, 20)
+	svc, err := billingservice.New(r.State)
+	if err != nil {
+		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
+		return
+	}
+	items, total, err := svc.ListInvoicePaymentAttempts(r.Request.Context(), payer, id, limit, offset)
+	if err != nil {
+		if db.IsNotFound(err) {
+			r.ErrorJSON(http.StatusNotFound, "invoice not found")
+			return
+		}
+		r.ErrorJSON(http.StatusInternalServerError, "failed to list invoice payments")
+		return
+	}
+	r.JSON(http.StatusOK, api.NewList(items, int64(total), limit, offset))
 }
 
 func selfLimitOffset(r *httprequest.Request, def int) (int, int) {

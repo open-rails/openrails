@@ -76,12 +76,23 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 	return rowID
 }
 
+// attributeTo puts the subscription and its instrument on one provider
+// account: the #657 same-PSP invariant every rebill is checked against.
+func (fx rebillFixture) attributeTo(t *testing.T, pspID uuid.UUID) {
+	t.Helper()
+	ctx := dbtest.WithTestMerchant(context.Background())
+	_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2 WHERE id=$1`, fx.subID, pspID)
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2 WHERE id=$1`, fx.methodID, pspID)
+	require.NoError(t, err)
+}
+
 func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, gatewayURL string) *railresolve.NMIArmer {
 	return &railresolve.NMIArmer{
 		Config:      cfg,
 		DB:          dbi,
 		MerchantsFn: func() *merchants.Service { return svc },
-		Endpoints:   railresolve.NMIEndpoints{DirectPostURL: gatewayURL, QueryURL: gatewayURL},
+		Endpoints:   railresolve.NMIEndpoints{DirectPostURL: gatewayURL, QueryURL: gatewayURL, V5BaseURL: gatewayURL},
 	}
 }
 
@@ -110,8 +121,10 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 
 	params := fx.enqueueParams(1)
 	params.PspID = accountRowID // #704 provenance stamp (what dunning enqueues)
-	_, err := fx.db.Pool().Exec(dbtest.WithTestMerchant(context.Background()), `UPDATE openrails.subscriptions SET psp_id=$2 WHERE id=$1`, *params.SubscriptionID, accountRowID)
-	require.NoError(t, err)
+	payload := params.Payload.(ManualRebillPayload)
+	payload.Instrument.PSPID = params.PspID
+	params.Payload = payload
+	fx.attributeTo(t, accountRowID)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -137,6 +150,10 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 
 	params := fx.enqueueParams(1)
 	params.PspID = accountRowID
+	payload := params.Payload.(ManualRebillPayload)
+	payload.Instrument.PSPID = params.PspID
+	params.Payload = payload
+	fx.attributeTo(t, accountRowID)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -174,6 +191,10 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 
 	params := fx.enqueueParams(1)
 	params.PspID = dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "nmi")
+	payload := params.Payload.(ManualRebillPayload)
+	payload.Instrument.PSPID = params.PspID
+	params.Payload = payload
+	fx.attributeTo(t, params.PspID)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)

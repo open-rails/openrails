@@ -29,6 +29,9 @@ func GetMyBillingStatus(r *httprequest.Request) {
 	if r.State.UserSubscriptionService != nil {
 		resp, err := r.State.UserSubscriptionService.GetUserSubscription(r.Request.Context(), user.ID)
 		if err == nil {
+			if !attachSubscriptionRecovery(r, resp) {
+				return
+			}
 			sub = resp
 			if resp.Subscription != nil {
 				hasActive = resp.Subscription.Status == models.StatusActive

@@ -449,3 +449,26 @@ SELECT * FROM openrails.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE;
+
+-- name: CountInvoicePaymentAttemptsByPayerForInvoices :many
+-- Customer recovery view (#809): every recorded attempt per invoice. One row
+-- per requested invoice; row_limit is the request's own size.
+SELECT invoice_id, count(*)::bigint AS attempt_count
+FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = ANY(sqlc.arg(invoice_ids)::uuid[])
+GROUP BY invoice_id
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListLatestFailedInvoicePaymentAttemptsByPayer :many
+-- Customer recovery view (#809): the newest failed attempt per invoice. One
+-- row per requested invoice; row_limit is the request's own size.
+SELECT DISTINCT ON (invoice_id) *
+FROM openrails.invoice_payments
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND invoice_id = ANY(sqlc.arg(invoice_ids)::uuid[])
+  AND status = 'failed'
+ORDER BY invoice_id, attempted_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::int;

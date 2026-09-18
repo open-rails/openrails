@@ -36,6 +36,7 @@ func TestNoLibraryEnvReads(t *testing.T) {
 		"config/":                                "the config-loading pipeline — the ONE place env is read",
 		"tests/":                                 "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
 		"scripts/":                               "operational tooling run as its own process, not importable library code",
+		"internal/integrationharness/":           "test support launches sandbox standalone processes",
 		"internal/dbtest/":                       "test-support package: container/DSN discovery for test binaries",
 		"internal/integrations/vault/vaulttest/": "test-support package: VAULT_ADDR/VAULT_TOKEN external-server override, mirrors dbtest",
 	}

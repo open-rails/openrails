@@ -88,7 +88,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		})
 		require.NoError(t, err)
 		_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
-			ID: priceID, ProductID: productID, Amount: 999, Currency: "USD", MerchantID: merchantID,
+			ID: priceID, ProductID: productID, Amount: 9_990_000, Currency: "USD", MerchantID: merchantID,
 			Archived: false, AccessDurationHours: &cycleHours, AutoRenew: true, CreatedAt: now, UpdatedAt: now,
 		})
 		require.NoError(t, err)
@@ -144,7 +144,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	f := &dunningCertaintyFixture{dbi: dbi, ctx: baseCtx, subID: subID, nmiWrites: &atomic.Int64{}}
 	f.nmiRespond = func(w http.ResponseWriter) { _, _ = w.Write([]byte("response=1&transactionid=txn_ok")) }
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRebillReceipts(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		if r.Form.Get("report_type") == "profile" {
 			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><merchant><company>Certainty TEST</company><email>c@acme.test</email></merchant></nm_response>`))
@@ -152,7 +152,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		}
 		f.nmiWrites.Add(1)
 		f.nmiRespond(w)
-	}))
+	}), "9.99", "USD"))
 	t.Cleanup(srv.Close)
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
 		SecurityKey: "certainty_key", WebhookSecret: "s",
@@ -160,6 +160,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 
 	f.priceSvc = catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)
@@ -221,6 +222,8 @@ type dunningRowState struct {
 	cancelledAt         *time.Time
 	deletionScheduledAt *time.Time
 	deleteIntents       int
+	claimHolder         *string
+	claimLive           bool
 }
 
 type failingDunningLifecycle struct {
@@ -247,9 +250,10 @@ func (f *dunningCertaintyFixture) state(t *testing.T) dunningRowState {
 	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 		qx := f.dbi.Qx(ctx)
 		if err := qx.QueryRow(ctx,
-			`SELECT status, retry_attempts, last_retry_at, next_retry_at, cancelled_at, deletion_scheduled_at
+			`SELECT status, retry_attempts, last_retry_at, next_retry_at, cancelled_at, deletion_scheduled_at,
+			        dunning_claim_holder, (dunning_claimed_until IS NOT NULL AND dunning_claimed_until > now())
 			   FROM openrails.subscriptions WHERE id = $1`, f.subID).
-			Scan(&s.status, &s.retryAttempts, &s.lastRetryAt, &s.nextRetryAt, &s.cancelledAt, &s.deletionScheduledAt); err != nil {
+			Scan(&s.status, &s.retryAttempts, &s.lastRetryAt, &s.nextRetryAt, &s.cancelledAt, &s.deletionScheduledAt, &s.claimHolder, &s.claimLive); err != nil {
 			return err
 		}
 		return qx.QueryRow(ctx,
@@ -428,8 +432,10 @@ func TestDunning_LifecycleFailureReleasesClaimAndSurfacesToRiver(t *testing.T) {
 	assert.Nil(t, state.retryAttempts, "a failed lifecycle transition must not advance the charge ordinal")
 	require.NotNil(t, state.lastRetryAt)
 	require.NotNil(t, state.nextRetryAt)
-	assert.True(t, state.nextRetryAt.Equal(*state.lastRetryAt), "the exact claim is immediately eligible for River's backoff retry")
-	assert.False(t, state.nextRetryAt.After(time.Now().UTC()), "released claim must be due now")
+	assert.Nil(t, state.claimHolder, "the attempt claim is released")
+	assert.False(t, state.claimLive)
+	assert.False(t, state.nextRetryAt.After(time.Now().UTC()),
+		"the schedule was never moved by the claim, so the row is immediately eligible for River's backoff retry")
 
 	var intentCount int
 	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
