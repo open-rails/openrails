@@ -444,6 +444,21 @@ func TestCustomerRetryNowAcrossDeployments(t *testing.T) {
 			require.EqualValues(t, 1, *state.RetryAttempts, "nothing counted")
 		})
 
+		t.Run("custody_flip_refused_without_provider_traffic", func(t *testing.T) {
+			gateway.SetMode(NMISaleApprove)
+			gateway.SetVisible(true)
+			sales := gateway.SaleCount()
+			fixture := seed()
+			h.FlipCustody(fixture)
+			_, err := retryNow(fixture, "custody-"+uuid.NewString()[:8])
+			requireRefusal(t, err, openrails.ErrSubscriptionNotRetryable, openrails.CodeSubscriptionNotRetryable)
+			require.Equal(t, sales, gateway.SaleCount(), "a custodian-held card is never rebilled on its stale vault")
+			require.Zero(t, h.RebillOperations(fixture.Subscription))
+			state := h.SubscriptionState(fixture.Subscription)
+			require.Equal(t, "past_due", state.Status)
+			require.EqualValues(t, 1, *state.RetryAttempts, "nothing counted")
+		})
+
 		t.Run("idempotency_key_bound_to_request", func(t *testing.T) {
 			gateway.SetMode(NMISaleDecline)
 			gateway.SetVisible(true)

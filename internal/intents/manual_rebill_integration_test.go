@@ -505,3 +505,83 @@ func TestManualRebillContradictedReceiptStaysUnknown(t *testing.T) {
 		})
 	}
 }
+
+// TestManualRebillCustodyFlipIsNeverChargedOrSettled (#809 R4 re-review P2):
+// a rebill is sent on, and judged against, the instrument frozen at enqueue —
+// provider account, custody, customer vault and billing reference. A #297
+// custody flip keeps the provider account and leaves the old vault reference
+// behind while moving custody, rail_method_ref and charge_via, so neither the
+// vault nor the PSP alone notices it.
+//
+//   - mid-flight: the flip cannot make verification switch to the unvaulted
+//     rule (which skips the vault check) and accept a contradicted receipt.
+//   - fresh attempt: the period's next rebill is superseded under the
+//     instrument's row lock instead of being sent on the stale vault/billing
+//     pair; re-deriving it after the instrument is repaired freezes it anew.
+func TestManualRebillCustodyFlipIsNeverChargedOrSettled(t *testing.T) {
+	ctx := dbtest.WithTestMerchant(context.Background())
+	flipCustody := func(t *testing.T, fx rebillFixture) {
+		t.Helper()
+		custodian := dbtest.EnsureTestCustodian(ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID())
+		_, err := fx.db.Pool().Exec(ctx, `
+			UPDATE openrails.payment_methods
+			   SET custodian = 'basis_theory', custodian_id = $2, rail_method_ref = $3, charge_via = 'pan_proxy'
+			 WHERE id = $1`, fx.methodID, custodian, "bt-token-"+uuid.NewString()[:8])
+		require.NoError(t, err)
+	}
+
+	t.Run("mid-flight: a contradicted receipt never settles", func(t *testing.T) {
+		fx := seedPastDueSubscription(t)
+		fake, client := newFakeNMIRebillGateway(t)
+		fake.saleStatus.Store(http.StatusBadGateway) // the answer is lost
+		runner := fx.rebillRunner(client, fullModeConfig())
+		row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+		require.NoError(t, err)
+		require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+
+		flipCustody(t, fx)
+		fake.charged.Store(true)
+		fake.recordSale("someone-elses-vault", rebillAmountWire, "USD")
+		_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+		require.NoError(t, err)
+		_, err = runner.RunVerifyOnce(context.Background())
+		require.NoError(t, err)
+
+		got := fx.intentByID(t, row.ID)
+		require.Equal(t, StatusUnknownNeedsVerify, got.Status, "custody is frozen, so the vault check still applies")
+		require.Contains(t, string(got.ResultEvidence), rebillEvidenceContradiction)
+		require.Equal(t, "past_due", string(fx.subscription(t).Status))
+		require.Zero(t, fx.paymentsFor(t, fake.txnID))
+		require.EqualValues(t, 1, fake.saleCalls.Load())
+	})
+
+	t.Run("fresh attempt: superseded, never sent on the stale pair", func(t *testing.T) {
+		fx := seedPastDueSubscription(t)
+		fake, client := newFakeNMIRebillGateway(t)
+		flipCustody(t, fx)
+
+		row, err := fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+		require.NoError(t, err)
+		require.Equal(t, StatusSuperseded, row.Status, "the frozen instrument no longer matches the method")
+		require.NotNil(t, row.LastFailureReason)
+		require.Contains(t, *row.LastFailureReason, "instrument_changed")
+		require.Zero(t, fake.saleCalls.Load(), "nothing is sent on the stale vault/billing pair")
+		require.Equal(t, "past_due", string(fx.subscription(t).Status))
+
+		// Repaired: the period's attempt is re-derived and freezes the
+		// instrument as it now is, and that charge goes out.
+		_, err = fx.db.Pool().Exec(ctx, `
+			UPDATE openrails.payment_methods
+			   SET custodian = 'psp', custodian_id = NULL, rail_method_ref = $2, charge_via = 'pan_proxy'
+			 WHERE id = $1`, fx.methodID, fx.billingID)
+		require.NoError(t, err)
+		row, err = fx.rebillRunner(client, fullModeConfig()).EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+		require.NoError(t, err)
+		require.Equal(t, StatusSucceeded, row.Status)
+		require.EqualValues(t, 1, fake.saleCalls.Load())
+		form, _ := fake.saleForm.Load().(url.Values)
+		require.Equal(t, fx.vault, form.Get("customer_vault_id"), "charged on the frozen vault")
+		require.Equal(t, fx.billingID, form.Get("billing_id"))
+		require.Equal(t, "active", string(fx.subscription(t).Status))
+	})
+}

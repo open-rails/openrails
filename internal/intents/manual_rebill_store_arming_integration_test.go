@@ -78,13 +78,15 @@ func seedNMIRailAccountForRebill(t *testing.T, dbi *db.DB, svc *merchants.Servic
 
 // attributeTo puts the subscription and its instrument on one provider
 // account: the #657 same-PSP invariant every rebill is checked against.
-func (fx rebillFixture) attributeTo(t *testing.T, pspID uuid.UUID) {
+func (fx *rebillFixture) attributeTo(t *testing.T, pspID uuid.UUID) {
 	t.Helper()
 	ctx := dbtest.WithTestMerchant(context.Background())
 	_, err := fx.db.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET psp_id=$2 WHERE id=$1`, fx.subID, pspID)
 	require.NoError(t, err)
 	_, err = fx.db.Pool().Exec(ctx, `UPDATE openrails.payment_methods SET psp_id=$2 WHERE id=$1`, fx.methodID, pspID)
 	require.NoError(t, err)
+	// The rebill freezes the instrument, so its payload names this account too.
+	fx.pspID = pspID
 }
 
 func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, gatewayURL string) *railresolve.NMIArmer {
@@ -119,9 +121,11 @@ func TestManualRebillStoreOnlyNMICredentials_ChargesThroughStore(t *testing.T) {
 	cfg := storeRebillConfig()
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, gatewayURL), cfg)
 
+	// Attribute first: the rebill freezes the instrument, so its payload is
+	// built from the account the subscription and method are on.
+	fx.attributeTo(t, accountRowID)
 	params := fx.enqueueParams(1)
 	params.PspID = accountRowID // #704 provenance stamp (what dunning enqueues)
-	fx.attributeTo(t, accountRowID)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -145,9 +149,9 @@ func TestManualRebillDeclaredAccountMissingSecret_FailsClosed(t *testing.T) {
 	cfg := storeRebillConfig()
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, cfg, bootClient.DirectPostURL), cfg)
 
+	fx.attributeTo(t, accountRowID)
 	params := fx.enqueueParams(1)
 	params.PspID = accountRowID
-	fx.attributeTo(t, accountRowID)
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
@@ -183,9 +187,9 @@ func TestManualRebillNoStoreRow_ParksFailClosed(t *testing.T) {
 	cfg := storeRebillConfig()
 	runner := storeArmedRebillRunner(fx, storeRebillBuilder(fx.db, msvc, liveCfg, bootClient.DirectPostURL), cfg)
 
+	fx.attributeTo(t, dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "nmi"))
 	params := fx.enqueueParams(1)
-	params.PspID = dbtest.EnsureTestPSP(context.Background(), t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "nmi")
-	fx.attributeTo(t, params.PspID)
+	params.PspID = fx.pspID
 
 	row, err := runner.EnqueueAndExecute(context.Background(), params)
 	require.NoError(t, err)
