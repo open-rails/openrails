@@ -10,9 +10,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/internal/migrate"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
@@ -112,9 +113,9 @@ func TestBillingBookRoundTripAndRetry(t *testing.T) {
 	var original bytes.Buffer
 	require.NoError(t, Export(t.Context(), source, id, &original))
 	seen := map[string]int{}
-	_, err := format.Read(bytes.NewReader(original.Bytes()), nil, func(p format.Profile, _ []*string) error { seen[p.Name]++; return nil })
+	_, err := contract.Read(bytes.NewReader(original.Bytes()), nil, func(p contract.Profile, _ []*string) error { seen[p.Name]++; return nil })
 	require.NoError(t, err)
-	for _, p := range format.Profiles {
+	for _, p := range contract.Profiles {
 		require.Positive(t, seen[p.Name], "every retained profile must be populated in this roundtrip: "+p.Name)
 	}
 
@@ -151,10 +152,10 @@ func TestRestoreBadFooterRollsBackAndCannotForgeGuard(t *testing.T) {
 	id := merchant.ID(uuid.New())
 	provision(t, d, id)
 	var b bytes.Buffer
-	w, err := format.NewWriter(&b, id.String())
+	w, err := archivewire.NewWriter(&b, id.String())
 	require.NoError(t, err)
-	for _, p := range format.Profiles {
-		require.NoError(t, w.Table(p))
+	for _, p := range contract.Profiles {
+		require.NoError(t, w.Table(p.Name))
 		if p.Name == "customers" {
 			values := make([]*string, len(p.Columns))
 			for i, c := range p.Columns {

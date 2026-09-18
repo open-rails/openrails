@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	archiveformat "github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/archivewire"
 )
 
 type unreadArchive struct{ t *testing.T }
@@ -65,7 +65,7 @@ func TestArchiveBodyLimitKeepsOrdinaryRoutesBounded(t *testing.T) {
 	called := false
 	h = BodyLimitHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
 	r := httptest.NewRequest(http.MethodPost, "/v1/merchant/billing-archive", strings.NewReader("unused"))
-	r.ContentLength = archiveformat.MaxBytes + 1
+	r.ContentLength = archivewire.MaxBytes + 1
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if called || w.Code != http.StatusRequestEntityTooLarge || !strings.Contains(w.Body.String(), `"code":"request_body_too_large"`) {

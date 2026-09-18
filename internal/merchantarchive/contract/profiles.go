@@ -1,5 +1,9 @@
 // Fixed v1 profiles. New schema fields require an explicit portability decision.
-package format
+package contract
+
+import "regexp"
+
+var uuidPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 type Column struct {
 	Name string

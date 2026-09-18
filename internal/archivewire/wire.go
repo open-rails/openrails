@@ -1,7 +1,7 @@
-// Package format defines the versioned, bounded merchant billing archive wire.
+// Package archivewire defines the versioned, bounded merchant billing archive wire.
 // It has no engine or database dependencies. SQL scalars, including JSONB, are
 // strings (or null), so an intermediate client never rounds money through float64.
-package format
+package archivewire
 
 import (
 	"bufio"
@@ -52,26 +52,30 @@ func validHeader(h Header) bool {
 
 // Read verifies the complete stream, invoking callbacks while it reads. Callers
 // performing writes MUST roll back when Read returns any error, including a
-// missing footer or trailing bytes. Callbacks do not receive unrecognized fields.
-func Read(src io.Reader, header func(Header) error, row func(Profile, []*string) error) (Info, error) {
-	return read(src, nil, header, row)
+// missing footer or trailing bytes. Record callbacks receive table and row records;
+// storage-specific table order, row widths and values belong to the caller.
+// Callbacks do not receive unrecognized fields.
+func Read(src io.Reader, header func(Header) error, record func(Record) error) (Info, error) {
+	return read(src, nil, header, record)
 }
 
 // CopyVerified forwards an archive without buffering it in memory. An error
 // means the destination may contain a prefix and must not be treated as a
 // successful archive. In particular, EOF is never a substitute for the footer.
+// This verifies transport integrity, not the billing schema or stored values.
 func CopyVerified(dst io.Writer, src io.Reader) (Info, error) {
 	return read(src, dst, nil, nil)
 }
 
-func read(src io.Reader, dst io.Writer, onHeader func(Header) error, onRow func(Profile, []*string) error) (Info, error) {
+func read(src io.Reader, dst io.Writer, onHeader func(Header) error, onRecord func(Record) error) (Info, error) {
 	var info Info
 	limited := &io.LimitedReader{R: src, N: MaxBytes + 1}
 	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 64<<10), MaxRecordBytes+1)
 	scanner.Split(terminatedLine)
 	digest := sha256.New()
-	lineNo, tableIndex := 0, -1
+	lineNo := 0
+	haveTable := false
 	finished := false
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -100,34 +104,30 @@ func read(src io.Reader, dst io.Writer, onHeader func(Header) error, onRow func(
 			}
 			switch r.Kind {
 			case "table":
-				tableIndex++
-				if tableIndex >= len(Profiles) || r.Table != Profiles[tableIndex].Name || r.Values != nil || r.Rows != nil || r.Digest != "" {
-					return info, errors.New("invalid archive table order or fields")
+				if r.Table == "" || r.Values != nil || r.Rows != nil || r.Digest != "" {
+					return info, errors.New("invalid archive table fields")
 				}
+				haveTable = true
 			case "row":
-				if tableIndex < 0 || r.Table != "" || r.Rows != nil || r.Digest != "" || len(r.Values) != len(Profiles[tableIndex].Columns) {
+				if !haveTable || r.Table != "" || r.Rows != nil || r.Digest != "" || len(r.Values) == 0 {
 					return info, errors.New("invalid archive row shape")
 				}
-				p := Profiles[tableIndex]
 				if r.Values[0] == nil || *r.Values[0] != info.MerchantID {
 					return info, errors.New("archive row belongs to another merchant")
 				}
-				if err := ValidateValues(p, r.Values); err != nil {
-					return info, err
-				}
-				if onRow != nil {
-					if err := onRow(p, r.Values); err != nil {
-						return info, err
-					}
-				}
 				info.Rows++
 			case "footer":
-				if tableIndex != len(Profiles)-1 || r.Table != "" || r.Values != nil || r.Rows == nil || *r.Rows != info.Rows || r.Digest != hex.EncodeToString(digest.Sum(nil)) {
+				if !haveTable || r.Table != "" || r.Values != nil || r.Rows == nil || *r.Rows != info.Rows || r.Digest != hex.EncodeToString(digest.Sum(nil)) {
 					return info, errors.New("archive footer count or digest mismatch")
 				}
 				info.Digest, finished = r.Digest, true
 			default:
 				return info, errors.New("unknown archive record kind")
+			}
+			if onRecord != nil && !finished {
+				if err := onRecord(r); err != nil {
+					return info, err
+				}
 			}
 		}
 		if !finished {
@@ -194,7 +194,7 @@ type Writer struct {
 	digest     hash.Hash
 	bytes      int64
 	rows       int64
-	table      int
+	haveTable  bool
 	closed     bool
 	merchantID string
 }
@@ -204,27 +204,24 @@ func NewWriter(w io.Writer, merchantID string) (*Writer, error) {
 	if !validHeader(h) {
 		return nil, errors.New("invalid merchant UUID")
 	}
-	a := &Writer{w: w, digest: sha256.New(), table: -1, merchantID: merchantID}
+	a := &Writer{w: w, digest: sha256.New(), merchantID: merchantID}
 	return a, a.write(h, true)
 }
 
-func (w *Writer) Table(p Profile) error {
-	if w.closed || w.table+1 >= len(Profiles) || Profiles[w.table+1].Name != p.Name {
-		return errors.New("invalid table order")
+func (w *Writer) Table(name string) error {
+	if w.closed || name == "" {
+		return errors.New("invalid table record")
 	}
-	w.table++
-	return w.write(Record{Kind: "table", Table: p.Name}, true)
+	w.haveTable = true
+	return w.write(Record{Kind: "table", Table: name}, true)
 }
 
 func (w *Writer) Row(values []*string) error {
-	if w.closed || w.table < 0 || len(values) != len(Profiles[w.table].Columns) {
+	if w.closed || !w.haveTable || len(values) == 0 {
 		return errors.New("invalid row shape")
 	}
 	if values[0] == nil || *values[0] != w.merchantID {
 		return errors.New("archive row belongs to another merchant")
-	}
-	if err := ValidateValues(Profiles[w.table], values); err != nil {
-		return err
 	}
 	if err := w.write(Record{Kind: "row", Values: values}, true); err != nil {
 		return err
@@ -234,7 +231,7 @@ func (w *Writer) Row(values []*string) error {
 }
 
 func (w *Writer) Close() error {
-	if w.closed || w.table != len(Profiles)-1 {
+	if w.closed || !w.haveTable {
 		return errors.New("archive tables incomplete")
 	}
 	w.closed = true

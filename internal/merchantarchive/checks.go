@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -72,7 +72,7 @@ var omittedColumns = map[string]string{
 
 func checkSchema(ctx context.Context, tx pgx.Tx) error {
 	known := map[string]bool{}
-	for _, p := range format.Profiles {
+	for _, p := range contract.Profiles {
 		known[p.Name] = true
 	}
 	for t := range excludedTables {
@@ -106,7 +106,7 @@ func checkSchema(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range format.Profiles {
+	for _, p := range contract.Profiles {
 		if !found[p.Name] {
 			return &Error{Code: "unsupported_state", Table: p.Name, Err: fmt.Errorf("required archive table absent")}
 		}
@@ -115,16 +115,16 @@ func checkSchema(ctx context.Context, tx pgx.Tx) error {
 }
 
 func checkColumns(ctx context.Context, tx pgx.Tx) error {
-	profiles := append([]format.Profile(nil), format.Profiles...)
+	profiles := append([]contract.Profile(nil), contract.Profiles...)
 	for table, names := range excludedColumns {
-		p := format.Profile{Name: table}
+		p := contract.Profile{Name: table}
 		for _, name := range strings.Fields(names) {
-			p.Columns = append(p.Columns, format.Column{Name: name})
+			p.Columns = append(p.Columns, contract.Column{Name: name})
 		}
 		profiles = append(profiles, p)
 	}
 	for _, p := range profiles {
-		wanted := map[string]format.Column{}
+		wanted := map[string]contract.Column{}
 		for _, c := range p.Columns {
 			wanted[c.Name] = c
 		}
@@ -223,7 +223,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	if err != nil {
 		return err
 	}
-	profile := format.Profile{Name: "payments", Columns: []format.Column{{Name: "metadata", Type: "jsonb"}}}
+	profile := contract.Profile{Name: "payments", Columns: []contract.Column{{Name: "metadata", Type: "jsonb"}}}
 	var invalid int64
 	for rows.Next() {
 		var metadata string
@@ -231,7 +231,7 @@ func preflight(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 			rows.Close()
 			return err
 		}
-		if format.ValidateValues(profile, []*string{&metadata}) != nil {
+		if contract.ValidateValues(profile, []*string{&metadata}) != nil {
 			invalid++
 		}
 	}

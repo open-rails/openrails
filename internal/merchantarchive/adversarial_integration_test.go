@@ -13,9 +13,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,7 @@ func alteredArchive(t *testing.T, raw []byte, table, column string, value *strin
 	lines := bytes.Split(bytes.TrimSuffix(raw, []byte{'\n'}), []byte{'\n'})
 	current, changed := "", false
 	for i := 1; i < len(lines)-1; i++ {
-		var r format.Record
+		var r archivewire.Record
 		require.NoError(t, json.Unmarshal(lines[i], &r))
 		if r.Kind == "table" {
 			current = r.Table
@@ -35,7 +36,7 @@ func alteredArchive(t *testing.T, raw []byte, table, column string, value *strin
 		if r.Kind != "row" || current != table || changed {
 			continue
 		}
-		for _, p := range format.Profiles {
+		for _, p := range contract.Profiles {
 			if p.Name != table {
 				continue
 			}
@@ -51,7 +52,7 @@ func alteredArchive(t *testing.T, raw []byte, table, column string, value *strin
 		require.NoError(t, err)
 	}
 	require.True(t, changed, "archive fixture must contain the requested row")
-	var footer format.Record
+	var footer archivewire.Record
 	require.NoError(t, json.Unmarshal(lines[len(lines)-1], &footer))
 	body := append(bytes.Join(lines[:len(lines)-1], []byte{'\n'}), '\n')
 	sum := sha256.Sum256(body)
@@ -64,7 +65,7 @@ func alteredArchive(t *testing.T, raw []byte, table, column string, value *strin
 func assertEmptyBook(t *testing.T, d *db.DB, id merchant.ID) {
 	t.Helper()
 	require.NoError(t, d.MerchantTx(merchant.WithID(t.Context(), id), func(ctx context.Context, tx pgx.Tx) error {
-		for _, p := range format.Profiles {
+		for _, p := range contract.Profiles {
 			var n int
 			require.NoError(t, tx.QueryRow(ctx, "SELECT count(*) FROM openrails."+p.Name+" WHERE merchant_id=$1", id.UUID()).Scan(&n))
 			require.Zero(t, n, p.Name)

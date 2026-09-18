@@ -5,7 +5,7 @@ import (
 	"path"
 	"strings"
 
-	archiveformat "github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/archivewire"
 )
 
 // IsMerchantBillingArchive recognizes the fixed archive route beneath an
@@ -21,7 +21,7 @@ func isMerchantArchiveImport(r *http.Request) bool {
 
 func requestBodyLimit(r *http.Request, ordinary int64) int64 {
 	if isMerchantArchiveImport(r) && ordinary == DefaultMaxBodyBytes {
-		return archiveformat.MaxBytes
+		return archivewire.MaxBytes
 	}
 	return ordinary
 }

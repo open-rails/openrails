@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	archiveformat "github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/archivewire"
 )
 
 const merchantBillingArchivePath = "/v1/merchant/billing-archive"
@@ -37,7 +37,7 @@ func (c *Client) ExportMerchantBilling(ctx context.Context, dst io.Writer) error
 		if err := archiveResponseError(resp); err != nil {
 			return err
 		}
-		if _, err := archiveformat.CopyVerified(dst, resp.Body); err != nil {
+		if _, err := archivewire.CopyVerified(dst, resp.Body); err != nil {
 			return fmt.Errorf("%w: incomplete or invalid billing archive: %w", ErrUnreachable, err)
 		}
 		return nil

@@ -11,45 +11,27 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	archiveformat "github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 func archiveTransportFixture(t *testing.T, mid MerchantID, customers int) []byte {
 	t.Helper()
 	var buf bytes.Buffer
-	w, err := archiveformat.NewWriter(&buf, mid.String())
+	w, err := archivewire.NewWriter(&buf, mid.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range archiveformat.Profiles {
-		if err := w.Table(p); err != nil {
+	// Transport fixtures exercise framing without importing the engine's schema.
+	if err := w.Table("customers"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < customers; i++ {
+		merchantID := mid.String()
+		id := uuid.NewSHA1(uuid.Nil, []byte(fmt.Sprint(i))).String()
+		issuer, timestamp := "https://merchant.example/auth", "2026-09-17 12:00:00+00"
+		if err := w.Row([]*string{&merchantID, &id, &issuer, &timestamp, &timestamp}); err != nil {
 			t.Fatal(err)
-		}
-		if p.Name != "customers" {
-			continue
-		}
-		for i := 0; i < customers; i++ {
-			values := []*string{}
-			for _, c := range p.Columns {
-				value := ""
-				switch c.Name {
-				case "merchant_id":
-					value = mid.String()
-				case "id":
-					value = uuid.NewSHA1(uuid.Nil, []byte(fmt.Sprint(i))).String()
-				case "issuer":
-					value = "https://merchant.example/auth"
-				case "created_at", "last_seen_at":
-					value = "2026-09-17 12:00:00+00"
-				default:
-					t.Fatalf("unclassified customer fixture column %s", c.Name)
-				}
-				values = append(values, &value)
-			}
-			if err := w.Row(values); err != nil {
-				t.Fatal(err)
-			}
 		}
 	}
 	if err := w.Close(); err != nil {

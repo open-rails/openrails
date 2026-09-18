@@ -10,7 +10,7 @@ import (
 // TestRootPackageStaysLight enforces the #338 package-layout contract: the root
 // openrails package (interface + remote client) must NOT pull the engine, so a
 // remote-only consumer's binary does not link pgx/river/gin or an internal
-// engine package. The archive format verifier is standard-library-only; the
+// engine package. The archive wire verifier is standard-library-only; the
 // heavy engine lives exclusively in openrails/embed.
 func TestRootPackageStaysLight(t *testing.T) {
 	goBin, err := exec.LookPath("go")
@@ -34,7 +34,7 @@ func TestRootPackageStaysLight(t *testing.T) {
 	}
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		dep := strings.TrimSpace(line)
-		if dep == "github.com/open-rails/openrails/pkg/merchant" || dep == "github.com/open-rails/openrails/pkg/pricing" || dep == "github.com/open-rails/openrails/internal/merchantarchive/format" {
+		if dep == "github.com/open-rails/openrails/pkg/merchant" || dep == "github.com/open-rails/openrails/pkg/pricing" || dep == "github.com/open-rails/openrails/internal/archivewire" {
 			continue
 		}
 		for _, bad := range forbidden {

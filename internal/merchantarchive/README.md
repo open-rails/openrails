@@ -7,6 +7,10 @@ content, nonempty destinations and failed references roll the transaction back.
 Callers must discard any partial export on error. These functions own their
 transactions and expect an unbound application-role database handle.
 
+`internal/archivewire` owns bounded framing and footer verification shared with
+the Client. The engine-owned `contract` package applies table order, row widths
+and stored-value rules; the remote Client does not link these billing contracts.
+
 The final cutover requires all source writers stopped. Repeatable read proves
 snapshot consistency, not that writers were stopped. The destination must be
 explicitly provisioned under its new host/AuthKit authority and remain unarmed
@@ -14,7 +18,7 @@ until cutover is complete. SQL checks every merchant table is empty before the
 first import; it cannot inspect manifest credentials or other runtime processes.
 Merchant directory/authority settings are never copied over the destination.
 
-The fixed profiles in `format/profiles.go` cover 42 retained tables, including
+The fixed profiles in `contract/profiles.go` cover 42 retained tables, including
 ledger accounts/transfers, invoices, grants, entitlements, admission receipts,
 rating and provider-refresh watermarks, webhook deduplication, acknowledged host
 events, and completed checkout and provider-intent coordinates. Scalar money is

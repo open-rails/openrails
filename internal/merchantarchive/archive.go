@@ -12,8 +12,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/merchantarchive/format"
+	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -86,12 +87,12 @@ func Export(ctx context.Context, database *db.DB, id merchant.ID, out io.Writer)
 		if _, err := tx.Exec(ctx, "SELECT openrails.check_billing_restore_ledger($1)", id.UUID()); err != nil {
 			return err
 		}
-		w, err := format.NewWriter(out, id.String())
+		w, err := archivewire.NewWriter(out, id.String())
 		if err != nil {
 			return err
 		}
-		for _, p := range format.Profiles {
-			if err := w.Table(p); err != nil {
+		for _, p := range contract.Profiles {
+			if err := w.Table(p.Name); err != nil {
 				return err
 			}
 			query := exportQuery(p)
@@ -109,6 +110,10 @@ func Export(ctx context.Context, database *db.DB, id merchant.ID, out io.Writer)
 				if err := rows.Scan(dest...); err != nil {
 					rows.Close()
 					return err
+				}
+				if err := contract.ValidateValues(p, values); err != nil {
+					rows.Close()
+					return &Error{Code: "unsupported_state", Table: p.Name, Count: 1, Err: err}
 				}
 				if err := w.Row(values); err != nil {
 					rows.Close()
@@ -152,7 +157,7 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 		}
 		var previousDigest *string
 		var previousRows *int64
-		info, err := format.Read(in, func(h format.Header) error {
+		info, err := contract.Read(in, func(h archivewire.Header) error {
 			if h.MerchantID != id.String() {
 				return &Error{Code: "merchant_mismatch"}
 			}
@@ -161,7 +166,7 @@ func Restore(ctx context.Context, database *db.DB, id merchant.ID, in io.Reader)
 				return err
 			}
 			return tx.QueryRow(ctx, "SELECT summary->>'digest',(summary->>'rows')::bigint FROM openrails.maintenance_runs WHERE merchant_id=$1 AND id=$2::uuid", id.UUID(), receipt).Scan(&previousDigest, &previousRows)
-		}, func(p format.Profile, values []*string) error {
+		}, func(p contract.Profile, values []*string) error {
 			if previousDigest != nil {
 				return nil
 			}
@@ -224,7 +229,7 @@ func scope(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 	return nil
 }
 
-func insertQuery(p format.Profile) string {
+func insertQuery(p contract.Profile) string {
 	cols, params := make([]string, len(p.Columns)), make([]string, len(p.Columns))
 	for i, c := range p.Columns {
 		cols[i] = pgx.Identifier{c.Name}.Sanitize()
@@ -233,7 +238,7 @@ func insertQuery(p format.Profile) string {
 	return "INSERT INTO openrails." + p.Name + " (" + strings.Join(cols, ",") + ") VALUES (" + strings.Join(params, ",") + ")"
 }
 
-func exportQuery(p format.Profile) string {
+func exportQuery(p contract.Profile) string {
 	cols := make([]string, len(p.Columns))
 	for i, c := range p.Columns {
 		expr := "t." + pgx.Identifier{c.Name}.Sanitize()
