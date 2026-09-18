@@ -45,6 +45,11 @@ import (
 
 type obsErr struct {
 	Status       int
+	Type         string
+	Code         string
+	Param        string
+	Metadata     map[string]any
+	HasRequestID bool
 	Invalid      bool
 	Unauthorized bool
 	Denied       bool
@@ -68,7 +73,10 @@ func observeErr(t *testing.T, label string, err error) obsErr {
 	}
 	var se *openrails.StatusError
 	require.ErrorAs(t, err, &se, "%s: both transports must return *openrails.StatusError, got %v", label, err)
-	o.Status = se.Status
+	o.Status, o.Type, o.Code, o.Metadata, o.HasRequestID = se.Status, se.Type, se.Code, se.Metadata, se.RequestID != ""
+	if se.Param != nil {
+		o.Param = *se.Param
+	}
 	return o
 }
 
