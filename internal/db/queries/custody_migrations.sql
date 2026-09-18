@@ -27,7 +27,7 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- name: CountUnresolvedOperationsNamingPaymentMethod :one
 -- or#297 refusal predicate, second arm: an operation pins the instrument its
--- frozen payload names (payment_method_id) until it resolves, whether or not
+-- frozen payload names until it resolves, whether or not
 -- a subscription links it (an invoice collection has none). Every unresolved
 -- state counts: pending and failed_retryable re-run from the executor,
 -- in_flight is mid-attempt, unknown_needs_verify was sent. Its submission,
@@ -36,7 +36,9 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
 SELECT count(*)::bigint FROM openrails.rail_intents ri
 WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
-  AND ri.payload->>'payment_method_id' = sqlc.arg(payment_method_id)::uuid::text;
+  AND (ri.payload->>'payment_method_id' = sqlc.arg(payment_method_id)::uuid::text
+       OR (ri.intent_type = 'nmi_payment_source_update'
+           AND sqlc.arg(payment_method_id)::uuid::text IN (ri.payload->>'new_payment_method_id', ri.payload->>'old_payment_method_id')));
 
 -- name: RemapPaymentMethodCustody :execrows
 -- The custody flip. What moves: who holds the card (custodian), the handle that

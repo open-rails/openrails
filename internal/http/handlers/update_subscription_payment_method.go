@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/api"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -112,7 +113,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(paymentMethod, subscription) {
-		r.ErrorJSON(http.StatusBadRequest, "Payment method belongs to a different PSP")
+		writePaymentMethodPSPMismatch(r)
 		return
 	}
 
@@ -140,14 +141,25 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	oldPaymentMethodID := subscription.PaymentMethodID
 	out, err := r.State.PaymentSourceUpdateIntents.ExecutePaymentSourceUpdate(ctx, subscription, paymentMethod, origin, originReason)
 	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID}).Error("Failed to post payment-source update intent")
-		r.ErrorJSON(http.StatusInternalServerError, "Failed to update payment method")
+		switch {
+		case errors.Is(err, subscriptions.ErrPaymentMethodProviderAccountMismatch):
+			// The durable seam re-read the target under its row lock and found
+			// it attributed to another PSP (#657): a refusal, not a fault.
+			writePaymentMethodPSPMismatch(r)
+		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
+			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+		default:
+			r.InternalError("Failed to update payment method", err)
+		}
 		return
 	}
 	switch {
 	case out.Done:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
 		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": subscription.ID.String(), "payment_method_id": paymentMethodID.String()})
+	case out.Terminal && out.Code == intents.EvidenceCodePSPMismatch:
+		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Info("Payment-source update refused: provider-account mismatch at execution")
+		writePaymentMethodPSPMismatch(r)
 	case out.Terminal:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "new_vault_id": paymentMethod.RailCustomerRef, "payment_method_id": paymentMethod.ID, "reason": out.Reason}).Error("Failed to update subscription payment source with NMI")
 		r.ErrorJSON(http.StatusBadGateway, "Failed to update payment method with payment rail")
@@ -157,4 +169,13 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Warn("Payment-source update unresolved inline; intent ledger will converge")
 		r.ErrorJSON(http.StatusConflict, intents.ErrPaymentSourceUpdateProcessing.Error())
 	}
+}
+
+// writePaymentMethodPSPMismatch renders openrails.CodePaymentMethodPSPMismatch:
+// the named method was vaulted by another provider account than the
+// subscription's; nothing reached the provider. Same answer at the HTTP
+// pre-check and at the durable seam (#657).
+func writePaymentMethodPSPMismatch(r *httprequest.Request) {
+	r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodePaymentMethodPSPMismatch,
+		"This payment method belongs to a different provider account than the subscription. Add the card again on the subscription's provider."))
 }
