@@ -212,18 +212,23 @@ Rules:
   no rebind command.
 - **Per-subscriber cutover off an archived PSP is report-only (#657).**
   `cp.PlanProviderAccountCutover(ctx, merchantID, query)` on
-  `embed/controlplane` resolves a subscription's PSP and either the card the
-  subscriber re-entered (`ReplacementPaymentMethodID`, whose PSP is the target)
-  or a named `TargetPSPID`, and returns the classification: same account ⇒
-  the durable payment-source update; cross-account ⇒
-  `cross_account_requires_card_reentry` with `Executable: false` and the
-  create/verify/cancel/repoint proof still to be qualified. It reads and
-  writes nothing else. The durable payment-source update itself refuses a
-  cross-account target twice: at enqueue and again in the executor under the
-  method's row lock (`failed_terminal`, evidence `code: psp_mismatch`, no
-  provider call), and a custody remap (or#297) refuses an instrument any
-  unresolved operation names, a payment-source update's frozen new/old sides
-  included (`operation_unresolved`).
+  `embed/controlplane` reads the subscription, the card the subscriber
+  re-entered (`ReplacementPaymentMethodID`) and/or a `TargetPSPID` (default:
+  the card's PSP), and both PSP rows, and writes nothing. `Executable` is true
+  only for the durable payment-source update: an NMI subscription that is
+  active or past_due with a provider recurring record, a non-archived target
+  equal to its own account, and a PSP-vaulted, unparked card of the payer on
+  that account (`code: ready`; provider availability is checked when the
+  update runs). Everything else is a coded, non-executable plan
+  (`rail_unsupported`, `subscription_not_rebilling`, `target_archived`,
+  `replacement_card_required`, `replacement_card_psp_mismatch`, ...);
+  cross-account moves report `cross_account_requires_card_reentry` and are
+  never executed. The durable update itself refuses a cross-account target
+  at enqueue and again in the executor under the method's row lock
+  (`failed_terminal`, evidence `code: psp_mismatch`, no provider call), and a
+  custody remap (or#297) refuses an instrument any unresolved operation names, a
+  payment-source update's frozen new/old sides included
+  (`operation_unresolved`).
 
 ### Custodians (or#880)
 
