@@ -109,7 +109,16 @@ var jsonRules = map[string]jsonRule{
 	"custodians.settings":                      object(map[string]jsonRule{"public_api_key": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
 	"products.entitlements_spec":               nullable(dictionary(nullable(integerValue))),
 	"subscriptions.entitlements_spec_snapshot": nullable(dictionary(nullable(integerValue))),
-	"payments.entitlements_spec_snapshot":      nullable(dictionary(nullable(integerValue))),
+	// Checkout writes correlation coordinates and delayed-start metadata;
+	// ordinary subscription updates add notes and supersession markers.
+	// Superseding a NULL response wraps it as previous_gateway_response:null.
+	"subscriptions.gateway_response": nullable(object(map[string]jsonRule{
+		"order_id": textValue, "provider_transaction_id": textValue,
+		"delayed_start": textValue, "e2e_run_id": textValue, "admin_notes": textValue,
+		"superseded_at": textValue, "superseded_by_subscription_id": nullable(textValue),
+		"previous_gateway_response": func(v any) bool { return v == nil },
+	})),
+	"payments.entitlements_spec_snapshot": nullable(dictionary(nullable(integerValue))),
 	"billing_policies.policy": object(map[string]jsonRule{
 		"kind": textValue, "outstanding_cap_amount": integerValue, "spend_windows": array(budgetWindow), "bad_spend_windows": array(budgetWindow), "accrual_rate_cap_per_hour": integerValue, "accrual_rate_window_seconds": integerValue, "collection_threshold_amount": nullable(integerValue), "collection_cycle_boundary": func(v any) bool { return v == "" }, "delinquency_grace_days": nullable(integerValue), "delinquency_amount_floor": nullable(integerValue), "policy_currency": textValue,
 	}),

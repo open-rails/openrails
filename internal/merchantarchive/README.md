@@ -37,9 +37,11 @@ not sufficient coverage.
   including unreferenced runs. Nonempty coverage, affected, summary or inventory
   fields refuse. Reconciliation runs are diagnostic and excluded. Other run
   kinds refuse. The local billing-restore receipt is excluded from re-export.
-- Source subscription gateway responses and maintenance note/error text are
-  diagnostic exclusions. Generated entitlement periods and generated run-class
-  columns are reconstructed by PostgreSQL.
+- Subscription gateway metadata preserves declared checkout correlation IDs,
+  delayed-start/run markers, admin notes and supersession markers. Unknown keys,
+  raw provider bodies and unsafe values refuse export and restore.
+- Maintenance note/error text is diagnostic and excluded. Generated entitlement
+  periods and generated run-class columns are reconstructed by PostgreSQL.
 - PSP settings, signer references and declared public configuration are retained.
   Source diagnostic labels, credential-version/validation markers, known API-key
   material and RPC API keys are excluded. Unknown evidence keys refuse. Custodian
@@ -74,7 +76,9 @@ by its transaction-local GUC. A GUC or an old receipt alone cannot suppress work
 A deferred constraint prohibits unfinished receipts and rechecks ledger totals.
 Restoring never resolves provider clients or enqueues jobs; payment events,
 subscription transition insertion and ledger-counter application are suppressed
-only while inserting their retained originals. Ordinary constraints remain live.
+only while inserting their retained originals. Historical subscription tiers are
+preserved, and live subscriptions (including remaining paid access) must agree
+with their product tier before commit. Ordinary constraints remain live.
 
 A retry verifies the entire artifact and compares its digest/row count with the
 committed receipt. An identical retry is a no-op even after normal destination

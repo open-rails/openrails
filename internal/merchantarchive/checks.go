@@ -59,7 +59,7 @@ var excludedColumns = map[string]string{
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
 	"custodians":        "credential_versions",
-	"subscriptions":     "gateway_response destructive_run_class",
+	"subscriptions":     "destructive_run_class",
 	"payments":          "metadata discount_metadata destructive_run_class",
 	"payment_methods":   "metadata",
 	"checkout_sessions": "destructive_run_class",
@@ -226,6 +226,12 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id merchant.ID) error {
 		{"ledger_transfers", `(customer_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id=ledger_transfers.customer_id))
 		 OR (grant_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.grants g WHERE g.merchant_id=$1 AND g.id=ledger_transfers.grant_id AND g.customer_id=ledger_transfers.customer_id))
 		 OR (invoice_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.invoices i WHERE i.merchant_id=$1 AND i.id=ledger_transfers.invoice_id AND i.customer_id=ledger_transfers.customer_id AND i.currency=ledger_transfers.currency))`},
+		// Restore preserves historical denormalized tiers, but a live subscription
+		// must still agree with its product, as required by the ordinary tier
+		// derivation and product-update guards. Include remaining paid access.
+		{"subscriptions", `deleted_at IS NULL
+		 AND (status IN ('active','pending','past_due','unknown') OR COALESCE(current_period_ends_at,ended_at)>now())
+		 AND EXISTS(SELECT 1 FROM openrails.products p WHERE p.merchant_id=$1 AND p.id=subscriptions.product_id AND p.tier_group IS DISTINCT FROM subscriptions.tier_group)`},
 		{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM openrails.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
 		{"rail_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.subscriptions s WHERE s.merchant_id=$1 AND s.id=rail_intents.subscription_id))
 		 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM openrails.payments p WHERE p.merchant_id=$1 AND p.id=rail_intents.payment_id))

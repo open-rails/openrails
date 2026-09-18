@@ -157,3 +157,25 @@ func TestCanonicalTimestampAndArraySafety(t *testing.T) {
 		t.Fatal("UUID mistaken for PAN")
 	}
 }
+
+func TestSubscriptionGatewayMetadataContract(t *testing.T) {
+	for _, raw := range []string{
+		`null`, `{}`,
+		`{"order_id":"checkout-1","provider_transaction_id":"charge-1","delayed_start":"2027-01-01T00:00:00Z","e2e_run_id":"run-1","admin_notes":"billing note"}`,
+		`{"order_id":"checkout-1","superseded_at":"2026-09-17T00:00:00Z","superseded_by_subscription_id":"10000000-0000-0000-0000-000000000001"}`,
+		`{"previous_gateway_response":null,"superseded_at":"2026-09-17T00:00:00Z","superseded_by_subscription_id":null}`,
+	} {
+		if err := validateJSON("subscriptions.gateway_response", raw); err != nil {
+			t.Errorf("refused supported subscription metadata %s: %v", raw, err)
+		}
+	}
+	for _, raw := range []string{
+		`{"order_id":"checkout-1","unknown":"value"}`, `{"raw_body":{"order_id":"checkout-1"}}`,
+		`{"order_id":42}`, `{"provider_transaction_id":"sk_live_secret"}`,
+		`{"previous_gateway_response":{"secret":"unsafe"}}`, `[]`,
+	} {
+		if validateJSON("subscriptions.gateway_response", raw) == nil {
+			t.Errorf("accepted unsafe subscription metadata %s", raw)
+		}
+	}
+}
