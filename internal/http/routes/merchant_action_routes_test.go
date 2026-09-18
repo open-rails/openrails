@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -172,6 +173,20 @@ func TestRegisterMerchantActionRoutesPermissions(t *testing.T) {
 			perm:   controlplane.PermMerchantPaymentProvidersUpdate,
 		},
 		{
+			name:   "payment provider rail archive",
+			method: http.MethodDelete,
+			path:   "/billing/v1/merchant/payment-providers/stripe",
+			perm:   controlplane.PermMerchantPaymentProvidersUpdate,
+		},
+		{
+			// #655/#656: the explicit per-account archive is a lifecycle
+			// write, gated exactly like the rail-level one.
+			name:   "payment provider account archive",
+			method: http.MethodPost,
+			path:   "/billing/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive",
+			perm:   controlplane.PermMerchantPaymentProvidersUpdate,
+		},
+		{
 			name:   "customer profile",
 			method: http.MethodGet,
 			path:   "/billing/v1/merchant/customers/11111111-1111-1111-1111-111111111111",
@@ -324,6 +339,43 @@ func TestCatalogMeterWritesUseManifestModeGuard(t *testing.T) {
 	))
 	require.Equal(t, http.StatusForbidden, recorder.Code)
 	require.Equal(t, controlplane.PermMerchantCatalogRead, checker.perm)
+}
+
+// The lifecycle archives stay mounted when the secret backend is read-only
+// (they never write a secret), while the credential-writing PUT is hidden;
+// both archives still carry the manifest-mode guard.
+func TestPaymentProviderArchivesMountWithoutSecretWrite(t *testing.T) {
+	checker := &merchantActionChecker{}
+	gate := NewGate(GateOptions{Authenticator: merchantActionAuth{}, AdminPermissionChecker: checker})
+	readOnly := routesurface.AllProviderRoutes()
+	readOnly.SecretWrite = false
+
+	mux := http.NewServeMux()
+	RegisterPaymentProviderRoutes(router.NewMux(mux, "/billing/v1/merchant/payment-providers", nil), nil, Options{Gate: gate, ProviderRoutes: &readOnly})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPut, "/billing/v1/merchant/payment-providers/stripe", strings.NewReader(`{}`)))
+	require.Equal(t, http.StatusMethodNotAllowed, rec.Code, "credential PUT is not mounted without secret writes")
+	require.NotContains(t, rec.Body.String(), "manifest_driven")
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodDelete, "/billing/v1/merchant/payment-providers/stripe"},
+		{http.MethodPost, "/billing/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive"},
+	} {
+		checker.perm = ""
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		require.Equal(t, http.StatusForbidden, rec.Code, "%s %s is mounted and gated", tc.method, tc.path)
+		require.Equal(t, controlplane.PermMerchantPaymentProvidersUpdate, checker.perm)
+	}
+
+	manifest := http.NewServeMux()
+	rt := &app.Runtime{Config: &config.Config{MerchantSource: config.MerchantSourceManifest}}
+	RegisterPaymentProviderRoutes(router.NewMux(manifest, "/billing/v1/merchant/payment-providers", nil), rt, Options{Gate: gate})
+	checker.perm = ""
+	rec = httptest.NewRecorder()
+	manifest.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/billing/v1/merchant/payment-providers/stripe/accounts/11111111-1111-1111-1111-111111111111/archive", nil))
+	require.Equal(t, http.StatusMethodNotAllowed, rec.Code)
+	require.Contains(t, rec.Body.String(), `"code":"manifest_driven"`)
+	require.Empty(t, checker.perm, "manifest guard must run before authorization")
 }
 
 func TestMerchantTierChangeUsesOffChannelAdminLimit(t *testing.T) {

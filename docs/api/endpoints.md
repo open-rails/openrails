@@ -410,9 +410,18 @@ manifest-guarded like catalog writes).
 |---|---|---|
 | GET | `/v1/merchant/payment-providers` | List configured providers |
 | GET | `/v1/merchant/payment-providers/{provider}` | One provider's config (redacted) |
-| PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets |
-| DELETE | `/v1/merchant/payment-providers/{provider}` | Remove provider config |
+| PUT | `/v1/merchant/payment-providers/{provider}` | Create/update provider config + secrets. Live-probes the supplied or stored credentials before writing, including `{"account_id","enabled":false}` — it cannot archive an account whose provider is dark |
+| POST | `/v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive` | Archive exactly this account by its immutable `id`. No provider call, credentials kept, idempotent; optional body `{"allow_last": true}` |
+| DELETE | `/v1/merchant/payment-providers/{provider}` | Archive the rail's single active account (no provider call). More than one active: `409 provider_accounts_ambiguous` — use the per-account archive |
 | POST | `/v1/merchant/payment-providers/routing/dry-run` | Explain which PSP a checkout would get, and why every other candidate was skipped. Read permission — creates nothing (or#288) |
+
+Archive is not deletion (#655): the row, its `id`, credentials and history
+remain, existing obligations and inbound webhooks keep resolving to it, and
+new checkout selects only active accounts. Archiving the rail's last active
+account answers `409 provider_account_last_active` (metadata: `psp_id`)
+unless `allow_last` is `true`; new checkout on that rail is then refused until
+another account is armed. Both archives are lifecycle writes: they stay
+mounted when the secret backend is read-only.
 
 ### Metrics, dashboard, webhooks, notifications
 

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -13,6 +15,38 @@ import (
 
 type PaymentProviderConfig = merchants.PaymentProviderConfig
 type UpsertPaymentProviderConfigRequest = merchants.UpsertPaymentProviderConfigRequest
+type ArchivePaymentProviderAccountRequest = merchants.ArchivePaymentProviderAccountRequest
+
+// ListPaymentProviderConfigs returns the merchant's PSP accounts on rail (""
+// = every rail) filtered by status ("active", "archived", "" = all), redacted.
+func ListPaymentProviderConfigs(ctx context.Context, a *app.App, id merchant.ID, rail, status string) ([]PaymentProviderConfig, error) {
+	providerService, err := paymentProviderService(a)
+	if err != nil {
+		return nil, fmt.Errorf("control plane list payment providers: %w", err)
+	}
+	items, err := providerService.ListPaymentProviderConfigs(ctx, id, rail, "", status)
+	if err != nil {
+		return nil, fmt.Errorf("control plane list payment providers: %w", err)
+	}
+	return items, nil
+}
+
+// ArchivePaymentProviderAccount archives exactly one PSP account by its
+// immutable id without contacting the provider (#655/#656).
+func ArchivePaymentProviderAccount(ctx context.Context, a *app.App, id merchant.ID, rail string, pspID uuid.UUID, req ArchivePaymentProviderAccountRequest) (PaymentProviderConfig, error) {
+	if strings.TrimSpace(rail) == "" {
+		return PaymentProviderConfig{}, errors.New("control plane archive payment provider account: rail required")
+	}
+	providerService, err := paymentProviderService(a)
+	if err != nil {
+		return PaymentProviderConfig{}, fmt.Errorf("control plane archive payment provider account: %w", err)
+	}
+	provider, err := providerService.ArchivePaymentProviderAccount(ctx, id, rail, pspID, req)
+	if err != nil {
+		return PaymentProviderConfig{}, fmt.Errorf("control plane archive payment provider account: %w", err)
+	}
+	return provider, nil
+}
 
 // GetPaymentProviderConfig returns one system-owned merchant PSP
 // with credential values redacted.

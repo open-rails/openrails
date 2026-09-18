@@ -200,6 +200,12 @@ Rules:
   `account_id` would silently lie). Declare a NEW `psps` entry and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
+  Archive by id: `POST /v1/merchant/payment-providers/{rail}/accounts/{psp_id}/archive`
+  (`embed/controlplane`: `ArchivePaymentProviderAccount`) makes no provider
+  call, so it works when the old provider is terminated or unreachable. The
+  rail-level `DELETE` refuses (`provider_accounts_ambiguous`) while two
+  accounts are active, and `PUT … {"enabled": false}` live-probes the stored
+  credentials, so neither archives a dark account.
 - **Pending intents stamped with the old PSP do not follow** a credential
   move: keep (or restore) the old PSP's credentials until its queue drains,
   or let stale intents expire/supersede via their relevance windows. There is
