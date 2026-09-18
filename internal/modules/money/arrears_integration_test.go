@@ -60,7 +60,8 @@ func TestAccrueOwed_ConcurrentSameCoords(t *testing.T) {
 }
 
 func TestChargeOutstanding_Threshold(t *testing.T) {
-	svc, pool, payer, cur, ctx := moneyInEnv(t)
+	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -73,7 +74,7 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 	ch := &fakeCharger{}
 	// Pending invoice items are not receivables yet, so collection waits for
 	// invoice finalization.
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Empty(t, ch.charges)
@@ -82,13 +83,13 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 	require.NoError(t, err)
 
 	// Below threshold first: owed $5, threshold $10 (both internal amounts) -> no charge.
-	n, err = svc.ChargeOutstanding(ctx, ch, 10_000_000)
+	n, err = svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 10_000_000)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Empty(t, ch.charges)
 
 	// At/over threshold: owed $5, threshold $5 -> charge.
-	n, err = svc.ChargeOutstanding(ctx, ch, 5_000_000)
+	n, err = svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 5_000_000)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.Len(t, ch.charges, 1)
@@ -101,7 +102,8 @@ func TestChargeOutstanding_Threshold(t *testing.T) {
 }
 
 func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
-	svc, pool, payer, cur, ctx := moneyInEnv(t)
+	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -115,7 +117,7 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 
 	ch := &fakeCharger{}
 	// threshold <= 0 => sweep everything with owed > 0.
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	// Sub-cent owed rounds UP: ceil(3_000_001 internal units / 10_000) = 301 cents.
@@ -126,7 +128,8 @@ func TestChargeOutstanding_MonthEndSweep(t *testing.T) {
 }
 
 func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
-	svc, pool, payer, cur, ctx := moneyInEnv(t)
+	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	pm := seedPaymentMethod(t, pool, ctx, payer, string(models.RailStripe))
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{
 		BillingMode: strptr(money.BillingModeArrears),
@@ -139,7 +142,7 @@ func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := &fakeCharger{declineAll: true}
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, ch.charges, 1, "charge attempted")
@@ -149,7 +152,8 @@ func TestChargeOutstanding_Declined_LeavesOwed(t *testing.T) {
 }
 
 func TestChargeOutstanding_NoPaymentMethod_Skipped(t *testing.T) {
-	svc, _, payer, cur, ctx := moneyInEnv(t)
+	svc, dbi, pool, payer, cur, ctx := moneyInEnvWithDB(t)
+	cleanupCollection(t, pool, ctx, payer)
 	_, err := svc.UpsertAccountSettings(ctx, payer, money.DefaultCurrency, money.AccountSettingsInput{BillingMode: strptr(money.BillingModeArrears)})
 	require.NoError(t, err)
 	_, err = svc.AccrueOwed(ctx, payer, cur, "usage", "r1", 500)
@@ -158,7 +162,7 @@ func TestChargeOutstanding_NoPaymentMethod_Skipped(t *testing.T) {
 	require.NoError(t, err)
 
 	ch := &fakeCharger{}
-	n, err := svc.ChargeOutstanding(ctx, ch, 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Empty(t, ch.charges, "no card on file -> not charged")

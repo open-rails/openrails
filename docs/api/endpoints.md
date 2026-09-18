@@ -342,7 +342,7 @@ Full request and state-transition details are in
 | GET | `/v1/merchant/invoices/{id}` | `merchant:invoices:read` | Read one invoice and its available actions |
 | GET | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:read` | List collection and remittance history |
 | POST | `/v1/merchant/invoices/{id}/payments` | `merchant:invoices:update` | Record an idempotent external remittance; does not charge a provider |
-| POST | `/v1/merchant/invoices/{id}/retry-collection` | `merchant:invoices:collect` | Retry provider collection with an explicit saved method and idempotency key |
+| POST | `/v1/merchant/invoices/{id}/retry-collection` | `merchant:invoices:collect` | Start or replay one durable collection operation with an explicit saved method and idempotency key (202 while unresolved) |
 | POST | `/v1/merchant/invoices/{id}/uncollectible` | `merchant:invoices:update` | Stop collection while retaining the debt |
 | POST | `/v1/merchant/invoices/{id}/void` | `merchant:invoices:update` | Void an eligible invoice and write off its remaining debt |
 

@@ -71,25 +71,26 @@ var providerWriteSurface = map[string]string{
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
 
 	// --- reads ----------------------------------------------------------
-	"ConfirmApprovedSale":         "read",
-	"ConfirmLiveSubscription":     "read",
-	"ConfirmRefund":               "read",
-	"ConfirmRefundNotExecuted":    "read",
-	"FindSuccessfulSaleByOrderID": "read",
-	"GetPayment":                  "read",
-	"GetPaymentActions":           "read",
-	"GetRecurringLiveness":        "read",
-	"GetRecurringPlanByID":        "read",
-	"GetRecurringPlanDetailByID":  "read",
-	"GetSubscription":             "read",
-	"GetWebhookSecret":            "read",
-	"ListCustomersPage":           "read",
-	"ListRecurringPlans":          "read",
-	"ListSubscriptionsPage":       "read",
-	"ProbeCredentials":            "read", // #812: bounded transaction-search probe; creates nothing
-	"ProbeSalesByOrderID":         "read",
-	"ProbeTestMode":               "read",
-	"SearchTransactions":          "read",
+	"ConfirmApprovedSale":          "read",
+	"ConfirmApprovedUnvaultedSale": "read",
+	"ConfirmLiveSubscription":      "read",
+	"ConfirmRefund":                "read",
+	"ConfirmRefundNotExecuted":     "read",
+	"FindSuccessfulSaleByOrderID":  "read",
+	"GetPayment":                   "read",
+	"GetPaymentActions":            "read",
+	"GetRecurringLiveness":         "read",
+	"GetRecurringPlanByID":         "read",
+	"GetRecurringPlanDetailByID":   "read",
+	"GetSubscription":              "read",
+	"GetWebhookSecret":             "read",
+	"ListCustomersPage":            "read",
+	"ListRecurringPlans":           "read",
+	"ListSubscriptionsPage":        "read",
+	"ProbeCredentials":             "read", // #812: bounded transaction-search probe; creates nothing
+	"ProbeSalesByOrderID":          "read",
+	"ProbeTestMode":                "read",
+	"SearchTransactions":           "read",
 }
 
 // solanaWriteFuncs are the sign-and-submit entry points: everything that puts a

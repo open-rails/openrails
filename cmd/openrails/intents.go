@@ -72,7 +72,7 @@ func newIntentsResolveCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "resolve",
-		Short: "Resolve an unknown provider operation with an exact provider receipt or provider-confirmed non-execution",
+		Short: "Resolve an unknown provider operation with an exact provider receipt or provider-confirmed non-execution (--not-executed also releases a never-submitted invoice collection)",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			id, err := uuid.Parse(strings.TrimSpace(intentID))

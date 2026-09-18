@@ -3,8 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"github.com/open-rails/openrails"
 	"time"
+
+	"github.com/open-rails/openrails"
 
 	"github.com/google/uuid"
 
@@ -371,11 +372,8 @@ func (s *Service) MarkInvoicesPastDue(ctx context.Context, now time.Time) (int, 
 
 // ChargeOutstanding collects the merchant's chargeable open/past-due
 // receivables (collection_method=charge_automatically, saved method on file)
-// via the runtime collection plane. Returns successful charge count.
+// through durable invoice_collection operations. Returns the settled count.
 func (s *Service) ChargeOutstanding(ctx context.Context, minThreshold int64) (int, error) {
-	if s == nil || s.rt == nil {
-		return 0, fmt.Errorf("service not initialized")
-	}
 	rt, err := s.runtime()
 	if err != nil {
 		return 0, err
@@ -386,41 +384,10 @@ func (s *Service) ChargeOutstanding(ctx context.Context, minThreshold int64) (in
 	var n int
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error
-		n, e = s.moneyService().ChargeOutstanding(ctx, rt.MoneyCharger, minThreshold)
+		n, e = s.moneyService().ChargeOutstanding(ctx, rt.IntentRunner(), minThreshold)
 		return e
 	})
 	return n, err
-}
-
-// InvoiceUnknownResolutionDTO mirrors one #828 unknown-outcome resolver pass.
-type InvoiceUnknownResolutionDTO struct {
-	Examined int `json:"examined"`
-	Settled  int `json:"settled"`
-	Skipped  int `json:"skipped"`
-}
-
-// ResolveUnknownInvoiceCollections resolves invoices parked
-// collection_outcome_unknown by provider READ through the runtime collection
-// plane (#828). The scheduled invoice worker runs this automatically; the
-// service surface exists for on-demand operator runs.
-func (s *Service) ResolveUnknownInvoiceCollections(ctx context.Context) (InvoiceUnknownResolutionDTO, error) {
-	if s == nil || s.rt == nil {
-		return InvoiceUnknownResolutionDTO{}, fmt.Errorf("service not initialized")
-	}
-	rt, err := s.runtime()
-	if err != nil {
-		return InvoiceUnknownResolutionDTO{}, err
-	}
-	if rt.CollectionResolver == nil {
-		return InvoiceUnknownResolutionDTO{}, fmt.Errorf("collection plane not configured")
-	}
-	var stats money.InvoiceUnknownResolution
-	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		var e error
-		stats, e = s.moneyService().ResolveUnknownInvoiceCollections(ctx, rt.CollectionResolver)
-		return e
-	})
-	return InvoiceUnknownResolutionDTO(stats), err
 }
 
 // RecordOutOfBandInvoicePayment applies a manual remittance (wire/check) to a

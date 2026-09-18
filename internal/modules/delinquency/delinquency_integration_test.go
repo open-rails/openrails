@@ -13,10 +13,12 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -37,10 +39,24 @@ func TestMain(m *testing.M) { dbtest.RunMain(m) }
 // the delinquency clock is supposed to run on.
 type declineCharger struct{ calls int }
 
-func (c *declineCharger) ChargeSavedMethod(_ context.Context, _ money.ChargeRequest) (money.ChargeResult, error) {
-	c.calls++
-	code, msg := "200", "declined"
-	return money.ChargeResult{Rail: string(models.RailNMI), Declined: true, FailureCode: &code, FailureMessage: &msg}, nil
+func (c *declineCharger) Prepare(_ context.Context, _ money.ChargeRequest) (money.PreparedCharge, error) {
+	return money.PreparedChargeFunc(func(context.Context) (money.ChargeResult, error) {
+		c.calls++
+		code, msg := "200", "declined"
+		return money.ChargeResult{Rail: string(models.RailNMI), Declined: true, FailureCode: &code, FailureMessage: &msg}, nil
+	}), nil
+}
+
+// collectionRunner is the invoice_collection ledger runner over the charger,
+// on the env's shared clock.
+func (e *env) collectionRunner(charger money.Charger) *intents.Runner {
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
+	return &intents.Runner{
+		Store:    intents.NewStore(e.dbi),
+		Registry: intents.NewRegistry(money.NewInvoiceCollectionHandler(e.dbi, charger, nil, cfg, e.clock)),
+		Config:   cfg,
+		Clock:    e.clock,
+	}
 }
 
 type env struct {
@@ -225,7 +241,7 @@ func TestDelinquencyLifecycle(t *testing.T) {
 	// delinquency clock exists to measure, and the DECLINE alone must not
 	// produce a delinquency state.
 	charger := &declineCharger{}
-	_, err := e.money.ChargeOutstanding(e.ctx, charger, 0)
+	_, err := e.money.ChargeOutstanding(e.ctx, e.collectionRunner(charger), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, charger.calls, "the collection path must have attempted the charge")
 

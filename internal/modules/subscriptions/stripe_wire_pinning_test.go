@@ -44,7 +44,7 @@ func TestStripeCollectInvoice_WirePinsCentsAmount(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"in_1","status":"open"}`))
 	})
 	mux.HandleFunc("POST /v1/invoices/in_1/finalize", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"in_1","status":"paid","amount_paid":1999,"payment_intent":"pi_1","charge":"ch_1"}`))
+		_, _ = w.Write([]byte(`{"id":"in_1","status":"paid","amount_paid":1999,"currency":"usd","payment_intent":"pi_1","charge":"ch_1","metadata":{"openrails_collection_key":"idem-1"}}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -66,7 +66,8 @@ func TestStripeCollectInvoice_WirePinsCentsAmount(t *testing.T) {
 }
 
 // TestStripeCollectInvoice_RejectsUnderpaidInvoice: the paid check compares
-// cents to cents — an invoice settled below the requested cents errors.
+// cents to cents — an invoice settled below the requested cents is not this
+// operation's receipt.
 func TestStripeCollectInvoice_RejectsUnderpaidInvoice(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/invoiceitems", func(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +77,7 @@ func TestStripeCollectInvoice_RejectsUnderpaidInvoice(t *testing.T) {
 		_, _ = w.Write([]byte(`{"id":"in_1","status":"open"}`))
 	})
 	mux.HandleFunc("POST /v1/invoices/in_1/finalize", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"id":"in_1","status":"paid","amount_paid":1998,"charge":"ch_1"}`))
+		_, _ = w.Write([]byte(`{"id":"in_1","status":"paid","amount_paid":1998,"currency":"usd","charge":"ch_1","metadata":{"openrails_collection_key":"idem-1"}}`))
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
@@ -91,7 +92,8 @@ func TestStripeCollectInvoice_RejectsUnderpaidInvoice(t *testing.T) {
 		Currency:        "USD",
 		IdempotencyKey:  "idem-1",
 	})
-	require.ErrorContains(t, err, "paid only 1998 of 1999")
+	require.ErrorIs(t, err, ErrStripeReceiptMismatch)
+	require.ErrorContains(t, err, "paid 1998, not 1999")
 }
 
 // TestStripeCreateRefund_WirePinsCentsAmount: RefundPayload.AmountCents (cents,

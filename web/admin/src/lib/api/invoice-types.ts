@@ -34,6 +34,7 @@ export interface MerchantInvoice {
   collection_method: string
   collection_failure_count: number
   last_collection_failure_code?: string
+  collection_intent_id?: string
   next_collection_attempt_at?: string
   po_number?: string
   tax?: Record<string, unknown>

@@ -73,6 +73,14 @@ checkout intents prune their submission payloads in the ordinary runner; any
 nonempty retained NMI purchase payload still refuses. Other provider workflows
 require their own safe contract.
 
+Invoice collection retains its typed frozen request, original instrument
+coordinates and terminal receipt. An invoice with a live collection pointer
+refuses cutover; terminal collection clears that pointer. Invoice item metadata
+retains only the engine's operation/source coordinates. Unknown fields and raw
+provider bodies remain refused. A production NMI collection test proves that a
+settled invoice restores and replays without installing a provider adapter or
+creating another payment or ledger transfer.
+
 ## Restore guard
 
 The existing maintenance ledger stores one `billing_restore` receipt per

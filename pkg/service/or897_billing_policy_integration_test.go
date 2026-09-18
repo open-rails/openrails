@@ -11,8 +11,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/admission"
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -34,10 +37,22 @@ type declineCharger struct {
 	attempts int
 }
 
-func (c *declineCharger) ChargeSavedMethod(_ context.Context, _ money.ChargeRequest) (money.ChargeResult, error) {
-	c.attempts++
-	code, message := "05", "do not honor"
-	return money.ChargeResult{Rail: "nmi", Declined: true, FailureCode: &code, FailureMessage: &message}, nil
+func (c *declineCharger) Prepare(_ context.Context, _ money.ChargeRequest) (money.PreparedCharge, error) {
+	return money.PreparedChargeFunc(func(context.Context) (money.ChargeResult, error) {
+		c.attempts++
+		code, message := "05", "do not honor"
+		return money.ChargeResult{Rail: "nmi", Declined: true, FailureCode: &code, FailureMessage: &message}, nil
+	}), nil
+}
+
+// collectionRunner is the invoice_collection ledger runner over the charger.
+func collectionRunner(dbi *db.DB, charger money.Charger) *intents.Runner {
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}
+	return &intents.Runner{
+		Store:    intents.NewStore(dbi),
+		Registry: intents.NewRegistry(money.NewInvoiceCollectionHandler(dbi, charger, nil, cfg, nil)),
+		Config:   cfg,
+	}
 }
 
 // SCENARIO 1 — the API business. A $200 credit line on OUTSTANDING owed.
@@ -80,7 +95,7 @@ func TestOr897_OutstandingCapPolicy_SeedAPIBusiness(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.invoices WHERE customer_id = $1", payer.UUID())
 	})
 	charger := &declineCharger{}
-	collected, err := ms.ChargeOutstanding(ctx, charger, 0)
+	collected, err := ms.ChargeOutstanding(ctx, collectionRunner(dbi, charger), 0)
 	require.NoError(t, err)
 	require.Zero(t, collected, "the charge declined, so nothing was collected")
 	require.Positive(t, charger.attempts, "collection must actually have been attempted")

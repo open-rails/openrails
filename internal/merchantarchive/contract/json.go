@@ -124,9 +124,24 @@ var jsonRules = map[string]jsonRule{
 		"resolution": object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "provider_reference": textValue, "not_executed": booleanValue}),
 	}),
 
+	// The completed collection operation retains its frozen instrument and
+	// accepted terms for replay; none of these fields contains card data.
+	"rail_intents.invoice_collection.payload": object(map[string]jsonRule{
+		"invoice_id": uuidValue, "customer_id": uuidValue, "attempt_id": uuidValue, "payment_method_id": uuidValue,
+		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue,
+		"instrument": object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue}),
+	}),
+	"rail_intents.invoice_collection.result_evidence": nullable(object(map[string]jsonRule{
+		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
+		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue, "not_executed": booleanValue,
+		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,
+	})),
 	// Engine-authored payment correlation, not an arbitrary provider body.
 	"payments.metadata": nullable(object(map[string]jsonRule{
 		"order_id": textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
+	})),
+	"invoice_items.metadata": nullable(object(map[string]jsonRule{
+		"operation": textValue, "source": textValue,
 	})),
 	// Successful checkout intents prune their submission payloads. Nonempty
 	// payloads remain unqualified; retain only the exact typed replay results.

@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -76,7 +75,7 @@ type nmiCutoverProgress struct {
 // frozen operation and receipts after success for exact replay and forensics.
 type NMIProviderCutover struct {
 	DB       *db.DB
-	Resolver money.NMIClientResolver
+	Resolver NMIClientResolver
 	Clock    clockwork.Clock
 }
 

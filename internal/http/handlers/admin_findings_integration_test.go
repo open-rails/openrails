@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +15,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/money"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -229,8 +231,16 @@ func (f findingsNMIResolver) ResolveCollectionAdapter(context.Context, gen.Openr
 	return nil, false, nil
 }
 
-func (f findingsNMIResolver) VerifyCollectionCharge(context.Context, gen.OpenrailsPaymentMethod, string) (money.CollectionVerifyResult, error) {
+func (f findingsNMIResolver) VerifyCollectionCharge(context.Context, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
 	return money.CollectionVerifyResult{}, nil
+}
+
+func (f findingsNMIResolver) ConfirmCollectionReceipt(context.Context, string, money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+	return money.CollectionVerifyResult{}, errors.New("no collection reads in this fixture")
+}
+
+func (f findingsNMIResolver) ConfirmCollectionNotExecuted(context.Context, money.CollectionReceiptExpectation) error {
+	return errors.New("no collection reads in this fixture")
 }
 
 func (fx *findingsFixture) exec(sql string, args ...any) {
