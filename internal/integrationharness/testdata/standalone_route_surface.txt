@@ -188,6 +188,7 @@ POST /v1/merchant/metrics/ask
 POST /v1/merchant/metrics/query
 POST /v1/merchant/notifications/{id}/read
 POST /v1/merchant/payment-providers/routing/dry-run
+POST /v1/merchant/payment-providers/{provider}/accounts/{psp_id}/archive
 POST /v1/merchant/payments/{id}/refunds
 POST /v1/merchant/plan-migrations
 POST /v1/merchant/plan-migrations/preview

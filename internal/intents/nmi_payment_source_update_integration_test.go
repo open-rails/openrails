@@ -16,6 +16,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -23,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -248,6 +250,369 @@ func TestNMIPaymentSourceUpdateIntent_WriteThroughHappyPathAndReplay(t *testing.
 	require.Equal(t, fx.newPM.ID, fx.localPaymentMethodID(t))
 }
 
+// otherPSP registers a second provider account on the merchant and returns
+// its id; reattribute moves a method onto it the way a #297 custody remap's
+// RemapPaymentMethodCustody does (psp_id only; the vault handle stays).
+func (fx *paymentSourceSwapFixture) otherPSP(t *testing.T) uuid.UUID {
+	t.Helper()
+	id := dbtest.EnsureTestPSP(fx.ctx, t, fx.db.Pool(), dbtest.TestMerchantID.UUID(), "other-mobius-"+uuid.NewString()[:8])
+	t.Cleanup(func() {
+		_, _ = fx.db.Pool().Exec(fx.ctx, "UPDATE openrails.psps SET archived = true WHERE id = $1", id)
+	})
+	return id
+}
+
+func (fx *paymentSourceSwapFixture) reattribute(t *testing.T, pm *models.PaymentMethod, psp uuid.UUID) {
+	t.Helper()
+	_, err := fx.db.Pool().Exec(fx.ctx, "UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2", psp, pm.ID)
+	require.NoError(t, err)
+	pm.PspID = psp
+}
+
+func (fx *paymentSourceSwapFixture) intentCount(t *testing.T) int {
+	t.Helper()
+	var n int
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
+		"SELECT count(*) FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2",
+		TypeNMIPaymentSourceUpdate, fx.sub.ID).Scan(&n))
+	return n
+}
+
+// latestIntentEvidenceCode reads result_evidence.code of the most recent swap
+// intent for the fixture's subscription.
+func (fx *paymentSourceSwapFixture) latestIntentEvidenceCode(t *testing.T) string {
+	t.Helper()
+	var code *string
+	require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
+		"SELECT result_evidence->>'code' FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2 ORDER BY created_at DESC, id LIMIT 1",
+		TypeNMIPaymentSourceUpdate, fx.sub.ID).Scan(&code))
+	if code == nil {
+		return ""
+	}
+	return *code
+}
+
+// Cross-account updates stop at the durable producer boundary: the target is
+// re-read under its row lock, no intent row is created and the fake NMI
+// receives no write — a target vault from another PSP can never be sent
+// through the archived/source account's client (#657).
+func TestNMIPaymentSourceUpdateIntent_CrossPSPRefusesBeforeProviderCall(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	fx.reattribute(t, fx.newPM, fx.otherPSP(t))
+
+	sub, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, fx.sub.ID)
+	require.NoError(t, err)
+	_, err = fx.through.ExecutePaymentSourceUpdate(fx.ctx, sub, fx.newPM, OriginUser, "cross-psp test")
+	require.ErrorIs(t, err, subscriptions.ErrPaymentMethodProviderAccountMismatch)
+	require.Zero(t, fx.gateway.updateCalls.Load(), "cross-PSP guard must run before any provider write")
+	require.Zero(t, fx.intentCount(t), "a refused request leaves no durable intent behind")
+}
+
+func (fx *paymentSourceSwapFixture) moveTargetToCustodian(t *testing.T) {
+	t.Helper()
+	custodian := uuid.New()
+	_, err := fx.db.Pool().Exec(fx.ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
+	require.NoError(t, err)
+	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, fx.newPM.ID, custodian)
+	require.NoError(t, err)
+}
+
+func TestNMIPaymentSourceUpdateIntent_CustodianHeldTargetRefusesBeforeProviderCall(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	fx.moveTargetToCustodian(t)
+	// The PSP remains unchanged, and the old vault reference remains for
+	// forensic correlation. It must never be used as a live NMI address.
+	_, err := fx.through.ExecutePaymentSourceUpdate(fx.ctx, fx.sub, fx.newPM, OriginUser, "custodian-held target")
+	require.ErrorIs(t, err, subscriptions.ErrPaymentMethodNotPSPVaulted)
+	require.Zero(t, fx.gateway.updateCalls.Load())
+	require.Zero(t, fx.gateway.getCalls.Load())
+	require.Zero(t, fx.intentCount(t))
+}
+
+func TestNMIPaymentSourceUpdateIntent_CustodyChangesBeforeContinuation(t *testing.T) {
+	for _, phase := range []string{"verify", "execute"} {
+		t.Run(phase, func(t *testing.T) {
+			fx := newPaymentSourceSwapFixture(t)
+			fx.gateway.updateMode.Store("ambiguous_lost")
+			out := fx.swapTo(t, fx.newPM)
+			require.False(t, out.Done)
+			fx.advanceClock(2 * time.Minute)
+			if phase == "execute" {
+				_, err := fx.runner.RunVerifyOnce(fx.ctx)
+				require.NoError(t, err)
+				status, _ := fx.latestIntent(t)
+				require.Equal(t, StatusFailedRetryable, status)
+				fx.advanceClock(15 * time.Minute)
+			}
+			fx.moveTargetToCustodian(t)
+			reads, writes := fx.gateway.getCalls.Load(), fx.gateway.updateCalls.Load()
+			var err error
+			if phase == "execute" {
+				_, err = fx.runner.RunExecuteOnce(fx.ctx)
+			} else {
+				_, err = fx.runner.RunVerifyOnce(fx.ctx)
+			}
+			require.NoError(t, err)
+			status, _ := fx.latestIntent(t)
+			require.Equal(t, StatusFailedTerminal, status)
+			require.Equal(t, subscriptions.ErrPaymentMethodNotPSPVaulted.Code, fx.latestIntentEvidenceCode(t))
+			require.Equal(t, reads, fx.gateway.getCalls.Load())
+			require.Equal(t, writes, fx.gateway.updateCalls.Load())
+			require.Equal(t, fx.oldPM.ID, fx.localPaymentMethodID(t))
+		})
+	}
+}
+
+// The producer's check is made against the CURRENT row, not the caller's
+// stale copy: a method re-attributed between the HTTP pre-check and the
+// durable seam is refused with zero writes.
+func TestNMIPaymentSourceUpdateIntent_ProducerRereadsTargetUnderLock(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	stale := *fx.newPM // what an HTTP handler read a moment ago: same PSP as the subscription
+	fx.reattribute(t, fx.newPM, fx.otherPSP(t))
+
+	sub, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, fx.sub.ID)
+	require.NoError(t, err)
+	_, err = fx.through.ExecutePaymentSourceUpdate(fx.ctx, sub, &stale, OriginUser, "stale caller copy")
+	require.ErrorIs(t, err, subscriptions.ErrPaymentMethodProviderAccountMismatch)
+	require.Zero(t, fx.gateway.updateCalls.Load())
+	require.Zero(t, fx.intentCount(t))
+}
+
+// A zero identifier is refused with the coded invalid-parameter envelope
+// before the row lock: no provider traffic, no durable intent, never a
+// "not found" lookup.
+func TestNMIPaymentSourceUpdateIntent_ZeroIdentifiersRefusedBeforeAnyLookup(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	sub, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, fx.sub.ID)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name   string
+		param  string
+		mutate func(*models.Subscription, *models.PaymentMethod)
+	}{
+		{"zero subscription id", "subscription_id", func(s *models.Subscription, _ *models.PaymentMethod) { s.ID = uuid.Nil }},
+		{"zero subscription psp", "subscription.psp_id", func(s *models.Subscription, _ *models.PaymentMethod) { s.PspID = uuid.Nil }},
+		{"zero payment method id", "payment_method_id", func(_ *models.Subscription, p *models.PaymentMethod) { p.ID = uuid.Nil }},
+		{"zero payment method psp", "payment_method.psp_id", func(_ *models.Subscription, p *models.PaymentMethod) { p.PspID = uuid.Nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, pm := *sub, *fx.newPM
+			tt.mutate(&s, &pm)
+			_, err := fx.through.ExecutePaymentSourceUpdate(fx.ctx, &s, &pm, OriginUser, "zero id test")
+			require.ErrorIs(t, err, openrails.ErrInvalid)
+			var se *apperr.Error
+			require.ErrorAs(t, err, &se)
+			require.Equal(t, "invalid_param", se.Code)
+			require.NotEmpty(t, se.Param)
+			require.Equal(t, tt.param, se.Param)
+			require.NotErrorIs(t, err, paymentmethods.ErrPaymentMethodNotFound, "a zero id is invalid, never a missing row")
+			require.Zero(t, fx.gateway.updateCalls.Load())
+			require.Zero(t, fx.intentCount(t), "a refused request leaves no durable intent")
+		})
+	}
+	// A zero merchant scope is refused too (the ambient scope resolves first,
+	// so this one surfaces as the missing-merchant refusal).
+	_, err = fx.through.ExecutePaymentSourceUpdate(merchant.WithID(context.Background(), merchant.ID{}), sub, fx.newPM, OriginUser, "zero merchant")
+	require.Error(t, err)
+	require.Zero(t, fx.gateway.updateCalls.Load())
+	require.Zero(t, fx.intentCount(t))
+}
+
+// A frozen payload carrying a zero identifier fails closed in the executor
+// exactly like a missing one: terminal, zero provider writes.
+func TestNMIPaymentSourceUpdateIntent_ZeroIdentifierInFrozenPayloadIsTerminal(t *testing.T) {
+	zero := uuid.Nil
+	tests := []struct {
+		name   string
+		break_ func(*NMIPaymentSourceUpdatePayload)
+	}{
+		{"zero target psp", func(p *NMIPaymentSourceUpdatePayload) { p.NewPspID = uuid.Nil }},
+		{"zero target method", func(p *NMIPaymentSourceUpdatePayload) { p.NewPaymentMethodID = uuid.Nil }},
+		{"zero old method", func(p *NMIPaymentSourceUpdatePayload) { p.OldPaymentMethodID = &zero }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := newPaymentSourceSwapFixture(t)
+			oldID, subID := fx.oldPM.ID, fx.sub.ID
+			payload := NMIPaymentSourceUpdatePayload{
+				UserID: fx.sub.CustomerID.String(), RailSubscriptionID: fx.sub.RailSubscriptionID,
+				NewPaymentMethodID: fx.newPM.ID, NewRailCustomerRef: fx.newPM.RailCustomerRef, NewPspID: fx.pspID,
+				OldPaymentMethodID: &oldID, OldRailCustomerRef: fx.oldPM.RailCustomerRef,
+			}
+			tt.break_(&payload)
+			_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
+				MerchantID: dbtest.TestMerchantID.UUID(), Provider: "mobius", PspID: fx.pspID,
+				IntentType: TypeNMIPaymentSourceUpdate, SubscriptionID: &subID, Payload: payload,
+				IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(subID, fx.newPM.RailCustomerRef, 0),
+				NextAttemptAt:  time.Now().UTC().Add(-time.Minute),
+				Origin:         OriginUser, OriginReason: "zero payload id test",
+			})
+			require.NoError(t, err)
+
+			_, err = fx.runner.RunExecuteOnce(fx.ctx)
+			require.NoError(t, err)
+			status, _ := fx.latestIntent(t)
+			require.Equal(t, StatusFailedTerminal, status)
+			require.Zero(t, fx.gateway.updateCalls.Load(), "a malformed payload never reaches the provider")
+			require.Equal(t, fx.oldPM.ID, fx.localPaymentMethodID(t))
+		})
+	}
+}
+
+// R3's reproduction on PR #488, now the regression: a same-PSP swap goes
+// ambiguous, the verifier finds it not executed (failed_retryable), the target
+// method is re-attributed to another PSP underneath the unresolved intent, and
+// the scheduled executor re-runs it. The executor must refuse under its row
+// lock: failed_terminal with psp_mismatch evidence, the ONE lost attempt is the
+// only provider write ever, the subscription stays on the old method, and no
+// later pass resurrects it.
+func TestNMIPaymentSourceUpdateIntent_TargetReattributedAfterEnqueueFailsTerminal(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	fx.gateway.updateMode.Store("ambiguous_lost")
+
+	out := fx.swapTo(t, fx.newPM)
+	require.False(t, out.Done)
+	require.False(t, out.Terminal)
+	require.EqualValues(t, 1, fx.gateway.updateCalls.Load())
+
+	fx.advanceClock(2 * time.Minute)
+	_, err := fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	status, _ := fx.latestIntent(t)
+	require.Equal(t, StatusFailedRetryable, status)
+
+	fx.reattribute(t, fx.newPM, fx.otherPSP(t))
+	fx.gateway.updateMode.Store("ok")
+
+	fx.advanceClock(15 * time.Minute)
+	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	status, n := fx.latestIntent(t)
+	require.Equal(t, StatusFailedTerminal, status)
+	require.Equal(t, 1, n)
+	require.Equal(t, EvidenceCodePSPMismatch, fx.latestIntentEvidenceCode(t))
+	require.EqualValues(t, 1, fx.gateway.updateCalls.Load(), "no provider write after the re-attribution")
+	require.Equal(t, fx.oldPM.RailCustomerRef, fx.gateway.vault.Load().(string))
+	require.Equal(t, fx.oldPM.ID, fx.localPaymentMethodID(t), "never finalized onto a method another PSP owns")
+
+	// Terminal is terminal: neither the executor nor the verifier touches it again.
+	fx.advanceClock(2 * time.Hour)
+	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	_, err = fx.runner.RunVerifyOnce(fx.ctx)
+	require.NoError(t, err)
+	status, _ = fx.latestIntent(t)
+	require.Equal(t, StatusFailedTerminal, status)
+	require.EqualValues(t, 1, fx.gateway.updateCalls.Load())
+}
+
+// A pending intent (crash before inline execution) whose target was
+// re-attributed before the scheduled executor got to it: same refusal, and
+// the frozen payload PSP is what makes the drift visible.
+func TestNMIPaymentSourceUpdateIntent_PendingTargetReattributedFailsTerminal(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	oldID, subID := fx.oldPM.ID, fx.sub.ID
+	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
+		MerchantID: dbtest.TestMerchantID.UUID(), Provider: "mobius", PspID: fx.pspID,
+		IntentType: TypeNMIPaymentSourceUpdate, SubscriptionID: &subID,
+		Payload: NMIPaymentSourceUpdatePayload{
+			UserID: fx.sub.CustomerID.String(), RailSubscriptionID: fx.sub.RailSubscriptionID,
+			NewPaymentMethodID: fx.newPM.ID, NewRailCustomerRef: fx.newPM.RailCustomerRef, NewPspID: fx.pspID,
+			OldPaymentMethodID: &oldID, OldRailCustomerRef: fx.oldPM.RailCustomerRef,
+		},
+		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(subID, fx.newPM.RailCustomerRef, 0),
+		NextAttemptAt:  time.Now().UTC().Add(-time.Minute),
+		Origin:         OriginUser, OriginReason: "pending re-attribution test",
+	})
+	require.NoError(t, err)
+	fx.reattribute(t, fx.newPM, fx.otherPSP(t))
+
+	_, err = fx.runner.RunExecuteOnce(fx.ctx)
+	require.NoError(t, err)
+	status, _ := fx.latestIntent(t)
+	require.Equal(t, StatusFailedTerminal, status)
+	require.Equal(t, EvidenceCodePSPMismatch, fx.latestIntentEvidenceCode(t))
+	require.Zero(t, fx.gateway.updateCalls.Load())
+	require.Equal(t, fx.oldPM.ID, fx.localPaymentMethodID(t))
+}
+
+// Lock ordering against a re-attribution in flight: a transaction holds the
+// target method FOR UPDATE (what the #297 remap holds while it flips) and only
+// commits its psp_id change AFTER the executor has claimed the intent and is
+// waiting on its FOR SHARE pin. The executor must observe the committed
+// re-attribution — never the pre-flip row — and refuse with zero writes.
+func TestNMIPaymentSourceUpdateIntent_ExecutorPinWaitsForReattributionInFlight(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	other := fx.otherPSP(t)
+	oldID, subID := fx.oldPM.ID, fx.sub.ID
+	_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
+		MerchantID: dbtest.TestMerchantID.UUID(), Provider: "mobius", PspID: fx.pspID,
+		IntentType: TypeNMIPaymentSourceUpdate, SubscriptionID: &subID,
+		Payload: NMIPaymentSourceUpdatePayload{
+			UserID: fx.sub.CustomerID.String(), RailSubscriptionID: fx.sub.RailSubscriptionID,
+			NewPaymentMethodID: fx.newPM.ID, NewRailCustomerRef: fx.newPM.RailCustomerRef, NewPspID: fx.pspID,
+			OldPaymentMethodID: &oldID, OldRailCustomerRef: fx.oldPM.RailCustomerRef,
+		},
+		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(subID, fx.newPM.RailCustomerRef, 0),
+		NextAttemptAt:  time.Now().UTC().Add(-time.Minute),
+		Origin:         OriginUser, OriginReason: "lock-ordering test",
+	})
+	require.NoError(t, err)
+
+	flip, err := fx.db.Pool().Begin(fx.ctx)
+	require.NoError(t, err)
+	defer func() { _ = flip.Rollback(context.Background()) }()
+	_, err = flip.Exec(fx.ctx, "SELECT 1 FROM openrails.payment_methods WHERE id = $1 FOR UPDATE", fx.newPM.ID)
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := fx.runner.RunExecuteOnce(fx.ctx)
+		done <- err
+	}()
+
+	// The executor has claimed the intent and is blocked on the row lock.
+	require.Eventually(t, func() bool {
+		var status string
+		if err := fx.db.Pool().QueryRow(fx.ctx,
+			"SELECT status FROM openrails.rail_intents WHERE intent_type = $1 AND subscription_id = $2",
+			TypeNMIPaymentSourceUpdate, subID).Scan(&status); err != nil {
+			return false
+		}
+		return status == StatusInFlight
+	}, 10*time.Second, 20*time.Millisecond)
+	require.Eventually(t, func() bool {
+		var waiting bool
+		require.NoError(t, fx.db.Pool().QueryRow(fx.ctx,
+			"SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%FOR SHARE%')").Scan(&waiting))
+		return waiting
+	}, 10*time.Second, 20*time.Millisecond, "executor must be waiting on the FOR SHARE pin")
+	select {
+	case err := <-done:
+		t.Fatalf("executor finished while the row was locked: %v", err)
+	default:
+	}
+
+	_, err = flip.Exec(fx.ctx, "UPDATE openrails.payment_methods SET psp_id = $1 WHERE id = $2", other, fx.newPM.ID)
+	require.NoError(t, err)
+	require.NoError(t, flip.Commit(fx.ctx))
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("executor did not finish after the flip committed")
+	}
+	status, _ := fx.latestIntent(t)
+	require.Equal(t, StatusFailedTerminal, status)
+	require.Equal(t, EvidenceCodePSPMismatch, fx.latestIntentEvidenceCode(t))
+	require.Zero(t, fx.gateway.updateCalls.Load(), "the pin saw the committed re-attribution; nothing reached the provider")
+	require.Equal(t, fx.oldPM.ID, fx.localPaymentMethodID(t))
+}
+
 // Ambiguous timeout where the update actually LANDED at NMI: the caller gets
 // processing (never success, never decline), the local row keeps the OLD link
 // until the provider is confirmed, a retried request maps onto the SAME intent
@@ -338,6 +703,7 @@ func TestNMIPaymentSourceUpdateIntent_CrashBeforeExecute(t *testing.T) {
 			RailSubscriptionID: fx.sub.RailSubscriptionID,
 			NewPaymentMethodID: fx.newPM.ID,
 			NewRailCustomerRef: fx.newPM.RailCustomerRef,
+			NewPspID:           fx.pspID,
 			OldPaymentMethodID: &oldID,
 			OldRailCustomerRef: fx.oldPM.RailCustomerRef,
 		},

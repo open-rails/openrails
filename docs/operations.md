@@ -200,10 +200,37 @@ Rules:
   `account_id` would silently lie). Declare a NEW `psps` entry and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
+  Archive by id: `POST /v1/merchant/payment-providers/{rail}/accounts/{psp_id}/archive`
+  (`embed/controlplane`: `ArchivePaymentProviderAccount`) makes no provider
+  call, so it works when the old provider is terminated or unreachable. The
+  rail-level `DELETE` refuses (`provider_accounts_ambiguous`) while two
+  accounts are active, and `PUT … {"enabled": false}` live-probes the stored
+  credentials, so neither archives a dark account.
 - **Pending intents stamped with the old PSP do not follow** a credential
   move: keep (or restore) the old PSP's credentials until its queue drains,
   or let stale intents expire/supersede via their relevance windows. There is
   no rebind command.
+- **Per-subscriber cutover off an archived PSP is report-only (#657).**
+  `cp.PlanProviderAccountCutover(ctx, merchantID, query)` on
+  `embed/controlplane` reads the subscription, the card the subscriber
+  re-entered (`ReplacementPaymentMethodID`) and/or a `TargetPSPID` (default:
+  the card's PSP), and both PSP rows, and writes nothing. `Executable` is true
+  only for the durable payment-source update: an NMI subscription that is
+  active or past_due with a provider recurring record, a non-archived target
+  equal to its own account, and a PSP-vaulted, unparked card of the payer on
+  that account (`code: ready`; provider availability is checked when the
+  update runs). Everything else is a coded, non-executable plan
+  (`rail_unsupported`, `subscription_not_rebilling`, `target_archived`,
+  `replacement_card_required`, `replacement_card_psp_mismatch`, ...);
+  cross-account moves report `cross_account_requires_card_reentry` and are
+  never executed. The durable update itself refuses a cross-account target
+  at enqueue and again in the executor under the method's row lock
+  (`failed_terminal`, evidence `code: psp_mismatch`, no provider call), and a
+  custody remap (or#297) refuses an instrument any unresolved payment-source
+  update names (`operation_unresolved`), using the same predicate that protects
+  an unresolved invoice collection's frozen instrument. A replacement already
+  moved to third-party custody is also refused (`payment_method_not_psp_vaulted`)
+  before any provider traffic, even if its PSP id is unchanged.
 
 ### Custodians (or#880)
 
