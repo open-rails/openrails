@@ -492,6 +492,57 @@ func (q *Queries) GetPaymentMethodByRailMethodRefForPSP(ctx context.Context, arg
 	return i, err
 }
 
+const getPaymentMethodForShare = `-- name: GetPaymentMethodForShare :one
+SELECT id, rail, initial_transaction_id, last_four, card_type, expiry_date, metadata, created_at, updated_at, merchant_id, customer_id, psp_id, rail_customer_ref, rail_method_ref, rebill_driver, stored_credential_recurring_ref, stored_credential_unscheduled_ref, custodian, custodian_id, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at FROM openrails.payment_methods
+WHERE merchant_id = $1::uuid
+  AND id = $2::uuid
+FOR SHARE
+`
+
+type GetPaymentMethodForShareParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// An operation freezing the instrument reads it under a shared lock, which
+// conflicts with the custody remap's FOR UPDATE: a remap either commits first
+// (the operation freezes the new custody) or waits for the operation to
+// commit and then sees it pinning the instrument.
+func (q *Queries) GetPaymentMethodForShare(ctx context.Context, arg GetPaymentMethodForShareParams) (OpenrailsPaymentMethod, error) {
+	row := q.db.QueryRow(ctx, getPaymentMethodForShare, arg.MerchantID, arg.ID)
+	var i OpenrailsPaymentMethod
+	err := row.Scan(
+		&i.ID,
+		&i.Rail,
+		&i.InitialTransactionID,
+		&i.LastFour,
+		&i.CardType,
+		&i.ExpiryDate,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.RailCustomerRef,
+		&i.RailMethodRef,
+		&i.RebillDriver,
+		&i.StoredCredentialRecurringRef,
+		&i.StoredCredentialUnscheduledRef,
+		&i.Custodian,
+		&i.CustodianID,
+		&i.Fingerprint,
+		&i.NetworkTokenID,
+		&i.NetworkTokenStatus,
+		&i.NetworkTokenPar,
+		&i.ChargeVia,
+		&i.ParkReason,
+		&i.ParkedAt,
+		&i.AccountUpdaterCheckedAt,
+	)
+	return i, err
+}
+
 const listLatestChargeByPaymentMethodIDs = `-- name: ListLatestChargeByPaymentMethodIDs :many
 SELECT DISTINCT ON (s.payment_method_id)
     s.payment_method_id AS payment_method_id,

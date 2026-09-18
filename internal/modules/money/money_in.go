@@ -43,6 +43,9 @@ type ChargeRequest struct {
 	// the Stripe idempotency-key root. Stable for the life of the operation.
 	IdempotencyKey string
 	Description    string
+	// Instrument is the method as the operation froze it; the charge is
+	// refused before submission if the method no longer matches.
+	Instrument CollectionInstrument
 }
 
 type ChargeResult struct {

@@ -430,7 +430,8 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: method.PspID, IntentType: TypeInvoiceCollection,
 			Payload: InvoiceCollectionPayload{
 				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID,
-				Rail: normalizeRail(method.Rail), Currency: invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
+				Rail: normalizeRail(method.Rail), Instrument: CollectionInstrumentOf(*method),
+				Currency: invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
 				Description: fmt.Sprintf("invoice %s", invoiceID),
 			},
 			IdempotencyKey: key, NextAttemptAt: now, Origin: opts.origin, OriginReason: opts.originReason,
@@ -465,7 +466,8 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 // collectionMethodFor resolves the payer-owned saved method the attempt is
 // charged through: the explicitly bound one (manual retry) or the account's
 // collection method. or#893: the account that vaulted the instrument takes
-// the money.
+// the money. The row is read under a shared lock so the instrument the
+// operation freezes cannot be remapped before the operation commits.
 func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, merchantID, payerID uuid.UUID, invoice *models.Invoice, opts invoiceCollectionEnqueue) (*gen.OpenrailsPaymentMethod, error) {
 	id := opts.paymentMethodID
 	if id == nil {
@@ -487,7 +489,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 			return nil, nil
 		}
 	}
-	method, err := q.GetPaymentMethodByID(ctx, *id)
+	method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: merchantID, ID: *id})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrCollectionPaymentMethodInvalid

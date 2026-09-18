@@ -124,7 +124,7 @@ func (f *fakeCharger) chargeCount() int {
 // Exact-read binding of the found sale is the credential plane's job
 // (MerchantCollectionAdapterBuilder), proven against the real gateway fake in
 // invoice_collection_nmi_receipt_integration_test.go.
-func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, _ gen.OpenrailsPaymentMethod, expect money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, expect money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	txn, ok := f.landed[expect.OperationKey]
@@ -136,7 +136,7 @@ func (f *fakeCharger) VerifyCollectionCharge(_ context.Context, _ gen.OpenrailsP
 // the operation's identity is the credential plane's job
 // (MerchantCollectionAdapterBuilder), proven against real gateway fakes in
 // invoice_collection_nmi_receipt_integration_test.go.
-func (f *fakeCharger) ConfirmCollectionReceipt(_ context.Context, _ gen.OpenrailsPaymentMethod, providerReference string, _ money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
+func (f *fakeCharger) ConfirmCollectionReceipt(_ context.Context, providerReference string, _ money.CollectionReceiptExpectation) (money.CollectionVerifyResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, txn := range f.landed {
@@ -147,7 +147,7 @@ func (f *fakeCharger) ConfirmCollectionReceipt(_ context.Context, _ gen.Openrail
 	return money.CollectionVerifyResult{}, fmt.Errorf("transaction %s does not exist", providerReference)
 }
 
-func (f *fakeCharger) ConfirmCollectionNotExecuted(_ context.Context, _ gen.OpenrailsPaymentMethod, expect money.CollectionReceiptExpectation) error {
+func (f *fakeCharger) ConfirmCollectionNotExecuted(_ context.Context, expect money.CollectionReceiptExpectation) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if txn, ok := f.landed[expect.OperationKey]; ok {

@@ -26,6 +26,16 @@ INSERT INTO openrails.payment_methods (
 -- name: GetPaymentMethodByID :one
 SELECT * FROM openrails.payment_methods WHERE id = $1;
 
+-- name: GetPaymentMethodForShare :one
+-- An operation freezing the instrument reads it under a shared lock, which
+-- conflicts with the custody remap's FOR UPDATE: a remap either commits first
+-- (the operation freezes the new custody) or waits for the operation to
+-- commit and then sees it pinning the instrument.
+SELECT * FROM openrails.payment_methods
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND id = sqlc.arg(id)::uuid
+FOR SHARE;
+
 -- name: ListPaymentMethodsByIDs :many
 SELECT * FROM openrails.payment_methods WHERE id = ANY(sqlc.arg(ids)::uuid[]);
 
