@@ -19,11 +19,10 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
-	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // fakeNMICheckoutGateway is a loopback NMI: vault creation succeeds, and every
@@ -109,15 +108,15 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 	standalone.App().Runtime.CheckoutService.NMIEndpointOverride = gateway.URL
 	standalone.App().Runtime.RailPaymentMethodService.NMIEndpointOverride = gateway.URL
 
-	local, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	local, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, local.Close(context.Background())) })
-	local.Embedded().App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
-	local.Embedded().App().Runtime.CheckoutService.NMIEndpointOverride = gateway.URL
-	local.Embedded().App().Runtime.RailPaymentMethodService.NMIEndpointOverride = gateway.URL
+	app.HostGraph(local).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	app.HostGraph(local).Runtime.CheckoutService.NMIEndpointOverride = gateway.URL
+	app.HostGraph(local).Runtime.RailPaymentMethodService.NMIEndpointOverride = gateway.URL
 	inprocess, err := local.Client()
 	require.NoError(t, err)
 
@@ -131,17 +130,17 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 	type step struct {
 		name         string
 		saleResponse string
-		payment      func(customer string) openrails.CheckoutPayment
+		payment      func(customer openrails.CustomerID) openrails.CheckoutPayment
 	}
-	token := func(string) openrails.CheckoutPayment {
+	token := func(openrails.CustomerID) openrails.CheckoutPayment {
 		return openrails.CheckoutPayment{Rail: "nmi", PaymentToken: "tok_" + uuid.NewString()[:8], NameOnCard: "Test Buyer", Zip: "90210", Country: "US", LastFour: "4242", CardType: "visa", ExpiryDate: "1230"}
 	}
 	steps := []step{
 		{name: "approved", saleResponse: "100", payment: token},
 		{name: "insufficient_funds", saleResponse: "202", payment: token},
 		{name: "gateway_rejected", saleResponse: "300", payment: token},
-		{name: "stale_saved_card", saleResponse: "100", payment: func(string) openrails.CheckoutPayment {
-			return openrails.CheckoutPayment{Rail: "nmi", PaymentMethodID: api.FormatPaymentMethodID(uuid.New())}
+		{name: "stale_saved_card", saleResponse: "100", payment: func(openrails.CustomerID) openrails.CheckoutPayment {
+			return openrails.CheckoutPayment{Rail: "nmi", PaymentMethodID: openrails.PaymentMethodID(uuid.New())}
 		}},
 	}
 
@@ -150,10 +149,10 @@ func TestCheckoutRefusalsAreCodedAcrossDeployments(t *testing.T) {
 		out := map[string]refusalObservation{}
 		for _, s := range steps {
 			gateway.saleResponseCode.Store(s.saleResponse)
-			customer := uuid.NewString()
+			customer := openrails.CustomerID(uuid.New())
 			session, err := client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-				Customer:       openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + customer[:8]},
-				PriceID:        priceID.String(),
+				Customer:       openrails.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "buyer@example.test", Username: "buyer-" + customer.String()[:8]},
+				PriceID:        openrails.PriceID(priceID),
 				IdempotencyKey: uuid.NewString(),
 				Payment:        s.payment(customer),
 			})

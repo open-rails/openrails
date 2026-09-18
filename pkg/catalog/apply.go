@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/google/uuid"
-
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // ApplyResult summarizes what an Apply run did, including any per-provider
@@ -61,7 +60,7 @@ func ApplyWithOptions(ctx context.Context, applier Applier, plan *ApplyPlan, opt
 			if err != nil {
 				return res, err
 			}
-			if productID == uuid.Nil {
+			if productID.IsZero() {
 				continue
 			}
 			if err := applyPrices(ctx, applier, pp, productID, res, opts); err != nil {
@@ -91,15 +90,15 @@ func ApplyWithOptions(ctx context.Context, applier Applier, plan *ApplyPlan, opt
 	return res, nil
 }
 
-func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *ApplyResult, opts ApplyOptions) (uuid.UUID, error) {
+func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *ApplyResult, opts ApplyOptions) (openrails.ProductID, error) {
 	switch pp.Action {
 	case ProductCreate:
 		if !opts.Insert {
-			return uuid.Nil, nil
+			return openrails.ProductID{}, nil
 		}
 		created, err := applier.CreateProduct(ctx, pp.CreateReq)
 		if err != nil {
-			return uuid.Nil, fmt.Errorf("create product %s: %w", pp.Key, err)
+			return openrails.ProductID{}, fmt.Errorf("create product %s: %w", pp.Key, err)
 		}
 		res.ProductsCreated++
 		return created.ID, nil
@@ -109,7 +108,7 @@ func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *Ap
 		}
 		updated, err := applier.UpdateProduct(ctx, pp.UpdateID, pp.UpdateReq)
 		if err != nil {
-			return uuid.Nil, fmt.Errorf("update product %s: %w", pp.Key, err)
+			return openrails.ProductID{}, fmt.Errorf("update product %s: %w", pp.Key, err)
 		}
 		res.ProductsUpdated++
 		return updated.ID, nil
@@ -118,7 +117,7 @@ func applyProduct(ctx context.Context, applier Applier, pp *ProductPlan, res *Ap
 	}
 }
 
-func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productID uuid.UUID, res *ApplyResult, opts ApplyOptions) error {
+func applyPrices(ctx context.Context, applier Applier, pp *ProductPlan, productID openrails.ProductID, res *ApplyResult, opts ApplyOptions) error {
 	for i := range pp.Prices {
 		plp := &pp.Prices[i]
 		switch plp.Action {

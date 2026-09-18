@@ -12,9 +12,9 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -30,10 +30,10 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	remote := h.StartStandalone("USD", integrationharness.WithRails(config.PSPSet{
 		"ccbill": {AccountID: "999981-0000", CCBill: &config.CCBillRailConfig{Salt: "operations-local-fixture"}},
 	}))
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	local, err := runtime.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
@@ -41,13 +41,13 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 	mid := dbtest.TestMerchantID
 
 	declaredKey := "stripe-declared-" + uuid.NewString()[:8]
-	pspID, err := runtime.DeclarePSP(ctx, mid, embedded.PSPDeclaration{Key: declaredKey, Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]})
+	pspID, err := runtime.DeclarePSP(ctx, mid, embed.PSPDeclaration{Key: declaredKey, Rail: "stripe", AccountID: "acct_declared_" + uuid.NewString()[:8]})
 	require.NoError(t, err)
 	require.NotEqual(t, uuid.Nil, pspID)
 	t.Cleanup(func() {
 		_, _ = h.Pool().Exec(context.Background(), `DELETE FROM openrails.psps WHERE id = $1`, pspID)
 	})
-	armed, err := runtime.Embedded().App().Runtime.RailConfigs.Armed(merchant.WithID(ctx, mid), "stripe")
+	armed, err := app.HostGraph(runtime).Runtime.RailConfigs.Armed(merchant.WithID(ctx, mid), "stripe")
 	require.NoError(t, err)
 	require.False(t, armed, "a credential-less PSP is not an armed rail")
 
@@ -69,14 +69,14 @@ func TestDeclaredPSPIsAttributableButNeverArmed(t *testing.T) {
 			price, err := client.CreatePrice(ctx, openrails.CreatePriceRequest{ProductID: product.ID, Key: key + "-price", UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &duration, AutoRenew: true})
 			require.NoError(t, err)
 
-			options, err := client.ListCheckoutRailOptions(ctx, price.ID.String())
+			options, err := client.ListCheckoutRailOptions(ctx, openrails.PriceID(price.ID))
 			require.NoError(t, err)
 			for _, option := range options {
 				require.NotEqual(t, declaredKey, option.Selector, "an unarmed PSP is never a checkout option")
 			}
 			_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{
-				Customer:       openrails.CheckoutCustomerIdentity{ID: uuid.NewString(), VerifiedEmail: "buyer@example.test", Username: "buyer"},
-				PriceID:        price.ID.String(),
+				Customer:       openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New()), VerifiedEmail: "buyer@example.test", Username: "buyer"},
+				PriceID:        openrails.PriceID(price.ID),
 				IdempotencyKey: uuid.NewString(),
 				Payment:        openrails.CheckoutPayment{Rail: declaredKey, NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
 			})

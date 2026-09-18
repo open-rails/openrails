@@ -1,21 +1,19 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/query"
 	"github.com/riverqueue/river"
@@ -28,28 +26,31 @@ type adminUserPath struct {
 
 // adminUserBillingProfile is the composite admin user-detail (#528): one read
 // returns the user's billing sections so admins don't fan out across dedicated
-// per-section endpoints.
+// per-section endpoints. Every section is the shared Client DTO the dedicated
+// route serves.
 type adminUserBillingProfile struct {
-	CustomerID     string                       `json:"customer_id"`
-	Email          *string                      `json:"email,omitempty"`
-	TrustLevel     string                       `json:"trust_level,omitempty"`
-	Subscriptions  []models.Subscription        `json:"subscriptions"`
-	Entitlements   []models.Entitlement         `json:"entitlements"`
-	Payments       []*models.Payment            `json:"payments"`
-	PaymentMethods []paymentMethodResponse      `json:"payment_methods"`
-	CreditBalance  []adminCreditBalanceResponse `json:"credit_balance"`
-	ProductAccess  []models.ProductAccessGrant  `json:"product_access"`
+	CustomerID     openrails.CustomerID           `json:"customer_id"`
+	Email          *string                        `json:"email,omitempty"`
+	TrustLevel     string                         `json:"trust_level,omitempty"`
+	Subscriptions  []openrails.Subscription       `json:"subscriptions"`
+	Entitlements   []openrails.EntitlementRecord  `json:"entitlements"`
+	Payments       []openrails.Payment            `json:"payments"`
+	PaymentMethods []paymentMethodResponse        `json:"payment_methods"`
+	CreditBalance  []adminCreditBalanceResponse   `json:"credit_balance"`
+	ProductAccess  []openrails.ProductAccessGrant `json:"product_access"`
 }
 
+// adminCreditBalanceResponse is one currency's balance on the profile; the
+// amounts are native units as decimal strings (docs/money-wire.md).
 type adminCreditBalanceResponse struct {
 	Currency              string `json:"currency"`
 	TrustLevel            string `json:"trust_level,omitempty"`
 	DisplayName           string `json:"display_name"`
 	Unit                  string `json:"unit"`
 	DecimalPlaces         int    `json:"decimal_places"`
-	Balance               int64  `json:"balance"`
-	HeldBalance           int64  `json:"held_balance"`
-	OutstandingOwedAmount int64  `json:"outstanding_owed_amount"`
+	Balance               int64  `json:"balance,string"`
+	HeldBalance           int64  `json:"held_balance,string"`
+	OutstandingOwedAmount int64  `json:"outstanding_owed_amount,string"`
 }
 
 // adminProfileSubscriptionWindow bounds the profile's subscriptions section to
@@ -81,13 +82,13 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	now := r.Clock.Now()
 	profile := adminUserBillingProfile{
-		CustomerID:     customerID.UUID().String(),
-		Subscriptions:  []models.Subscription{},
-		Entitlements:   []models.Entitlement{},
-		Payments:       []*models.Payment{},
+		CustomerID:     openrails.CustomerID(customerID),
+		Subscriptions:  []openrails.Subscription{},
+		Entitlements:   []openrails.EntitlementRecord{},
+		Payments:       []openrails.Payment{},
 		PaymentMethods: []paymentMethodResponse{},
 		CreditBalance:  []adminCreditBalanceResponse{},
-		ProductAccess:  []models.ProductAccessGrant{},
+		ProductAccess:  []openrails.ProductAccessGrant{},
 	}
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
@@ -110,20 +111,27 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 		// admin 360 that hid pending/past_due/cancelled/unknown rows forced
 		// hosts to fan out to GET /subscriptions?user_id= to see them.
 		subs, _, err := r.State.SubscriptionService.GetPaginatedByUserID(ctx, path.UserID, 1, adminProfileSubscriptionWindow)
-		if err == nil && len(subs) > 0 {
-			profile.Subscriptions = subs
+		if err == nil {
+			for i := range subs {
+				sub := &subs[i]
+				profile.Subscriptions = append(profile.Subscriptions, subscriptionView(&subscriptions.AdminSubscriptionResponse{Subscription: sub, Price: sub.Price}, now))
+			}
 		}
 	}
 	if r.State.EntitlementService != nil {
 		ents, err := r.State.EntitlementService.ListActiveRecords(ctx, path.UserID, now)
-		if err == nil && len(ents) > 0 {
-			profile.Entitlements = ents
+		if err == nil {
+			for i := range ents {
+				profile.Entitlements = append(profile.Entitlements, entitlementRecordFromModel(&ents[i]))
+			}
 		}
 	}
 	if r.State.PaymentService != nil {
 		payments, err := r.State.PaymentService.GetByUserID(ctx, path.UserID)
-		if err == nil && len(payments) > 0 {
-			profile.Payments = payments
+		if err == nil {
+			for _, p := range payments {
+				profile.Payments = append(profile.Payments, PaymentToAPI(p, nil))
+			}
 		}
 	}
 	if r.State.PaymentMethodService != nil {
@@ -196,7 +204,7 @@ func GetAdminUserBillingProfile(r *httprequest.Request) {
 	}
 	if svc := productAccessService(r); svc != nil {
 		if grants, err := svc.ListAllGrantsByUser(ctx, path.UserID); err == nil && len(grants) > 0 {
-			profile.ProductAccess = grants
+			profile.ProductAccess = productAccessResponses(r, grants)
 		}
 	}
 	r.SuccessJSON(profile)
@@ -267,11 +275,12 @@ func GetAdminSubscription(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	subscriptionID, err := api.ParseSubscriptionID(path.SubscriptionID)
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(path.SubscriptionID)
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 	svc := r.State.AdminSubscriptionService
 	if svc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "admin subscription service unavailable")
@@ -279,56 +288,38 @@ func GetAdminSubscription(r *httprequest.Request) {
 	}
 	subscription, err := svc.GetSubscriptionByID(r.Request.Context(), subscriptionID)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, err.Error())
+		writeRefusal(r, err, "failed to load subscription")
 		return
 	}
 	r.SuccessJSON(subscriptionView(subscription, r.Clock.Now()))
 }
 
 func AdminCancelSubscription(r *httprequest.Request) {
-	subscriptionID, err := api.ParseSubscriptionID(r.Param("id"))
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 	req := new(adminCancelSubscriptionRequest)
 	if !r.BindJSON(req) {
 		r.ErrorJSON(http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := r.State.AdminSubscriptionService.CancelSubscription(r.Request.Context(), subscriptionID, req.Reason, req.RevokeAccess); err != nil {
-		// Map domain errors to stable status codes; never leak raw sql/pgx text
-		// to the client (#783). AdminSubscriptionService.CancelSubscription
-		// returns "subscription not found: <wrapped ErrNoRows>" for a missing
-		// id, "subscription is not active" for a bad state, and "cancel
-		// operation not supported for rail '<rail>'" for an ineligible rail.
-		msg := err.Error()
-		switch {
-		case strings.HasPrefix(msg, "subscription not found"):
-			r.ErrorJSON(http.StatusNotFound, "subscription not found")
-		case strings.Contains(msg, "not active"):
-			r.ErrorJSON(http.StatusConflict, "subscription is not active")
-		// or#896: a Solana cancel is the subscriber's signature to give, not a
-		// server-side operation — name the endpoints instead of a 500.
-		case errors.Is(err, subscriptions.ErrSolanaCancelNeedsWalletSignature):
-			r.ErrorJSON(http.StatusBadRequest, msg)
-		case strings.Contains(msg, "not supported for rail"):
-			r.ErrorJSON(http.StatusBadRequest, msg)
-		default:
-			log.WithError(err).Error("admin cancel subscription failed")
-			r.ErrorJSON(http.StatusInternalServerError, "failed to cancel subscription")
-		}
+		writeRefusal(r, err, "failed to cancel subscription")
 		return
 	}
 	r.SuccessJSONMessage("subscription cancelled successfully")
 }
 
 func AdminResumeSubscription(r *httprequest.Request) {
-	subscriptionID, err := api.ParseSubscriptionID(r.Param("id"))
-	if err != nil {
+	typedSubscriptionID, err := openrails.ParseSubscriptionID(r.Param("id"))
+	if err != nil || typedSubscriptionID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid subscription ID")
 		return
 	}
+	subscriptionID := typedSubscriptionID.UUID()
 	if r.State.SubscriptionService == nil || r.State.RiverProducer == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "subscription service unavailable")
 		return

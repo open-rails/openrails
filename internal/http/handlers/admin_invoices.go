@@ -11,17 +11,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -66,12 +66,12 @@ func ListAdminInvoices(gate billingauth.Gate) func(*httprequest.Request) {
 		}
 		filter := billingservice.MerchantInvoiceFilter{}
 		if raw := strings.TrimSpace(r.Query("customer_id")); raw != "" {
-			id, err := uuid.Parse(raw)
-			if err != nil || id == uuid.Nil {
+			id, err := openrails.ParseCustomerID(raw)
+			if err != nil || id.IsZero() {
 				r.ErrorJSON(http.StatusBadRequest, "invalid customer_id")
 				return
 			}
-			filter.CustomerID = &id
+			filter.CustomerID = id
 		}
 		if raw := strings.ToUpper(strings.TrimSpace(r.Query("currency"))); raw != "" {
 			if err := money.RequireBillingCurrency(raw); err != nil {
@@ -228,13 +228,13 @@ func RetryAdminInvoiceCollection(r *httprequest.Request) {
 		return
 	}
 	var body struct {
-		PaymentMethodID uuid.UUID `json:"payment_method_id"`
+		PaymentMethodID openrails.PaymentMethodID `json:"payment_method_id"`
 	}
 	if !r.BindJSON(&body) {
 		return
 	}
 	key := strings.TrimSpace(r.Request.Header.Get("Idempotency-Key"))
-	if body.PaymentMethodID == uuid.Nil || key == "" || len(key) > 255 {
+	if body.PaymentMethodID.IsZero() || key == "" || len(key) > 255 {
 		r.ErrorJSON(http.StatusBadRequest, "payment_method_id and Idempotency-Key (1–255 bytes) are required")
 		return
 	}

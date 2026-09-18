@@ -14,12 +14,11 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/examples/billingapp"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -43,14 +42,14 @@ func TestBillingApplicationRunsUnchangedAcrossDeployments(t *testing.T) {
 	integrationharness.SeedPSPs(ctx, t, standalone.App().Runtime, tenant.MerchantID, ccbill("999981-0001"))
 
 	newRuntime := func() *embed.Runtime {
-		rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+		rt, err := embed.New(ctx, embed.Options{
 			Config: &config.Config{
 				Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI,
 				SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull,
 				DB: &config.DBConfig{URL: h.DSN},
 			},
-			Redis: h.Redis, River: embedded.RiverManagedByOpenRails(),
-		}})
+			Redis: h.Redis, River: embed.RiverManagedByOpenRails(),
+		})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 		return rt
@@ -143,7 +142,7 @@ func seedMerchantFacts(ctx context.Context, t *testing.T, h *integrationharness.
 	}))
 	return billingapp.Inputs{
 		Currency: "USD", Run: run, CheckoutPriceKey: priceKey, CheckoutRail: "ccbill",
-		SubscriberID: subscriber.String(), SubscriptionID: api.FormatSubscriptionID(subscription), InvoiceID: invoiceID,
+		SubscriberID: openrails.CustomerID(subscriber), SubscriptionID: openrails.SubscriptionID(subscription), InvoiceID: invoiceID,
 	}, price
 }
 

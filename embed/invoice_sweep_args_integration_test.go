@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
 
@@ -35,9 +34,9 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 
 	var jobs *river.Client[pgx.Tx]
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	rt, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn}},
-		River: embedded.RiverFromHost(func(ctx context.Context, fleet *embedded.RiverFleet) (*river.Client[pgx.Tx], error) {
+		River: embed.RiverFromHost(func(ctx context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
 			c, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
 				Queues:  map[string]river.QueueConfig{river.QueueDefault: {MaxWorkers: 1}, fleet.QueueBilling: {MaxWorkers: 1}},
 				Workers: fleet.Workers,
@@ -45,7 +44,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 			jobs = c
 			return c, err
 		}),
-	}})
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 	require.NoError(t, jobs.Start(ctx))
@@ -85,7 +84,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	for _, occurred := range []time.Time{periodFrom.Add(3 * 24 * time.Hour), periodTo.Add(-time.Hour)} {
 		occurred := occurred
 		require.NoError(t, client.RecordUsage(ctx, openrails.UsageReport{
-			CustomerID: payer.String(), Invoker: payer.String(), Currency: "USD", EventType: eventType,
+			CustomerID: openrails.CustomerID(payer), Invoker: payer.String(), Currency: "USD", EventType: eventType,
 			Dimensions: map[string]int64{"amount_micros": settled},
 			Source:     "host-settlement", SourceID: uuid.NewString(), OccurredAt: &occurred,
 		}))
@@ -100,7 +99,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 		t.Helper()
 		res, err := jobs.Insert(ctx, embed.InvoiceSweepArgs{FinalizePreviousMonth: true}, nil)
 		require.NoError(t, err)
-		require.Equal(t, embedded.QueueBilling, res.Job.Queue)
+		require.Equal(t, embed.QueueBilling, res.Job.Queue)
 		require.Eventually(t, func() bool {
 			var state string
 			return pool.QueryRow(ctx, `SELECT state FROM river_job WHERE id = $1`, res.Job.ID).Scan(&state) == nil && state == "completed"
@@ -108,7 +107,7 @@ func TestInvoiceSweepArgs_HostOwnedRiverRunsThePeriodSweep(t *testing.T) {
 	}
 	listInvoices := func() []openrails.MerchantInvoiceDTO {
 		t.Helper()
-		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: &payer}, 10, 0)
+		invoices, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: openrails.CustomerID(payer)}, 10, 0)
 		require.NoError(t, err)
 		require.EqualValues(t, len(invoices), total)
 		return invoices

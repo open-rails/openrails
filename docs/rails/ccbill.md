@@ -110,8 +110,8 @@ webhook arrives.
 
 Point CCBill's Webhooks admin at:
 
-- `POST /v1/webhooks/ccbill` (single-merchant), or
-- `POST /v1/merchants/{slug}/webhooks/ccbill` (multi-merchant/embedded)
+- `POST /v1/webhooks/ccbill` (standalone; the merchant is resolved from the payload's account), or
+- `POST <prefix>/v1/merchants/{merchant}/webhooks/ccbill` (embedded, e.g. `/billing/v1/...`)
 
 The `eventType` must arrive as a query parameter and, when the body also
 carries one, the two must match. Payloads may be form-encoded or JSON.

@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -119,13 +120,29 @@ func paramUUID(params map[string]any, key string) (uuid.UUID, error) {
 	return id, nil
 }
 
-func paramOptionalUUID(params map[string]any, key string) (uuid.UUID, bool, error) {
-	if params[key] == nil || paramString(params, key) == "" {
-		return uuid.Nil, false, nil
+// paramTypedID reads a typed id param in its wire spelling; the bare UUID is
+// refused like everywhere else on the wire.
+func paramTypedID[T interface{ IsZero() bool }](params map[string]any, key string, parse func(string) (T, error)) (T, error) {
+	var zero T
+	raw := paramString(params, key)
+	if raw == "" {
+		return zero, paramErrorf("recommendation param %q is required", key)
 	}
-	id, err := paramUUID(params, key)
+	id, err := parse(raw)
+	if err != nil || id.IsZero() {
+		return zero, paramErrorf("recommendation param %q is not a valid id: %s", key, raw)
+	}
+	return id, nil
+}
+
+func paramOptionalTypedID[T interface{ IsZero() bool }](params map[string]any, key string, parse func(string) (T, error)) (T, bool, error) {
+	var zero T
+	if params[key] == nil || paramString(params, key) == "" {
+		return zero, false, nil
+	}
+	id, err := paramTypedID(params, key, parse)
 	if err != nil {
-		return uuid.Nil, false, err
+		return zero, false, err
 	}
 	return id, true, nil
 }
@@ -205,13 +222,13 @@ func executeRecordAdminGrant(r *httprequest.Request, finding reconcile.FindingRe
 	if customerID == "" {
 		return paramErrorf("recommendation param \"customer_id\" is required")
 	}
-	productID, err := paramUUID(params, "product_id")
+	productID, err := paramTypedID(params, "product_id", openrails.ParseProductID)
 	if err != nil {
 		return err
 	}
 	grant, created, err := svc.GrantProductAccess(ctx, productaccess.GrantParams{
 		UserID:     customerID,
-		ProductID:  productID,
+		ProductID:  productID.UUID(),
 		SourceType: models.ProductAccessSourceAdmin,
 		SourceID:   "finding:" + finding.ID.String(),
 	})
@@ -233,14 +250,15 @@ func executeRecordAdminGrant(r *httprequest.Request, finding reconcile.FindingRe
 // compensation state. Both ids are optional (#690: a pure one-off ownership
 // duplicate has no subscription — refund-only), but at least one is required.
 func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRecord, params map[string]any, notes string, result map[string]any) error {
-	subID, hasCancel, err := paramOptionalUUID(params, "subscription_id")
+	typedSubID, hasCancel, err := paramOptionalTypedID(params, "subscription_id", openrails.ParseSubscriptionID)
 	if err != nil {
 		return err
 	}
-	paymentID, hasRefund, err := paramOptionalUUID(params, "refund_payment_id")
+	typedPaymentID, hasRefund, err := paramOptionalTypedID(params, "refund_payment_id", openrails.ParsePaymentID)
 	if err != nil {
 		return err
 	}
+	subID, paymentID := typedSubID.UUID(), typedPaymentID.UUID()
 	if !hasCancel && !hasRefund {
 		return paramErrorf("cancel_and_refund needs at least one of \"subscription_id\", \"refund_payment_id\"")
 	}
@@ -368,7 +386,7 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 			return fmt.Errorf("stripe cancelled remotely but local cancel failed for %s: %w", subID, err)
 		}
 		result["cancel"] = "cancelled"
-		result["subscription_id"] = subID.String()
+		result["subscription_id"] = openrails.SubscriptionID(subID).String()
 		return nil
 	default:
 		// Solana (subscriber-signed by design) etc.: no operator-driven cancel
@@ -408,8 +426,8 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 	if err != nil {
 		return fmt.Errorf("refund payment %s: %w", paymentID, err)
 	}
-	result["refund_payment_id"] = paymentID.String()
-	result["refund_amount"] = amount
+	result["refund_payment_id"] = openrails.PaymentID(paymentID).String()
+	result["refund_amount"] = strconv.FormatInt(amount, 10)
 	if refund != nil {
 		result["refund_id"] = refund.ID.String()
 	}

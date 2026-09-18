@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -106,11 +107,7 @@ func afterConvergeTransition(ctx context.Context, deps convergeDeps, sub *models
 			ID:         uuidutil.NewV7(),
 			CustomerID: sub.CustomerID,
 			EventType:  models.NotificationPaymentMethodFailed,
-			Data: map[string]any{
-				"rail":                 string(sub.Rail),
-				"rail_subscription_id": sub.RailSubscriptionID,
-				"source":               "fetch_converge",
-			},
+			Data:       openrails.NotificationData{Rail: string(sub.Rail), RailSubscriptionID: sub.RailSubscriptionID, Source: "fetch_converge"},
 		}
 		if err := deps.NotificationService.CreateAndDeliver(ctx, notification); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("subscription_id", sub.ID).

@@ -5,14 +5,17 @@ import { adminQueries } from "@/lib/queries"
 import type { MetricsResult } from "@/lib/api/metrics"
 import { formatNativeAmount } from "@/lib/format"
 import {
+  donutSlices,
   filteredCurrency,
   formatMeasure,
   groupSeries,
   indexColumns,
+  exactKey,
   pivotTimeSeries,
   statDelta,
 } from "./lib"
-import { WidgetVizView } from "./widget-viz"
+import { ChartContainer } from "@/components/ui/chart"
+import { MetricTooltip, WidgetVizView } from "./widget-viz"
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -21,16 +24,16 @@ const moneyStats: MetricsResult = {
   range,
   columns: [
     { name: "currency", kind: "dimension" },
-    { name: "revenue", kind: "measure", unit: "micros" },
+    { name: "revenue", kind: "measure", unit: "money" },
   ],
   rows: [
-    ["USD", 100_000_000],
+    ["USD", "100000000"],
     ["JPY", 200_000_000],
   ],
   // Deliberately reverse row order: matching is by dimensions, not array index.
   compare_rows: [
-    ["JPY", 100_000_000],
-    ["USD", 100_000_000],
+    ["JPY", "100000000"],
+    ["USD", "100000000"],
   ],
 }
 const moneyChart: MetricsResult = {
@@ -38,7 +41,7 @@ const moneyChart: MetricsResult = {
   grain: "day",
   columns: [{ name: "bucket", kind: "time" }, ...moneyStats.columns],
   rows: [
-    ["2026-09-01", "EUR", 100_000_000],
+    ["2026-09-01", "EUR", "100000000"],
     ["2026-09-01", "JPY", 200_000_000],
     ["2026-09-02", "EUR", 150_000_000],
     ["2026-09-02", "JPY", 250_000_000],
@@ -97,11 +100,11 @@ describe("dashboard currency", () => {
       expect(group.series).toHaveLength(1)
       const series = group.series[0]
       expect(series.dimensions).toEqual([group.label])
-      expect(formatMeasure(100_000_000, series.unit, series.currency)).toBe(
+      expect(formatMeasure("100000000", series.unit, series.currency)).toBe(
         formatNativeAmount(100_000_000, group.label)
       )
       expect(
-        formatMeasure(100_000_000, series.unit, series.currency)
+        formatMeasure("100000000", series.unit, series.currency)
       ).not.toContain("$")
     }
     for (const viz of ["line", "area", "bar", "donut"] as const) {
@@ -113,7 +116,7 @@ describe("dashboard currency", () => {
               ? {
                   ...moneyStats,
                   rows: [
-                    ["EUR", 100_000_000],
+                    ["EUR", "100000000"],
                     ["JPY", 200_000_000],
                   ],
                 }
@@ -136,9 +139,9 @@ describe("dashboard currency", () => {
     expect(filteredCurrency(query)).toBe("EUR")
     const result: MetricsResult = {
       range,
-      columns: [{ name: "revenue", kind: "measure", unit: "micros" }],
-      rows: [[100_000_000]],
-      compare_rows: [[100_000_000]],
+      columns: [{ name: "revenue", kind: "measure", unit: "money" }],
+      rows: [["100000000"]],
+      compare_rows: [["100000000"]],
     }
     for (const viz of ["stat", "table"] as const) {
       const html = renderToStaticMarkup(
@@ -147,7 +150,7 @@ describe("dashboard currency", () => {
       expect(html).toContain(formatNativeAmount(100_000_000, "EUR"))
       expect(html).not.toContain("$")
     }
-    expect(formatMeasure(100_000_000, "micros")).not.toContain("$")
+    expect(formatMeasure("100000000", "money")).not.toContain("$")
     expect(
       filteredCurrency({ ...query, filters: { currency: ["EUR", "JPY"] } })
     ).toBeUndefined()
@@ -174,7 +177,7 @@ describe("dashboard currency", () => {
     })
     expect(
       groupSeries(mixed.series).map((group) => group.series[0].unit)
-    ).toEqual(["micros", "count", "micros"])
+    ).toEqual(["money", "count", "money"])
     expect(indexColumns(result.columns).currency).toBe(-1)
   })
 
@@ -210,8 +213,8 @@ it("does not relabel stale results when the currency filter changes", async () =
   const jpy = { ...eur, filters: { currency: ["JPY"] } }
   const euroResult: MetricsResult = {
     range,
-    columns: [{ name: "revenue", kind: "measure", unit: "micros" }],
-    rows: [[100_000_000]],
+    columns: [{ name: "revenue", kind: "measure", unit: "money" }],
+    rows: [["100000000"]],
   }
   client.setQueryData(adminQueries.widgetMetrics(eur).queryKey, euroResult)
   const observer = new QueryObserver(client, {
@@ -235,4 +238,66 @@ it("does not relabel stale results when the currency filter changes", async () =
     observer.destroy()
     client.clear()
   }
+})
+
+describe("money cells beyond Number precision", () => {
+  it("keeps the exact wire string for stat, table and chart tooltips", () => {
+    const huge = "9007199254740993" // 2^53 + 1: a Number cannot hold it
+    const result: MetricsResult = {
+      grain: "day",
+      range,
+      columns: [
+        { name: "time", kind: "time" },
+        { name: "currency", kind: "dimension" },
+        { name: "revenue", kind: "measure", unit: "money" },
+      ],
+      rows: [["2026-09-01T00:00:00Z", "USD", huge]],
+    }
+    expect(formatMeasure(huge, "money", "USD")).toBe(
+      formatNativeAmount(huge, "USD")
+    )
+    const { data, series } = pivotTimeSeries(result)
+    expect(series).toHaveLength(1)
+    expect(data[0][exactKey(series[0].key)]).toBe(huge)
+    expect(
+      formatMeasure(String(data[0][exactKey(series[0].key)]), "money", "USD")
+    ).toBe(formatNativeAmount(huge, "USD"))
+  })
+
+  it("renders the donut tooltip from the exact slice cell, not the plotted Number", () => {
+    const huge = "9007199254740993"
+    const result: MetricsResult = {
+      range,
+      columns: [
+        { name: "currency", kind: "dimension" },
+        { name: "revenue", kind: "measure", unit: "money" },
+      ],
+      rows: [["USD", huge]],
+    }
+    const slices = donutSlices(result)
+    expect(slices).toHaveLength(1)
+    expect(slices[0][exactKey(slices[0].key)]).toBe(huge)
+    expect(slices[0].value).toBe(9007199254740992) // the plotted Number is lossy
+    const html = renderToStaticMarkup(
+      <ChartContainer config={{ [slices[0].key]: { label: "USD" } }}>
+        <MetricTooltip
+          series={slices}
+          nameKey="key"
+          active
+          payload={[
+            {
+              name: slices[0].key,
+              dataKey: "value",
+              graphicalItemId: "pie",
+              value: slices[0].value,
+              payload: slices[0],
+            },
+          ]}
+        />
+      </ChartContainer>
+    )
+    expect(html).toContain(formatNativeAmount(huge, "USD"))
+    expect(html).toContain("9,007,199,254.740993")
+    expect(html).not.toContain(formatNativeAmount(slices[0].value, "USD"))
+  })
 })

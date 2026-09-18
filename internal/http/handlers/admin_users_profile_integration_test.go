@@ -11,12 +11,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/stretchr/testify/require"
 )
 
@@ -74,7 +74,7 @@ func TestAdminUserBillingProfile_DegradesWhenCollectionDefaultsFail(t *testing.T
 
 	// Sanity: with a healthy loader the profile carries the default.
 	healthy := readDefaultMethods(t, fx, fx.customer, GetAdminUserBillingProfile)
-	require.Equal(t, []string{"USD"}, healthy[api.FormatPaymentMethodID(pm.ID)])
+	require.Equal(t, []string{"USD"}, healthy[openrails.PaymentMethodID(pm.ID).String()])
 
 	original := loadCollectionPaymentMethodDefaults
 	t.Cleanup(func() { loadCollectionPaymentMethodDefaults = original })
@@ -89,9 +89,9 @@ func TestAdminUserBillingProfile_DegradesWhenCollectionDefaultsFail(t *testing.T
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var profile adminUserBillingProfile
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &profile), rec.Body.String())
-	require.Equal(t, fx.customer.String(), profile.CustomerID)
+	require.Equal(t, openrails.CustomerID(fx.customer), profile.CustomerID)
 	require.Len(t, profile.PaymentMethods, 1)
-	require.Equal(t, api.FormatPaymentMethodID(pm.ID), profile.PaymentMethods[0].ID)
+	require.Equal(t, openrails.PaymentMethodID(pm.ID), profile.PaymentMethods[0].ID)
 	require.Empty(t, profile.PaymentMethods[0].CollectionDefaultCurrencies, "defaults are dropped, not invented")
 	require.Len(t, profile.Subscriptions, 1, "subscriptions section survives the defaults failure")
 	require.Len(t, profile.CreditBalance, 1, "credit balance section survives the defaults failure")
@@ -118,7 +118,7 @@ func TestAdminUserBillingProfile_ListsSubscriptionsOfEveryStatus(t *testing.T) {
 
 	statusByID := map[uuid.UUID]models.SubscriptionStatus{}
 	for _, sub := range profile.Subscriptions {
-		statusByID[sub.ID] = sub.Status
+		statusByID[sub.ID.UUID()] = models.SubscriptionStatus(sub.Status)
 	}
 	require.Len(t, statusByID, 3, "three live rows, the soft-deleted one excluded: %s", rec.Body.String())
 	require.Equal(t, models.StatusPastDue, statusByID[pastDue])

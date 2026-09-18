@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/riverqueue/river"
 	logrustest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -21,8 +23,8 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -44,7 +46,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}, // deliberately NO PaymentProviders
+		Config: cfg, River: embed.RiverManagedByOpenRails(), // deliberately NO PaymentProviders
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -82,7 +84,7 @@ func TestEmbeddedPullArming_ManifestSecretsNoPaymentProviders(t *testing.T) {
 		}
 	})
 
-	runtime := rt.Embedded().App().Runtime
+	runtime := app.HostGraph(rt).Runtime
 	require.NotNil(t, runtime)
 
 	// Worker registration is where hosts fold OpenRails' workers into their
@@ -174,7 +176,7 @@ func pullCLIManifestMerchant(t *testing.T, ctx context.Context, dsn, slug string
 	t.Helper()
 	appDB := dbtest.OpenAppDB(t, dsn)
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	id, err := rt.UpsertMerchantConfig(ctx, slug, m)
 	require.NoError(t, err)
@@ -225,13 +227,13 @@ func TestPullProviderCLI_ManifestModeArmsFromManifestPlane(t *testing.T) {
 
 	fake := newPullFakeNMI(t)
 	var out bytes.Buffer
-	require.NoError(t, embedded.PullProvider(ctx, embedded.PullProviderOptions{
+	require.NoError(t, hosttools.PullProvider(ctx, hosttools.PullProviderOptions{
 		Config:           &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
 		MerchantID:       id,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),
 		Out:              &out,
-		MerchantManifest: &embedded.BillingConfig{Version: 1, Merchants: map[string]embedded.MerchantConfig{slug: m}},
+		MerchantManifest: &embed.BillingConfig{Version: 1, Merchants: map[string]embed.MerchantConfig{slug: m}},
 		Endpoints: reconcile.ProviderEndpoints{
 			NMIQueryURL:  fake.srv.URL,
 			NMIV5BaseURL: fake.srv.URL,
@@ -268,12 +270,12 @@ func TestPullProviderCLI_ManifestModeMissingSecretRailNotArmed(t *testing.T) {
 
 	hook := logrustest.NewGlobal()
 	defer hook.Reset()
-	err := embedded.PullProvider(ctx, embedded.PullProviderOptions{
+	err := hosttools.PullProvider(ctx, hosttools.PullProviderOptions{
 		Config:           &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}},
 		MerchantID:       id,
 		Providers:        []string{"nmi"},
 		LogDir:           t.TempDir(),
-		MerchantManifest: &embedded.BillingConfig{Version: 1, Merchants: map[string]embedded.MerchantConfig{slug: m}},
+		MerchantManifest: &embed.BillingConfig{Version: 1, Merchants: map[string]embed.MerchantConfig{slug: m}},
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "no payment providers configured")

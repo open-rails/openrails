@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -285,7 +287,7 @@ func uniqueSub(subs []*LocalSubscription) (*LocalSubscription, bool) {
 
 func localSubEvidence(s *LocalSubscription) map[string]any {
 	ev := map[string]any{
-		"subscription_id":      s.ID.String(),
+		"subscription_id":      openrails.SubscriptionID(s.ID).String(),
 		"customer_id":          s.CustomerID.String(),
 		"status":               s.Status,
 		"rail":                 s.Rail,
@@ -327,7 +329,7 @@ func remoteSubEvidence(r *RemoteSubscription) map[string]any {
 		ev["next_billing_at"] = r.NextBillingAt.Format(time.RFC3339)
 	}
 	if r.AmountCents != 0 {
-		ev["amount_cents"] = r.AmountCents
+		ev["amount_cents"] = strconv.FormatInt(r.AmountCents, 10)
 	}
 	return ev
 }
@@ -337,7 +339,7 @@ func remoteTxnEvidence(t *RemoteTransaction) map[string]any {
 		"transaction_id": t.TransactionID,
 		"type":           string(t.Type),
 		"success":        t.Success,
-		"amount_cents":   t.AmountCents,
+		"amount_cents":   strconv.FormatInt(t.AmountCents, 10),
 		// occurred_at drives the windowed auto-resolve of PS-4/5/6.
 		"occurred_at": t.OccurredAt.UTC().Format(time.RFC3339),
 	}
@@ -442,7 +444,7 @@ func evidenceFlooredFindings(provider Provider, findings []Finding) []Finding {
 			Status:        FindingStatusRequiresReview,
 			RequiresAdmin: true,
 			LocalEvidence: map[string]any{
-				"subscription_id": a.Decide.SubscriptionID.String(),
+				"subscription_id": openrails.SubscriptionID(a.Decide.SubscriptionID).String(),
 				"withheld_cause":  a.Decide.Decision.Reason,
 			},
 			RecommendedAction: evidenceStaleAction(a.Decide.Decision.Reason),
@@ -541,7 +543,7 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 			matches := make([]map[string]any, 0, len(candidates))
 			for _, c := range candidates {
 				matches = append(matches, map[string]any{
-					"subscription_id":      c.ID.String(),
+					"subscription_id":      openrails.SubscriptionID(c.ID).String(),
 					"customer_id":          c.CustomerID.String(),
 					"status":               c.Status,
 					"rail_subscription_id": c.RailSubscriptionID,
@@ -1138,9 +1140,9 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 	}
 
 	f.LocalEvidence = map[string]any{
-		"checkout_session_id": d.MemoLocalID,
+		"checkout_session_id": checkoutSessionRef(d.MemoLocalID),
 		"customer_id":         customerID.String(),
-		"price_id":            priceID.String(),
+		"price_id":            openrails.PriceID(priceID).String(),
 		"correlated_via":      "purchase_memo",
 	}
 	f.RecommendedAction = "memo-recognized one-off purchase verified against its checkout session (recipient, mint and amount agree); enforce backfills the missing openrails.payments row with money from the on-chain transfer"
@@ -1156,7 +1158,7 @@ func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, b
 			"reconcile_backfill":  true,
 			"correlated_via":      "purchase_memo",
 			"discovered_via":      "wallet_scan",
-			"checkout_session_id": d.MemoLocalID,
+			"checkout_session_id": checkoutSessionRef(d.MemoLocalID),
 			"provider":            string(provider),
 		},
 	}}
@@ -1213,10 +1215,10 @@ func makePS5(provider Provider, t *RemoteTransaction, corr *correlator, payments
 	}
 
 	f.LocalEvidence = map[string]any{
-		"payment_id":     original.ID.String(),
+		"payment_id":     openrails.PaymentID(original.ID).String(),
 		"customer_id":    original.CustomerID.String(),
 		"transaction_id": original.TransactionID,
-		"amount_cents":   original.AmountCents,
+		"amount_cents":   strconv.FormatInt(original.AmountCents, 10),
 		"status":         original.Status,
 	}
 	f.RecommendedAction = "enforce records the refund locally (negative payment row + original marked refunded). Revoking any entitlement the refunded payment granted is a human decision — review in the admin queue if warranted"
@@ -1306,7 +1308,7 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 				Severity:   SeverityMedium,
 				Status:     FindingStatusReconcileRequired,
 				LocalEvidence: map[string]any{
-					"payment_method_id": pm.ID.String(),
+					"payment_method_id": openrails.PaymentMethodID(pm.ID).String(),
 					"customer_id":       pm.CustomerID.String(),
 					"vault_id":          pm.RailCustomerRef,
 					"last_four":         pm.LastFour,
@@ -1333,7 +1335,7 @@ func diffPaymentMethods(provider Provider, local *LocalState, ridx *remoteIndex,
 			Severity:   SeverityMedium,
 			Status:     FindingStatusReconcileRequired,
 			LocalEvidence: map[string]any{
-				"payment_method_id": pm.ID.String(),
+				"payment_method_id": openrails.PaymentMethodID(pm.ID).String(),
 				"customer_id":       pm.CustomerID.String(),
 				"vault_id":          pm.RailCustomerRef,
 				"last_four":         pm.LastFour,
@@ -1364,4 +1366,13 @@ func normalizeExpiry(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// checkoutSessionRef spells a purchase memo's local id, a checkout session
+// UUID, as the session's wire id; a memo that is not a UUID stays verbatim.
+func checkoutSessionRef(memoLocalID string) string {
+	if u, err := uuid.Parse(memoLocalID); err == nil {
+		return openrails.CheckoutSessionID(u).String()
+	}
+	return memoLocalID
 }

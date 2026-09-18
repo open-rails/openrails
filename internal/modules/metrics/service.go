@@ -1,10 +1,14 @@
 package metrics
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"math/big"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,13 +36,38 @@ type Column struct {
 	Unit string `json:"unit,omitempty"`
 }
 
+// MoneyCell is a money measure cell: an exact int64 of the row's currency's
+// native units, encoded as a decimal JSON string like every other monetary
+// value on the wire (docs/money-wire.md).
+type MoneyCell int64
+
+func (c MoneyCell) MarshalJSON() ([]byte, error) {
+	return json.Marshal(strconv.FormatInt(int64(c), 10))
+}
+
+func (c *MoneyCell) UnmarshalJSON(raw []byte) error {
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return err
+	}
+	value, err := strconv.ParseInt(text, 10, 64)
+	if err != nil {
+		return err
+	}
+	*c = MoneyCell(value)
+	return nil
+}
+
 // RangeOut echoes the resolved query window.
 type RangeOut struct {
 	From time.Time `json:"from"`
 	To   time.Time `json:"to"`
 }
 
-// Result is the tabular query response: token-lean columns + rows.
+// Result is the tabular query response: token-lean columns + rows. Leaf
+// measures aggregate exactly (int64; money and counts are bigint sums in SQL),
+// ratios divide after aggregation. A money cell is a MoneyCell, a count an
+// int64, a ratio a float64 (nil when its denominator is zero).
 type Result struct {
 	Grain        string    `json:"grain,omitempty"`
 	Range        RangeOut  `json:"range"`
@@ -94,11 +123,58 @@ func columns(plan *Plan) []Column {
 	return cols
 }
 
+// leaf is one aggregated leaf value: money and counts are exact int64 (their
+// statements cast to bigint); the duration measures (days, seconds) are
+// float8 and stay floats.
+type leaf struct {
+	n     int64
+	f     float64
+	float bool
+}
+
+func (l leaf) add(o leaf) (leaf, error) {
+	if l.float || o.float {
+		return leaf{f: l.value() + o.value(), float: true}, nil
+	}
+	if (o.n > 0 && l.n > math.MaxInt64-o.n) || (o.n < 0 && l.n < math.MinInt64-o.n) {
+		return leaf{}, fmt.Errorf("balance aggregate does not fit int64")
+	}
+	return leaf{n: l.n + o.n}, nil
+}
+
+func (l leaf) value() float64 {
+	if l.float {
+		return l.f
+	}
+	return float64(l.n)
+}
+
+// toLeaf reads a scanned aggregate exactly; a non-numeric type is a registry
+// bug, not data.
+func toLeaf(v any) (leaf, error) {
+	switch x := v.(type) {
+	case nil:
+		return leaf{}, nil
+	case int64:
+		return leaf{n: x}, nil
+	case int32:
+		return leaf{n: int64(x)}, nil
+	case int16:
+		return leaf{n: int64(x)}, nil
+	case float64:
+		return leaf{f: x, float: true}, nil
+	case float32:
+		return leaf{f: float64(x), float: true}, nil
+	default:
+		return leaf{}, fmt.Errorf("leaf measure returned %T, want bigint or float8", v)
+	}
+}
+
 // group accumulates leaf values for one (bucket, dims...) key.
 type group struct {
 	bucket time.Time // zero when the plan has no time grouping
 	dims   []string
-	vals   map[string]float64 // leaf measure -> value
+	vals   map[string]leaf // leaf measure -> value
 }
 
 func groupKey(bucket time.Time, dims []string) string {
@@ -115,7 +191,7 @@ func ensureGroup(groups map[string]*group, bucket time.Time, dims []string) *gro
 	k := groupKey(bucket, dims)
 	g, ok := groups[k]
 	if !ok {
-		g = &group{bucket: bucket, dims: append([]string(nil), dims...), vals: map[string]float64{}}
+		g = &group{bucket: bucket, dims: append([]string(nil), dims...), vals: map[string]leaf{}}
 		groups[k] = g
 	}
 	return g
@@ -145,7 +221,10 @@ func (s *Service) run(ctx context.Context, plan *Plan) ([][]any, error) {
 	}
 
 	zeroFill(plan, groups)
-	rows := assemble(plan, groups)
+	rows, err := assemble(plan, groups)
+	if err != nil {
+		return nil, err
+	}
 	orderRows(plan, rows)
 	if len(rows) > plan.Limit {
 		rows = rows[:plan.Limit]
@@ -158,7 +237,7 @@ type rawRow struct {
 	bucket  *time.Time
 	nullDim bool
 	dims    []string
-	vals    []float64
+	vals    []leaf
 }
 
 func scanStmt(ctx context.Context, tx pgx.Tx, plan *Plan, st stmt, groups map[string]*group) error {
@@ -178,7 +257,7 @@ func scanStmt(ctx context.Context, tx pgx.Tx, plan *Plan, st stmt, groups map[st
 		if err != nil {
 			return err
 		}
-		r := rawRow{dims: make([]string, nDims), vals: make([]float64, len(st.leaves))}
+		r := rawRow{dims: make([]string, nDims), vals: make([]leaf, len(st.leaves))}
 		i := 0
 		if st.hasTime {
 			switch t := vals[i].(type) {
@@ -204,7 +283,11 @@ func scanStmt(ctx context.Context, tx pgx.Tx, plan *Plan, st stmt, groups map[st
 			i++
 		}
 		for v := 0; v < len(st.leaves); v++ {
-			r.vals[v] = toFloat(vals[i])
+			value, err := toLeaf(vals[i])
+			if err != nil {
+				return fmt.Errorf("measure %s: %w", st.leaves[v].Name, err)
+			}
+			r.vals[v] = value
 			i++
 		}
 		raws = append(raws, r)
@@ -214,8 +297,7 @@ func scanStmt(ctx context.Context, tx pgx.Tx, plan *Plan, st stmt, groups map[st
 	}
 
 	if st.balance && plan.HasTime {
-		foldBalance(plan, st, raws, groups)
-		return nil
+		return foldBalance(plan, st, raws, groups)
 	}
 
 	for _, r := range raws {
@@ -247,11 +329,11 @@ func scanStmt(ctx context.Context, tx pgx.Tx, plan *Plan, st stmt, groups map[st
 // foldBalance turns per-bucket transfer deltas (NULL bucket = before the first
 // edge) into running balances at each bucket label: balance(e_i) = base +
 // sum(deltas of buckets before e_i). Strictly-before semantics.
-func foldBalance(plan *Plan, st stmt, raws []rawRow, groups map[string]*group) {
+func foldBalance(plan *Plan, st stmt, raws []rawRow, groups map[string]*group) error {
 	type combo struct {
 		dims  []string
-		base  []float64
-		delta map[time.Time][]float64
+		base  []leaf
+		delta map[time.Time][]leaf
 	}
 	combos := map[string]*combo{}
 	for _, r := range raws {
@@ -261,52 +343,69 @@ func foldBalance(plan *Plan, st stmt, raws []rawRow, groups map[string]*group) {
 		k := strings.Join(r.dims, "\x00")
 		c, ok := combos[k]
 		if !ok {
-			c = &combo{dims: append([]string(nil), r.dims...), base: make([]float64, len(st.leaves)), delta: map[time.Time][]float64{}}
+			c = &combo{dims: append([]string(nil), r.dims...), base: make([]leaf, len(st.leaves)), delta: map[time.Time][]leaf{}}
 			combos[k] = c
 		}
 		if r.bucket == nil {
 			for i := range c.base {
-				c.base[i] += r.vals[i]
+				value, err := c.base[i].add(r.vals[i])
+				if err != nil {
+					return fmt.Errorf("metrics %s: %w", st.leaves[i].Name, err)
+				}
+				c.base[i] = value
 			}
 			continue
 		}
 		d, ok := c.delta[*r.bucket]
 		if !ok {
-			d = make([]float64, len(st.leaves))
+			d = make([]leaf, len(st.leaves))
 		}
 		for i := range d {
-			d[i] += r.vals[i]
+			value, err := d[i].add(r.vals[i])
+			if err != nil {
+				return fmt.Errorf("metrics %s: %w", st.leaves[i].Name, err)
+			}
+			d[i] = value
 		}
 		c.delta[*r.bucket] = d
 	}
 	for _, c := range combos {
-		running := append([]float64(nil), c.base...)
-		for _, label := range plan.Buckets {
+		running := append([]leaf(nil), c.base...)
+		for index, label := range plan.Buckets {
 			g := ensureGroup(groups, label, c.dims)
 			for i, m := range st.leaves {
 				g.vals[m.Name] = running[i]
 			}
+			// The last bucket's delta is outside every requested snapshot.
+			if index == len(plan.Buckets)-1 {
+				break
+			}
 			if d, ok := c.delta[label]; ok {
 				for i := range running {
-					running[i] += d[i]
+					value, err := running[i].add(d[i])
+					if err != nil {
+						return fmt.Errorf("metrics %s: %w", st.leaves[i].Name, err)
+					}
+					running[i] = value
 				}
 			}
 		}
 	}
+	return nil
 }
 
+// toFloat reads a cell for ordering; money and counts compare exactly as
+// integers, ratios as floats.
 func toFloat(v any) float64 {
 	switch x := v.(type) {
 	case nil:
 		return 0
-	case int64:
+	case MoneyCell:
 		return float64(x)
-	case int32:
+	case int64:
 		return float64(x)
 	case float64:
 		return x
-	case float32:
-		return float64(x)
 	default:
 		return 0
 	}
@@ -341,13 +440,13 @@ func zeroFill(plan *Plan, groups map[string]*group) {
 // FILTERs inside a broader group-by) are dropped — a combo earns a row by
 // having at least one non-zero leaf somewhere; time buckets inside a kept
 // combo still zero-fill.
-func assemble(plan *Plan, groups map[string]*group) [][]any {
+func assemble(plan *Plan, groups map[string]*group) ([][]any, error) {
 	signal := map[string]bool{}
 	if len(plan.Dims) > 0 {
 		for _, g := range groups {
 			key := strings.Join(g.dims, "\x00")
 			for _, v := range g.vals {
-				if v != 0 {
+				if v.value() != 0 {
 					signal[key] = true
 				}
 			}
@@ -366,43 +465,98 @@ func assemble(plan *Plan, groups map[string]*group) [][]any {
 			row = append(row, d)
 		}
 		for _, m := range plan.Measures {
-			row = append(row, measureValue(m, g))
+			cell, err := measureValue(m, g)
+			if err != nil {
+				return nil, err
+			}
+			row = append(row, cell)
 		}
 		rows = append(rows, row)
 	}
-	return rows
+	return rows, nil
 }
 
-func measureValue(m *Measure, g *group) any {
+// measureValue renders one cell. Ratios divide exactly (big.Rat): a
+// money-unit ratio (an average amount) rounds half away from zero to whole
+// native units and stays a MoneyCell, checked to fit int64; every other ratio
+// is the correctly rounded float of the exact quotient. Money and counts
+// never pass through a float.
+func measureValue(m *Measure, g *group) (any, error) {
 	if m.Class == ClassRatio {
-		num := componentValue(measureByName[m.Num], g)
-		den := componentValue(measureByName[m.Den], g)
-		if den == 0 {
-			return nil
+		quotient, ok := componentRat(measureByName[m.Num], g)
+		if !ok {
+			return nil, nil
 		}
-		return num / den
+		den, ok := componentRat(measureByName[m.Den], g)
+		if !ok || den.Sign() == 0 {
+			return nil, nil
+		}
+		quotient.Quo(quotient, den)
+		if m.Unit == UnitMoney {
+			cell, err := moneyCellFromRat(quotient)
+			if err != nil {
+				return nil, fmt.Errorf("metrics %s: %w", m.Name, err)
+			}
+			return cell, nil
+		}
+		f, _ := quotient.Float64()
+		return f, nil
 	}
 	v := g.vals[m.Name]
-	switch m.Unit {
-	case "micros", "count":
-		return int64(math.Round(v))
+	switch {
+	case m.Unit == UnitMoney:
+		return MoneyCell(v.n), nil
+	case v.float:
+		return v.f, nil
 	default:
-		return v
+		return v.n, nil
 	}
 }
 
-func componentValue(m *Measure, g *group) float64 {
+// componentRat is a ratio component as an exact rational; a nested ratio
+// with a zero denominator is absent (false).
+func componentRat(m *Measure, g *group) (*big.Rat, bool) {
 	if m == nil {
-		return 0
+		return new(big.Rat), true
 	}
 	if m.Class == ClassRatio {
-		den := componentValue(measureByName[m.Den], g)
-		if den == 0 {
-			return 0
+		num, ok := componentRat(measureByName[m.Num], g)
+		if !ok {
+			return nil, false
 		}
-		return componentValue(measureByName[m.Num], g) / den
+		den, ok := componentRat(measureByName[m.Den], g)
+		if !ok || den.Sign() == 0 {
+			return nil, false
+		}
+		return num.Quo(num, den), true
 	}
-	return g.vals[m.Name]
+	v := g.vals[m.Name]
+	if v.float {
+		r, ok := new(big.Rat).SetString(strconv.FormatFloat(v.f, 'f', -1, 64))
+		if !ok {
+			return nil, false
+		}
+		return r, true
+	}
+	return new(big.Rat).SetInt64(v.n), true
+}
+
+// moneyCellFromRat rounds an exact quotient half away from zero to whole
+// native units and refuses one outside int64.
+func moneyCellFromRat(q *big.Rat) (MoneyCell, error) {
+	num := new(big.Int).Set(q.Num())
+	den := q.Denom()
+	// Round half away from zero: (2|num| + den) / (2 den), sign restored.
+	twice := new(big.Int).Abs(num)
+	twice.Mul(twice, big.NewInt(2)).Add(twice, den)
+	rounded := twice.Quo(twice, new(big.Int).Mul(den, big.NewInt(2)))
+	if num.Sign() < 0 {
+		rounded.Neg(rounded)
+	}
+	if !rounded.IsInt64() {
+		return 0, fmt.Errorf("money ratio %s does not fit int64", rounded)
+	}
+	return MoneyCell(rounded.Int64()), nil
 }
 
 // orderRows sorts by the user's order terms, then time asc + dims asc for
@@ -466,7 +620,8 @@ func orderRows(plan *Plan, rows [][]any) {
 	})
 }
 
-// compareVals orders strings lexically and numbers numerically; nil sorts last.
+// compareVals orders strings lexically and numbers numerically (integer
+// cells exactly); nil sorts last.
 func compareVals(a, b any) int {
 	if a == nil && b == nil {
 		return 0
@@ -481,14 +636,14 @@ func compareVals(a, b any) int {
 	case string:
 		bv, _ := b.(string)
 		return strings.Compare(av, bv)
-	default:
-		af, bf := toFloat(a), toFloat(b)
-		switch {
-		case af < bf:
-			return -1
-		case af > bf:
-			return 1
+	case MoneyCell:
+		if bv, ok := b.(MoneyCell); ok {
+			return cmp.Compare(av, bv)
+		}
+	case int64:
+		if bv, ok := b.(int64); ok {
+			return cmp.Compare(av, bv)
 		}
 	}
-	return 0
+	return cmp.Compare(toFloat(a), toFloat(b))
 }

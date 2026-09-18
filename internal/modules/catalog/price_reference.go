@@ -3,21 +3,18 @@ package catalog
 import (
 	"context"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// ResolveReference resolves a caller-supplied price identifier that may be
-// EITHER a price UUID (bare or "price_"-prefixed, api.ParsePriceID's format)
-// OR a #774 price_key. Every checkout/API entrypoint that historically
-// accepted only a price id now accepts a price_key at the SAME field: try the
-// id parse first (api.ParsePriceID is total over its own format, so a real
-// key string never collides with it), fall back to a key lookup only when
-// that fails.
+// ResolveReference resolves a caller-supplied price reference that is EITHER
+// a typed price id ("price_<uuid>") OR a #774 price_key: the id spelling never
+// collides with a key, so an id parse is tried first and a key lookup follows
+// only when the reference is not an id.
 func ResolveReference(ctx context.Context, prices *PriceService, ref string) (*models.Price, error) {
-	if id, err := api.ParsePriceID(ref); err == nil {
-		return prices.GetByID(ctx, id)
+	if id, err := openrails.ParsePriceID(ref); err == nil && !id.IsZero() {
+		return prices.GetByID(ctx, id.UUID())
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {

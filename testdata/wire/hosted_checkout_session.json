@@ -1,0 +1,71 @@
+{
+  "id": "ocs_fixture",
+  "status": "created",
+  "merchant": {
+    "display_name": "Acme Demo"
+  },
+  "plan": {
+    "display_name": "Premium Membership",
+    "unit_amount": "9223372036854775807",
+    "currency": "USD",
+    "unit_decimals": 6,
+    "period_hours": 720,
+    "automatically_renews": true
+  },
+  "line_items": [
+    {
+      "label": "Premium Membership",
+      "sublabel": "Renews monthly",
+      "amount": "9223372036854775807"
+    },
+    {
+      "label": "Launch discount",
+      "amount": "-9223372036854775808"
+    }
+  ],
+  "tax": "0",
+  "due_today": "9223372036854775807",
+  "rails": [
+    {
+      "id": "option_card",
+      "rail": "nmi",
+      "mode": "subscription",
+      "driver": "collect_js",
+      "public_config": {
+        "tokenization_key": "public-key",
+        "tokenization_url": "https://secure.networkmerchants.com/token/Collect.js"
+      }
+    },
+    {
+      "id": "option_wallet",
+      "rail": "solana",
+      "mode": "one_off",
+      "driver": "solana_pay",
+      "public_config": {
+        "network": "devnet",
+        "token_symbol": "USDC"
+      }
+    },
+    {
+      "id": "option_redirect",
+      "rail": "ccbill",
+      "mode": "subscription",
+      "driver": "redirect"
+    }
+  ],
+  "saved_methods": [
+    {
+      "id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "option_id": "option_card",
+      "rail": "nmi",
+      "brand": "visa",
+      "last_four": "4242",
+      "exp_month": 12,
+      "exp_year": 2030
+    }
+  ],
+  "payment_id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+  "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+  "success_url": "https://merchant.example/thanks?checkout=ocs_fixture",
+  "expires_at": "2026-09-16T00:00:00.123456789Z"
+}

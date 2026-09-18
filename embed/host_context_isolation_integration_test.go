@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -78,10 +77,10 @@ func TestHostContextNeverReachesTheEngine(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	standalone := h.StartStandalone("USD")
 	host := h.StartEmbeddedHost("USD")
-	multi, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	multi, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, multi.Close(context.Background())) })
 	multiClient, err := multi.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
@@ -132,7 +131,7 @@ func observeHostContext(t *testing.T, ctx context.Context, h *integrationharness
 
 	var out hostContextObservation
 	for i := 0; i < 11; i++ {
-		err := client.SetCustomerInvoiceProfile(hostCtx, customer.String(), openrails.InvoiceProfileDTO{
+		err := client.SetCustomerInvoiceProfile(hostCtx, openrails.CustomerID(customer), openrails.InvoiceProfileDTO{
 			NetTermsDays: i, CollectionMethod: "send_invoice",
 		})
 		status := 0
@@ -147,7 +146,7 @@ func observeHostContext(t *testing.T, ctx context.Context, h *integrationharness
 	out.AuditUsers = hook.drain()
 	require.NotContains(t, out.AuditUsers, sessionUser, "the host's session user must never be an engine audit actor")
 
-	_, err = client.GetCustomerInvoiceProfile(merchant.WithID(hostCtx, merchant.ID(uuid.New())), customer.String())
+	_, err = client.GetCustomerInvoiceProfile(merchant.WithID(hostCtx, merchant.ID(uuid.New())), openrails.CustomerID(customer))
 	var se *openrails.StatusError
 	require.ErrorAs(t, err, &se, "pin mismatch must be a StatusError")
 	out.PinMismatchStatus, out.PinMismatchConflict = se.Status, errors.Is(err, openrails.ErrConflict)

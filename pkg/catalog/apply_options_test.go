@@ -6,7 +6,8 @@ import (
 
 	"github.com/google/uuid"
 
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
@@ -39,14 +40,14 @@ func TestApplyWithOptionsFiltersMutationClasses(t *testing.T) {
 			{
 				Key:      "existing",
 				Action:   ProductUpdate,
-				UpdateID: existingProductID,
+				UpdateID: openrails.ProductID(existingProductID),
 				Prices: []PricePlan{
-					{Label: "existing $9.99/month", Action: PriceActivate, ExistingID: existingPriceID},
-					{Label: "existing $19.99/month", Action: PriceArchive, ExistingID: uuid.New()},
+					{Label: "existing $9.99/month", Action: PriceActivate, ExistingID: openrails.PriceID(existingPriceID)},
+					{Label: "existing $19.99/month", Action: PriceArchive, ExistingID: openrails.PriceID(uuid.New())},
 				},
 			},
 		},
-		RemovedProducts: []billingservice.CatalogProduct{{ID: removedProductID, Key: "removed"}},
+		RemovedProducts: []billingservice.CatalogProduct{{ID: openrails.ProductID(removedProductID), Key: "removed"}},
 	}}}
 
 	t.Run("insert only", func(t *testing.T) {

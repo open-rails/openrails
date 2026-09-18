@@ -10,15 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/api"
 	"github.com/open-rails/openrails/pkg/pricing"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
@@ -108,7 +110,7 @@ func TestStandaloneMerchantMeteringRoutesHTTP(t *testing.T) {
 		},
 	}
 	missingProduct := cloneJSONMap(t, rateCard)
-	missingProduct["product_id"] = uuid.New()
+	missingProduct["product_id"] = openrails.ProductID(uuid.New())
 	status, body = requestJSON(t, http.MethodPut, rateCardURL, token, missingProduct)
 	require.Equal(t, http.StatusNotFound, status, string(body))
 	requireAPIErrorCode(t, body, "rate_card_product_not_found")
@@ -175,7 +177,7 @@ VALUES ($1, $2, 'metering-test', 'USD', 'api', 'api.request',
 	requireAPIErrorCode(t, body, "default_rate_card_not_found")
 }
 
-func createMeteringProduct(t *testing.T, baseURL, token, key string) uuid.UUID {
+func createMeteringProduct(t *testing.T, baseURL, token, key string) openrails.ProductID {
 	t.Helper()
 	status, body := requestJSON(t, http.MethodPost, baseURL+"/v1/merchant/catalog/products", token, map[string]any{
 		"key":          key,
@@ -183,10 +185,10 @@ func createMeteringProduct(t *testing.T, baseURL, token, key string) uuid.UUID {
 	})
 	require.Equal(t, http.StatusCreated, status, string(body))
 	var product struct {
-		ID uuid.UUID `json:"id"`
+		ID openrails.ProductID `json:"id"`
 	}
 	require.NoError(t, json.Unmarshal(body, &product))
-	require.NotEqual(t, uuid.Nil, product.ID)
+	require.False(t, product.ID.IsZero())
 	return product.ID
 }
 

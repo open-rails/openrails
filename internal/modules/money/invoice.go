@@ -5,18 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -49,7 +49,7 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 	// 076) is satisfied even if no prior money op touched this subject (#317).
 	//
 	// or#868 B2: on a merchant-PINNED connection. FinalizeInvoice is a
-	// host/embedded-facing seam (pkg/service.Service.FinalizeInvoice), so nothing
+	// host/embedded-facing seam (internal/service.Service.FinalizeInvoice), so nothing
 	// upstream necessarily pinned one, and off the request path this INSERT was
 	// denied 42501 — taking the whole arrears close down with it.
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -332,10 +332,8 @@ func (s *MoneyService) FinalizeInvoice(ctx context.Context, payer identity.Custo
 			if inv.InvoiceNumber != nil && *inv.InvoiceNumber != "" {
 				number = *inv.InvoiceNumber
 			}
-			data, err := models.ToJSONB(map[string]any{
-				"invoice_id": inv.ID.String(), "invoice_number": number,
-				"amount_due": strconv.FormatInt(inv.AmountDue, 10), "currency": inv.Currency, "due_at": inv.DueAt,
-			})
+			amountDue := inv.AmountDue
+			data, err := json.Marshal(openrails.NotificationData{InvoiceID: inv.ID, InvoiceNumber: number, AmountDue: &amountDue, Currency: inv.Currency, DueAt: inv.DueAt})
 			if err != nil {
 				return err
 			}

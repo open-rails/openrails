@@ -16,8 +16,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
-	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // Payment reads run identically through the in-process and HTTP transports and
@@ -28,10 +26,10 @@ func TestPaymentReadsThroughSharedClient(t *testing.T) {
 	remote := h.StartStandalone("USD")
 	owned := remote.ProvisionOwnedMerchant("payments-" + uuid.NewString()[:8])
 	mid := owned.MerchantID
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	local, err := runtime.Client(openrails.WithMerchantID(mid))
@@ -56,15 +54,15 @@ func TestPaymentReadsThroughSharedClient(t *testing.T) {
 	var reference *openrails.Payment
 	for name, client := range map[string]*openrails.Client{"embedded": local, "standalone": standalone} {
 		t.Run(name, func(t *testing.T) {
-			got, err := client.GetPayment(ctx, api.FormatPaymentID(payment))
+			got, err := client.GetPayment(ctx, openrails.PaymentID(payment))
 			require.NoError(t, err)
-			require.Equal(t, api.FormatPaymentID(payment), got.ID)
+			require.Equal(t, openrails.PaymentID(payment), got.ID)
 			require.EqualValues(t, math.MaxInt64, got.Amount, "the full int64 range survives the wire")
 			require.EqualValues(t, 1, got.AmountRefunded)
 			require.Equal(t, "USD", got.Currency)
-			require.Equal(t, api.FormatUserID(payer.String()), got.User)
+			require.Equal(t, openrails.CustomerID(payer), got.CustomerID)
 			require.NotNil(t, got.Price)
-			require.Equal(t, api.FormatPriceID(price), got.Price.ID)
+			require.Equal(t, openrails.PriceID(price), got.Price.ID)
 			require.EqualValues(t, math.MaxInt64, got.Price.UnitAmount)
 			require.NotNil(t, got.Refunds)
 			require.Len(t, got.Refunds.Data, 1)
@@ -75,11 +73,11 @@ func TestPaymentReadsThroughSharedClient(t *testing.T) {
 				require.Equal(t, reference, got, "both transports return the same payment")
 			}
 
-			page, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: payer.String(), PriceID: price.String()})
+			page, err := client.ListPayments(ctx, openrails.PaymentFilter{CustomerID: openrails.CustomerID(payer), PriceID: openrails.PriceID(price)})
 			require.NoError(t, err)
 			require.EqualValues(t, 2, page.Total, "the payer's payment and its refund")
 			for _, item := range page.Data {
-				require.Equal(t, api.FormatUserID(payer.String()), item.User)
+				require.Equal(t, openrails.CustomerID(payer), item.CustomerID)
 			}
 			all, err := client.ListPayments(ctx, openrails.PaymentFilter{PageOptions: openrails.PageOptions{Limit: 1}})
 			require.NoError(t, err)
@@ -87,15 +85,15 @@ func TestPaymentReadsThroughSharedClient(t *testing.T) {
 			require.EqualValues(t, 3, all.Total)
 			require.True(t, all.HasMore)
 
-			_, err = client.GetPayment(ctx, api.FormatPaymentID(uuid.New()))
+			_, err = client.GetPayment(ctx, openrails.PaymentID(uuid.New()))
 			require.ErrorIs(t, err, openrails.ErrNotFound)
-			_, err = client.GetPayment(ctx, " ")
+			_, err = client.GetPayment(ctx, openrails.PaymentID{})
 			require.ErrorIs(t, err, openrails.ErrInvalid)
 		})
 	}
 
 	// Another merchant's key never sees these payments.
 	stranger := remote.Client()
-	_, err = stranger.GetPayment(ctx, api.FormatPaymentID(payment))
+	_, err = stranger.GetPayment(ctx, openrails.PaymentID(payment))
 	require.ErrorIs(t, err, openrails.ErrNotFound)
 }

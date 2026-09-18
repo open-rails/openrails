@@ -45,16 +45,6 @@ type MerchantID = merchant.ID
 // EnsureCustomerID materializes rows under it).
 const SelfIssuer = "openrails:self"
 
-// CustomerID is the OpenRails customer UUID a charge is billed to.
-type CustomerID uuid.UUID
-
-func (id CustomerID) MarshalText() ([]byte, error)     { return uuid.UUID(id).MarshalText() }
-func (id *CustomerID) UnmarshalText(data []byte) error { return (*uuid.UUID)(id).UnmarshalText(data) }
-
-func (id CustomerID) UUID() uuid.UUID { return uuid.UUID(id) }
-func (id CustomerID) String() string  { return uuid.UUID(id).String() }
-func (id CustomerID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-
 // DepositCreditsRequest mints a credit block for a payer (admin funding,
 // promotions, money-in settlement). Amount is in the currency's native integer unit.
 type DepositCreditsRequest struct {
@@ -89,7 +79,7 @@ type DepositCreditsRequest struct {
 // native integer precision, and timestamps are RFC3339 instants.
 type CreditTransaction struct {
 	ID              uuid.UUID  `json:"id"`
-	CustomerID      uuid.UUID  `json:"customer_id"`
+	CustomerID      CustomerID `json:"customer_id"`
 	Invoker         string     `json:"invoker"`
 	Currency        string     `json:"currency"`
 	Amount          int64      `json:"amount,string"`
@@ -121,13 +111,13 @@ type CreditTransaction struct {
 // EstimatedAmount is the upper-bound charge to hold. A zero EstimatedAmount runs
 // the limit checks without placing a money hold.
 type AdmitRequest struct {
-	CustomerID      string `json:"customer_id"`
-	Invoker         string `json:"invoker"`
-	InvokerType     string `json:"invoker_type,omitempty"`
-	TrustLevel      string `json:"trust_level,omitempty"`
-	Resource        string `json:"resource,omitempty"`
-	Currency        string `json:"currency,omitempty"`
-	EstimatedAmount int64  `json:"estimated_amount,string"`
+	CustomerID      CustomerID `json:"customer_id"`
+	Invoker         string     `json:"invoker"`
+	InvokerType     string     `json:"invoker_type,omitempty"`
+	TrustLevel      string     `json:"trust_level,omitempty"`
+	Resource        string     `json:"resource,omitempty"`
+	Currency        string     `json:"currency,omitempty"`
+	EstimatedAmount int64      `json:"estimated_amount,string"`
 	// AccrualRateDeltaPerHour is the or#897 PROSPECTIVE rate this request would
 	// add, in micros per hour — "the VM I am about to start burns $2/hour". Only
 	// the host knows it. Zero means the request adds no ongoing rate, which
@@ -146,7 +136,7 @@ type AdmitRequest struct {
 	Roles []uuid.UUID `json:"roles,omitempty"`
 }
 
-// AdmitResponse is the admission verdict (pkg/service.AdmitResult on the wire).
+// AdmitResponse is the admission verdict (internal/service.AdmitResult on the wire).
 // Allowed=false carries a BlockedBy axis ("budget" | "abuse" | "money") and a
 // DenyCode when available. A successful money-bearing admit creates a request_id
 // keyed SQL operation. A deny is returned as (Allowed=false, nil error) on both
@@ -198,9 +188,9 @@ type BalanceResponse = CreditAccount
 // customer + currency pair. All amounts are in the currency's internal
 // precision (micros for USD).
 type CreditAccount struct {
-	CustomerID  string `json:"customer_id"`
-	Currency    string `json:"currency"`
-	BillingMode string `json:"billing_mode"`
+	CustomerID  CustomerID `json:"customer_id"`
+	Currency    string     `json:"currency"`
+	BillingMode string     `json:"billing_mode"`
 	// BalanceAmount is the total prepaid credit balance (excluding holds).
 	BalanceAmount int64 `json:"balance_amount,string"`
 	// HeldAmount is the sum of outstanding authorization holds not yet captured or released.
@@ -301,9 +291,9 @@ type BillingPolicyInput struct {
 // GetMerchantSettings returns only the DECLARATIVE rungs (default + tier):
 // per-customer bindings are runtime segmentation state and are not enumerated.
 type BillingPolicyBindingInput struct {
-	PolicyName string `json:"policy"`
-	CustomerID string `json:"customer_id,omitempty"`
-	Tier       string `json:"tier,omitempty"`
+	PolicyName string     `json:"policy"`
+	CustomerID CustomerID `json:"customer_id,omitzero"`
+	Tier       string     `json:"tier,omitempty"`
 }
 
 // WastedSpendReport is one host-reported failed attempt that cost money.
@@ -316,10 +306,10 @@ type BillingPolicyBindingInput struct {
 // keyed structurally in the usage ledger — and a replay with a changed Amount is
 // refused rather than answered with the first result (or#891).
 type WastedSpendReport struct {
-	CustomerID  string `json:"customer_id"`
-	Invoker     string `json:"invoker"`
-	InvokerType string `json:"invoker_type,omitempty"`
-	Currency    string `json:"currency,omitempty"`
+	CustomerID  CustomerID `json:"customer_id"`
+	Invoker     string     `json:"invoker"`
+	InvokerType string     `json:"invoker_type,omitempty"`
+	Currency    string     `json:"currency,omitempty"`
 	// Amount is the wasted spend in the currency's internal precision.
 	Amount int64 `json:"amount,string"`
 	// Source identifies the system reporting the waste (e.g. "inference-gateway").
@@ -340,7 +330,7 @@ type WastedSpendReport struct {
 // through rate-card rating). OccurredAt (nil = now) places the event in its
 // rating window — gauge segment reporters set it to segment end.
 type UsageReport struct {
-	CustomerID string           `json:"customer_id"`
+	CustomerID CustomerID       `json:"customer_id"`
 	Invoker    string           `json:"invoker"`
 	Currency   string           `json:"currency,omitempty"`
 	EventType  string           `json:"event_type"`
@@ -370,7 +360,7 @@ type WastedSpendResponse struct {
 
 // SpendLimitWindow is one fixed money-budget window in a hierarchical
 // budget-scope policy (#473) — same shape as BudgetWindowInput
-// (pkg/service.SpendLimitWindowInput on the wire).
+// (internal/service.SpendLimitWindowInput on the wire).
 type SpendLimitWindow = BudgetWindowInput
 
 // SpendDelegationInput is one payer-owned spend delegation. Machine clients use
@@ -399,10 +389,13 @@ type ResourceRevenueResponse struct {
 	Daily         []ResourceRevenueDailyRow `json:"daily"`
 }
 
-// EntitlementRecord is one entitlement window.
+// EntitlementRecord is one entitlement window. SourceID is the source
+// resource's own wire id beside SourceType (see SourceRef): sub_… for
+// subscription and grace sources, pay_… for one_off sources, the host's
+// declared id for admin sources.
 type EntitlementRecord struct {
 	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id,omitempty"`
+	CustomerID   CustomerID `json:"customer_id,omitzero"`
 	Entitlement  string     `json:"entitlement"`
 	StartAt      time.Time  `json:"start_at"`
 	EndAt        *time.Time `json:"end_at,omitempty"`
@@ -415,16 +408,17 @@ type EntitlementRecord struct {
 }
 
 // ProductAccessGrant is one active product-access row from the merchant lookup
-// API.
+// API. SourceID follows the EntitlementRecord rule (pay_… for purchase,
+// sub_… for subscription, the declared id for admin).
 type ProductAccessGrant struct {
 	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id"`
-	ProductID    string     `json:"product_id"`
+	CustomerID   CustomerID `json:"customer_id"`
+	ProductID    ProductID  `json:"product_id"`
 	ProductKey   string     `json:"product_key,omitempty"`
 	ProductName  string     `json:"product_name,omitempty"`
 	SourceType   string     `json:"source_type"`
 	SourceID     string     `json:"source_id,omitempty"`
-	PaymentID    *string    `json:"payment_id,omitempty"`
+	PaymentID    *PaymentID `json:"payment_id,omitempty"`
 	Status       string     `json:"status"`
 	StartsAt     time.Time  `json:"starts_at"`
 	EndsAt       *time.Time `json:"ends_at,omitempty"`
@@ -436,9 +430,9 @@ type ProductAccessGrant struct {
 
 // ProductAccessCheck is the response from a single product-access check.
 type ProductAccessCheck struct {
-	CustomerID string `json:"customer_id"`
-	ProductID  string `json:"product_id"`
-	HasAccess  bool   `json:"has_access"`
+	CustomerID CustomerID `json:"customer_id"`
+	ProductID  ProductID  `json:"product_id"`
+	HasAccess  bool       `json:"has_access"`
 }
 
 // AdmitBatchVerdict is one per-item verdict from POST /v1/merchant/admissions.
@@ -459,7 +453,7 @@ func (v AdmitBatchVerdict) Allowed() bool {
 
 // CreditLimitRequest carries an exact native-currency arrears limit.
 type CreditLimitRequest struct {
-	CustomerID        string `json:"customer_id"`
-	Currency          string `json:"currency"`
-	CreditLimitAmount int64  `json:"credit_limit_amount,string"`
+	CustomerID        CustomerID `json:"customer_id"`
+	Currency          string     `json:"currency"`
+	CreditLimitAmount int64      `json:"credit_limit_amount,string"`
 }

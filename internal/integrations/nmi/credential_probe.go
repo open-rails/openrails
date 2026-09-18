@@ -9,6 +9,9 @@ import (
 	"strings"
 )
 
+// ErrCredentialsRejected: the gateway answered and refused the security key.
+var ErrCredentialsRejected = errors.New("provider rejected credentials")
+
 // ProbeCredentials verifies the security key through a bounded, read-only
 // transaction query. It never creates or changes provider state.
 func (c *NMIClient) ProbeCredentials(ctx context.Context) error {
@@ -31,7 +34,7 @@ func (c *NMIClient) ProbeCredentials(ctx context.Context) error {
 		return fmt.Errorf("nmi credential probe: parse response: %w", err)
 	}
 	if strings.TrimSpace(response.ErrorResponse) != "" {
-		return errors.New("nmi credential probe: provider rejected credentials")
+		return fmt.Errorf("nmi credential probe: %w", ErrCredentialsRejected)
 	}
 	return nil
 }

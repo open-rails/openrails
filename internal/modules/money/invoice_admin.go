@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails"
 	"slices"
 	"strings"
+
+	"github.com/open-rails/openrails"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -31,14 +32,19 @@ func (s *MoneyService) ListMerchantInvoices(ctx context.Context, filter Merchant
 	offset32, _ := safecast.Convert[int32](offset)
 	var invoices []models.Invoice
 	var total int64
+	var customerID *uuid.UUID
+	if !filter.CustomerID.IsZero() {
+		id := filter.CustomerID.UUID()
+		customerID = &id
+	}
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		var err error
-		total, err = q.CountMerchantInvoices(ctx, gen.CountMerchantInvoicesParams{MerchantID: mid.UUID(), CustomerID: filter.CustomerID, Currency: filter.Currency, Status: filter.Status, PeriodFrom: filter.PeriodFrom, PeriodTo: filter.PeriodTo})
+		total, err = q.CountMerchantInvoices(ctx, gen.CountMerchantInvoicesParams{MerchantID: mid.UUID(), CustomerID: customerID, Currency: filter.Currency, Status: filter.Status, PeriodFrom: filter.PeriodFrom, PeriodTo: filter.PeriodTo})
 		if err != nil {
 			return err
 		}
-		rows, err := q.ListMerchantInvoices(ctx, gen.ListMerchantInvoicesParams{MerchantID: mid.UUID(), CustomerID: filter.CustomerID, Currency: filter.Currency, Status: filter.Status, PeriodFrom: filter.PeriodFrom, PeriodTo: filter.PeriodTo, PageLimit: limit32, PageOffset: offset32})
+		rows, err := q.ListMerchantInvoices(ctx, gen.ListMerchantInvoicesParams{MerchantID: mid.UUID(), CustomerID: customerID, Currency: filter.Currency, Status: filter.Status, PeriodFrom: filter.PeriodFrom, PeriodTo: filter.PeriodTo, PageLimit: limit32, PageOffset: offset32})
 		if err != nil {
 			return err
 		}

@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // or#868 B3: the embedded client's TRANSCRIBED methods — single Admit and both
@@ -39,7 +38,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 
 	rdb, _ := dbtest.SharedRedisClient(t)
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, Redis: rdb, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, Redis: rdb, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -66,7 +65,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 		admitter := client
 
 		resp, err := admitter.Admit(ctx, openrails.AdmitRequest{
-			CustomerID:      customerID.String(),
+			CustomerID:      openrails.CustomerID(customerID),
 			Invoker:         "or868-b3-invoker",
 			InvokerType:     openrails.InvokerTypePayer,
 			Currency:        "USD",
@@ -82,7 +81,7 @@ func TestEmbeddedTranscribedPathPinsTheMerchantConnection(t *testing.T) {
 	})
 
 	t.Run("spend-delegation writes land under the merchant's own scope", func(t *testing.T) {
-		require.NoError(t, client.SetCustomerSpendDelegations(ctx, customerID.String(),
+		require.NoError(t, client.SetCustomerSpendDelegations(ctx, openrails.CustomerID(customerID),
 			[]openrails.SpendDelegationInput{{
 				Scope:    "invoker",
 				ScopeKey: "or868-b3-invoker",

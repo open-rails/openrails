@@ -4,17 +4,17 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-func commerceCustomer(r *httprequest.Request, raw string) (identity.CustomerID, bool) {
-	id, err := parseServiceCustomerID(raw)
-	if err != nil || id == nil {
+// commerceCustomer resolves a customer id from a request body field or a
+// path/query string and enforces the caller's customer scope.
+func commerceCustomer(r *httprequest.Request, customerID openrails.CustomerID) (identity.CustomerID, bool) {
+	id := servicePayer(customerID)
+	if id == nil {
 		r.ErrorJSON(http.StatusBadRequest, "valid customer_id required")
 		return identity.CustomerID{}, false
 	}
@@ -33,7 +33,7 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	input.Customer.ID = payer.String()
+	input.Customer.ID = openrails.CustomerID(payer)
 	input.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
 	if input.IdempotencyKey == "" {
 		r.ErrorJSON(http.StatusBadRequest, "Idempotency-Key required")
@@ -53,15 +53,16 @@ func ServiceCreateCheckoutSession(r *httprequest.Request) {
 }
 
 func ServiceGetCheckoutSession(r *httprequest.Request) {
-	payer, ok := commerceCustomer(r, r.Query("customer_id"))
+	payer, ok := commerceCustomer(r, customerIDParam(r.Query("customer_id")))
 	if !ok {
 		return
 	}
-	id, err := api.ParseCheckoutSessionID(r.Param("id"))
-	if err != nil || id == uuid.Nil {
+	typedId, err := openrails.ParseCheckoutSessionID(r.Param("id"))
+	if err != nil || typedId.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
+	id := typedId.UUID()
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
@@ -84,11 +85,12 @@ func ServiceConfirmCheckoutSession(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	id, err := api.ParseCheckoutSessionID(r.Param("id"))
-	if err != nil || id == uuid.Nil {
+	typedId, err := openrails.ParseCheckoutSessionID(r.Param("id"))
+	if err != nil || typedId.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid checkout session id")
 		return
 	}
+	id := typedId.UUID()
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.InternalError("billing service unavailable", err)
@@ -122,7 +124,7 @@ func ServiceListCheckoutRailOptions(r *httprequest.Request) {
 }
 
 func ServiceResolveEffectiveTier(r *httprequest.Request) {
-	payer, ok := commerceCustomer(r, r.Param("customer_id"))
+	payer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
 	if !ok {
 		return
 	}

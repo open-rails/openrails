@@ -4,29 +4,29 @@ package embed_test
 
 import (
 	"context"
+	"testing"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/pricing"
 	"github.com/stretchr/testify/require"
-	"testing"
-	"time"
 )
 
 func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
 	remote := h.StartStandalone("USD")
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	local, err := runtime.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
@@ -45,7 +45,7 @@ func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 			again, err := client.GetUsageMeter(ctx, key)
 			require.NoError(t, err)
 			require.True(t, first.UpdatedAt.Equal(again.UpdatedAt))
-			card, err := client.SetDefaultUsageRateCard(ctx, key, openrails.DefaultUsageRateCardRequest{ProductID: product, Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})
+			card, err := client.SetDefaultUsageRateCard(ctx, key, openrails.DefaultUsageRateCardRequest{ProductID: openrails.ProductID(product), Price: pricing.RatePrice{Model: pricing.ModelPerUnit, Currency: "USD", PerUnit: &pricing.PerUnitPrice{UnitAmount: 100, DivideBy: 1}}})
 			require.NoError(t, err)
 			require.NotNil(t, card.DefaultRateCard)
 			require.EqualValues(t, 100, card.DefaultRateCard.Price.PerUnit.UnitAmount)
@@ -53,7 +53,7 @@ func TestMeteringClientRatesIntoInvoice(t *testing.T) {
 			mode := money.BillingModeArrears
 			_, err = ms.UpsertAccountSettings(dbtest.WithTestMerchant(ctx), identity.CustomerID(payer), "USD", money.AccountSettingsInput{BillingMode: &mode})
 			require.NoError(t, err)
-			event := openrails.UsageReport{CustomerID: payer.String(), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
+			event := openrails.UsageReport{CustomerID: openrails.CustomerID(payer), Currency: "USD", Invoker: "host", EventType: key, Dimensions: map[string]int64{"units": 3}, Source: "workflow", SourceID: uuid.NewString()}
 			require.NoError(t, client.RecordUsage(ctx, event))
 			require.NoError(t, client.RecordUsage(ctx, event))
 			// Drive the same close used by the invoice worker, then read with the client.

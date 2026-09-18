@@ -13,12 +13,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/catalog"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 // These tests drive the #777 console price-change wizard's backend contract
@@ -35,7 +36,7 @@ import (
 // directly (no checkout rail needed for these read/schedule-path tests) —
 // mirrors internal/modules/subscriptions/reprice_integration_test.go's own
 // fixture idiom.
-func seedRepriceSubscription(t *testing.T, ctx context.Context, h *Harness, productID, priceID uuid.UUID) uuid.UUID {
+func seedRepriceSubscription(t *testing.T, ctx context.Context, h *Harness, productID openrails.ProductID, priceID openrails.PriceID) uuid.UUID {
 	t.Helper()
 	pool := h.Pool()
 	var customerID uuid.UUID
@@ -49,7 +50,7 @@ func seedRepriceSubscription(t *testing.T, ctx context.Context, h *Harness, prod
 	require.NoError(t, pool.QueryRow(ctx, `
 		INSERT INTO openrails.subscriptions (merchant_id, customer_id, product_id, price_id, status, rail, rail_subscription_id, current_period_starts_at, current_period_ends_at, psp_id)
 		VALUES ($1,$2,$3,$4,'active','nmi',$5,$6,$7,$8) RETURNING id`,
-		dbtest.TestMerchantID.UUID(), customerID, productID, priceID, "wizard-rail-sub-"+uuid.NewString(), now, now.Add(30*24*time.Hour), pspID).Scan(&subID))
+		dbtest.TestMerchantID.UUID(), customerID, productID.UUID(), priceID.UUID(), "wizard-rail-sub-"+uuid.NewString(), now, now.Add(30*24*time.Hour), pspID).Scan(&subID))
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.subscriptions WHERE id = $1", subID)
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.customers WHERE id = $1", customerID)
@@ -145,7 +146,7 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 	// migrate call, the existing subscriber's price_id is untouched.
 	var pinnedPriceID uuid.UUID
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT price_id FROM openrails.subscriptions WHERE product_id = $1 AND status = 'active' LIMIT 1`, v1.ProductID).Scan(&pinnedPriceID))
-	require.Equal(t, v1.ID, pinnedPriceID, "increase defaults to grandfather: subscriber stays on the old price")
+	require.Equal(t, v1.ID.UUID(), pinnedPriceID, "increase defaults to grandfather: subscriber stays on the old price")
 
 	// Version-chain history, most-recent-first, resolved from the movement
 	// log (not each row's own created_at).
@@ -198,7 +199,7 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 	batchesStatus, batchesBody := requestJSON(t, http.MethodGet, surface.BaseURL+"/v1/merchant/reprices/batches?price_key="+priceKey, token, nil)
 	require.Equal(t, http.StatusOK, batchesStatus, string(batchesBody))
 	var batches struct {
-		Items []*models.RepriceBatch `json:"items"`
+		Items []subscriptions.RepriceBatchView `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(batchesBody, &batches))
 	require.Len(t, batches.Items, 2)
@@ -211,7 +212,7 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 		surface.BaseURL+"/v1/merchant/reprices?reprice_batch_id="+batchResult.BatchID.String(), token, nil)
 	require.Equal(t, http.StatusOK, repricesStatus, string(repricesBody))
 	var reprices struct {
-		Items []*models.SubscriptionReprice `json:"items"`
+		Items []subscriptions.SubscriptionRepriceView `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(repricesBody, &reprices))
 	require.Len(t, reprices.Items, 1)
@@ -229,7 +230,7 @@ func TestStandaloneMerchantRepriceWizardIncreaseHTTP(t *testing.T) {
 
 	// The subscriber is provably untouched throughout.
 	require.NoError(t, h.Pool().QueryRow(ctx, `SELECT price_id FROM openrails.subscriptions WHERE product_id = $1 AND status = 'active' LIMIT 1`, v1.ProductID).Scan(&pinnedPriceID))
-	require.Equal(t, v1.ID, pinnedPriceID, "canceled-before-effective reprice never touches the subscription")
+	require.Equal(t, v1.ID.UUID(), pinnedPriceID, "canceled-before-effective reprice never touches the subscription")
 }
 
 // TestStandaloneMerchantRepriceWizardDecreaseHTTP drives a DECREASE: the

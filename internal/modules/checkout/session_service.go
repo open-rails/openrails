@@ -16,7 +16,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -35,8 +37,6 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	"github.com/open-rails/openrails/pkg/api"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
 )
@@ -909,14 +909,14 @@ func (s *CheckoutSessionService) validateNMIInput(ctx context.Context, payment *
 		return fmt.Errorf("%w: provide either payment_token or payment_method_id", ErrCheckoutSessionValidation)
 	}
 	if hasMethod {
-		pmID, err := api.ParsePaymentMethodID(payment.PaymentMethodID)
-		if err != nil {
+		pmID, err := openrails.ParsePaymentMethodID(payment.PaymentMethodID)
+		if err != nil || pmID.IsZero() {
 			return fmt.Errorf("%w: invalid payment_method_id", ErrCheckoutSessionValidation)
 		}
 		if s.paymentMethodService == nil {
 			return fmt.Errorf("%w: payment method service unavailable", ErrCheckoutSessionValidation)
 		}
-		if err := s.paymentMethodService.ValidateOwnership(ctx, pmID, user.ID); err != nil {
+		if err := s.paymentMethodService.ValidateOwnership(ctx, pmID.UUID(), user.ID); err != nil {
 			if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) || errors.Is(err, paymentmethods.ErrPaymentMethodAccessDenied) {
 				return fmt.Errorf("%w: %w", ErrPaymentMethodStale, err)
 			}
@@ -1431,10 +1431,11 @@ func (s *CheckoutSessionService) createSolanaLifecycleSession(ctx context.Contex
 		return nil, fmt.Errorf("%w: %s mode requires the solana rail", ErrCheckoutSessionValidation, mode)
 	}
 
-	subscriptionID, err := api.ParseSubscriptionID(strings.TrimSpace(req.SubscriptionID))
-	if err != nil {
+	parsedSubscriptionID, err := openrails.ParseSubscriptionID(req.SubscriptionID)
+	if err != nil || parsedSubscriptionID.IsZero() {
 		return nil, fmt.Errorf("%w: subscription_id is required", ErrCheckoutSessionValidation)
 	}
+	subscriptionID := parsedSubscriptionID.UUID()
 
 	// Authorize: the acting user must OWN the target subscription, and it must be
 	// an active Solana subscription.
@@ -1659,7 +1660,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		railSelector = strings.TrimSpace(psp)
 	}
 	req := &CheckoutRequest{
-		PriceID:           api.FormatPriceID(session.PriceID),
+		PriceID:           openrails.PriceID(session.PriceID).String(),
 		PaymentMethodID:   payment.PaymentMethodID,
 		PaymentToken:      payment.PaymentToken,
 		Rail:              railSelector,
@@ -1687,7 +1688,7 @@ func (s *CheckoutSessionService) initializeCheckoutSession(ctx context.Context, 
 		}
 	}
 	if session.Rail == models.RailStripe || session.Rail == models.RailCCBill {
-		req.CheckoutSessionID = api.FormatCheckoutSessionID(session.ID)
+		req.CheckoutSessionID = openrails.CheckoutSessionID(session.ID).String()
 	}
 
 	resp, err := s.checkoutService.Checkout(ctx, req, user)
@@ -1783,10 +1784,10 @@ func addField(fields map[string]any, key, value string) {
 func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSession) *CheckoutSessionResponse {
 	resp := &CheckoutSessionResponse{
 		Object:   "checkout_session",
-		ID:       api.FormatCheckoutSessionID(session.ID),
+		ID:       openrails.CheckoutSessionID(session.ID),
 		Status:   string(session.Status),
 		Mode:     string(session.Mode),
-		PriceID:  api.FormatPriceID(session.PriceID),
+		PriceID:  openrails.PriceID(session.PriceID),
 		Amount:   session.Amount,
 		Currency: session.Currency,
 		Payment: CheckoutSessionPaymentResponse{
@@ -1807,11 +1808,11 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 	}
 
 	if session.PaymentID != nil {
-		paymentID := api.FormatPaymentID(*session.PaymentID)
+		paymentID := openrails.PaymentID(*session.PaymentID)
 		resp.PaymentID = &paymentID
 	}
 	if session.SubscriptionID != nil {
-		subID := api.FormatSubscriptionID(*session.SubscriptionID)
+		subID := openrails.SubscriptionID(*session.SubscriptionID)
 		resp.SubscriptionID = &subID
 	}
 
@@ -1834,7 +1835,7 @@ func (s *CheckoutSessionService) sessionToResponse(session *models.CheckoutSessi
 				resp.Payment.SolanaPayURL = fmt.Sprintf(
 					"solana:%s/v1/checkout/%s/solana-pay",
 					baseURL,
-					api.FormatCheckoutSessionID(session.ID),
+					openrails.CheckoutSessionID(session.ID),
 				)
 			}
 		}
@@ -2324,11 +2325,11 @@ func (s *CheckoutSessionService) FindOpenCCBillReservation(ctx context.Context, 
 	if reservationID == "" {
 		return nil, sql.ErrNoRows
 	}
-	sessionID, err := api.ParseCheckoutSessionID(reservationID)
-	if err != nil {
-		return nil, err
+	sessionID, err := openrails.ParseCheckoutSessionID(reservationID)
+	if err != nil || sessionID.IsZero() {
+		return nil, sql.ErrNoRows
 	}
-	session, err := s.repo.GetByID(ctx, sessionID)
+	session, err := s.repo.GetByID(ctx, sessionID.UUID())
 	if err != nil {
 		return nil, err
 	}

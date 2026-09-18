@@ -18,7 +18,7 @@ func TestCreditTransactionWireContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	balance, zero := int64(math.MinInt64), int64(0)
-	value := CreditTransaction{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Invoker: "host", Currency: "USD", Amount: math.MaxInt64, BalanceAfter: &balance, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", CreatedAt: when, UpdatedAt: when}
+	value := CreditTransaction{ID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), CustomerID: CustomerID(uuid.MustParse("22222222-2222-2222-2222-222222222222")), Invoker: "host", Currency: "USD", Amount: math.MaxInt64, BalanceAfter: &balance, TransactionType: "deposit", Status: "completed", Captured: &zero, Source: "bank", CreatedAt: when, UpdatedAt: when}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestDepositAndBalanceInt64RoundTrip(t *testing.T) {
 		if !reflect.DeepEqual(request, got) {
 			t.Fatalf("deposit changed: %s", raw)
 		}
-		balance := CreditAccount{CustomerID: customer.String(), Currency: "USD", BalanceAmount: amount, HeldAmount: amount, AvailableAmount: amount, OutstandingOwedAmount: amount}
+		balance := CreditAccount{CustomerID: customer, Currency: "USD", BalanceAmount: amount, HeldAmount: amount, AvailableAmount: amount, OutstandingOwedAmount: amount}
 		raw, err = json.Marshal(balance)
 		if err != nil {
 			t.Fatal(err)
@@ -124,7 +124,7 @@ func TestPolicyMoneyAndUsageSummaryAreExact(t *testing.T) {
 		SpendDelegationInput{Scope: "invoker", ScopeKey: "worker", Windows: []SpendLimitWindow{{Key: "day", WindowSeconds: 86400, Limit: max, Currency: "USD"}}},
 		BillingPolicyInput{Name: "credit-line", Kind: "outstanding_cap", OutstandingCapAmount: max, AccrualRateCapPerHour: max, CollectionThresholdAmount: &max, DelinquencyAmountFloor: &max},
 		MerchantSettings{InvoiceCollectionThreshold: &max, InvoiceMonthlyFloor: &max, ArrearsDelinquencyFloor: &max},
-		CreditLimitRequest{CustomerID: uuid.NewString(), Currency: "USD", CreditLimitAmount: max},
+		CreditLimitRequest{CustomerID: CustomerID(uuid.New()), Currency: "USD", CreditLimitAmount: max},
 		UsageRollupRow{Key: "api", EventCount: 1, TotalAmount: max, Currency: "USD"},
 		ResourceRevenueResponse{Currency: "USD", RevenueAmount: max, Daily: []ResourceRevenueDailyRow{{Date: "2026-09-16", Currency: "USD", Amount: max}}},
 	} {

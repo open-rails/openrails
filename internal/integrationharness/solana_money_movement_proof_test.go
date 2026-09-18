@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -44,11 +45,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	solanamod "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
+	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/catalog"
-	"github.com/open-rails/openrails/pkg/identity"
 	"github.com/open-rails/openrails/pkg/merchant"
-	billingservice "github.com/open-rails/openrails/pkg/service"
 )
 
 const (
@@ -217,7 +217,7 @@ func TestSolanaDevnetMoneyMovementProof(t *testing.T) {
 	assertNoMetadataInTx(t, built.TransactionBase64, productKey, displayName, description, entitlement, creditKey)
 
 	// --- (b) Granted benefits + invoice/payment state live in the OpenRails DB. -
-	proveDBSourceOfTruth(t, h, surface, product.ID, priceID, reference, entitlement)
+	proveDBSourceOfTruth(t, h, surface, product.ID.UUID(), priceID.UUID(), reference, entitlement)
 
 	// --- Optional real on-chain leg: a funded devnet USDC transfer. -------------
 	maybeRunOnChainLeg(t, ctx, rpcClient, priv, merchantPub,
@@ -275,7 +275,7 @@ func proveDBSourceOfTruth(t *testing.T, h *Harness, surface *Surface, productID,
 
 	requestID := "solana-proof-" + uuid.NewString()
 	verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
-		CustomerID:      payerID.String(),
+		CustomerID:      openrails.CustomerID(payerID),
 		Invoker:         payerID.String(),
 		InvokerType:     string(identity.InvokerTypePayer),
 		Resource:        "vm-small",

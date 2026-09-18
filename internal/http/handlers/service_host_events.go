@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	service "github.com/open-rails/openrails/pkg/service"
+	service "github.com/open-rails/openrails/internal/service"
 )
 
 func writeHostEventError(r *httprequest.Request, err error) {
@@ -42,8 +42,8 @@ func ServiceListHostEvents(r *httprequest.Request) {
 		}
 	}
 	if value := r.Query("payment_id"); value != "" {
-		options.PaymentID, err = uuid.Parse(value)
-		if err != nil {
+		options.PaymentID, err = openrails.ParsePaymentID(value)
+		if err != nil || options.PaymentID.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid payment_id")
 			return
 		}

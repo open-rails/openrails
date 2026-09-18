@@ -162,9 +162,6 @@ export function CustomerDetailPage() {
                       <TableHead className="text-muted-foreground">
                         Period ends
                       </TableHead>
-                      <TableHead className="text-muted-foreground">
-                        Email
-                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -185,7 +182,6 @@ export function CustomerDetailPage() {
                         <TableCell className="tabular-nums">
                           {formatDate(s.current_period_ends_at)}
                         </TableCell>
-                        <TableCell>{s.user_email ?? "—"}</TableCell>
                       </LinkedTableRow>
                     ))}
                   </TableBody>
@@ -241,7 +237,7 @@ export function CustomerDetailPage() {
                         </TableCell>
                         <TableCell>{p.rail}</TableCell>
                         <TableCell className="tabular-nums">
-                          {formatDate(p.purchased_at)}
+                          {formatDate(p.created_at)}
                         </TableCell>
                       </LinkedTableRow>
                     ))}

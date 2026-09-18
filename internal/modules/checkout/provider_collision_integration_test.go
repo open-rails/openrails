@@ -3,13 +3,14 @@
 package checkout
 
 import (
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/stretchr/testify/require"
-	"testing"
 )
 
 func TestCheckoutSubscriptionAdoptionIgnoresSiblingPSPCollision(t *testing.T) {

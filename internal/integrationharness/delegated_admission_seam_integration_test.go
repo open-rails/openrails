@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -19,13 +21,12 @@ import (
 
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
+	orauthkit "github.com/open-rails/openrails/embed/authkit"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
-	orauthkit "github.com/open-rails/openrails/pkg/embedded/authkit"
 )
 
 // or#918 end to end: the admission seam absorbs BOTH decisions a privileged
@@ -60,11 +61,11 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 		Auth:           &config.AuthConfig{Issuer: "https://or918.openrails.test", KeysPath: t.TempDir()},
 	}
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()},
+		Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err, "embed.New")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	app := rt.Embedded().App()
+	app := app.HostGraph(rt)
 	app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	// The host's own AuthKit, beside the engine — the host-one shape.
@@ -143,9 +144,9 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	handler, err := rt.Handler(embedded.MountOptions{
+	handler, err := rt.Handler(embed.MountOptions{
 		MountPrefix:            "/billing",
-		RouteSets:              []embedded.RouteSet{embedded.RouteSetMerchantAPI, embedded.RouteSetCustomer},
+		RouteSets:              []embed.RouteSet{embed.RouteSetMerchantAPI, embed.RouteSetCustomer},
 		Gate:                   httproutes.NewGate(httproutes.GateOptions{DelegatedAuthenticator: authn}),
 		DelegatedAuthenticator: authn,
 	})
@@ -204,9 +205,9 @@ func TestDelegatedAdmissionSeam_LivenessAndDBBackedGrant(t *testing.T) {
 		orauthkit.WithPermissionResolver(grant),
 	)
 	require.NoError(t, err)
-	noSlugHandler, err := rt.Handler(embedded.MountOptions{
+	noSlugHandler, err := rt.Handler(embed.MountOptions{
 		MountPrefix:            "/billing",
-		RouteSets:              []embedded.RouteSet{embedded.RouteSetCustomer},
+		RouteSets:              []embed.RouteSet{embed.RouteSetCustomer},
 		DelegatedAuthenticator: unslugged,
 	})
 	require.NoError(t, err)

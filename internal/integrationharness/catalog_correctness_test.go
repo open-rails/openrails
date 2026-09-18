@@ -13,10 +13,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	service "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/merchant"
-	service "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,7 +52,7 @@ func TestCatalogDisjointPatchesAndClearSemantics(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				request, err := http.NewRequestWithContext(ctx, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+p.ID.String(), bytes.NewReader(payload))
+				request, err := http.NewRequestWithContext(ctx, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(p.ID).String(), bytes.NewReader(payload))
 				if err != nil {
 					return err
 				}
@@ -149,7 +150,7 @@ func TestCatalogTierRegroupConflictsThroughPublicSurface(t *testing.T) {
 			require.NoError(t, err)
 			_, err = svc.UpdateProduct(ctx, p.ID, service.UpdateProductRequest{SetTierGroup: true, TierGroup: &next})
 			require.ErrorIs(t, err, service.ErrProductTierGroupInUse)
-			code, body := requestJSON(t, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+p.ID.String(), token,
+			code, body := requestJSON(t, http.MethodPatch, surface.BaseURL+"/v1/merchant/catalog/products/"+openrails.ProductID(p.ID).String(), token,
 				service.UpdateProductRequest{SetTierGroup: true, TierGroup: &next})
 			require.Equal(t, http.StatusConflict, code, string(body))
 			require.NotContains(t, string(body), "SQLSTATE")

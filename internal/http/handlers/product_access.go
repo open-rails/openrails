@@ -7,35 +7,20 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // ProductAccessGrantResponse is the application-facing view of a durable product
 // access grant (issue #250), enriched with product metadata so host apps can
 // build a purchased-library view without querying the catalog or payment history.
-type ProductAccessGrantResponse struct {
-	ID           string     `json:"id"`
-	CustomerID   string     `json:"customer_id"`
-	ProductID    string     `json:"product_id"`
-	ProductKey   string     `json:"product_key,omitempty"`
-	ProductName  string     `json:"product_name,omitempty"`
-	SourceType   string     `json:"source_type"`
-	SourceID     string     `json:"source_id,omitempty"`
-	PaymentID    *string    `json:"payment_id,omitempty"`
-	Status       string     `json:"status"`
-	StartsAt     time.Time  `json:"starts_at"`
-	EndsAt       *time.Time `json:"ends_at,omitempty"`
-	RevokedAt    *time.Time `json:"revoked_at,omitempty"`
-	RevokeReason *string    `json:"revoke_reason,omitempty"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
-}
+type ProductAccessGrantResponse = openrails.ProductAccessGrant
 
 type productAccessPath struct {
-	ProductID string `uri:"product_id" binding:"required"`
+	ProductID openrails.ProductID `uri:"product_id" binding:"required"`
 }
 
 type adminUserProductAccessPath struct {
@@ -48,8 +33,8 @@ type adminProductAccessGrantPath struct {
 }
 
 type grantProductAccessRequest struct {
-	ProductID string  `json:"product_id" binding:"required"`
-	EndsAt    *string `json:"ends_at,omitempty"` // RFC3339; omit for indefinite
+	ProductID openrails.ProductID `json:"product_id"`
+	EndsAt    *string             `json:"ends_at,omitempty"` // RFC3339; omit for indefinite
 }
 
 // productAccessResponses enriches grants with product metadata. It loads each
@@ -62,10 +47,10 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 		g := grants[i]
 		resp := ProductAccessGrantResponse{
 			ID:         g.ID.String(),
-			CustomerID: g.CustomerID.String(),
-			ProductID:  g.ProductID.String(),
+			CustomerID: openrails.CustomerID(g.CustomerID),
+			ProductID:  openrails.ProductID(g.ProductID),
 			SourceType: string(g.SourceType),
-			SourceID:   g.SourceID,
+			SourceID:   openrails.SourceRef(string(g.SourceType), g.SourceID),
 			Status:     string(g.Status),
 			StartsAt:   g.StartsAt,
 			EndsAt:     g.EndsAt,
@@ -74,7 +59,7 @@ func productAccessResponses(r *httprequest.Request, grants []models.ProductAcces
 			UpdatedAt:  g.UpdatedAt,
 		}
 		if g.PaymentID != nil {
-			pid := g.PaymentID.String()
+			pid := openrails.PaymentID(*g.PaymentID)
 			resp.PaymentID = &pid
 		}
 		if g.RevokeReason != nil {
@@ -142,11 +127,11 @@ func GetMyProductAccess(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	productID, err := uuid.Parse(strings.TrimSpace(path.ProductID))
-	if err != nil {
+	if path.ProductID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
 		return
 	}
+	productID := path.ProductID.UUID()
 	svc := productAccessService(r)
 	if svc == nil {
 		r.ErrorJSON(http.StatusInternalServerError, "product access service unavailable")
@@ -160,15 +145,8 @@ func GetMyProductAccess(r *httprequest.Request) {
 	r.JSON(http.StatusOK, newProductAccessCheck(productID, user.ID, has))
 }
 
-// productAccessCheckResponse is the typed payload for has-access checks.
-type productAccessCheckResponse struct {
-	CustomerID string `json:"customer_id"`
-	ProductID  string `json:"product_id"`
-	HasAccess  bool   `json:"has_access"`
-}
-
-func newProductAccessCheck(productID uuid.UUID, userID string, has bool) productAccessCheckResponse {
-	return productAccessCheckResponse{CustomerID: identity.CustomerIDFromString(userID).UUID().String(), ProductID: productID.String(), HasAccess: has}
+func newProductAccessCheck(productID uuid.UUID, userID string, has bool) openrails.ProductAccessCheck {
+	return openrails.ProductAccessCheck{CustomerID: openrails.CustomerID(identity.CustomerIDFromString(userID)), ProductID: openrails.ProductID(productID), HasAccess: has}
 }
 
 // --- API-key service (GET /v1/merchant/customers/:user_id/product-access) ---
@@ -188,11 +166,12 @@ func ServiceGetUserProductAccess(r *httprequest.Request) {
 		return
 	}
 	if productIDStr := strings.TrimSpace(r.Query("product_id")); productIDStr != "" {
-		productID, err := uuid.Parse(productIDStr)
-		if err != nil {
+		typedProductID, err := openrails.ParseProductID(productIDStr)
+		if err != nil || typedProductID.IsZero() {
 			r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
 			return
 		}
+		productID := typedProductID.UUID()
 		has, err := svc.HasProductAccess(r.Request.Context(), userID, productID)
 		if err != nil {
 			r.ErrorJSON(http.StatusInternalServerError, "failed to check product access")
@@ -222,11 +201,11 @@ func GrantAdminProductAccess(r *httprequest.Request) {
 	if !r.BindJSON(&req) {
 		return
 	}
-	productID, err := uuid.Parse(strings.TrimSpace(req.ProductID))
-	if err != nil {
+	if req.ProductID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid product_id format")
 		return
 	}
+	productID := req.ProductID.UUID()
 	var endsAt *time.Time
 	if req.EndsAt != nil && strings.TrimSpace(*req.EndsAt) != "" {
 		parsed, perr := time.Parse(time.RFC3339, strings.TrimSpace(*req.EndsAt))

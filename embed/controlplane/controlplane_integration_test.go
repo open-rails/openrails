@@ -22,7 +22,6 @@ import (
 	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -74,7 +73,7 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 		SecretBackend: config.SecretBackendDB, DB: &config.DBConfig{URL: dsn},
 		Auth: &config.AuthConfig{Issuer: "https://handle.openrails.test", KeysPath: t.TempDir()},
 	}
-	rt, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := embed.New(ctx, embed.Options{Config: cfg, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
@@ -153,10 +152,10 @@ func TestHostedControlPlaneThroughRuntimeHandle(t *testing.T) {
 	settings, err := client.GetMerchantSettings(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, settings)
-	customer := uuid.NewString()
+	customer := openrails.CustomerID(uuid.New())
 	_, err = client.GrantEntitlement(ctx, customer, openrails.GrantEntitlementRequest{Entitlement: "premium"})
 	require.NoError(t, err)
-	members, err := cp.ListMerchantsForSubject(ctx, customer)
+	members, err := cp.ListMerchantsForSubject(ctx, customer.String())
 	require.NoError(t, err)
 	require.Len(t, members, 1)
 	require.Equal(t, created.MerchantID, members[0].ID)

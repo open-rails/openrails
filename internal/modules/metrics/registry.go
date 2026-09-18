@@ -1,5 +1,11 @@
 package metrics
 
+import (
+	"fmt"
+
+	"github.com/open-rails/openrails"
+)
+
 // The registry is the single source of truth for the metrics vocabulary:
 // it drives validation, SQL compilation, /schema, and the LLM context doc.
 // SQL text comes ONLY from fragments declared here; client strings are bind
@@ -56,7 +62,7 @@ type Measure struct {
 	Family      Family
 	Description string // one line, token-lean (rides in LLM context)
 	Formula     string // /schema formula text
-	Unit        string // "micros" | "count" | "ratio" | "days" | "seconds"
+	Unit        string // UnitMoney | "count" | "ratio" | "days" | "seconds"
 	// Expr is the aggregate SQL expression (flow + snapshot families).
 	Expr string
 	// Dims are the allowed group-by/filter dimensions (besides time).
@@ -78,10 +84,28 @@ type Dimension struct {
 	Name        string
 	Description string
 	Values      []string // closed vocabulary when non-nil (validated on filters)
+	// Parse validates and canonicalizes one filter value (typed ids); nil
+	// accepts any string.
+	Parse func(string) (string, error)
+}
+
+// typedDimValue accepts exactly the typed id's wire spelling; the bare UUID
+// or another kind's prefix is an invalid filter value.
+func typedDimValue(parse func(string) (fmt.Stringer, error)) func(string) (string, error) {
+	return func(raw string) (string, error) {
+		id, err := parse(raw)
+		if err != nil {
+			return "", err
+		}
+		if id.String() == "" {
+			return "", fmt.Errorf("empty id")
+		}
+		return id.String(), nil
+	}
 }
 
 const (
-	// monthlyNormExpr converts a price to a monthly-normalized amount (micros):
+	// monthlyNormExpr converts a price to a monthly-normalized amount (native currency units):
 	// cycles >= ~27d divide by the rounded month count; shorter cycles scale up
 	// by 730h/month. Deterministic; pinned by tests.
 	monthlyNormExpr = `CASE
@@ -116,12 +140,12 @@ var Dimensions = []Dimension{
 	{Name: "rail", Description: "payment rail (e.g. stripe, mobius, ccbill, solana)"},
 	{Name: "rail_account", Description: "operator-declared PSP label; VAMP thresholds apply per account"},
 	{Name: "stream", Description: "revenue stream: subscription | one_time", Values: []string{"subscription", "one_time"}},
-	{Name: "product_id", Description: "product UUID"},
-	{Name: "price_id", Description: "price UUID"},
+	{Name: "product_id", Description: "product id (prod_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseProductID(s) })},
+	{Name: "price_id", Description: "price id (price_<uuid>, the catalog's spelling)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParsePriceID(s) })},
 	{Name: "billing_cycle", Description: "price cadence: daily|weekly|monthly|quarterly|semiannual|annual|one_time", Values: []string{"daily", "weekly", "monthly", "quarterly", "semiannual", "annual", "one_time"}},
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "cancelled", "unknown"}},
-	{Name: "payer", Description: "paying customer UUID (usage/admission measures)"},
+	{Name: "payer", Description: "paying customer id (plain UUID; usage/admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return openrails.ParseCustomerID(s) })},
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
@@ -150,8 +174,8 @@ var families = map[Family]familySpec{
 			"rail":           `p.rail`,
 			"rail_account":   `COALESCE(rma.account_id, 'unknown')`,
 			"stream":         streamExpr,
-			"product_id":     `COALESCE(pr.product_id::text, '')`,
-			"price_id":       `p.price_id::text`,
+			"product_id":     `COALESCE('prod_' || pr.product_id::text, '')`,
+			"price_id":       `'price_' || p.price_id::text`,
 			"billing_cycle":  billingCycleExpr,
 			"card_brand":     `COALESCE(p.card_brand, '')`,
 			"token_type":     `COALESCE(p.token_type, 'unknown')`,
@@ -173,8 +197,8 @@ var families = map[Family]familySpec{
 			"currency":      `COALESCE(pr.currency, '')`,
 			"rail":          `s.rail`,
 			"rail_account":  `COALESCE(rma.account_id, 'unknown')`,
-			"product_id":    `s.product_id::text`,
-			"price_id":      `COALESCE(s.price_id::text, '')`,
+			"product_id":    `'prod_' || s.product_id::text`,
+			"price_id":      `COALESCE('price_' || s.price_id::text, '')`,
 			"billing_cycle": billingCycleExpr,
 			"subscriber_type": `CASE WHEN EXISTS (
 				SELECT 1 FROM openrails.subscriptions s2
@@ -195,8 +219,8 @@ var families = map[Family]familySpec{
 			"currency":     `COALESCE(pr.currency, '')`,
 			"rail":         `s.rail`,
 			"rail_account": `COALESCE(rma.account_id, 'unknown')`,
-			"product_id":   `s.product_id::text`,
-			"price_id":     `COALESCE(s.price_id::text, '')`,
+			"product_id":   `'prod_' || s.product_id::text`,
+			"price_id":     `COALESCE('price_' || s.price_id::text, '')`,
 			"cancel_type":  `COALESCE(s.cancel_type, 'unknown')`,
 		},
 		BaseWhere: `s.cancelled_at IS NOT NULL`,
@@ -207,8 +231,8 @@ var families = map[Family]familySpec{
 		TimeExpr: `s.ended_at`,
 		DimExprs: map[string]string{
 			"rail":        `s.rail`,
-			"product_id":  `s.product_id::text`,
-			"price_id":    `COALESCE(s.price_id::text, '')`,
+			"product_id":  `'prod_' || s.product_id::text`,
+			"price_id":    `COALESCE('price_' || s.price_id::text, '')`,
 			"cancel_type": `COALESCE(s.cancel_type, 'unknown')`,
 		},
 		BaseWhere: `s.ended_at IS NOT NULL`,
@@ -219,7 +243,7 @@ var families = map[Family]familySpec{
 		TimeExpr: `g.created_at`,
 		DimExprs: map[string]string{
 			"currency":   `g.currency`,
-			"product_id": `COALESCE(g.product_id::text, '')`,
+			"product_id": `COALESCE('prod_' || g.product_id::text, '')`,
 			"payer":      `g.customer_id::text`,
 		},
 		BaseWhere: `g.kind = 'credit' AND g.event = 'grant' AND g.source_type = 'purchase'`,
@@ -264,8 +288,8 @@ var families = map[Family]familySpec{
 			"currency":      `COALESCE(pr.currency, '')`,
 			"rail":          `s.rail`,
 			"rail_account":  `COALESCE(rma.account_id, 'unknown')`,
-			"product_id":    `s.product_id::text`,
-			"price_id":      `COALESCE(s.price_id::text, '')`,
+			"product_id":    `'prod_' || s.product_id::text`,
+			"price_id":      `COALESCE('price_' || s.price_id::text, '')`,
 			"billing_cycle": billingCycleExpr,
 			"status":        `s.status::text`,
 		},
@@ -309,6 +333,10 @@ var families = map[Family]familySpec{
 	},
 }
 
+// UnitMoney marks a measure whose cells are MoneyCell values: exact native
+// units of the row's currency (the registry scale, not always millionths).
+const UnitMoney = "money"
+
 // depletionRiskDays: a payer is at depletion risk when their prepaid balance
 // covers <= this many days of their trailing-7d average burn.
 const depletionRiskDays = 7
@@ -316,23 +344,23 @@ const depletionRiskDays = 7
 // Measures is the measure registry (CORE tier + internal ratio components).
 var Measures = []Measure{
 	// --- payments: additive money -------------------------------------------
-	{Name: "gross_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
-		Description: "sum of settled sale amounts (micros), before refunds/chargebacks; gross of processor fees",
+	{Name: "gross_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
+		Description: "sum of settled sale amounts (native currency units), before refunds/chargebacks; gross of processor fees",
 		Formula:     "SUM(amount) over settled sale payments (incl. later-refunded)",
 		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE ` + saleSettled + ` AND p.amount > 0), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	{Name: "net_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
+	{Name: "net_revenue", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
 		Description: "gross_revenue minus refunds and chargebacks (net of returns, NOT net of fees); Stripe's 'net volume'",
 		Formula:     "gross_revenue - refunds - chargebacks",
 		Expr:        `COALESCE(SUM(p.amount) FILTER (WHERE p.status IN ('completed','refunded')), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "card_brand", "attempt_kind", "discount_code"}},
-	{Name: "refunds", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
-		Description: "sum of refunded amounts (micros, positive), from refund mirror rows",
+	{Name: "refunds", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
+		Description: "sum of refunded amounts (native currency units, positive), from refund mirror rows",
 		Formula:     "SUM(-amount) over reversal_kind='refund' mirror rows",
 		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind = 'refund'), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand"}},
-	{Name: "chargebacks", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "micros",
-		Description: "sum of chargeback amounts (micros, positive), net of won disputes",
+	{Name: "chargebacks", Class: ClassAdditive, Family: FamPayments, Money: true, Unit: "money",
+		Description: "sum of chargeback amounts (native currency units, positive), net of won disputes",
 		Formula:     "SUM(-amount) over reversal_kind IN ('chargeback','dispute_reversal') mirror rows",
 		Expr:        `COALESCE(SUM(-p.amount) FILTER (WHERE p.status = 'completed' AND p.reversal_kind IN ('chargeback','dispute_reversal')), 0)::bigint`,
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand"}},
@@ -383,7 +411,7 @@ var Measures = []Measure{
 		Description: "chargebacks / settled payments; group by rail_account for the per-account VAMP number",
 		Formula:     "chargeback_count / payment_count",
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "card_brand"}},
-	{Name: "realized_revenue_per_customer", Class: ClassRatio, Unit: "micros", Money: true, Num: "net_revenue", Den: "paying_customers",
+	{Name: "realized_revenue_per_customer", Class: ClassRatio, Unit: "money", Money: true, Num: "net_revenue", Den: "paying_customers",
 		Description: "net revenue per distinct paying customer in the window (LTV-to-date when windowed over lifetime)",
 		Formula:     "net_revenue / COUNT(DISTINCT paying customers)",
 		Dims:        []string{"currency", "rail", "rail_account", "stream", "product_id", "price_id", "billing_cycle", "attempt_kind", "discount_code"}},
@@ -432,8 +460,8 @@ var Measures = []Measure{
 		Formula:     "recovered / (recovered + lost) dunning exits",
 		Dims:        []string{}},
 	// --- grants / usage-credits ---------------------------------------------------
-	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: "micros",
-		Description: "prepaid credit lots purchased (cash-in, micros); NOT recognized revenue until consumed",
+	{Name: "credits_sold", Class: ClassAdditive, Family: FamGrants, Money: true, Unit: "money",
+		Description: "prepaid credit lots purchased (cash-in, native currency units); NOT recognized revenue until consumed",
 		Formula:     "SUM(grant lot amounts) over purchased credit grants",
 		Expr:        `COALESCE(SUM(g.amount), 0)::bigint`,
 		Dims:        []string{"currency", "product_id", "payer"}},
@@ -452,8 +480,8 @@ var Measures = []Measure{
 		Description: "share of credit purchases in the bucket made by customers with an earlier credit purchase",
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
-	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "micros",
-		Description: "consumed (recognized) usage spend in micros, from usage events; cash-in is credits_sold",
+	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
+		Description: "consumed (recognized) usage spend in native currency units, from usage events; cash-in is credits_sold",
 		Formula:     "SUM(usage_events.amount)",
 		Expr:        `COALESCE(SUM(ue.amount), 0)::bigint`,
 		Dims:        []string{"currency", "payer", "sku", "rate_card"}},
@@ -482,7 +510,7 @@ var Measures = []Measure{
 		Formula:     "COUNT(subs with started_at <= t < ended_at)",
 		Expr:        `COUNT(s.id)`,
 		Dims:        []string{"currency", "rail", "rail_account", "product_id", "price_id", "billing_cycle", "status"}},
-	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: "micros",
+	{Name: "mrr", Class: ClassSnapshot, Family: FamSubsSnapshot, Money: true, Unit: "money",
 		Description: "monthly-normalized recurring price of auto-renew subs existing at t; group by status to split healthy vs in-dunning",
 		Formula:     "SUM(monthly_normalized(price)) over auto-renew subs at t",
 		Expr:        `COALESCE(SUM(` + monthlyNormExpr + `) FILTER (WHERE pr.auto_renew), 0)::bigint`,
@@ -497,14 +525,14 @@ var Measures = []Measure{
 		Formula:     "COUNT(DISTINCT customer_id) over entitlement windows covering t",
 		Expr:        `COUNT(DISTINCT e.customer_id)`,
 		Dims:        []string{"entitlement"}},
-	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "micros",
+	{Name: "outstanding_credit_liability", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
 		Description: "unconsumed prepaid credit (deferred revenue) at t: net customer_balance across the ledger",
 		Formula:     "SUM(credits - debits) of customer_balance accounts from transfers before t",
 		Expr: `COALESCE(SUM(
 			CASE WHEN ca.account_type = 'customer_balance' THEN lt.amount ELSE 0 END
 			- CASE WHEN da.account_type = 'customer_balance' THEN lt.amount ELSE 0 END), 0)::bigint`,
 		Dims: []string{"currency"}},
-	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "micros",
+	{Name: "outstanding_owed", Class: ClassSnapshot, Family: FamBalance, Money: true, Unit: "money",
 		Description: "arrears accounts receivable at t: accrued-but-unpaid usage debt",
 		Formula:     "SUM(debits - credits) of arrears_liability accounts from transfers before t",
 		Expr: `COALESCE(SUM(

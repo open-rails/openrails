@@ -31,7 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/modules/money"
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
@@ -91,7 +91,7 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 			// --- item 3: the reused-key refusal reaches the host --------------
 			usageSourceID := uuid.NewString()
 			usage := openrails.UsageReport{
-				CustomerID: payer.String(),
+				CustomerID: openrails.CustomerID(payer),
 				Invoker:    invoker,
 				Currency:   currency,
 				EventType:  "or900_event",
@@ -123,7 +123,7 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 			// changed terms, not about retrying.
 			require.NoError(t, tr.client.RecordUsage(ctx, usage), "an unchanged retry is still idempotent")
 
-			_, err = tr.client.Admit(ctx, openrails.AdmitRequest{CustomerID: "invalid", Currency: currency})
+			_, err = tr.client.Admit(ctx, openrails.AdmitRequest{Currency: currency})
 			require.ErrorAs(t, err, &se)
 			require.Equal(t, http.StatusBadRequest, se.Status)
 			require.Equal(t, "invalid_param", se.Code)
@@ -145,5 +145,5 @@ func TestOr900_ReplayedAndIdempotencyConflictCrossBothTransports(t *testing.T) {
 // to name the same refusal without importing internal/.
 func TestOr900_ServiceFacadeExportsTheIdempotencySentinel(t *testing.T) {
 	require.True(t, errors.Is(billingservice.ErrIdempotencyKeyReused, money.ErrIdempotencyKeyReused),
-		"pkg/service must re-export the money sentinel itself, not a look-alike")
+		"internal/service must re-export the money sentinel itself, not a look-alike")
 }

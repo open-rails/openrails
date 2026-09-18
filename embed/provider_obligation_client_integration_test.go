@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -25,7 +27,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 const providerBillingTestQuiescence = time.Second
@@ -38,10 +39,10 @@ func newProviderObligationRuntime(t *testing.T, ctx context.Context, h *integrat
 	t.Helper()
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}}
 	withProviderBillingQuiescence(cfg)
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{Config: cfg, Redis: h.Redis, River: embedded.RiverManagedByOpenRails()}})
+	runtime, err := embed.New(ctx, embed.Options{Config: cfg, Redis: h.Redis, River: embed.RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
-	runtime.Embedded().App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	app.HostGraph(runtime).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 	return runtime
 }
 
@@ -99,7 +100,7 @@ func (f *providerFixture) observation(operationID, observationID string, costs .
 
 func (f *providerFixture) account(t *testing.T, ctx context.Context) string {
 	t.Helper()
-	account, err := f.client.GetCreditAccount(ctx, f.payer.String(), "USD")
+	account, err := f.client.GetCreditAccount(ctx, openrails.CustomerID(f.payer), "USD")
 	require.NoError(t, err)
 	return fmt.Sprintf("balance=%d held=%d available=%d owed=%d", account.BalanceAmount, account.HeldAmount, account.AvailableAmount, account.OutstandingOwedAmount)
 }

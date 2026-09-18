@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/permissions"
 	"github.com/open-rails/openrails/pkg/billingauth"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // TestMountHandlerRouteSelection proves the neutral MountHandler front door
@@ -49,29 +48,27 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	})
 
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{
-			Config: &config.Config{
-				Env:      "dev",
-				TestMode: config.CredentialPostureSandbox,
-				DB:       &config.DBConfig{URL: h.DSN},
-			},
-			Redis: h.Redis,
-			River: embedded.RiverManagedByOpenRails(),
+		Config: &config.Config{
+			Env:      "dev",
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: h.DSN},
 		},
+		Redis: h.Redis,
+		River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	// Case 1: customer omitted -> /v1/me is not mounted, capabilities.customer=false.
-	h1, err := rt.Handler(embedded.MountOptions{
+	h1, err := rt.Handler(embed.MountOptions{
 		MountPrefix:    "/billing",
-		RouteSets:      []embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetWebhooks},
+		RouteSets:      []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetWebhooks},
 		Authenticator:  authn,
-		ProviderRoutes: &embedded.ProviderRoutes{},
+		ProviderRoutes: &embed.ProviderRoutes{},
 	})
 	require.NoError(t, err)
 	require.ElementsMatch(t,
-		[]embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetWebhooks},
+		[]embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetWebhooks},
 		rt.ActiveRouteSets())
 
 	w := doMounted(h1, http.MethodGet, "/billing/v1/me/balance?currency=USD", nil)
@@ -87,15 +84,15 @@ func TestMountHandlerRouteSelection(t *testing.T) {
 	require.False(t, caps1.Routes["webhooks"])
 
 	// Case 2: customer included -> /v1/me mounted, capabilities.customer=true.
-	h2, err := rt.Handler(embedded.MountOptions{
+	h2, err := rt.Handler(embed.MountOptions{
 		MountPrefix:            "/billing",
-		RouteSets:              []embedded.RouteSet{embedded.RouteSetCheckout, embedded.RouteSetCustomer, embedded.RouteSetWebhooks},
+		RouteSets:              []embed.RouteSet{embed.RouteSetCheckout, embed.RouteSetCustomer, embed.RouteSetWebhooks},
 		Authenticator:          authn,
 		DelegatedAuthenticator: delegated,
-		ProviderRoutes:         &embedded.ProviderRoutes{},
+		ProviderRoutes:         &embed.ProviderRoutes{},
 	})
 	require.NoError(t, err)
-	require.Contains(t, rt.ActiveRouteSets(), embedded.RouteSetCustomer)
+	require.Contains(t, rt.ActiveRouteSets(), embed.RouteSetCustomer)
 
 	caps2 := getCapabilities(t, h2)
 	require.True(t, caps2.RouteGroups["customer"], "customer selected -> advertised true even though the user handler strips it")

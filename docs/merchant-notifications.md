@@ -19,17 +19,6 @@ refuses delivery. Generic JSON contains title, severity, summary, fired_at and a
 optional dashboard_link. Discord and Slack destinations receive their native
 message format. Delivery retains bounded retries and SSRF protection.
 
-Configurable metric alert rules and scheduled digests are deferred from core.
-There is no rule editor, template API, rule test-fire API or periodic digest job.
-Customizable dashboards, provider webhook health/history, denial history, worker
-health, durable findings and basic payment notifications remain available.
-
-This is a fresh-schema hard cut: alert_rules, finding_digest_state, their two
-cross-merchant lookup functions, and the former merchant notification rule_id are absent.
-There is no upgrade/backfill path or hidden replacement module. A future host
-notification product can consume retained operational evidence if a concrete
-consumer needs configurable rules or summaries.
-
 ## Recipient storage
 
 Customer billing notices and the merchant console bell share `notifications`.

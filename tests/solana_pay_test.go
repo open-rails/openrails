@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/open-rails/openrails"
+
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -31,7 +34,7 @@ func TestSolanaPayTransactionRequestFlow(t *testing.T) {
 
 	t.Run("create checkout session returns solana_pay_url", func(t *testing.T) {
 		body := map[string]any{
-			"price_id": priceID.String(),
+			"price_id": openrails.PriceID(priceID).String(),
 			"payment": map[string]any{
 				"rail":         "solana",
 				"token_symbol": "USDC",
@@ -85,7 +88,7 @@ func TestSolanaPayGetEndpoint(t *testing.T) {
 	t.Run("returns label and icon for valid session", func(t *testing.T) {
 		// First create a checkout session
 		body := map[string]any{
-			"price_id": priceID.String(),
+			"price_id": openrails.PriceID(priceID).String(),
 			"payment": map[string]any{
 				"rail":         "solana",
 				"token_symbol": "USDC",
@@ -137,7 +140,7 @@ func TestSolanaPayGetEndpoint(t *testing.T) {
 
 	t.Run("returns 404 for non-existent session", func(t *testing.T) {
 		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/v1/checkout/cs_00000000-0000-0000-0000-000000000000/solana-pay", nil)
+		req, _ := http.NewRequest("GET", "/v1/checkout/"+openrails.CheckoutSessionID(uuid.New()).String()+"/solana-pay", nil)
 		suite.Server.Handler().ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusNotFound, w.Code)
@@ -156,7 +159,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 	t.Run("returns error without account", func(t *testing.T) {
 		// First create a checkout session
 		body := map[string]any{
-			"price_id": priceID.String(),
+			"price_id": openrails.PriceID(priceID).String(),
 			"payment": map[string]any{
 				"rail":         "solana",
 				"token_symbol": "USDC",
@@ -189,7 +192,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 		// Create a non-Solana checkout session
 		mobiusPriceID := products[0].Prices[0].ID
 		body := map[string]any{
-			"price_id": mobiusPriceID.String(),
+			"price_id": openrails.PriceID(mobiusPriceID).String(),
 			"payment": map[string]any{
 				"rail":          "nmi",
 				"payment_token": "tok_test_123",
@@ -211,7 +214,7 @@ func TestSolanaPayPostEndpoint(t *testing.T) {
 		products2 := suiteWithNMI.SeedProducts()
 		mobiusPriceID2 := products2[0].Prices[0].ID
 
-		body["price_id"] = mobiusPriceID2.String()
+		body["price_id"] = openrails.PriceID(mobiusPriceID2).String()
 		jsonBody, _ = json.Marshal(body)
 
 		w := httptest.NewRecorder()
@@ -245,7 +248,7 @@ func TestSolanaPayTransferRequestNotAffected(t *testing.T) {
 	priceID := products[2].Prices[0].ID
 
 	body := map[string]any{
-		"price_id": priceID.String(),
+		"price_id": openrails.PriceID(priceID).String(),
 		"payment": map[string]any{
 			"rail":         "solana",
 			"token_symbol": "USDC",

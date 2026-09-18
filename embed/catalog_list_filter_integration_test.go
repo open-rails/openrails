@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // TestCatalogListFiltersAreTriStateAcrossDeployments proves the archived
@@ -26,10 +25,10 @@ func TestCatalogListFiltersAreTriStateAcrossDeployments(t *testing.T) {
 	ctx := context.Background()
 	h := integrationharness.New(t, ctx)
 	standalone := h.StartStandalone("USD")
-	runtime, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	runtime, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close(context.Background())) })
 	local, err := runtime.Client(openrails.WithMerchantID(dbtest.TestMerchantID))
@@ -61,28 +60,28 @@ func TestCatalogListFiltersAreTriStateAcrossDeployments(t *testing.T) {
 				require.EqualValues(t, len(page.Items), page.Total)
 				out := make([]uuid.UUID, 0, len(page.Items))
 				for _, p := range page.Items {
-					out = append(out, p.ID)
+					out = append(out, p.ID.UUID())
 				}
 				return out
 			}
-			require.ElementsMatch(t, []uuid.UUID{product.ID, retired.ID}, productIDs(openrails.ProductFilter{}), "unset lists live and archived products")
-			require.Equal(t, []uuid.UUID{product.ID}, productIDs(openrails.ProductFilter{Archived: &live}))
-			require.Equal(t, []uuid.UUID{retired.ID}, productIDs(openrails.ProductFilter{Archived: &archived}))
+			require.ElementsMatch(t, []uuid.UUID{product.ID.UUID(), retired.ID.UUID()}, productIDs(openrails.ProductFilter{}), "unset lists live and archived products")
+			require.Equal(t, []uuid.UUID{product.ID.UUID()}, productIDs(openrails.ProductFilter{Archived: &live}))
+			require.Equal(t, []uuid.UUID{retired.ID.UUID()}, productIDs(openrails.ProductFilter{Archived: &archived}))
 
 			priceIDs := func(filter openrails.PriceFilter) []uuid.UUID {
-				filter.ProductID = &product.ID
+				filter.ProductID = product.ID
 				page, err := client.ListPrices(ctx, filter)
 				require.NoError(t, err)
 				require.EqualValues(t, len(page.Items), page.Total)
 				out := make([]uuid.UUID, 0, len(page.Items))
 				for _, p := range page.Items {
-					out = append(out, p.ID)
+					out = append(out, p.ID.UUID())
 				}
 				return out
 			}
-			require.ElementsMatch(t, []uuid.UUID{price.ID, oldPrice.ID}, priceIDs(openrails.PriceFilter{}), "unset lists live and archived prices")
-			require.Equal(t, []uuid.UUID{price.ID}, priceIDs(openrails.PriceFilter{Archived: &live}))
-			require.Equal(t, []uuid.UUID{oldPrice.ID}, priceIDs(openrails.PriceFilter{Archived: &archived}))
+			require.ElementsMatch(t, []uuid.UUID{price.ID.UUID(), oldPrice.ID.UUID()}, priceIDs(openrails.PriceFilter{}), "unset lists live and archived prices")
+			require.Equal(t, []uuid.UUID{price.ID.UUID()}, priceIDs(openrails.PriceFilter{Archived: &live}))
+			require.Equal(t, []uuid.UUID{oldPrice.ID.UUID()}, priceIDs(openrails.PriceFilter{Archived: &archived}))
 		})
 	}
 }

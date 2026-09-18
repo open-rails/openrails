@@ -324,7 +324,7 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 // forensic and was already durably logged to rail_mutation_logs before the
 // success transition, so it is safe to drop from the intent row — UNLESS the handler asks to
 // keep its evidence (PrunePolicy), which the catalog archive/sunset handlers do
-// because pkg/service/catalog_extras.go renders their verification booleans.
+// because internal/service/catalog_extras.go renders their verification booleans.
 var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
 
 // PruneSucceeded slims a just-succeeded intent down to a dedupe tombstone:

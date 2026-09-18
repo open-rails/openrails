@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -107,7 +109,7 @@ func TestReconcileAdoptsAccountUpdaterRefreshedCard(t *testing.T) {
 	require.Len(t, ps7, 1, "the reissued card is seen exactly once")
 	assert.False(t, ps7[0].RequiresAdmin, "an updater refresh is never an admin-required discrepancy")
 	assert.Equal(t, FindingStatusAutoFixed, ps7[0].Status, "the engine ADOPTS provider truth rather than parking it as drift")
-	assert.Equal(t, methodID.String(), ps7[0].LocalEvidence["payment_method_id"])
+	assert.Equal(t, openrails.PaymentMethodID(methodID).String(), ps7[0].LocalEvidence["payment_method_id"])
 	assert.GreaterOrEqual(t, enforce.Summary.Providers["nmi"].AutoFixed, 1, "the adopt applied")
 
 	assertInstrument := func(t *testing.T, wantLast4, wantExpiry string) {

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/open-rails/openrails/internal/app"
+
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
@@ -14,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/permissions"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,13 +27,13 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 	remote := h.StartStandalone("USD", integrationharness.WithRails(config.PSPSet{
 		"ccbill": {AccountID: "999981-0000", CCBill: &config.CCBillRailConfig{Salt: "issue981-local-fixture"}},
 	}))
-	local, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	local, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, MerchantSource: config.MerchantSourceAPI, SecretBackend: config.SecretBackendDB, ProviderWriteMode: config.ProviderWriteModeFull, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, local.Close(context.Background())) })
-	local.Embedded().App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	app.HostGraph(local).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 	productID, priceID := uuid.New(), uuid.New()
 	priceKey := "commerce-" + priceID.String()
 	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Commerce fixture')`, productID, dbtest.TestMerchantID.UUID(), "commerce-"+productID.String())
@@ -46,13 +47,13 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 	require.NoError(t, err)
 	for name, client := range map[string]*openrails.Client{"embedded": inprocess, "remote": remote.Client()} {
 		t.Run(name, func(t *testing.T) {
-			user := uuid.NewString()
+			user := openrails.CustomerID(uuid.New())
 			request := openrails.CreateCheckoutSessionRequest{
 				Customer: openrails.CheckoutCustomerIdentity{ID: user, VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]},
-				PriceID:  priceKey, IdempotencyKey: uuid.NewString(),
+				PriceID:  openrails.PriceID(priceID), IdempotencyKey: uuid.NewString(),
 				Payment: openrails.CheckoutPayment{Rail: "ccbill", NameOnCard: "Test Buyer", Zip: "90210", Country: "US"},
 			}
-			options, err := client.ListCheckoutRailOptions(ctx, priceKey)
+			options, err := client.ListCheckoutRailOptions(ctx, openrails.PriceID(priceID))
 			require.NoError(t, err)
 			require.NotEmpty(t, options)
 			first, err := client.CreateCheckoutSession(ctx, request)
@@ -70,9 +71,9 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, first.ID, read.ID)
 			require.Equal(t, first.Amount, read.Amount)
-			_, err = client.GetCheckoutSession(ctx, uuid.NewString(), first.ID)
+			_, err = client.GetCheckoutSession(ctx, openrails.CustomerID(uuid.New()), first.ID)
 			require.ErrorIs(t, err, openrails.ErrDenied)
-			_, err = client.ConfirmCheckoutSession(ctx, first.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: uuid.NewString(), Payment: openrails.ConfirmPayment{Rail: "solana"}})
+			_, err = client.ConfirmCheckoutSession(ctx, first.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: openrails.CustomerID(uuid.New()), Payment: openrails.ConfirmPayment{Rail: "solana"}})
 			require.ErrorIs(t, err, openrails.ErrDenied)
 			require.NoError(t, client.Verify(ctx))
 			tier, err := client.ResolveEffectiveTier(ctx, user, "membership")
@@ -89,6 +90,6 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 	readOnly := remote.MintAPIKey(dbtest.TestMerchantSlug, "commerce-reader", []string{permissions.MerchantCustomerSettingsRead})
 	client, err := openrails.NewRemote(remote.BaseURL, openrails.WithAPIKey(readOnly))
 	require.NoError(t, err)
-	_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: uuid.NewString()}, IdempotencyKey: uuid.NewString()})
+	_, err = client.CreateCheckoutSession(ctx, openrails.CreateCheckoutSessionRequest{Customer: openrails.CheckoutCustomerIdentity{ID: openrails.CustomerID(uuid.New())}, IdempotencyKey: uuid.NewString()})
 	require.ErrorIs(t, err, openrails.ErrDenied, "customer-read does not grant merchant checkout creation")
 }

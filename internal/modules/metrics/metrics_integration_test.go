@@ -13,12 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/metrics"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
-// Fixture truth (all hand-computed; June 2026, usd, micros):
+// Fixture truth (all hand-computed; June 2026, usd, native units = micros):
 //
 // payments (merchant A): sale0 5/10 7M one-time; sale1 6/02 10M sub initial;
 // sale2 6/10 10M sub renewal; sale3 6/11 5M one-time initial (PROMO);
@@ -330,10 +331,10 @@ func TestMetrics_PaymentsFlow(t *testing.T) {
 	}))
 	require.Len(t, res.Rows, 1)
 	m := map[string]string{}
-	require.Equal(t, int64(25_000_000), cell(t, res, m, "gross_revenue"))
-	require.Equal(t, int64(10_000_000), cell(t, res, m, "net_revenue"))
-	require.Equal(t, int64(5_000_000), cell(t, res, m, "refunds"))
-	require.Equal(t, int64(10_000_000), cell(t, res, m, "chargebacks"))
+	require.Equal(t, metrics.MoneyCell(25_000_000), cell(t, res, m, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(10_000_000), cell(t, res, m, "net_revenue"))
+	require.Equal(t, metrics.MoneyCell(5_000_000), cell(t, res, m, "refunds"))
+	require.Equal(t, metrics.MoneyCell(10_000_000), cell(t, res, m, "chargebacks"))
 	require.Equal(t, int64(3), cell(t, res, m, "payment_count"))
 	require.Equal(t, int64(2), cell(t, res, m, "payment_failures"))
 	require.Equal(t, int64(1), cell(t, res, m, "refund_count"))
@@ -343,21 +344,21 @@ func TestMetrics_PaymentsFlow(t *testing.T) {
 	// Ratios divide AFTER aggregation: 3/5, not the mean of daily ratios (0.625).
 	require.InDelta(t, 0.6, cell(t, res, m, "approval_rate").(float64), 1e-9)
 	require.InDelta(t, 1.0/3.0, cell(t, res, m, "chargeback_rate").(float64), 1e-9)
-	require.InDelta(t, 5_000_000, cell(t, res, m, "realized_revenue_per_customer").(float64), 1e-6)
+	require.Equal(t, metrics.MoneyCell(5_000_000), cell(t, res, m, "realized_revenue_per_customer"))
 }
 
 func TestMetrics_PaymentsDimensions(t *testing.T) {
 	_, svc, ctxA, _ := seed(t)
 
 	byRail := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue", "net_revenue"}, By: []string{"rail"}, Range: juneQ}))
-	require.Equal(t, int64(20_000_000), cell(t, byRail, map[string]string{"rail": "nmi"}, "gross_revenue"))
-	require.Equal(t, int64(10_000_000), cell(t, byRail, map[string]string{"rail": "nmi"}, "net_revenue"))
-	require.Equal(t, int64(5_000_000), cell(t, byRail, map[string]string{"rail": "ccbill"}, "gross_revenue"))
-	require.Equal(t, int64(0), cell(t, byRail, map[string]string{"rail": "ccbill"}, "net_revenue"))
+	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, byRail, map[string]string{"rail": "nmi"}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(10_000_000), cell(t, byRail, map[string]string{"rail": "nmi"}, "net_revenue"))
+	require.Equal(t, metrics.MoneyCell(5_000_000), cell(t, byRail, map[string]string{"rail": "ccbill"}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(0), cell(t, byRail, map[string]string{"rail": "ccbill"}, "net_revenue"))
 
 	byStream := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"stream"}, Range: juneQ}))
-	require.Equal(t, int64(20_000_000), cell(t, byStream, map[string]string{"stream": "subscription"}, "gross_revenue"))
-	require.Equal(t, int64(5_000_000), cell(t, byStream, map[string]string{"stream": "one_time"}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, byStream, map[string]string{"stream": "subscription"}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(5_000_000), cell(t, byStream, map[string]string{"stream": "one_time"}, "gross_revenue"))
 
 	byKind := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"payment_count"}, By: []string{"attempt_kind"}, Range: juneQ}))
 	require.Equal(t, int64(2), cell(t, byKind, map[string]string{"attempt_kind": "initial"}, "payment_count"))
@@ -386,10 +387,21 @@ func TestMetrics_PaymentsDimensions(t *testing.T) {
 	require.Equal(t, int64(1), cell(t, byAcct, map[string]string{"rail_account": "acct-cc-1"}, "payment_count"))
 
 	byDiscount := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"discount_code"}, Range: juneQ}))
-	require.Equal(t, int64(5_000_000), cell(t, byDiscount, map[string]string{"discount_code": "PROMO"}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(5_000_000), cell(t, byDiscount, map[string]string{"discount_code": "PROMO"}, "gross_revenue"))
 
 	byBrand := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"payment_count"}, By: []string{"card_brand"}, Range: juneQ}))
 	require.Equal(t, int64(2), cell(t, byBrand, map[string]string{"card_brand": "visa"}, "payment_count"))
+
+	// Catalog ids are spelled as the catalog spells them (prod_/price_), and a
+	// filter takes exactly that spelling: the bare UUID is not an id.
+	byProduct := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, By: []string{"product_id", "price_id"}, Range: juneQ}))
+	product, price := openrails.ProductID(productA).String(), openrails.PriceID(pricePM).String()
+	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, byProduct, map[string]string{"product_id": product, "price_id": price}, "gross_revenue"))
+	filtered := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {price}}}))
+	require.Equal(t, metrics.MoneyCell(20_000_000), cell(t, filtered, map[string]string{}, "gross_revenue"))
+	_, ve := metrics.Validate(usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ, Filters: map[string][]string{"price_id": {pricePM.String()}}}))
+	require.NotNil(t, ve)
+	require.Equal(t, "invalid_filter_value", ve.Errors[0].Code)
 }
 
 func TestMetrics_ZeroFillAndCompare(t *testing.T) {
@@ -402,15 +414,15 @@ func TestMetrics_ZeroFillAndCompare(t *testing.T) {
 		Filters: map[string][]string{"rail": {"nmi"}},
 	}))
 	require.Len(t, daily.Rows, 7)
-	require.Equal(t, int64(10_000_000), cell(t, daily, map[string]string{"time": "2026-06-02T00:00:00Z"}, "net_revenue"))
-	require.Equal(t, int64(0), cell(t, daily, map[string]string{"time": "2026-06-01T00:00:00Z"}, "net_revenue"))
+	require.Equal(t, metrics.MoneyCell(10_000_000), cell(t, daily, map[string]string{"time": "2026-06-02T00:00:00Z"}, "net_revenue"))
+	require.Equal(t, metrics.MoneyCell(0), cell(t, daily, map[string]string{"time": "2026-06-01T00:00:00Z"}, "net_revenue"))
 
 	// compare=previous_period returns the shifted window (May: sale0 = 7M).
 	cmp := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"net_revenue"}, Range: juneQ, Compare: "previous_period"}))
-	require.Equal(t, int64(10_000_000), cell(t, cmp, map[string]string{}, "net_revenue"))
+	require.Equal(t, metrics.MoneyCell(10_000_000), cell(t, cmp, map[string]string{}, "net_revenue"))
 	require.NotNil(t, cmp.CompareRange)
 	require.Len(t, cmp.CompareRows, 1)
-	require.Equal(t, int64(7_000_000), cmp.CompareRows[0][colIdx(t, cmp, "net_revenue")])
+	require.Equal(t, metrics.MoneyCell(7_000_000), cmp.CompareRows[0][colIdx(t, cmp, "net_revenue")])
 }
 
 // --- subscriptions ---------------------------------------------------------------
@@ -448,10 +460,10 @@ func TestMetrics_SnapshotReconstruction(t *testing.T) {
 	}))
 	require.Len(t, series.Rows, 3)
 	require.Equal(t, int64(4), cell(t, series, map[string]string{"time": "2026-04-01T00:00:00Z"}, "subscriptions"))
-	require.Equal(t, int64(38_000_000), cell(t, series, map[string]string{"time": "2026-04-01T00:00:00Z"}, "mrr"))
+	require.Equal(t, metrics.MoneyCell(38_000_000), cell(t, series, map[string]string{"time": "2026-04-01T00:00:00Z"}, "mrr"))
 	require.Equal(t, int64(4), cell(t, series, map[string]string{"time": "2026-05-01T00:00:00Z"}, "subscriptions"))
 	require.Equal(t, int64(5), cell(t, series, map[string]string{"time": "2026-06-01T00:00:00Z"}, "subscriptions"))
-	require.Equal(t, int64(48_000_000), cell(t, series, map[string]string{"time": "2026-06-01T00:00:00Z"}, "mrr"))
+	require.Equal(t, metrics.MoneyCell(48_000_000), cell(t, series, map[string]string{"time": "2026-06-01T00:00:00Z"}, "mrr"))
 
 	// A snapshot is NEVER summed across buckets: the whole-June single value
 	// equals the point-in-time count, not a 30-day sum.
@@ -468,7 +480,7 @@ func TestMetrics_SnapshotReconstruction(t *testing.T) {
 	require.Equal(t, int64(3), cell(t, byStatus, map[string]string{"time": jun, "status": "active"}, "subscriptions"))
 	require.Equal(t, int64(1), cell(t, byStatus, map[string]string{"time": jun, "status": "past_due"}, "subscriptions"))
 	require.Equal(t, int64(1), cell(t, byStatus, map[string]string{"time": jun, "status": "cancelled"}, "subscriptions"))
-	require.Equal(t, int64(10_000_000), cell(t, byStatus, map[string]string{"time": jun, "status": "past_due"}, "mrr"))
+	require.Equal(t, metrics.MoneyCell(10_000_000), cell(t, byStatus, map[string]string{"time": jun, "status": "past_due"}, "mrr"))
 
 	// billable = auto-renew + non-terminal + not scheduled to end.
 	billable := run(t, svc, ctxA, usd(&metrics.Query{
@@ -479,7 +491,7 @@ func TestMetrics_SnapshotReconstruction(t *testing.T) {
 
 	// Weekly-cycle normalization pinned at the range end (sub7: 2.3M/168h).
 	mrrNow := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"mrr"}, Range: juneQ}))
-	require.Equal(t, int64(10_000_000+8_000_000+10_000_000+10_000_000+9_994_048), cell(t, mrrNow, map[string]string{}, "mrr"))
+	require.Equal(t, metrics.MoneyCell(10_000_000+8_000_000+10_000_000+10_000_000+9_994_048), cell(t, mrrNow, map[string]string{}, "mrr"))
 }
 
 func TestMetrics_RecoveryRate(t *testing.T) {
@@ -502,8 +514,8 @@ func TestMetrics_UsageCreditsFlow(t *testing.T) {
 		Range:    juneQ,
 	}))
 	m := map[string]string{}
-	require.Equal(t, int64(30_000_000), cell(t, res, m, "credits_sold"))
-	require.Equal(t, int64(24_000_000), cell(t, res, m, "usage_revenue"))
+	require.Equal(t, metrics.MoneyCell(30_000_000), cell(t, res, m, "credits_sold"))
+	require.Equal(t, metrics.MoneyCell(24_000_000), cell(t, res, m, "usage_revenue"))
 	require.Equal(t, int64(4), cell(t, res, m, "usage_units"))
 	require.Equal(t, int64(2), cell(t, res, m, "active_payers"))
 	require.InDelta(t, 0.8, cell(t, res, m, "credit_utilization").(float64), 1e-9)
@@ -518,11 +530,11 @@ func TestMetrics_UsageCreditsFlow(t *testing.T) {
 	}))
 	require.Len(t, top.Rows, 1)
 	require.Equal(t, c[2].String(), top.Rows[0][colIdx(t, top, "payer")])
-	require.Equal(t, int64(16_000_000), top.Rows[0][colIdx(t, top, "usage_revenue")])
+	require.Equal(t, metrics.MoneyCell(16_000_000), top.Rows[0][colIdx(t, top, "usage_revenue")])
 
 	bySku := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"usage_revenue"}, By: []string{"sku", "rate_card"}, Range: juneQ}))
-	require.Equal(t, int64(8_000_000), cell(t, bySku, map[string]string{"sku": "api", "rate_card": "gpt"}, "usage_revenue"))
-	require.Equal(t, int64(16_000_000), cell(t, bySku, map[string]string{"sku": "img", "rate_card": "flux"}, "usage_revenue"))
+	require.Equal(t, metrics.MoneyCell(8_000_000), cell(t, bySku, map[string]string{"sku": "api", "rate_card": "gpt"}, "usage_revenue"))
+	require.Equal(t, metrics.MoneyCell(16_000_000), cell(t, bySku, map[string]string{"sku": "img", "rate_card": "flux"}, "usage_revenue"))
 }
 
 func TestMetrics_BalancesAndDepletion(t *testing.T) {
@@ -534,16 +546,16 @@ func TestMetrics_BalancesAndDepletion(t *testing.T) {
 		Range:    juneQ,
 	}))
 	m := map[string]string{}
-	require.Equal(t, int64(36_000_000), cell(t, bal, m, "outstanding_credit_liability"))
-	require.Equal(t, int64(3_000_000), cell(t, bal, m, "outstanding_owed"))
+	require.Equal(t, metrics.MoneyCell(36_000_000), cell(t, bal, m, "outstanding_credit_liability"))
+	require.Equal(t, metrics.MoneyCell(3_000_000), cell(t, bal, m, "outstanding_owed"))
 
 	// Series: balance at each month START (May 1: nothing yet; Jun 1: deposits 30M).
 	series := run(t, svc, ctxA, usd(&metrics.Query{
 		Measures: []string{"outstanding_credit_liability"}, By: []string{"time"}, Grain: "month",
 		Range: &metrics.QueryRange{From: "2026-05-01", To: "2026-06-30"},
 	}))
-	require.Equal(t, int64(0), cell(t, series, map[string]string{"time": "2026-05-01T00:00:00Z"}, "outstanding_credit_liability"))
-	require.Equal(t, int64(30_000_000), cell(t, series, map[string]string{"time": "2026-06-01T00:00:00Z"}, "outstanding_credit_liability"))
+	require.Equal(t, metrics.MoneyCell(0), cell(t, series, map[string]string{"time": "2026-05-01T00:00:00Z"}, "outstanding_credit_liability"))
+	require.Equal(t, metrics.MoneyCell(30_000_000), cell(t, series, map[string]string{"time": "2026-06-01T00:00:00Z"}, "outstanding_credit_liability"))
 
 	// Depletion risk at 7/1: c2's balance (14M) covers exactly 7 days of its
 	// trailing-7d burn (14M) -> at risk; c1 has no trailing burn -> not counted.
@@ -572,10 +584,10 @@ func TestMetrics_MerchantIsolation(t *testing.T) {
 	_, svc, ctxA, ctxB := seed(t)
 
 	a := run(t, svc, ctxA, usd(&metrics.Query{Measures: []string{"gross_revenue"}, Range: juneQ}))
-	require.Equal(t, int64(25_000_000), cell(t, a, map[string]string{}, "gross_revenue"), "merchant A must never see B's 999M payment")
+	require.Equal(t, metrics.MoneyCell(25_000_000), cell(t, a, map[string]string{}, "gross_revenue"), "merchant A must never see B's 999M payment")
 
 	b := run(t, svc, ctxB, usd(&metrics.Query{Measures: []string{"gross_revenue", "payment_count"}, Range: juneQ}))
-	require.Equal(t, int64(999_000_000), cell(t, b, map[string]string{}, "gross_revenue"))
+	require.Equal(t, metrics.MoneyCell(999_000_000), cell(t, b, map[string]string{}, "gross_revenue"))
 	require.Equal(t, int64(1), cell(t, b, map[string]string{}, "payment_count"))
 
 	bSubs := run(t, svc, ctxB, &metrics.Query{Measures: []string{"subscriptions", "new_subscriptions", "cancellations"}, Range: juneQ})
