@@ -120,7 +120,7 @@ beforeEach(async () => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-it.each(cases)("%s", async (_name, run, expected, invalidates, body, late) => {
+it.each(cases)("%s", async (_name, run, expected, invalidates, body) => {
   const queryClient = client()
   const seeded = [...seedCache(queryClient, "merchant-a"), ...seedCache(queryClient, "merchant-b")]
   selectMerchant("merchant-a")
