@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -37,12 +38,12 @@ func TestGuardsRefuseZeroIdentifiers(t *testing.T) {
 			}
 			require.Error(t, tt.err)
 			require.ErrorIs(t, tt.err, openrails.ErrInvalid)
-			var se *openrails.StatusError
+			var se *apperr.Error
 			require.ErrorAs(t, tt.err, &se)
 			require.Equal(t, 400, se.Status)
 			require.Equal(t, "invalid_param", se.Code)
-			require.NotNil(t, se.Param)
-			require.Equal(t, tt.param, *se.Param)
+			require.NotEmpty(t, se.Param)
+			require.Equal(t, tt.param, se.Param)
 			require.Contains(t, se.Message, tt.param)
 		})
 	}

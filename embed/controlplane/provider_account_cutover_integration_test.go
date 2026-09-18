@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -196,12 +197,12 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 		t.Run("refuses "+tc.name, func(t *testing.T) {
 			_, err := cp.PlanProviderAccountCutover(ctx, tc.id, tc.q)
 			require.ErrorIs(t, err, openrails.ErrInvalid)
-			var se *openrails.StatusError
+			var se *apperr.Error
 			require.ErrorAs(t, err, &se)
 			require.Equal(t, 400, se.Status)
 			require.Equal(t, "invalid_param", se.Code)
-			require.NotNil(t, se.Param)
-			require.Equal(t, tc.param, *se.Param)
+			require.NotEmpty(t, se.Param)
+			require.Equal(t, tc.param, se.Param)
 			require.NotContains(t, se.Message, "not found", "a zero id is invalid, never a missing row")
 		})
 	}

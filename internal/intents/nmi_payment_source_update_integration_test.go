@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -307,20 +308,59 @@ func TestNMIPaymentSourceUpdateIntent_CrossPSPRefusesBeforeProviderCall(t *testi
 	require.Zero(t, fx.intentCount(t), "a refused request leaves no durable intent behind")
 }
 
-func TestNMIPaymentSourceUpdateIntent_CustodianHeldTargetRefusesBeforeProviderCall(t *testing.T) {
-	fx := newPaymentSourceSwapFixture(t)
+func (fx *paymentSourceSwapFixture) moveTargetToCustodian(t *testing.T) {
+	t.Helper()
 	custodian := uuid.New()
 	_, err := fx.db.Pool().Exec(fx.ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
 	require.NoError(t, err)
 	_, err = fx.db.Pool().Exec(fx.ctx, `UPDATE openrails.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, fx.newPM.ID, custodian)
 	require.NoError(t, err)
+}
+
+func TestNMIPaymentSourceUpdateIntent_CustodianHeldTargetRefusesBeforeProviderCall(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	fx.moveTargetToCustodian(t)
 	// The PSP remains unchanged, and the old vault reference remains for
 	// forensic correlation. It must never be used as a live NMI address.
-	_, err = fx.through.ExecutePaymentSourceUpdate(fx.ctx, fx.sub, fx.newPM, OriginUser, "custodian-held target")
-	require.Error(t, err)
+	_, err := fx.through.ExecutePaymentSourceUpdate(fx.ctx, fx.sub, fx.newPM, OriginUser, "custodian-held target")
+	require.ErrorIs(t, err, subscriptions.ErrPaymentMethodNotPSPVaulted)
 	require.Zero(t, fx.gateway.updateCalls.Load())
 	require.Zero(t, fx.gateway.getCalls.Load())
 	require.Zero(t, fx.intentCount(t))
+}
+
+func TestNMIPaymentSourceUpdateIntent_CustodyChangesBeforeContinuation(t *testing.T) {
+	for _, phase := range []string{"verify", "execute"} {
+		t.Run(phase, func(t *testing.T) {
+			fx := newPaymentSourceSwapFixture(t)
+			fx.gateway.updateMode.Store("ambiguous_lost")
+			out := fx.swapTo(t, fx.newPM)
+			require.False(t, out.Done)
+			fx.advanceClock(2 * time.Minute)
+			if phase == "execute" {
+				_, err := fx.runner.RunVerifyOnce(fx.ctx)
+				require.NoError(t, err)
+				status, _ := fx.latestIntent(t)
+				require.Equal(t, StatusFailedRetryable, status)
+				fx.advanceClock(15 * time.Minute)
+			}
+			fx.moveTargetToCustodian(t)
+			reads, writes := fx.gateway.getCalls.Load(), fx.gateway.updateCalls.Load()
+			var err error
+			if phase == "execute" {
+				_, err = fx.runner.RunExecuteOnce(fx.ctx)
+			} else {
+				_, err = fx.runner.RunVerifyOnce(fx.ctx)
+			}
+			require.NoError(t, err)
+			status, _ := fx.latestIntent(t)
+			require.Equal(t, StatusFailedTerminal, status)
+			require.Equal(t, subscriptions.ErrPaymentMethodNotPSPVaulted.Code, fx.latestIntentEvidenceCode(t))
+			require.Equal(t, reads, fx.gateway.getCalls.Load())
+			require.Equal(t, writes, fx.gateway.updateCalls.Load())
+			require.Equal(t, fx.oldPM.ID, fx.localPaymentMethodID(t))
+		})
+	}
 }
 
 // The producer's check is made against the CURRENT row, not the caller's
@@ -363,11 +403,11 @@ func TestNMIPaymentSourceUpdateIntent_ZeroIdentifiersRefusedBeforeAnyLookup(t *t
 			tt.mutate(&s, &pm)
 			_, err := fx.through.ExecutePaymentSourceUpdate(fx.ctx, &s, &pm, OriginUser, "zero id test")
 			require.ErrorIs(t, err, openrails.ErrInvalid)
-			var se *openrails.StatusError
+			var se *apperr.Error
 			require.ErrorAs(t, err, &se)
 			require.Equal(t, "invalid_param", se.Code)
-			require.NotNil(t, se.Param)
-			require.Equal(t, tt.param, *se.Param)
+			require.NotEmpty(t, se.Param)
+			require.Equal(t, tt.param, se.Param)
 			require.NotErrorIs(t, err, paymentmethods.ErrPaymentMethodNotFound, "a zero id is invalid, never a missing row")
 			require.Zero(t, fx.gateway.updateCalls.Load())
 			require.Zero(t, fx.intentCount(t), "a refused request leaves no durable intent")

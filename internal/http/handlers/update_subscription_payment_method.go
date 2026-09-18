@@ -152,16 +152,6 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			writePaymentMethodPSPMismatch(r)
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
-		case errors.Is(err, openrails.ErrInvalid):
-			// A coded refusal from the durable seam (a zero/blank identifier)
-			// keeps its code and param instead of becoming a 500.
-			var se *openrails.StatusError
-			errors.As(err, &se)
-			refusal := api.NewAPIError(http.StatusBadRequest, se.Type, se.Code, se.Message)
-			if se.Param != nil {
-				refusal = refusal.WithParam(*se.Param)
-			}
-			r.APIError(refusal)
 		default:
 			writeRefusal(r, err, "Failed to update payment method")
 		}
@@ -170,7 +160,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	switch {
 	case out.Done:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
-		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": subscription.ID.String(), "payment_method_id": paymentMethodID.String()})
+		r.SuccessJSON(map[string]any{"success": true, "message": "Payment method updated successfully", "subscription_id": openrails.SubscriptionID(subscription.ID), "payment_method_id": openrails.PaymentMethodID(paymentMethodID)})
 	case out.Terminal && out.Code == intents.EvidenceCodePSPMismatch:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Info("Payment-source update refused: provider-account mismatch at execution")
 		writePaymentMethodPSPMismatch(r)

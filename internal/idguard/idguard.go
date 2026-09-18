@@ -11,12 +11,9 @@
 package idguard
 
 import (
-	"net/http"
-
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -24,16 +21,7 @@ import (
 // invalid_param, naming the offending field. errors.Is(err, openrails.ErrInvalid)
 // classifies it identically in embedded and remote callers.
 func Invalid(field, message string) error {
-	param := field
-	return &openrails.StatusError{
-		Status: http.StatusBadRequest,
-		ErrorDetails: openrails.ErrorDetails{
-			Type:    api.ErrorTypeInvalidRequest,
-			Code:    api.CodeInvalidParam,
-			Message: message,
-			Param:   &param,
-		},
-	}
+	return apperr.Invalidf("%s", message).WithParam(field)
 }
 
 // Require refuses a zero UUID.

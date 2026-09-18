@@ -347,10 +347,6 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 		switch {
 		case lerr == nil:
 			currentTargetPSP = locked.PspID
-			if locked.Custodian != models.CustodianPSP || locked.CustodianID != nil {
-				refused = ptr(TerminalWithEvidence(subscriptions.ErrPaymentMethodNotPSPVaulted.Error(), map[string]any{"code": subscriptions.ErrPaymentMethodNotPSPVaulted.Code}))
-				return nil
-			}
 			if ref = strings.TrimSpace(locked.RailCustomerRef); ref == "" {
 				refused = ptr(Terminal("target payment method has no rail customer ref; cannot repoint billing"))
 				return nil
@@ -376,6 +372,10 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 					"target_psp_id_current": currentTargetPSP.String(),
 					"target_method_found":   targetFound,
 				}))
+			return nil
+		}
+		if targetFound && (locked.Custodian != models.CustodianPSP || locked.CustodianID != nil) {
+			refused = ptr(TerminalWithEvidence(subscriptions.ErrPaymentMethodNotPSPVaulted.Error(), map[string]any{"code": subscriptions.ErrPaymentMethodNotPSPVaulted.Code}))
 			return nil
 		}
 		pin = providerAccountPin{sub: sub, newRailCustomerRef: ref}

@@ -23,6 +23,33 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 )
 
+func TestUpdateSubscriptionPaymentMethodCustodianHeldTarget(t *testing.T) {
+	suite, mock := SetupSuiteWithMockNMI(t)
+	user := uuid.NewString()
+	token := suite.MintUserToken(user, "custodian-target@test.example.com")
+	oldPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: user, Rail: models.RailNMI, VaultID: "old-vault"})
+	newPM := suite.CreateTestPaymentMethodWithOptions(PaymentMethodOptions{UserID: user, Rail: models.RailNMI, VaultID: "historical-vault"})
+	sub := suite.CreateTestSubscriptionWithOptions(SubscriptionOptions{UserID: user, PriceID: suite.SeedProducts()[0].Prices[0].ID, Status: models.StatusActive, Rail: models.RailNMI, RailSubID: "provider-sub-" + uuid.NewString(), PaymentMethodID: &oldPM.ID})
+	custodian := uuid.New()
+	ctx := t.Context()
+	_, err := suite.MerchantPool().Exec(ctx, `INSERT INTO openrails.custodians(id,merchant_id,key,kind,account_id) VALUES($1,$2,$3,'basis_theory',$3)`, custodian, dbtest.TestMerchantID.UUID(), "source-update-"+custodian.String())
+	require.NoError(t, err)
+	_, err = suite.MerchantPool().Exec(ctx, `UPDATE openrails.payment_methods SET custodian='basis_theory',custodian_id=$2,rail_method_ref='custodian-token' WHERE id=$1`, newPM.ID, custodian)
+	require.NoError(t, err)
+	mock.Reset()
+	body, err := json.Marshal(openrails.UpdateSubscriptionPaymentMethodRequest{PaymentMethodID: openrails.PaymentMethodID(newPM.ID)})
+	require.NoError(t, err)
+	request := httptest.NewRequest(http.MethodPut, updateSubscriptionPaymentMethodPath(openrails.SubscriptionID(sub.ID).String()), bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	suite.Server.Handler().ServeHTTP(response, request)
+	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"code":"payment_method_not_psp_vaulted"`)
+	require.Empty(t, mock.LastRequest)
+	require.Equal(t, oldPM.ID, *suite.GetSubscription(sub.ID).PaymentMethodID)
+}
+
 // TestUpdateSubscriptionPaymentMethodRequiresAuth tests that the endpoint requires authentication
 func TestUpdateSubscriptionPaymentMethodRequiresAuth(t *testing.T) {
 	suite := getSharedTestSuite(t)
@@ -107,7 +134,7 @@ func TestUpdateSubscriptionPaymentMethodSuccess(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.True(t, response["success"].(bool), "Success should be true")
-		assert.Equal(t, newPM.ID.String(), response["payment_method_id"], "Response should contain new payment method ID")
+		assert.Equal(t, openrails.PaymentMethodID(newPM.ID).String(), response["payment_method_id"], "Response should contain new payment method ID")
 
 		// Verify NMI was called with update_subscription
 		assert.Contains(t, mock.LastRequest["recurring"], "update_subscription", "Should call NMI with update_subscription")
