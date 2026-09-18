@@ -43,13 +43,18 @@ subscription and grace sources, `pay_` for one-off and purchase sources; an
 admin source is the host's declared id verbatim). Customer filters on the
 merchant list routes are `customer_id`.
 Counts and timestamps are not money: counts remain numbers. Every timestamp on the
-wire — response fields and request parameters alike (`expires_at`, `occurred_at`,
-`at`, rollup `from`/`to`) — is an RFC3339 instant; the Go client sends
+wire — response fields and request parameters alike (`created_at`, `expires_at`,
+`occurred_at`, `at`, rollup `from`/`to`) — is an RFC3339 instant, including the
+public product/price/payment objects and the admin credit grant's `expires_at`
+(no Stripe-style epoch seconds remain); the Go client sends
 `time.RFC3339Nano` and handlers accept any fractional precision. Durations stay
 integer seconds (`window_seconds`, `retry_after_seconds`) and day buckets stay
 `YYYY-MM-DD`. Missing optional timestamps are omitted; explicit nullable receipt
-fields use null. Not yet moved: the epoch-seconds `created` on `Payment`,
-`PublicPrice` and the admin catalog objects (tracked with #983).
+fields use null. Handlers encode instants as `time.Time` (RFC3339 at full
+nanosecond precision), never through a hand-written second-precision format.
+A subscription's `payments[]` history is the same `Payment` shape
+`GET /v1/merchant/payments` serves (`created_at`, `status` `succeeded`,
+`amount`), not a second summary shape.
 
 
 The registry has one owner. Go consumers read it with `openrails.Currencies()`

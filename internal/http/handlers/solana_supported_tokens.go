@@ -73,13 +73,13 @@ type TokenInfo struct {
 // amount; TokenPriceUSD and FXRate are the rates that produced it, spelled
 // as decimal strings (see TokenInfo.Price).
 type TokenQuote struct {
-	Amount        string `json:"amount"`
-	Units         uint64 `json:"units,string"`
-	TokenPriceUSD string `json:"token_price_usd"`
-	FXRate        string `json:"fx_rate"`
-	FXCurrency    string `json:"fx_currency"`
-	QuotedAt      string `json:"quoted_at"`
-	ExpiresAt     string `json:"expires_at"`
+	Amount        string    `json:"amount"`
+	Units         uint64    `json:"units,string"`
+	TokenPriceUSD string    `json:"token_price_usd"`
+	FXRate        string    `json:"fx_rate"`
+	FXCurrency    string    `json:"fx_currency"`
+	QuotedAt      time.Time `json:"quoted_at"`
+	ExpiresAt     time.Time `json:"expires_at"`
 }
 
 // rateString spells a provider rate exactly as the float the feed handed us:
@@ -476,8 +476,8 @@ func calculateQuoteForToken(ctx context.Context, r *httprequest.Request, tokenSy
 		TokenPriceUSD: rateString(quote.TokenPriceUSD),
 		FXRate:        rateString(quote.FXRate),
 		FXCurrency:    quote.FXCurrency,
-		QuotedAt:      quotedAt.Format(time.RFC3339),
-		ExpiresAt:     expiresAt.Format(time.RFC3339),
+		QuotedAt:      quotedAt.UTC(),
+		ExpiresAt:     expiresAt.UTC(),
 	}
 }
 

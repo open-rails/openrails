@@ -18,8 +18,8 @@ type ProductObject struct {
 	TierRank         int                 `json:"tier_rank"`
 	Active           bool                `json:"active"`
 	Metadata         map[string]string   `json:"metadata,omitempty"`
-	Created          int64               `json:"created"`
-	Updated          int64               `json:"updated"`
+	CreatedAt        time.Time           `json:"created_at"`
+	UpdatedAt        time.Time           `json:"updated_at"`
 	Prices           []PriceObject       `json:"prices,omitempty"`
 }
 
@@ -49,12 +49,4 @@ func NewList[T any](data []T, total int64, limit, offset int) List[T] {
 		Offset:  offset,
 		HasMore: int64(offset+len(data)) < total,
 	}
-}
-
-// Helper to convert time.Time to unix epoch
-func ToUnix(t time.Time) int64 {
-	if t.IsZero() {
-		return 0
-	}
-	return t.Unix()
 }

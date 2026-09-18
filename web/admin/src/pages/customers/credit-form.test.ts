@@ -75,6 +75,13 @@ describe("credit grant form", () => {
   it("requires grant permission", () => {
     expect(() => creditGrantInput(input, false)).toThrow("cannot grant")
   })
+  it("sends a future expiry as an RFC3339 instant", () => {
+    const out = creditGrantInput(
+      { ...input, expires: "2099-01-02T03:04" },
+      true
+    )
+    expect(out.expires_at).toBe(new Date("2099-01-02T03:04").toISOString())
+  })
   it("rejects an expired or malformed expiry", () => {
     expect(() => creditGrantInput({ ...input, expires: "bad" }, true)).toThrow(
       "future date"

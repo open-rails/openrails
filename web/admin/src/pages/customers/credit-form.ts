@@ -21,12 +21,12 @@ export function creditGrantInput(
     )
   const currency = input.currency.trim()
   if (!currency) throw new Error("Select a currency.")
-  let expires: number | undefined
+  let expires: string | undefined
   if (input.expires) {
     const time = new Date(input.expires).getTime()
     if (!Number.isFinite(time) || time <= now)
       throw new Error("Expiry must be a valid future date.")
-    expires = Math.floor(time / 1000)
+    expires = new Date(time).toISOString()
   }
   return {
     amount,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // PublicPrice is the price object public catalog and payment responses embed.
@@ -22,7 +23,7 @@ type PublicPrice struct {
 	Active     bool              `json:"active"`
 	Providers  []string          `json:"providers,omitempty"`
 	Metadata   map[string]string `json:"metadata,omitempty"`
-	Created    int64             `json:"created"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 // PriceRecurrence describes a recurring price's interval ("720h", "8760h").
@@ -31,7 +32,8 @@ type PriceRecurrence struct {
 }
 
 // Payment is one rail payment or refund as the merchant surface reports it.
-// Amount is native units, positive for payments and negative for refunds.
+// Amount is native units, positive for payments and negative for refunds;
+// CreatedAt is an RFC3339 instant.
 type Payment struct {
 	ID             PaymentID       `json:"id"`
 	Object         string          `json:"object"`
@@ -49,7 +51,7 @@ type Payment struct {
 	FailureCode   *string      `json:"failure_code,omitempty"`
 	FailureReason *string      `json:"failure_reason,omitempty"`
 	Refunds       *PaymentList `json:"refunds,omitempty"`
-	Created       int64        `json:"created"`
+	CreatedAt     time.Time    `json:"created_at"`
 	Price         *PublicPrice `json:"price,omitempty"`
 }
 
