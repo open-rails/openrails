@@ -4,6 +4,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 checks() {
+  # Keep the source-level safety checks in the compact entrypoint. These are
+  # cheap and catch regressions that a build or an end-to-end journey cannot
+  # observe (business-time injection, raw SQL, and migration lock hazards).
+  bash scripts/check_business_time_test.sh
+  bash scripts/check_business_time.sh
   bash scripts/scan-injected-code.sh --all
   unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
   if [[ -n "$unformatted" ]]; then
@@ -12,10 +17,26 @@ checks() {
   fi
   go build ./...
   go vet ./...
+  # Integration-tagged files are a separate compilation universe; keep the
+  # compile/vet guard that catches dependency drift before the E2E runner.
+  go vet -tags=integration ./...
   go test -race -count=1 ./...
   bash scripts/build-admin-console.sh cmd/openrails/consoleassets/dist
+  pnpm --dir web/admin run lint
   pnpm --dir web/admin exec vitest run --maxWorkers=2
+  test -n "$(ls -A cmd/openrails/consoleassets/dist 2>/dev/null)" || {
+    echo "console: dist/ is empty — the embed gate would prove nothing" >&2
+    exit 1
+  }
   go build -tags console_assets -o /dev/null ./cmd/openrails
+  go vet -tags console_assets ./cmd/openrails/consoleassets
+  stray="$(grep -rlE '^//go:build .*console_assets' --include='*.go' . |
+    grep -v '^\./cmd/openrails/consoleassets/' || true)"
+  if [[ -n "$stray" ]]; then
+    echo "console_assets-conditional source outside cmd/openrails/consoleassets:" >&2
+    echo "$stray" >&2
+    exit 1
+  fi
 }
 
 e2e() {
@@ -32,6 +53,9 @@ e2e() {
   "$sqlc_bin" generate
   "$sqlc_bin" vet
   git diff --exit-code -- internal/db/gen
+  CGO_ENABLED=1 go test ./internal/db/sqlaudit/ -run '^TestQueryAudit$' -count=1
+  bash scripts/sql-lint.sh
+  bash scripts/migration-lint.sh
   go run ./scripts/contracts -workflows
 }
 
