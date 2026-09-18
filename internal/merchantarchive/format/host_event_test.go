@@ -15,6 +15,8 @@ func TestPaymentHostEventStructuredDedupeKey(t *testing.T) {
 		"4111111111111111", "payment:4111111111111111",
 		"payment:" + payment + ":4111111111111111",
 		"payment:41111111-1111-4115-a111-111111111112",
+		"payment:10000000-0000-0000-0000-000000000002",
+		"unrelated-safe-key",
 	} {
 		if ValidateValues(p, []*string{&event, &payment, &bad, &delivered}) == nil {
 			t.Errorf("accepted unsafe or mismatched dedupe key %q", bad)
@@ -29,5 +31,10 @@ func TestPaymentHostEventStructuredDedupeKey(t *testing.T) {
 	}
 	if validateJSON("payments.metadata", `{"order_id":"`+dedupe+`"}`) == nil {
 		t.Error("structured ID exemption leaked into arbitrary metadata")
+	}
+	event, payment = "payment.settled", testMerchant
+	dedupe = "payment:" + payment
+	if err := ValidateValues(p, []*string{&event, &payment, &dedupe, &delivered}); err != nil {
+		t.Fatalf("refused ordinary matching payment key: %v", err)
 	}
 }

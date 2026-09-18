@@ -47,6 +47,10 @@ func TestPaymentHostEventUUIDArchiveRoundTrip(t *testing.T) {
 		require.ErrorAs(t, err, &archiveErr)
 		t.Fatalf("export failed: %v; cause: %v", err, archiveErr.Err)
 	}
+	wrongKey := "payment:10000000-0000-0000-0000-000000000002"
+	_, err = Restore(t.Context(), target, id, bytes.NewReader(alteredArchive(t, artifact.Bytes(), "host_outbox", "dedupe_key", &wrongKey)))
+	require.Error(t, err, "an ordinary UUID cannot replace the payment's replay coordinate")
+	assertEmptyBook(t, target, id)
 	_, err = Restore(t.Context(), target, id, bytes.NewReader(artifact.Bytes()))
 	require.NoError(t, err)
 	var restored bytes.Buffer

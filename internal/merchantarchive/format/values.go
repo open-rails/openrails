@@ -23,7 +23,10 @@ func ValidateValues(p Profile, values []*string) error {
 				// column. A numeric UUID segment can pass Luhn once prefixed;
 				// exempt only this exact typed coordinate, never arbitrary text.
 				event, payment := value(p, values, "event_type"), value(p, values, "payment_id")
-				if event != nil && *event == "payment.settled" && payment != nil && uuidPattern.MatchString(*payment) && v == "payment:"+*payment {
+				if event != nil && *event == "payment.settled" {
+					if payment == nil || !uuidPattern.MatchString(*payment) || v != "payment:"+*payment {
+						return fmt.Errorf("invalid payment settlement dedupe key")
+					}
 					safe = true
 				}
 			}
