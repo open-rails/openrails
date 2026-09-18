@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,14 @@ type jsonRule func(any) bool
 
 func textValue(v any) bool { s, ok := v.(string); return ok && safeText(s) }
 func uuidValue(v any) bool { s, ok := v.(string); return ok && uuidPattern.MatchString(s) }
+func sha256Value(v any) bool {
+	s, ok := v.(string)
+	if !ok || len(s) != 64 || s != strings.ToLower(s) {
+		return false
+	}
+	_, err := hex.DecodeString(s)
+	return err == nil
+}
 func integerValue(v any) bool {
 	n, ok := v.(json.Number)
 	if !ok {
@@ -107,7 +116,28 @@ var rateJSON = object(map[string]jsonRule{
 
 // Exact nested shapes keep raw metadata/provider bodies out of the archive.
 // An unsupported shape is a refusal, never a lossy rewrite of a replay body.
+var cutoverPlanJSON = object(map[string]jsonRule{
+	"object": textValue, "id": textValue, "plan_name": textValue, "plan_amount": textValue, "plan_payments": textValue, "day_frequency": textValue, "month_frequency": textValue, "day_of_month": textValue,
+})
+var cutoverSubscriptionJSON = object(map[string]jsonRule{
+	"object": textValue, "id": textValue, "start_date": textValue, "next_billing_date": textValue, "amount": textValue, "customer_vault_id": textValue, "delayed_condition": textValue,
+	"paused_subscription": func(v any) bool { return booleanValue(v) || integerValue(v) || textValue(v) }, "plan": nullable(cutoverPlanJSON),
+})
+
 var jsonRules = map[string]jsonRule{
+	"rail_intents.nmi_provider_cutover.payload": object(map[string]jsonRule{
+		"source_credential_fingerprint": sha256Value, "target_credential_fingerprint": sha256Value,
+		"request":     object(map[string]jsonRule{"target_payment_method_id": uuidValue, "expected_source_psp_id": uuidValue, "expected_target_psp_id": uuidValue}),
+		"customer_id": uuidValue, "subscription_id": uuidValue, "source_subscription_id": textValue, "source_payment_method_id": uuidValue, "source_vault_id": textValue, "price_id": uuidValue, "plan_id": textValue, "vault_id": textValue, "billing_id": textValue, "currency": textValue, "amount": integerValue, "cycle_hours": integerValue, "period_start": textValue, "period_end": textValue, "anchor": textValue,
+	}),
+	"rail_intents.nmi_provider_cutover.result_evidence": object(map[string]jsonRule{
+		"create_submitted": booleanValue, "target": nullable(cutoverSubscriptionJSON), "source_receipt": nullable(cutoverSubscriptionJSON), "source_absent_at": textValue, "activated_target": nullable(cutoverSubscriptionJSON), "source_cancel_submitted": booleanValue, "source_canceled": booleanValue, "activation_submitted": booleanValue, "target_active": booleanValue,
+		"activation_anchor": textValue, "billing_anchor": textValue, "paused_anchor": textValue,
+		"not_executed": booleanValue, "not_executed_code": textValue,
+		"anchor_resolutions": array(object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "billing_anchor": textValue, "previous_anchor": textValue})),
+		"resolution":         object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "provider_reference": textValue, "not_executed": booleanValue}),
+	}),
+
 	// The completed collection operation retains its frozen instrument and
 	// accepted terms for replay; none of these fields contains card data.
 	"rail_intents.invoice_collection.payload": object(map[string]jsonRule{

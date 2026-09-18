@@ -50,6 +50,11 @@ import (
 // the client without adding it here fails Guard B.
 var providerWriteSurface = map[string]string{
 	// --- writes ---------------------------------------------------------
+	"CreatePausedSubscription":        "write",
+	"ActivateSubscription":            "write",
+	"ConfirmCutoverVault":             "read",
+	"GetCutoverPlan":                  "read",
+	"GetCutoverSubscription":          "read",
 	"RunSale":                         "write", // charges a card
 	"Refund":                          "write", // returns money
 	"Void":                            "write", // cancels an authorization
@@ -114,6 +119,7 @@ var allowedWriteCallers = map[string]string{
 	"internal/modules/checkout/nmi_upgrade_intent.go:advance":      "durable per-step upgrade handler",
 	"internal/intents/manual_rebill.go:Execute":                    "manual_rebill intent handler",
 	"internal/intents/refund.go:Execute":                           "nmi_refund intent handler",
+	"internal/intents/nmi_provider_cutover.go:advance":             "durable cutover step executor",
 	"internal/intents/nmi_delete.go:Execute":                       "nmi_delete_subscription intent handler",
 	"internal/intents/nmi_payment_source_update.go:Execute":        "nmi_payment_source_update intent handler (both call sites route through PaymentSourceUpdateThrough)",
 	"internal/intents/nmi_payment_method_delete.go:Execute":        "nmi_vault_delete intent handler — the sanctioned executor for durable user-initiated deletes",
