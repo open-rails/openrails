@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -43,8 +42,11 @@ func (v RecoveryView) Subscription(ctx context.Context, sub *models.Subscription
 	if err != nil {
 		return nil, err
 	}
-	now := timeutil.FirstClock(v.Clock).Now().UTC()
 	q := v.DB.Gen(ctx)
+	now, err := q.DatabaseNow(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read database clock: %w", err)
+	}
 	rows, err := v.Money.RecoveryPaymentMethodRows(ctx, identity.CustomerID(sub.CustomerID))
 	if err != nil {
 		return nil, err
@@ -76,11 +78,9 @@ func (v RecoveryView) Subscription(ctx context.Context, sub *models.Subscription
 			recovery.Operation = live
 			recovery.AttemptCount++
 		}
-		// A scheduled retry is the engine's own next attempt; a lease (the
-		// worker or a retry-now mid-charge) is not a schedule.
-		if sub.NextRetryAt != nil && !leased(sub) {
-			recovery.NextAttemptAt = sub.NextRetryAt
-		}
+		// next_retry_at is only ever the schedule: the engine's own next
+		// attempt. A live claim is a separate column.
+		recovery.NextAttemptAt = sub.NextRetryAt
 	}
 	windowExpired := false
 	if pastDue {
@@ -94,11 +94,10 @@ func (v RecoveryView) Subscription(ctx context.Context, sub *models.Subscription
 	return recovery, nil
 }
 
-// leased reports a live attempt lease: a claim writes next_retry_at exactly
-// AttemptLease after last_retry_at, a decline schedules days out. Telling them
-// apart by shape keeps a node clock out of the decision.
-func leased(sub *models.Subscription) bool {
-	return sub.NextRetryAt != nil && sub.LastRetryAt != nil && sub.NextRetryAt.Sub(*sub.LastRetryAt) <= AttemptLease
+// claimed reports a live rebill attempt claim (a dunning pass or a customer
+// retry-now mid-attempt), on the database clock.
+func claimed(sub *models.Subscription, now time.Time) bool {
+	return sub.DunningClaimedUntil != nil && sub.DunningClaimedUntil.After(now)
 }
 
 // liveOperation is the current period's unresolved rebill operation, if any.
@@ -132,7 +131,7 @@ func subscriptionRecoveryEligibility(sub *models.Subscription, recovery *openrai
 		return false, openrails.RecoveryBlockedOutcomeUnknown
 	case recovery.Operation != nil:
 		return false, openrails.RecoveryBlockedInProgress
-	case leased(sub) && sub.NextRetryAt.After(now):
+	case claimed(sub, now):
 		return false, openrails.RecoveryBlockedInProgress
 	case windowExpired:
 		return false, openrails.RecoveryBlockedWindowExpired

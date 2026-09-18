@@ -221,6 +221,8 @@ type dunningRowState struct {
 	cancelledAt         *time.Time
 	deletionScheduledAt *time.Time
 	deleteIntents       int
+	claimHolder         *string
+	claimLive           bool
 }
 
 type failingDunningLifecycle struct {
@@ -247,9 +249,10 @@ func (f *dunningCertaintyFixture) state(t *testing.T) dunningRowState {
 	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
 		qx := f.dbi.Qx(ctx)
 		if err := qx.QueryRow(ctx,
-			`SELECT status, retry_attempts, last_retry_at, next_retry_at, cancelled_at, deletion_scheduled_at
+			`SELECT status, retry_attempts, last_retry_at, next_retry_at, cancelled_at, deletion_scheduled_at,
+			        dunning_claim_holder, (dunning_claimed_until IS NOT NULL AND dunning_claimed_until > now())
 			   FROM openrails.subscriptions WHERE id = $1`, f.subID).
-			Scan(&s.status, &s.retryAttempts, &s.lastRetryAt, &s.nextRetryAt, &s.cancelledAt, &s.deletionScheduledAt); err != nil {
+			Scan(&s.status, &s.retryAttempts, &s.lastRetryAt, &s.nextRetryAt, &s.cancelledAt, &s.deletionScheduledAt, &s.claimHolder, &s.claimLive); err != nil {
 			return err
 		}
 		return qx.QueryRow(ctx,
@@ -428,8 +431,10 @@ func TestDunning_LifecycleFailureReleasesClaimAndSurfacesToRiver(t *testing.T) {
 	assert.Nil(t, state.retryAttempts, "a failed lifecycle transition must not advance the charge ordinal")
 	require.NotNil(t, state.lastRetryAt)
 	require.NotNil(t, state.nextRetryAt)
-	assert.True(t, state.nextRetryAt.Equal(*state.lastRetryAt), "the exact claim is immediately eligible for River's backoff retry")
-	assert.False(t, state.nextRetryAt.After(time.Now().UTC()), "released claim must be due now")
+	assert.Nil(t, state.claimHolder, "the attempt claim is released")
+	assert.False(t, state.claimLive)
+	assert.False(t, state.nextRetryAt.After(time.Now().UTC()),
+		"the schedule was never moved by the claim, so the row is immediately eligible for River's backoff retry")
 
 	var intentCount int
 	require.NoError(t, f.dbi.RunInMerchantConn(f.ctx, func(ctx context.Context) error {
