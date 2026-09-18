@@ -23,58 +23,13 @@ type ProductObject struct {
 	Prices           []PriceObject     `json:"prices,omitempty"`
 }
 
-type PriceObject struct {
-	ID string `json:"id"`
-	// Key (#774) is the durable, merchant-unique movable-pointer handle for
-	// this price's substance-version chain — usable anywhere `id` is accepted.
-	Key        string         `json:"key,omitempty"`
-	Object     string         `json:"object"`             // Always "price"
-	UnitAmount int64          `json:"unit_amount,string"` // native units at the currency registry scale
-	Currency   string         `json:"currency"`
-	Type       string         `json:"type,omitempty"`      // one_time or recurring
-	Recurring  *RecurringInfo `json:"recurring,omitempty"` // null for one-time purchases
-	Product    string         `json:"product"`             // Product ID
-	Active     bool           `json:"active"`
-	// Providers lists the payment rails this price can be paid through
-	// (e.g. ["stripe","ccbill"]), sorted. Lets clients render per-provider
-	// checkout actions and choose which rail to send at checkout time.
-	Providers []string          `json:"providers,omitempty"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
-	Created   int64             `json:"created"`
-}
-
-// RecurringInfo describes the billing interval for recurring prices
-type RecurringInfo struct {
-	Interval string `json:"interval"` // hours, e.g. "720h", "8760h"
-}
-
-// PaymentObject represents a payment resource
-type PaymentObject struct {
-	ID             string  `json:"id"`
-	Object         string  `json:"object"`           // "charge" for Stripe-style responses
-	Status         string  `json:"status,omitempty"` // succeeded, pending, failed, refunded, partially_refunded
-	Amount         int64   `json:"amount,string"`    // native units; positive for payments, negative for refunds
-	AmountRefunded int64   `json:"amount_refunded,string"`
-	Currency       string  `json:"currency"`
-	User           string  `json:"user"`                   // User ID with usr_ prefix
-	Subscription   *string `json:"subscription,omitempty"` // Subscription ID if linked
-	Rail           string  `json:"rail"`                   // nmi, ccbill, solana
-	TransactionID  string  `json:"transaction_id"`         // Rail's transaction identifier
-	Refunded       bool    `json:"refunded"`               // True if fully refunded
-	Captured       bool    `json:"captured,omitempty"`     // Always true for immediate captures
-	// FailureCode is the raw rail decline code; FailureReason the normalized category.
-	FailureCode   *string             `json:"failure_code,omitempty"`
-	FailureReason *string             `json:"failure_reason,omitempty"`
-	Refunds       *PaymentRefundsList `json:"refunds,omitempty"` // List of refunds (for single payment view)
-	Created       int64               `json:"created"`           // Unix epoch seconds
-	Price         *PriceObject        `json:"price,omitempty"`   // Expanded price object
-}
-
-// PaymentRefundsList contains refund entries for a payment
-type PaymentRefundsList struct {
-	Object string          `json:"object"` // Always "list"
-	Data   []PaymentObject `json:"data"`
-}
+// These aliases share the public Client wire types.
+type (
+	PriceObject        = openrails.PublicPrice
+	RecurringInfo      = openrails.PriceRecurrence
+	PaymentObject      = openrails.Payment
+	PaymentRefundsList = openrails.PaymentList
+)
 
 // List is a Stripe-style list response with offset/limit pagination. It mirrors
 // the Gin response package shape without importing Gin, keeping pkg/embedded

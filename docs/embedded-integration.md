@@ -415,9 +415,8 @@ via `embed.WithAdminConsole(sub)`; gate mounting on `admin_console.enabled`. See
 ### 7. Calling the engine
 
 ```go
-client, err := rt.Client()
+client, err := rt.Client() // bound to the merchant UpsertMerchantConfig bound
 if err != nil { log.Fatal(err) }
-ctx = openrails.WithMerchant(ctx, mid) // per-call pin; must agree with the bound merchant
 if err := client.Verify(ctx); err != nil { log.Fatal(err) } // fail fast at boot
 ```
 

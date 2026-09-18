@@ -145,7 +145,8 @@ func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error)
 }
 
 // Client returns the same typed client as NewRemote over the in-process
-// operation transport. Options, validation and errors follow the same path.
+// operation transport. It is bound to the runtime's configured merchant, or to
+// WithMerchantID on a multi-merchant runtime; an unbound client is refused.
 func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
 	rt := r.emb.App().Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt) })
@@ -156,7 +157,17 @@ func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, 
 	if id := rt.ConfiguredMerchant(); !id.IsZero() {
 		defaults = append(defaults, openrails.WithMerchantID(id))
 	}
-	return openrails.NewRemote(inprocessBaseURL, append(defaults, options...)...)
+	client, err := openrails.NewRemote(inprocessBaseURL, append(defaults, options...)...)
+	if err != nil {
+		return nil, err
+	}
+	switch bound := rt.ConfiguredMerchant(); {
+	case client.MerchantID().IsZero():
+		return nil, fmt.Errorf("openrails embed: runtime serves several merchants; bind the client with openrails.WithMerchantID")
+	case !bound.IsZero() && client.MerchantID() != bound:
+		return nil, fmt.Errorf("openrails embed: %s", merchantMismatchMsg(bound, client.MerchantID()))
+	}
+	return client, nil
 }
 
 // Service exposes the underlying pkg/service facade for host code that wants

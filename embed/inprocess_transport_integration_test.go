@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/pkg/embedded"
@@ -82,5 +81,5 @@ func TestInProcessTransportAuthTraversal(t *testing.T) {
 	}
 	_, err = c.GetMerchantSettings(ctx)
 	require.NoError(t, err, "unified client through in-process transport")
-	require.NoError(t, openrails.Verify(ctx, c), "Verify through in-process transport")
+	require.NoError(t, c.Verify(ctx), "Verify through in-process transport")
 }

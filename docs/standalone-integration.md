@@ -163,8 +163,8 @@ client := openrails.NewRemote("https://openrails.example",
     openrails.WithCurrency("usd"),
     openrails.WithTimeout(2*time.Second), // per-call deadline; default 2s
 )
-if err := openrails.Verify(ctx, client); err != nil { // authenticated boot probe
-    log.Fatal(err)                                    // bad URL, bad key — fail fast
+if err := client.Verify(ctx); err != nil { // authenticated boot probe
+    log.Fatal(err)                         // bad URL, bad key — fail fast
 }
 
 verdicts, err := client.AdmitBatch(ctx, []openrails.AdmitRequest{{
