@@ -55,6 +55,12 @@ jobs:
               go.mod|go.sum|docker-compose*|Dockerfile*) go=true; broad=true ;;
               # SQL/schema changes uniquely require the database-backed sqlc gate.
               sqlc.yaml|migrations/*|internal/db/*|scripts/sqlc-*|scripts/sql-lint.sh|scripts/migration-lint.sh) go=true; sql=true; broad=true ;;
+              # The sqlc gate's own runner: Taskfile.yaml is the command list
+              # the sqlc job executes, and go-test-gate.sh decides whether those
+              # commands count as a pass. Editing either can disarm the gate
+              # (or#1013), so it has to run — without the unbounded integration
+              # impact `broad` implies.
+              Taskfile.yaml|scripts/go-test-gate*|scripts/testdata/gatefixture*) go=true; sql=true ;;
               # Shared production surfaces have unbounded integration impact.
               internal/integrationharness/*|internal/shared/*|config/*) go=true; broad=true ;;
               # Generated from the Go currency registry; a Go unit test pins it.
