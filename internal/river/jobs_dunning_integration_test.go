@@ -72,7 +72,7 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 		ID:                  priceID,
 		ProductID:           productID,
 		Archived:            false,
-		Amount:              999,
+		Amount:              9_990_000,
 		Currency:            "USD",
 		AccessDurationHours: &billingDays,
 		AutoRenew:           true,
@@ -82,7 +82,7 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 	_, err = q.CreatePrice(ctx, gen.CreatePriceParams{
 		ID:                  priceID,
 		ProductID:           productID,
-		Amount:              999,
+		Amount:              9_990_000,
 		Currency:            "USD",
 		MerchantID:          dbtest.TestMerchantID.UUID(),
 		Archived:            false,
@@ -180,10 +180,10 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 
 	// Stub NMI direct post endpoint for AttemptManualRebill.
 	railTxnID := "txn_test_" + uuid.New().String()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRebillReceipts(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		_, _ = w.Write([]byte("response=1&transactionid=" + railTxnID))
-	}))
+	}), "9.99", "USD"))
 	t.Cleanup(srv.Close)
 
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
@@ -193,6 +193,7 @@ func TestDunningWorker_RebillSuccessWithoutBundledCredits(t *testing.T) {
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 
 	worker := &DunningWorker{
 		DB:          dbi,

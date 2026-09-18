@@ -61,7 +61,9 @@ type InvoiceDTO struct {
 	// CollectionIntentID names the live collection operation (`openrails
 	// intents`); no competing collection or admin mutation runs while set.
 	CollectionIntentID *uuid.UUID `json:"collection_intent_id,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
+	// Recovery is the customer's pay-now state; the customer routes fill it.
+	Recovery  *PaymentRecovery `json:"recovery,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
 }
 
 type InvoicePaymentAttemptDTO struct {

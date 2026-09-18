@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -68,7 +69,7 @@ func ValidateValues(p Profile, values []*string) error {
 		case "jsonb":
 			field := p.Name + "." + c.Name
 			if p.Name == "rail_intents" && (c.Name == "payload" || c.Name == "result_evidence") {
-				if typ := value(p, values, "intent_type"); typ != nil && (*typ == "nmi_sale" || *typ == "nmi_subscription_create" || *typ == "invoice_collection") {
+				if typ := value(p, values, "intent_type"); typ != nil && (*typ == "nmi_sale" || *typ == "nmi_subscription_create" || *typ == "invoice_collection" || *typ == "manual_rebill") {
 					field = p.Name + "." + *typ + "." + c.Name
 				}
 			}
@@ -77,6 +78,8 @@ func ValidateValues(p Profile, values []*string) error {
 			}
 		}
 		switch p.Name + "." + c.Name {
+		case "subscriptions.dunning_claim_holder", "subscriptions.dunning_claimed_until", "rail_intents.claimed_until":
+			return bad() // Export terminal facts, never a live or stale execution claim.
 		case "invoices.collection_intent_id":
 			return bad() // Any live collection must resolve before cutover.
 		case "payments.status":
@@ -118,7 +121,19 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection")) {
+		if typ != nil && *typ == "manual_rebill" {
+			if payload == nil || *payload == "null" || *payload == "{}" {
+				return fmt.Errorf("manual rebill has no retained request payload")
+			}
+			status, raw := value(p, values, "status"), value(p, values, "result_evidence")
+			if status != nil && *status == "succeeded" {
+				var evidence map[string]json.RawMessage
+				if raw == nil || json.Unmarshal([]byte(*raw), &evidence) != nil || evidence["qualified_rebill_receipt"] == nil {
+					return fmt.Errorf("successful rebill has no qualified receipt")
+				}
+			}
+		}
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection" && *typ != "manual_rebill")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 	}

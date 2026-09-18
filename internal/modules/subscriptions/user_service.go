@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,6 +121,7 @@ func (s *UserSubscriptionService) now() time.Time {
 
 // UserSubscriptionResponse represents a user's subscription with enriched data
 type UserSubscriptionResponse struct {
+	Recovery *openrails.PaymentRecovery `json:"recovery,omitempty"`
 	*models.Subscription
 	// EvaluatedAt binds derived eligibility flags to the service's business clock.
 	EvaluatedAt      time.Time        `json:"-"`
@@ -143,32 +145,33 @@ func (r *UserSubscriptionResponse) EvaluationTime() time.Time {
 // internal service callers.
 func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 	type userSubscriptionJSON struct {
-		ID                    uuid.UUID                 `json:"id,omitempty"`
-		CustomerID            string                    `json:"customer_id,omitempty"`
-		ProductID             uuid.UUID                 `json:"product_id,omitempty"`
-		PriceID               uuid.UUID                 `json:"price_id,omitempty"`
-		ScheduledPriceID      *uuid.UUID                `json:"scheduled_price_id,omitempty"`
-		Status                models.SubscriptionStatus `json:"status,omitempty"`
-		StartedAt             time.Time                 `json:"started_at,omitempty"`
-		EndedAt               *time.Time                `json:"ended_at,omitempty"`
-		CurrentPeriodStartsAt *time.Time                `json:"current_period_starts_at,omitempty"`
-		CurrentPeriodEndsAt   *time.Time                `json:"current_period_ends_at,omitempty"`
-		Rail                  models.Rail               `json:"rail,omitempty"`
-		CancelFeedback        *string                   `json:"cancel_feedback,omitempty"`
-		CancelType            *models.CancelType        `json:"cancel_type,omitempty"`
-		CancelledAt           *time.Time                `json:"cancelled_at,omitempty"`
-		Resumable             bool                      `json:"resumable"`
-		CancelScheduled       bool                      `json:"cancel_scheduled"`
-		CancelMode            string                    `json:"cancel_mode,omitempty"`
-		CancelPortalURL       *string                   `json:"cancel_portal_url,omitempty"`
-		CreatedAt             time.Time                 `json:"created_at,omitempty"`
-		UpdatedAt             time.Time                 `json:"updated_at,omitempty"`
-		Price                 *api.PriceObject          `json:"price,omitempty"`
-		Product               *api.ProductObject        `json:"product,omitempty"`
-		ScheduledPrice        *api.PriceObject          `json:"scheduled_price,omitempty"`
-		ScheduledProduct      *api.ProductObject        `json:"scheduled_product,omitempty"`
-		Card                  *subscriptionCardJSON     `json:"card,omitempty"`
-		Access                *UserAccessGrant          `json:"access,omitempty"`
+		Recovery              *openrails.PaymentRecovery `json:"recovery,omitempty"`
+		ID                    uuid.UUID                  `json:"id,omitempty"`
+		CustomerID            string                     `json:"customer_id,omitempty"`
+		ProductID             uuid.UUID                  `json:"product_id,omitempty"`
+		PriceID               uuid.UUID                  `json:"price_id,omitempty"`
+		ScheduledPriceID      *uuid.UUID                 `json:"scheduled_price_id,omitempty"`
+		Status                models.SubscriptionStatus  `json:"status,omitempty"`
+		StartedAt             time.Time                  `json:"started_at,omitempty"`
+		EndedAt               *time.Time                 `json:"ended_at,omitempty"`
+		CurrentPeriodStartsAt *time.Time                 `json:"current_period_starts_at,omitempty"`
+		CurrentPeriodEndsAt   *time.Time                 `json:"current_period_ends_at,omitempty"`
+		Rail                  models.Rail                `json:"rail,omitempty"`
+		CancelFeedback        *string                    `json:"cancel_feedback,omitempty"`
+		CancelType            *models.CancelType         `json:"cancel_type,omitempty"`
+		CancelledAt           *time.Time                 `json:"cancelled_at,omitempty"`
+		Resumable             bool                       `json:"resumable"`
+		CancelScheduled       bool                       `json:"cancel_scheduled"`
+		CancelMode            string                     `json:"cancel_mode,omitempty"`
+		CancelPortalURL       *string                    `json:"cancel_portal_url,omitempty"`
+		CreatedAt             time.Time                  `json:"created_at,omitempty"`
+		UpdatedAt             time.Time                  `json:"updated_at,omitempty"`
+		Price                 *api.PriceObject           `json:"price,omitempty"`
+		Product               *api.ProductObject         `json:"product,omitempty"`
+		ScheduledPrice        *api.PriceObject           `json:"scheduled_price,omitempty"`
+		ScheduledProduct      *api.ProductObject         `json:"scheduled_product,omitempty"`
+		Card                  *subscriptionCardJSON      `json:"card,omitempty"`
+		Access                *UserAccessGrant           `json:"access,omitempty"`
 	}
 
 	if r.Subscription != nil {
@@ -177,6 +180,7 @@ func (r *UserSubscriptionResponse) MarshalJSON() ([]byte, error) {
 		// and the library DTO.
 		now := r.EvaluationTime()
 		out := userSubscriptionJSON{
+			Recovery:              r.Recovery,
 			ID:                    r.Subscription.ID,
 			CustomerID:            r.Subscription.CustomerID.String(),
 			ProductID:             r.Subscription.ProductID,

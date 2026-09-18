@@ -1227,10 +1227,13 @@ type OpenrailsSubscription struct {
 	EndedAt               *time.Time
 	GraceEndsAt           *time.Time
 	// Price ID for scheduled tier change (downgrade). Applied at end of current billing period during renewal.
-	ScheduledPriceID         *uuid.UUID
-	LastRetryAt              *time.Time
-	RetryAttempts            *int32
-	NextRetryAt              *time.Time
+	ScheduledPriceID *uuid.UUID
+	LastRetryAt      *time.Time
+	RetryAttempts    *int32
+	NextRetryAt      *time.Time
+	// Who holds the rebill attempt claim (#809 R4): a dunning worker pass or a customer retry-now request. next_retry_at is the schedule only; the claim is this pair, acquired and expired on the database clock.
+	DunningClaimHolder       *string
+	DunningClaimedUntil      *time.Time
 	CancelledAt              *time.Time
 	CancelType               *string
 	CancelFeedback           *string

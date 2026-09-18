@@ -41,6 +41,7 @@ var converters = []string{
 // pinnedBoundaries: file -> the wire-pinning test that covers it (known micros
 // in ⇒ exact integer on the wire).
 var pinnedBoundaries = map[string]string{
+	"internal/modules/dunning/freeze.go":              "internal/modules/dunning/freeze_wire_pinning_test.go",
 	"internal/modules/checkout/nmi_upgrade_intent.go": "internal/modules/checkout/upgrade_receipts_integration_test.go",
 	"internal/integrations/nmi/payments.go":           "internal/integrations/nmi/payments_wire_test.go",
 	"internal/integrations/nmi/v5.go":                 "internal/integrations/nmi/payments_wire_test.go",

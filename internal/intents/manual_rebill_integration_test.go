@@ -4,9 +4,13 @@ package intents
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/db/models"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -34,6 +38,17 @@ type fakeNMIRebillGateway struct {
 	saleAuthKey atomic.Value // security_key the last sale authenticated with (#730)
 	saleForm    atomic.Value // url.Values: full form of the last sale (#297 wire assertions)
 	txnID       string
+	// exact is the v5 read of txnID: what NMI recorded for the landed sale.
+	exactVault, exactAmount, exactCurrency atomic.Value
+}
+
+// recordSale overrides what the v5 exact read reports for the landed sale. By
+// default it is what NMI records: the vault the sale was sent with, at the
+// plan amount (the fixture's $9.99 USD).
+func (f *fakeNMIRebillGateway) recordSale(vault, amount, currency string) {
+	f.exactVault.Store(vault)
+	f.exactAmount.Store(amount)
+	f.exactCurrency.Store(currency)
 }
 
 func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClient) {
@@ -41,7 +56,27 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 	f := &fakeNMIRebillGateway{txnID: "txn-rebill-" + uuid.NewString()[:8]}
 	f.saleBody.Store("response=1&transactionid=" + f.txnID)
 
+	f.recordSale("", rebillAmountWire, "USD")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/payments/"+f.txnID) && f.charged.Load() {
+			amount := f.exactAmount.Load().(string)
+			vault := f.exactVault.Load().(string)
+			if form, ok := f.saleForm.Load().(url.Values); ok && vault == "" {
+				vault = form.Get("customer_vault_id")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"object": "transaction", "id": f.txnID, "response": "1", "response_code": "100",
+				"amount": amount, "currency": f.exactCurrency.Load().(string), "customer_vault_id": vault,
+				"actions": []map[string]any{{"id": f.txnID, "type": "sale", "amount": amount, "success": true}},
+			})
+			return
+		}
+		if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/payments/") {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"type":"notFound","error_code":"E_NOT_FOUND","message":"transaction not found"}`)
+			return
+		}
 		_ = r.ParseForm()
 		if r.Form.Get("report_type") == "transaction" || r.URL.Query().Get("report_type") == "transaction" {
 			f.queryCalls.Add(1)
@@ -64,7 +99,11 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 				w.WriteHeader(int(st))
 				return
 			}
-			_, _ = w.Write([]byte(f.saleBody.Load().(string)))
+			body := f.saleBody.Load().(string)
+			if strings.HasPrefix(body, "response=1&") {
+				f.charged.Store(true)
+			}
+			_, _ = w.Write([]byte(body))
 			return
 		}
 		_, _ = w.Write([]byte("response=1"))
@@ -78,17 +117,28 @@ func newFakeNMIRebillGateway(t *testing.T) (*fakeNMIRebillGateway, *nmi.NMIClien
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 	return f, client
 }
 
 type rebillFixture struct {
-	db        *db.DB
-	store     *Store
-	subID     uuid.UUID
-	periodEnd time.Time
-	orderRef  string
-	pspID     uuid.UUID
+	db               *db.DB
+	store            *Store
+	subID            uuid.UUID
+	periodEnd        time.Time
+	orderRef         string
+	pspID            uuid.UUID
+	methodID         uuid.UUID
+	vault            string
+	billing, railSub string
 }
+
+// The fixture price is $9.99 (native micros); the rebill freezes it.
+const (
+	rebillAmount      = 9_990_000
+	rebillAmountMinor = 999
+	rebillAmountWire  = "9.99"
+)
 
 // seedPastDueSubscription inserts product/price/payment-method/subscription
 // in the dunning posture: past_due, missed period end in the recent past.
@@ -120,7 +170,9 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 	exec(`INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $2, $3)`,
 		productID, "rebill-prod-"+suffix, tenantID)
 	exec(`INSERT INTO openrails.prices (id, product_id, amount, currency, access_duration_hours, auto_renew, merchant_id)
-	      VALUES ($1, $2, 999, 'USD', 720, true, $3)`, priceID, productID, tenantID)
+	      VALUES ($1, $2, $3, 'USD', 720, true, $4)`, priceID, productID, rebillAmount, tenantID)
+	fx.methodID, fx.vault = paymentMethodID, "vault-"+suffix
+	fx.billing, fx.railSub = "bill-"+suffix, "psid-"+suffix
 	exec(`INSERT INTO openrails.payment_methods
 	        (id, customer_id, rail, psp_id, rail_customer_ref, rail_method_ref,
 	         initial_transaction_id, stored_credential_recurring_ref, merchant_id)
@@ -150,6 +202,20 @@ func seedPastDueSubscription(t *testing.T) rebillFixture {
 func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 	subID := fx.subID
 	windowEnd := fx.periodEnd.Add(14 * 24 * time.Hour)
+	// Match production admission: capture the credential sequence now. Later
+	// changes to the method cannot refresh an already accepted operation.
+	var anchor, legacy string
+	if err := fx.db.Pool().QueryRow(context.Background(),
+		`SELECT stored_credential_recurring_ref, initial_transaction_id FROM openrails.payment_methods WHERE id=$1`, fx.methodID).Scan(&anchor, &legacy); err != nil {
+		panic(err)
+	}
+	anchorSource := "agreement"
+	if anchor == "" {
+		anchor, anchorSource = legacy, "legacy_initial_transaction_id"
+	}
+	if anchor == "" {
+		anchorSource = "unavailable"
+	}
 	return EnqueueParams{
 		MerchantID:     dbtest.TestMerchantID.UUID(),
 		Provider:       "mobius",
@@ -157,11 +223,19 @@ func (fx rebillFixture) enqueueParams(attempt int) EnqueueParams {
 		IntentType:     TypeManualRebill,
 		SubscriptionID: &subID,
 		Payload: ManualRebillPayload{
-			SubscriptionID: fx.subID,
-			PeriodEnd:      fx.periodEnd,
-			Rail:           "mobius",
-			OrderReference: fx.orderRef,
-			Attempt:        attempt,
+			SubscriptionID:         fx.subID,
+			PeriodEnd:              fx.periodEnd,
+			Rail:                   "mobius",
+			OrderReference:         fx.orderRef,
+			Attempt:                attempt,
+			PaymentMethodID:        fx.methodID,
+			Instrument:             RebillInstrument{PSPID: fx.pspID, Custodian: models.CustodianPSP, RailCustomerRef: fx.vault, RailMethodRef: fx.billing},
+			RailSubscriptionID:     fx.railSub,
+			CredentialReference:    anchor,
+			CredentialAnchorSource: anchorSource,
+			Currency:               "USD",
+			Amount:                 rebillAmount,
+			AmountMinor:            rebillAmountMinor,
 		},
 		IdempotencyKey: ManualRebillIdempotencyKey(fx.subID, fx.periodEnd, "mobius", fx.orderRef, attempt),
 		NextAttemptAt:  time.Now().UTC(),
@@ -271,7 +345,7 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 	require.Equal(t, OutcomeAmbiguous, outcome.Class)
 	require.EqualValues(t, 1, fake.saleCalls.Load())
 
-	// The charge actually landed at NMI.
+	// The charge actually landed at NMI, exactly as frozen.
 	fake.charged.Store(true)
 	_, err = fx.db.Pool().Exec(context.Background(),
 		"UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
@@ -281,11 +355,9 @@ func TestManualRebillAmbiguousVerifyLateSuccessRepairsLifecycle(t *testing.T) {
 
 	got := fx.intentByID(t, row.ID)
 	assert.Equal(t, StatusSucceeded, got.Status)
-	// #607: the tombstone is slimmed to the dunning pointer keys — the
-	// transaction_id the repair path reads survives; the verified_existing
-	// forensic marker is dropped (retained in the mutation log).
+	// The persisted qualification survives terminalization for audit and replay.
 	assert.Contains(t, string(got.ResultEvidence), fake.txnID, "transaction_id pointer retained for the dunning repair path")
-	assert.NotContains(t, string(got.ResultEvidence), "verified_existing", "forensic evidence pruned")
+	assert.Contains(t, string(got.ResultEvidence), rebillReceiptKey, "qualified receipt retained")
 	assert.EqualValues(t, 1, fake.saleCalls.Load(), "exactly one charge attempt ever reached the gateway")
 
 	sub := fx.subscription(t)
@@ -385,4 +457,71 @@ func TestManualRebillWindowExpiryNeverFires(t *testing.T) {
 	assert.Equal(t, StatusExpired, got.Status)
 	assert.Zero(t, fake.saleCalls.Load(), "expired dunning charges never fire")
 	assert.Equal(t, "past_due", string(fx.subscription(t).Status))
+}
+
+// TestManualRebillContradictedReceiptStaysUnknown (#809 R4 P1): a rebill whose
+// response was lost converges only on the exact frozen charge. A sale under
+// the period's order reference on another vault, for another amount, or in
+// another currency keeps the operation unknown with the contradiction
+// retained: no payment, no renewal, no resend; the operator can neither name
+// it as the receipt nor attest non-execution. The exact sale then settles —
+// through the verifier, or through the operator's receipt.
+func TestManualRebillContradictedReceiptStaysUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		name, vault, amount, currency string
+		byOperator                    bool
+	}{
+		{name: "another vault", vault: "someone-elses-vault", amount: rebillAmountWire, currency: "USD"},
+		{name: "another amount", amount: "0.01", currency: "USD"},
+		{name: "another currency", amount: rebillAmountWire, currency: "EUR", byOperator: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fx := seedPastDueSubscription(t)
+			fake, client := newFakeNMIRebillGateway(t)
+			fake.saleStatus.Store(http.StatusBadGateway)
+			runner := fx.rebillRunner(client, fullModeConfig())
+			ctx := dbtest.WithTestMerchant(context.Background())
+			row, err := runner.EnqueueAndExecute(context.Background(), fx.enqueueParams(1))
+			require.NoError(t, err)
+			require.Equal(t, StatusUnknownNeedsVerify, row.Status)
+
+			fake.charged.Store(true)
+			fake.recordSale(tc.vault, tc.amount, tc.currency)
+			_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+			require.NoError(t, err)
+			_, err = runner.RunVerifyOnce(context.Background())
+			require.NoError(t, err)
+			got := fx.intentByID(t, row.ID)
+			require.Equal(t, StatusUnknownNeedsVerify, got.Status, "a contradicting sale never settles")
+			require.Contains(t, string(got.ResultEvidence), rebillEvidenceContradiction)
+			require.Equal(t, "past_due", string(fx.subscription(t).Status), "no renewal")
+			require.Zero(t, fx.paymentsFor(t, fake.txnID), "no payment recorded")
+
+			_, err = runner.Resolve(ctx, row.ID, Resolution{ProviderReference: fake.txnID, Actor: "ops", Reason: "portal"})
+			require.ErrorIs(t, err, ErrResolutionRejected, "the contradicting sale is not this rebill's receipt")
+			_, err = runner.Resolve(ctx, row.ID, Resolution{NotExecuted: true, Actor: "ops", Reason: "portal"})
+			require.ErrorIs(t, err, ErrResolutionRejected, "non-execution cannot be attested against provider evidence")
+			require.Equal(t, StatusUnknownNeedsVerify, fx.intentByID(t, row.ID).Status)
+			require.EqualValues(t, 1, fake.saleCalls.Load(), "nothing is resent")
+
+			fake.recordSale("", rebillAmountWire, "USD")
+			if tc.byOperator {
+				resolved, err := runner.Resolve(ctx, row.ID, Resolution{ProviderReference: fake.txnID, Actor: "ops", Reason: "portal"})
+				require.NoError(t, err)
+				require.Equal(t, StatusSucceeded, resolved.Status)
+			} else {
+				_, err = fx.db.Pool().Exec(ctx, "UPDATE openrails.rail_intents SET next_attempt_at = now() WHERE id = $1", row.ID)
+				require.NoError(t, err)
+				_, err = runner.RunVerifyOnce(context.Background())
+				require.NoError(t, err)
+				require.Equal(t, StatusSucceeded, fx.intentByID(t, row.ID).Status)
+			}
+			require.Equal(t, "active", string(fx.subscription(t).Status))
+			require.Equal(t, 1, fx.paymentsFor(t, fake.txnID))
+			var amount int64
+			require.NoError(t, fx.db.Pool().QueryRow(ctx, "SELECT amount FROM openrails.payments WHERE subscription_id = $1 AND transaction_id = $2", fx.subID, fake.txnID).Scan(&amount))
+			require.EqualValues(t, rebillAmount, amount, "the renewal records the frozen amount")
+			require.EqualValues(t, 1, fake.saleCalls.Load())
+		})
+	}
 }

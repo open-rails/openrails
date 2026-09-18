@@ -88,7 +88,7 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.Equal(t, "12/30", expiry)
 
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		dueAt, leaseUntil := now.Add(-time.Hour), now.Add(time.Hour)
+		dueAt := now.Add(-time.Hour)
 		claimSubID, scheduleSubID := uuid.New(), uuid.New()
 		_, err = qx.Exec(ctx,
 			`INSERT INTO openrails.subscriptions
@@ -102,29 +102,50 @@ func TestMutationPredicatesRejectCrossMerchantIDsWithoutRLS(t *testing.T) {
 		require.NoError(t, err)
 
 		claim := gen.ClaimDunningAttemptParams{
-			ID: claimSubID, MerchantID: otherID, LeaseUntil: leaseUntil, ClaimedAt: now,
+			ID: claimSubID, MerchantID: otherID, Holder: "dunning:scope-test", LeaseSeconds: 900, ClaimedAt: now,
 		}
 		n, err = queries.ClaimDunningAttempt(ctx, claim)
 		require.NoError(t, err)
 		require.Zero(t, n)
 		var nextRetry time.Time
-		var lastRetry *time.Time
-		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT next_retry_at, last_retry_at FROM openrails.subscriptions WHERE id = $1`, claimSubID,
-		).Scan(&nextRetry, &lastRetry))
+		var lastRetry, claimedUntil *time.Time
+		var holder *string
+		readClaim := func() {
+			require.NoError(t, qx.QueryRow(ctx,
+				`SELECT next_retry_at, last_retry_at, dunning_claim_holder, dunning_claimed_until FROM openrails.subscriptions WHERE id = $1`, claimSubID,
+			).Scan(&nextRetry, &lastRetry, &holder, &claimedUntil))
+		}
+		readClaim()
 		require.True(t, dueAt.Equal(nextRetry))
 		require.Nil(t, lastRetry)
+		require.Nil(t, holder, "another merchant's claim never lands")
 
 		claim.MerchantID = ownerID
 		n, err = queries.ClaimDunningAttempt(ctx, claim)
 		require.NoError(t, err)
 		require.EqualValues(t, 1, n)
-		require.NoError(t, qx.QueryRow(ctx,
-			`SELECT next_retry_at, last_retry_at FROM openrails.subscriptions WHERE id = $1`, claimSubID,
-		).Scan(&nextRetry, &lastRetry))
-		require.True(t, leaseUntil.Equal(nextRetry))
+		readClaim()
+		require.True(t, dueAt.Equal(nextRetry), "the claim never moves the schedule (#809 R4)")
 		require.NotNil(t, lastRetry)
 		require.True(t, now.Equal(*lastRetry))
+		require.NotNil(t, holder)
+		require.Equal(t, "dunning:scope-test", *holder)
+		require.NotNil(t, claimedUntil)
+		require.True(t, claimedUntil.After(time.Now().UTC()), "the claim expires on the database clock")
+
+		// A live claim is exclusive; releasing it by holder frees the row.
+		n, err = queries.ClaimDunningAttempt(ctx, gen.ClaimDunningAttemptParams{ID: claimSubID, MerchantID: ownerID, Holder: "dunning:other-pass", LeaseSeconds: 900, ClaimedAt: now})
+		require.NoError(t, err)
+		require.Zero(t, n, "a live claim is not taken over")
+		n, err = queries.ReleaseDunningClaim(ctx, gen.ReleaseDunningClaimParams{ID: claimSubID, MerchantID: otherID, Holder: "dunning:scope-test"})
+		require.NoError(t, err)
+		require.Zero(t, n, "another merchant cannot release it")
+		n, err = queries.ReleaseDunningClaim(ctx, gen.ReleaseDunningClaimParams{ID: claimSubID, MerchantID: ownerID, Holder: "dunning:scope-test"})
+		require.NoError(t, err)
+		require.EqualValues(t, 1, n)
+		readClaim()
+		require.Nil(t, holder)
+		require.True(t, dueAt.Equal(nextRetry), "the row is due again as it was")
 
 		scheduleAt := now.Add(30 * time.Minute)
 		schedule := gen.SetSubscriptionNextRetryParams{

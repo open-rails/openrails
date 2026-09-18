@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -88,6 +89,20 @@ func array(r jsonRule) jsonRule {
 	}
 }
 
+// A receipt digest is a typed public commitment, not arbitrary opaque text.
+func qualifiedRebillReceiptJSON(v any) bool {
+	m, ok := v.(map[string]any)
+	if !ok || len(m) != 2 || !textValue(m["transaction_id"]) || m["transaction_id"] == "" {
+		return false
+	}
+	digest, ok := m["binding"].(string)
+	if !ok || len(digest) != 64 || strings.ToLower(digest) != digest {
+		return false
+	}
+	_, err := hex.DecodeString(digest)
+	return err == nil
+}
+
 var emptyObject = object(map[string]jsonRule{})
 var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds": integerValue, "limit": integerValue, "currency": textValue})
 var profileJSON = object(map[string]jsonRule{"display_name": textValue, "logo_url": textValue, "from_email": textValue, "support_url": textValue, "signup_url": textValue})
@@ -108,6 +123,25 @@ var rateJSON = object(map[string]jsonRule{
 // Exact nested shapes keep raw metadata/provider bodies out of the archive.
 // An unsupported shape is a refusal, never a lossy rewrite of a replay body.
 var jsonRules = map[string]jsonRule{
+	"rail_intents.manual_rebill.payload": object(map[string]jsonRule{
+		"subscription_id": uuidValue, "period_end": textValue, "rail": textValue,
+		"order_reference": textValue, "attempt": integerValue, "payment_method_id": uuidValue,
+		"rail_subscription_id": textValue,
+		"instrument":           object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue}),
+		"credential_reference": textValue, "credential_anchor_source": textValue,
+		"currency": textValue, "amount": integerValue, "amount_minor": integerValue,
+		"request_key": textValue, "request_payment_method_id": uuidValue,
+	}),
+	"rail_intents.manual_rebill.result_evidence": nullable(object(map[string]jsonRule{
+		"transaction_id": textValue, "qualified_rebill_receipt": qualifiedRebillReceiptJSON,
+		"declined": booleanValue, "response_code": integerValue,
+		"stored_credential_anchor_missing": booleanValue, "stored_credential_anchor_source": textValue,
+		"operator_resolution": object(map[string]jsonRule{
+			"actor": textValue, "reason": textValue, "resolved_at": textValue,
+			"provider_reference": textValue, "not_executed": booleanValue,
+		}),
+	})),
+
 	// The completed collection operation retains its frozen instrument and
 	// accepted terms for replay; none of these fields contains card data.
 	"rail_intents.invoice_collection.payload": object(map[string]jsonRule{
@@ -124,6 +158,7 @@ var jsonRules = map[string]jsonRule{
 	// Engine-authored payment correlation, not an arbitrary provider body.
 	"payments.metadata": nullable(object(map[string]jsonRule{
 		"order_id": textValue, "provider_transaction_id": textValue, "e2e_run_id": textValue, "stripe_invoice_id": textValue,
+		"refund_review": textValue, // confirmed rebill on an already-cancelled subscription
 	})),
 	"invoice_items.metadata": nullable(object(map[string]jsonRule{
 		"operation": textValue, "source": textValue,

@@ -40,6 +40,59 @@ func successfulAction(txn v5Transaction, actionType string, amount moneyutil.Cen
 	return false
 }
 
+// OrderSale is what an OpenRails charge froze before submission: the order
+// reference it was sent under, the instrument's customer vault (a
+// custodian-held card has none: Unvaulted), and the exact amount and currency.
+type OrderSale struct {
+	OrderID         string
+	CustomerVaultID string
+	Unvaulted       bool
+	Amount          moneyutil.Cents
+	Currency        string
+}
+
+// ConfirmOrderSale is the ONE exact-receipt path for an OpenRails-originated
+// NMI charge (invoice collection, subscription rebill), shared by autonomous
+// verification and operator resolution. The Query API must return a
+// successful sale for the order reference (identity); with providerReference
+// set it must be that very sale. The v5 read of that sale must then be
+// approved, in the frozen currency, for the frozen amount, on the frozen
+// customer vault (a custodian-held card is charged by card data and has no
+// vault at NMI: its read binds approval, currency and amount, and the order
+// reference binds the instrument). An empty search is inconclusive
+// (found=false, nil error); a sale that exists but contradicts the frozen
+// facts is an ErrReceiptMismatch error.
+func (c *NMIClient) ConfirmOrderSale(ctx context.Context, expect OrderSale, providerReference string) (transactionID string, found bool, err error) {
+	orderID := strings.TrimSpace(expect.OrderID)
+	if orderID == "" || expect.Amount <= 0 || strings.TrimSpace(expect.Currency) == "" {
+		return "", false, errors.New("receipt expectation is incomplete")
+	}
+	providerReference = strings.TrimSpace(providerReference)
+	txnID, ok, err := c.FindSuccessfulSaleByOrderID(ctx, orderID)
+	if err != nil {
+		return "", false, fmt.Errorf("nmi query for order ref %q: %w", orderID, err)
+	}
+	txnID = strings.TrimSpace(txnID)
+	if !ok || txnID == "" {
+		if providerReference != "" {
+			return "", false, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, orderID)
+		}
+		return "", false, nil
+	}
+	if providerReference != "" && txnID != providerReference {
+		return "", false, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, orderID)
+	}
+	if expect.Unvaulted {
+		err = c.ConfirmApprovedUnvaultedSale(ctx, txnID, expect.Amount, expect.Currency)
+	} else {
+		err = c.ConfirmApprovedSale(ctx, txnID, expect.CustomerVaultID, expect.Amount, expect.Currency)
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return txnID, true, nil
+}
+
 // ConfirmApprovedSale reads one transaction by its exact id and requires an
 // approved sale of exactly amount, in currency, on the customer vault. It
 // does not establish which operation the sale belongs to: callers bind the

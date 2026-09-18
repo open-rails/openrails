@@ -434,6 +434,17 @@ func (q *Queries) CountRailIntents(ctx context.Context, arg CountRailIntentsPara
 	return count, err
 }
 
+const databaseNow = `-- name: DatabaseNow :one
+SELECT now()::timestamptz AS now
+`
+
+func (q *Queries) DatabaseNow(ctx context.Context) (time.Time, error) {
+	row := q.db.QueryRow(ctx, databaseNow)
+	var now time.Time
+	err := row.Scan(&now)
+	return now, err
+}
+
 const enqueueRailIntent = `-- name: EnqueueRailIntent :one
 
 
@@ -620,6 +631,55 @@ func (q *Queries) ExpireOverdueRailIntents(ctx context.Context, arg ExpireOverdu
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const getManualRebillByRequestKey = `-- name: GetManualRebillByRequestKey :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid
+  AND intent_type = 'manual_rebill'
+  AND (payload ->> 'request_key') = $2::text
+`
+
+type GetManualRebillByRequestKeyParams struct {
+	MerchantID uuid.UUID
+	RequestKey string
+}
+
+// Customer retry-now (#809): the rebill a payer-scoped client idempotency key
+// started, bound through the frozen payload's request_key (unique per
+// merchant, uq_rail_intents_request_key).
+func (q *Queries) GetManualRebillByRequestKey(ctx context.Context, arg GetManualRebillByRequestKeyParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, getManualRebillByRequestKey, arg.MerchantID, arg.RequestKey)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
 }
 
 const getRailIntent = `-- name: GetRailIntent :one
@@ -907,6 +967,74 @@ func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams
 	return items, nil
 }
 
+const listRailIntentsBySubject = `-- name: ListRailIntentsBySubject :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid
+  AND intent_type = $2::text
+  AND subscription_id = $3::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT $4::int
+`
+
+type ListRailIntentsBySubjectParams struct {
+	MerchantID     uuid.UUID
+	IntentType     string
+	SubscriptionID uuid.UUID
+	RowLimit       int32
+}
+
+func (q *Queries) ListRailIntentsBySubject(ctx context.Context, arg ListRailIntentsBySubjectParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listRailIntentsBySubject,
+		arg.MerchantID,
+		arg.IntentType,
+		arg.SubscriptionID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listStuckRailIntents = `-- name: ListStuckRailIntents :many
 
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
@@ -974,6 +1102,17 @@ func (q *Queries) ListStuckRailIntents(ctx context.Context, arg ListStuckRailInt
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockRecoveryRequestKey = `-- name: LockRecoveryRequestKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 2))
+`
+
+// Serializes customer recovery requests sharing one payer-scoped client key
+// (#809), so the second sees the first's operation and compares requests.
+func (q *Queries) LockRecoveryRequestKey(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockRecoveryRequestKey, lockKey)
+	return err
 }
 
 const markRailIntentFailedRetryable = `-- name: MarkRailIntentFailedRetryable :execrows

@@ -145,6 +145,10 @@ func createPythPriceProvider(cfg *config.Config) (solanamodule.TokenPriceProvide
 }
 
 func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, overrides *runtimeOverrides) (*Runtime, error) {
+	gateway, gatewayErr := cfg.SandboxNMIGatewayURL()
+	if gatewayErr != nil {
+		return nil, gatewayErr
+	}
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -345,6 +349,18 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	runtimeRef = runtime
 	runtime.CollectionResolver = collectionResolver
 	moneyCharger.SetAdapterResolver(collectionResolver)
+	// A declared loopback NMI gateway (config.ProviderSandbox) reaches every
+	// store-armed NMI client: collection charges and verify reads, checkout
+	// sales, payment-method updates.
+	if gateway != "" {
+		collectionResolver.Endpoints = money.CollectionEndpoints{NMIV5BaseURL: gateway, NMIDirectPostURL: gateway, NMIQueryURL: gateway}
+		if serviceInstances.CheckoutService != nil {
+			serviceInstances.CheckoutService.NMIEndpointOverride = gateway
+		}
+		if runtime.RailPaymentMethodService != nil {
+			runtime.RailPaymentMethodService.NMIEndpointOverride = gateway
+		}
+	}
 	runtime.SolanaRPCResolver = solanaRPCResolver
 	// #817: decimals come from the SPL mint on-chain, read through the same
 	// per-merchant chain reader and cached (mint decimals are immutable).

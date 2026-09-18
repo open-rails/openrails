@@ -27,11 +27,19 @@ func writePaymentMethodStale(r *httprequest.Request) {
 }
 
 // paymentRefusalError maps an NMI failure code (localization id or numeric
-// response code) onto the refusal envelope. Card categories are a 402
-// card_declined the customer can answer with another card; gateway and
-// merchant-configuration categories are a 502 payment_provider_rejected.
+// response code) onto the refusal envelope.
 func paymentRefusalError(failureCode string) *api.APIError {
-	reason := payments.NormalizeFailureReason("nmi", failureCode)
+	return refusalForReason(payments.NormalizeFailureReason("nmi", failureCode), failureCode)
+}
+
+// refusalForReason renders a normalized decline reason. Card categories are a
+// 402 card_declined the customer can answer with another card; gateway and
+// merchant-configuration categories are a 502 payment_provider_rejected.
+// Metadata carries decline_reason and the provider's verbatim failure_code.
+func refusalForReason(reason, failureCode string) *api.APIError {
+	if reason == "" {
+		reason = payments.FailureUnknown
+	}
 	metadata := map[string]any{"decline_reason": reason}
 	if failureCode != "" {
 		metadata["failure_code"] = failureCode

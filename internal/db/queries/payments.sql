@@ -309,3 +309,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
   AND card_last4 IS NOT NULL
   AND deleted_at IS NULL
 LIMIT 1;
+
+-- name: GetLatestFailedPaymentBySubscription :one
+-- Customer recovery view (#809): the newest recorded decline on the
+-- subscription's rebill history.
+SELECT * FROM openrails.payments purch
+WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND purch.subscription_id = sqlc.arg(subscription_id)::uuid
+  AND purch.status = 'failed'
+  AND purch.deleted_at IS NULL
+ORDER BY purch.purchased_at DESC, purch.id DESC
+LIMIT 1;
