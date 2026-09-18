@@ -502,14 +502,14 @@ describe("payment mutations", () => {
         )
       )
       .execute({
-        amount: 5_000_000,
+        amount: "5000000",
         reason: "requested",
         revokeAccess: true,
       })
 
     expect(refundPayment).toHaveBeenCalledWith(
       "payment-1",
-      5_000_000,
+      "5000000",
       "requested",
       true
     )
@@ -553,7 +553,7 @@ describe("payment mutations", () => {
     await queryClient
       .getMutationCache()
       .build(queryClient, options)
-      .execute({ amount: 5_000_000, reason: "", revokeAccess: false })
+      .execute({ amount: "5000000", reason: "", revokeAccess: false })
 
     expect(queryClient.getQueryState(paymentAKey)?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(customerAKey)?.isInvalidated).toBe(true)
@@ -833,7 +833,7 @@ describe("customer mutations", () => {
     const payment = {
       price_id: "price-1",
       transaction_id: "external-1",
-      amount: 12_500_000,
+      amount: "12500000",
     }
 
     await queryClient
@@ -1067,7 +1067,7 @@ describe("catalog mutations", () => {
     const price = {
       product_id: "product-1",
       key: "pro-monthly",
-      unit_amount: 12_000_000,
+      unit_amount: "12000000",
       currency: "usd",
       auto_renew: true,
     }
@@ -1144,7 +1144,7 @@ describe("catalog mutations", () => {
     queryClient.setQueryData(catalogKey, { items: [] })
     const price = {
       product_id: "product-1",
-      unit_amount: 20_000_000,
+      unit_amount: "20000000",
       currency: "usd",
       access_duration_hours: 720,
       auto_renew: true,
@@ -1194,7 +1194,7 @@ describe("catalog mutations", () => {
         .execute({
           price: {
             product_id: "product-1",
-            unit_amount: 20_000_000,
+            unit_amount: "20000000",
             currency: "usd",
             access_duration_hours: 720,
             auto_renew: true,
@@ -1262,7 +1262,7 @@ describe("catalog mutations", () => {
       price: {
         model: "per_unit" as const,
         currency: "USD",
-        per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+        per_unit: { unit_amount: "1000000", divide_by: 1 },
       },
     }
 
@@ -1307,7 +1307,7 @@ describe("catalog mutations", () => {
       price: {
         model: "per_unit" as const,
         currency: "USD",
-        per_unit: { unit_amount: 500_000, divide_by: 1 },
+        per_unit: { unit_amount: "500000", divide_by: 1 },
       },
     }
 

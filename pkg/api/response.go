@@ -28,8 +28,8 @@ type PriceObject struct {
 	// Key (#774) is the durable, merchant-unique movable-pointer handle for
 	// this price's substance-version chain — usable anywhere `id` is accepted.
 	Key        string         `json:"key,omitempty"`
-	Object     string         `json:"object"`      // Always "price"
-	UnitAmount int64          `json:"unit_amount"` // Currency micros (1e6 per major unit), NOT cents
+	Object     string         `json:"object"`             // Always "price"
+	UnitAmount int64          `json:"unit_amount,string"` // native units at the currency registry scale
 	Currency   string         `json:"currency"`
 	Type       string         `json:"type,omitempty"`      // one_time or recurring
 	Recurring  *RecurringInfo `json:"recurring,omitempty"` // null for one-time purchases
@@ -53,8 +53,8 @@ type PaymentObject struct {
 	ID             string  `json:"id"`
 	Object         string  `json:"object"`           // "charge" for Stripe-style responses
 	Status         string  `json:"status,omitempty"` // succeeded, pending, failed, refunded, partially_refunded
-	Amount         int64   `json:"amount"`           // Amount in cents (positive for payments, negative for refunds)
-	AmountRefunded int64   `json:"amount_refunded"`
+	Amount         int64   `json:"amount,string"`    // native units; positive for payments, negative for refunds
+	AmountRefunded int64   `json:"amount_refunded,string"`
 	Currency       string  `json:"currency"`
 	User           string  `json:"user"`                   // User ID with usr_ prefix
 	Subscription   *string `json:"subscription,omitempty"` // Subscription ID if linked

@@ -28,17 +28,17 @@ type RatePrice struct {
 }
 
 type FlatPrice struct {
-	Amount int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
+	Amount int64 `json:"amount,omitempty,string" yaml:"amount,omitempty"`
 }
 
 type PerUnitPrice struct {
-	UnitAmount int64  `json:"unit_amount,omitempty" yaml:"unit_amount,omitempty"`
+	UnitAmount int64  `json:"unit_amount,omitempty,string" yaml:"unit_amount,omitempty"`
 	DivideBy   int64  `json:"divide_by,omitempty" yaml:"divide_by,omitempty"`
 	Round      string `json:"round,omitempty" yaml:"round,omitempty"`
 
 	// maximum_amount — per-period cap on the computed cost (0 = uncapped). A real
 	// per-SKU pricing fact: DO caps a resource at its advertised monthly price.
-	MaximumAmount int64 `json:"maximum_amount,omitempty" yaml:"maximum_amount,omitempty"`
+	MaximumAmount int64 `json:"maximum_amount,omitempty,string" yaml:"maximum_amount,omitempty"`
 
 	// matrix — unit_amount (and optional per-cell cap/included) vary by
 	// one meter group_by dimension (Orb matrix). Only valid with model: per_unit.
@@ -51,15 +51,15 @@ type TieredPrice struct {
 }
 
 type PackagePrice struct {
-	Amount      int64 `json:"amount,omitempty" yaml:"amount,omitempty"`
+	Amount      int64 `json:"amount,omitempty,string" yaml:"amount,omitempty"`
 	PackageSize int64 `json:"package_size,omitempty" yaml:"package_size,omitempty"`
 	FreeUnits   int64 `json:"free_units,omitempty" yaml:"free_units,omitempty"`
 }
 
 type RateTier struct {
 	UpTo       *int64 `json:"up_to" yaml:"up_to"` // inclusive ceiling; nil == unbounded (last)
-	UnitAmount int64  `json:"unit_amount,omitempty" yaml:"unit_amount,omitempty"`
-	FlatAmount int64  `json:"flat_amount,omitempty" yaml:"flat_amount,omitempty"`
+	UnitAmount int64  `json:"unit_amount,omitempty,string" yaml:"unit_amount,omitempty"`
+	FlatAmount int64  `json:"flat_amount,omitempty,string" yaml:"flat_amount,omitempty"`
 }
 
 type Matrix struct {
@@ -68,8 +68,8 @@ type Matrix struct {
 }
 
 type MatrixCell struct {
-	UnitAmount    int64 `json:"unit_amount" yaml:"unit_amount"`
-	MaximumAmount int64 `json:"maximum_amount,omitempty" yaml:"maximum_amount,omitempty"`
+	UnitAmount    int64 `json:"unit_amount,string" yaml:"unit_amount"`
+	MaximumAmount int64 `json:"maximum_amount,omitempty,string" yaml:"maximum_amount,omitempty"`
 	Included      int64 `json:"included,omitempty" yaml:"included,omitempty"` // per-cycle included units other cards' allowances accrue from
 }
 

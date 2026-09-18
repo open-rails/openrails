@@ -45,7 +45,7 @@ describe("catalog pagination", () => {
       id: `price-${i}`,
       key: `price-${i}`,
       product_id: product.id,
-      unit_amount: 1000000,
+      unit_amount: "1000000",
       currency: "USD",
       auto_renew: true,
       archived: false,

@@ -79,10 +79,10 @@ describe("rate-card form", () => {
       model: "per_unit",
       currency: "USD",
       per_unit: {
-        unit_amount: 2500,
+        unit_amount: "2500",
         divide_by: 1000,
         round: "half_up",
-        maximum_amount: 15_000_000,
+        maximum_amount: "15000000",
       },
     })
   })
@@ -109,8 +109,8 @@ describe("rate-card form", () => {
       dimension: "model",
       cells: {
         fast: {
-          unit_amount: 10_000,
-          maximum_amount: 20_000_000,
+          unit_amount: "10000",
+          maximum_amount: "20000000",
           included: 100,
         },
       },
@@ -128,8 +128,8 @@ describe("rate-card form", () => {
       ],
     })
     expect(buildRateCardRequest(values).price.tiered?.tiers).toEqual([
-      { up_to: 100, unit_amount: 200_000, flat_amount: 0 },
-      { up_to: null, unit_amount: 100_000, flat_amount: 5_000_000 },
+      { up_to: 100, unit_amount: "200000", flat_amount: "0" },
+      { up_to: null, unit_amount: "100000", flat_amount: "5000000" },
     ])
   })
 
@@ -146,7 +146,7 @@ describe("rate-card form", () => {
     })
     const request = buildRateCardRequest(values)
     expect(request.price.package).toEqual({
-      amount: 2_500_000,
+      amount: "2500000",
       package_size: 1000,
       free_units: 25,
     })
@@ -197,7 +197,7 @@ describe("rate-card form", () => {
       price: {
         model: "per_unit" as const,
         currency: "USD",
-        per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+        per_unit: { unit_amount: "1000000", divide_by: 1 },
       },
       created_at: "2026-08-17T00:00:00Z",
       updated_at: "2026-08-17T00:00:00Z",
@@ -207,7 +207,7 @@ describe("rate-card form", () => {
       price: {
         model: "package",
         currency: "USD",
-        package: { amount: 5_000_000, package_size: 1000 },
+        package: { amount: "5000000", package_size: 1000 },
       },
       allowance: { included: 50 },
       created_at: "2026-08-17T00:00:00Z",
@@ -231,7 +231,7 @@ describe("rate-card form", () => {
       price: {
         model: "per_unit" as const,
         currency: "USD",
-        per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+        per_unit: { unit_amount: "1000000", divide_by: 1 },
       },
       allowance: { included: 100 },
       created_at: "2026-08-17T00:00:00Z",
@@ -259,7 +259,7 @@ describe("rate-card form", () => {
       price: {
         model: "per_unit",
         currency: "USD",
-        per_unit: { unit_amount: 500_000, divide_by: 1 },
+        per_unit: { unit_amount: "500000", divide_by: 1 },
       },
       allowance: { included: 50 },
     })
@@ -268,7 +268,7 @@ describe("rate-card form", () => {
       price: {
         model: "per_unit",
         currency: "USD",
-        per_unit: { unit_amount: 500_000, divide_by: 1 },
+        per_unit: { unit_amount: "500000", divide_by: 1 },
       },
       allowance: { included: 50 },
     })
@@ -335,7 +335,7 @@ describe("metering states", () => {
           price: {
             model: "per_unit",
             currency: "USD",
-            per_unit: { unit_amount: 1_000_000, divide_by: 1 },
+            per_unit: { unit_amount: "1000000", divide_by: 1 },
           },
         } as NonNullable<UsageMeter["default_rate_card"]>)
       )
@@ -357,7 +357,7 @@ describe("metering states", () => {
           price: {
             model: "package",
             currency: "USD",
-            package: { amount: 2_000_000, package_size: 100 },
+            package: { amount: "2000000", package_size: 100 },
           },
         } as NonNullable<UsageMeter["default_rate_card"]>)
       )

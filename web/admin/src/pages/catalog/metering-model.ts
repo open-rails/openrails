@@ -186,7 +186,9 @@ export function rateCardFormValues(
     })),
     tierMode: price?.tiered?.mode ?? "graduated",
     tiers: (
-      price?.tiered?.tiers ?? [{ up_to: null, unit_amount: 0, flat_amount: 0 }]
+      price?.tiered?.tiers ?? [
+        { up_to: null, unit_amount: "0", flat_amount: "0" },
+      ]
     ).map((tier) => ({
       upTo: tier.up_to === null ? "" : String(tier.up_to),
       unitAmount: moneyToInput(currency, tier.unit_amount),
@@ -303,7 +305,7 @@ function buildPrice(
             row.maximumAmount,
             `Maximum for ${key}`,
             `${fieldPrefix}-maximum`
-          ) > 0
+          ) !== "0"
             ? {
                 maximum_amount: optionalMoney(
                   currency,
@@ -334,7 +336,7 @@ function buildPrice(
         per_unit: {
           divide_by: divideBy,
           round: values.round,
-          ...(maximumAmount > 0 ? { maximum_amount: maximumAmount } : {}),
+          ...(maximumAmount !== "0" ? { maximum_amount: maximumAmount } : {}),
           matrix: { dimension, cells },
         },
       }
@@ -352,7 +354,7 @@ function buildPrice(
         ),
         divide_by: divideBy,
         round: values.round,
-        ...(maximumAmount > 0 ? { maximum_amount: maximumAmount } : {}),
+        ...(maximumAmount !== "0" ? { maximum_amount: maximumAmount } : {}),
       },
     }
   }
@@ -506,9 +508,13 @@ function requiredMoney(
   label: string,
   fieldId: string,
   allowZero = false
-): number {
+): string {
   const amount = nativeAmountFromInput(value, currency)
-  if (amount === null || amount < 0 || (!allowZero && amount === 0)) {
+  if (
+    amount === null ||
+    BigInt(amount) < 0n ||
+    (!allowZero && BigInt(amount) === 0n)
+  ) {
     rateCardError(
       fieldId,
       `${label} must be ${allowZero ? "zero or more" : "greater than zero"}.`
@@ -522,8 +528,8 @@ function optionalMoney(
   value: string,
   label: string,
   fieldId: string
-): number {
-  if (!value.trim()) return 0
+): string {
+  if (!value.trim()) return "0"
   return requiredMoney(currency, value, label, fieldId, true)
 }
 
@@ -552,8 +558,8 @@ function rateCardError(fieldId: string, message: string): never {
   throw new RateCardFormError(fieldId, message)
 }
 
-function moneyToInput(currency: string, value?: number): string {
-  return value ? nativeAmountToInput(value, currency) : ""
+function moneyToInput(currency: string, value?: string): string {
+  return value && value !== "0" ? nativeAmountToInput(value, currency) : ""
 }
 
 function integerToInput(value?: number, fallback = ""): string {
@@ -567,7 +573,7 @@ export function summarizeRateCard(card?: DefaultUsageRateCard): string {
     if (price.per_unit.matrix) {
       return `${Object.keys(price.per_unit.matrix.cells).length} matrix rates · ${price.currency}`
     }
-    return `${formatNativeAmount(price.per_unit.unit_amount ?? 0, price.currency)} per ${price.per_unit.divide_by || 1} units`
+    return `${formatNativeAmount(price.per_unit.unit_amount ?? "0", price.currency)} per ${price.per_unit.divide_by || 1} units`
   }
   if (price.model === "tiered" && price.tiered) {
     return `${price.tiered.tiers.length} ${price.tiered.mode} tiers · ${price.currency}`

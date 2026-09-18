@@ -178,7 +178,7 @@ func TestGetActiveSubscriptionEndpoint(t *testing.T) {
 		assert.Equal(t, string(models.StatusActive), subscriptions[0]["status"])
 		price, ok := subscriptions[0]["price"].(map[string]any)
 		require.True(t, ok, "Should include price details")
-		assert.Equal(t, float64(9_990_000), price["unit_amount"], "unit_amount should be 9990000 micros")
+		assert.Equal(t, "9990000", price["unit_amount"], "unit_amount should be 9990000 micros")
 		assert.NotContains(t, price, "amount", "public subscription price should not expose amount")
 	})
 
@@ -313,8 +313,7 @@ func TestGetUserPaymentsEndpoint(t *testing.T) {
 		paymentIDs := make(map[string]bool)
 		for _, p := range resp.Data {
 			paymentIDs[p["id"].(string)] = true
-			// JSON unmarshals numbers as float64, but we compare against int64 value
-			assert.Equal(t, float64(9_990_000), p["amount"], "Amount should be 9990000 micros")
+			assert.Equal(t, "9990000", p["amount"], "amount is an exact native-unit string")
 			assert.Equal(t, "USD", p["currency"])
 		}
 		assert.True(t, paymentIDs[api.FormatPaymentID(payment1.ID)], "Should include payment 1")

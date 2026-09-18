@@ -24,37 +24,8 @@ var wireDTODirs = []string{".", "pkg/api", "pkg/catalog", "internal/operator", "
 // Every entry is a known #983 gap or a type that never reaches the HTTP wire;
 // the guard fails when a listed field becomes a decimal string.
 var pendingNumericMoney = map[string]string{
-	"catalog.go:CatalogPrice.TrialUnitAmount trial_unit_amount":                                                                                      pendingCatalogPrice,
-	"catalog.go:CatalogPrice.UnitAmount unit_amount":                                                                                                 pendingCatalogPrice,
-	"catalog.go:CreatePriceRequest.TrialUnitAmount trial_unit_amount":                                                                                pendingCatalogPrice,
-	"catalog.go:CreatePriceRequest.UnitAmount unit_amount":                                                                                           pendingCatalogPrice,
-	"internal/modules/copilot/types.go:CreatePriceDraft.TrialUnitAmount trial_unit_amount":                                                           pendingCatalogPrice,
-	"internal/modules/copilot/types.go:CreatePriceDraft.UnitAmount unit_amount":                                                                      pendingCatalogPrice,
-	"internal/modules/copilot/types.go:PriceChangeDraft.CurrentAmount current_amount":                                                                pendingCatalogPrice,
-	"internal/modules/copilot/types.go:PriceChangeDraft.NewAmount new_amount":                                                                        pendingCatalogPrice,
-	"pkg/api/response.go:PriceObject.UnitAmount unit_amount":                                                                                         pendingCatalogPrice,
-	"pkg/catalog/manifest.go:Price.UnitAmount unit_amount":                                                                                           pendingCatalogPrice,
-	"pkg/catalog/manifest.go:PriceTrial.UnitAmount unit_amount":                                                                                      pendingCatalogPrice,
-	"subscriptions.go:SubscriptionPayment.Amount amount":                                                                                             pendingSubscription,
-	"subscriptions.go:SubscriptionPrice.Amount amount":                                                                                               pendingSubscription,
-	"tier_change.go:TierChangePreviewResponse.AmountDueNow amount_due_now":                                                                           pendingSubscription,
-	"tier_change.go:TierChangePreviewResponse.NextChargeAmount next_charge_amount":                                                                   pendingSubscription,
-	"tier_change.go:TierChangeResponse.AmountDueNow amount_due_now":                                                                                  pendingSubscription,
-	"tier_change.go:TierChangeResponse.NextChargeAmount next_charge_amount":                                                                          pendingSubscription,
-	"internal/http/handlers/admin_payments.go:adminOffChannelPaymentRequest.Amount amount":                                                           pendingPayment,
-	"internal/http/handlers/admin_payments.go:refundRequest.Amount amount":                                                                           pendingPayment,
-	"internal/http/handlers/payment_api.go:userPaymentObject.Amount amount":                                                                          pendingPayment,
-	"internal/http/handlers/payment_api.go:userPaymentObject.AmountRefunded amount_refunded":                                                         pendingPayment,
-	"pkg/api/response.go:PaymentObject.Amount amount":                                                                                                pendingPayment,
-	"pkg/api/response.go:PaymentObject.AmountRefunded amount_refunded":                                                                               pendingPayment,
-	"pkg/pricing/price.go:FlatPrice.Amount amount":                                                                                                   pendingRateCard,
-	"pkg/pricing/price.go:MatrixCell.MaximumAmount maximum_amount":                                                                                   pendingRateCard,
-	"pkg/pricing/price.go:MatrixCell.UnitAmount unit_amount":                                                                                         pendingRateCard,
-	"pkg/pricing/price.go:PackagePrice.Amount amount":                                                                                                pendingRateCard,
-	"pkg/pricing/price.go:PerUnitPrice.MaximumAmount maximum_amount":                                                                                 pendingRateCard,
-	"pkg/pricing/price.go:PerUnitPrice.UnitAmount unit_amount":                                                                                       pendingRateCard,
-	"pkg/pricing/price.go:RateTier.FlatAmount flat_amount":                                                                                           pendingRateCard,
-	"pkg/pricing/price.go:RateTier.UnitAmount unit_amount":                                                                                           pendingRateCard,
+	"pkg/catalog/manifest.go:Price.UnitAmount unit_amount":                                                                                           pendingCatalogPublish,
+	"pkg/catalog/manifest.go:PriceTrial.UnitAmount unit_amount":                                                                                      pendingCatalogPublish,
 	"internal/http/handlers/admin_users.go:adminCreditBalanceResponse.Balance balance":                                                               pendingBalance,
 	"internal/http/handlers/admin_users.go:adminCreditBalanceResponse.HeldBalance held_balance":                                                      pendingBalance,
 	"internal/http/handlers/admin_users.go:adminCreditBalanceResponse.OutstandingOwedAmount outstanding_owed_amount":                                 pendingBalance,
@@ -90,10 +61,7 @@ var pendingNumericMoney = map[string]string{
 }
 
 const (
-	pendingCatalogPrice     = "pending #983: catalog price"
-	pendingSubscription     = "pending #983: subscription and tier change"
-	pendingPayment          = "pending #983: payment and refund"
-	pendingRateCard         = "pending #983: rate card (also catalog_rate_cards JSONB)"
+	pendingCatalogPublish   = "pending #983: catalog publish manifest (authored, not served, by the Client)"
 	pendingBalance          = "pending #983: balance, ledger, grant and delinquency"
 	deletedByCatalogCut     = "deleted with catalog credit/usage-limit features (#1008 PR438)"
 	notMoneyCount           = "not HTTP: merchant counts"
