@@ -119,6 +119,23 @@ dynamically from operator definitions (metrics, fleet analytics, dump/restore
 over a dynamic table list), and privileged access that runs before merchant
 context exists (DEK bootstrap, merchant secret stores).
 
+`internal/merchantarchive/archive.go` and `checks.go` are PERMANENT: the typed
+archive profiles determine table/column projections, insert statements and
+schema coverage checks at runtime. The checks also inspect PostgreSQL catalogs
+for unclassified columns and enforced RLS. Identifiers come only from reviewed
+profiles/classifications; merchant IDs and row values remain bound parameters.
+The same transaction owns snapshot isolation, session settings, retained-row
+inserts and restore-guard calls, so export/restore either validates the complete
+billing book or refuses it atomically. sqlc cannot express those dynamic profiles
+or transaction controls.
+
+`internal/merchants/restore_identity.go` is PERMANENT privileged pre-context
+provisioning: it creates the destination merchant directory identity before a
+merchant context exists, using the directory pool rather than a merchant-scoped
+billing connection. The caller authorizes the destination group/host authority;
+the insert preserves the source UUID without rebinding an existing identity.
+It follows the same pre-context boundary as the merchant credential stores.
+
 Two more sit in the GUC group: `internal/db/merchant_scope.go` reads
 `app.merchant_id` via `current_setting` (`AssertMerchantScope` checks the LIVE
 session, which is the whole point — a context value would prove nothing), and

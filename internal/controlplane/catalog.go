@@ -233,6 +233,7 @@ const (
 	PermMerchantDashboardUpdate        = permissions.MerchantDashboardUpdate
 	PermMerchantFindingsResolve        = permissions.MerchantFindingsResolve
 	PermMerchantBillingImport          = permissions.MerchantBillingImport
+	PermMerchantBillingExport          = permissions.MerchantBillingExport
 	PermMerchantCreditsGrant           = permissions.MerchantCreditsGrant
 	PermMerchantCreditsRevoke          = permissions.MerchantCreditsRevoke
 	PermMerchantMembersRead            = permissions.MerchantMembersRead

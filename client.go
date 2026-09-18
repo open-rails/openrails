@@ -13,9 +13,9 @@
 // transports cannot drift because there is nothing to drift between. The
 // dual-mode conformance test in openrails/embed enforces this end to end.
 //
-// This root package stays dependency-light: it MUST NOT import internal/* or
-// pkg/embedded, so a remote-only consumer's binary does not link the engine
-// (enforced by deps_test.go).
+// This root package stays dependency-light: it must not link the engine or
+// pkg/embedded. The shared, standard-library-only archive format verifier is
+// the sole internal-package exception (enforced by deps_test.go).
 package openrails
 
 import (

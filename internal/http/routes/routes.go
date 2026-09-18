@@ -186,10 +186,20 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	}
 }
 
+// RegisterMerchantArchiveRoutes mounts the complete portable billing archive
+// surface, shared by the server and database-only CLI runtime.
+func RegisterMerchantArchiveRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	// Archives own their snapshot/restore transaction and its merchant RLS pin;
+	// no outer merchant connection is held while transferring the artifact.
+	rr.Handle(http.MethodGet, "/billing-archive", h(httphandlers.ExportMerchantBilling), opts.merchantActionPermissionMW(controlplane.PermMerchantBillingExport))
+	rr.Handle(http.MethodPost, "/billing-archive", h(httphandlers.ImportMerchantBilling), opts.merchantActionPermissionMW(controlplane.PermMerchantBillingImport))
+}
+
 // RegisterServiceRoutes mounts the merchant billing surface. Access is gated by
 // merchant permissions, not credential type (#564).
 func RegisterServiceRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	group := rr
+	RegisterMerchantArchiveRoutes(rr, rt, opts)
 	var dbMW []router.Middleware
 	if rt != nil && rt.DB != nil {
 		dbMW = append(dbMW, middleware.MerchantDBConnMW(rt.DB))
