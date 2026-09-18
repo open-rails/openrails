@@ -57,17 +57,18 @@ expands `./...` to only the integration-tagged packages, and runs
 `OPENRAILS_INTEGRATION_TIMEOUT`, default 25m). The suite is self-cleaning
 (per-run DBs are dropped; a reaper removes orphans).
 
-PR CI narrows ordinary integration coverage to the packages touched by the
-diff and always includes `internal/integrationharness`. Narrow diffs use one
-serial shard; changes to shared surfaces run the complete tagged package set
-in two balanced shards, each with a six-minute test timeout and its own service
-stack. `.github/workflows/ci-full.yaml` is the unsharded backstop: every Monday
-at 05:00 UTC and on manual dispatch it runs the complete tagged suite serially
-against one stack.
+The maintained CI entry point is `bash scripts/check.sh`: `checks` runs the
+build, race tests, console checks, vulnerability scan and source guardrails;
+`e2e` prepares disposable PostgreSQL/Redis services and runs the selected
+integration/browser journeys through the release-manifest qualifier. The same
+commands run locally and in the two ordinary PR jobs. There are no path-based
+integration shards or weekly duplicate full-suite workflow; external-provider
+qualification remains a separately invoked manual workflow.
 
-Query-layer checks: `task test-query-contracts` and `task test-query-perf`
-run `internal/db/querytest` against a migrated Postgres
-(`QUERY_TEST_DATABASE_URL` overrides `OPENRAILS_TEST_DB_URL`).
+The end-to-end gate also prepares a fresh SQLC database and runs generation,
+vet, query-audit and migration/SQL discipline checks before qualifying the
+manifest. `QUERY_TEST_DATABASE_URL` remains available for focused local query
+work, but is not a second CI workflow.
 
 ## Business time and test clocks
 
