@@ -708,6 +708,64 @@ func (q *Queries) GetRailIntentByIdempotencyKey(ctx context.Context, arg GetRail
 	return i, err
 }
 
+const getRailIntentByRequestKey = `-- name: GetRailIntentByRequestKey :one
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid
+  AND intent_type = $2::text
+  AND subscription_id = $3::uuid
+  AND payload->>'request_key' = $4::text
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetRailIntentByRequestKeyParams struct {
+	MerchantID     uuid.UUID
+	IntentType     string
+	SubscriptionID uuid.UUID
+	RequestKey     string
+}
+
+// Customer retry-now (#809): the operation a client idempotency key started,
+// bound through the frozen payload's request_key.
+func (q *Queries) GetRailIntentByRequestKey(ctx context.Context, arg GetRailIntentByRequestKeyParams) (OpenrailsRailIntent, error) {
+	row := q.db.QueryRow(ctx, getRailIntentByRequestKey,
+		arg.MerchantID,
+		arg.IntentType,
+		arg.SubscriptionID,
+		arg.RequestKey,
+	)
+	var i OpenrailsRailIntent
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Rail,
+		&i.IntentType,
+		&i.SubscriptionID,
+		&i.PaymentID,
+		&i.PriceID,
+		&i.Payload,
+		&i.IdempotencyKey,
+		&i.Status,
+		&i.Attempts,
+		&i.NextAttemptAt,
+		&i.ClaimedUntil,
+		&i.Origin,
+		&i.OriginReason,
+		&i.Actor,
+		&i.LastFailureReason,
+		&i.ExpiresAt,
+		&i.ResultEvidence,
+		&i.CreatedAt,
+		&i.ExecutedAt,
+		&i.UpdatedAt,
+		&i.PspID,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.CustodianID,
+	)
+	return i, err
+}
+
 const getReconciliationFindingByIdentity = `-- name: GetReconciliationFindingByIdentity :one
 SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM openrails.reconciliation_findings
 WHERE merchant_id = $1::uuid
@@ -861,6 +919,74 @@ func (q *Queries) ListRailIntents(ctx context.Context, arg ListRailIntentsParams
 		arg.SubscriptionID,
 		arg.PageOffset,
 		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OpenrailsRailIntent
+	for rows.Next() {
+		var i OpenrailsRailIntent
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.Rail,
+			&i.IntentType,
+			&i.SubscriptionID,
+			&i.PaymentID,
+			&i.PriceID,
+			&i.Payload,
+			&i.IdempotencyKey,
+			&i.Status,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.ClaimedUntil,
+			&i.Origin,
+			&i.OriginReason,
+			&i.Actor,
+			&i.LastFailureReason,
+			&i.ExpiresAt,
+			&i.ResultEvidence,
+			&i.CreatedAt,
+			&i.ExecutedAt,
+			&i.UpdatedAt,
+			&i.PspID,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.CustodianID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRailIntentsBySubject = `-- name: ListRailIntentsBySubject :many
+SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents
+WHERE merchant_id = $1::uuid
+  AND intent_type = $2::text
+  AND subscription_id = $3::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT $4::int
+`
+
+type ListRailIntentsBySubjectParams struct {
+	MerchantID     uuid.UUID
+	IntentType     string
+	SubscriptionID uuid.UUID
+	RowLimit       int32
+}
+
+func (q *Queries) ListRailIntentsBySubject(ctx context.Context, arg ListRailIntentsBySubjectParams) ([]OpenrailsRailIntent, error) {
+	rows, err := q.db.Query(ctx, listRailIntentsBySubject,
+		arg.MerchantID,
+		arg.IntentType,
+		arg.SubscriptionID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err

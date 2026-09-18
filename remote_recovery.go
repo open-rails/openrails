@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 func pageQuery(options PageOptions) url.Values {
@@ -158,4 +159,57 @@ func (c *Client) DeletePaymentMethod(ctx context.Context, customerID CustomerID,
 	default:
 		return nil, fmt.Errorf("%w: unexpected payment deletion status %d", ErrUnreachable, response.status)
 	}
+}
+
+// PayInvoiceNow charges one open or past-due invoice of request.CustomerID
+// through their saved method, as the customer's own pay-now would. The
+// engine creates a new immutable attempt under request.IdempotencyKey; the
+// same key replays the same attempt without a second charge. A decline is
+// ErrCardDeclined (402); a provider-managed rail is
+// ErrPaymentRecoveryRailUnsupported before any provider traffic. An
+// unresolved outcome returns normally with Operation.Unresolved().
+func (c *Client) PayInvoiceNow(ctx context.Context, request PayInvoiceNowRequest) (*InvoicePayNowResult, error) {
+	path, err := customerPath(request.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	invoice, err := requireUUID("invoice_id", request.InvoiceID)
+	if err != nil {
+		return nil, err
+	}
+	if request.PaymentMethodID.IsZero() {
+		return nil, invalidErr("payment_method_id is required")
+	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return nil, invalidErr("idempotency_key is required")
+	}
+	var out InvoicePayNowResult
+	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/invoices/"+invoice+"/pay-now", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// RetrySubscriptionNow rebills one past-due subscription of request.CustomerID
+// now through its current saved method, as the customer's own retry-now
+// would. A confirmed charge renews the subscription and clears its dunning
+// schedule; a decline is ErrCardDeclined (402); an unresolved outcome returns
+// normally with Operation.Unresolved().
+func (c *Client) RetrySubscriptionNow(ctx context.Context, request RetrySubscriptionNowRequest) (*SubscriptionRetryNowResult, error) {
+	path, err := customerPath(request.CustomerID)
+	if err != nil {
+		return nil, err
+	}
+	subscription, err := requireTypedID("subscription_id", request.SubscriptionID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(request.IdempotencyKey) == "" {
+		return nil, invalidErr("idempotency_key is required")
+	}
+	var out SubscriptionRetryNowResult
+	if err := c.doWithHeaders(ctx, http.MethodPost, path+"/subscriptions/"+subscription+"/retry-now", request, &out, http.Header{"Idempotency-Key": {request.IdempotencyKey}}); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

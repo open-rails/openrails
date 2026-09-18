@@ -427,3 +427,22 @@ SELECT merchant_id FROM openrails.due_verify_rail_intent_merchant_ids(
 -- name: GetRailIntentByIdempotencyKey :one
 SELECT * FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND idempotency_key = sqlc.arg(idempotency_key)::text;
+
+-- name: GetRailIntentByRequestKey :one
+-- Customer retry-now (#809): the operation a client idempotency key started,
+-- bound through the frozen payload's request_key.
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = sqlc.arg(intent_type)::text
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+  AND payload->>'request_key' = sqlc.arg(request_key)::text
+ORDER BY created_at DESC, id DESC
+LIMIT 1;
+
+-- name: ListRailIntentsBySubject :many
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = sqlc.arg(intent_type)::text
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::int;

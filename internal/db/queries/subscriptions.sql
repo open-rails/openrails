@@ -366,3 +366,22 @@ WHERE sub.price_id = sqlc.arg(price_id)::uuid
   AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
+
+-- name: ClaimSubscriptionRetryNow :execrows
+-- Customer retry-now (#809) takes the same lease the dunning worker takes
+-- (ClaimDunningAttempt), but may take it ahead of the schedule: a still-due
+-- row, a row with no schedule, or a row whose next retry lies beyond the
+-- lease window. A row inside a live lease (next_retry_at within the window)
+-- is the worker's, and is refused.
+UPDATE openrails.subscriptions
+SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
+    last_retry_at = sqlc.arg(claimed_at)::timestamptz,
+    updated_at = sqlc.arg(claimed_at)::timestamptz
+WHERE id = $1
+  AND merchant_id = sqlc.arg(merchant_id)
+  AND customer_id = sqlc.arg(customer_id)
+  AND status = 'past_due'
+  AND deleted_at IS NULL
+  AND (next_retry_at IS NULL
+       OR next_retry_at <= sqlc.arg(claimed_at)::timestamptz
+       OR next_retry_at > sqlc.arg(lease_until)::timestamptz);

@@ -77,7 +77,7 @@ func moneyDeploymentBuilders(h *Harness, gateway *FakeNMIGateway) []struct {
 				name: "embedded", merchant: dbtest.TestMerchantID,
 				runtime: func() *app.Runtime { return app.HostGraph(embedded).Runtime },
 				client: func() *openrails.Client {
-					client, err := embedded.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"))
+					client, err := embedded.Client(openrails.WithMerchantID(dbtest.TestMerchantID), openrails.WithCurrency("USD"), openrails.WithTimeout(30*time.Second))
 					require.NoError(t, err)
 					return client
 				},

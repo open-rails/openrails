@@ -982,6 +982,13 @@ func registerMerchantInvoiceRoutes(rr router.Router, opts Options, dbMW ...route
 	profileWrite := opts.merchantAdminOperationMW(controlplane.PermMerchantCustomerSettingsUpdate, middleware.AdminOperationGrant, dbMW...)
 	rr.Handle(http.MethodGet, "/customers/:customer_id/invoice-profile", h(httphandlers.GetAdminInvoiceProfile(opts.Gate)), profileRead...)
 	rr.Handle(http.MethodPut, "/customers/:customer_id/invoice-profile", h(httphandlers.PutAdminInvoiceProfile), profileWrite...)
+	// Customer payment recovery on the host's behalf (#809): the customer's
+	// own pay-now / retry-now, for a host that authenticated the customer
+	// itself (the Client's PayInvoiceNow / RetrySubscriptionNow). Same
+	// service path as /v1/me, so both deployments answer identically.
+	rr.Handle(http.MethodPost, "/customers/:customer_id/invoices/:id/pay-now", h(httphandlers.PayCustomerInvoiceNow), collect...)
+	subscriptionCollect := opts.merchantAdminOperationMW(controlplane.PermMerchantSubscriptionsUpdate, middleware.AdminOperationOffChannel, dbMW...)
+	rr.Handle(http.MethodPost, "/customers/:customer_id/subscriptions/:id/retry-now", h(httphandlers.RetryCustomerSubscriptionNow), subscriptionCollect...)
 }
 
 func authorizationToken(header string) string {

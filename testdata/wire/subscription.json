@@ -85,6 +85,14 @@
     "start_at": "2026-09-16T00:00:00.123456789Z",
     "end_at": "2026-09-16T00:00:00.123456789Z"
   },
+  "recovery": {
+    "retryable": false,
+    "blocked_reason": "not_due",
+    "attempt_count": 0,
+    "compatible_payment_method_ids": [
+      "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    ]
+  },
   "created_at": "2026-09-16T00:00:00.123456789Z",
   "updated_at": "2026-09-16T00:00:00.123456789Z"
 }

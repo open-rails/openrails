@@ -50,6 +50,10 @@ type ManualRebillPayload struct {
 	// must never break.
 	OrderReference string `json:"order_reference"`
 	Attempt        int    `json:"attempt"`
+	// RequestKey binds a customer retry-now request (#809) to the operation
+	// it started, so the same client idempotency key replays this attempt.
+	// Empty on scheduled attempts.
+	RequestKey string `json:"request_key,omitempty"`
 }
 
 // ManualRebillIdempotencyKey content-addresses one dunning charge attempt the
@@ -104,6 +108,10 @@ func (h *ManualRebillHandler) railClient(ctx context.Context, intent gen.Openrai
 
 func (h *ManualRebillHandler) Type() string                         { return TypeManualRebill }
 func (h *ManualRebillHandler) Backoff(attempts int32) time.Duration { return h.Policy.Delay(attempts) }
+
+// PrunePolicy keeps the frozen payload: a customer retry-now key replays
+// against the operation's request_key after success (#809).
+func (h *ManualRebillHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
 
 func decodeManualRebillPayload(intent gen.OpenrailsRailIntent) (ManualRebillPayload, error) {
 	var p ManualRebillPayload

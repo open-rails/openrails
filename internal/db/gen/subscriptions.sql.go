@@ -46,6 +46,48 @@ func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttem
 	return result.RowsAffected(), nil
 }
 
+const claimSubscriptionRetryNow = `-- name: ClaimSubscriptionRetryNow :execrows
+UPDATE openrails.subscriptions
+SET next_retry_at = $2::timestamptz,
+    last_retry_at = $3::timestamptz,
+    updated_at = $3::timestamptz
+WHERE id = $1
+  AND merchant_id = $4
+  AND customer_id = $5
+  AND status = 'past_due'
+  AND deleted_at IS NULL
+  AND (next_retry_at IS NULL
+       OR next_retry_at <= $3::timestamptz
+       OR next_retry_at > $2::timestamptz)
+`
+
+type ClaimSubscriptionRetryNowParams struct {
+	ID         uuid.UUID
+	LeaseUntil time.Time
+	ClaimedAt  time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// Customer retry-now (#809) takes the same lease the dunning worker takes
+// (ClaimDunningAttempt), but may take it ahead of the schedule: a still-due
+// row, a row with no schedule, or a row whose next retry lies beyond the
+// lease window. A row inside a live lease (next_retry_at within the window)
+// is the worker's, and is refused.
+func (q *Queries) ClaimSubscriptionRetryNow(ctx context.Context, arg ClaimSubscriptionRetryNowParams) (int64, error) {
+	result, err := q.db.Exec(ctx, claimSubscriptionRetryNow,
+		arg.ID,
+		arg.LeaseUntil,
+		arg.ClaimedAt,
+		arg.MerchantID,
+		arg.CustomerID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const clearStripePaymentMethodSubscriptions = `-- name: ClearStripePaymentMethodSubscriptions :execrows
 UPDATE openrails.subscriptions SET
     payment_method_id = NULL,

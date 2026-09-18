@@ -22,6 +22,9 @@ func GetMyBillingStatus(r *httprequest.Request) {
 			out.Access = resp.Access
 			if resp.Subscription != nil {
 				view := resp.View()
+				if !attachSubscriptionRecovery(r, resp, &view) {
+					return
+				}
 				out.Subscription = &view
 				out.HasActiveSubscription = resp.Subscription.Status == models.StatusActive
 				out.NextRenewalAt = resp.Subscription.CurrentPeriodEndsAt
