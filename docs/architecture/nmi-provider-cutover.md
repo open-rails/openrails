@@ -81,6 +81,19 @@ unchanged; `anchor` in the operation response reports the authorized first-charg
 date. Delaying that charge is an explicit merchant concession, not an automatic
 grant or an immediate charge. An already submitted activation that reads back
 active at the exact expected terms can finish after its anchor elapsed.
+If the anchor expires before the create submission marker exists, execution
+instead records terminal non-execution and releases the local fences. Replaying
+that key retains the terminal result; ordinary renewal can advance the period
+before a fresh cutover request.
+
+Both effective credential fingerprints are frozen at admission and checked
+again against the clients used for every continuation. A rotated or misplaced
+key cannot turn another account's 404 into source cancellation proof. The keys
+themselves are never retained. Rotation during unresolved work requires operator
+account requalification; restoring the original verified binding permits the
+same operation to resume. NMI's credential probe proves access and sandbox mode,
+not the external account identity: that account-to-key binding remains part of
+provider qualification, including after a key is revoked or rotated.
 
 `status` is the existing intent status vocabulary, including `failed_retryable`.
 `stage` identifies the last retained step; `succeeded` always has `completed` and

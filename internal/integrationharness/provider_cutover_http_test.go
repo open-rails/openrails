@@ -36,6 +36,7 @@ type cutoverAccount struct {
 	Subs                          map[string]nmi.V5Subscription
 	Mode                          string
 	Creates, Deletes, Activations int
+	Requests                      int
 	Source                        bool
 }
 type cutoverGateway struct {
@@ -54,6 +55,7 @@ func newCutoverGateway(t *testing.T) *cutoverGateway {
 			http.Error(w, "wrong account credential", 401)
 			return
 		}
+		acct.Requests++
 		w.Header().Set("Content-Type", "application/json")
 		if acct.Mode == "dark" {
 			http.Error(w, "provider unavailable", 503)

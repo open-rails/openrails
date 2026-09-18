@@ -16,7 +16,9 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/pkg/api"
@@ -330,6 +332,68 @@ func TestNMIProviderCutoverIsolation(t *testing.T) {
 		fake := clockwork.NewFakeClockAt(p.Anchor.Add(time.Hour))
 		rt.Clock, rt.ProviderCutovers.Clock = fake, fake
 		defer func() { rt.Clock, rt.ProviderCutovers.Clock = oldClock, oldAdmissionClock }()
+		result, err = client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
+		require.NoError(t, err)
+		assertCutoverCommitted(t, h, g, p, result)
+	})
+
+	t.Run("unsent_expired_anchor_releases_fences", func(t *testing.T) {
+		p := seed(t, "success")
+		rt := s.App().Runtime
+		oldMode, oldClock, oldAdmissionClock := rt.Config.ProviderWriteMode, rt.Clock, rt.ProviderCutovers.Clock
+		defer func() {
+			rt.Config.ProviderWriteMode, rt.Clock, rt.ProviderCutovers.Clock = oldMode, oldClock, oldAdmissionClock
+		}()
+		rt.Config.ProviderWriteMode = config.ProviderWriteModeReadOnly
+		key := uuid.NewString()
+		result, err := client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
+		require.NoError(t, err)
+		require.Contains(t, []string{"pending", "failed_retryable"}, result.Status)
+		fake := clockwork.NewFakeClockAt(p.Anchor.Add(time.Hour))
+		rt.Clock, rt.ProviderCutovers.Clock = fake, fake
+		rt.Config.ProviderWriteMode = config.ProviderWriteModeFull
+		result, err = client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
+		require.NoError(t, err)
+		require.Equal(t, "failed_terminal", result.Status)
+		require.Equal(t, "not_executed", result.Stage)
+		_, err = h.Pool().Exec(ctx, `UPDATE openrails.subscriptions SET current_period_ends_at=current_period_ends_at + interval '30 days' WHERE id=$1`, p.Sub)
+		require.NoError(t, err, "unsent expiry must release the renewal fence")
+		replay, err := client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
+		require.NoError(t, err)
+		require.Equal(t, result, replay)
+		g.mu.Lock()
+		require.Zero(t, g.Accounts[p.SourceKey].Requests)
+		require.Zero(t, g.Accounts[p.TargetKey].Requests)
+		g.mu.Unlock()
+	})
+
+	t.Run("rotated_source_key_cannot_turn_foreign_404_into_cancellation", func(t *testing.T) {
+		p := seed(t, "source_dark")
+		key := uuid.NewString()
+		result, err := client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
+		require.NoError(t, err)
+		require.Equal(t, "unknown_needs_verify", result.Status)
+		require.NotEmpty(t, result.TargetSubscriptionID)
+		wrongKey := "foreign-" + uuid.NewString()
+		g.mu.Lock()
+		g.Accounts[wrongKey] = &cutoverAccount{Source: true, Subs: map[string]nmi.V5Subscription{}}
+		g.mu.Unlock()
+		name, err := merchants.PSPSecretName("nmi", "test", p.SourceKey, "security_key")
+		require.NoError(t, err)
+		store := s.App().Runtime.Merchants.Secrets()
+		_, err = store.Put(ctx, owner.MerchantID, name, wrongKey)
+		require.NoError(t, err)
+		result, err = client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
+		require.NoError(t, err)
+		require.Equal(t, "unknown_needs_verify", result.Status)
+		g.mu.Lock()
+		require.Zero(t, g.Accounts[wrongKey].Requests, "foreign account must not be consulted for cancellation proof")
+		require.Zero(t, g.Accounts[p.SourceKey].Deletes)
+		require.Zero(t, g.Accounts[p.TargetKey].Activations)
+		g.Accounts[p.SourceKey].Mode = ""
+		g.mu.Unlock()
+		_, err = store.Put(ctx, owner.MerchantID, name, p.SourceKey)
+		require.NoError(t, err)
 		result, err = client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
 		require.NoError(t, err)
 		assertCutoverCommitted(t, h, g, p, result)

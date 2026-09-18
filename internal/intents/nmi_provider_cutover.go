@@ -2,6 +2,7 @@ package intents
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,22 +41,24 @@ func normalizeCutoverRequest(body openrails.ProviderCutoverRequest) (nmiCutoverR
 }
 
 type nmiCutoverPayload struct {
-	Request               nmiCutoverRequest `json:"request"`
-	CustomerID            uuid.UUID         `json:"customer_id"`
-	SubscriptionID        uuid.UUID         `json:"subscription_id"`
-	SourceSubscriptionID  string            `json:"source_subscription_id"`
-	SourcePaymentMethodID uuid.UUID         `json:"source_payment_method_id"`
-	SourceVaultID         string            `json:"source_vault_id"`
-	PriceID               uuid.UUID         `json:"price_id"`
-	PlanID                string            `json:"plan_id"`
-	BillingID             string            `json:"billing_id"`
-	VaultID               string            `json:"vault_id"`
-	Currency              string            `json:"currency"`
-	Amount                int64             `json:"amount"`
-	CycleHours            int32             `json:"cycle_hours"`
-	PeriodStart           time.Time         `json:"period_start"`
-	PeriodEnd             time.Time         `json:"period_end"`
-	Anchor                time.Time         `json:"anchor"`
+	Request                     nmiCutoverRequest `json:"request"`
+	CustomerID                  uuid.UUID         `json:"customer_id"`
+	SubscriptionID              uuid.UUID         `json:"subscription_id"`
+	SourceSubscriptionID        string            `json:"source_subscription_id"`
+	SourcePaymentMethodID       uuid.UUID         `json:"source_payment_method_id"`
+	SourceVaultID               string            `json:"source_vault_id"`
+	PriceID                     uuid.UUID         `json:"price_id"`
+	PlanID                      string            `json:"plan_id"`
+	BillingID                   string            `json:"billing_id"`
+	VaultID                     string            `json:"vault_id"`
+	Currency                    string            `json:"currency"`
+	Amount                      int64             `json:"amount"`
+	CycleHours                  int32             `json:"cycle_hours"`
+	PeriodStart                 time.Time         `json:"period_start"`
+	PeriodEnd                   time.Time         `json:"period_end"`
+	Anchor                      time.Time         `json:"anchor"`
+	SourceCredentialFingerprint string            `json:"source_credential_fingerprint"`
+	TargetCredentialFingerprint string            `json:"target_credential_fingerprint"`
 }
 
 type nmiCutoverProgress struct {
@@ -73,6 +76,8 @@ type nmiCutoverProgress struct {
 	BillingAnchor         time.Time           `json:"billing_anchor,omitzero"`
 	PausedAnchor          time.Time           `json:"paused_anchor,omitzero"`
 	AnchorResolutions     []map[string]any    `json:"anchor_resolutions,omitempty"`
+	NotExecuted           bool                `json:"not_executed,omitempty"`
+	NotExecutedCode       string              `json:"not_executed_code,omitempty"`
 }
 
 // NMIProviderCutover uses the existing intent ledger. It retains the complete
@@ -147,7 +152,21 @@ func (h *NMIProviderCutover) freeze(ctx context.Context, d *db.DB, id uuid.UUID,
 	if p.SourceSubscriptionID == "" || p.SourceVaultID == "" || p.PlanID == "" || p.VaultID == "" || p.BillingID == "" || p.Amount <= 0 || p.CycleHours <= 0 || p.CycleHours%24 != 0 || !p.Anchor.After(p.PeriodStart) {
 		return p, cutoverConflict("incomplete or unsupported commercial terms")
 	}
+	source, ok, err := h.Resolver.ResolveNMIClient(ctx, mid.UUID(), &req.ExpectedSourcePSPID)
+	if err != nil || !ok || source == nil || source.SecurityKey == "" {
+		return p, cutoverConflict("source credential unavailable")
+	}
+	target, ok, err := h.Resolver.ResolveNMIClient(ctx, mid.UUID(), &req.ExpectedTargetPSPID)
+	if err != nil || !ok || target == nil || target.SecurityKey == "" {
+		return p, cutoverConflict("target credential unavailable")
+	}
+	p.SourceCredentialFingerprint = cutoverCredentialFingerprint(source)
+	p.TargetCredentialFingerprint = cutoverCredentialFingerprint(target)
 	return p, nil
+}
+
+func cutoverCredentialFingerprint(client *nmi.NMIClient) string {
+	return fmt.Sprintf("%x", sha256.Sum256([]byte(client.SecurityKey)))
 }
 
 func (h *NMIProviderCutover) Preview(ctx context.Context, id uuid.UUID, body openrails.ProviderCutoverRequest) (*openrails.ProviderCutover, error) {
@@ -319,6 +338,9 @@ func cutoverResult(in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutover
 	if in.Status == StatusSucceeded {
 		r.Stage = "completed"
 	}
+	if g.NotExecuted {
+		r.Stage = "not_executed"
+	}
 	return r
 }
 func (h *NMIProviderCutover) Execute(ctx context.Context, in gen.OpenrailsRailIntent) Outcome {
@@ -353,6 +375,10 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	if in.PspID == nil || *in.PspID != p.Request.ExpectedTargetPSPID || in.SubscriptionID == nil || *in.SubscriptionID != p.SubscriptionID {
 		return uncertain("frozen intent address mismatch")
 	}
+	if !g.CreateSubmitted && !p.Anchor.After(h.now()) {
+		g.NotExecuted, g.NotExecutedCode = true, "anchor_expired"
+		return TerminalWithEvidence("billing anchor expired before any provider submission", evidence())
+	}
 	// After local commit only the durable receipt is needed to mark success.
 	if g.TargetActive && g.SourceCanceled {
 		done, e := h.isRepointed(ctx, p, g.Target)
@@ -374,9 +400,6 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	if !g.BillingAnchor.IsZero() {
 		terms.Anchor = g.BillingAnchor
 	}
-	if !g.CreateSubmitted && !terms.Anchor.After(h.now()) {
-		return uncertain("billing anchor elapsed; operator resolution required")
-	}
 	target, ok, err := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedTargetPSPID)
 	if err != nil || !ok || target == nil {
 		return uncertain("target credentials unavailable")
@@ -384,6 +407,9 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	source, ok, err := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedSourcePSPID)
 	if err != nil || !ok || source == nil {
 		return uncertain("source credentials unavailable; cancellation is unproven")
+	}
+	if cutoverCredentialFingerprint(source) != p.SourceCredentialFingerprint || cutoverCredentialFingerprint(target) != p.TargetCredentialFingerprint {
+		return uncertain("provider credential changed; account identity must be requalified")
 	}
 	if e := target.ConfirmCutoverVault(ctx, p.VaultID, p.BillingID); e != nil {
 		return uncertain("target vault is not qualified: " + e.Error())
@@ -628,6 +654,9 @@ func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.OpenrailsRailIn
 	if e != nil || !ok || client == nil {
 		return Outcome{}, ErrResolutionRejected
 	}
+	if cutoverCredentialFingerprint(client) != p.TargetCredentialFingerprint {
+		return Outcome{}, ErrResolutionRejected
+	}
 	target, found, e := client.GetCutoverSubscription(ctx, r.ProviderReference)
 	paused, known := cutoverPaused(target.PausedSubscription)
 	if e != nil || !found || !known || !paused || !cutoverSubscriptionMatches(target, p, r.ProviderReference) {
@@ -675,6 +704,9 @@ func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.Openrails
 	if e != nil || !ok || target == nil {
 		return Outcome{}, ErrResolutionRejected
 	}
+	if cutoverCredentialFingerprint(target) != p.TargetCredentialFingerprint {
+		return Outcome{}, ErrResolutionRejected
+	}
 	if e = target.ConfirmCutoverVault(ctx, p.VaultID, p.BillingID); e != nil {
 		return Outcome{}, ErrResolutionRejected
 	}
@@ -689,6 +721,9 @@ func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.Openrails
 	}
 	source, ok, e := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedSourcePSPID)
 	if e != nil || !ok || source == nil {
+		return Outcome{}, ErrResolutionRejected
+	}
+	if cutoverCredentialFingerprint(source) != p.SourceCredentialFingerprint {
 		return Outcome{}, ErrResolutionRejected
 	}
 	old, active, e := source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
