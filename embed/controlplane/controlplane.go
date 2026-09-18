@@ -56,6 +56,11 @@ type (
 	MerchantRetirementCandidatePage     = operator.MerchantRetirementCandidatePage
 	MerchantRetirementRefusal           = operator.MerchantRetirementRefusal
 	RetireUnusedMerchantResult          = operator.RetireUnusedMerchantResult
+	ProviderAccountCutoverDisposition   = operator.ProviderAccountCutoverDisposition
+	ProviderAccountCutoverCode          = operator.ProviderAccountCutoverCode
+	ProviderAccountCutoverPlan          = operator.ProviderAccountCutoverPlan
+	ProviderAccountCutoverQuery         = operator.ProviderAccountCutoverQuery
+	ProviderAccountCutoverReport        = operator.ProviderAccountCutoverReport
 )
 
 const (
@@ -66,6 +71,25 @@ const (
 	MerchantRetirementRefusedGroupMismatch = operator.MerchantRetirementRefusedGroupMismatch
 	MerchantRetirementRefusedReserved      = operator.MerchantRetirementRefusedReserved
 	MerchantRetirementRefusedActive        = operator.MerchantRetirementRefusedActive
+
+	ProviderAccountCutoverSameAccount     = operator.ProviderAccountCutoverSameAccount
+	ProviderAccountCutoverRequiresReentry = operator.ProviderAccountCutoverRequiresReentry
+	ProviderAccountCutoverBlocked         = operator.ProviderAccountCutoverBlocked
+
+	ProviderAccountCutoverReady                     = operator.ProviderAccountCutoverReady
+	ProviderAccountCutoverIdentityMissing           = operator.ProviderAccountCutoverIdentityMissing
+	ProviderAccountCutoverRailUnsupported           = operator.ProviderAccountCutoverRailUnsupported
+	ProviderAccountCutoverTargetRailMismatch        = operator.ProviderAccountCutoverTargetRailMismatch
+	ProviderAccountCutoverSubscriptionNotRebilling  = operator.ProviderAccountCutoverSubscriptionNotRebilling
+	ProviderAccountCutoverSubscriptionNotAtProvider = operator.ProviderAccountCutoverSubscriptionNotAtProvider
+	ProviderAccountCutoverTargetArchived            = operator.ProviderAccountCutoverTargetArchived
+	ProviderAccountCutoverSourceNotArchived         = operator.ProviderAccountCutoverSourceNotArchived
+	ProviderAccountCutoverReplacementCardRequired   = operator.ProviderAccountCutoverReplacementCardRequired
+	ProviderAccountCutoverReplacementCardNotFound   = operator.ProviderAccountCutoverReplacementCardNotFound
+	ProviderAccountCutoverReplacementCardNotOwned   = operator.ProviderAccountCutoverReplacementCardNotOwned
+	ProviderAccountCutoverReplacementCardUnusable   = operator.ProviderAccountCutoverReplacementCardUnusable
+	ProviderAccountCutoverReplacementCardPSP        = operator.ProviderAccountCutoverReplacementCardPSP
+	ProviderAccountCutoverCrossAccountNotQualified  = operator.ProviderAccountCutoverCrossAccountNotQualified
 )
 
 var (
@@ -78,6 +102,9 @@ var (
 	ErrEmailUnverified              = operator.ErrEmailUnverified
 	ErrVaultedPaymentMethodRequired = operator.ErrVaultedPaymentMethodRequired
 	ErrMerchantGroupReleasePending  = operator.ErrMerchantGroupReleasePending
+	// ErrProviderAccountCutoverNotQualified is the reason a cross-account plan
+	// reports; it is never executed automatically.
+	ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified
 	// ErrPaymentProviderNotFound is GetPaymentProviderConfig's answer when the
 	// merchant has no active account on the rail; match it with errors.Is.
 	ErrPaymentProviderNotFound = merchants.ErrPaymentProviderNotFound
@@ -281,4 +308,15 @@ func (c *ControlPlane) RetireUnusedMerchant(ctx context.Context, id merchant.ID,
 
 func (c *ControlPlane) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error) {
 	return operator.CompletePendingMerchantRetirements(ctx, c.app, limit)
+}
+
+// PlanProviderAccountCutover reports how one subscriber could move to another
+// provider account (#657). Executable only for an NMI subscription that still
+// rebills, onto a ready replacement card vaulted by its own non-archived
+// account (the durable payment-source update); every other case is a coded,
+// non-executable plan, and a cross-account move is report-only card re-entry.
+// Read-only: it resolves the subscription, the optional replacement method and
+// both PSP rows and writes nothing.
+func (c *ControlPlane) PlanProviderAccountCutover(ctx context.Context, id merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error) {
+	return operator.PlanProviderAccountCutover(ctx, c.app, id, q)
 }

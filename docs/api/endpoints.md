@@ -139,7 +139,7 @@ scoped to the token's subject — no `:user_id` appears in any path.
 | POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
 | POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
 | POST | `/v1/me/subscriptions/{id}/change-tier/preview` | Dry-run of the tier change (proration/effect preview), no mutation |
-| PUT | `/v1/me/subscriptions/{id}/payment-method` | Reassign an NMI-backed subscription to another saved method. Body `{ "payment_method_id": "..." }` |
+| PUT | `/v1/me/subscriptions/{id}/payment-method` | Reassign an NMI-backed subscription to another saved method. Body `{ "payment_method_id": "..." }`. A method vaulted by a different provider account is `409 payment_method_psp_mismatch` |
 
 Solana on-chain lifecycle (mounted only when OpenRails has a Solana signer;
 prepare → wallet signs → confirm):

@@ -3,12 +3,22 @@ package subscriptions
 import (
 	"context"
 	"errors"
-	"github.com/google/uuid"
+	"fmt"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 )
+
+// ErrPaymentMethodProviderAccountMismatch is returned when a durable
+// payment-source update is asked to use an instrument owned by another PSP.
+// Provider vault references are account-scoped; allowing this request to reach
+// a source-account client could silently bill the wrong account or produce an
+// unrepairable split. Cross-account cutover must use the explicit card
+// re-entry workflow described by ProviderAccountCutoverPlan.
+var ErrPaymentMethodProviderAccountMismatch = errors.New("payment method belongs to a different provider account")
 
 // NMIClientForExistingSubscription resolves the NMI client that owns an already
 // recorded subscription. New-work selectors must not be used for rows pinned to
@@ -48,4 +58,17 @@ func PaymentMethodMatchesSubscriptionProvider(pm *models.PaymentMethod, sub *mod
 		return true
 	}
 	return pm.PspID == sub.PspID
+}
+
+// ValidatePaymentMethodProviderAccount enforces the provider-account boundary
+// at the durable update seam. Callers may perform an earlier HTTP validation,
+// but this check must remain at the side-effect boundary too.
+func ValidatePaymentMethodProviderAccount(pm *models.PaymentMethod, sub *models.Subscription) error {
+	if pm == nil || sub == nil {
+		return errors.New("payment method and subscription are required")
+	}
+	if !PaymentMethodMatchesSubscriptionProvider(pm, sub) {
+		return fmt.Errorf("%w: source=%s target=%s; card re-entry on the active provider is required", ErrPaymentMethodProviderAccountMismatch, sub.PspID, pm.PspID)
+	}
+	return nil
 }
