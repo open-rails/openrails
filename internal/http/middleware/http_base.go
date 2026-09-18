@@ -55,7 +55,20 @@ func BodyLimitHTTP(maxBytes int64) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if maxBytes > 0 && r.Body != nil {
-				body := http.MaxBytesReader(w, r.Body, maxBytes)
+				limit := requestBodyLimit(r, maxBytes)
+				body := http.MaxBytesReader(w, r.Body, limit)
+				if isMerchantArchiveImport(r) && limit != maxBytes {
+					if r.ContentLength > limit {
+						w.Header().Set("X-Request-ID", httprequest.EnsureRequestID(r))
+						billingauth.WriteJSONError(w, http.StatusRequestEntityTooLarge, openrails.CodeRequestBodyTooLarge, "billing archive exceeds its size limit")
+						return
+					}
+					// Authenticate before reading a potentially large archive. Its
+					// handler validates the full bounded stream before committing.
+					r.Body = body
+					next.ServeHTTP(w, r)
+					return
+				}
 				raw, err := io.ReadAll(body)
 				_ = body.Close()
 				if err != nil {

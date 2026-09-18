@@ -19,6 +19,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/http/inprocess"
 	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/service"
 )
@@ -149,7 +150,7 @@ func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, 
 	rt := r.emb.App().Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt) })
 	defaults := []openrails.ClientOption{
-		openrails.WithHTTPClient(&http.Client{Transport: &inprocessTransport{handler: r.handler, rt: rt}}),
+		openrails.WithHTTPClient(&http.Client{Transport: inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)}),
 		openrails.WithTokenProvider(func(context.Context) (string, error) { return "in-process-host", nil }),
 	}
 	if id := rt.ConfiguredMerchant(); !id.IsZero() {

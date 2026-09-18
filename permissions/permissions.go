@@ -49,6 +49,10 @@ const (
 	// DeclaredBilling book import writes subscriptions/payments/payment methods
 	// wholesale — owner/automation authority, not a support-role grant.
 	MerchantBillingImport = "merchant:billing:import"
+	// MerchantBillingExport allows a complete merchant billing archive, including
+	// customer/provider references and historical financial records. It is not a
+	// viewer/support grant. Restoration uses MerchantBillingImport.
+	MerchantBillingExport = "merchant:billing:export"
 	// MerchantCreditsGrant gates the human-admin credit grant
 	// (or#906: POST /v1/merchant/customers/{id}/credits). Money-in is the one
 	// grant-shaped act whose blast radius is monetary, so it does NOT ride on

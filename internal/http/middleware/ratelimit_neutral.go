@@ -143,6 +143,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 	// cap (so chunked bodies are capped on read); a declared Content-Length over
 	// the cap is rejected here, before any rate-limit counting.
 	if maxBytes, ok := BucketMaxContentLength[bucket]; ok && r != nil {
+		maxBytes = requestBodyLimit(r, maxBytes)
 		if r.Body != nil {
 			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 		}

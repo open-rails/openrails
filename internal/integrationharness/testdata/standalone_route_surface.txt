@@ -55,6 +55,7 @@ GET /v1/me/transactions
 GET /v1/me/usage
 GET /v1/merchant/api-host
 GET /v1/merchant/api-keys
+GET /v1/merchant/billing-archive
 GET /v1/merchant/catalog/drift
 GET /v1/merchant/catalog/meters
 GET /v1/merchant/catalog/meters/{key}
@@ -155,6 +156,7 @@ POST /v1/merchant/admissions/{id}/capture
 POST /v1/merchant/admissions/{id}/extend
 POST /v1/merchant/admissions/{id}/release
 POST /v1/merchant/api-keys
+POST /v1/merchant/billing-archive
 POST /v1/merchant/catalog/ask
 POST /v1/merchant/catalog/copilot/confirm
 POST /v1/merchant/catalog/drift/refresh

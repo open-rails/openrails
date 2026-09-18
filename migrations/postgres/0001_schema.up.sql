@@ -437,10 +437,26 @@ COMMENT ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestam
 REVOKE ALL ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION openrails.due_verify_rail_intent_merchant_ids(p_now timestamp with time zone, p_limit integer) TO openrails_app;
 
+CREATE FUNCTION openrails.billing_restore_active(p_merchant uuid) RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'openrails', 'pg_temp'
+    AS $$
+BEGIN
+    IF p_merchant IS DISTINCT FROM openrails.current_merchant_id() THEN RETURN false; END IF;
+    RETURN EXISTS (SELECT 1 FROM openrails.maintenance_runs r
+        WHERE r.merchant_id=p_merchant AND r.kind='billing_restore' AND r.status='running'
+        AND r.id::text=current_setting('app.billing_restore_id',true)
+        AND r.xmin=pg_current_xact_id_if_assigned()::xid);
+END;
+$$;
+REVOKE ALL ON FUNCTION openrails.billing_restore_active(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION openrails.billing_restore_active(uuid) TO openrails_app;
+
 CREATE FUNCTION openrails.enqueue_payment_settlement_event() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+    IF openrails.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     IF NEW.status = 'completed'
        AND NEW.amount > 0
        AND NEW.refunded_payment_id IS NULL
@@ -688,6 +704,7 @@ DECLARE
     debit_balance bigint;
     credit_balance bigint;
 BEGIN
+    IF openrails.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     FOR acc IN
         SELECT *
         FROM openrails.ledger_accounts
@@ -907,6 +924,7 @@ CREATE FUNCTION openrails.subscriptions_record_status_transition() RETURNS trigg
     LANGUAGE plpgsql
     AS $$
 BEGIN
+    IF openrails.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     IF TG_OP = 'INSERT' THEN
         INSERT INTO openrails.subscription_status_transitions
             (merchant_id, subscription_id, from_status, to_status, cancel_type, occurred_at)
@@ -924,6 +942,7 @@ CREATE FUNCTION openrails.subscriptions_set_tier_group() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
+    IF openrails.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
     SELECT prod.tier_group INTO NEW.tier_group
     FROM openrails.products AS prod
     WHERE prod.id = NEW.product_id AND prod.merchant_id = NEW.merchant_id
@@ -1128,7 +1147,7 @@ CREATE TABLE openrails.maintenance_runs (
     error text,
     inventory_manifest jsonb,
     inventory_total_rows bigint,
-    run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' ELSE 'destructive' END) STORED NOT NULL,
+    run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' WHEN kind = 'billing_restore' THEN 'restore' ELSE 'destructive' END) STORED NOT NULL,
     CONSTRAINT maintenance_runs_expected_rows CHECK (expected_rows IS NULL OR expected_rows >= 0),
     CONSTRAINT maintenance_runs_status CHECK (status IN ('running','completed','failed','reversed')),
     CONSTRAINT maintenance_runs_shape CHECK ((
@@ -1139,6 +1158,15 @@ CREATE TABLE openrails.maintenance_runs (
         OR (kind IN ('prune','converge_enforce','merchant_purge') AND btrim(actor) <> ''
          AND mode = '' AND cardinality(rails) = 0 AND window_since IS NULL AND window_until IS NULL
          AND summary IS NULL AND error IS NULL AND inventory_manifest IS NULL AND inventory_total_rows IS NULL)
+        OR (kind = 'billing_restore' AND actor = 'merchantarchive' AND status IN ('running','completed')
+         AND mode = '' AND cardinality(rails)=0 AND psp_id IS NULL AND NOT dry_run
+         AND window_since IS NULL AND window_until IS NULL AND coverage IS NULL AND expected_rows IS NULL
+         AND affected IS NULL AND reversed_at IS NULL AND reversed_by IS NULL AND note IS NULL AND error IS NULL
+         AND inventory_manifest IS NULL AND inventory_total_rows IS NULL
+         AND ((status='running' AND finished_at IS NULL AND summary IS NULL)
+              OR (status='completed' AND finished_at IS NOT NULL AND jsonb_typeof(summary)='object'
+                  AND summary ?& ARRAY['digest','rows'] AND jsonb_typeof(summary->'digest')='string'
+                  AND jsonb_typeof(summary->'rows')='number' AND summary->>'digest' ~ '^[0-9a-f]{64}$' AND (summary->>'rows')::bigint >= 0)))
         OR (kind = 'purge_inventory' AND status = 'completed' AND finished_at IS NOT NULL
          AND mode = '' AND cardinality(rails) = 0 AND psp_id IS NULL
          AND window_since IS NULL AND window_until IS NULL AND NOT dry_run
@@ -4397,3 +4425,104 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO openrail
 -- One unresolved upgrade owns the predecessor's provider mutation sequence.
 CREATE UNIQUE INDEX uq_rail_intents_upgrade_predecessor ON openrails.rail_intents(merchant_id, subscription_id)
 WHERE intent_type='nmi_upgrade' AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable');
+
+-- #293: one receipt, on the existing maintenance ledger, protects the narrow
+-- restore-only trigger suppression. An application-set GUC alone does nothing.
+CREATE UNIQUE INDEX uq_maintenance_billing_restore ON openrails.maintenance_runs(merchant_id)
+    WHERE kind='billing_restore';
+
+CREATE FUNCTION openrails.guard_billing_restore_receipt() RETURNS trigger
+    LANGUAGE plpgsql SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF ((TG_OP<>'DELETE' AND NEW.kind='billing_restore') OR (TG_OP<>'INSERT' AND OLD.kind='billing_restore'))
+       AND current_user <> pg_get_userbyid((SELECT relowner FROM pg_class WHERE oid='openrails.maintenance_runs'::regclass)) THEN
+        RAISE EXCEPTION 'billing restore receipts are managed only by restore functions' USING ERRCODE='42501';
+    END IF;
+    IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER guard_billing_restore_receipt BEFORE INSERT OR UPDATE OR DELETE ON openrails.maintenance_runs
+    FOR EACH ROW EXECUTE FUNCTION openrails.guard_billing_restore_receipt();
+
+CREATE FUNCTION openrails.begin_billing_restore(p_merchant uuid) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+DECLARE receipt uuid; item record; occupied boolean; current_schema_name text;
+BEGIN
+    IF p_merchant IS DISTINCT FROM openrails.current_merchant_id() THEN
+        RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
+    END IF;
+    PERFORM 1 FROM openrails.merchants WHERE id=p_merchant AND status='active' AND deleted_at IS NULL FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'billing restore merchant missing or inactive' USING ERRCODE='P0002'; END IF;
+    SELECT id INTO receipt FROM openrails.maintenance_runs WHERE merchant_id=p_merchant AND kind='billing_restore' AND status='completed';
+    IF receipt IS NOT NULL THEN RETURN receipt; END IF;
+    SELECT n.nspname INTO current_schema_name FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE c.oid='openrails.merchants'::regclass;
+    -- Inspect all merchant-scoped tables, including future and currently retired
+    -- tables. The merchant row lock serializes the FK-backed first writes.
+    FOR item IN SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        JOIN pg_attribute a ON a.attrelid=c.oid AND a.attname='merchant_id' AND NOT a.attisdropped
+        WHERE n.nspname=current_schema_name AND c.relkind IN ('r','p')
+    LOOP
+        EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I WHERE merchant_id=$1)',current_schema_name,item.relname)
+            INTO occupied USING p_merchant;
+        IF occupied THEN RAISE EXCEPTION 'billing restore destination is not empty: %',item.relname USING ERRCODE='55000'; END IF;
+    END LOOP;
+    INSERT INTO openrails.maintenance_runs(merchant_id,kind,actor) VALUES(p_merchant,'billing_restore','merchantarchive') RETURNING id INTO receipt;
+    PERFORM set_config('app.billing_restore_id',receipt::text,true);
+    RETURN receipt;
+END;
+$$;
+REVOKE ALL ON FUNCTION openrails.begin_billing_restore(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION openrails.begin_billing_restore(uuid) TO openrails_app;
+
+CREATE FUNCTION openrails.check_billing_restore_ledger(p_merchant uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF p_merchant IS DISTINCT FROM openrails.current_merchant_id() THEN
+        RAISE EXCEPTION 'billing restore merchant mismatch' USING ERRCODE='42501';
+    END IF;
+    IF EXISTS (SELECT 1 FROM openrails.ledger_accounts a
+        LEFT JOIN (SELECT credit_account_id id,sum(amount) amount FROM openrails.ledger_transfers WHERE merchant_id=p_merchant GROUP BY credit_account_id) c ON c.id=a.id
+        LEFT JOIN (SELECT debit_account_id id,sum(amount) amount FROM openrails.ledger_transfers WHERE merchant_id=p_merchant GROUP BY debit_account_id) d ON d.id=a.id
+        WHERE a.merchant_id=p_merchant AND (a.credits_posted<>coalesce(c.amount,0) OR a.debits_posted<>coalesce(d.amount,0)))
+       OR EXISTS (SELECT currency FROM openrails.ledger_accounts WHERE merchant_id=p_merchant GROUP BY currency HAVING sum(credits_posted::numeric-debits_posted::numeric)<>0)
+       OR EXISTS (SELECT 1 FROM openrails.ledger_transfers t JOIN openrails.ledger_accounts d ON d.id=t.debit_account_id
+           JOIN openrails.ledger_accounts c ON c.id=t.credit_account_id WHERE t.merchant_id=p_merchant
+           AND (d.currency<>t.currency OR c.currency<>t.currency OR d.merchant_id<>p_merchant OR c.merchant_id<>p_merchant
+                OR (d.customer_id IS NOT NULL AND d.customer_id IS DISTINCT FROM t.customer_id)
+                OR (c.customer_id IS NOT NULL AND c.customer_id IS DISTINCT FROM t.customer_id))) THEN
+        RAISE EXCEPTION 'billing restore ledger integrity mismatch' USING ERRCODE='23514';
+    END IF;
+END;
+$$;
+REVOKE ALL ON FUNCTION openrails.check_billing_restore_ledger(uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION openrails.check_billing_restore_ledger(uuid) TO openrails_app;
+
+CREATE FUNCTION openrails.finish_billing_restore(p_merchant uuid,p_digest text,p_rows bigint) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF NOT openrails.billing_restore_active(p_merchant) OR p_digest IS NULL OR p_rows IS NULL OR p_digest !~ '^[0-9a-f]{64}$' OR p_rows<0 THEN
+        RAISE EXCEPTION 'invalid billing restore finalization' USING ERRCODE='23514';
+    END IF;
+    PERFORM openrails.check_billing_restore_ledger(p_merchant);
+    UPDATE openrails.maintenance_runs SET status='completed',finished_at=now(),summary=jsonb_build_object('digest',p_digest,'rows',p_rows)
+        WHERE merchant_id=p_merchant AND kind='billing_restore' AND id::text=current_setting('app.billing_restore_id',true);
+END;
+$$;
+REVOKE ALL ON FUNCTION openrails.finish_billing_restore(uuid,text,bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION openrails.finish_billing_restore(uuid,text,bigint) TO openrails_app;
+
+CREATE FUNCTION openrails.require_finished_billing_restore() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'pg_catalog', 'openrails', 'pg_temp' AS $$
+BEGIN
+    IF NEW.kind='billing_restore' THEN
+        IF NOT EXISTS (SELECT 1 FROM openrails.maintenance_runs WHERE id=NEW.id AND merchant_id=NEW.merchant_id AND status='completed') THEN
+            RAISE EXCEPTION 'unfinished billing restore cannot commit' USING ERRCODE='23514';
+        END IF;
+        PERFORM openrails.check_billing_restore_ledger(NEW.merchant_id);
+    END IF;
+    RETURN NULL;
+END;
+$$;
+CREATE CONSTRAINT TRIGGER require_finished_billing_restore AFTER INSERT OR UPDATE ON openrails.maintenance_runs
+    DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION openrails.require_finished_billing_restore();
