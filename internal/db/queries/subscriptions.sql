@@ -367,21 +367,25 @@ WHERE sub.price_id = sqlc.arg(price_id)::uuid
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at;
 
--- name: ClaimSubscriptionRetryNow :execrows
+-- name: ClaimSubscriptionRetryNow :one
 -- Customer retry-now (#809) takes the same lease the dunning worker takes
 -- (ClaimDunningAttempt), but may take it ahead of the schedule: a still-due
--- row, a row with no schedule, or a row whose next retry lies beyond the
--- lease window. A row inside a live lease (next_retry_at within the window)
--- is the worker's, and is refused.
+-- row, a row with no schedule, or a row whose next retry is a SCHEDULE. A
+-- lease is told from a schedule by its own shape — a claim writes
+-- next_retry_at exactly lease_seconds after last_retry_at, a decline schedules
+-- days out — so a lease written by a node whose clock runs ahead is still a
+-- lease. Times are the database's, never a node clock.
 UPDATE openrails.subscriptions
-SET next_retry_at = sqlc.arg(lease_until)::timestamptz,
-    last_retry_at = sqlc.arg(claimed_at)::timestamptz,
-    updated_at = sqlc.arg(claimed_at)::timestamptz
+SET last_retry_at = now(),
+    next_retry_at = now() + make_interval(secs => sqlc.arg(lease_seconds)::int),
+    updated_at = now()
 WHERE id = $1
   AND merchant_id = sqlc.arg(merchant_id)
   AND customer_id = sqlc.arg(customer_id)
   AND status = 'past_due'
   AND deleted_at IS NULL
   AND (next_retry_at IS NULL
-       OR next_retry_at <= sqlc.arg(claimed_at)::timestamptz
-       OR next_retry_at > sqlc.arg(lease_until)::timestamptz);
+       OR next_retry_at <= now()
+       OR (last_retry_at IS NOT NULL
+           AND next_retry_at - last_retry_at > make_interval(secs => sqlc.arg(lease_seconds)::int)))
+RETURNING last_retry_at, next_retry_at;

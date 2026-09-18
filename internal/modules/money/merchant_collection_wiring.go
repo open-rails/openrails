@@ -253,42 +253,23 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 	return res, nil
 }
 
-// nmiCollectionReceipt is the ONE exact-receipt path for an NMI-family
-// collection, shared by autonomous verification and operator resolution. The
-// Query API must return a successful sale for the operation's order reference
-// (identity); with providerReference set it must be that very sale. The v5
-// read of that sale must then be approved, in the frozen currency, for the
-// frozen amount, on the instrument's customer vault. A custodian-held card
-// (or#879) is charged by card data and has no vault at NMI: its exact read
-// binds approval, currency and amount, and the order reference binds the
-// instrument. An empty search is inconclusive (Settled=false, nil error); a
-// sale that exists but contradicts the frozen facts is an error.
+// nmiCollectionReceipt runs the ONE exact-receipt path
+// (nmi.ConfirmOrderSale) for an NMI-family collection, shared by autonomous
+// verification and operator resolution and by the subscription rebill
+// verifier: the order reference's sale, approved, for the frozen amount and
+// currency, on the instrument's customer vault (a custodian-held card has
+// none, or#879). An empty search is inconclusive (Settled=false, nil error); a
+// sale that contradicts the frozen facts is an error.
 func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
-	key := strings.TrimSpace(expect.OperationKey)
-	if key == "" || expect.Amount <= 0 || strings.TrimSpace(expect.Currency) == "" {
-		return CollectionVerifyResult{}, errors.New("collection receipt expectation is incomplete")
-	}
-	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, key)
-	if err != nil {
-		return CollectionVerifyResult{}, fmt.Errorf("nmi query for order ref %q: %w", key, err)
-	}
-	txnID = strings.TrimSpace(txnID)
-	if !found || txnID == "" {
-		if providerReference != "" {
-			return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, key)
-		}
-		return CollectionVerifyResult{Supported: true}, nil
-	}
-	if providerReference != "" && txnID != providerReference {
-		return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, key)
-	}
-	if method.Custodian == models.CustodianBasisTheory {
-		err = client.ConfirmApprovedUnvaultedSale(ctx, txnID, expect.Amount, expect.Currency)
-	} else {
-		err = client.ConfirmApprovedSale(ctx, txnID, strings.TrimSpace(method.RailCustomerRef), expect.Amount, expect.Currency)
-	}
+	txnID, found, err := client.ConfirmOrderSale(ctx, nmi.OrderSale{
+		OrderID: expect.OperationKey, CustomerVaultID: strings.TrimSpace(method.RailCustomerRef),
+		Unvaulted: method.Custodian == models.CustodianBasisTheory, Amount: expect.Amount, Currency: expect.Currency,
+	}, providerReference)
 	if err != nil {
 		return CollectionVerifyResult{}, err
+	}
+	if !found {
+		return CollectionVerifyResult{Supported: true}, nil
 	}
 	return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: txnID}, nil
 }

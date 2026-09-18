@@ -67,6 +67,7 @@ var providerWriteSurface = map[string]string{
 
 	// --- reads ----------------------------------------------------------
 	"ConfirmApprovedSale":          "read",
+	"ConfirmOrderSale":             "read",
 	"ConfirmApprovedUnvaultedSale": "read",
 	"ConfirmLiveSubscription":      "read",
 	"ConfirmRefund":                "read",

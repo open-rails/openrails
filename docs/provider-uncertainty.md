@@ -40,9 +40,9 @@ subscription on the vault and plan, unowned locally; refund: approved refund of
 the reserved amount on the original sale's vault) before local effects commit
 through the normal receipt path. `--not-executed` records provider-confirmed
 non-execution and takes the type's definitive-refusal path; it is refused while
-the operation's exact order reference shows a successful sale. Rebills and
-custodian sales accept only non-execution because their receipts correlate
-exactly by order reference. Every resolution records actor and reason on the
+the operation's exact order reference shows a successful sale. Custodian
+sales accept only non-execution because their receipts correlate exactly by
+order reference. Every resolution records actor and reason on the
 operation and in the mutation log. NMI subscription enrollment follows the
 upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.
@@ -88,6 +88,21 @@ account that never armed) has no verifier; `intents resolve --not-executed`
 releases it on the strength of the absent fence, and refuses one that carries
 the fence. There is no evidence-free unpark/force-resend method. No automatic
 compensating cancel or refund is triggered by uncertainty.
+
+A manual rebill (scheduled dunning or a customer retry-now, #809) freezes its
+charge at enqueue: the subscription's instrument and customer vault, the price
+amount and currency, and the provider account on the operation. It converges
+through the same exact-receipt path as invoice collection
+(`nmi.ConfirmOrderSale`): the verifier and `intents resolve --receipt` accept
+only the order reference's sale approved on the frozen vault for the frozen
+amount and currency; a contradicting sale is retained as
+`provider_contradiction`, keeps the operation unknown and refuses
+`--not-executed`. The renewal records the frozen amount. Before any provider
+traffic the operation is re-checked under the instrument's shared row lock
+(the #297 custody remap takes it exclusively and refuses while the rebill is
+in flight): an instrument moved to another provider account (#657), a changed
+subscription method or vault supersedes the operation, and re-deriving the
+period's attempt revives it with a fresh freeze.
 
 A manual rebill confirmed after dunning parked or the customer cancelled the
 subscription still records its payment exactly once: a parked (`unknown`) or

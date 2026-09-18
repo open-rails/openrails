@@ -380,10 +380,12 @@ func (w *DunningWorker) processSubscription(
 			logEntry.WithError(err).Warn("Dunning (materialize): failed to load subscription merchant for rebill intent")
 			return dunningOutcomeFailed, nil
 		}
-		attemptOrdinal := 0
-		if sub.RetryAttempts != nil {
-			attemptOrdinal = *sub.RetryAttempts
+		payload, err := dunning.FreezeRebill(ctx, w.DB, sub)
+		if err != nil {
+			logEntry.WithError(err).Warn("Dunning (materialize): rebill cannot be frozen; nothing materialized")
+			return dunningOutcomeFailed, nil
 		}
+		payload.Rail = railName
 		windowEnd := periodEnd.Add(window)
 		row, err := w.intentRunner().Store.Enqueue(ctx, intents.EnqueueParams{
 			MerchantID:     genSub.MerchantID,
@@ -391,14 +393,8 @@ func (w *DunningWorker) processSubscription(
 			IntentType:     intents.TypeManualRebill,
 			SubscriptionID: &sub.ID,
 			PspID:          sub.PspID,
-			Payload: intents.ManualRebillPayload{
-				SubscriptionID: sub.ID,
-				PeriodEnd:      periodEnd,
-				Rail:           railName,
-				OrderReference: orderReference,
-				Attempt:        attemptOrdinal,
-			},
-			IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, railName, orderReference, attemptOrdinal),
+			Payload:        payload,
+			IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, railName, orderReference, payload.Attempt),
 			NextAttemptAt:  w.now().UTC(),
 			Origin:         intents.OriginSystem,
 			OriginReason:   "dunning rebill attempt (materialized under mode=limited)",
@@ -444,6 +440,24 @@ func (w *DunningWorker) processSubscription(
 		return dunningOutcomeFailed, nil
 	}
 
+	// #657: a rebill charges through the subscription's provider account, so
+	// its instrument must have been vaulted by that same account (a #297
+	// custody remap re-attributes instruments and leaves subscriptions). No
+	// claim, no attempt, no provider traffic until the card is re-entered on
+	// the subscription's account; the executor re-checks under the
+	// instrument's row lock.
+	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(pm, sub) {
+		logEntry.WithFields(log.Fields{"subscription_psp_id": sub.PspID, "payment_method_psp_id": pm.PspID}).
+			Error("Dunning: payment method belongs to another provider account (#657); rebill skipped, nothing sent — card re-entry on the subscription's account is required")
+		return dunningOutcomeFailed, nil
+	}
+	payload, err := dunning.FreezeRebill(ctx, w.DB, sub)
+	if err != nil {
+		logEntry.WithError(err).Warn("Dunning: rebill cannot be frozen; skipped, nothing sent")
+		return dunningOutcomeFailed, nil
+	}
+	payload.Rail = railName
+
 	claimed, err := w.claimDunningAttempt(ctx, sub, w.now())
 	if err != nil {
 		logEntry.WithError(err).Warn("Dunning: failed to claim subscription for rebill")
@@ -465,10 +479,6 @@ func (w *DunningWorker) processSubscription(
 		logEntry.WithError(err).Warn("Dunning: failed to load subscription merchant for rebill intent")
 		return dunningOutcomeFailed, nil
 	}
-	attemptOrdinal := 0
-	if sub.RetryAttempts != nil {
-		attemptOrdinal = *sub.RetryAttempts
-	}
 	windowEnd := periodEnd.Add(window)
 	intent, err := w.intentRunner().EnqueueAndExecute(ctx, intents.EnqueueParams{
 		MerchantID:     genSub.MerchantID,
@@ -476,14 +486,8 @@ func (w *DunningWorker) processSubscription(
 		IntentType:     intents.TypeManualRebill,
 		SubscriptionID: &sub.ID,
 		PspID:          sub.PspID,
-		Payload: intents.ManualRebillPayload{
-			SubscriptionID: sub.ID,
-			PeriodEnd:      periodEnd,
-			Rail:           railName,
-			OrderReference: orderReference,
-			Attempt:        attemptOrdinal,
-		},
-		IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, railName, orderReference, attemptOrdinal),
+		Payload:        payload,
+		IdempotencyKey: intents.ManualRebillIdempotencyKey(sub.ID, periodEnd, railName, orderReference, payload.Attempt),
 		NextAttemptAt:  w.now().UTC(),
 		Origin:         intents.OriginSystem,
 		OriginReason:   "dunning rebill attempt",

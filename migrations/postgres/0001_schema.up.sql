@@ -2348,6 +2348,10 @@ CREATE INDEX idx_rail_intents_subscription ON openrails.rail_intents USING btree
 
 CREATE UNIQUE INDEX uq_rail_intents_merchant_idempotency_key ON openrails.rail_intents USING btree (merchant_id, idempotency_key);
 
+CREATE UNIQUE INDEX uq_rail_intents_request_key ON openrails.rail_intents USING btree (merchant_id, ((payload ->> 'request_key'::text))) WHERE ((payload ->> 'request_key'::text) IS NOT NULL);
+
+COMMENT ON INDEX openrails.uq_rail_intents_request_key IS 'One operation per customer recovery request key (#809): a payer-scoped client Idempotency-Key binds exactly one rebill.';
+
 ALTER TABLE ONLY openrails.rail_intents
     ADD CONSTRAINT rail_intents_custodian_fk FOREIGN KEY (custodian_id, merchant_id) REFERENCES openrails.custodians(id, merchant_id) ON DELETE RESTRICT;
 

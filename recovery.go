@@ -43,9 +43,9 @@ type PaymentRecovery struct {
 }
 
 // PaymentOperation names one durable collection operation and its state.
-// Status is pending, in_flight, unknown_needs_verify, succeeded,
-// failed_terminal, failed_retryable, superseded or expired; the first three
-// are unresolved.
+// Status is pending, in_flight, failed_retryable, unknown_needs_verify
+// (unresolved: no provider answer yet), or succeeded, failed_terminal,
+// superseded, expired.
 type PaymentOperation struct {
 	ID     uuid.UUID `json:"id"`
 	Status string    `json:"status"`
@@ -68,6 +68,13 @@ const (
 	RecoveryBlockedOutcomeUnknown  = "outcome_unknown"
 	RecoveryBlockedRailUnsupported = "rail_unsupported"
 	RecoveryBlockedNoPaymentMethod = "no_compatible_payment_method"
+	// RecoveryBlockedPSPMismatch: the subscription's saved method was vaulted
+	// by another provider account (#657); collect the card again on the
+	// subscription's account.
+	RecoveryBlockedPSPMismatch = "payment_method_psp_mismatch"
+	// RecoveryBlockedWindowExpired: the missed renewal is older than the
+	// dunning window (#839); nothing charges it any more.
+	RecoveryBlockedWindowExpired = "dunning_window_expired"
 )
 
 // PayInvoiceNowRequest charges one open or past-due invoice through a saved
@@ -128,15 +135,21 @@ const (
 	// CodeSubscriptionRetryOutcomeUnknown (409): a submitted rebill has no
 	// provider answer yet; nothing is resent until it resolves.
 	CodeSubscriptionRetryOutcomeUnknown = "subscription_retry_outcome_unknown"
+	// CodeSubscriptionRetryIdempotencyConflict (409): the Idempotency-Key
+	// already names a different retry-now request (another subscription or
+	// payment method). Nothing is charged and nothing is replayed.
+	CodeSubscriptionRetryIdempotencyConflict = "subscription_retry_idempotency_conflict"
 )
 
 var (
-	ErrPaymentRecoveryRailUnsupported  error = newCodedError(CodePaymentRecoveryRailUnsupported, ErrConflict)
-	ErrSubscriptionNotRetryable        error = newCodedError(CodeSubscriptionNotRetryable, ErrConflict)
-	ErrSubscriptionRetryInProgress     error = newCodedError(CodeSubscriptionRetryInProgress, ErrConflict)
-	ErrSubscriptionRetryOutcomeUnknown error = newCodedError(CodeSubscriptionRetryOutcomeUnknown, ErrConflict)
-	ErrInvoiceNotRetryable             error = newCodedError(CodeInvoiceNotRetryable, ErrConflict)
-	ErrInvoiceRetryInProgress          error = newCodedError(CodeInvoiceRetryInProgress, ErrConflict)
-	ErrInvoiceRetryOutcomeUnknown      error = newCodedError(CodeInvoiceRetryOutcomeUnknown, ErrConflict)
-	ErrCollectionPaymentMethodInvalid  error = newCodedError(CodeCollectionPaymentMethodInvalid, ErrInvalid)
+	ErrPaymentRecoveryRailUnsupported       error = newCodedError(CodePaymentRecoveryRailUnsupported, ErrConflict)
+	ErrSubscriptionNotRetryable             error = newCodedError(CodeSubscriptionNotRetryable, ErrConflict)
+	ErrSubscriptionRetryInProgress          error = newCodedError(CodeSubscriptionRetryInProgress, ErrConflict)
+	ErrSubscriptionRetryOutcomeUnknown      error = newCodedError(CodeSubscriptionRetryOutcomeUnknown, ErrConflict)
+	ErrSubscriptionRetryIdempotencyConflict error = newCodedError(CodeSubscriptionRetryIdempotencyConflict, ErrConflict)
+	ErrInvoiceRetryIdempotencyConflict      error = newCodedError(CodeInvoiceRetryIdempotencyConflict, ErrConflict)
+	ErrInvoiceNotRetryable                  error = newCodedError(CodeInvoiceNotRetryable, ErrConflict)
+	ErrInvoiceRetryInProgress               error = newCodedError(CodeInvoiceRetryInProgress, ErrConflict)
+	ErrInvoiceRetryOutcomeUnknown           error = newCodedError(CodeInvoiceRetryOutcomeUnknown, ErrConflict)
+	ErrCollectionPaymentMethodInvalid       error = newCodedError(CodeCollectionPaymentMethodInvalid, ErrInvalid)
 )

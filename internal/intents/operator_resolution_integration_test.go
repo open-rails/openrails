@@ -183,10 +183,12 @@ func TestStripeRefundLostResponseReplaysProviderIdempotencyKey(t *testing.T) {
 	require.Equal(t, "re_1", txn)
 }
 
-// A lost rebill resolves only through the exact order-reference search or
-// provider-confirmed non-execution; an operator reference is refused, and
-// non-execution is refused while the order shows a successful sale.
-func TestManualRebillOperatorResolutionIsNonExecutionOnly(t *testing.T) {
+// A lost rebill resolves through the exact-receipt path or
+// provider-confirmed non-execution: an operator reference the provider does
+// not show is refused, and non-execution is refused while the order shows a
+// successful sale. (TestManualRebillContradictedReceiptStaysUnknown covers a
+// sale that contradicts the frozen charge and an accepted exact receipt.)
+func TestManualRebillOperatorResolutionRefusesUnprovenOutcomes(t *testing.T) {
 	fx := seedPastDueSubscription(t)
 	fake, client := newFakeNMIRebillGateway(t)
 	fake.saleStatus.Store(http.StatusBadGateway)
