@@ -259,7 +259,8 @@ type Config struct {
 	// ProviderSandbox points sandbox-posture provider clients at loopback
 	// gateways so a whole process (standalone or embedded) can be qualified
 	// against fake providers over its real wire paths. Honored only under
-	// test_mode=sandbox; a live posture refuses it at load.
+	// test_mode=sandbox and only for a literal loopback IP destination; a live
+	// posture or any other destination refuses to load.
 	ProviderSandbox *ProviderSandboxConfig `koanf:"provider_sandbox,omitempty"`
 }
 
@@ -294,18 +295,45 @@ func (cfg *Config) SandboxStripeAPIURL() string {
 	return strings.TrimSpace(cfg.ProviderSandbox.StripeAPIURL)
 }
 
+// errProviderSandboxDestination refuses a provider_sandbox declaration: a
+// live posture, or a destination that is not a literal loopback address.
+var errProviderSandboxDestination = errors.New("provider_sandbox destination refused")
+
 func validateProviderSandbox(cfg *Config) error {
 	for key, gateway := range map[string]string{"nmi_gateway_url": cfg.SandboxNMIGatewayURL(), "stripe_api_url": cfg.SandboxStripeAPIURL()} {
 		if gateway == "" {
 			continue
 		}
 		if cfg.TestMode == CredentialPostureLive {
-			return fmt.Errorf("provider_sandbox.%s is refused with test_mode=live: a loopback gateway is a sandbox-only seam", key)
+			return fmt.Errorf("%w: provider_sandbox.%s with test_mode=live: a loopback gateway is a sandbox-only seam", errProviderSandboxDestination, key)
 		}
-		u, err := url.Parse(gateway)
-		if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-			return fmt.Errorf("invalid provider_sandbox.%s %q: must be an absolute http(s) URL", key, gateway)
+		if err := validateLoopbackProviderURL(gateway); err != nil {
+			return fmt.Errorf("provider_sandbox.%s: %w", key, err)
 		}
+	}
+	return nil
+}
+
+// validateLoopbackProviderURL accepts only a literal loopback destination:
+// an absolute http(s) URL without userinfo whose host is an IP literal
+// net.IP.IsLoopback accepts. Provider credentials are sent there, so a
+// hostname (even "localhost") is refused: locality must not depend on a
+// resolver. Same rule as #477's ValidateLoopbackGatewayURL; they converge at
+// rebase.
+func validateLoopbackProviderURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("%w: %q is not an absolute http(s) URL", errProviderSandboxDestination, raw)
+	}
+	if u.User != nil {
+		return fmt.Errorf("%w: %q carries userinfo", errProviderSandboxDestination, raw)
+	}
+	ip := net.ParseIP(u.Hostname())
+	if ip == nil {
+		return fmt.Errorf("%w: host %q must be a loopback IP literal, not a hostname", errProviderSandboxDestination, u.Hostname())
+	}
+	if !ip.IsLoopback() {
+		return fmt.Errorf("%w: host %q is not a loopback address", errProviderSandboxDestination, u.Hostname())
 	}
 	return nil
 }
