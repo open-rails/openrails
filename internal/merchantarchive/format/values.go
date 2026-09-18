@@ -16,8 +16,20 @@ func ValidateValues(p Profile, values []*string) error {
 			continue
 		}
 		v := *values[i]
-		if (c.Type == "text" || strings.HasPrefix(c.Type, "character varying")) && !safeText(v) {
-			return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)
+		if c.Type == "text" || strings.HasPrefix(c.Type, "character varying") {
+			safe := safeText(v)
+			if p.Name == "host_outbox" && c.Name == "dedupe_key" {
+				// The settlement trigger derives this field from the UUID payment
+				// column. A numeric UUID segment can pass Luhn once prefixed;
+				// exempt only this exact typed coordinate, never arbitrary text.
+				event, payment := value(p, values, "event_type"), value(p, values, "payment_id")
+				if event != nil && *event == "payment.settled" && payment != nil && uuidPattern.MatchString(*payment) && v == "payment:"+*payment {
+					safe = true
+				}
+			}
+			if !safe {
+				return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)
+			}
 		}
 		bad := func() error { return fmt.Errorf("unsupported or invalid value in %s.%s", p.Name, c.Name) }
 		if c.Name == "currency" && strings.HasPrefix(v, "credit:") {
