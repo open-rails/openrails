@@ -2,19 +2,22 @@ package checkout
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/google/uuid"
-	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/internal/cardguard"
 )
 
 // PAN firewall (#795 B5, SAQ A): custodian-held-card checkout accepts ONLY the BT
 // token-intent handle. A raw card number reaching OpenRails — pasted into any
 // request field — would silently escalate the PCI posture (SAQ A -> SAQ D), so
 // card-number-shaped values are rejected LOUDLY, never stored or forwarded.
+//
+// Every field is scanned unconditionally. Identifiers are kept out of the
+// refusals by the detector's grouping rule (internal/cardguard), never by a
+// per-field exemption: an exemption is a hole an attacker can aim at, and it
+// only ever covered the fields someone had already been burned by.
 
 // RejectPANShapedFields errors when any string field of the checkout request
-// contains a 13-19 digit Luhn-passing sequence (spaces/dashes tolerated).
+// contains a card number.
 func RejectPANShapedFields(req *CheckoutRequest) error {
 	if req == nil {
 		return nil
@@ -36,73 +39,16 @@ func RejectPANShapedFields(req *CheckoutRequest) error {
 		"expiry_date":        req.ExpiryDate,
 		"card_type":          req.CardType,
 	}
-	// Typed UUID handles can contain a Luhn-valid run across their groups.
-	// Only these identifier fields receive this exemption; free-form fields
-	// and malformed handles retain the card-number scan.
-	if canonicalUUIDHandle(req.BTTokenIntentID) {
-		delete(fields, "bt_token_intent_id")
-	}
-	if canonicalUUIDHandle(strings.TrimPrefix(req.PaymentMethodID, api.PrefixPaymentMethod)) {
-		delete(fields, "payment_method_id")
-	}
 	for key, value := range req.Metadata {
-		if looksLikePAN(key) {
+		if cardguard.ContainsPAN(key) {
 			return fmt.Errorf("metadata key contains a card-number-shaped value: raw PANs must never reach OpenRails (SAQ A) — collect cards via the vault's browser SDK")
 		}
 		fields["metadata."+key] = value
 	}
 	for name, value := range fields {
-		if looksLikePAN(value) {
+		if cardguard.ContainsPAN(value) {
 			return fmt.Errorf("field %q contains a card-number-shaped value: raw PANs must never reach OpenRails (SAQ A) — collect cards via the vault's browser SDK", name)
 		}
 	}
 	return nil
-}
-
-// looksLikePAN reports whether s contains a 13-19 digit Luhn-valid run.
-func looksLikePAN(s string) bool {
-	if s == "" {
-		return false
-	}
-	var digits []byte
-	flush := func() bool {
-		defer func() { digits = digits[:0] }()
-		return len(digits) >= 13 && len(digits) <= 19 && luhnValid(digits)
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c >= '0' && c <= '9':
-			digits = append(digits, c-'0')
-		case c == ' ' || c == '-':
-			// separators inside a formatted PAN
-		default:
-			if flush() {
-				return true
-			}
-		}
-	}
-	return flush()
-}
-
-func luhnValid(digits []byte) bool {
-	sum := 0
-	double := false
-	for i := len(digits) - 1; i >= 0; i-- {
-		d := int(digits[i])
-		if double {
-			d *= 2
-			if d > 9 {
-				d -= 9
-			}
-		}
-		sum += d
-		double = !double
-	}
-	return sum%10 == 0
-}
-
-func canonicalUUIDHandle(value string) bool {
-	id, err := uuid.Parse(value)
-	return err == nil && strings.EqualFold(value, id.String())
 }
