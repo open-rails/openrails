@@ -58,12 +58,15 @@ type ManualRebillPayload struct {
 	// amount and currency the period is billed at. The verifier and operator
 	// resolution accept only a provider sale matching every one of them, and
 	// the renewal records exactly this amount.
-	PaymentMethodID uuid.UUID       `json:"payment_method_id"`
-	CustomerVaultID string          `json:"customer_vault_id,omitempty"`
-	Unvaulted       bool            `json:"unvaulted,omitempty"`
-	Currency        string          `json:"currency"`
-	Amount          int64           `json:"amount"`
-	AmountMinor     moneyutil.Cents `json:"amount_minor"`
+	PaymentMethodID        uuid.UUID       `json:"payment_method_id"`
+	BillingID              string          `json:"billing_id"`
+	RailSubscriptionID     string          `json:"rail_subscription_id"`
+	CredentialReference    string          `json:"credential_reference,omitempty"`
+	CredentialAnchorSource string          `json:"credential_anchor_source"`
+	CustomerVaultID        string          `json:"customer_vault_id,omitempty"`
+	Currency               string          `json:"currency"`
+	Amount                 int64           `json:"amount"`
+	AmountMinor            moneyutil.Cents `json:"amount_minor"`
 	// RequestKey binds a customer retry-now request (#809) to the operation
 	// it started, and RequestPaymentMethodID is the method that request named
 	// (nil = the subscription's current one): the same client key with a
@@ -75,7 +78,7 @@ type ManualRebillPayload struct {
 
 // Receipt is the exact provider sale this rebill must be confirmed by.
 func (p ManualRebillPayload) Receipt() nmi.OrderSale {
-	return nmi.OrderSale{OrderID: p.OrderReference, CustomerVaultID: p.CustomerVaultID, Unvaulted: p.Unvaulted, Amount: p.AmountMinor, Currency: p.Currency}
+	return nmi.OrderSale{OrderID: p.OrderReference, CustomerVaultID: p.CustomerVaultID, Amount: p.AmountMinor, Currency: p.Currency}
 }
 
 // ManualRebillIdempotencyKey content-addresses one dunning charge attempt the
@@ -133,7 +136,7 @@ func (h *ManualRebillHandler) Backoff(attempts int32) time.Duration { return h.P
 
 // PrunePolicy keeps the frozen payload: a customer retry-now key replays
 // against the operation's request_key after success (#809).
-func (h *ManualRebillHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
+func (h *ManualRebillHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, true }
 
 func decodeManualRebillPayload(intent gen.OpenrailsRailIntent) (ManualRebillPayload, error) {
 	var p ManualRebillPayload
@@ -144,7 +147,7 @@ func decodeManualRebillPayload(intent gen.OpenrailsRailIntent) (ManualRebillPayl
 		return p, fmt.Errorf("decode manual rebill payload: %w", err)
 	}
 	if p.SubscriptionID == uuid.Nil || p.PeriodEnd.IsZero() || strings.TrimSpace(p.OrderReference) == "" ||
-		p.PaymentMethodID == uuid.Nil || (!p.Unvaulted && strings.TrimSpace(p.CustomerVaultID) == "") ||
+		p.PaymentMethodID == uuid.Nil || p.BillingID == "" || p.RailSubscriptionID == "" || strings.TrimSpace(p.CustomerVaultID) == "" ||
 		strings.TrimSpace(p.Currency) == "" || p.Amount <= 0 || p.AmountMinor <= 0 {
 		return p, errors.New("manual rebill payload is incomplete")
 	}
@@ -225,9 +228,13 @@ func (h *ManualRebillHandler) pinInstrument(ctx context.Context, intent gen.Open
 		switch {
 		case sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID:
 			reason = "the subscription's payment method changed since the rebill was frozen"
+		case sub.RailSubscriptionID != p.RailSubscriptionID:
+			reason = "the subscription's provider reference changed since the rebill was frozen"
+		case method.RailMethodRef != p.BillingID:
+			reason = "the payment method's billing reference changed since the rebill was frozen"
 		case sub.PspID != *intent.PspID || method.PspID != *intent.PspID:
 			reason = fmt.Sprintf("%s: subscription PSP %s, rebill PSP %s, payment method PSP %s; a cross-PSP rebill is never sent (#657)", EvidenceCodePSPMismatch, sub.PspID, *intent.PspID, method.PspID)
-		case !p.Unvaulted && strings.TrimSpace(method.RailCustomerRef) != p.CustomerVaultID:
+		case strings.TrimSpace(method.RailCustomerRef) != p.CustomerVaultID:
 			reason = "the payment method's vault changed since the rebill was frozen"
 		}
 		return nil
@@ -253,17 +260,13 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		return Terminal(err.Error())
 	}
 
-	sub, err := subscriptions.NewSubscriptionRepo(h.DB).GetByID(ctx, p.SubscriptionID)
-	if err != nil {
-		return Parked("load subscription before submission: " + err.Error())
-	}
 	// The frozen instrument, never the subscription's current link:
 	// CheckRelevance already superseded a drifted one under its row lock.
 	pm, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, p.PaymentMethodID)
 	if err != nil && !errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
 		return Parked("load frozen payment method before submission: " + err.Error())
 	}
-	if pm != nil && (intent.PspID == nil || pm.PspID != *intent.PspID || strings.TrimSpace(pm.RailCustomerRef) != p.CustomerVaultID) {
+	if pm != nil && (intent.PspID == nil || pm.PspID != *intent.PspID || strings.TrimSpace(pm.RailCustomerRef) != p.CustomerVaultID || strings.TrimSpace(pm.RailMethodRef) != p.BillingID) {
 		return Parked("frozen payment method no longer matches the rebill; the relevance re-check supersedes it")
 	}
 	if pm == nil || pm.RailCustomerRef == "" || pm.RailMethodRef == "" {
@@ -279,12 +282,8 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	// anchor whenever it was captured. Historical rows without an anchor still
 	// get a best-effort merchant+used MIT so a missing migration artifact does
 	// not strand the subscription; the exception is explicit in logs/evidence.
-	priorRef := strings.TrimSpace(pm.StoredCredentialRecurringRef)
-	anchorSource := "agreement"
-	if priorRef == "" {
-		priorRef = strings.TrimSpace(pm.InitialTransactionID)
-		anchorSource = "legacy_initial_transaction_id"
-	}
+	priorRef := p.CredentialReference
+	anchorSource := p.CredentialAnchorSource
 	if priorRef == "" {
 		anchorSource = "unavailable"
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -312,9 +311,9 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 	}
 
 	rebillResp, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
-		VaultID:          pm.RailCustomerRef,
-		BillingID:        pm.RailMethodRef,
-		SubscriptionID:   sub.RailSubscriptionID,
+		VaultID:          p.CustomerVaultID,
+		BillingID:        p.BillingID,
+		SubscriptionID:   p.RailSubscriptionID,
 		OrderID:          p.OrderReference,
 		PONumber:         p.OrderReference,
 		StoredCredential: nmidirect.StoredCredentialFor(credentialContext),
@@ -347,52 +346,41 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, intent gen.OpenrailsR
 		})
 	}
 
-	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, rebillResp.TransactionID); err != nil {
-		// The charge DID happen; route through the verifier so the lifecycle
-		// repair is retried (its read re-finds the sale by order reference).
-		return AmbiguousWithEvidence("rebill charged, but local lifecycle update failed: "+err.Error(), map[string]any{"transaction_id": rebillResp.TransactionID})
+	// Classic approval supplies a candidate ID only: recurring rebills do not
+	// send amount/currency and NMI's current plan may differ from the freeze.
+	if err := h.saveRebillCandidate(ctx, intent, rebillResp.TransactionID); err != nil {
+		return AmbiguousWithEvidence("rebill approved, but candidate custody failed: "+err.Error(), map[string]any{"transaction_id": rebillResp.TransactionID})
 	}
-	return Succeeded(map[string]any{
-		"transaction_id":                   rebillResp.TransactionID,
-		"stored_credential_anchor_missing": anchorMissing,
-		"stored_credential_anchor_source":  anchorSource,
-	})
+	out := h.confirmAndFinalizeRebill(ctx, intent, p, client, rebillResp.TransactionID)
+	if out.Evidence == nil {
+		out.Evidence = map[string]any{}
+	}
+	out.Evidence["stored_credential_anchor_missing"] = anchorMissing
+	out.Evidence["stored_credential_anchor_source"] = anchorSource
+	return out
 }
 
-// Verify reconciles the same submitted period from positive evidence only:
-// the receipt this operation already holds, or the ONE exact-receipt path
-// (nmi.ConfirmOrderSale) against the frozen charge. An empty search keeps the
-// operation unknown and never arms another charge; a sale under the order
-// reference that contradicts the frozen instrument, amount or currency is
-// retained as evidence and keeps it unknown — nothing is recorded, renewed or
-// resent.
+// Verify accepts only a persisted bound receipt or exact provider readback.
+// A saved transaction ID is a candidate; it never authorizes renewal itself.
 func (h *ManualRebillHandler) Verify(ctx context.Context, intent gen.OpenrailsRailIntent) Outcome {
 	p, err := decodeManualRebillPayload(intent)
 	if err != nil {
 		return Ambiguous(err.Error())
 	}
-	txnID := EvidenceString(intent, "transaction_id")
-	if txnID == "" {
-		client, cerr := h.railClient(ctx, intent)
-		if cerr != nil {
-			return Ambiguous("nmi client unavailable, cannot verify: " + cerr.Error())
-		}
-		var found bool
-		txnID, found, err = client.ConfirmOrderSale(ctx, p.Receipt(), "")
-		if errors.Is(err, nmi.ErrReceiptMismatch) {
-			return rebillContradicted(err)
-		}
-		if err != nil {
-			return Ambiguous("provider read failed: " + err.Error())
-		}
-		if !found {
-			return Ambiguous("submitted rebill has no exact provider receipt; no automatic resend")
-		}
+	if receipt, found, err := loadRebillReceipt(intent, p); err != nil {
+		return rebillContradicted(err)
+	} else if found {
+		return h.completeRebill(ctx, intent, p, receipt)
 	}
-	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, txnID); err != nil {
-		return AmbiguousWithEvidence("charge verified at provider, but local lifecycle repair failed: "+err.Error(), map[string]any{"transaction_id": txnID})
+	client, err := h.railClient(ctx, intent)
+	if err != nil {
+		return Ambiguous("nmi client unavailable, cannot verify: " + err.Error())
 	}
-	return Succeeded(map[string]any{"transaction_id": txnID, "verified_existing": true})
+	candidate := EvidenceString(intent, rebillCandidateKey)
+	if candidate == "" {
+		candidate = EvidenceString(intent, "transaction_id")
+	}
+	return h.confirmAndFinalizeRebill(ctx, intent, p, client, candidate)
 }
 
 // rebillEvidenceContradiction retains a provider sale found under the
@@ -411,20 +399,35 @@ func rebillContradicted(err error) Outcome {
 //	past_due / unknown (dunning parked it) / active -> RenewMembership
 //	terminally cancelled (user, merchant, chargeback) -> payment row only;
 //	                                    never reactivated, flagged for refund review
-func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uuid.UUID, p ManualRebillPayload, transactionID string) error {
-	subRepo := subscriptions.NewSubscriptionRepo(h.DB)
-	sub, err := subRepo.GetByID(ctx, p.SubscriptionID)
+func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, intent gen.OpenrailsRailIntent, p ManualRebillPayload, receipt manualRebillReceipt) error {
+	if err := receipt.matches(intent, p); err != nil {
+		return err
+	}
+	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		database := h.DB.NewWithPgxTx(tx)
+		return h.finalizeRebillInTx(ctx, database, intent, p, receipt)
+	})
+}
+
+func (h *ManualRebillHandler) finalizeRebillInTx(ctx context.Context, database *db.DB, intent gen.OpenrailsRailIntent, p ManualRebillPayload, receipt manualRebillReceipt) error {
+	transactionID := receipt.transactionID
+	subRepo := subscriptions.NewSubscriptionRepo(database)
+	sub, err := subRepo.GetByIDForUpdate(ctx, p.SubscriptionID)
 	if err != nil {
 		return fmt.Errorf("load subscription: %w", err)
 	}
 
-	priceSvc := catalog.NewPriceService(h.DB)
-	productSvc := catalog.NewProductService(h.DB)
+	if intent.PspID == nil || sub.PspID != *intent.PspID || sub.RailSubscriptionID != p.RailSubscriptionID {
+		return errors.New("subscription no longer matches the qualified receipt's provider identity")
+	}
+
+	priceSvc := catalog.NewPriceService(database)
+	productSvc := catalog.NewProductService(database)
 	lifecycle := subscriptions.NewSubscriptionLifecycleService(
-		h.DB, productSvc, priceSvc,
-		entitlements.NewEntitlementService(h.DB, h.Clock),
-		subscriptions.NewNotificationService(h.DB, nil),
-		payments.NewPaymentService(h.DB, h.Clock),
+		database, productSvc, priceSvc,
+		entitlements.NewEntitlementService(database, h.Clock),
+		subscriptions.NewNotificationService(database, nil),
+		payments.NewPaymentService(database, h.Clock),
 		h.Clock,
 	)
 	lifecycle.SetConfig(h.Config)
@@ -433,7 +436,7 @@ func (h *ManualRebillHandler) finalizeSuccess(ctx context.Context, merchantID uu
 	// at confirmation time.
 	params := &subscriptions.RenewMembershipParams{
 		Rail:               models.Rail(strings.ToLower(intentRail(p, sub))),
-		RailSubscriptionID: sub.RailSubscriptionID,
+		RailSubscriptionID: p.RailSubscriptionID,
 		TransactionID:      transactionID,
 		Amount:             p.Amount,
 		Currency:           p.Currency,

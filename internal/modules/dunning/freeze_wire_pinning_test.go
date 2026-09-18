@@ -21,8 +21,8 @@ func TestFreezeRebillPinsTheRailAmount(t *testing.T) {
 	periodEnd := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	sub := func(amount int64, currency string) *models.Subscription {
 		return &models.Subscription{
-			ID: uuid.New(), Rail: models.RailNMI, CurrentPeriodEndsAt: &periodEnd,
-			PaymentMethod: &models.PaymentMethod{ID: uuid.New(), RailCustomerRef: " vault-1 "},
+			ID: uuid.New(), Rail: models.RailNMI, RailSubscriptionID: "sub-1", CurrentPeriodEndsAt: &periodEnd,
+			PaymentMethod: &models.PaymentMethod{ID: uuid.New(), RailCustomerRef: " vault-1 ", RailMethodRef: "bill-1"},
 			Price:         &models.Price{ID: uuid.New(), Amount: amount, Currency: currency},
 		}
 	}
@@ -44,4 +44,22 @@ func TestFreezeRebillPinsTheRailAmount(t *testing.T) {
 	}
 	_, err := FreezeRebill(context.Background(), nil, sub(12_345_678, "USD"))
 	require.ErrorIs(t, err, ErrNothingToFreeze, "a sub-cent price is refused, never rounded")
+}
+
+// A third-party custodian is not evidence that this NMI recurring operation
+// submitted card data. It still sends a vault and requires that exact vault.
+func TestFreezeRebillRequiresProviderVaultForCustodianMethod(t *testing.T) {
+	periodEnd := time.Now().UTC()
+	sub := &models.Subscription{
+		ID: uuid.New(), Rail: models.RailNMI, RailSubscriptionID: "sub-recurring", CurrentPeriodEndsAt: &periodEnd,
+		PaymentMethod: &models.PaymentMethod{ID: uuid.New(), Custodian: models.CustodianBasisTheory, RailMethodRef: "bill-recurring"},
+		Price:         &models.Price{ID: uuid.New(), Amount: 12_000_000, Currency: "USD"},
+	}
+	_, err := FreezeRebill(context.Background(), nil, sub)
+	require.ErrorIs(t, err, ErrNothingToFreeze, "a custodian method without an NMI recurring vault cannot submit this operation")
+	sub.PaymentMethod.RailCustomerRef = "original-nmi-vault"
+	p, err := FreezeRebill(context.Background(), nil, sub)
+	require.NoError(t, err)
+	require.False(t, p.Receipt().Unvaulted)
+	require.Equal(t, "original-nmi-vault", p.Receipt().CustomerVaultID)
 }

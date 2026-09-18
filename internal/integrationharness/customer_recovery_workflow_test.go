@@ -208,6 +208,7 @@ func TestCustomerPayNowAcrossDeployments(t *testing.T) {
 					gateway.SetMode(tc.mode)
 					gateway.SetVisible(true)
 					sales := gateway.SaleCount()
+					requests := gateway.SaleRequestCount()
 					fixture := h.SeedPastDueInvoice(d.runtime(), d.merchant, "USD", 4_000_000)
 					key := "same-" + uuid.NewString()[:8]
 					release := h.HoldRowLock("invoices", fixture.Invoice)
@@ -225,15 +226,18 @@ func TestCustomerPayNowAcrossDeployments(t *testing.T) {
 					release()
 					wg.Wait()
 
-					// The caller that executes answers terminally; the other names
-					// the same attempt, terminal or still in flight (202).
+					// Operation status controls polling. Concurrent completion can
+					// settle the attempt before the operation snapshot terminalizes;
+					// 202 does not assert that no provider or local effects exist.
 					attempt := map[string]bool{}
+					operations := map[string]bool{}
 					replays, terminal := 0, 0
 					for i := range results {
 						if errs[i] != nil {
 							require.Equal(t, "failed", tc.status, "%v", errs[i])
 							status := requireDeclined(t, errs[i])
 							attempt[status.Metadata["attempt_id"].(string)] = true
+							operations[status.Metadata["operation_id"].(string)] = true
 							terminal++
 							if status.Metadata["replayed"] == true {
 								replays++
@@ -241,29 +245,56 @@ func TestCustomerPayNowAcrossDeployments(t *testing.T) {
 							continue
 						}
 						attempt[results[i].Attempt.ID.String()] = true
+						operations[results[i].Operation.ID.String()] = true
 						if results[i].Replayed {
 							replays++
 						}
 						if results[i].Operation.Unresolved() {
-							require.Equal(t, "attempted", results[i].Attempt.Status)
+							require.Contains(t, []string{"attempted", tc.status}, results[i].Attempt.Status)
 							continue
 						}
 						require.Equal(t, tc.status, results[i].Attempt.Status)
 						terminal++
 					}
 					require.Len(t, attempt, 1, "both answers name the same attempt")
+					require.Len(t, operations, 1, "both answers name the same operation")
 					require.Equal(t, 1, replays, "one caller enqueued, the other replayed")
 					require.GreaterOrEqual(t, terminal, 1)
-					_, total, err := client.ListInvoicePaymentAttempts(ctx, fixture.Invoice, 10, 0)
+					attempts, total, err := client.ListInvoicePaymentAttempts(ctx, fixture.Invoice, 10, 0)
 					require.NoError(t, err)
 					require.EqualValues(t, 1, total)
+					require.Len(t, attempts, 1)
+					require.Contains(t, attempt, attempts[0].ID.String())
+					require.Equal(t, tc.status, attempts[0].Status)
+					require.EqualValues(t, fixture.Amount, attempts[0].Amount)
+					require.Equal(t, fixture.Currency, attempts[0].Currency)
+					operation := h.LatestCollectionOperation(fixture.Invoice)
+					require.Contains(t, operations, operation.ID.String())
+					final, err := payNow(fixture, key, fixture.Method)
 					if tc.status == "settled" {
+						require.NoError(t, err)
+						require.True(t, final.Replayed)
+						require.Equal(t, operation.ID, final.Operation.ID)
+						require.Equal(t, "succeeded", final.Operation.Status)
+						require.Equal(t, attempts[0].ID, final.Attempt.ID)
 						require.Equal(t, sales+1, gateway.SaleCount(), "one provider submission")
+						receipt := gateway.Sales()[sales]
+						require.NotNil(t, attempts[0].RailPaymentID)
+						require.Equal(t, receipt.TransactionID, *attempts[0].RailPaymentID)
+						require.Equal(t, "4.00", receipt.Amount)
+						require.Equal(t, fixture.Currency, receipt.Currency)
+						require.Equal(t, fixture.Vault, receipt.Vault)
 						require.Equal(t, 1, h.OwedPaymentTransfers(fixture.Customer))
 					} else {
+						decline := requireDeclined(t, err)
+						require.Equal(t, operation.ID.String(), decline.Metadata["operation_id"])
+						require.Equal(t, attempts[0].ID.String(), decline.Metadata["attempt_id"])
+						require.Equal(t, true, decline.Metadata["replayed"])
+						require.Equal(t, "failed_terminal", operation.Status)
 						require.Equal(t, sales, gateway.SaleCount(), "a decline lands nothing")
 						require.Zero(t, h.OwedPaymentTransfers(fixture.Customer))
 					}
+					require.Equal(t, requests+1, gateway.SaleRequestCount(), "concurrency and final replay send exactly one provider action, including declines")
 				})
 			}
 		})

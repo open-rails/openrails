@@ -144,7 +144,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	f := &dunningCertaintyFixture{dbi: dbi, ctx: baseCtx, subID: subID, nmiWrites: &atomic.Int64{}}
 	f.nmiRespond = func(w http.ResponseWriter) { _, _ = w.Write([]byte("response=1&transactionid=txn_ok")) }
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRebillReceipts(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		if r.Form.Get("report_type") == "profile" {
 			_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response><merchant><company>Certainty TEST</company><email>c@acme.test</email></merchant></nm_response>`))
@@ -152,7 +152,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 		}
 		f.nmiWrites.Add(1)
 		f.nmiRespond(w)
-	}))
+	}), "9.99", "USD"))
 	t.Cleanup(srv.Close)
 	client, err := nmi.NewClient("mobius", &config.NMIProviderSettings{
 		SecurityKey: "certainty_key", WebhookSecret: "s",
@@ -160,6 +160,7 @@ func newDunningCertaintyFixture(t *testing.T, cycleHours int32, periodEndAgo tim
 	require.NoError(t, err)
 	client.DirectPostURL = srv.URL
 	client.QueryURL = srv.URL
+	client.V5BaseURL = srv.URL
 
 	f.priceSvc = catalog.NewPriceService(dbi)
 	productSvc := catalog.NewProductService(dbi)

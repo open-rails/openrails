@@ -92,7 +92,7 @@ func storeRebillBuilder(dbi *db.DB, svc *merchants.Service, cfg *config.Config, 
 		Config:      cfg,
 		DB:          dbi,
 		MerchantsFn: func() *merchants.Service { return svc },
-		Endpoints:   railresolve.NMIEndpoints{DirectPostURL: gatewayURL, QueryURL: gatewayURL},
+		Endpoints:   railresolve.NMIEndpoints{DirectPostURL: gatewayURL, QueryURL: gatewayURL, V5BaseURL: gatewayURL},
 	}
 }
 

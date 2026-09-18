@@ -44,14 +44,15 @@ type PaymentRecovery struct {
 
 // PaymentOperation names one durable collection operation and its state.
 // Status is pending, in_flight, failed_retryable, unknown_needs_verify
-// (unresolved: no provider answer yet), or succeeded, failed_terminal,
+// (unresolved: provider outcome or local completion is pending), or succeeded, failed_terminal,
 // superseded, expired.
 type PaymentOperation struct {
 	ID     uuid.UUID `json:"id"`
 	Status string    `json:"status"`
 }
 
-// Unresolved reports that the provider outcome is not yet known.
+// Unresolved reports that the operation has not finished. Provider or local
+// payment effects may already exist; keep polling this operation.
 func (o PaymentOperation) Unresolved() bool {
 	switch o.Status {
 	case "pending", "in_flight", "unknown_needs_verify", "failed_retryable":
@@ -89,10 +90,11 @@ type PayInvoiceNowRequest struct {
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }
 
-// InvoicePayNowResult is the pay-now answer: HTTP 200 once the attempt is
+// InvoicePayNowResult is the pay-now answer: HTTP 200 once the operation is
 // terminal, 202 while Operation is unresolved (poll GET /invoices/{id} and
 // its /payments). A decline is not a result; it is the 402 card_declined
-// refusal whose metadata carries the attempt.
+// refusal whose metadata carries the attempt. Under concurrent completion,
+// Attempt can already be settled while Operation is still unresolved.
 type InvoicePayNowResult struct {
 	Invoice   InvoiceDTO               `json:"invoice"`
 	Attempt   InvoicePaymentAttemptDTO `json:"attempt"`

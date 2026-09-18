@@ -24,8 +24,10 @@ func (h *ManualRebillHandler) Resolve(ctx context.Context, intent gen.OpenrailsR
 	if resolution.Step != "" {
 		return Outcome{}, fmt.Errorf("%w: a rebill has no steps", ErrResolutionInvalid)
 	}
-	if txn := EvidenceString(intent, "transaction_id"); txn != "" {
-		return Outcome{}, RejectResolution("operation already holds receipt %s; its verifier completes renewal", txn)
+	if receipt, found, err := loadRebillReceipt(intent, p); err != nil {
+		return Outcome{}, RejectResolution("%v", err)
+	} else if found {
+		return Outcome{}, RejectResolution("operation already holds qualified receipt %s; its verifier completes renewal", receipt.transactionID)
 	}
 	client, err := h.railClient(ctx, intent)
 	if err != nil {
@@ -58,8 +60,9 @@ func (h *ManualRebillHandler) Resolve(ctx context.Context, intent gen.OpenrailsR
 	if !found {
 		return Outcome{}, RejectResolution("provider object %s is not a settled sale for order %s", reference, p.OrderReference)
 	}
-	if err := h.finalizeSuccess(ctx, intent.MerchantID, p, txn); err != nil {
-		return AmbiguousWithEvidence("receipt confirmed at provider, but local lifecycle repair failed: "+err.Error(), map[string]any{"transaction_id": txn}), nil
+	receipt := manualRebillReceipt{transactionID: txn, binding: rebillReceiptBinding(intent, p, txn)}
+	if err := h.saveRebillReceipt(ctx, intent, p, receipt); err != nil {
+		return Ambiguous("qualified rebill receipt custody failed: " + err.Error()), nil
 	}
-	return Succeeded(map[string]any{"transaction_id": txn, "verified_existing": true}), nil
+	return h.completeRebill(ctx, intent, p, receipt), nil
 }

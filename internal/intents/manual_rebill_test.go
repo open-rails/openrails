@@ -37,16 +37,19 @@ func manualRebillIntent(t *testing.T, payload ManualRebillPayload) gen.Openrails
 func testManualRebillPayload() ManualRebillPayload {
 	subID := uuid.MustParse("11111111-2222-3333-4444-555555555555")
 	return ManualRebillPayload{
-		SubscriptionID:  subID,
-		PeriodEnd:       time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
-		Rail:            "mobius",
-		OrderReference:  fmt.Sprintf("rebill-%s-%d", subID, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC).Unix()),
-		Attempt:         1,
-		PaymentMethodID: uuid.MustParse("66666666-7777-8888-9999-000000000000"),
-		CustomerVaultID: "vault-frozen",
-		Currency:        "USD",
-		Amount:          12_000_000,
-		AmountMinor:     1200,
+		SubscriptionID:         subID,
+		PeriodEnd:              time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		Rail:                   "mobius",
+		OrderReference:         fmt.Sprintf("rebill-%s-%d", subID, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC).Unix()),
+		Attempt:                1,
+		PaymentMethodID:        uuid.MustParse("66666666-7777-8888-9999-000000000000"),
+		CustomerVaultID:        "vault-frozen",
+		BillingID:              "billing-frozen",
+		RailSubscriptionID:     "subscription-frozen",
+		CredentialAnchorSource: "unavailable",
+		Currency:               "USD",
+		Amount:                 12_000_000,
+		AmountMinor:            1200,
 	}
 }
 
