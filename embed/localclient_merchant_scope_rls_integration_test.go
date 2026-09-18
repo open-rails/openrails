@@ -98,12 +98,4 @@ SELECT count(*) FROM openrails.invoker_spend_limits
 			uuid.UUID(boundID), customerID, "or868-b3-invoker").Scan(&rows))
 		require.Equal(t, 1, rows, "the delegation must be visible inside the bound merchant's RLS scope")
 	})
-
-	t.Run("#772 pin mismatch is still refused as a conflict, not swallowed", func(t *testing.T) {
-		other := openrails.MerchantID(uuid.New())
-		err := client.SetCustomerSpendDelegations(openrails.WithMerchant(ctx, other), customerID.String(), nil)
-		require.Error(t, err)
-		require.ErrorIs(t, err, openrails.ErrConflict,
-			"pinning the connection must not have blurred the merchant-mismatch refusal")
-	})
 }

@@ -250,7 +250,7 @@ func observeBatchVerdicts(verdicts []openrails.AdmitBatchVerdict) []obsBatchVerd
 	return out
 }
 
-func admitOne(ctx context.Context, c openrails.AdmissionClient, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
+func admitOne(ctx context.Context, c *openrails.Client, req openrails.AdmitRequest) (*openrails.AdmitResponse, error) {
 	verdicts, err := c.AdmitBatch(ctx, []openrails.AdmitRequest{req})
 	if err != nil {
 		return nil, err
