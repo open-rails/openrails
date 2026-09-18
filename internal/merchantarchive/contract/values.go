@@ -17,21 +17,22 @@ func ValidateValues(p Profile, values []*string) error {
 		}
 		v := *values[i]
 		if c.Type == "text" || strings.HasPrefix(c.Type, "character varying") {
-			safe := safeText(v)
-			if p.Name == "host_outbox" && c.Name == "dedupe_key" {
-				// The settlement trigger derives this field from the UUID payment
-				// column. A numeric UUID segment can pass Luhn once prefixed;
-				// exempt only this exact typed coordinate, never arbitrary text.
-				event, payment := value(p, values, "event_type"), value(p, values, "payment_id")
-				if event != nil && *event == "payment.settled" {
-					if payment == nil || !uuidPattern.MatchString(*payment) || v != "payment:"+*payment {
-						return fmt.Errorf("invalid payment settlement dedupe key")
-					}
-					safe = true
-				}
-			}
-			if !safe {
+			if !safeText(v) {
 				return fmt.Errorf("sensitive text in %s.%s", p.Name, c.Name)
+			}
+		}
+		// The settlement trigger derives this key from the payment row, and the
+		// archive restores it verbatim, so it must still name its own payment on
+		// its own event. This is a coordinate check, not a card exemption: the
+		// card scan above runs on it like on any other text.
+		if p.Name == "host_outbox" && c.Name == "dedupe_key" {
+			event := value(p, values, "event_type")
+			settlement := event != nil && *event == "payment.settled"
+			if settlement || strings.HasPrefix(v, "payment:") {
+				payment := value(p, values, "payment_id")
+				if !settlement || payment == nil || !uuidPattern.MatchString(*payment) || v != "payment:"+*payment {
+					return fmt.Errorf("invalid payment settlement dedupe key")
+				}
 			}
 		}
 		bad := func() error { return fmt.Errorf("unsupported or invalid value in %s.%s", p.Name, c.Name) }
