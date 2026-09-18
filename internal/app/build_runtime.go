@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/pyth"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/migrate"
@@ -453,6 +454,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
+
+	// Install only after runtime construction succeeds. The runtime releases
+	// its sandbox lease on Close, including a later embedded-construction failure.
+	if api := cfg.SandboxStripeAPIURL(); api != "" {
+		runtime.releaseStripeTransport = stripeapi.InstallBaseTransport(stripeapi.HostRewriteTransport(api))
+	}
 
 	return runtime, nil
 }

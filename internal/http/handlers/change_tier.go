@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/pkg/api"
 )
 
 type ChangeTierRequest = openrails.ChangeTierRequest
@@ -59,6 +60,17 @@ func ChangeTier(r *httprequest.Request) {
 		return
 	}
 
+	writeTierChangeResponse(r, resp)
+}
+
+// writeTierChangeResponse answers a durable tier change: 202 while the
+// provider outcome is unresolved (the body names the operation; the same
+// Idempotency-Key replays the result), 200 otherwise.
+func writeTierChangeResponse(r *httprequest.Request, resp *checkout.TierChangeResponse) {
+	if resp.Status == "processing" {
+		r.JSON(http.StatusAccepted, resp)
+		return
+	}
 	r.SuccessJSON(resp)
 }
 
@@ -111,8 +123,18 @@ func ChangeTierPreview(r *httprequest.Request) {
 }
 
 func writeChangeTierError(r *httprequest.Request, err error) {
+	var inFlight *checkout.TierChangeInFlightError
+	if errors.As(err, &inFlight) {
+		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, openrails.CodeTierChangeInFlight, inFlight.Error()).
+			WithMetadata(map[string]any{"operation_id": inFlight.OperationID.String()}))
+		return
+	}
 	var tierErr *checkout.TierChangeError
 	if errors.As(err, &tierErr) {
+		if tierErr.Code != "" {
+			r.APIError(api.NewAPIError(tierErr.HTTPStatus, api.ErrorTypeForStatus(tierErr.HTTPStatus), tierErr.Code, tierErr.Message))
+			return
+		}
 		r.ErrorJSON(tierErr.HTTPStatus, tierErr.Message)
 		return
 	}

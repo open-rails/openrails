@@ -345,6 +345,7 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		}
 		registry.Register(checkout.NewNMISubscriptionCreateIntentHandler(r.CheckoutService))
 		registry.Register(checkout.NewNMIUpgradeIntentHandler(r.CheckoutService))
+		registry.Register(checkout.NewStripeTierChangeIntentHandler(r.CheckoutService))
 	}
 	// #674 tail: durable user-initiated vault deletes (an unwired RailPaymentMethodService
 	// resolves no client, so the handler parks — never fails).

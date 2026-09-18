@@ -4432,9 +4432,9 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON openrails.price_psp_bindings TO openrail
 ALTER TABLE ONLY openrails.invoices
     ADD CONSTRAINT invoices_collection_intent_fk FOREIGN KEY (merchant_id, collection_intent_id) REFERENCES openrails.rail_intents(merchant_id, id) ON DELETE RESTRICT;
 
--- One unresolved upgrade owns the predecessor's provider mutation sequence.
-CREATE UNIQUE INDEX uq_rail_intents_upgrade_predecessor ON openrails.rail_intents(merchant_id, subscription_id)
-WHERE intent_type='nmi_upgrade' AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable');
+-- One unresolved tier change owns its subscription's provider mutation sequence.
+CREATE UNIQUE INDEX uq_rail_intents_tier_change_subscription ON openrails.rail_intents(merchant_id, subscription_id)
+WHERE intent_type IN ('nmi_upgrade', 'stripe_tier_change') AND status IN ('pending','in_flight','unknown_needs_verify','failed_retryable');
 
 -- #293: one receipt, on the existing maintenance ledger, protects the narrow
 -- restore-only trigger suppression. An application-set GUC alone does nothing.

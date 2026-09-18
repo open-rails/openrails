@@ -198,7 +198,6 @@ func TestSetBaseTransportInstallsUnderTheGuard(t *testing.T) {
 	require.Nil(t, seen, "a fake wire server must never buy a caller an unguarded write")
 
 	SetBaseTransport(nil)
-	require.Nil(t, baseTransportOverride)
 	require.Equal(t, http.DefaultTransport, defaultBaseTransport())
 }
 

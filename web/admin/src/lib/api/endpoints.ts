@@ -218,9 +218,16 @@ export const previewSubscriptionTierChange = (id: string, priceId: string) =>
     body: { price_id: priceId },
   })
 
-export const changeSubscriptionTier = (id: string, priceId: string) =>
+// A tier change is a durable operation keyed by this header: the same key
+// replays its result, so a retry must reuse the key of the reviewed change.
+export const changeSubscriptionTier = (
+  id: string,
+  priceId: string,
+  idempotencyKey: string
+) =>
   api<TierChangeResult>(`/merchant/subscriptions/${id}/change-tier`, {
     method: "POST",
+    headers: { "Idempotency-Key": idempotencyKey },
     body: { price_id: priceId },
   })
 

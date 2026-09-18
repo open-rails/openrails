@@ -35,6 +35,7 @@ type checkoutIdempotencyStore interface {
 // not finished inline is drained by the scheduled executor/verifier.
 type intentExecutor interface {
 	EnqueueAndExecute(ctx context.Context, p intents.EnqueueParams) (gen.OpenrailsRailIntent, error)
+	EnqueueOwnedAndExecute(ctx context.Context, p intents.EnqueueParams, owns func(gen.OpenrailsRailIntent) error) (gen.OpenrailsRailIntent, error)
 }
 
 // ErrCheckoutProcessing is returned when the provider write's outcome is not
