@@ -316,8 +316,8 @@ for those routes.
 
 | Method | Path | Permission | Purpose |
 |---|---|---|---|
-| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters |
-| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history |
+| GET | `/v1/merchant/payments` | `merchant:payments:read` | List payments with filters (`user_id`, `price_id`, `status`, `rail`, ...); `Client.ListPayments` |
+| GET | `/v1/merchant/payments/{id}` | `merchant:payments:read` | One payment with refund history; `Client.GetPayment` |
 | POST | `/v1/merchant/payments/{id}/refunds` | `merchant:payments:refund` | Refund through the rail; `revoke_access` must be explicit to also revoke one-off access |
 | GET | `/v1/merchant/subscriptions` | `merchant:subscriptions:read` | List subscriptions with filters |
 | GET | `/v1/merchant/subscriptions/{id}` | `merchant:subscriptions:read` | One subscription |
