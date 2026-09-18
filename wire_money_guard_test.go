@@ -50,6 +50,10 @@ var pendingNumericMoney = map[string]string{
 	"internal/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                   notHTTPStoredPayload,
 	"internal/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                               notHTTPStoredPayload,
 	"internal/modules/money/invoice_collection_intent.go:InvoiceCollectionPayload.Amount amount":                                                     notHTTPIntentPayload,
+	"internal/intents/manual_rebill.go:ManualRebillPayload.Amount amount":                                                                            notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.AmountDueNow amount_due_now":                                     notHTTPIntentPayload,
+	"internal/modules/checkout/stripe_tier_change_intent.go:StripeTierChangePayload.RecurringAmount recurring_amount":                                notHTTPIntentPayload,
+	"internal/modules/subscriptions/stripe_tier_change.go:func parseStripeScheduleState.Price price":                                                 notProviderResponse,
 	"embed/river.go:InvoiceSweepArgs.CollectionThresholdAmount collection_threshold_amount":                                                          notHTTPJobArgs,
 	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                                             notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":                                       notHTTPStorageRow,
@@ -158,6 +162,12 @@ const (
 	// internal persisted intent data, never an HTTP body: an internal
 	// exception, not permission to leave HTTP money numeric.
 	notHTTPIntentPayload = "not HTTP: internal persisted rail_intents data; the pinned provider wire is asserted separately"
+	// A provider's own response body decoded at the client boundary: its shape
+	// is the provider's, not OpenRails' wire.
+	notProviderResponse = "not HTTP: provider response decoding (raw JSON from the provider API)"
+	// Stripe spells a price HANDLE (or its object) under the key "price"; the
+	// loopback gateway answers in Stripe's own shape, not OpenRails' wire.
+	notProviderPriceHandle = "not money: Stripe price handle on the provider's own wire"
 )
 
 // pendingDynamicMoney lists the map[string]any entries with a monetary key
@@ -170,6 +180,8 @@ var pendingDynamicMoney = map[string]string{
 	"internal/http/handlers/self_usage_invoices.go:func GetMyInvoices \"limit\"":                                   notMoneyPageSize,
 	"internal/http/request/request.go:func SuccessJSONPaginated \"limit\"":                                         notMoneyPageSize,
 	"internal/integrationharness/nmi_gateway.go:func serveExactRead \"amount\"":                                    notHTTPProviderWire,
+	"internal/integrationharness/stripe_gateway.go:func handle \"price\"":                                          notProviderPriceHandle,
+	"internal/integrationharness/stripe_gateway.go:func subscriptionJSON \"price\"":                                 notProviderPriceHandle,
 	"internal/integrations/nmi/payments.go:func Refund \"amount\"":                                                 notHTTPProviderWire,
 	"internal/merchants/delete.go:func TakePurgeInventory \"not_captured\"":                                        notMoneyPurgeInventory,
 	"internal/modules/checkout/session_service.go:func confirmSolanaSession \"solana_token_amount\"":               notHTTPStoredMetadata,
