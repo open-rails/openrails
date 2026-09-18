@@ -53,6 +53,12 @@ func ProvisionMerchantForRestore(ctx context.Context, a *app.App, req ProvisionM
 	if !allowed {
 		return nil, authkit.ErrInsufficientRoleAuthority
 	}
+	// Match ordinary provisioning: obtain the current canonical name after the
+	// ownership check, so a rename during authorization is not projected stale.
+	group, err = core.GroupInstanceByID(ctx, groupID)
+	if err != nil {
+		return nil, err
+	}
 	directory, err := merchants.NewDirectoryService(cp.Pool())
 	if err != nil {
 		return nil, err
