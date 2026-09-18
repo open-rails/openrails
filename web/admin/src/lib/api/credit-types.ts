@@ -34,7 +34,7 @@ export interface CreditGrantInput {
   amount: string
   source: "admin"
   source_id: string
-  expires_at?: number
+  expires_at?: string // RFC3339
   description?: string
 }
 
