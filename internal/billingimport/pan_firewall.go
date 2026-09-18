@@ -1,10 +1,20 @@
 package billingimport
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
 
 	"github.com/open-rails/openrails/internal/cardguard"
 )
+
+// ErrInvalidDeclaredInput identifies a refused host-authored field before any
+// database work. HTTP callers receive the same invalid_param contract.
+var ErrInvalidDeclaredInput = errors.New("import billing: invalid declared input")
 
 // A declared book is host-authored free text that lands in the same columns
 // checkout writes and the merchant archive later exports: rail_method_ref,
@@ -22,7 +32,7 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 		if !cardguard.ContainsPAN(value) {
 			return nil
 		}
-		return fmt.Errorf("import billing: %s contains a card-number-shaped value: raw PANs must never reach OpenRails (SAQ A) — declare the provider's vault handle, never the card", where)
+		return fmt.Errorf("%w: %s contains a card-number-shaped value: raw PANs must never reach OpenRails (SAQ A) — declare the provider's vault handle, never the card", ErrInvalidDeclaredInput, where)
 	}
 	scan := func(where string, values ...string) error {
 		for _, value := range values {
@@ -53,8 +63,11 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 		where := fmt.Sprintf("subscriptions[%d]", i)
 		if err := scan(where,
 			sub.SourceID, sub.Rail, sub.RailSubscriptionID, sub.PSP.Key, sub.UserEmail,
-			sub.Cancel.Kind, string(sub.Evidence),
+			sub.Cancel.Kind,
 		); err != nil {
+			return err
+		}
+		if err := scanEvidencePANs(where+".evidence", sub.Evidence, refuse); err != nil {
 			return err
 		}
 		if sub.PaymentMethod != nil {
@@ -78,4 +91,69 @@ func rejectDeclaredPANs(book DeclaredBilling) error {
 		}
 	}
 	return nil
+}
+
+// RawMessage preserves JSON escapes. Scan decoded tokens, including object keys
+// and every duplicate-key occurrence, before PostgreSQL normalizes the JSONB.
+func scanEvidencePANs(where string, raw json.RawMessage, refuse func(string, string) error) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	if !json.Valid(raw) {
+		return fmt.Errorf("%w: %s must be valid JSON", ErrInvalidDeclaredInput, where)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("%w: %s must be valid JSON", ErrInvalidDeclaredInput, where)
+		}
+		var value string
+		switch token := token.(type) {
+		case string:
+			value = token
+		case json.Number:
+			value = token.String()
+			if err := refuse(where, wholeJSONNumber(value)); err != nil {
+				return err
+			}
+		default:
+			continue
+		}
+		if err := refuse(where, value); err != nil {
+			return err
+		}
+	}
+}
+
+// PostgreSQL expands JSON exponents: 4.111111111111111e15 becomes a bare PAN.
+// Expand only whole numbers within PAN length, without floats or large powers.
+// The input is already a valid JSON number from Decoder.Token.
+func wholeJSONNumber(number string) string {
+	mantissa := strings.TrimPrefix(number, "-")
+	exponent := int64(0)
+	if i := strings.IndexAny(mantissa, "eE"); i >= 0 {
+		var err error
+		exponent, err = strconv.ParseInt(mantissa[i+1:], 10, 32)
+		if err != nil {
+			return ""
+		}
+		mantissa = mantissa[:i]
+	}
+	if i := strings.IndexByte(mantissa, '.'); i >= 0 {
+		exponent -= int64(len(mantissa) - i - 1)
+		mantissa = mantissa[:i] + mantissa[i+1:]
+	}
+	digits := strings.TrimLeft(mantissa, "0")
+	trimmed := strings.TrimRight(digits, "0")
+	exponent += int64(len(digits) - len(trimmed))
+	size := int64(len(trimmed)) + exponent
+	if len(trimmed) == 0 || exponent < 0 || size < 13 || size > 19 {
+		return ""
+	}
+	return trimmed + strings.Repeat("0", int(exponent))
 }

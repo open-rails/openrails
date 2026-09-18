@@ -1,6 +1,7 @@
 package billingimport
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -85,5 +86,35 @@ func TestDeclaredBookRefusesCardNumbers(t *testing.T) {
 		err := rejectDeclaredPANs(book)
 		require.Errorf(t, err, "a card number in %s must refuse the book", name)
 		require.Containsf(t, err.Error(), "card-number-shaped", "%s", name)
+	}
+}
+
+func TestDeclaredEvidenceRefusesEscapedCardBeforeDatabase(t *testing.T) {
+	for _, raw := range []string{
+		`{"card":"\u0034\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031\u0031"}`,
+		`{"nested":[{"\u0034111111111111111":"value"}]}`,
+		`{"card":"\u0034111111111111111","card":"overwritten"}`,
+		`{"card":4.111111111111111e15}`,
+		`{"card":411111111111111100e-2}`,
+		`{"card":4111111111111111.0}`,
+	} {
+		book := declaredBook()
+		book.Subscriptions[0].Evidence = json.RawMessage(raw)
+		_, err := Import(context.Background(), Options{Book: book})
+		require.ErrorContains(t, err, "card-number-shaped", "must refuse before opening the absent database: %s", raw)
+	}
+}
+
+func TestDeclaredEvidenceDecodedIdentifiersAndInvalidJSON(t *testing.T) {
+	book := declaredBook()
+	for _, raw := range []string{`{"nested":[{"id":"a544fda7-1958-4199-9417-3263a6c4b369"}]}`, `null`, `{"as_of":1770000000000000}`, `{"huge":1e10000000}`, `{"tiny":1e-10000000}`, `{"fraction":4.111111111111111}`, `{"huge":1e999999999999999999999}`} {
+		book.Subscriptions[0].Evidence = json.RawMessage(raw)
+		require.NoError(t, rejectDeclaredPANs(book))
+	}
+	for _, raw := range []string{`{"value":`, `{} {}`, `"4111111111111111`} {
+		book.Subscriptions[0].Evidence = json.RawMessage(raw)
+		_, err := Import(context.Background(), Options{Book: book})
+		require.ErrorIs(t, err, ErrInvalidDeclaredInput)
+		require.NotContains(t, err.Error(), "4111111111111111")
 	}
 }
