@@ -108,7 +108,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 		sub, err := dbq.GetSubscriptionByID(ctx, q.SubscriptionID.UUID())
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("subscription %s: not found", q.SubscriptionID)
+				return fmt.Errorf("subscription %s: %w", q.SubscriptionID, openrails.ErrNotFound)
 			}
 			return fmt.Errorf("subscription %s: %w", q.SubscriptionID, err)
 		}
@@ -127,7 +127,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 				r.OwnedByPayer = pm.CustomerID == sub.CustomerID
 				r.PSPID = pm.PspID
 				r.Rail = models.Rail(pm.Rail)
-				r.PSPVaulted = pm.Custodian == models.CustodianPSP && strings.TrimSpace(pm.RailCustomerRef) != ""
+				r.PSPVaulted = pm.Custodian == models.CustodianPSP && pm.CustodianID == nil && strings.TrimSpace(pm.RailCustomerRef) != ""
 				r.Parked = pm.ParkedAt != nil
 				req.TargetPSPID = pm.PspID
 			case errors.Is(err, pgx.ErrNoRows):
@@ -163,12 +163,12 @@ func pspRow(ctx context.Context, q *gen.Queries, merchantID merchant.ID, id uuid
 	psp, err := q.GetPSP(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: not found", id)
+			return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, openrails.ErrNotFound)
 		}
 		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, err)
 	}
 	if psp.MerchantID != merchantID.UUID() {
-		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: not found", id)
+		return gen.OpenrailsPsp{}, fmt.Errorf("psp %s: %w", id, openrails.ErrNotFound)
 	}
 	return psp, nil
 }

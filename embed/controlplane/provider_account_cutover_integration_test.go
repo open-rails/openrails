@@ -214,11 +214,21 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 	// Identity errors: an unknown PSP or subscription, no target at all, and
 	// another merchant's scope.
 	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &missing})
-	require.ErrorContains(t, err, "not found")
+	require.ErrorIs(t, err, openrails.ErrNotFound)
 	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(missing), TargetPSPID: &active})
-	require.ErrorContains(t, err, "not found")
-	_, err = cp.PlanProviderAccountCutover(ctx, merchant.ID(uuid.New()), controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &active})
-	require.Error(t, err, "another merchant's scope sees nothing")
+	require.ErrorIs(t, err, openrails.ErrNotFound)
+
+	foreignMerchant, foreignPSP := uuid.New(), uuid.New()
+	super := dbtest.SharedSuperuserPGXPool(t)
+	_, err = super.Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES($1,$2)`, foreignMerchant, "foreign-cutover-"+foreignMerchant.String())
+	require.NoError(t, err)
+	_, err = super.Exec(ctx, `INSERT INTO openrails.psps(id,merchant_id,rail,environment,account_id) VALUES($1,$2,'nmi','test','hidden-foreign-provider')`, foreignPSP, foreignMerchant)
+	require.NoError(t, err)
+	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &foreignPSP})
+	require.ErrorIs(t, err, openrails.ErrNotFound, "a foreign PSP is indistinguishable from a missing one")
+	require.NotContains(t, err.Error(), "hidden-foreign-provider")
+	_, err = cp.PlanProviderAccountCutover(ctx, merchant.ID(foreignMerchant), controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &foreignPSP})
+	require.ErrorIs(t, err, openrails.ErrNotFound, "another merchant's scope sees no subscription")
 
 	require.Equal(t, before, snapshot(), "a plan never writes: subscriptions, instruments and intents are untouched")
 }
