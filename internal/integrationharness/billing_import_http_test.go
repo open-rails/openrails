@@ -95,6 +95,38 @@ func TestBillingImportHTTP(t *testing.T) {
 		Reasons  map[string]string `json:"reasons"`
 	}
 
+	t.Run("PAN refusal is a client error and persists no book", func(t *testing.T) {
+		for _, evidence := range []json.RawMessage{
+			json.RawMessage(`{"card":"4111111111111111"}`),
+			json.RawMessage(`{"card":"\u0034111111111111111"}`),
+			json.RawMessage(`{"card":4.111111111111111e15}`),
+		} {
+			customer := uuid.New()
+			candidate := billingimport.DeclaredBilling{
+				AsOf: asOf, DefaultPSP: billingimport.PSPRef{Key: "nmi"},
+				Customers: []billingimport.DeclaredCustomer{{Customer: customer}},
+				Subscriptions: []billingimport.DeclaredSubscription{{
+					SourceID: "pan-" + customer.String(), Customer: customer, Price: price, Rail: "nmi",
+					RailSubscriptionID: "pan-" + customer.String(), StartedAt: asOf.Add(-day),
+					PaidThrough: &paidThrough, Evidence: evidence,
+				}},
+			}
+			status, body := requestJSON(t, http.MethodPost, importURL, surface.Token, candidate)
+			require.Equalf(t, http.StatusBadRequest, status, "PAN import refusal: %s", body)
+			var envelope struct {
+				Error struct{ Type, Code, Message string }
+			}
+			require.NoError(t, json.Unmarshal(body, &envelope))
+			require.Equal(t, "invalid_request_error", envelope.Error.Type)
+			require.Equal(t, "invalid_param", envelope.Error.Code)
+			require.Contains(t, envelope.Error.Message, "card-number-shaped")
+			require.NotContains(t, string(body), "4111111111111111")
+			var rows int
+			require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.customers WHERE merchant_id=$1 AND id=$2`, merchantID, customer).Scan(&rows))
+			require.Zero(t, rows, "the whole book is refused before customer creation")
+		}
+	})
+
 	t.Run("authenticated import lands the book", func(t *testing.T) {
 		status, body := requestJSON(t, http.MethodPost, importURL, surface.Token, book)
 		require.Equalf(t, http.StatusOK, status, "import: %s", string(body))

@@ -50,6 +50,10 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 	})
 	if err != nil {
 		msg := err.Error()
+		if errors.Is(err, billingimport.ErrInvalidDeclaredInput) {
+			r.ErrorJSON(http.StatusBadRequest, msg)
+			return
+		}
 		if errors.Is(err, billingimport.ErrInvalidPSPReference) {
 			r.APIError(&api.APIError{
 				HTTPStatus: http.StatusBadRequest,
