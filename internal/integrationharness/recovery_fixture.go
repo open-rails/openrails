@@ -3,6 +3,8 @@
 package integrationharness
 
 import (
+	"context"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -66,9 +68,11 @@ func (h *Harness) SeedPastDueSubscription(rt *app.Runtime, mid merchant.ID, opts
 	for _, opt := range opts {
 		opt(&seed)
 	}
-	psp := h.ArmLoopbackNMI(rt, mid)
-	if seed.rail != models.RailNMI {
-		psp = dbtest.EnsureTestPSP(h.ctx, h.t, h.sharedPool(), mid.UUID(), string(seed.rail))
+	var psp uuid.UUID
+	if seed.rail == models.RailNMI {
+		psp = h.ArmLoopbackNMI(rt, mid)
+	} else {
+		psp = h.fixturePSP(mid, seed.rail)
 	}
 	pool := h.sharedPool()
 	q := gen.New(pool)
@@ -112,6 +116,27 @@ func (h *Harness) SeedPastDueSubscription(rt *app.Runtime, mid merchant.ID, opts
 		LastRetryAt: &periodEnd, NextRetryAt: &nextRetry, RetryAttempts: &attempts, CreatedAt: now, UpdatedAt: now,
 	})
 	require.NoError(h.t, err)
+	// End what this fixture opened so it holds no obligation on a shared
+	// provider account (the payment-provider drain tests count them). A
+	// refused rail's rows reference nothing else and are removed with it.
+	t := h.t
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if seed.rail != models.RailNMI {
+			for _, row := range []struct {
+				table string
+				id    uuid.UUID
+			}{{"subscriptions", subscription}, {"payment_methods", method}, {"prices", price}, {"products", product}} {
+				_, err := pool.Exec(ctx, `DELETE FROM openrails.`+row.table+` WHERE id = $1`, row.id)
+				assertNoCleanupError(t, err, "delete "+row.table)
+			}
+			return
+		}
+		_, err := pool.Exec(ctx, `UPDATE openrails.rail_intents SET status = 'superseded', updated_at = now() WHERE subscription_id = $1 AND status IN ('pending', 'in_flight', 'failed_retryable', 'unknown_needs_verify')`, subscription)
+		assertNoCleanupError(t, err, "supersede live rebills")
+		_, err = pool.Exec(ctx, `UPDATE openrails.subscriptions SET status = 'cancelled', cancelled_at = now(), cancel_type = 'merchant', ended_at = now(), next_retry_at = NULL, updated_at = now() WHERE id = $1 AND status <> 'cancelled'`, subscription)
+		assertNoCleanupError(t, err, "end subscription")
+	})
 	return SubscriptionFixture{Merchant: mid, Customer: customer, Method: method, Subscription: subscription, Product: product, Price: price, PSP: psp, Vault: vault, PeriodEnd: periodEnd, Amount: 12_000_000}
 }
 
@@ -120,8 +145,13 @@ func (h *Harness) SeedPastDueSubscription(rt *app.Runtime, mid merchant.ID, opts
 func (h *Harness) SeedStripeMethod(mid merchant.ID, customer uuid.UUID) uuid.UUID {
 	h.t.Helper()
 	pool := h.sharedPool()
-	psp := dbtest.EnsureTestPSP(h.ctx, h.t, pool, mid.UUID(), string(models.RailStripe))
+	psp := h.fixturePSP(mid, models.RailStripe)
 	method := uuid.New()
+	t := h.t
+	t.Cleanup(func() {
+		_, err := pool.Exec(context.Background(), `DELETE FROM openrails.payment_methods WHERE id = $1`, method)
+		assertNoCleanupError(t, err, "delete stripe method")
+	})
 	now := time.Now().UTC()
 	_, err := gen.New(pool).CreatePaymentMethod(h.ctx, gen.CreatePaymentMethodParams{
 		ID: method, MerchantID: mid.UUID(), CustomerID: customer, Rail: string(models.RailStripe), PspID: psp,
@@ -150,6 +180,33 @@ func (h *Harness) LockWaiters() int {
 		return 0
 	}
 	return n
+}
+
+// fixturePSP is the merchant's provider account on a rail the customer
+// surface refuses. One the fixture had to create is removed at cleanup (after
+// the rows that name it), so no test leaves a second account on a shared
+// merchant behind.
+func (h *Harness) fixturePSP(mid merchant.ID, rail models.Rail) uuid.UUID {
+	h.t.Helper()
+	pool := h.sharedPool()
+	var existing uuid.UUID
+	err := pool.QueryRow(h.ctx, `SELECT id FROM openrails.psps WHERE merchant_id = $1 AND rail = $2 AND archived = false ORDER BY created_at DESC, id DESC LIMIT 1`, mid.UUID(), string(rail)).Scan(&existing)
+	if err == nil {
+		return existing
+	}
+	psp := dbtest.EnsureTestPSP(h.ctx, h.t, pool, mid.UUID(), string(rail))
+	t := h.t
+	t.Cleanup(func() {
+		_, err := pool.Exec(context.Background(), `DELETE FROM openrails.psps WHERE id = $1`, psp)
+		assertNoCleanupError(t, err, "delete fixture psp")
+	})
+	return psp
+}
+
+func assertNoCleanupError(t *testing.T, err error, what string) {
+	if err != nil {
+		t.Errorf("fixture cleanup %s: %v", what, err)
+	}
 }
 
 // SubscriptionState is the recovery-relevant slice of a subscription row.
