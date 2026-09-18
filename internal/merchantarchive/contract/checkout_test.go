@@ -52,3 +52,36 @@ func TestPaymentCorrelationMetadataContract(t *testing.T) {
 		}
 	}
 }
+
+// An invoice collection archives its frozen charge and scalar receipt facts;
+// a provider body, a credential or an unknown key is refused.
+func TestInvoiceCollectionOperationContracts(t *testing.T) {
+	p := Profile{Name: "rail_intents", Columns: []Column{{"intent_type", "text"}, {"status", "text"}, {"payload", "jsonb"}, {"result_evidence", "jsonb"}}}
+	frozen := `{"invoice_id":"` + testMerchant + `","customer_id":"` + testMerchant + `","attempt_id":"` + testMerchant +
+		`","payment_method_id":"` + testMerchant + `","rail":"nmi","currency":"USD","amount":4000000,"amount_minor":400,` +
+		`"description":"Invoice INV-1","instrument":{"psp_id":"` + testMerchant + `","custodian":"nmi","rail_customer_ref":"vault-1","rail_method_ref":"card-1"}}`
+	for _, tc := range []struct {
+		name, typ, status, payload, evidence string
+		valid                                bool
+	}{
+		{"settled", "invoice_collection", "succeeded", frozen, `{"transaction_id":"sale-1","rail":"nmi","external_invoice_id":"in_1"}`, true},
+		{"declined", "invoice_collection", "failed_terminal", frozen, `{"declined":true,"failure_code":"200","rail":"nmi"}`, true},
+		{"not executed", "invoice_collection", "failed_terminal", frozen, `{"not_executed":true,"declined":false,"not_executed_code":"instrument_changed","failure_message":"payment method changed"}`, true},
+		{"operator resolved", "invoice_collection", "succeeded", frozen, `{"transaction_id":"sale-1","rail":"nmi","operator_resolution":{"actor":"ops","reason":"receipt","resolved_at":"2026-09-18T00:00:00Z","provider_reference":"sale-1"}}`, true},
+		{"custodian held", "invoice_collection", "succeeded", `{"invoice_id":"` + testMerchant + `","instrument":{"psp_id":"` + testMerchant + `","custodian":"openrails","custodian_id":"` + testMerchant + `","rail_customer_ref":"","rail_method_ref":"tok-1"}}`, `{}`, true},
+		{"provider body", "invoice_collection", "succeeded", frozen, `{"transaction_id":"sale-1","raw_response":{"amount":"40.00"}}`, false},
+		{"credential in receipt", "invoice_collection", "succeeded", frozen, `{"transaction_id":"sk_live_secret"}`, false},
+		{"unknown payload key", "invoice_collection", "succeeded", `{"customer_vault_id":"vault-1"}`, `{}`, false},
+		{"unknown instrument key", "invoice_collection", "succeeded", `{"instrument":{"security_key":"secret"}}`, `{}`, false},
+		{"numeric money as text", "invoice_collection", "succeeded", `{"amount":"4000000"}`, `{}`, false},
+		{"malformed instrument id", "invoice_collection", "succeeded", `{"instrument":{"psp_id":"not-a-uuid"}}`, `{}`, false},
+		{"unresolved", "invoice_collection", "unknown_needs_verify", frozen, `{"submitted_at":"2026-09-18T00:00:00Z"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateValues(p, []*string{&tc.typ, &tc.status, &tc.payload, &tc.evidence})
+			if (err == nil) != tc.valid {
+				t.Fatalf("valid=%v, error=%v", tc.valid, err)
+			}
+		})
+	}
+}

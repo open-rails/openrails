@@ -92,6 +92,7 @@ var emptyObject = object(map[string]jsonRule{})
 var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds": integerValue, "limit": integerValue, "currency": textValue})
 var profileJSON = object(map[string]jsonRule{"display_name": textValue, "logo_url": textValue, "from_email": textValue, "support_url": textValue, "signup_url": textValue})
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
+var operatorResolutionJSON = object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "not_executed": booleanValue, "provider_reference": textValue})
 var invoiceLineJSON = array(object(map[string]jsonRule{"event_type": textValue, "amount": integerValue, "count": integerValue, "dimensions": dictionary(integerValue)}))
 var pspSettingsJSON = object(map[string]jsonRule{"tokenization_key": textValue, "tokenization_url": textValue, "rpc_provider": textValue, "recipient_wallet": textValue, "tokens": dictionary(object(map[string]jsonRule{"mint": textValue, "name": textValue}))})
 var rateJSON = object(map[string]jsonRule{
@@ -117,6 +118,22 @@ var jsonRules = map[string]jsonRule{
 	"rail_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
 		"transaction_id": textValue, "payment_id": uuidValue, "delayed_start": textValue, "verified_existing": booleanValue,
 		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue,
+	})),
+	// An invoice collection freezes its charge and instrument in the payload
+	// and keeps only scalar receipt facts; no provider body is retained.
+	"rail_intents.invoice_collection.payload": nullable(object(map[string]jsonRule{
+		"invoice_id": uuidValue, "customer_id": uuidValue, "attempt_id": uuidValue, "payment_method_id": uuidValue,
+		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue,
+		"instrument": object(map[string]jsonRule{
+			"psp_id": uuidValue, "custodian": textValue, "custodian_id": nullable(uuidValue),
+			"rail_customer_ref": textValue, "rail_method_ref": textValue,
+		}),
+	})),
+	"rail_intents.invoice_collection.result_evidence": nullable(object(map[string]jsonRule{
+		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
+		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue,
+		"not_executed": booleanValue, "not_executed_code": textValue, "submitted_at": textValue,
+		"provider_contradiction": textValue, "operator_resolution": operatorResolutionJSON,
 	})),
 	"rail_intents.nmi_subscription_create.payload": nullable(emptyObject),
 	"rail_intents.nmi_subscription_create.result_evidence": nullable(object(map[string]jsonRule{
