@@ -361,6 +361,69 @@ func TestCustodyMigration_RefusesMidDunningAttempt(t *testing.T) {
 	}
 }
 
+// TestCustodyMigration_RefusesUnresolvedFrozenOperation: an operation freezes
+// the instrument it charges in its payload and is judged against that frozen
+// custody afterwards, so the flip waits for it — including the invoice
+// collection the subscription join cannot see (it has no subscription at
+// all). Every unresolved state pins; a resolved one does not.
+func TestCustodyMigration_RefusesUnresolvedFrozenOperation(t *testing.T) {
+	for _, status := range []string{"pending", "in_flight", "failed_retryable", "unknown_needs_verify"} {
+		t.Run(status, func(t *testing.T) {
+			fx := newCustodyFixture(t)
+			vaultID := "vault-" + uuid.NewString()[:8]
+			methodID, _ := fx.seedPSPVaultedCard(t, vaultID)
+			intentID := seedFrozenInstrumentIntent(t, fx, methodID, status)
+
+			exp := fx.export(custodymigration.ImportedToken{
+				SourceRailCustomerRef: vaultID, Token: "tok_" + uuid.NewString()[:12],
+			})
+
+			plan, err := custodymigration.Migrate(fx.ctx, fx.opts(exp, false))
+			require.NoError(t, err)
+			require.Equal(t, custodymigration.OutcomeBlocked, plan.Rows[0].Outcome)
+			require.Equal(t, custodymigration.ReasonOperationUnresolved, plan.Rows[0].Reason)
+
+			res, err := custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
+			require.NoError(t, err)
+			require.Equal(t, 1, res.Counts[custodymigration.OutcomeBlocked])
+			require.Equal(t, custodymigration.ReasonOperationUnresolved, res.Rows[0].Reason)
+			require.Equal(t, models.CustodianPSP, fx.method(t, methodID).Custodian,
+				"a refused instrument is untouched")
+			requireMigrationCount(t, fx, methodID, 0)
+
+			// The operation resolves; the operator re-runs; the card moves.
+			_, err = fx.db.Pool().Exec(fx.ctx,
+				`UPDATE openrails.rail_intents SET status = 'succeeded', executed_at = now() WHERE id = $1`, intentID)
+			require.NoError(t, err)
+
+			res, err = custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
+			require.NoError(t, err)
+			require.Equal(t, 1, res.Counts[custodymigration.OutcomeRemapped])
+			require.Equal(t, models.CustodianBasisTheory, fx.method(t, methodID).Custodian)
+		})
+	}
+}
+
+// TestCustodyMigration_IgnoresOperationsOnOtherInstruments: the predicate
+// matches the FROZEN method id, so an unresolved operation on someone else's
+// instrument never blocks this flip.
+func TestCustodyMigration_IgnoresOperationsOnOtherInstruments(t *testing.T) {
+	fx := newCustodyFixture(t)
+	vaultID := "vault-" + uuid.NewString()[:8]
+	methodID, _ := fx.seedPSPVaultedCard(t, vaultID)
+	otherMethod, _ := fx.seedPSPVaultedCard(t, "vault-"+uuid.NewString()[:8])
+	seedFrozenInstrumentIntent(t, fx, otherMethod, "unknown_needs_verify")
+
+	exp := fx.export(custodymigration.ImportedToken{
+		SourceRailCustomerRef: vaultID, Token: "tok_" + uuid.NewString()[:12],
+	})
+	res, err := custodymigration.Migrate(fx.ctx, fx.opts(exp, true))
+	require.NoError(t, err)
+	require.Equal(t, 1, res.Counts[custodymigration.OutcomeRemapped])
+	require.Equal(t, models.CustodianBasisTheory, fx.method(t, methodID).Custodian)
+	require.Equal(t, models.CustodianPSP, fx.method(t, otherMethod).Custodian)
+}
+
 // TestCustodyMigration_PerRowOutcomes: the manifest is declared FACTS, so every
 // way a line can fail to describe a real card gets its own verdict — and one
 // bad line never stops the good ones.
@@ -549,6 +612,20 @@ func seedChargeIntent(t *testing.T, fx *custodyFixture, subID uuid.UUID, status 
 		`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, subscription_id, idempotency_key, status, origin, origin_reason, psp_id)
 		 VALUES ($1, $2, 'nmi', 'manual_rebill', $3, $4, $5, 'system', 'or297 test', $6)`,
 		id, dbtest.TestMerchantID.UUID(), subID, "or297-"+uuid.NewString(), status, fx.oldPSP.ID)
+	require.NoError(t, err)
+	return id
+}
+
+// seedFrozenInstrumentIntent is an operation that froze this instrument in
+// its payload and names no subscription — the shape of an invoice collection
+// (#990) or a customer-driven rebill.
+func seedFrozenInstrumentIntent(t *testing.T, fx *custodyFixture, methodID uuid.UUID, status string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	_, err := fx.db.Pool().Exec(fx.ctx,
+		`INSERT INTO openrails.rail_intents (id, merchant_id, rail, intent_type, idempotency_key, status, origin, origin_reason, psp_id, payload)
+		 VALUES ($1, $2, 'nmi', 'invoice_collection', $3, $4, 'system', 'or297 test', $5, jsonb_build_object('payment_method_id', $6::text))`,
+		id, dbtest.TestMerchantID.UUID(), "or297-frozen-"+uuid.NewString(), status, fx.oldPSP.ID, methodID)
 	require.NoError(t, err)
 	return id
 }
