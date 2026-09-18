@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
 	"github.com/open-rails/openrails/permissions"
+	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,19 +35,42 @@ func TestCommerceClientCheckoutAndTier(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, local.Close(context.Background())) })
 	app.HostGraph(local).Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
-	productID, priceID := uuid.New(), uuid.New()
-	priceKey := "commerce-" + priceID.String()
-	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Commerce fixture')`, productID, dbtest.TestMerchantID.UUID(), "commerce-"+productID.String())
-	require.NoError(t, err)
-	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,10000000,'USD',720,true)`, priceID, dbtest.TestMerchantID.UUID(), productID, priceKey)
-	require.NoError(t, err)
-	pspID := dbtest.EnsureTestPSP(ctx, t, h.Pool(), dbtest.TestMerchantID.UUID(), "ccbill")
-	_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"test-form"}')`, dbtest.TestMerchantID.UUID(), priceID, pspID, uuid.NewString())
-	require.NoError(t, err)
+	// An armed CCBill price: product, price and its PSP binding.
+	seedPrice := func(mid merchant.ID) openrails.PriceID {
+		t.Helper()
+		productID, priceID := uuid.New(), uuid.New()
+		priceKey := "commerce-" + priceID.String()
+		_, err := h.Pool().Exec(ctx, `INSERT INTO openrails.products(id,merchant_id,key,display_name) VALUES($1,$2,$3,'Commerce fixture')`, productID, mid.UUID(), "commerce-"+productID.String())
+		require.NoError(t, err)
+		_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.prices(id,merchant_id,product_id,key,amount,currency,access_duration_hours,auto_renew) VALUES($1,$2,$3,$4,10000000,'USD',720,true)`, priceID, mid.UUID(), productID, priceKey)
+		require.NoError(t, err)
+		pspID := dbtest.EnsureTestPSP(ctx, t, h.Pool(), mid.UUID(), "ccbill")
+		_, err = h.Pool().Exec(ctx, `INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,flex_id,configuration) VALUES($1,$2,$3,$4,'{"form_name":"test-form"}')`, mid.UUID(), priceID, pspID, uuid.NewString())
+		require.NoError(t, err)
+		return openrails.PriceID(priceID)
+	}
 	inprocess, err := local.Client()
 	require.NoError(t, err)
-	for name, client := range map[string]*openrails.Client{"embedded": inprocess, "remote": remote.Client()} {
-		t.Run(name, func(t *testing.T) {
+	// SaaS: a hosted merchant on the shared engine behind the real hosted
+	// control plane, integrating with an owner-minted API key; its CCBill
+	// account is armed in the shared secret store.
+	hosted := h.StartHosted("USD")
+	tenant := hosted.ProvisionMerchant(hosted.RegisterUser("owner"), "commerce-"+uuid.NewString()[:8])
+	integrationharness.SeedPSPs(ctx, t, hosted.AppRuntime(), tenant.ID, config.PSPSet{
+		"ccbill": {AccountID: "999981-0001", CCBill: &config.CCBillRailConfig{Salt: "issue981-hosted-fixture"}},
+	})
+	deployments := []struct {
+		name    string
+		client  *openrails.Client
+		priceID openrails.PriceID
+	}{
+		{"embedded", inprocess, seedPrice(dbtest.TestMerchantID)},
+		{"remote", remote.Client(), seedPrice(dbtest.TestMerchantID)},
+		{"saas", tenant.Client(), seedPrice(tenant.ID)},
+	}
+	for _, d := range deployments {
+		client, priceID := d.client, d.priceID
+		t.Run(d.name, func(t *testing.T) {
 			user := openrails.CustomerID(uuid.New())
 			request := openrails.CreateCheckoutSessionRequest{
 				Customer: openrails.CheckoutCustomerIdentity{ID: user, VerifiedEmail: "checkout@example.test", Username: "checkout-" + uuid.NewString()[:8]},
