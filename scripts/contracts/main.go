@@ -51,10 +51,6 @@ func runWorkflows(root *os.Root) error {
 	if err != nil {
 		return err
 	}
-	packages, pattern, err := contractaudit.WorkflowSelection(rows)
-	if err != nil {
-		return err
-	}
 	if err := root.MkdirAll(".reports", 0o755); err != nil {
 		return err
 	}
@@ -67,7 +63,10 @@ func runWorkflows(root *os.Root) error {
 	// The terminal's interrupt reaches the script directly so it can stop the
 	// Compose services it started.
 	var output bytes.Buffer
-	cmd := exec.CommandContext(context.Background(), "bash", append([]string{"scripts/test_integration.sh", "-json", "-run", pattern}, packages...)...)
+	// The reduced suite is the maintained set. Run every retained integration
+	// and browser test, including money/concurrency regressions outside the
+	// journey matrix; the same event stream must contain every named workflow.
+	cmd := exec.CommandContext(context.Background(), "bash", "scripts/test_integration.sh", "-tags=integration,browser", "-json", "./...")
 	cmd.Stdout = io.MultiWriter(receipt, &output)
 	cmd.Stderr = os.Stderr
 	runErr := cmd.Run()
