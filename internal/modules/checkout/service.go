@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1772,7 +1773,17 @@ func CalculateModelBUpgradeCharge(
 	// Credit for the unused portion of the OLD plan (integer math to avoid
 	// floating-point drift), rounded UP to a whole cent (customer-favored) so
 	// the resulting charge is whole-cent for whole-cent prices.
-	oldUnused := (oldFull * int64(hoursRemaining)) / int64(cycleHours)
+	// The product can exceed int64 even though the quotient cannot: remaining
+	// hours are clamped to the positive cycle, so valid nonnegative prices
+	// yield 0 <= oldUnused <= oldFull. Widen before multiplying, keep the
+	// existing integer truncation, and check before narrowing.
+	var unused big.Int
+	unused.Mul(big.NewInt(oldFull), big.NewInt(int64(hoursRemaining)))
+	unused.Quo(&unused, big.NewInt(int64(cycleHours)))
+	if !unused.IsInt64() {
+		return 0, 0, fmt.Errorf("unused subscription value exceeds int64 precision")
+	}
+	oldUnused := unused.Int64()
 	// or#863: ceil to a whole RAIL MINOR unit at this price's own currency
 	// scale, then back to internal units — not an inline /10_000 that assumes
 	// every currency is 2-decimal. RequireSameCurrency above already proved the
