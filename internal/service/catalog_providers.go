@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // Issue #208 declarative-provider primitives.
@@ -61,7 +63,7 @@ var errRemoteWritesDisabled = errors.New("catalog provider writes are disabled (
 // ErrTrialUnsupportedOnRail refuses a `trial:` first phase declared against a
 // rail that cannot execute one (or#896). Exported so the HTTP layer answers
 // 400 (a declaration the operator must fix), never 500.
-var ErrTrialUnsupportedOnRail = errors.New("trial first phase is not supported on this rail")
+var ErrTrialUnsupportedOnRail = apperr.New(http.StatusBadRequest, "trial_unsupported_on_rail", "trial first phase is not supported on this rail")
 
 // remoteWritesDisabledMessage is the pending_manual_link message used when the
 // operating mode (not a missing capability) deferred the provider write.
@@ -294,7 +296,7 @@ func (s *Service) resolveProviders(ctx context.Context, product *models.Product,
 			}
 		}
 		if !ok {
-			return nil, nil, nil, fmt.Errorf(
+			return nil, nil, nil, apperr.Invalidf(
 				"unknown provider %q in providers/provider_links: not a rail (%s) or a declared merchant account key",
 				name, strings.Join(sortedAdapterNames(adapters), ", "))
 		}

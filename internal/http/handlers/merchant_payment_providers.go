@@ -112,13 +112,7 @@ func writeMerchantProviderError(r *httprequest.Request, err error) {
 		r.ErrorJSON(http.StatusNotFound, "payment provider not configured")
 	case errors.Is(err, merchants.ErrSecretBackendUnavailable):
 		r.ErrorJSON(http.StatusServiceUnavailable, "secret backend unavailable")
-	case strings.Contains(err.Error(), "required"),
-		strings.Contains(err.Error(), "unsupported"),
-		strings.Contains(err.Error(), "environment"),
-		strings.Contains(err.Error(), "invalid"),
-		strings.Contains(err.Error(), "unknown"):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
 	default:
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
+		writeRefusal(r, err, "payment provider operation failed")
 	}
 }

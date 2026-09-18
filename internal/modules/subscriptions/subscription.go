@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -192,7 +192,8 @@ func (s *SubscriptionService) Create(ctx context.Context, subscription *models.S
 	}
 
 	if err := s.subscriptionRepo.Create(ctx, subscription); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "idx_subscriptions_user_product_active_pending") {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.ConstraintName == "uq_subscriptions_customer_product_lifecycle" {
 			return ErrActiveSubscriptionExists
 		}
 		return err

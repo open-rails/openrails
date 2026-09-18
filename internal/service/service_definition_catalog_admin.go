@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -66,12 +67,12 @@ func (s *Service) GetProduct(ctx context.Context, id openrails.ProductID) (*Cata
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("product_id required")
+		return nil, apperr.Invalidf("product_id required")
 	}
 	productID := id.UUID()
 	p, err := products.GetByID(ctx, productID)
 	if err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 	return productToCatalogProduct(p), nil
 }
@@ -90,11 +91,11 @@ func (s *Service) GetProductByKey(ctx context.Context, key string) (*CatalogProd
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	p, err := products.GetByKey(ctx, key)
 	if err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 	return productToCatalogProduct(p), nil
 }
@@ -153,15 +154,15 @@ func (s *Service) ActivateProduct(ctx context.Context, id openrails.ProductID) (
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("product_id required")
+		return nil, apperr.Invalidf("product_id required")
 	}
 	productID := id.UUID()
 	if err := products.Activate(ctx, productID); err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 	updated, err := products.GetByID(ctx, productID)
 	if err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 	// Propagate the active flag to Stripe so re-activating an OpenRails product
 	// re-activates its Stripe Product (best-effort).
@@ -183,15 +184,15 @@ func (s *Service) DeactivateProduct(ctx context.Context, id openrails.ProductID)
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("product_id required")
+		return nil, apperr.Invalidf("product_id required")
 	}
 	productID := id.UUID()
 	if err := products.Deactivate(ctx, productID); err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 	updated, err := products.GetByID(ctx, productID)
 	if err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 	// Propagate the active flag to Stripe (archived -> Stripe active=false).
 	s.propagateProductActiveToStripe(ctx, productID, false)
@@ -211,12 +212,12 @@ func (s *Service) GetPrice(ctx context.Context, id openrails.PriceID) (*CatalogP
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("price_id required")
+		return nil, apperr.Invalidf("price_id required")
 	}
 	priceID := id.UUID()
 	p, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	return priceToCatalogPrice(p), nil
 }
@@ -234,7 +235,7 @@ func (s *Service) ListPricesByProduct(ctx context.Context, id openrails.ProductI
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("product_id required")
+		return nil, apperr.Invalidf("product_id required")
 	}
 	productID := id.UUID()
 	var raws []*models.Price
@@ -318,12 +319,12 @@ func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*Cat
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("price_id required")
+		return nil, apperr.Invalidf("price_id required")
 	}
 	priceID := id.UUID()
 	current, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	wasArchived := current.Archived
 	if wasArchived {
@@ -342,11 +343,11 @@ func (s *Service) ActivatePrice(ctx context.Context, id openrails.PriceID) (*Cat
 		}
 	}
 	if err := prices.Activate(ctx, priceID); err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	updated, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	if wasArchived {
 		tid, err := merchant.Require(ctx)
@@ -375,15 +376,15 @@ func (s *Service) DeactivatePrice(ctx context.Context, id openrails.PriceID) (*C
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("price_id required")
+		return nil, apperr.Invalidf("price_id required")
 	}
 	priceID := id.UUID()
 	if err := prices.Deactivate(ctx, priceID); err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	updated, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	s.propagatePriceActiveToStripe(ctx, updated, false)
 	return priceToCatalogPrice(updated), nil
@@ -406,11 +407,11 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		return nil, err
 	}
 	if priceID == uuid.Nil {
-		return nil, fmt.Errorf("price_id required")
+		return nil, apperr.Invalidf("price_id required")
 	}
 	p, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	if len(p.PSPLinks) == 0 {
 		return nil, nil
@@ -509,7 +510,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 		return nil, err
 	}
 	if priceID == uuid.Nil {
-		return nil, fmt.Errorf("price_id required")
+		return nil, apperr.Invalidf("price_id required")
 	}
 	verified, err := s.VerifyPriceSync(ctx, priceID)
 	if err != nil {
@@ -520,7 +521,7 @@ func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts Re
 	}
 	local, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	adapters := s.providerAdapters()
 	actions := make(map[string]string, len(verified))
@@ -651,11 +652,11 @@ func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opt
 		return nil, err
 	}
 	if productID == uuid.Nil {
-		return nil, fmt.Errorf("product_id required")
+		return nil, apperr.Invalidf("product_id required")
 	}
 	local, err := products.GetByID(ctx, productID)
 	if err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 	stripeProductID := s.lookupStripeProductID(ctx, productID)
 	if stripeProductID == "" {

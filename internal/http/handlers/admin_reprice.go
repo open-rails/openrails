@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -9,11 +8,11 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // #773 reprice HTTP surface: schedule/list/cancel a subscription price move,
@@ -22,44 +21,7 @@ import (
 // existing route patterns — see routes.go registerMerchantSupportRoutes).
 
 func writeRepriceError(r *httprequest.Request, err error) {
-	if err == nil {
-		return
-	}
-	var constraintErr *subscriptions.RepriceConstraintError
-	if errors.As(err, &constraintErr) {
-		r.APIError(&api.APIError{
-			HTTPStatus: http.StatusUnprocessableEntity,
-			Type:       api.ErrorTypeInvalidRequest,
-			Code:       repriceErrorCode(constraintErr.Sentinel),
-			Message:    err.Error(),
-		})
-		return
-	}
-	switch {
-	case errors.Is(err, subscriptions.ErrRepriceAlreadyScheduled):
-		r.APIError(&api.APIError{HTTPStatus: http.StatusConflict, Type: api.ErrorTypeInvalidRequest, Code: "reprice_already_scheduled", Message: err.Error()})
-	case errors.Is(err, subscriptions.ErrRepriceNotScheduled):
-		r.APIError(&api.APIError{HTTPStatus: http.StatusConflict, Type: api.ErrorTypeInvalidRequest, Code: "reprice_not_scheduled", Message: err.Error()})
-	case strings.Contains(strings.ToLower(err.Error()), "not found"):
-		r.ErrorJSON(http.StatusNotFound, err.Error())
-	default:
-		r.ErrorJSON(http.StatusInternalServerError, err.Error())
-	}
-}
-
-func repriceErrorCode(sentinel error) string {
-	switch {
-	case errors.Is(sentinel, subscriptions.ErrRepriceCrossProduct):
-		return "reprice_cross_product"
-	case errors.Is(sentinel, subscriptions.ErrRepriceCrossCurrency):
-		return "reprice_cross_currency"
-	case errors.Is(sentinel, subscriptions.ErrRepriceInactivePrice):
-		return "reprice_inactive_price"
-	case errors.Is(sentinel, subscriptions.ErrRepriceNoticeWindowViolation):
-		return "reprice_notice_window_violation"
-	default:
-		return "reprice_constraint_violation"
-	}
+	writeRefusal(r, err, "reprice operation failed")
 }
 
 type createSubscriptionRepriceRequest struct {
@@ -100,7 +62,10 @@ func CreateSubscriptionReprice(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	toPrice, err := catalog.ResolveReference(ctx, r.State.PriceService, req.ToPrice)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "to_price not found")
+		if db.IsNotFound(err) {
+			err = subscriptions.ErrRepriceTargetPriceNotFound
+		}
+		writeRefusal(r, err, "failed to resolve to_price")
 		return
 	}
 	out, err := r.State.RepriceService.Reprice(ctx, subscriptions.RepriceRequest{
@@ -265,7 +230,7 @@ func GetSubscriptionReprice(r *httprequest.Request) {
 	}
 	out, err := r.State.RepriceService.GetByID(r.Request.Context(), id)
 	if err != nil {
-		r.ErrorJSON(http.StatusNotFound, "reprice not found")
+		writeRefusal(r, err, "failed to load reprice")
 		return
 	}
 	r.JSON(http.StatusOK, subscriptions.SubscriptionRepriceViewOf(out))

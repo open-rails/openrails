@@ -1,12 +1,9 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -32,41 +29,7 @@ func newAdminBillingService(r *httprequest.Request) (*billingservice.Service, bo
 }
 
 func writeCatalogError(r *httprequest.Request, err error) {
-	if err == nil {
-		return
-	}
-	// Map known business errors to stable status codes + machine-readable codes.
-	msg := strings.ToLower(err.Error())
-	switch {
-	case errors.Is(err, billingservice.ErrProductTierGroupInUse):
-		r.ErrorJSON(http.StatusConflict, err.Error())
-	// or#896: a trial declared on a rail that cannot execute one is a bad
-	// DECLARATION — 400 with the limitation named, never a generic 500.
-	case errors.Is(err, billingservice.ErrTrialUnsupportedOnRail):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-	// or#782: product_not_found/price_not_found (the stable codes the lookup
-	// helpers rewrite "sql: no rows" into) match on the UNDERSCORE form — without
-	// it every missing-or-foreign id fell through to a 500, so a cross-merchant
-	// read was denied while looking like a server fault.
-	case strings.Contains(msg, "not found"), strings.Contains(msg, "not_found"):
-		r.ErrorJSON(http.StatusNotFound, err.Error())
-	case strings.Contains(msg, "duplicate key"),
-		strings.Contains(msg, "already exists"):
-		// A unique-constraint collision is a client conflict, not a 500 — and the
-		// raw Postgres "… (SQLSTATE 23505)" text must never leak to the client (#783).
-		r.ErrorJSON(http.StatusConflict, "a resource with these attributes already exists")
-	case strings.Contains(msg, "required"),
-		strings.Contains(msg, "auto_renew requires"),
-		strings.Contains(msg, "must be positive"),
-		strings.Contains(msg, "must be non-negative"),
-		strings.Contains(msg, "invalid"):
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-	default:
-		// Never pass raw sql/pgx/SQLSTATE text to the client (#783): log the real
-		// error, return a generic message.
-		log.WithError(err).Error("catalog operation failed")
-		r.ErrorJSON(http.StatusInternalServerError, "internal error")
-	}
+	writeRefusal(r, err, "catalog operation failed")
 }
 
 // -- Products ----------------------------------------------------------------
@@ -124,7 +87,7 @@ func AdminGetProduct(r *httprequest.Request) {
 	}
 	out, err := svc.GetProduct(r.Request.Context(), id)
 	if err != nil {
-		writeCatalogError(r, productLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -142,7 +105,7 @@ func AdminGetProductByKey(r *httprequest.Request) {
 	}
 	out, err := svc.GetProductByKey(r.Request.Context(), key)
 	if err != nil {
-		writeCatalogError(r, productLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -164,7 +127,7 @@ func AdminUpdateProduct(r *httprequest.Request) {
 	}
 	out, err := svc.UpdateProduct(r.Request.Context(), id, req)
 	if err != nil {
-		writeCatalogError(r, productLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -182,7 +145,7 @@ func AdminActivateProduct(r *httprequest.Request) {
 	}
 	out, err := svc.ActivateProduct(r.Request.Context(), id)
 	if err != nil {
-		writeCatalogError(r, productLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -200,7 +163,7 @@ func AdminDeactivateProduct(r *httprequest.Request) {
 	}
 	out, err := svc.DeactivateProduct(r.Request.Context(), id)
 	if err != nil {
-		writeCatalogError(r, productLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -271,7 +234,7 @@ func AdminGetPrice(r *httprequest.Request) {
 	}
 	out, err := svc.GetPrice(r.Request.Context(), id)
 	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	if parseBool(r.Query("verify")) {
@@ -298,7 +261,7 @@ func AdminUpdatePrice(r *httprequest.Request) {
 	}
 	out, err := svc.UpdatePrice(r.Request.Context(), id, req)
 	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -316,7 +279,7 @@ func AdminActivatePrice(r *httprequest.Request) {
 	}
 	out, err := svc.ActivatePrice(r.Request.Context(), id)
 	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -334,7 +297,7 @@ func AdminDeactivatePrice(r *httprequest.Request) {
 	}
 	out, err := svc.DeactivatePrice(r.Request.Context(), id)
 	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -354,7 +317,7 @@ func AdminGetPriceByKey(r *httprequest.Request) {
 	}
 	out, err := svc.GetPriceByKey(r.Request.Context(), key)
 	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -376,7 +339,7 @@ func AdminGetPriceKeyHistory(r *httprequest.Request) {
 	}
 	items, err := svc.GetPriceKeyHistory(r.Request.Context(), key)
 	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, paginatedResponse[billingservice.PriceKeyHistoryEntry]{
@@ -410,7 +373,7 @@ func AdminSetPriceKey(r *httprequest.Request) {
 	}
 	out, err := svc.SetPriceKey(r.Request.Context(), id, req.Key)
 	if err != nil {
-		writeCatalogError(r, priceLookupErr(err))
+		writeCatalogError(r, err)
 		return
 	}
 	r.JSON(http.StatusOK, out)
@@ -444,29 +407,4 @@ func parseBool(s string) bool {
 	default:
 		return false
 	}
-}
-
-// productLookupErr rewrites generic "sql: no rows" / bun "not found" errors
-// from the repo layer into a stable "product_not_found" message so the HTTP
-// layer can map to 404.
-func productLookupErr(err error) error {
-	if err == nil {
-		return nil
-	}
-	low := strings.ToLower(err.Error())
-	if strings.Contains(low, "no rows") || strings.Contains(low, "not found") {
-		return errors.New("product_not_found")
-	}
-	return err
-}
-
-func priceLookupErr(err error) error {
-	if err == nil {
-		return nil
-	}
-	low := strings.ToLower(err.Error())
-	if strings.Contains(low, "no rows") || strings.Contains(low, "not found") {
-		return errors.New("price_not_found")
-	}
-	return err
 }
