@@ -2,10 +2,10 @@ package handlers
 
 import (
 	"errors"
-	"github.com/google/uuid"
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -93,6 +93,9 @@ func providerCutover(r *httprequest.Request, owned, preview bool) {
 			cutoverRefusal(r, 400, "invalid_param", "invalid cutover request", "")
 		case errors.Is(err, intents.ErrProviderCutoverConflict):
 			cutoverRefusal(r, http.StatusConflict, "provider_cutover_conflict", err.Error(), "")
+		case errors.Is(err, intents.ErrRateCeilingTripped):
+			r.APIError(api.NewAPIError(http.StatusTooManyRequests, api.ErrorTypeRateLimit, api.CodeRateLimitExceeded,
+				"Destructive operation rate limit reached; try again later or contact support"))
 		case db.IsNotFound(err):
 			cutoverRefusal(r, http.StatusNotFound, "resource_missing", "cutover or subscription not found", "")
 		default:

@@ -121,7 +121,9 @@ var jsonRules = map[string]jsonRule{
 	}),
 	"rail_intents.nmi_provider_cutover.result_evidence": object(map[string]jsonRule{
 		"create_submitted": booleanValue, "target": nullable(cutoverSubscriptionJSON), "source_receipt": nullable(cutoverSubscriptionJSON), "source_absent_at": textValue, "activated_target": nullable(cutoverSubscriptionJSON), "source_cancel_submitted": booleanValue, "source_canceled": booleanValue, "activation_submitted": booleanValue, "target_active": booleanValue,
-		"resolution": object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "provider_reference": textValue, "not_executed": booleanValue}),
+		"activation_anchor": textValue, "billing_anchor": textValue, "paused_anchor": textValue,
+		"anchor_resolutions": array(object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "billing_anchor": textValue, "previous_anchor": textValue})),
+		"resolution":         object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "provider_reference": textValue, "not_executed": booleanValue}),
 	}),
 
 	// The completed collection operation retains its frozen instrument and

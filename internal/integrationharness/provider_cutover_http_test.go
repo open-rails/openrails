@@ -98,6 +98,13 @@ func newCutoverGateway(t *testing.T) *cutoverGateway {
 			if acct.Mode == "source_dark" {
 				g.Accounts[strings.Replace(r.Header.Get("Authorization"), "target-", "source-", 1)].Mode = "dark"
 			}
+			if acct.Mode == "source_external_cancel" {
+				source := g.Accounts[strings.Replace(r.Header.Get("Authorization"), "target-", "source-", 1)]
+				for id, sub := range source.Subs {
+					sub.DelayedCondition = "inactive"
+					source.Subs[id] = sub
+				}
+			}
 			if acct.Mode == "lost_create" {
 				w.WriteHeader(502)
 				return
@@ -118,6 +125,9 @@ func newCutoverGateway(t *testing.T) *cutoverGateway {
 			case http.MethodGet:
 				if acct.Mode == "wrong_tombstone" && sub.DelayedCondition == "inactive" {
 					sub.ID = "different-subscription"
+				}
+				if acct.Mode == "wrong_tombstone_vault" && sub.DelayedCondition == "inactive" {
+					sub.CustomerVaultID = "different-vault"
 				}
 				_ = json.NewEncoder(w).Encode(sub)
 			case http.MethodDelete:
@@ -150,6 +160,10 @@ func newCutoverGateway(t *testing.T) *cutoverGateway {
 					http.Error(w, "elapsed anchor", 400)
 					return
 				}
+				if acct.Mode == "source_external_cancel" {
+					w.WriteHeader(502)
+					return
+				}
 				acct.Activations++
 				sub.PausedSubscription = 0
 				sub.NextBillingDate = start.Format(time.RFC3339)
@@ -175,31 +189,40 @@ type cutoverHTTPFixture struct {
 	Sub, Source, Target, Customer, OldMethod, NewMethod, Price uuid.UUID
 	Anchor, Start                                              time.Time
 	SourceKey, TargetKey                                       string
+	SourceDeletes                                              int
 	Req                                                        openrails.ProviderCutoverRequest
 }
 
-func seedCutoverHTTP(t *testing.T, h *Harness, s *Surface, g *cutoverGateway, mode string) cutoverHTTPFixture {
+func seedCutoverHTTP(t *testing.T, h *Harness, s *Surface, g *cutoverGateway, mode string, merchantIDs ...merchant.ID) cutoverHTTPFixture {
 	t.Helper()
 	ctx := context.Background()
 	rt := s.App().Runtime
+	merchantID := dbtest.TestMerchantID
+	if len(merchantIDs) > 0 {
+		merchantID = merchantIDs[0]
+	}
 	suffix := uuid.NewString()
 	sourceKey := "source-" + suffix
 	targetKey := "target-" + suffix
 	set := config.PSPSet{sourceKey: {Rail: models.RailNMI, AccountID: sourceKey, Archived: true, NMI: &config.NMIRailConfig{SecurityKey: sourceKey}}, targetKey: {Rail: models.RailNMI, AccountID: targetKey, NMI: &config.NMIRailConfig{SecurityKey: targetKey}}}
-	SeedPSPs(ctx, t, rt, dbtest.TestMerchantID, set)
+	SeedPSPs(ctx, t, rt, merchantID, set)
 	source, _, _, _ := merchants.PSPNaturalKey("nmi", "test", sourceKey)
 	target, _, _, _ := merchants.PSPNaturalKey("nmi", "test", targetKey)
 	p := cutoverHTTPFixture{Sub: uuid.New(), Source: source, Target: target, Customer: uuid.New(), OldMethod: uuid.New(), NewMethod: uuid.New(), Price: uuid.New(), Start: time.Now().UTC().Truncate(time.Second).Add(-time.Hour), Anchor: time.Now().UTC().Truncate(time.Second).Add(7 * 24 * time.Hour), SourceKey: sourceKey, TargetKey: targetKey}
+	p.SourceDeletes = 1
+	if mode == "source_external_cancel" {
+		p.SourceDeletes = 0
+	}
 	p.Req = openrails.ProviderCutoverRequest{TargetPaymentMethodID: api.FormatPaymentMethodID(p.NewMethod), ExpectedSourcePSPID: source, ExpectedTargetPSPID: target}
 	pool := h.Pool()
-	mid := dbtest.TestMerchantID.UUID()
+	mid := merchantID.UUID()
 	product := uuid.New()
 	oldVault := "old-" + suffix
 	newVault := "new-" + suffix
 	providerSub := "old-sub-" + suffix
 	planID := "plan-" + suffix
 	exec := func(q string, args ...any) { t.Helper(); _, e := pool.Exec(ctx, q, args...); require.NoError(t, e) }
-	dbtest.EnsureCustomerIDPgx(ctx, t, pool, p.Customer.String())
+	dbtest.EnsureCustomerIDPgxFor(ctx, t, pool, mid, p.Customer.String())
 	exec(`INSERT INTO openrails.products(id,key,display_name,merchant_id) VALUES($1,$2,$2,$3)`, product, suffix, mid)
 	exec(`INSERT INTO openrails.prices(id,product_id,key,amount,currency,access_duration_hours,auto_renew,merchant_id) VALUES($1,$2,$3,10000000,'USD',720,true,$4)`, p.Price, product, suffix, mid)
 	exec(`INSERT INTO openrails.price_psp_bindings(merchant_id,price_id,psp_id,plan_id,configuration) VALUES($1,$2,$3,$4,'{}')`, mid, p.Price, target, planID)
@@ -213,7 +236,7 @@ func seedCutoverHTTP(t *testing.T, h *Harness, s *Surface, g *cutoverGateway, mo
 	plan := nmi.V5Plan{Object: "plan", ID: planID, PlanAmount: "10.00", PlanPayments: "0", DayFrequency: "30", MonthFrequency: "0"}
 	sourceAcct := &cutoverAccount{Source: true, Plan: plan, Subs: map[string]nmi.V5Subscription{providerSub: {Object: "subscription", ID: providerSub, CustomerVaultID: oldVault, Amount: "10.00", Plan: &plan, PausedSubscription: 0, DelayedCondition: "active", NextBillingDate: p.Anchor.Format(time.RFC3339)}}}
 	targetAcct := &cutoverAccount{Plan: plan, Subs: map[string]nmi.V5Subscription{}}
-	if mode == "lost_cancel" || mode == "wrong_tombstone" {
+	if mode == "lost_cancel" || strings.HasPrefix(mode, "wrong_tombstone") {
 		sourceAcct.Mode = mode
 	} else {
 		targetAcct.Mode = mode
@@ -251,7 +274,7 @@ func assertCutoverCommitted(t *testing.T, h *Harness, g *cutoverGateway, p cutov
 	source := g.Accounts[p.SourceKey]
 	target := g.Accounts[p.TargetKey]
 	require.Equal(t, 1, target.Creates)
-	require.Equal(t, 1, source.Deletes)
+	require.Equal(t, p.SourceDeletes, source.Deletes)
 	require.Equal(t, 1, target.Activations)
 	for _, sub := range source.Subs {
 		require.Equal(t, "inactive", sub.DelayedCondition)
@@ -269,17 +292,21 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 	builder, ok := s.App().Runtime.CollectionResolver.(*money.MerchantCollectionAdapterBuilder)
 	require.True(t, ok)
 	builder.Endpoints.NMIV5BaseURL = g.Server.URL
-	client := s.Client()
-	for _, mode := range []string{"success", "lost_cancel", "lost_activation", "source_dark", "lost_create", "wrong_receipt", "wrong_tombstone"} {
+	owner := s.ProvisionOwnedMerchant("cutover-http-" + uuid.NewString())
+	client := s.Client(openrails.WithAPIKey(owner.APIKey), openrails.WithMerchantID(owner.MerchantID))
+	seed := func(t *testing.T, mode string) cutoverHTTPFixture {
+		return seedCutoverHTTP(t, h, s, g, mode, owner.MerchantID)
+	}
+	for _, mode := range []string{"success", "lost_cancel", "lost_activation", "source_dark", "lost_create", "wrong_receipt", "wrong_tombstone", "wrong_tombstone_vault"} {
 		t.Run(mode, func(t *testing.T) {
-			p := seedCutoverHTTP(t, h, s, g, mode)
+			p := seed(t, mode)
 			key := uuid.NewString()
 			preview, e := client.PreviewProviderCutover(ctx, api.FormatSubscriptionID(p.Sub), p.Req)
 			require.NoError(t, e)
 			require.Equal(t, "ready", preview.Status)
 			result, e := client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
 			require.NoError(t, e)
-			if mode == "lost_create" || mode == "wrong_receipt" || mode == "wrong_tombstone" {
+			if mode == "lost_create" || mode == "wrong_receipt" || strings.HasPrefix(mode, "wrong_tombstone") {
 				require.Equal(t, "unknown_needs_verify", result.Status)
 				for i := 0; i < 2; i++ {
 					result, e = client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
@@ -289,7 +316,7 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 				g.mu.Lock()
 				require.Equal(t, 1, g.Accounts[p.TargetKey].Creates)
 				require.Equal(t, 0, g.Accounts[p.TargetKey].Activations)
-				if mode != "wrong_tombstone" {
+				if !strings.HasPrefix(mode, "wrong_tombstone") {
 					require.Equal(t, 0, g.Accounts[p.SourceKey].Deletes)
 				}
 				g.mu.Unlock()
@@ -328,13 +355,13 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 		})
 	}
 	t.Run("operator_resolves_lost_create", func(t *testing.T) {
-		p := seedCutoverHTTP(t, h, s, g, "lost_create")
+		p := seed(t, "lost_create")
 		key := uuid.NewString()
 		result, e := client.CutoverProvider(ctx, api.FormatSubscriptionID(p.Sub), key, p.Req)
 		require.NoError(t, e)
 		require.Equal(t, "unknown_needs_verify", result.Status)
 		rt := s.App().Runtime
-		e = rt.DB.RunInMerchantConn(merchant.WithID(ctx, dbtest.TestMerchantID), func(cctx context.Context) error {
+		e = rt.DB.RunInMerchantConn(merchant.WithID(ctx, owner.MerchantID), func(cctx context.Context) error {
 			_, err := rt.IntentRunner().Resolve(cctx, result.ID, intents.Resolution{Step: "target", ProviderReference: "8001", Actor: "fixture-operator", Reason: "provider support supplied exact enrollment receipt"})
 			return err
 		})
@@ -344,7 +371,7 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 		assertCutoverCommitted(t, h, g, p, result)
 	})
 	t.Run("concurrent_replay", func(t *testing.T) {
-		p := seedCutoverHTTP(t, h, s, g, "success")
+		p := seed(t, "success")
 		key := uuid.NewString()
 		var wg sync.WaitGroup
 		errs := make(chan error, 2)
@@ -366,8 +393,8 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 		assertCutoverCommitted(t, h, g, p, result)
 	})
 	t.Run("customer_ownership", func(t *testing.T) {
-		p := seedCutoverHTTP(t, h, s, g, "success")
-		issuer := s.RegisterDelegatedIssuer("cutover-"+uuid.NewString(), dbtest.TestMerchantSlug)
+		p := seed(t, "success")
+		issuer := s.RegisterDelegatedIssuer("cutover-"+uuid.NewString(), owner.MerchantSlug)
 		token := issuer.Mint(p.Customer.String(), "owner@example.com", "owner", nil)
 		path := s.BaseURL + "/v1/me/subscriptions/" + api.FormatSubscriptionID(p.Sub) + "/provider-cutover/preview"
 		status, body := requestJSON(t, http.MethodPost, path, token, p.Req)
@@ -381,8 +408,8 @@ func TestNMIProviderCutoverHTTP(t *testing.T) {
 		require.Error(t, e)
 	})
 	t.Run("host_campaign", func(t *testing.T) {
-		p := seedCutoverHTTP(t, h, s, g, "lost_cancel")
-		runHostProviderCampaign(t, s.BaseURL, s.Token, dbtest.TestMerchantID.UUID(), p.Source, p.Target, []hostCampaignMember{{SubscriptionID: api.FormatSubscriptionID(p.Sub), TargetPaymentMethodID: api.FormatPaymentMethodID(p.NewMethod)}}, 1, nil)
+		p := seed(t, "lost_cancel")
+		runHostProviderCampaign(t, s.BaseURL, owner.APIKey, owner.MerchantID.UUID(), p.Source, p.Target, []hostCampaignMember{{SubscriptionID: api.FormatSubscriptionID(p.Sub), TargetPaymentMethodID: api.FormatPaymentMethodID(p.NewMethod)}}, 1, nil)
 		// A real host script writes exactly one intent with the frozen request.
 		var key string
 		require.NoError(t, h.Pool().QueryRow(ctx, `SELECT idempotency_key FROM openrails.rail_intents WHERE subscription_id=$1 AND intent_type=$2`, p.Sub, intents.TypeNMIProviderCutover).Scan(&key))

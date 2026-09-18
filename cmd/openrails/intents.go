@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -59,20 +60,22 @@ func newIntentsCmd() *cobra.Command {
 // newIntentsResolveCmd applies operator evidence to one unknown provider
 // operation. A provider reference is read back by its exact id and matched to
 // the frozen operation before local effects commit; --not-executed records
-// provider-confirmed non-execution. Neither resends the unresolved mutation.
+// provider-confirmed non-execution. The NMI cutover anchor step may instead
+// record authorization for a later first charge on its verified paused target.
 func newIntentsResolveCmd() *cobra.Command {
 	var (
-		merchantSlug string
-		intentID     string
-		step         string
-		reference    string
-		notExecuted  bool
-		actor        string
-		reason       string
+		merchantSlug  string
+		intentID      string
+		step          string
+		reference     string
+		billingAnchor string
+		notExecuted   bool
+		actor         string
+		reason        string
 	)
 	cmd := &cobra.Command{
 		Use:   "resolve",
-		Short: "Resolve an unknown provider operation with an exact provider receipt or provider-confirmed non-execution (--not-executed also releases a never-submitted invoice collection)",
+		Short: "Resolve an unknown provider operation with verified evidence or an authorized NMI billing anchor",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			id, err := uuid.Parse(strings.TrimSpace(intentID))
@@ -80,14 +83,21 @@ func newIntentsResolveCmd() *cobra.Command {
 				return fmt.Errorf("--intent must be a UUID: %w", err)
 			}
 			resolution := intents.Resolution{Step: step, ProviderReference: reference, NotExecuted: notExecuted, Actor: actor, Reason: reason}
+			if billingAnchor != "" {
+				resolution.BillingAnchor, err = time.Parse(time.RFC3339, billingAnchor)
+				if err != nil {
+					return fmt.Errorf("--billing-anchor must be an RFC3339 instant: %w", err)
+				}
+			}
 			cfg, _ := c.Context().Value(config.ConfigContextKey).(*config.Config)
 			return runIntentsResolve(c.Context(), cfg, merchantSlug, id, resolution)
 		},
 	}
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
 	cmd.Flags().StringVar(&intentID, "intent", "", "Unknown operation id (required)")
-	cmd.Flags().StringVar(&step, "step", "", "Provider step of a multi-step operation (nmi_upgrade: successor or proration)")
+	cmd.Flags().StringVar(&step, "step", "", "Provider step (nmi_upgrade: successor/proration; nmi_provider_cutover: target/anchor)")
 	cmd.Flags().StringVar(&reference, "receipt", "", "Exact provider object id: transaction, subscription or refund id")
+	cmd.Flags().StringVar(&billingAnchor, "billing-anchor", "", "Future first charge instant, RFC3339 whole seconds (NMI provider cutover --step anchor only)")
 	cmd.Flags().BoolVar(&notExecuted, "not-executed", false, "Record provider-confirmed non-execution")
 	cmd.Flags().StringVar(&actor, "actor", cliActor(), "Operator recorded with the resolution")
 	cmd.Flags().StringVar(&reason, "reason", "", "Evidence source, e.g. provider ticket or dashboard record (required)")

@@ -67,8 +67,12 @@ type nmiCutoverProgress struct {
 	ActivatedTarget       *nmi.V5Subscription `json:"activated_target,omitempty"`
 	SourceCanceled        bool                `json:"source_canceled,omitempty"`
 	ActivationSubmitted   bool                `json:"activation_submitted,omitempty"`
+	ActivationAnchor      time.Time           `json:"activation_anchor,omitzero"`
 	TargetActive          bool                `json:"target_active,omitempty"`
 	Resolution            map[string]any      `json:"resolution,omitempty"`
+	BillingAnchor         time.Time           `json:"billing_anchor,omitzero"`
+	PausedAnchor          time.Time           `json:"paused_anchor,omitzero"`
+	AnchorResolutions     []map[string]any    `json:"anchor_resolutions,omitempty"`
 }
 
 // NMIProviderCutover uses the existing intent ledger. It retains the complete
@@ -86,10 +90,7 @@ func (*NMIProviderCutover) CheckRelevance(context.Context, gen.OpenrailsRailInte
 	return StillRelevant(), nil
 }
 func (h *NMIProviderCutover) now() time.Time {
-	if h.Clock != nil {
-		return h.Clock.Now().UTC()
-	}
-	return time.Now().UTC()
+	return h.Clock.Now().UTC()
 }
 func cutoverConflict(reason string) error {
 	return fmt.Errorf("%w: %s", ErrProviderCutoverConflict, reason)
@@ -143,7 +144,7 @@ func (h *NMIProviderCutover) freeze(ctx context.Context, d *db.DB, id uuid.UUID,
 	if p.Anchor.Before(p.PeriodEnd) {
 		p.Anchor = p.Anchor.Add(time.Second)
 	}
-	if p.SourceSubscriptionID == "" || p.SourceVaultID == "" || p.PlanID == "" || p.VaultID == "" || p.Amount <= 0 || p.CycleHours <= 0 || p.CycleHours%24 != 0 || !p.Anchor.After(p.PeriodStart) {
+	if p.SourceSubscriptionID == "" || p.SourceVaultID == "" || p.PlanID == "" || p.VaultID == "" || p.BillingID == "" || p.Amount <= 0 || p.CycleHours <= 0 || p.CycleHours%24 != 0 || !p.Anchor.After(p.PeriodStart) {
 		return p, cutoverConflict("incomplete or unsupported commercial terms")
 	}
 	return p, nil
@@ -290,6 +291,9 @@ func decodeCutover(in gen.OpenrailsRailIntent) (nmiCutoverPayload, nmiCutoverPro
 }
 func cutoverResult(in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress) *openrails.ProviderCutover {
 	r := &openrails.ProviderCutover{ID: in.ID, MerchantID: in.MerchantID, SubscriptionID: api.FormatSubscriptionID(p.SubscriptionID), SourcePSPID: p.Request.ExpectedSourcePSPID, TargetPSPID: p.Request.ExpectedTargetPSPID, TargetPaymentMethodID: api.FormatPaymentMethodID(p.Request.TargetPaymentMethodID), Anchor: p.Anchor, Status: in.Status, Stage: "pending"}
+	if !g.BillingAnchor.IsZero() {
+		r.Anchor = g.BillingAnchor
+	}
 	if in.LastFailureReason != nil {
 		r.Reason = *in.LastFailureReason
 	}
@@ -366,7 +370,11 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	if !reflect.DeepEqual(live, p) {
 		return uncertain("local commercial terms changed since cutover admission")
 	}
-	if !p.Anchor.After(h.now()) {
+	terms := p
+	if !g.BillingAnchor.IsZero() {
+		terms.Anchor = g.BillingAnchor
+	}
+	if !g.CreateSubmitted && !terms.Anchor.After(h.now()) {
 		return uncertain("billing anchor elapsed; operator resolution required")
 	}
 	target, ok, err := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedTargetPSPID)
@@ -386,7 +394,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	if !g.CreateSubmitted {
 		// Do not enroll until the exact source and target plan can be read.
 		old, found, e := source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
-		if e != nil || !found || old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID {
+		if e != nil || !found || !cutoverSourceMatches(old, p) {
 			return uncertain("source obligation could not be verified")
 		}
 		plan, found, e := target.GetCutoverPlan(ctx, p.PlanID)
@@ -419,19 +427,26 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 	if e != nil || !found {
 		return uncertain("target subscription readback unavailable")
 	}
-	if !cutoverSubscriptionMatches(observed, p, g.Target.ID) {
-		return uncertain("target subscription differs from frozen terms")
+	pausedTerms := terms
+	if !g.PausedAnchor.IsZero() {
+		pausedTerms.Anchor = g.PausedAnchor
 	}
 	paused, known := cutoverPaused(observed.PausedSubscription)
+	if (!paused && !cutoverSubscriptionMatches(observed, terms, g.Target.ID)) || (paused && !cutoverSubscriptionMatches(observed, pausedTerms, g.Target.ID)) {
+		return uncertain("target subscription differs from frozen terms")
+	}
 	if !known {
 		return uncertain("target pause state is unrecognized")
 	}
 	if !g.ActivationSubmitted && !paused {
 		return uncertain("target became active before verified source cancellation")
 	}
+	if paused && !terms.Anchor.After(h.now()) {
+		return uncertain("billing anchor elapsed; operator resolution required")
+	}
 	if !g.SourceCanceled {
 		old, found, e := source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
-		if e != nil || (old.ID != "" && old.ID != p.SourceSubscriptionID) {
+		if e != nil || (old.ID != "" && (old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID)) {
 			return uncertain("source cancellation readback unavailable or wrong identity")
 		}
 		if found {
@@ -452,7 +467,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 				return uncertain("source cancellation unresolved: " + e.Error())
 			}
 			old, found, e = source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
-			if e != nil || found || (old.ID != "" && old.ID != p.SourceSubscriptionID) {
+			if e != nil || found || (old.ID != "" && (old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID)) {
 				return uncertain("source cancellation is not verified")
 			}
 		}
@@ -469,7 +484,7 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 		if !send {
 			return Retryable("source canceled; target activation requires executor")
 		}
-		if !p.Anchor.After(h.now()) {
+		if !terms.Anchor.After(h.now()) {
 			return uncertain("billing anchor elapsed before target activation")
 		}
 		if !g.ActivationSubmitted {
@@ -479,11 +494,17 @@ func (h *NMIProviderCutover) advance(ctx context.Context, in gen.OpenrailsRailIn
 			}
 			g.ActivationSubmitted = true
 		}
-		if e = target.ActivateSubscription(ctx, g.Target.ID, p.Anchor); e != nil {
+		if !g.ActivationAnchor.Equal(terms.Anchor) {
+			g.ActivationAnchor = terms.Anchor
+			if e = save(); e != nil {
+				return uncertain("persist target activation anchor: " + e.Error())
+			}
+		}
+		if e = target.ActivateSubscription(ctx, g.Target.ID, terms.Anchor); e != nil {
 			return uncertain("target activation unresolved: " + e.Error())
 		}
 		observed, found, e = target.GetCutoverSubscription(ctx, g.Target.ID)
-		if e != nil || !found || !cutoverSubscriptionMatches(observed, p, g.Target.ID) {
+		if e != nil || !found || !cutoverSubscriptionMatches(observed, terms, g.Target.ID) {
 			return uncertain("target activation readback mismatch")
 		}
 		paused, known = cutoverPaused(observed.PausedSubscription)
@@ -542,6 +563,17 @@ func cutoverSubscriptionMatches(s nmi.V5Subscription, p nmiCutoverPayload, id st
 	next, e := time.Parse(time.RFC3339, s.NextBillingDate)
 	return e == nil && next.Equal(p.Anchor)
 }
+
+func cutoverSourceMatches(s nmi.V5Subscription, p nmiCutoverPayload) bool {
+	if s.Plan == nil || s.Plan.ID == "" {
+		return false
+	}
+	// Different accounts may name the same commercial plan differently.
+	p.PlanID = s.Plan.ID
+	p.VaultID = p.SourceVaultID
+	paused, known := cutoverPaused(s.PausedSubscription)
+	return known && !paused && cutoverSubscriptionMatches(s, p, p.SourceSubscriptionID)
+}
 func (h *NMIProviderCutover) isRepointed(ctx context.Context, p nmiCutoverPayload, target *nmi.V5Subscription) (bool, error) {
 	if target == nil {
 		return false, nil
@@ -586,6 +618,9 @@ func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.OpenrailsRailIn
 	if e != nil {
 		return Outcome{}, e
 	}
+	if !r.BillingAnchor.IsZero() {
+		return h.resolveAnchor(ctx, in, p, g, r)
+	}
 	if r.Step != "target" || r.NotExecuted || r.ProviderReference == "" || !g.CreateSubmitted || g.Target != nil {
 		return Outcome{}, ErrResolutionRejected
 	}
@@ -607,4 +642,74 @@ func (h *NMIProviderCutover) Resolve(ctx context.Context, in gen.OpenrailsRailIn
 		return Outcome{}, e
 	}
 	return Retryable("operator supplied verified paused target; continue under executor gates"), nil
+}
+
+func cutoverAnchorResolutionMatches(in gen.OpenrailsRailIntent, r Resolution) bool {
+	_, g, err := decodeCutover(in)
+	if err != nil || r.BillingAnchor.IsZero() || !g.BillingAnchor.Equal(r.BillingAnchor) || len(g.AnchorResolutions) == 0 {
+		return false
+	}
+	last := g.AnchorResolutions[len(g.AnchorResolutions)-1]
+	return last["actor"] == r.Actor && last["reason"] == r.Reason
+}
+
+// An expired anchor can only be replaced by explicit operator authorization.
+// Resolve reads the exact paused target and canceled source; the ordinary
+// executor performs the update under the same mode and destructive gates.
+func (h *NMIProviderCutover) resolveAnchor(ctx context.Context, in gen.OpenrailsRailIntent, p nmiCutoverPayload, g nmiCutoverProgress, r Resolution) (Outcome, error) {
+	if r.Step != "anchor" || r.ProviderReference != "" || r.NotExecuted || r.Actor == "" || r.Reason == "" || r.BillingAnchor.Nanosecond() != 0 || !r.BillingAnchor.After(h.now()) || g.Target == nil || (!g.SourceCancelSubmitted && !g.SourceCanceled) || g.TargetActive {
+		return Outcome{}, ErrResolutionRejected
+	}
+	previous := p.Anchor
+	if !g.BillingAnchor.IsZero() {
+		previous = g.BillingAnchor
+	}
+	if previous.After(h.now()) || !r.BillingAnchor.After(previous) {
+		return Outcome{}, ErrResolutionRejected
+	}
+	live, e := h.freeze(ctx, h.DB, p.SubscriptionID, p.Request)
+	if e != nil || !reflect.DeepEqual(live, p) {
+		return Outcome{}, ErrResolutionRejected
+	}
+	target, ok, e := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedTargetPSPID)
+	if e != nil || !ok || target == nil {
+		return Outcome{}, ErrResolutionRejected
+	}
+	if e = target.ConfirmCutoverVault(ctx, p.VaultID, p.BillingID); e != nil {
+		return Outcome{}, ErrResolutionRejected
+	}
+	observed, found, e := target.GetCutoverSubscription(ctx, g.Target.ID)
+	paused, known := cutoverPaused(observed.PausedSubscription)
+	terms := p
+	if !g.PausedAnchor.IsZero() {
+		terms.Anchor = g.PausedAnchor
+	}
+	if e != nil || !found || !known || !paused || !cutoverSubscriptionMatches(observed, terms, g.Target.ID) {
+		return Outcome{}, ErrResolutionRejected
+	}
+	source, ok, e := h.Resolver.ResolveNMIClient(ctx, in.MerchantID, &p.Request.ExpectedSourcePSPID)
+	if e != nil || !ok || source == nil {
+		return Outcome{}, ErrResolutionRejected
+	}
+	old, active, e := source.GetCutoverSubscription(ctx, p.SourceSubscriptionID)
+	if e != nil || active || (old.ID != "" && (old.ID != p.SourceSubscriptionID || old.CustomerVaultID != p.SourceVaultID)) {
+		return Outcome{}, ErrResolutionRejected
+	}
+	g.SourceCanceled = true
+	g.SourceAbsentAt = h.now()
+	if old.ID != "" {
+		g.SourceReceipt = &old
+	}
+	g.BillingAnchor = r.BillingAnchor.UTC()
+	g.PausedAnchor = terms.Anchor
+	record := r.Record(h.now())
+	record["previous_anchor"] = previous.Format(time.RFC3339)
+	g.AnchorResolutions = append(g.AnchorResolutions, record)
+	data, _ := json.Marshal(g)
+	var evidence map[string]any
+	_ = json.Unmarshal(data, &evidence)
+	if e = NewStore(h.DB).RecordProgress(ctx, in.ID, evidence); e != nil {
+		return Outcome{}, e
+	}
+	return Retryable("operator authorized a future first charge; continue under executor gates"), nil
 }

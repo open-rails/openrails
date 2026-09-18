@@ -1,7 +1,5 @@
 //go:build integration
 
-// Proposed helper for internal/integrationharness/provider_cutover_http_test.go.
-// The caller owns the real Runtime, database fixtures, NMI gateways and final DB/provider assertions.
 package integrationharness
 
 import (
