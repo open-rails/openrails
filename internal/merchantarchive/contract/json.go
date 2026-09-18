@@ -107,6 +107,7 @@ var emptyObject = object(map[string]jsonRule{})
 var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds": integerValue, "limit": integerValue, "currency": textValue})
 var profileJSON = object(map[string]jsonRule{"display_name": textValue, "logo_url": textValue, "from_email": textValue, "support_url": textValue, "signup_url": textValue})
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
+var operatorResolutionJSON = object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "not_executed": booleanValue, "provider_reference": textValue})
 var invoiceLineJSON = array(object(map[string]jsonRule{"event_type": textValue, "amount": integerValue, "count": integerValue, "dimensions": dictionary(integerValue)}))
 var pspSettingsJSON = object(map[string]jsonRule{"tokenization_key": textValue, "tokenization_url": textValue, "rpc_provider": textValue, "recipient_wallet": textValue, "tokens": dictionary(object(map[string]jsonRule{"mint": textValue, "name": textValue}))})
 var rateJSON = object(map[string]jsonRule{
@@ -152,6 +153,7 @@ var jsonRules = map[string]jsonRule{
 		"transaction_id": textValue, "external_invoice_id": textValue, "rail": textValue,
 		"declined": booleanValue, "failure_code": textValue, "failure_message": textValue, "not_executed": booleanValue,
 		"not_executed_code": textValue, "submitted_at": textValue, "provider_contradiction": textValue, "verified_existing": booleanValue,
+		"operator_resolution": operatorResolutionJSON,
 	})),
 	// Engine-authored payment correlation, not an arbitrary provider body.
 	"payments.metadata": nullable(object(map[string]jsonRule{

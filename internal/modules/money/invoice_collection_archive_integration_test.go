@@ -22,6 +22,12 @@ import (
 )
 
 func TestInvoiceCollectionArchivePreservesTerminalReplay(t *testing.T) {
+	for _, resolution := range []string{"verifier", "operator"} {
+		t.Run(resolution, func(t *testing.T) { testInvoiceCollectionArchive(t, resolution) })
+	}
+}
+
+func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	// A whole-book export must not inherit the package's shared merchant: other
 	// tests legitimately leave unsupported operation evidence on that merchant.
 	mid := merchant.ID(uuid.New())
@@ -60,14 +66,18 @@ func TestInvoiceCollectionArchivePreservesTerminalReplay(t *testing.T) {
 	require.Empty(t, archive.Bytes())
 	e.gateway.orderSale(e.op.String(), "txn_archive_collected")
 	e.gateway.payment("txn_archive_collected", e.vault, "0.05", "USD")
-	require.Equal(t, intents.StatusSucceeded, e.verify(t))
+	if resolution == "operator" {
+		require.NoError(t, e.resolve(t, "txn_archive_collected"))
+	} else {
+		require.Equal(t, intents.StatusSucceeded, e.verify(t))
+	}
 	e.requireSettledOnce(t)
 	original, err := intents.NewStore(e.db).Get(e.ctx, e.op)
 	require.NoError(t, err)
 	require.NoError(t, merchantarchive.Export(t.Context(), e.db, mid, &archive))
 
 	adminDSN, appDSN := dbtest.SharedRLSPostgres(t)
-	const schema = "collected_invoice_archive"
+	schema := "collected_invoice_archive_" + resolution
 	require.NoError(t, migrate.RunPostgres(t.Context(), &config.Config{DB: &config.DBConfig{URL: adminDSN, Schema: schema}}))
 	target, err := db.NewDB(t.Context(), &config.DBConfig{URL: appDSN, Schema: schema})
 	require.NoError(t, err)

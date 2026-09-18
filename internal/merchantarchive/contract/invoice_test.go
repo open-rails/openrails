@@ -7,6 +7,15 @@ func TestInvoiceCollectionArchiveContract(t *testing.T) {
 	if err := validateJSON("rail_intents.invoice_collection.payload", payload); err != nil {
 		t.Fatal(err)
 	}
+	// A completed operator resolution may retain its full evidence when the
+	// optional post-success slimming step did not run. Preserve it verbatim.
+	resolved := `{"transaction_id":"sale-original","operator_resolution":{"actor":"operator","reason":"confirmed exact provider receipt","resolved_at":"2026-09-18T00:00:00Z","provider_reference":"sale-original"}}`
+	if err := validateJSON("rail_intents.invoice_collection.result_evidence", resolved); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateJSON("rail_intents.invoice_collection.result_evidence", `{"operator_resolution":{"actor":"operator","raw_provider_body":{}}}`); err == nil {
+		t.Fatal("accepted unknown raw operator evidence")
+	}
 	for _, bad := range []string{
 		`{"instrument":{"psp_id":"not-a-uuid"}}`,
 		`{"instrument":{"security_key":"secret"}}`,
