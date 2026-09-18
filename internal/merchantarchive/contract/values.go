@@ -118,11 +118,7 @@ func ValidateValues(p Profile, values []*string) error {
 	if p.Name == "rail_intents" {
 		typ := value(p, values, "intent_type")
 		payload := value(p, values, "payload")
-<<<<<<< HEAD
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "nmi_provider_cutover")) {
-=======
-		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "invoice_collection")) {
->>>>>>> origin/master
+		if payload != nil && *payload != "null" && *payload != "{}" && (typ == nil || (*typ != "nmi_refund" && *typ != "stripe_refund" && *typ != "ccbill_refund" && *typ != "nmi_provider_cutover" && *typ != "invoice_collection")) {
 			return fmt.Errorf("unsupported retained intent payload")
 		}
 	}
