@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 
 	"github.com/open-rails/openrails/internal/db"
@@ -42,21 +43,36 @@ func NMIPaymentSourceUpdateIdempotencyKey(subscriptionID uuid.UUID, newRailCusto
 
 // NMIPaymentSourceUpdatePayload is the stored payload. The subscription and
 // target payment method are re-read at execution time; the vault-id copies are
-// forensics plus the verifier's old/new comparison anchors.
+// forensics plus the verifier's old/new comparison anchors. NewPspID freezes
+// the provider account that vaulted the target when the swap was produced, so
+// a re-attribution after enqueue (#297 custody remap) is detectable at the
+// seam that emits provider traffic (#657).
 type NMIPaymentSourceUpdatePayload struct {
 	UserID             string     `json:"user_id"`
 	RailSubscriptionID string     `json:"rail_subscription_id,omitempty"`
 	NewPaymentMethodID uuid.UUID  `json:"new_payment_method_id"`
 	NewRailCustomerRef string     `json:"new_vault_id"`
+	NewPspID           uuid.UUID  `json:"new_psp_id"`
 	OldPaymentMethodID *uuid.UUID `json:"old_payment_method_id,omitempty"`
 	OldRailCustomerRef string     `json:"old_vault_id,omitempty"`
 }
+
+// EvidenceCodePSPMismatch is result_evidence["code"] of a swap the executor
+// refused because the subscription, the intent and the target method no longer
+// name one provider account. Terminal, never retried, zero provider writes.
+const EvidenceCodePSPMismatch = "psp_mismatch"
 
 // NMIPaymentSourceUpdateHandler implements the effectively-once swap:
 //
 //   - relevance: applicable while the subscription still rebills (active/
 //     past_due) and still points at the intent's old (or already new) payment
 //     method; a later swap that moved the row elsewhere supersedes it.
+//   - provider account: before any provider traffic (execute and verify), the
+//     subscription, the intent's addressed PSP, the frozen target PSP and the
+//     target method's CURRENT PSP must be one account, re-read under the
+//     target's shared row lock (serialized against the #297 custody remap).
+//     A mismatch is terminal with evidence code psp_mismatch — a cross-PSP
+//     swap is never sent, never retried (#657).
 //   - execute: read the recurring record first — already billing the new vault
 //     IS success (crash-after-write recovery costs one read, zero writes);
 //     otherwise send the update. Transport-ambiguous outcomes go to the
@@ -104,7 +120,7 @@ func decodeNMIPaymentSourceUpdatePayload(intent gen.OpenrailsRailIntent) (NMIPay
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode nmi payment source update payload: %w", err)
 	}
-	if p.NewPaymentMethodID == uuid.Nil || strings.TrimSpace(p.NewRailCustomerRef) == "" {
+	if p.NewPaymentMethodID == uuid.Nil || strings.TrimSpace(p.NewRailCustomerRef) == "" || p.NewPspID == uuid.Nil {
 		return p, errors.New("nmi payment source update payload is incomplete")
 	}
 	return p, nil
@@ -146,10 +162,14 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	sub, err := h.loadSubscription(ctx, intent)
+	pin, refused, err := h.pinProviderAccount(ctx, intent, p)
 	if err != nil {
-		return Retryable("load subscription: " + err.Error())
+		return Retryable("pin provider account: " + err.Error())
 	}
+	if refused != nil {
+		return *refused
+	}
+	sub, newRailCustomerRef := pin.sub, pin.newRailCustomerRef
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	if psid == "" {
 		return Terminal("subscription has no rail subscription id; nothing exists at the provider to repoint")
@@ -160,10 +180,6 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 	}
 	if client.ReadOnly {
 		return Parked("nmi client is read-only (mode=readonly)")
-	}
-	newRailCustomerRef, outcome, ok := h.targetRailCustomerRef(ctx, p)
-	if !ok {
-		return outcome
 	}
 
 	// Read-first: already billing the new vault IS success (a prior attempt's
@@ -221,10 +237,14 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.O
 	if err != nil {
 		return Terminal(err.Error())
 	}
-	sub, err := h.loadSubscription(ctx, intent)
+	pin, refused, err := h.pinProviderAccount(ctx, intent, p)
 	if err != nil {
-		return Ambiguous("load subscription: " + err.Error())
+		return Ambiguous("pin provider account: " + err.Error())
 	}
+	if refused != nil {
+		return *refused
+	}
+	sub, newRailCustomerRef := pin.sub, pin.newRailCustomerRef
 	psid := strings.TrimSpace(sub.RailSubscriptionID)
 	if psid == "" {
 		return Terminal("subscription has no rail subscription id; nothing exists at the provider to verify")
@@ -232,10 +252,6 @@ func (h *NMIPaymentSourceUpdateHandler) Verify(ctx context.Context, intent gen.O
 	client, _, ok := h.resolveClient(ctx, intent, sub)
 	if !ok {
 		return Ambiguous(fmt.Sprintf("nmi client not configured for provider %q; cannot verify", intent.Rail))
-	}
-	newRailCustomerRef, outcome, ok := h.targetRailCustomerRef(ctx, p)
-	if !ok {
-		return outcome
 	}
 	remote, found, err := client.GetSubscription(ctx, psid)
 	if err != nil {
@@ -286,22 +302,73 @@ func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, inten
 	return client, Outcome{}, true
 }
 
-// targetRailCustomerRef re-reads the target payment method for a fresh vault ref; the
-// payload copy backstops a row deleted out-of-band AFTER the provider write
-// may already have landed (the swap must still converge). ok=false carries the
-// outcome to return.
-func (h *NMIPaymentSourceUpdateHandler) targetRailCustomerRef(ctx context.Context, p NMIPaymentSourceUpdatePayload) (string, Outcome, bool) {
-	pm, err := paymentmethods.NewPaymentMethodRepo(h.DB).GetByID(ctx, p.NewPaymentMethodID)
-	if err != nil {
-		if errors.Is(err, paymentmethods.ErrPaymentMethodNotFound) {
-			return strings.TrimSpace(p.NewRailCustomerRef), Outcome{}, true
+// providerAccountPin is what Execute/Verify may touch the provider with: the
+// subscription and the target vault ref, both re-read under the target
+// instrument's shared row lock with the same-PSP invariant established.
+type providerAccountPin struct {
+	sub                *models.Subscription
+	newRailCustomerRef string
+}
+
+// pinProviderAccount re-establishes the same-PSP invariant at the seam that
+// emits provider traffic. Under FOR SHARE on the target method (conflicting
+// with the #297 custody remap's FOR UPDATE, so the two serialize) it re-reads
+// the subscription and the target and requires
+//
+//	subscription.psp_id == intent.psp_id == payload.new_psp_id == target.psp_id
+//
+// refused carries the terminal outcome (psp_mismatch evidence, or a target
+// with no vault ref); err is a read failure the caller classifies. A target
+// row deleted out-of-band after a provider write may already have landed is
+// backstopped by the frozen payload: its PSP was proven at enqueue and cannot
+// be re-attributed once gone, so the swap still converges.
+func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, intent gen.OpenrailsRailIntent, p NMIPaymentSourceUpdatePayload) (pin providerAccountPin, refused *Outcome, err error) {
+	if intent.SubscriptionID == nil {
+		return pin, ptr(Terminal("intent has no subscription_id")), nil
+	}
+	if intent.PspID == nil {
+		return pin, ptr(Terminal("intent is not addressed to a PSP; the provider-account invariant cannot be established")), nil
+	}
+	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		currentTargetPSP, targetFound := p.NewPspID, true
+		ref := strings.TrimSpace(p.NewRailCustomerRef)
+		locked, lerr := gen.New(tx).LockPaymentMethodForProviderAccountCheck(ctx, gen.LockPaymentMethodForProviderAccountCheckParams{
+			MerchantID: intent.MerchantID, ID: p.NewPaymentMethodID,
+		})
+		switch {
+		case lerr == nil:
+			currentTargetPSP = locked.PspID
+			if ref = strings.TrimSpace(locked.RailCustomerRef); ref == "" {
+				refused = ptr(Terminal("target payment method has no rail customer ref; cannot repoint billing"))
+				return nil
+			}
+		case errors.Is(lerr, pgx.ErrNoRows):
+			targetFound = false
+		default:
+			return fmt.Errorf("lock target payment method: %w", lerr)
 		}
-		return "", Retryable("load target payment method: " + err.Error()), false
-	}
-	if v := strings.TrimSpace(pm.RailCustomerRef); v != "" {
-		return v, Outcome{}, true
-	}
-	return "", Terminal("target payment method has no rail customer ref; cannot repoint billing"), false
+		sub, serr := subscriptions.NewSubscriptionRepo(h.DB.NewWithPgxTx(tx)).GetByID(ctx, *intent.SubscriptionID)
+		if serr != nil {
+			return fmt.Errorf("load subscription: %w", serr)
+		}
+		if sub.PspID != *intent.PspID || *intent.PspID != p.NewPspID || p.NewPspID != currentTargetPSP {
+			refused = ptr(TerminalWithEvidence(
+				fmt.Sprintf("provider-account invariant violated: subscription PSP %s, intent PSP %s, target method PSP %s at enqueue / %s now — a cross-PSP payment-source update is never sent; repair: card re-entry on the subscription's active provider account (#657)",
+					sub.PspID, *intent.PspID, p.NewPspID, currentTargetPSP),
+				map[string]any{
+					"code":                  EvidenceCodePSPMismatch,
+					"subscription_psp_id":   sub.PspID.String(),
+					"intent_psp_id":         intent.PspID.String(),
+					"target_psp_id_frozen":  p.NewPspID.String(),
+					"target_psp_id_current": currentTargetPSP.String(),
+					"target_method_found":   targetFound,
+				}))
+			return nil
+		}
+		pin = providerAccountPin{sub: sub, newRailCustomerRef: ref}
+		return nil
+	})
+	return pin, refused, err
 }
 
 // finalize points the local subscription at the new payment method — only
@@ -337,9 +404,11 @@ var ErrPaymentSourceUpdateProcessing = errors.New("payment method update is proc
 type PaymentSourceUpdateOutcome struct {
 	// Done: the provider bills the new vault and the local row points at it.
 	Done bool
-	// Terminal: the swap failed permanently; Reason says why.
+	// Terminal: the swap failed permanently; Reason says why and Code is the
+	// intent's evidence code when the refusal is classified (psp_mismatch).
 	Terminal bool
 	Reason   string
+	Code     string
 }
 
 // PaymentSourceUpdateThrough posts the durable nmi_payment_source_update
@@ -362,7 +431,33 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	if err != nil {
 		return PaymentSourceUpdateOutcome{}, err
 	}
-	newRailCustomerRef := strings.TrimSpace(newPM.RailCustomerRef)
+	// The account boundary at the durable side-effect seam, whatever the HTTP
+	// caller already checked: the target is re-read under its shared row lock,
+	// so a #297 custody remap in flight commits first and is seen here (a remap
+	// landing after this check is caught by the executor's pin). A target on
+	// another PSP never becomes an intent; cross-account migration is the
+	// report-only card re-entry plan (#657).
+	var target *models.PaymentMethod
+	err = t.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		row, lerr := gen.New(tx).LockPaymentMethodForProviderAccountCheck(ctx, gen.LockPaymentMethodForProviderAccountCheckParams{
+			MerchantID: tid.UUID(), ID: newPM.ID,
+		})
+		if lerr != nil {
+			if errors.Is(lerr, pgx.ErrNoRows) {
+				return fmt.Errorf("payment method %s: %w", newPM.ID, paymentmethods.ErrPaymentMethodNotFound)
+			}
+			return lerr
+		}
+		target, lerr = models.PaymentMethodFromGen(row)
+		return lerr
+	})
+	if err != nil {
+		return PaymentSourceUpdateOutcome{}, fmt.Errorf("load target payment method: %w", err)
+	}
+	if err := subscriptions.ValidatePaymentMethodProviderAccount(target, sub); err != nil {
+		return PaymentSourceUpdateOutcome{}, err
+	}
+	newRailCustomerRef := strings.TrimSpace(target.RailCustomerRef)
 	if newRailCustomerRef == "" {
 		return PaymentSourceUpdateOutcome{}, errors.New("target payment method has no rail customer ref")
 	}
@@ -405,8 +500,9 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 		Payload: NMIPaymentSourceUpdatePayload{
 			UserID:             sub.CustomerID.String(),
 			RailSubscriptionID: sub.RailSubscriptionID,
-			NewPaymentMethodID: newPM.ID,
+			NewPaymentMethodID: target.ID,
 			NewRailCustomerRef: newRailCustomerRef,
+			NewPspID:           target.PspID,
 			OldPaymentMethodID: oldPMID,
 			OldRailCustomerRef: oldRailCustomerRef,
 		},
@@ -427,6 +523,7 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 		out.Done = true
 	case StatusFailedTerminal, StatusSuperseded, StatusExpired:
 		out.Terminal = true
+		out.Code = EvidenceString(row, "code")
 	}
 	return out, nil
 }

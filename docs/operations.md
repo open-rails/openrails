@@ -204,6 +204,19 @@ Rules:
   move: keep (or restore) the old PSP's credentials until its queue drains,
   or let stale intents expire/supersede via their relevance windows. There is
   no rebind command.
+- **Per-subscriber cutover off an archived PSP is report-only (#657).**
+  `cp.PlanProviderAccountCutover(ctx, merchantID, query)` on
+  `embed/controlplane` resolves a subscription's PSP and either the card the
+  subscriber re-entered (`ReplacementPaymentMethodID`, whose PSP is the target)
+  or a named `TargetPSPID`, and returns the classification: same account ⇒
+  the durable payment-source update; cross-account ⇒
+  `cross_account_requires_card_reentry` with `Executable: false` and the
+  create/verify/cancel/repoint proof still to be qualified. It reads and
+  writes nothing else. The durable payment-source update itself refuses a
+  cross-account target twice: at enqueue and again in the executor under the
+  method's row lock (`failed_terminal`, evidence `code: psp_mismatch`, no
+  provider call), and a custody remap (or#297) refuses an instrument any
+  unresolved payment-source update names (`payment_source_update_unresolved`).
 
 ### Custodians (or#880)
 

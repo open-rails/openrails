@@ -50,6 +50,10 @@ type (
 	MerchantRetirementCandidatePage     = operator.MerchantRetirementCandidatePage
 	MerchantRetirementRefusal           = operator.MerchantRetirementRefusal
 	RetireUnusedMerchantResult          = operator.RetireUnusedMerchantResult
+	ProviderAccountCutoverDisposition   = operator.ProviderAccountCutoverDisposition
+	ProviderAccountCutoverPlan          = operator.ProviderAccountCutoverPlan
+	ProviderAccountCutoverQuery         = operator.ProviderAccountCutoverQuery
+	ProviderAccountCutoverReport        = operator.ProviderAccountCutoverReport
 )
 
 const (
@@ -60,6 +64,10 @@ const (
 	MerchantRetirementRefusedGroupMismatch = operator.MerchantRetirementRefusedGroupMismatch
 	MerchantRetirementRefusedReserved      = operator.MerchantRetirementRefusedReserved
 	MerchantRetirementRefusedActive        = operator.MerchantRetirementRefusedActive
+
+	ProviderAccountCutoverSameAccount     = operator.ProviderAccountCutoverSameAccount
+	ProviderAccountCutoverRequiresReentry = operator.ProviderAccountCutoverRequiresReentry
+	ProviderAccountCutoverBlocked         = operator.ProviderAccountCutoverBlocked
 )
 
 var (
@@ -72,6 +80,9 @@ var (
 	ErrEmailUnverified              = operator.ErrEmailUnverified
 	ErrVaultedPaymentMethodRequired = operator.ErrVaultedPaymentMethodRequired
 	ErrMerchantGroupReleasePending  = operator.ErrMerchantGroupReleasePending
+	// ErrProviderAccountCutoverNotQualified is the reason a cross-account plan
+	// reports; it is never executed automatically.
+	ErrProviderAccountCutoverNotQualified = operator.ErrProviderAccountCutoverNotQualified
 	// ErrPaymentProviderNotFound is GetPaymentProviderConfig's answer when the
 	// merchant has no active account on the rail; match it with errors.Is.
 	ErrPaymentProviderNotFound = merchants.ErrPaymentProviderNotFound
@@ -253,4 +264,14 @@ func (c *ControlPlane) RetireUnusedMerchant(ctx context.Context, id merchant.ID,
 
 func (c *ControlPlane) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error) {
 	return operator.CompletePendingMerchantRetirements(ctx, c.app, limit)
+}
+
+// PlanProviderAccountCutover reports how one subscriber could move to another
+// provider account (#657). Same-account moves are the durable payment-source
+// update; a cross-account move is report-only card re-entry on a non-archived
+// target and is never executed by this call. Read-only: it resolves the
+// subscription, the optional replacement method and both PSP rows and writes
+// nothing.
+func (c *ControlPlane) PlanProviderAccountCutover(ctx context.Context, id merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error) {
+	return operator.PlanProviderAccountCutover(ctx, c.app, id, q)
 }
