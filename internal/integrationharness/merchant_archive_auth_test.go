@@ -171,8 +171,7 @@ func archiveEmbeddedClient(t *testing.T, dsn, schema string, mid merchant.ID) *o
 	}})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	rt.Embedded().App().Runtime.SetConfiguredMerchant(mid)
-	client, err := rt.Client(openrails.WithCurrency("USD"), openrails.WithTimeout(0))
+	client, err := rt.Client(openrails.WithMerchantID(mid), openrails.WithCurrency("USD"), openrails.WithTimeout(0))
 	require.NoError(t, err)
 	return client
 }
