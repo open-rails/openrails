@@ -19,10 +19,12 @@ import (
 // provider sale could match.
 func TestFreezeRebillPinsTheRailAmount(t *testing.T) {
 	periodEnd := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	psp := uuid.New()
 	sub := func(amount int64, currency string) *models.Subscription {
 		return &models.Subscription{
 			ID: uuid.New(), Rail: models.RailNMI, CurrentPeriodEndsAt: &periodEnd,
-			PaymentMethod: &models.PaymentMethod{ID: uuid.New(), RailCustomerRef: " vault-1 "},
+			PspID:         psp,
+			PaymentMethod: &models.PaymentMethod{ID: uuid.New(), PspID: psp, Custodian: models.CustodianPSP, RailCustomerRef: " vault-1 ", RailMethodRef: "billing-1"},
 			Price:         &models.Price{ID: uuid.New(), Amount: amount, Currency: currency},
 		}
 	}
@@ -39,7 +41,8 @@ func TestFreezeRebillPinsTheRailAmount(t *testing.T) {
 		require.NoError(t, err, "%d %s", tc.amount, tc.currency)
 		require.Equal(t, tc.minor, p.AmountMinor, "%d %s", tc.amount, tc.currency)
 		require.Equal(t, tc.amount, p.Amount)
-		require.Equal(t, "vault-1", p.CustomerVaultID)
+		require.Equal(t, "vault-1", p.Instrument.RailCustomerRef)
+		require.Equal(t, psp, p.Instrument.PSPID)
 		require.Equal(t, tc.minor, p.Receipt().Amount, "the receipt expects exactly the frozen minor amount")
 	}
 	_, err := FreezeRebill(context.Background(), nil, sub(12_345_678, "USD"))

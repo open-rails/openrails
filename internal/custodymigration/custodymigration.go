@@ -200,6 +200,12 @@ const (
 	// would finalize a subscription onto a method another PSP now owns
 	// (#657). Transient by construction — resolve or supersede, then re-run.
 	ReasonPaymentSourceUpdateUnresolved = "payment_source_update_unresolved"
+
+	// ReasonOperationUnresolved: an unresolved operation (an invoice
+	// collection, a rebill, a vault update...) froze this instrument in its
+	// payload. Its outcome is judged against the custody it froze, so the flip
+	// waits for it to resolve. Transient by construction — re-run.
+	ReasonOperationUnresolved = "operation_unresolved"
 	// ReasonTokenConflict: another instrument already holds this custodian
 	// token. Two instruments pointing at one card is never right.
 	ReasonTokenConflict = "token_conflict"

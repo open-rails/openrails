@@ -76,11 +76,17 @@ type CollectionVerifyResult struct {
 }
 
 // CollectionReceiptExpectation is the frozen operation every receipt must
-// match exactly: its provider identity (the operation key) and the amount
-// and currency frozen at enqueue. The instrument is the payment method the
-// reads are made for.
+// match exactly: its provider identity (the operation key), the instrument as
+// frozen at enqueue, and the amount and currency. It is the only input the
+// reconciliation reads take: the payment method's current row is never
+// consulted, so an instrument that changed after submission cannot change
+// which receipt settles the charge.
 type CollectionReceiptExpectation struct {
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
 	OperationKey string
+	Rail         string
+	Instrument   CollectionInstrument
 	Amount       moneyutil.Cents
 	Currency     string
 }
@@ -94,13 +100,13 @@ type CollectionVerifier interface {
 	// without such a read; an empty search is inconclusive (Settled=false, nil
 	// error), never non-execution; a charge that exists but contradicts the
 	// frozen facts is an error, never a receipt.
-	VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) (CollectionVerifyResult, error)
+	VerifyCollectionCharge(ctx context.Context, expect CollectionReceiptExpectation) (CollectionVerifyResult, error)
 	// ConfirmCollectionReceipt reads the exact provider object an operator
 	// named and requires it to be this operation's settled charge.
-	ConfirmCollectionReceipt(ctx context.Context, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error)
+	ConfirmCollectionReceipt(ctx context.Context, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error)
 	// ConfirmCollectionNotExecuted errors while the provider shows the
 	// operation executed, or when it cannot say.
-	ConfirmCollectionNotExecuted(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) error
+	ConfirmCollectionNotExecuted(ctx context.Context, expect CollectionReceiptExpectation) error
 }
 
 // NMIClientResolver is the raw-client NMI leg of the #725 store resolver.
@@ -201,12 +207,12 @@ func (b *MerchantCollectionAdapterBuilder) ResolveNMIClient(ctx context.Context,
 // charges settle on the SAME NMI gateway account (or#879), so one branch
 // covers both transports. Stripe has no such read and converges through
 // idempotent replay instead.
-func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
-	client, ok, err := b.nmiClientFor(ctx, method)
+func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Context, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+	client, ok, err := b.nmiClientFor(ctx, expect)
 	if err != nil || !ok {
 		return CollectionVerifyResult{}, err
 	}
-	return nmiCollectionReceipt(ctx, client, method, "", expect)
+	return nmiCollectionReceipt(ctx, client, "", expect)
 }
 
 // ConfirmCollectionReceipt reads the exact provider object an operator named.
@@ -214,13 +220,13 @@ func (b *MerchantCollectionAdapterBuilder) VerifyCollectionCharge(ctx context.Co
 // named transaction required to be the order reference's sale. Stripe: the
 // invoice must match the operation through the same check the collection
 // sequence applies to its own paid invoice.
-func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.Context, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.Context, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
 	providerReference = strings.TrimSpace(providerReference)
 	if providerReference == "" {
 		return CollectionVerifyResult{}, errors.New("provider reference is required")
 	}
-	if normalizeRail(method.Rail) == string(models.RailStripe) {
-		service, err := b.stripeServiceFor(ctx, method)
+	if normalizeRail(expect.Rail) == string(models.RailStripe) {
+		service, err := b.stripeServiceFor(ctx, expect)
 		if err != nil {
 			return CollectionVerifyResult{}, err
 		}
@@ -236,14 +242,14 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 		}
 		return CollectionVerifyResult{Supported: true, Settled: true, TransactionID: stripeReceiptTransactionID(receipt), ExternalInvoiceID: receipt.InvoiceID}, nil
 	}
-	client, ok, err := b.nmiClientFor(ctx, method)
+	client, ok, err := b.nmiClientFor(ctx, expect)
 	if err != nil {
 		return CollectionVerifyResult{}, err
 	}
 	if !ok {
-		return CollectionVerifyResult{}, fmt.Errorf("rail %q has no armed provider read", method.Rail)
+		return CollectionVerifyResult{}, fmt.Errorf("rail %q has no armed provider read", expect.Rail)
 	}
-	res, err := nmiCollectionReceipt(ctx, client, method, providerReference, expect)
+	res, err := nmiCollectionReceipt(ctx, client, providerReference, expect)
 	if err != nil {
 		return CollectionVerifyResult{}, err
 	}
@@ -253,17 +259,29 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionReceipt(ctx context.
 	return res, nil
 }
 
-// nmiCollectionReceipt runs the ONE exact-receipt path
-// (nmi.ConfirmOrderSale) for an NMI-family collection, shared by autonomous
-// verification and operator resolution and by the subscription rebill
-// verifier: the order reference's sale, approved, for the frozen amount and
-// currency, on the instrument's customer vault (a custodian-held card has
-// none, or#879). An empty search is inconclusive (Settled=false, nil error); a
-// sale that contradicts the frozen facts is an error.
-func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, method gen.OpenrailsPaymentMethod, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+// nmiCollectionReceipt is the ONE exact-receipt path for an NMI-family
+// charge, shared by autonomous verification, operator resolution and the
+// subscription rebill verifier (nmi.ConfirmOrderSale). The Query API must
+// return a successful sale for the operation's order reference (identity);
+// with providerReference set it must be that very sale. The v5 read of that
+// sale must then be approved, in the frozen currency, for the frozen amount,
+// on the frozen customer vault. A card the frozen instrument held at a
+// custodian (or#879) was charged by card data and has no vault at NMI: its
+// exact read binds approval, currency and amount, and the order reference
+// binds the instrument. The rule comes from the FROZEN custody, never the
+// method's current one. An empty search is inconclusive (Settled=false, nil
+// error); a sale that exists but contradicts the frozen facts is an error.
+func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, providerReference string, expect CollectionReceiptExpectation) (CollectionVerifyResult, error) {
+	if err := expect.Instrument.validate(); err != nil {
+		return CollectionVerifyResult{}, err
+	}
 	txnID, found, err := client.ConfirmOrderSale(ctx, nmi.OrderSale{
-		OrderID: expect.OperationKey, CustomerVaultID: strings.TrimSpace(method.RailCustomerRef),
-		Unvaulted: method.Custodian == models.CustodianBasisTheory, Amount: expect.Amount, Currency: expect.Currency,
+		OrderID:   expect.OperationKey,
+		Amount:    expect.Amount,
+		Currency:  expect.Currency,
+		Unvaulted: expect.Instrument.custodianHeld(),
+		// The frozen vault, never the method row's current one.
+		CustomerVaultID: expect.Instrument.RailCustomerRef,
 	}, providerReference)
 	if err != nil {
 		return CollectionVerifyResult{}, err
@@ -279,19 +297,19 @@ func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, method gen
 // cannot say. For Stripe it also makes the non-execution definitive: every
 // invoice item, draft and open invoice stamped with the operation key is
 // deleted or voided so no later invoice can sweep them; a paid one refuses.
-func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, method gen.OpenrailsPaymentMethod, expect CollectionReceiptExpectation) error {
-	if normalizeRail(method.Rail) == string(models.RailStripe) {
-		service, err := b.stripeServiceFor(ctx, method)
+func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx context.Context, expect CollectionReceiptExpectation) error {
+	if normalizeRail(expect.Rail) == string(models.RailStripe) {
+		service, err := b.stripeServiceFor(ctx, expect)
 		if err != nil {
 			return err
 		}
-		customerID, err := NewStripeCollectionAdapter(b.DB, service).stripeCustomerID(ctx, method)
+		customerID, err := NewStripeCollectionAdapter(b.DB, service).stripeCustomerID(ctx, expect.MerchantID, expect.CustomerID)
 		if err != nil {
 			return err
 		}
 		return service.CleanupCollection(ctx, customerID, expect.OperationKey)
 	}
-	res, err := b.VerifyCollectionCharge(ctx, method, expect)
+	res, err := b.VerifyCollectionCharge(ctx, expect)
 	if errors.Is(err, nmi.ErrReceiptMismatch) {
 		return fmt.Errorf("provider shows a sale for order %s that contradicts the operation: %w", expect.OperationKey, err)
 	}
@@ -299,7 +317,7 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 		return err
 	}
 	if !res.Supported {
-		return fmt.Errorf("rail %q has no armed provider read", method.Rail)
+		return fmt.Errorf("rail %q has no armed provider read", expect.Rail)
 	}
 	if res.Settled {
 		return fmt.Errorf("provider shows successful sale %s for order %s", res.TransactionID, expect.OperationKey)
@@ -307,22 +325,31 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 	return nil
 }
 
-// nmiClientFor arms the NMI client for an NMI-family instrument's stamped
-// account. ok=false for other rails or an undeclared account.
-func (b *MerchantCollectionAdapterBuilder) nmiClientFor(ctx context.Context, method gen.OpenrailsPaymentMethod) (*nmi.NMIClient, bool, error) {
-	if b == nil || b.merchants() == nil || b.DB == nil || !rails.IsNMI(models.Rail(normalizeRail(method.Rail))) {
+// nmiClientFor arms the NMI client for the account the operation was
+// submitted to (the frozen PSP). ok=false for other rails or an undeclared
+// account.
+func (b *MerchantCollectionAdapterBuilder) nmiClientFor(ctx context.Context, expect CollectionReceiptExpectation) (*nmi.NMIClient, bool, error) {
+	if b == nil || b.merchants() == nil || b.DB == nil || !rails.IsNMI(models.Rail(normalizeRail(expect.Rail))) {
 		return nil, false, nil
 	}
-	return b.ResolveNMIClient(ctx, method.MerchantID, &method.PspID)
+	if expect.Instrument.PSPID == uuid.Nil {
+		return nil, false, errors.New("collection receipt expectation names no provider account")
+	}
+	psp := expect.Instrument.PSPID
+	return b.ResolveNMIClient(ctx, expect.MerchantID, &psp)
 }
 
-func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context, method gen.OpenrailsPaymentMethod) (*subscriptions.StripeService, error) {
+func (b *MerchantCollectionAdapterBuilder) stripeServiceFor(ctx context.Context, expect CollectionReceiptExpectation) (*subscriptions.StripeService, error) {
 	svc := b.merchants()
 	if b == nil || svc == nil || b.DB == nil {
 		return nil, errors.New("stripe collection plane is not armed")
 	}
-	mid := merchant.ID(method.MerchantID)
-	scope, ok, err := b.resolveScope(ctx, svc, mid, string(models.RailStripe), &method.PspID)
+	if expect.Instrument.PSPID == uuid.Nil {
+		return nil, errors.New("collection receipt expectation names no provider account")
+	}
+	mid := merchant.ID(expect.MerchantID)
+	psp := expect.Instrument.PSPID
+	scope, ok, err := b.resolveScope(ctx, svc, mid, string(models.RailStripe), &psp)
 	if err != nil {
 		return nil, err
 	}

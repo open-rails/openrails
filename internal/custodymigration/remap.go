@@ -231,6 +231,9 @@ func (p *planner) instrumentPinned(ctx context.Context, methodID uuid.UUID) (str
 //     the intent's frozen method ids rather than the subscription's link
 //     (which only moves at finalize): re-attributing the PSP underneath would
 //     finalize a subscription onto a method another account owns (#657).
+
+//   - any operation whose frozen payload names it, in any unresolved state
+//     (an invoice collection has no subscription to join through).
 //
 // Both clear on their own or by operator resolution, so this is "come back
 // later", not a failure.
@@ -252,6 +255,15 @@ func pinnedBy(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUI
 	}
 	if swaps > 0 {
 		return ReasonPaymentSourceUpdateUnresolved, nil
+	}
+	operations, err := q.CountUnresolvedOperationsNamingPaymentMethod(ctx, gen.CountUnresolvedOperationsNamingPaymentMethodParams{
+		MerchantID: merchantID, PaymentMethodID: methodID,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("count unresolved operations naming %s: %w", methodID, err)
+	}
+	if operations > 0 {
+		return ReasonOperationUnresolved, nil
 	}
 	return "", nil
 }

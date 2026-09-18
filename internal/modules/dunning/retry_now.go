@@ -234,8 +234,15 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 	if err != nil {
 		return nil, err
 	}
+	unresolved := false
 	if claimed {
+		// Released once the attempt has a definitive answer; while the outcome
+		// is unknown the claim is held to its expiry, so nothing re-claims and
+		// re-enqueues a no-op while the verifier owns it.
 		defer func() {
+			if unresolved {
+				return
+			}
 			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
 			if err := ReleaseClaim(releaseCtx, r.DB, mid.UUID(), sub.ID, holder); err != nil {
@@ -262,6 +269,7 @@ func (r *RetryNow) Run(ctx context.Context, request RetryNowRequest) (*RetryNowR
 		}
 		return r.result(ctx, repo, sub.ID, sub.Rail, executed, true)
 	}
+	unresolved = executed.Status == intents.StatusUnknownNeedsVerify
 	switch executed.Status {
 	case intents.StatusSuperseded, intents.StatusExpired:
 		// Relevance moved on under us (renewed, cancelled, period advanced,
@@ -300,8 +308,11 @@ func eligible(sub *models.Subscription, paymentMethodID *uuid.UUID) error {
 		return fmt.Errorf("%w: status %s", ErrSubscriptionNotRetryable, sub.Status)
 	}
 	pm := sub.PaymentMethod
-	if pm == nil || strings.TrimSpace(pm.RailCustomerRef) == "" || strings.TrimSpace(pm.RailMethodRef) == "" || strings.TrimSpace(pm.ParkReason) != "" {
+	if pm == nil || strings.TrimSpace(pm.ParkReason) != "" {
 		return fmt.Errorf("%w: the saved payment method cannot be charged", ErrSubscriptionNotRetryable)
+	}
+	if err := intents.RebillInstrumentOf(pm).Validate(); err != nil {
+		return fmt.Errorf("%w: %v", ErrSubscriptionNotRetryable, err)
 	}
 	if paymentMethodID != nil && *paymentMethodID != pm.ID {
 		return fmt.Errorf("%w: retry-now charges the subscription's current payment method", ErrPaymentMethodInvalid)
