@@ -47,7 +47,7 @@ func TestAdminCreditGrant_OnceOnlyAndChangedAmountConflict(t *testing.T) {
 	sourceID := "or906-admin-" + uuid.NewString()
 	path := "/v1/merchant/customers/" + customerID + "/credits"
 	body := map[string]any{
-		"currency": money.DefaultCurrency, "amount": 5_000, "source_id": sourceID,
+		"currency": money.DefaultCurrency, "amount": "5000", "source_id": sourceID,
 		"description": "or906 goodwill",
 	}
 
@@ -76,7 +76,7 @@ func TestAdminCreditGrant_OnceOnlyAndChangedAmountConflict(t *testing.T) {
 	require.Equal(t, first.ID, again.ID)
 
 	// A changed-amount retry at the same key is a 409 caller bug.
-	body["amount"] = 10_000
+	body["amount"] = "10000"
 	w = adminCreditPost(t, admin, path, body)
 	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), "idempotency_key_reused")
@@ -132,7 +132,7 @@ func TestAdminCreditGrant_RequiresCreditsGrantPermission(t *testing.T) {
 		[]string{controlplane.PermMerchantCustomerSettingsUpdate})
 
 	body := map[string]any{
-		"currency": money.DefaultCurrency, "amount": 5_000,
+		"currency": money.DefaultCurrency, "amount": "5000",
 		"source_id": "or906-denied-" + uuid.NewString(),
 	}
 	w := adminCreditPost(t, support, "/v1/merchant/customers/"+uuid.NewString()+"/credits", body)
