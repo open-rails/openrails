@@ -80,8 +80,8 @@ type userPaymentObject struct {
 	ID             string           `json:"id"`
 	Object         string           `json:"object"`
 	Status         string           `json:"status,omitempty"`
-	Amount         int64            `json:"amount"`
-	AmountRefunded int64            `json:"amount_refunded"`
+	Amount         int64            `json:"amount,string"`
+	AmountRefunded int64            `json:"amount_refunded,string"`
 	Currency       string           `json:"currency"`
 	User           string           `json:"user"`
 	Subscription   *string          `json:"subscription,omitempty"`

@@ -64,7 +64,7 @@ type SubscriptionPrice struct {
 	ID                  string `json:"id"`
 	Key                 string `json:"key"`
 	ProductID           string `json:"product_id"`
-	Amount              int64  `json:"amount"`
+	Amount              int64  `json:"amount,string"`
 	Currency            string `json:"currency"`
 	AutoRenew           bool   `json:"auto_renew"`
 	AccessDurationHours *int   `json:"access_duration_hours"`
@@ -94,7 +94,7 @@ type UpdateSubscriptionPaymentMethodRequest struct {
 type SubscriptionPayment struct {
 	ID            string    `json:"id"`
 	Status        string    `json:"status"`
-	Amount        int64     `json:"amount"`
+	Amount        int64     `json:"amount,string"`
 	Currency      string    `json:"currency"`
 	Rail          string    `json:"rail"`
 	TransactionID string    `json:"transaction_id"`

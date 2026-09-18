@@ -52,7 +52,7 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 			Price: json.RawMessage(`{
 				"model":"per_unit",
 				"currency":"USD",
-				"per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":8930,"maximum_amount":6000000}}}}
+				"per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":"8930","maximum_amount":"6000000"}}}}
 			}`),
 		}},
 	}))

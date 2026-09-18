@@ -143,7 +143,7 @@ export const revokeProductAccess = (customerId: string, grantId: string) =>
 export interface OffChannelPaymentRequest {
   price_id: string
   transaction_id: string
-  amount?: number
+  amount?: string
   currency?: string
   purchased_at?: string
   discount_code?: string
@@ -252,7 +252,7 @@ export const getPayment = (id: string, signal?: AbortSignal) =>
 
 export const refundPayment = (
   id: string,
-  amount: number,
+  amount: string,
   reason: string,
   revokeAccess: boolean
 ) =>
@@ -387,11 +387,11 @@ export const listPrices = (
 
 export interface PriceRequest {
   product_id: string
-  unit_amount: number
+  unit_amount: string
   currency: string
   access_duration_hours?: number
   auto_renew?: boolean
-  trial_unit_amount?: number
+  trial_unit_amount?: string
   trial_duration_hours?: number
   // Key (#774): declaring the SAME key as an existing live price with a
   // DIFFERENT amount is a version bump (the #777 wizard's whole mechanism) —

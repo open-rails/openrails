@@ -83,7 +83,7 @@ VALUES ($1, $2, $3, 'units', 'sum', 'unit', '{}'::jsonb)`, merchantID, meter, "o
 		_, err = pool.Exec(ctx, `
 INSERT INTO openrails.catalog_rate_cards (merchant_id, product_id, ordinal, meter_key, payment_term, price)
 VALUES ($1, $2, 1, $3, 'in_arrears',
-        '{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":1000}}'::jsonb)`,
+        '{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"1000"}}'::jsonb)`,
 			merchantID, productID, meter)
 		require.NoError(t, err)
 

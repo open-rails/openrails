@@ -39,7 +39,7 @@ func TestPricingAuthoritySeparatesFinalCapturesFromCatalogInputs(t *testing.T) {
 	require.NoError(t, err)
 	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_meters (merchant_id,key,event_type,value_property,aggregation) VALUES ($1,$2,$2,$2,'sum')`, merchantID, meterKey)
 	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_rate_cards (merchant_id,product_id,ordinal,meter_key,payment_term,price) VALUES ($1,$2,1,$3,'in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":100,"divide_by":1}}'::jsonb)`, merchantID, productID, meterKey)
+	_, err = pool.Exec(ctx, `INSERT INTO openrails.catalog_rate_cards (merchant_id,product_id,ordinal,meter_key,payment_term,price) VALUES ($1,$2,1,$3,'in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"100","divide_by":1}}'::jsonb)`, merchantID, productID, meterKey)
 	require.NoError(t, err)
 
 	_, err = svc.Deposit(ctx, money.DepositParams{CustomerID: &payer, Invoker: "owner", Currency: currency, Amount: 1000, Source: "seed"})
