@@ -1,0 +1,1523 @@
+package service
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/open-rails/openrails/config"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/modules/catalog"
+	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/payments"
+	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	riverjobs "github.com/open-rails/openrails/internal/river"
+	sharedformat "github.com/open-rails/openrails/internal/shared/format"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	"github.com/open-rails/openrails/pkg/api"
+	"github.com/open-rails/openrails/pkg/query"
+	"github.com/riverqueue/river"
+	log "github.com/sirupsen/logrus"
+)
+
+var (
+	// ErrPaymentMethodUpdateProcessing means the provider outcome is still
+	// converging. Repeating the same request checks the same durable attempt.
+	ErrPaymentMethodUpdateProcessing = errors.New("payment method update is processing")
+	// ErrPaymentMethodRetokenize means the provider did not apply the
+	// single-use token and the caller must tokenize the card again.
+	ErrPaymentMethodRetokenize = errors.New("payment method must be tokenized again")
+)
+
+// PaymentMethodUpdateFailedError means the provider replacement reached an
+// unrecoverable state that requires operator attention.
+type PaymentMethodUpdateFailedError struct {
+	Reason string
+}
+
+func (e *PaymentMethodUpdateFailedError) Error() string {
+	if e == nil || strings.TrimSpace(e.Reason) == "" {
+		return "payment method update failed permanently"
+	}
+	return "payment method update failed permanently: " + e.Reason
+}
+
+// PaymentMethodUpdateValidationError is a caller-correctable replacement
+// request error.
+type PaymentMethodUpdateValidationError struct {
+	Message string
+}
+
+func (e *PaymentMethodUpdateValidationError) Error() string {
+	if e == nil {
+		return "invalid payment method update"
+	}
+	return e.Message
+}
+
+// -------------------------------- Products --------------------------------
+
+// GetProducts returns a paginated list of products.
+func (s *Service) GetProducts(ctx context.Context, opts GetProductsOptions) (*PaginatedResult[Product], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	publicSubscriptions, err := s.requirePublicSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	result, err := publicSubscriptions.GetProductsPaginated(ctx, opts.IncludeInactive, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("get products: %w", err)
+	}
+
+	products := make([]Product, 0, len(result.Products))
+	for _, p := range result.Products {
+		projected := productFromModel(p)
+		products = append(products, projected)
+	}
+
+	return &PaginatedResult[Product]{
+		Data:       products,
+		TotalItems: result.TotalItems,
+		Limit:      limit,
+		Offset:     offset,
+	}, nil
+}
+
+// -------------------------------- Prices --------------------------------
+
+// GetPrices returns a paginated list of prices.
+func (s *Service) GetPrices(ctx context.Context, opts GetPricesOptions) (*PaginatedResult[Price], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	prices, err := s.requirePriceService()
+	if err != nil {
+		return nil, err
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	filter := catalog.PriceFilter{
+		Currency: moneyutil.NormalizeCurrency(opts.Currency),
+		Type:     opts.Type,
+	}
+	if opts.ProductID != nil {
+		filter.ProductID = opts.ProductID
+	}
+	// Public wire filter is Stripe-shaped ("active"); the catalog filter is the
+	// archived flag — invert once here.
+	if opts.Active != nil {
+		archived := !*opts.Active
+		filter.Archived = &archived
+	} else if !opts.IncludeInactive {
+		archived := false
+		filter.Archived = &archived
+	}
+
+	modelPrices, totalItems, err := prices.ListPaginated(ctx, filter, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("get prices: %w", err)
+	}
+
+	items := make([]Price, 0, len(modelPrices))
+	for _, p := range modelPrices {
+		items = append(items, priceFromModel(p))
+	}
+
+	return &PaginatedResult[Price]{
+		Data:       items,
+		TotalItems: totalItems,
+		Limit:      limit,
+		Offset:     offset,
+	}, nil
+}
+
+// -------------------------------- Checkout Sessions --------------------------------
+
+// ListCheckoutRailOptions returns the locally ready payment-provider choices
+// for a price. It does not probe remote providers or mutate billing state.
+func (s *Service) ListCheckoutRailOptions(ctx context.Context, priceRef string) ([]CheckoutRailOption, error) {
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
+	}
+	priceRef = strings.TrimSpace(priceRef)
+	if priceRef == "" {
+		return nil, fmt.Errorf("price reference is required")
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var options []checkout.CheckoutRailOption
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var listErr error
+		options, listErr = checkoutSessions.ListCheckoutRailOptions(scopedCtx, priceRef)
+		return listErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list checkout rail options: %w", err)
+	}
+	result := make([]CheckoutRailOption, 0, len(options))
+	for _, option := range options {
+		pspID := ""
+		if option.PSPID != uuid.Nil {
+			pspID = option.PSPID.String()
+		}
+		result = append(result, CheckoutRailOption{
+			Selector: option.Selector,
+			PSPID:    pspID,
+			Rail:     option.Rail,
+			Mode:     option.Mode,
+		})
+	}
+	return result, nil
+}
+
+// CreateCheckoutSession creates a new checkout session.
+func (s *Service) CreateCheckoutSession(ctx context.Context, userID string, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	return s.CreateCheckoutSessionForCustomer(ctx, CheckoutCustomerIdentity{ID: userID}, req)
+}
+
+// CreateCheckoutSessionForCustomer creates a checkout session with host-resolved
+// identity attributes for rails that require them.
+func (s *Service) CreateCheckoutSessionForCustomer(ctx context.Context, customer CheckoutCustomerIdentity, req CreateCheckoutSessionRequest) (*CheckoutSession, error) {
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
+	}
+	user, err := checkoutUserIdentity(customer)
+	if err != nil {
+		return nil, err
+	}
+
+	svcReq := &checkout.CheckoutSessionCreateRequest{
+		PriceID:        req.PriceID,
+		SubscriptionID: req.SubscriptionID,
+		NewPriceID:     req.NewPriceID,
+		Mode:           req.Mode,
+		Metadata:       req.Metadata,
+		IdempotencyKey: req.IdempotencyKey,
+		SuccessURL:     req.SuccessURL,
+		CancelURL:      req.CancelURL,
+		Payment: checkout.CheckoutSessionPaymentRequest{
+			Rail:            req.Payment.Rail,
+			PaymentMethodID: req.Payment.PaymentMethodID,
+			PaymentToken:    req.Payment.PaymentToken,
+			TokenSymbol:     req.Payment.TokenSymbol,
+			Flow:            req.Payment.Flow,
+			Wallet:          req.Payment.Wallet,
+			Email:           req.Payment.Email,
+			NameOnCard:      req.Payment.NameOnCard,
+			FirstName:       req.Payment.FirstName,
+			LastName:        req.Payment.LastName,
+			Address1:        req.Payment.Address1,
+			City:            req.Payment.City,
+			State:           req.Payment.State,
+			Zip:             req.Payment.Zip,
+			Country:         req.Payment.Country,
+			LastFour:        req.Payment.LastFour,
+			CardType:        req.Payment.CardType,
+			ExpiryDate:      req.Payment.ExpiryDate,
+		},
+	}
+
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var resp *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var createErr error
+		resp, createErr = checkoutSessions.CreateSession(scopedCtx, svcReq, user)
+		return createErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return checkoutSessionFromResponse(resp), nil
+}
+
+// CreateCheckoutSessionWithCustomerResolver resolves the customer through the
+// embedding host's identity system before creating the checkout session.
+func (s *Service) CreateCheckoutSessionWithCustomerResolver(
+	ctx context.Context,
+	customerRef string,
+	resolver CheckoutCustomerIdentityResolver,
+	req CreateCheckoutSessionRequest,
+) (*CheckoutSession, error) {
+	customer, err := resolveCheckoutCustomerIdentity(ctx, customerRef, resolver)
+	if err != nil {
+		return nil, err
+	}
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	return s.CreateCheckoutSessionForCustomer(ctx, customer, req)
+}
+
+func checkoutUserIdentity(customer CheckoutCustomerIdentity) (*checkout.UserIdentity, error) {
+	customer.ID = strings.TrimSpace(customer.ID)
+	if customer.ID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	var email *string
+	if verifiedEmail := strings.TrimSpace(customer.VerifiedEmail); verifiedEmail != "" {
+		email = &verifiedEmail
+	}
+	return &checkout.UserIdentity{
+		ID:       customer.ID,
+		Email:    email,
+		Username: strings.TrimSpace(customer.Username),
+	}, nil
+}
+
+// GetCheckoutSession retrieves a checkout session by ID.
+func (s *Service) GetCheckoutSession(ctx context.Context, userID string, sessionID uuid.UUID) (*CheckoutSession, error) {
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+	if sessionID == uuid.Nil {
+		return nil, fmt.Errorf("session_id required")
+	}
+
+	user := &checkout.UserIdentity{ID: userID}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var resp *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var getErr error
+		resp, getErr = checkoutSessions.GetSession(scopedCtx, sessionID, user)
+		return getErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return checkoutSessionFromResponse(resp), nil
+}
+
+// ConfirmCheckoutSession confirms a checkout session (primarily for Solana).
+func (s *Service) ConfirmCheckoutSession(ctx context.Context, userID string, sessionID uuid.UUID, req ConfirmCheckoutSessionRequest) (*CheckoutSession, error) {
+	checkoutSessions, err := s.requireCheckoutSessionService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+	if sessionID == uuid.Nil {
+		return nil, fmt.Errorf("session_id required")
+	}
+
+	svcReq := &checkout.CheckoutSessionConfirmRequest{
+		Payment: checkout.CheckoutSessionConfirmPayment{
+			Rail:      req.Payment.Rail,
+			Signature: req.Payment.Signature,
+			Wallet:    req.Payment.Wallet,
+		},
+	}
+
+	user := &checkout.UserIdentity{ID: userID}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.DB == nil {
+		return nil, fmt.Errorf("billing service: database unavailable")
+	}
+	var resp *checkout.CheckoutSessionResponse
+	err = rt.DB.RunInMerchantConn(ctx, func(scopedCtx context.Context) error {
+		var confirmErr error
+		resp, confirmErr = checkoutSessions.ConfirmSession(scopedCtx, sessionID, svcReq, user)
+		return confirmErr
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return checkoutSessionFromResponse(resp), nil
+}
+
+// -------------------------------- Billing Status --------------------------------
+
+// GetBillingStatus returns a user's overall billing status.
+func (s *Service) GetBillingStatus(ctx context.Context, userID string) (*BillingStatus, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	status := &BillingStatus{}
+
+	// Get subscription
+	if s.rt.UserSubscriptionService != nil {
+		resp, err := s.rt.UserSubscriptionService.GetUserSubscription(ctx, userID)
+		if err == nil && resp != nil && resp.Subscription != nil {
+			status.HasActiveSubscription = resp.Subscription.Status == models.StatusActive
+			status.Subscription = subscriptionDetailFromModel(resp)
+			if resp.Subscription.CurrentPeriodEndsAt != nil {
+				status.NextRenewalAt = resp.Subscription.CurrentPeriodEndsAt
+			}
+		}
+	}
+
+	// Get entitlements
+	if s.rt.EntitlementService != nil {
+		ents, err := s.rt.EntitlementService.ListActiveEntitlements(ctx, userID, s.now().UTC())
+		if err == nil {
+			status.Entitlements = ents
+		}
+	}
+
+	return status, nil
+}
+
+// ResolveEffectiveTier returns THE effective tier for a user within one tier
+// group (or#912): the highest-ranked non-archived product whose declared
+// entitlements intersect the user's active entitlement windows now.
+// Overlapping active entitlements (mid-upgrade) deterministically resolve to
+// the highest tier_rank — never an error. Returns (nil, nil) when the user
+// holds no active entitlement in the group; the host applies its own default.
+func (s *Service) ResolveEffectiveTier(ctx context.Context, userID, group string) (*EffectiveTier, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+	if s.rt.EntitlementService == nil {
+		return nil, fmt.Errorf("entitlement service unavailable")
+	}
+	tier, err := s.rt.EntitlementService.ResolveEffectiveTier(ctx, userID, group, s.now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if tier == nil {
+		return nil, nil
+	}
+	return &EffectiveTier{
+		Group:       tier.TierGroup,
+		Entitlement: tier.Entitlement,
+		DisplayName: tier.ProductDisplayName,
+		TierRank:    tier.TierRank,
+		ProductID:   api.FormatProductID(tier.ProductID),
+		ProductKey:  tier.ProductKey,
+	}, nil
+}
+
+// -------------------------------- Subscriptions --------------------------------
+
+// GetSubscriptions returns a user's subscriptions.
+func (s *Service) GetSubscriptions(ctx context.Context, userID string, opts GetSubscriptionsOptions) (*PaginatedResult[Subscription], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	queryOpts := &query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
+		Limit:   limit,
+		Offset:  offset,
+		Filters: subscriptions.GetSubscriptionsFilters{UserID: userID},
+	}
+	if opts.Status != "" && opts.Status != "all" {
+		queryOpts.Filters.Status = opts.Status
+	}
+
+	subs, total, err := userSubscriptions.GetUserSubscriptionHistory(ctx, userID, queryOpts)
+	if err != nil {
+		return nil, fmt.Errorf("get subscriptions: %w", err)
+	}
+
+	result := make([]Subscription, 0, len(subs))
+	for _, sub := range subs {
+		result = append(result, subscriptionFromModel(sub))
+	}
+
+	return &PaginatedResult[Subscription]{
+		Data:       result,
+		TotalItems: total,
+		Limit:      limit,
+		Offset:     offset,
+	}, nil
+}
+
+// CancelSubscription cancels a user's active subscription.
+func (s *Service) CancelSubscription(ctx context.Context, userID string, req CancelSubscriptionRequest) (*CancelSubscriptionResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	if err := userSubscriptions.CancelUserSubscription(ctx, userID, req.Feedback); err != nil {
+		return nil, err
+	}
+
+	return &CancelSubscriptionResult{
+		Success: true,
+		Message: "Subscription cancelled successfully",
+	}, nil
+}
+
+// ResumeSubscription resumes a cancelled-but-still-resumable subscription.
+//
+// It runs the same path as the HTTP resume route: it locates the user's
+// resumable subscription, gates on the single shared Resumable predicate, then
+// enqueues the same ResumeSubscriptionArgs River job the HTTP handler enqueues —
+// so the library and HTTP entrypoints execute identically.
+func (s *Service) ResumeSubscription(ctx context.Context, userID string) (*ResumeSubscriptionResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.RiverProducer == nil {
+		return nil, fmt.Errorf("job queue unavailable")
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	now := s.now().UTC()
+
+	// Find the user's most recent resumable subscription. We look at the current
+	// subscription first (active/cancelled-in-window), then fall back to recent
+	// cancelled history.
+	resp, err := userSubscriptions.GetUserSubscription(ctx, userID)
+	if err != nil && !db.IsNotFound(err) {
+		return nil, fmt.Errorf("resume subscription: %w", err)
+	}
+
+	var target *models.Subscription
+	if resp != nil && resp.Subscription != nil && subscriptions.Resumable(resp.Subscription, now) {
+		target = resp.Subscription
+	} else {
+		// Fall back to scanning the user's subscription history for a resumable one.
+		queryOpts := &query.QueryOptions[subscriptions.GetSubscriptionsFilters]{
+			Limit:   25,
+			Offset:  0,
+			Filters: subscriptions.GetSubscriptionsFilters{UserID: userID, Status: string(models.StatusCancelled)},
+		}
+		history, _, herr := userSubscriptions.GetUserSubscriptionHistory(ctx, userID, queryOpts)
+		if herr != nil {
+			return nil, fmt.Errorf("resume subscription: %w", herr)
+		}
+		for _, h := range history {
+			if h.Subscription != nil && subscriptions.Resumable(h.Subscription, now) {
+				target = h.Subscription
+				break
+			}
+		}
+	}
+
+	if target == nil {
+		return &ResumeSubscriptionResult{
+			Success: false,
+			Message: "no resumable subscription found",
+		}, nil
+	}
+
+	if _, err := rt.RiverProducer.Insert(ctx, riverjobs.ResumeSubscriptionArgs{
+		MerchantID:     target.MerchantID,
+		UserID:         userID,
+		SubscriptionID: target.ID,
+	}, &river.InsertOpts{
+		Queue: riverjobs.QueueBilling,
+		UniqueOpts: river.UniqueOpts{
+			ByArgs:  true,
+			ByQueue: true,
+		},
+	}); err != nil {
+		return nil, fmt.Errorf("resume subscription: enqueue: %w", err)
+	}
+
+	return &ResumeSubscriptionResult{
+		Success: true,
+		Message: "Subscription resume queued",
+	}, nil
+}
+
+// UpdateSubscriptionPaymentMethod updates the payment method for a subscription.
+func (s *Service) UpdateSubscriptionPaymentMethod(ctx context.Context, userID string, req UpdateSubscriptionPaymentMethodRequest) (*UpdateSubscriptionPaymentMethodResult, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	subscriptionService, paymentMethods, err := s.requireSubscriptionAndPaymentMethodServices()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	subID, err := uuid.Parse(req.SubscriptionID)
+	if err != nil {
+		subID, err = api.ParseSubscriptionID(req.SubscriptionID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid subscription_id")
+		}
+	}
+
+	pmID, err := uuid.Parse(req.PaymentMethodID)
+	if err != nil {
+		pmID, err = api.ParsePaymentMethodID(req.PaymentMethodID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid payment_method_id")
+		}
+	}
+
+	// Verify ownership and update
+	sub, err := subscriptionService.GetByID(ctx, subID)
+	if err != nil {
+		return nil, fmt.Errorf("subscription not found")
+	}
+	if sub.CustomerID.String() != userID {
+		return nil, fmt.Errorf("subscription does not belong to user")
+	}
+	if !rails.IsNMI(sub.Rail) {
+		return nil, fmt.Errorf("only NMI-backed subscriptions can have their payment method updated")
+	}
+	if sub.Status != models.StatusActive && sub.Status != models.StatusPastDue {
+		return nil, fmt.Errorf("cannot update payment method for subscription status %s", sub.Status)
+	}
+
+	pm, err := paymentMethods.GetByID(ctx, pmID)
+	if err != nil {
+		return nil, fmt.Errorf("payment method not found")
+	}
+	if pm.CustomerID.String() != userID {
+		return nil, fmt.Errorf("payment method does not belong to user")
+	}
+	if !rails.IsNMI(pm.Rail) {
+		return nil, fmt.Errorf("only NMI-backed payment methods can be used")
+	}
+	if !rails.SameRail(pm.Rail, sub.Rail) {
+		return nil, fmt.Errorf("payment method belongs to a different payment provider")
+	}
+	if !subscriptions.PaymentMethodMatchesSubscriptionProvider(pm, sub) {
+		return nil, fmt.Errorf("payment method belongs to a different PSP")
+	}
+	// Pre-flight: resolve the rail read-only so misconfiguration surfaces
+	// immediately (the intent handler re-resolves at execution time).
+	if _, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, s.rt.CollectionResolver, sub); err != nil {
+		return nil, fmt.Errorf("resolve subscription PSP: %w", err)
+	} else if !ok {
+		return nil, fmt.Errorf("payment rail not available")
+	}
+
+	// #674: the swap goes through the durable nmi_payment_source_update intent
+	// (write-through); an unresolved outcome surfaces as
+	// intents.ErrPaymentSourceUpdateProcessing, never success or decline.
+	out, err := s.rt.PaymentSourceUpdateIntents.ExecutePaymentSourceUpdate(ctx, sub, pm, intents.OriginUser, "user payment-method swap")
+	if err != nil {
+		return nil, fmt.Errorf("update payment method with rail: %w", err)
+	}
+	switch {
+	case out.Done:
+		return &UpdateSubscriptionPaymentMethodResult{
+			Success:         true,
+			Message:         "Payment method updated successfully",
+			SubscriptionID:  api.FormatSubscriptionID(subID),
+			PaymentMethodID: api.FormatPaymentMethodID(pmID),
+		}, nil
+	case out.Terminal:
+		return nil, fmt.Errorf("update payment method with rail: %s", out.Reason)
+	default:
+		return nil, intents.ErrPaymentSourceUpdateProcessing
+	}
+}
+
+// -------------------------------- Payments --------------------------------
+
+// GetPayments returns a user's payments.
+func (s *Service) GetPayments(ctx context.Context, userID string, opts GetPaymentsOptions) (*PaginatedResult[Payment], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	queryOpts := &query.QueryOptions[payments.GetPaymentsFilters]{
+		Limit:   limit,
+		Offset:  offset,
+		Filters: payments.GetPaymentsFilters{UserID: userID},
+	}
+
+	payments, total, err := userSubscriptions.GetUserPayments(ctx, userID, queryOpts)
+	if err != nil {
+		return nil, fmt.Errorf("get payments: %w", err)
+	}
+
+	result := make([]Payment, 0, len(payments))
+	for _, p := range payments {
+		result = append(result, paymentFromModel(p))
+	}
+
+	return &PaginatedResult[Payment]{
+		Data:       result,
+		TotalItems: total,
+		Limit:      limit,
+		Offset:     offset,
+	}, nil
+}
+
+// -------------------------------- Payment Methods --------------------------------
+
+// GetPaymentMethods returns a user's payment methods.
+func (s *Service) GetPaymentMethods(ctx context.Context, userID string, opts GetPaymentMethodsOptions) (*PaginatedResult[PaymentMethod], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	paymentMethods, err := s.requirePaymentMethodService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	methods, total, err := paymentMethods.ListByUserID(ctx, userID, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("get payment methods: %w", err)
+	}
+
+	result := make([]PaymentMethod, 0, len(methods))
+	for _, pm := range methods {
+		result = append(result, paymentMethodFromModel(pm))
+	}
+
+	return &PaginatedResult[PaymentMethod]{
+		Data:       result,
+		TotalItems: total,
+		Limit:      limit,
+		Offset:     offset,
+	}, nil
+}
+
+// CreatePaymentMethod creates a new payment method.
+func (s *Service) CreatePaymentMethod(ctx context.Context, userID string, req CreatePaymentMethodRequest) (*PaymentMethod, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	vaults, err := s.requireVaultService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	user := &checkout.UserIdentity{ID: userID}
+	pm, err := vaults.CreatePaymentMethod(ctx, user.ID, &paymentmethods.CreatePaymentMethodRequest{
+		PaymentToken: req.PaymentToken,
+		NameOnCard:   req.NameOnCard,
+		FirstName:    req.FirstName,
+		LastName:     req.LastName,
+		Address1:     req.Address1,
+		City:         req.City,
+		State:        req.State,
+		Zip:          req.Zip,
+		Country:      req.Country,
+		Phone:        req.Phone,
+		Email:        req.Email,
+		Company:      req.Company,
+		Address2:     req.Address2,
+		Provider:     req.Provider,
+		LastFour:     req.LastFour,
+		CardType:     req.CardType,
+		ExpiryDate:   req.ExpiryDate,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	result := paymentMethodFromModel(pm)
+	return &result, nil
+}
+
+// UpdatePaymentMethod updates an existing payment method.
+func (s *Service) UpdatePaymentMethod(ctx context.Context, userID string, paymentMethodID uuid.UUID, req UpdatePaymentMethodRequest) (*PaymentMethod, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	vaults, paymentMethods, err := s.requireVaultAndPaymentMethodServices()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+	if paymentMethodID == uuid.Nil {
+		return nil, fmt.Errorf("payment_method_id required")
+	}
+
+	// Get the existing payment method and verify ownership
+	pm, err := paymentMethods.GetByID(ctx, paymentMethodID)
+	if err != nil {
+		return nil, fmt.Errorf("payment method not found")
+	}
+	if pm.CustomerID.String() != userID {
+		return nil, fmt.Errorf("payment method does not belong to user")
+	}
+
+	// Build update request
+	updateReq := &paymentmethods.UpdatePaymentMethodRequest{
+		PaymentToken: &req.PaymentToken,
+		NameOnCard:   req.NameOnCard,
+		FirstName:    req.FirstName,
+		LastName:     req.LastName,
+		Address1:     req.Address1,
+		City:         req.City,
+		State:        req.State,
+		Zip:          req.Zip,
+		Country:      req.Country,
+		Phone:        req.Phone,
+		Email:        req.Email,
+		Company:      req.Company,
+		Address2:     req.Address2,
+		Provider:     req.Provider,
+		LastFour:     req.LastFour,
+		CardType:     req.CardType,
+		ExpiryDate:   req.ExpiryDate,
+	}
+
+	pm, err = vaults.UpdatePaymentMethod(ctx, pm, updateReq)
+	if err != nil {
+		return nil, paymentMethodUpdateFacadeError(err)
+	}
+
+	result := paymentMethodFromModel(pm)
+	return &result, nil
+}
+
+func paymentMethodUpdateFacadeError(err error) error {
+	switch {
+	case errors.Is(err, paymentmethods.ErrPaymentMethodUpdateProcessing):
+		return ErrPaymentMethodUpdateProcessing
+	case errors.Is(err, paymentmethods.ErrPaymentMethodRetokenize):
+		return ErrPaymentMethodRetokenize
+	}
+	var validation *paymentmethods.PaymentMethodUpdateValidationError
+	if errors.As(err, &validation) {
+		return &PaymentMethodUpdateValidationError{Message: validation.Message}
+	}
+	var terminal *paymentmethods.PaymentMethodUpdateFailedError
+	if errors.As(err, &terminal) {
+		return &PaymentMethodUpdateFailedError{Reason: terminal.Reason}
+	}
+	return err
+}
+
+// DeletePaymentMethod deletes (deactivates) a payment method.
+func (s *Service) DeletePaymentMethod(ctx context.Context, userID string, paymentMethodID uuid.UUID) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
+	vaults, paymentMethods, err := s.requireVaultAndPaymentMethodServices()
+	if err != nil {
+		return err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("user_id required")
+	}
+	if paymentMethodID == uuid.Nil {
+		return fmt.Errorf("payment_method_id required")
+	}
+
+	pm, err := paymentMethods.GetByID(ctx, paymentMethodID)
+	if err != nil {
+		return fmt.Errorf("payment method not found")
+	}
+	if pm.CustomerID.String() != userID {
+		return fmt.Errorf("payment method does not belong to user")
+	}
+
+	return vaults.DeletePaymentMethod(ctx, pm)
+}
+
+// -------------------------------- Notifications --------------------------------
+
+// GetNotifications returns a user's notifications.
+func (s *Service) GetNotifications(ctx context.Context, userID string, opts GetNotificationsOptions) (*PaginatedResult[Notification], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	queryOpts := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
+		Limit:   limit,
+		Offset:  offset,
+		Filters: subscriptions.GetNotificationsFilters{UserID: userID, Seen: opts.Seen},
+	}
+
+	notifications, total, err := userSubscriptions.GetUserNotifications(ctx, userID, queryOpts)
+	if err != nil {
+		return nil, fmt.Errorf("get notifications: %w", err)
+	}
+
+	result := make([]Notification, 0, len(notifications))
+	for _, n := range notifications {
+		result = append(result, notificationFromModel(n))
+	}
+
+	return &PaginatedResult[Notification]{
+		Data:       result,
+		TotalItems: total,
+		Limit:      limit,
+		Offset:     offset,
+	}, nil
+}
+
+// GetUnreadNotificationCount returns the count of unread notifications.
+func (s *Service) GetUnreadNotificationCount(ctx context.Context, userID string) (*UnreadNotificationCount, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return nil, err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	unread := false
+	queryOpts := &query.QueryOptions[subscriptions.GetNotificationsFilters]{
+		Limit:   1,
+		Offset:  0,
+		Filters: subscriptions.GetNotificationsFilters{UserID: userID, Seen: &unread},
+	}
+
+	_, total, err := userSubscriptions.GetUserNotifications(ctx, userID, queryOpts)
+	if err != nil {
+		return nil, fmt.Errorf("get unread count: %w", err)
+	}
+
+	return &UnreadNotificationCount{Count: total}, nil
+}
+
+// MarkNotificationRead marks a notification as read.
+func (s *Service) MarkNotificationRead(ctx context.Context, userID string, notificationID uuid.UUID) error {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return pinErr
+	}
+	defer release()
+
+	userSubscriptions, err := s.requireUserSubscriptionService()
+	if err != nil {
+		return err
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return fmt.Errorf("user_id required")
+	}
+	if notificationID == uuid.Nil {
+		return fmt.Errorf("notification_id required")
+	}
+
+	return userSubscriptions.MarkNotificationRead(ctx, userID, notificationID)
+}
+
+// -------------------------------- Credits (User-facing) --------------------------------
+
+func (s *Service) GetCredits(ctx context.Context, userID string) ([]CreditBalance, error) {
+	return nil, fmt.Errorf("currency required; use GetCreditsByType")
+}
+
+// GetCreditsByType returns the user's money balance for the requested currency.
+func (s *Service) GetCreditsByType(ctx context.Context, userID, currency string) (*CreditBalance, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+	currency, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
+
+	payer := identity.CustomerIDFromString(userID)
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer could not be resolved from subject")
+	}
+	bal, err := s.moneyService().GetBalanceForCustomer(ctx, payer, currency)
+	if err != nil {
+		return nil, fmt.Errorf("get credit balance: %w", err)
+	}
+	decimals, err := money.CurrencyDecimals(bal.Currency)
+	if err != nil {
+		return nil, err
+	}
+	return &CreditBalance{
+		Currency:      bal.Currency,
+		DisplayName:   bal.Currency,
+		Unit:          bal.Currency,
+		DecimalPlaces: decimals,
+		Balance:       bal.Balance,
+		HeldBalance:   bal.HeldBalance,
+	}, nil
+}
+
+// GetCreditTransactions returns money transactions for a user in the requested currency.
+func (s *Service) GetCreditTransactions(ctx context.Context, userID, currency string, opts GetCreditTransactionsOptions) (*PaginatedResult[CreditTransaction], error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	payer := identity.CustomerIDFromString(userID)
+	if payer.IsZero() {
+		return nil, fmt.Errorf("payer could not be resolved from subject")
+	}
+	canonical, err := requireCurrency(currency)
+	if err != nil {
+		return nil, err
+	}
+	transactions, total, err := s.moneyService().GetTransactionsByCustomer(ctx, payer, canonical, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("get credit transactions: %w", err)
+	}
+
+	result := make([]CreditTransaction, 0, len(transactions))
+	for _, t := range transactions {
+		result = append(result, CreditTransaction{
+			ID:              t.ID,
+			CustomerID:      t.CustomerID,
+			Invoker:         t.Invoker,
+			Currency:        canonical,
+			Amount:          t.Amount,
+			TransactionType: t.TransactionType,
+			Source:          t.Source,
+			SourceID:        t.SourceID,
+			ExpiresAt:       t.ExpiresAt,
+			Description:     t.Description,
+			CreatedAt:       t.CreatedAt,
+		})
+	}
+
+	return &PaginatedResult[CreditTransaction]{
+		Data:       result,
+		TotalItems: int64(total),
+		Limit:      limit,
+		Offset:     offset,
+	}, nil
+}
+
+// -------------------------------- Solana Tokens --------------------------------
+
+// solanaMintDecimals returns the runtime's on-chain mint-decimals resolver
+// (#817), or nil when the Solana rail is not armed.
+func (s *Service) solanaMintDecimals() solanamodule.MintDecimalsSource {
+	if s == nil || s.rt == nil || s.rt.SolanaMintDecimals == nil {
+		return nil
+	}
+	return s.rt.SolanaMintDecimals
+}
+
+// GetSupportedTokens returns the list of supported Solana tokens with prices.
+func (s *Service) GetSupportedTokens(ctx context.Context) (*SupportedTokensResult, error) {
+	if _, err := s.requireConfig(); err != nil {
+		return nil, err
+	}
+	var solanaProc *config.PSPConfig
+	if s.rt != nil && s.rt.RailConfigs != nil {
+		proc, err := s.rt.RailConfigs.RailConfig(ctx, string(models.RailSolana), "")
+		if err == nil {
+			solanaProc = proc
+		}
+	}
+	if solanaProc == nil || solanaProc.Solana == nil {
+		return nil, fmt.Errorf("solana not configured")
+	}
+
+	tokens := make([]SolanaToken, 0)
+	for symbol, t := range solanaProc.Solana.Tokens {
+		symbol = strings.ToUpper(strings.TrimSpace(symbol))
+		if symbol == "" {
+			continue
+		}
+		name := t.Name
+		if name == "" {
+			name = symbol
+		}
+		// #817: decimals are the mint's, read on-chain. An unreadable mint is a
+		// token we cannot price — drop it loudly rather than invent a precision.
+		decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMintDecimals(), t.Mint)
+		if err != nil {
+			log.WithError(err).WithField("token", symbol).Warn("solana token dropped: mint decimals unreadable on-chain")
+			continue
+		}
+		tokens = append(tokens, SolanaToken{
+			Symbol:   symbol,
+			Name:     name,
+			Mint:     t.Mint,
+			Decimals: decimals,
+			Price:    0,
+		})
+	}
+
+	return &SupportedTokensResult{Tokens: tokens}, nil
+}
+
+// -------------------------------- Stripe Portal --------------------------------
+
+// CreateStripePortalSession creates a Stripe customer portal session.
+func (s *Service) CreateStripePortalSession(ctx context.Context, userID string, req CreateStripePortalSessionRequest) (*StripePortalSession, error) {
+	ctx, release, pinErr := s.pin(ctx)
+	if pinErr != nil {
+		return nil, pinErr
+	}
+	defer release()
+
+	rt, err := s.runtime()
+	if err != nil {
+		return nil, err
+	}
+	if rt.RailCustomerService == nil || rt.Config == nil {
+		return nil, fmt.Errorf("billing service: not initialized")
+	}
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, fmt.Errorf("user_id required")
+	}
+
+	customerID, err := rt.RailCustomerService.GetCustomerID(ctx, userID, "stripe")
+	if err != nil || strings.TrimSpace(customerID) == "" {
+		return nil, fmt.Errorf("stripe customer not found")
+	}
+
+	returnURL := req.ReturnURL
+	if returnURL == "" {
+		return nil, fmt.Errorf("return_url required")
+	}
+
+	service := &subscriptions.StripePortalService{Config: rt.Config, Rails: rt.RailConfigs}
+	urlStr, err := service.CreatePortalSession(ctx, customerID, returnURL)
+	if err != nil {
+		return nil, err
+	}
+
+	return &StripePortalSession{RedirectURL: urlStr}, nil
+}
+
+// -------------------------------- Conversion Helpers --------------------------------
+
+func productFromModel(p *catalog.PublicProductResponse) Product {
+	prices := make([]Price, 0, len(p.Prices))
+	for _, pr := range p.Prices {
+		prices = append(prices, priceFromModel(pr))
+	}
+	return Product{
+		ID:               api.FormatProductID(p.ID),
+		Key:              p.Key,
+		Name:             p.DisplayName,
+		Description:      p.Description,
+		EntitlementsSpec: p.EntitlementsSpec,
+		TierGroup:        p.TierGroup,
+		TierRank:         p.TierRank,
+		Active:           p.IsPurchasable(),
+		Created:          api.ToUnix(p.CreatedAt),
+		Updated:          api.ToUnix(p.UpdatedAt),
+		Prices:           prices,
+	}
+}
+
+func priceFromModel(p *models.Price) Price {
+	var recurring *RecurringInfo
+	if ch := p.RecurringCycleHours(); ch != nil {
+		recurring = &RecurringInfo{
+			Interval: sharedformat.BillingCycleHoursToInterval(*ch),
+		}
+	}
+
+	priceType := "one_time"
+	if recurring != nil {
+		priceType = "recurring"
+	}
+
+	return Price{
+		ID:         api.FormatPriceID(p.ID),
+		UnitAmount: p.Amount,
+		Currency:   p.Currency,
+		Type:       priceType,
+		Recurring:  recurring,
+		ProductID:  api.FormatProductID(p.ProductID),
+		Active:     p.IsPurchasable(),
+		Created:    api.ToUnix(p.CreatedAt),
+	}
+}
+
+func subscriptionFromModel(resp *subscriptions.UserSubscriptionResponse) Subscription {
+	sub := resp.Subscription
+	result := Subscription{
+		ID:                 api.FormatSubscriptionID(sub.ID),
+		Status:             string(sub.Status),
+		Rail:               string(sub.Rail),
+		RailSubscriptionID: sub.RailSubscriptionID,
+		StartedAt:          api.ToUnix(sub.StartedAt),
+		Created:            api.ToUnix(sub.CreatedAt),
+		Updated:            api.ToUnix(sub.UpdatedAt),
+	}
+	if sub.EndedAt != nil && !sub.EndedAt.IsZero() {
+		ts := sub.EndedAt.Unix()
+		result.EndedAt = &ts
+	}
+	if sub.CurrentPeriodStartsAt != nil && !sub.CurrentPeriodStartsAt.IsZero() {
+		ts := sub.CurrentPeriodStartsAt.Unix()
+		result.CurrentPeriodStartsAt = &ts
+	}
+	if sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.IsZero() {
+		ts := sub.CurrentPeriodEndsAt.Unix()
+		result.CurrentPeriodEndsAt = &ts
+	}
+	if sub.CancelledAt != nil && !sub.CancelledAt.IsZero() {
+		ts := sub.CancelledAt.Unix()
+		result.CancelledAt = &ts
+	}
+	if sub.CancelType != nil {
+		ct := string(*sub.CancelType)
+		result.CancelType = &ct
+	}
+	if sub.CancelFeedback != nil {
+		result.CancelFeedback = sub.CancelFeedback
+	}
+	if resp.Price != nil {
+		p := priceFromModel(resp.Price)
+		result.Price = &p
+	}
+	if sub.PaymentMethodID != nil {
+		result.PaymentMethod = &PaymentMethodSummary{
+			ID: api.FormatPaymentMethodID(*sub.PaymentMethodID),
+		}
+	}
+
+	// Resumability surface — derived from the single shared predicate so the
+	// library DTO, the HTTP serialization, the resume handler, and the worker all
+	// agree (they call the same subscriptions.* helpers).
+	now := resp.EvaluationTime()
+	result.Resumable = subscriptions.Resumable(sub, now)
+	result.CancelScheduled = subscriptions.CancelScheduled(sub, now)
+	result.CancelMode = string(subscriptions.CancelModeFor(sub, now))
+	result.CancelPortalURL = subscriptions.CancelPortalURL(sub, now)
+
+	return result
+}
+
+func subscriptionDetailFromModel(resp *subscriptions.UserSubscriptionResponse) *SubscriptionDetail {
+	sub := subscriptionFromModel(resp)
+	detail := &SubscriptionDetail{Subscription: sub}
+	if resp.Product != nil {
+		detail.Product = &Product{
+			ID:          api.FormatProductID(resp.Product.ID),
+			Name:        resp.Product.DisplayName,
+			Description: resp.Product.Description,
+			Active:      resp.Product.IsPurchasable(),
+			Created:     api.ToUnix(resp.Product.CreatedAt),
+			Updated:     api.ToUnix(resp.Product.UpdatedAt),
+		}
+	}
+	return detail
+}
+
+func paymentFromModel(p *models.Payment) Payment {
+	result := Payment{
+		ID:            api.FormatPaymentID(p.ID),
+		Status:        "succeeded",
+		Amount:        p.Amount,
+		Currency:      p.Currency,
+		UserID:        api.FormatUserID(p.CustomerID.String()),
+		Rail:          string(p.Rail),
+		TransactionID: p.TransactionID,
+		Created:       api.ToUnix(p.CreatedAt),
+	}
+	if p.SubscriptionID != nil {
+		subID := api.FormatSubscriptionID(*p.SubscriptionID)
+		result.SubscriptionID = &subID
+	}
+	if p.Price != nil {
+		price := priceFromModel(p.Price)
+		result.Price = &price
+	}
+	return result
+}
+
+func paymentMethodFromModel(pm *models.PaymentMethod) PaymentMethod {
+	pspID := ""
+	if pm.PspID != uuid.Nil {
+		pspID = pm.PspID.String()
+	}
+	result := PaymentMethod{
+		ID:        api.FormatPaymentMethodID(pm.ID),
+		Type:      "card",
+		Rail:      string(pm.Rail),
+		PSPID:     pspID,
+		CreatedAt: pm.CreatedAt,
+	}
+	if pm.LastFour != nil || pm.CardType != nil {
+		result.Card = &CardDetails{
+			Brand: pm.CardType,
+			Last4: pm.LastFour,
+		}
+		if pm.ExpiryDate != nil {
+			if month, year, ok := sharedformat.ParseExpiry(*pm.ExpiryDate); ok {
+				result.Card.ExpMonth = &month
+				result.Card.ExpYear = &year
+			}
+		}
+	}
+	return result
+}
+
+func notificationFromModel(n *models.NotificationQueue) Notification {
+	return Notification{
+		ID:      n.ID.String(),
+		Type:    string(n.EventType),
+		Title:   "", // Would need to be derived from event type
+		Message: "", // Would need to be derived from event type
+		Seen:    n.IsSeen(),
+		Data:    n.Data,
+		Created: api.ToUnix(n.CreatedAt),
+	}
+}
+
+func checkoutSessionFromResponse(resp *checkout.CheckoutSessionResponse) *CheckoutSession {
+	result := &CheckoutSession{
+		ID:        resp.ID,
+		Status:    resp.Status,
+		Mode:      resp.Mode,
+		PriceID:   resp.PriceID,
+		Amount:    resp.Amount,
+		Currency:  resp.Currency,
+		CreatedAt: resp.CreatedAt,
+		ExpiresAt: resp.ExpiresAt,
+		Metadata:  resp.Metadata,
+	}
+	if resp.PaymentID != nil {
+		result.PaymentID = resp.PaymentID
+	}
+	if resp.SubscriptionID != nil {
+		result.SubscriptionID = resp.SubscriptionID
+	}
+	if resp.URL != "" {
+		result.URL = &resp.URL
+	} else if resp.NextAction != nil && resp.NextAction.RedirectToURL != nil {
+		result.URL = &resp.NextAction.RedirectToURL.URL
+	}
+	result.RailData = map[string]any{
+		"rail":            resp.Payment.Rail,
+		"reference":       resp.Payment.Reference,
+		"transaction_url": resp.Payment.TransactionURL,
+		"solana_pay_url":  resp.Payment.SolanaPayURL,
+		"redirect_url":    resp.Payment.RedirectURL,
+		"transaction_id":  resp.Payment.TransactionID,
+	}
+	return result
+}
+
+// Placeholder for UserIdentity to avoid importing internal package directly in method signatures.
+// The actual UserIdentity lives in internal/modules/checkout.
+var _ = sql.ErrNoRows // Keep sql import

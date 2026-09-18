@@ -15,8 +15,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/dbtest"
+	service "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/pkg/merchant"
-	service "github.com/open-rails/openrails/pkg/service"
 	"github.com/stretchr/testify/require"
 )
 

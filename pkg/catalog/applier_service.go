@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // ServiceApplier adapts an in-process *service.Service to the Applier

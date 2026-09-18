@@ -16,8 +16,8 @@ The pre-launch cutover needs no old-name compatibility reader or second alias re
 
 ## Pre-launch helper API changes
 
-Imports and maintenance helpers accept `MerchantID merchant.ID`, replacing `MerchantSlug`: `AdminGrantImportOptions`, `ConvergeMerchantOptions`, `PruneListOptions`, `UndoRunOptions`, `PullProviderOptions` and `PullProviderReportOptions`. `BillingImportOptions` and `CustodyMigrationOptions` keep their existing UUID field and remove name fallback. Pull and report accept a caller-owned `PGXPool`, preserving the application's unprivileged billing connection.
+Imports and maintenance operations take `MerchantID merchant.ID`, never a name: `rt.Converge(ctx, merchantID)`, `rt.PullProvider(ctx, embed.PullProviderOptions{MerchantID: ...})`, `rt.PullProviderReport`, the declared-facts import on the merchant-bound Client, and the standalone CLI's prune/undo commands. They run on the runtime's unprivileged billing pool.
 
-At a host CLI boundary, build AuthKit's lightweight `embedded.NewGroupDirectory` on an authority pool, adapt it with OpenRails `embedded/controlplane.NewNameAuthority`, and call OpenRails `embedded.ResolveMerchantName` to obtain the billing UUID and canonical name. The authority pool must remain separate from a billing pool that can hold its only connection. Catalog push/dump and named pull-manifest input accept this explicit authority; an already constructed runtime uses its configured directory.
+At a host CLI boundary, call `rt.ResolveMerchant(ctx, name)` once to obtain the billing UUID and canonical name; the runtime's configured directory (its attached control plane's AuthKit authority, or the unbound host namespace) answers.
 
 Standalone maintenance commands interpret bare `--merchant` values as public names, including UUID-shaped names. Deliberate direct operator addressing uses `--merchant id:<uuid>`; it never shares an ambiguous string format with public names. The selected UUID must identify an existing non-deleted billing merchant.

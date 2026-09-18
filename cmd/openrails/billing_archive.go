@@ -26,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/embed/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/pkg/embedded"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -225,7 +224,7 @@ func openBillingTargetRuntime(ctx context.Context, cfg *config.Config) (*embed.R
 	opts := embed.Options{}
 	opts.Config = cfg
 	opts.PGXPool = database.Pool()
-	opts.River = embedded.RiverManagedByOpenRails()
+	opts.River = embed.RiverManagedByOpenRails()
 	rt, err := embed.New(ctx, opts)
 	if err != nil {
 		_ = database.Close()

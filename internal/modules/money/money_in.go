@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/pkg/identity"
 )
 
 // Charger arms an off-session (merchant-initiated) charge of a saved payment

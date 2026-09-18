@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	riverjobs "github.com/open-rails/openrails/internal/river"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // noopWorker is a trivial host worker added to the SAME registry as billing's
@@ -51,42 +50,39 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	var sawBillingWorkers bool
 
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{
-			Config: &config.Config{
-				Env:      "dev",
-				TestMode: config.CredentialPostureSandbox,
-				DB:       &config.DBConfig{URL: dsn},
-			},
-			River: embedded.RiverFromHost(func(ctx context.Context, fleet *embedded.RiverFleet) (*river.Client[pgx.Tx], error) {
-				// Billing's workers are ALREADY in the registry, with their
-				// health bookkeeping attached — the host adds its own on top.
-				require.NotNil(t, fleet.Workers)
-				require.Equal(t, riverjobs.QueueBilling, fleet.QueueBilling)
-				sawBillingWorkers = true
-				require.NoError(t, river.AddWorkerSafely(fleet.Workers, &noopWorker{}))
-
-				c, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
-					Queues: map[string]river.QueueConfig{
-						river.QueueDefault:     {MaxWorkers: 2},
-						fleet.QueueBilling:     {MaxWorkers: 2},
-						riverjobs.QueueBilling: {MaxWorkers: 2},
-					},
-					Workers: fleet.Workers,
-				})
-				if err != nil {
-					return nil, err
-				}
-				client = c
-				return c, nil
-			}),
+		Config: &config.Config{
+			Env:      "dev",
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: dsn},
 		},
+		River: embed.RiverFromHost(func(ctx context.Context, fleet *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
+			// Billing's workers are ALREADY in the registry, with their
+			// health bookkeeping attached — the host adds its own on top.
+			require.NotNil(t, fleet.Workers)
+			require.Equal(t, riverjobs.QueueBilling, fleet.QueueBilling)
+			sawBillingWorkers = true
+			require.NoError(t, river.AddWorkerSafely(fleet.Workers, &noopWorker{}))
+
+			c, err := river.NewClient(riverpgxv5.New(pool), &river.Config{
+				Queues: map[string]river.QueueConfig{
+					river.QueueDefault:     {MaxWorkers: 2},
+					fleet.QueueBilling:     {MaxWorkers: 2},
+					riverjobs.QueueBilling: {MaxWorkers: 2},
+				},
+				Workers: fleet.Workers,
+			})
+			if err != nil {
+				return nil, err
+			}
+			client = c
+			return c, nil
+		}),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
 
 	require.True(t, sawBillingWorkers, "binder must be invoked during New")
-	emb := rt.Embedded()
-	require.True(t, emb.HasExternalRiverClient(), "the binder's client must be injected by New")
+	require.True(t, rt.HasExternalRiverClient(), "the binder's client must be injected by New")
 	require.NotNil(t, client)
 
 	require.NoError(t, client.Start(ctx))
@@ -115,7 +111,7 @@ func TestRiverFromHost_SharedClientDrainsBillingJobs(t *testing.T) {
 	require.NotNil(t, lastSuccess, "health bookkeeping must be installed without host cooperation (#895)")
 
 	// The fleet is progressing, and OpenRails can say so without running a job.
-	report, err := emb.CheckJobProgress(ctx)
+	report, err := rt.CheckJobProgress(ctx)
 	require.NoError(t, err)
 	require.NotEmpty(t, report.Kinds, "periodic kinds are registered")
 	require.NoError(t, report.Err())
@@ -130,16 +126,15 @@ func TestRiverRequired_ConstructionRefuses(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	_, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{
-			Config: &config.Config{
-				Env:      "dev",
-				TestMode: config.CredentialPostureSandbox,
-				DB:       &config.DBConfig{URL: dsn},
-			},
-			// River deliberately omitted.
+		Config: &config.Config{
+			Env:      "dev",
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: dsn},
 		},
+		// River deliberately omitted.
+
 	})
-	require.ErrorIs(t, err, embedded.ErrRiverRequired)
+	require.ErrorIs(t, err, embed.ErrRiverRequired)
 }
 
 // TestRiverFromHost_NilClientRefuses closes the other half of the handoff: a
@@ -149,16 +144,14 @@ func TestRiverFromHost_NilClientRefuses(t *testing.T) {
 	dsn := dbtest.SharedPostgresDSN(t)
 
 	_, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{
-			Config: &config.Config{
-				Env:      "dev",
-				TestMode: config.CredentialPostureSandbox,
-				DB:       &config.DBConfig{URL: dsn},
-			},
-			River: embedded.RiverFromHost(func(context.Context, *embedded.RiverFleet) (*river.Client[pgx.Tx], error) {
-				return nil, nil
-			}),
+		Config: &config.Config{
+			Env:      "dev",
+			TestMode: config.CredentialPostureSandbox,
+			DB:       &config.DBConfig{URL: dsn},
 		},
+		River: embed.RiverFromHost(func(context.Context, *embed.RiverFleet) (*river.Client[pgx.Tx], error) {
+			return nil, nil
+		}),
 	})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "nil client")

@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	billingservice "github.com/open-rails/openrails/pkg/service"
+	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
 // ApplyResult summarizes what an Apply run did, including any per-provider

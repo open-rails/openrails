@@ -46,11 +46,11 @@ scope. Test fixture SQL is allowed when it creates or mutates fixture state.
 
 ### Catalog sidecars and drift helpers
 
-- `pkg/service/catalog_sidecars.go`: catalog sidecar upserts/deletes and product
+- `internal/service/catalog_sidecars.go`: catalog sidecar upserts/deletes and product
   lookups. Keep raw for now because this is tightly coupled to manifest apply and
   bulk replace semantics; it is now covered indirectly by the query-contract
   catalog path and should be the next sqlc conversion candidate if it grows.
-- `pkg/service/service_definition_catalog_admin.go`: advisory drift close; keep
+- `internal/service/service_definition_catalog_admin.go`: advisory drift close; keep
   raw because it is best-effort ops cleanup.
 
 ### Reconciliation, River, and repository edge paths

@@ -1,13 +1,9 @@
-// Package embed is the heavy half of the unified OpenRails SDK (#338/#685): it
-// runs the engine IN-PROCESS (pgx, river, the full pkg/embedded app graph) and
-// hands out the SAME client implementation openrails.NewRemote builds, wired to
-// an in-process transport (no socket). Embedded vs standalone is a constructor
-// choice — host code written against openrails.Client does not change when the
-// deployment flips.
-//
-// Package layout keeps remote-only consumers light: the root openrails package
-// is interface + remote impl only; this package is the only one that links the
-// engine.
+// Package embed runs the OpenRails engine in the host process and hands out
+// the same *openrails.Client that openrails.NewRemote builds, wired to an
+// in-process transport. Embedded versus standalone is a constructor choice;
+// application code written against the Client does not change. The root
+// openrails package stays engine-free; this package is the only public one
+// that links the engine.
 package embed
 
 import (
@@ -15,140 +11,166 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/http/embedhttp"
 	"github.com/open-rails/openrails/internal/http/inprocess"
-	"github.com/open-rails/openrails/pkg/embedded"
-	"github.com/open-rails/openrails/pkg/service"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/pkg/cache"
 )
 
-// Options configures the embedded runtime. It wraps pkg/embedded.Options
-// (Config, PGXPool, Redis, Cache) and adds lifecycle switches.
+// Options configures the embedded runtime.
 type Options struct {
-	embedded.Options
-
-	// RunWorkers starts the River background workers on a goroutine owned by
-	// the Runtime (stopped by Close). The worker context is detached from the
-	// ctx passed to New (context.WithoutCancel) so a short-lived startup
-	// context does not kill long-running workers; cancellation is Close's job.
-	// Leave false to drive workers yourself via Runtime.RunWorkers.
+	// Config is built programmatically by the host; embedded construction never
+	// runs config.Load, so Env and TestMode (sandbox or live) must be set
+	// explicitly. Rate-limit and captcha defaults are seeded when left nil
+	// unless Config.RateLimitsDisabled.
+	Config *config.Config
+	// PGXPool is the host-supplied database handle. Leave nil to open one from
+	// Config.DB.
+	PGXPool *pgxpool.Pool
+	Redis   *redis.Client
+	Cache   cache.Cache
+	// River declares who owns the River job fleet. Required: use
+	// RiverFromHost(bind) when the host owns River, RiverManagedByOpenRails()
+	// to let OpenRails run its own.
+	River RiverOwnership
+	// RunWorkers starts the River workers on a goroutine owned by the Runtime
+	// (stopped by Close), detached from the ctx passed to New. Leave false to
+	// drive Runtime.RunWorkers yourself.
 	RunWorkers bool
+	// ConsoleAssets is the host-built admin console SPA rooted at index.html
+	// (scripts/build-admin-console.sh); nil links no frontend bytes.
+	ConsoleAssets fs.FS
+	// StripeTransport is the test seam under the Stripe API choke point for
+	// driving rail pushes against a fake Stripe. Refused with a live posture.
+	StripeTransport http.RoundTripper
 }
 
-// Option adjusts Options before the runtime is built (New's variadic tail).
-type Option func(*Options)
-
-// WithAdminConsole supplies the HOST-BUILT admin console SPA (#754): an fs.FS
-// rooted at index.html, typically a 3-line `//go:embed all:dist` package in the
-// host repo over a gitignored dist produced by openrails'
-// scripts/build-admin-console.sh. Not passing this links ZERO frontend bytes;
-// enabling admin_console without it is a boot error on the standalone surface.
-func WithAdminConsole(assets fs.FS) Option {
-	return func(o *Options) { o.ConsoleAssets = assets }
-}
-
-// RouteSet names a mountable billing HTTP route group.
-type RouteSet = embedded.RouteSet
-
-// InvoiceSweepArgs lets a host that owns River insert one run of the engine's
-// invoice job; see embedded.InvoiceSweepArgs.
-type InvoiceSweepArgs = embedded.InvoiceSweepArgs
-
-const (
-	// RouteSetCheckout mounts buyer-facing products, prices, config, and checkout routes.
-	RouteSetCheckout = embedded.RouteSetCheckout
-	// RouteSetCustomer mounts customer-facing billing routes (/v1/me/*, /v1/customers/*).
-	RouteSetCustomer = embedded.RouteSetCustomer
-	// RouteSetMerchantAdmin mounts human merchant-admin customer/support routes.
-	RouteSetMerchantAdmin = embedded.RouteSetMerchantAdmin
-	// RouteSetCatalog mounts merchant catalog routes.
-	RouteSetCatalog = embedded.RouteSetCatalog
-	// RouteSetPaymentProviders mounts provider config and secret routes.
-	RouteSetPaymentProviders = embedded.RouteSetPaymentProviders
-	// RouteSetMerchantAPI mounts the host-internal service/API-key surface
-	// (/billing/v1/merchant/*). Opt in for embedded hosts that want the same
-	// service-credential surface as standalone; most embedded hosts use Client() instead.
-	RouteSetMerchantAPI = embedded.RouteSetMerchantAPI
-	// RouteSetWebhooks mounts merchant-scoped inbound webhook routes.
-	RouteSetWebhooks = embedded.RouteSetWebhooks
-)
-
-var (
-	// EmbeddedDefaultRouteSets is the default embedded HTTP surface: checkout,
-	// customer, merchant_admin, catalog, and webhooks. It excludes
-	// RouteSetPaymentProviders and RouteSetMerchantAPI (both opt-in for embedded hosts).
-	EmbeddedDefaultRouteSets = append([]RouteSet(nil), embedded.EmbeddedDefaultRouteSets...)
-	// StandaloneDefaultRouteSets is the full standalone HTTP surface, including
-	// payment_providers and merchant_api in addition to EmbeddedDefaultRouteSets.
-	StandaloneDefaultRouteSets = append([]RouteSet(nil), embedded.StandaloneDefaultRouteSets...)
-)
-
-// Runtime is the in-process OpenRails engine plus its SDK adapter. It is the
-// ONE entry point an embedding host needs: Client() for the unified interface,
-// Handler() to mount the embedded HTTP surface, RunWorkers/Close for lifecycle.
+// Runtime is the in-process engine: Client() for the shared client, Handler()
+// to mount the billing HTTP surface, RunWorkers/Close for lifecycle.
 type Runtime struct {
-	emb *embedded.Embedded
+	app *app.App
 	svc *service.Service
+
+	activeRouteSets          []RouteSet
+	stripeTransportInstalled bool
 
 	workersCancel context.CancelFunc
 	workersDone   chan error
 
-	// handlerOnce/handler memoize the in-process route mux (#767): it depends
-	// only on r.emb's *app.Runtime, never on per-Client() options, so building
-	// it once and reusing it across every Client() call avoids re-running
-	// RegisterServiceRoutes/RegisterImportRoutes on every call.
+	// handlerOnce memoizes the in-process route mux: it depends only on the
+	// app graph, never on per-Client() options.
 	handlerOnce sync.Once
 	handler     http.Handler
 }
 
 func init() {
 	app.HostGraph = func(runtime any) *app.App {
-		if r, ok := runtime.(*Runtime); ok && r != nil && r.emb != nil {
-			return r.emb.App()
+		if r, ok := runtime.(*Runtime); ok && r != nil {
+			return r.app
 		}
 		return nil
 	}
 }
 
-// New builds the embedded runtime: the gin-free app graph (pkg/embedded.New),
-// then the service facade the Client adapts. The variadic tail applies
-// functional options (e.g. WithAdminConsole) on top of opts.
-func New(ctx context.Context, opts Options, options ...Option) (*Runtime, error) {
-	for _, opt := range options {
-		if opt != nil {
-			opt(&opts)
-		}
+// New builds the engine. ctx bounds the wait for the database; nothing else
+// does.
+func New(ctx context.Context, opts Options) (*Runtime, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if opts.Config == nil {
 		return nil, fmt.Errorf("openrails embed: config is required")
 	}
-	emb, err := embedded.New(ctx, opts.Options)
-	if err != nil {
+	if !opts.River.declared() {
+		return nil, ErrRiverRequired
+	}
+	if err := applyEmbeddedDefaults(opts.Config); err != nil {
 		return nil, err
 	}
-	svc, err := emb.Service()
-	if err != nil {
-		_ = emb.Close(ctx)
-		return nil, err
+	if opts.StripeTransport != nil && opts.Config.TestMode == config.CredentialPostureLive {
+		return nil, fmt.Errorf("openrails embed: Options.StripeTransport is a test seam and is refused with config.TestMode=live")
 	}
+	application, err := app.BootstrapWithOptions(ctx, opts.Config, &app.BootstrapOptions{
+		PGXPool: opts.PGXPool,
+		Redis:   opts.Redis,
+		Cache:   opts.Cache,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap application: %w", err)
+	}
+	// Ordinary Client calls need the same provider/secret graph as the
+	// standalone server; worker startup or mounting cannot be prerequisites.
+	if err := application.Runtime.EnsureMerchantsService(ctx); err != nil {
+		_ = application.Close(ctx)
+		return nil, fmt.Errorf("initialize merchant services: %w", err)
+	}
+	application.ConsoleAssets = opts.ConsoleAssets
 
-	r := &Runtime{emb: emb, svc: svc}
+	r := &Runtime{app: application}
+	if opts.StripeTransport != nil {
+		stripeapi.SetBaseTransport(opts.StripeTransport)
+		r.stripeTransportInstalled = true
+	}
+	if err := r.bindRiver(ctx, opts.River); err != nil {
+		_ = r.Close(ctx)
+		return nil, err
+	}
+	// The out-of-River progress detector starts at construction: a host that
+	// never calls RunWorkers is exactly the case that must be detectable.
+	application.Runtime.StartRiverProgressMonitor(ctx)
+	svc, err := service.New(application.Runtime)
+	if err != nil {
+		_ = r.Close(ctx)
+		return nil, err
+	}
+	r.svc = svc
 	if opts.RunWorkers {
 		wctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		r.workersCancel = cancel
 		r.workersDone = make(chan error, 1)
-		go func() { r.workersDone <- emb.RunWorkers(wctx) }()
+		go func() { r.workersDone <- application.Runtime.RunWorkers(wctx) }()
 	}
 	return r, nil
+}
+
+// applyEmbeddedDefaults enforces the posture embedded construction must declare
+// and seeds the protective defaults config.Load applies.
+func applyEmbeddedDefaults(cfg *config.Config) error {
+	if strings.TrimSpace(cfg.Env) == "" {
+		return fmt.Errorf("openrails embed: config.Env is required; embedded construction never runs config.Load's dev-like empty-Env default")
+	}
+	switch cfg.TestMode {
+	case config.CredentialPostureSandbox, config.CredentialPostureLive:
+	default:
+		return fmt.Errorf("openrails embed: config.TestMode is required; set config.CredentialPostureSandbox or config.CredentialPostureLive explicitly")
+	}
+	if !cfg.RateLimitsDisabled {
+		defaults := config.GetDefaultBillingConfig()
+		if cfg.RateLimits == nil {
+			cfg.RateLimits = defaults.RateLimits
+		}
+		if cfg.Captcha == nil {
+			cfg.Captcha = defaults.Captcha
+		}
+	}
+	return nil
 }
 
 // Client returns the same typed client as NewRemote over the in-process
 // operation transport. It is bound to the runtime's configured merchant, or to
 // WithMerchantID on a multi-merchant runtime; an unbound client is refused.
 func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, error) {
-	rt := r.emb.App().Runtime
+	rt := r.app.Runtime
 	r.handlerOnce.Do(func() { r.handler = newServiceHandler(rt) })
 	defaults := []openrails.ClientOption{
 		openrails.WithHTTPClient(&http.Client{Transport: inprocess.NewTransport(r.handler, rt.ConfiguredMerchant)}),
@@ -170,34 +192,34 @@ func (r *Runtime) Client(options ...openrails.ClientOption) (*openrails.Client, 
 	return client, nil
 }
 
-// Service exposes the underlying pkg/service facade for host code that wants
-// engine-native types (identity.CustomerID etc.) instead of wire types.
-func (r *Runtime) Service() *service.Service { return r.svc }
-
-// Embedded exposes the engine for control-plane wiring that still takes the
-// application graph. Mounting, readiness and River checks are Runtime methods.
-func (r *Runtime) Embedded() *embedded.Embedded { return r.emb }
-
 // ActiveRouteSets returns the route groups of the most recently mounted HTTP
-// surface (embedded.MountHandler); nil before any mount. It is the in-process
-// twin of GET /v1/capabilities — same source.
+// surface; nil before any mount. It is the in-process twin of
+// GET /v1/capabilities.
 func (r *Runtime) ActiveRouteSets() []RouteSet {
 	if r == nil {
 		return nil
 	}
-	return r.emb.ActiveRouteSets()
+	return append([]RouteSet(nil), r.activeRouteSets...)
 }
 
-// RunWorkers runs the River workers, blocking until ctx is done — a thin
-// passthrough for hosts that did not set Options.RunWorkers.
+func (r *Runtime) mountRouteSets(sets []RouteSet) []RouteSet {
+	resolved := embedhttp.ResolveRouteSets(sets)
+	r.activeRouteSets = resolved
+	return resolved
+}
+
+// RunWorkers runs the River workers, blocking until ctx is done.
 func (r *Runtime) RunWorkers(ctx context.Context) error {
-	return r.emb.RunWorkers(ctx)
+	if r == nil || r.app == nil || r.app.Runtime == nil {
+		return fmt.Errorf("openrails embed: runtime is not initialized")
+	}
+	return r.app.Runtime.RunWorkers(ctx)
 }
 
 // Close stops Options.RunWorkers workers (waiting for them up to ctx) and
 // closes the app graph.
 func (r *Runtime) Close(ctx context.Context) error {
-	if r == nil {
+	if r == nil || r.app == nil {
 		return nil
 	}
 	if r.workersCancel != nil {
@@ -208,5 +230,9 @@ func (r *Runtime) Close(ctx context.Context) error {
 		}
 		r.workersCancel = nil
 	}
-	return r.emb.Close(ctx)
+	if r.stripeTransportInstalled {
+		stripeapi.SetBaseTransport(nil)
+		r.stripeTransportInstalled = false
+	}
+	return r.app.Close(ctx)
 }

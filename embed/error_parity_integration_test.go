@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/integrationharness"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // errorObservation is everything a caller can branch on, excluding the human
@@ -69,10 +68,10 @@ func TestClientErrorsAreIdenticalAcrossDeployments(t *testing.T) {
 	h := integrationharness.New(t, ctx)
 	standalone := h.StartStandalone("USD")
 	host := h.StartEmbeddedHost("USD")
-	multi, err := embed.New(ctx, embed.Options{Options: embedded.Options{
+	multi, err := embed.New(ctx, embed.Options{
 		Config: &config.Config{Env: "dev", TestMode: config.CredentialPostureSandbox, DB: &config.DBConfig{URL: h.DSN}},
-		Redis:  h.Redis, River: embedded.RiverManagedByOpenRails(),
-	}})
+		Redis:  h.Redis, River: embed.RiverManagedByOpenRails(),
+	})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, multi.Close(context.Background())) })
 	multiClient, err := multi.Client(openrails.WithMerchantID(dbtest.TestMerchantID))

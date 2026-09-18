@@ -471,7 +471,7 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 //   - keepPayload: the refund producer reads reservation_id off the durable
 //     succeeded row to detect a double-refund conflict (admin_payments.go).
 //   - keepEvidence: the catalog status view renders verification booleans off
-//     succeeded archive/sunset rows (pkg/service/catalog_extras.go).
+//     succeeded archive/sunset rows (internal/service/catalog_extras.go).
 //
 // Handlers whose only post-success reader is the pointer-key path (dunning's
 // transaction_id/response_code, the admin operations view) need not implement

@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/embed"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // TestUpsertMerchantConfig_SeedsPSPs verifies the #593 public
@@ -30,7 +29,7 @@ func TestUpsertMerchantConfig_SeedsPSPs(t *testing.T) {
 	slug := fmt.Sprintf("embed-provision-%d", time.Now().UnixNano())
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
 	rt, err := embed.New(ctx, embed.Options{
-		Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()},
+		Config: cfg, River: embed.RiverManagedByOpenRails(),
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

@@ -44,7 +44,7 @@ Ways to run:
 
 ```bash
 task test                    # guardrail + unit tests (-race) + core integration tier
-task test-integration-core   # ./tests ./embed ./internal/river ./pkg/service
+task test-integration-core   # ./tests ./embed ./internal/river ./internal/service
 task test-integration-all    # every integration-tagged package, serially
 bash scripts/test_integration.sh ./tests -run TestFoo   # targeted
 ```
@@ -101,7 +101,7 @@ that must swap the shared runtime clock after setup.
 **Guardrail:** `bash scripts/check_business_time.sh` (first step of
 `task test`) scans business/domain paths (`internal/modules`, `internal/river`,
 `internal/http/handlers`, `internal/reconcile`, `internal/intents`,
-`pkg/service`) for direct
+`internal/service`) for direct
 `time.Now()`, SQL `NOW()`/`CURRENT_TIMESTAMP`, and
 `clockwork.NewRealClock()`. Existing allowed usages are classified in
 `scripts/business-time-allowlist.txt` (`file|fragment|classification|reason`

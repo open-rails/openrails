@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
-	"github.com/open-rails/openrails/pkg/embedded"
 )
 
 // TestInProcessClientHonorsExplicitUnlimitedTimeout proves #767: an in-process SDK call
@@ -45,10 +44,10 @@ func TestInProcessClientHonorsExplicitUnlimitedTimeout(t *testing.T) {
 	lockPool := dbtest.SharedMerchantPool(t, dbtest.TestMerchantID.UUID())
 
 	cfg := &config.Config{Env: "dev", TestMode: config.CredentialPostureLive, DB: &config.DBConfig{URL: dsn}}
-	rt, err := New(ctx, Options{Options: embedded.Options{Config: cfg, River: embedded.RiverManagedByOpenRails()}})
+	rt, err := New(ctx, Options{Config: cfg, River: RiverManagedByOpenRails()})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	rt.emb.App().Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
+	rt.app.Runtime.SetConfiguredMerchant(dbtest.TestMerchantID)
 
 	c, cErr := rt.Client(openrails.WithTimeout(0))
 	if cErr != nil {
