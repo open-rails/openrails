@@ -10,6 +10,7 @@ import (
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -32,7 +33,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id mercha
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
 		if err := client.ProbeCredentials(probeCtx); err != nil {
-			return false, fmt.Errorf("merchants: validate nmi credentials: %w", err)
+			return false, providerCredentialError(fmt.Errorf("merchants: validate nmi credentials: %w", err))
 		}
 		return true, nil
 
@@ -49,11 +50,11 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id mercha
 			return false, nil
 		}
 		if !hasUsername || !hasPassword {
-			return false, errors.New("merchants: ccbill datalink_username and datalink_password are required together")
+			return false, apperr.Invalidf("merchants: ccbill datalink_username and datalink_password are required together")
 		}
 		clientAccNum, clientSubAcc, err := config.SplitCCBillAccountID(accountID)
 		if err != nil {
-			return false, fmt.Errorf("merchants: validate ccbill account id: %w", err)
+			return false, apperr.Invalidf("merchants: validate ccbill account id: %v", err)
 		}
 		client := ccbill.NewDataLinkClient(&config.CCBillConfig{
 			ClientAccNum:     clientAccNum,

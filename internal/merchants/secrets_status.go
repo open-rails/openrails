@@ -3,10 +3,10 @@ package merchants
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -88,7 +88,7 @@ func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name str
 	}
 	name = cleanSecretName(name)
 	if !SecretWritable(name) {
-		return fmt.Errorf("merchants: unknown merchant secret %q", name)
+		return apperr.Invalidf("merchants: unknown merchant secret %q", name)
 	}
 	if err := s.secrets.Delete(ctx, id, name); err != nil {
 		return err
@@ -101,7 +101,7 @@ func (s *Service) DeleteCredential(ctx context.Context, id merchant.ID, name str
 func (s *Service) ValidateCredential(ctx context.Context, id merchant.ID, name, value string, stripeTester func(context.Context, string) error) error {
 	name = cleanSecretName(name)
 	if !SecretWritable(name) {
-		return fmt.Errorf("merchants: unknown merchant secret %q", name)
+		return apperr.Invalidf("merchants: unknown merchant secret %q", name)
 	}
 	if strings.TrimSpace(value) == "" {
 		if s.secrets == nil {
@@ -148,7 +148,7 @@ func validateSecretValueLocal(name, value string) error {
 			return cerr
 		}
 		if value == "" {
-			return errors.New("empty")
+			return apperr.Invalidf("empty")
 		}
 		return nil
 	}
@@ -157,7 +157,7 @@ func validateSecretValueLocal(name, value string) error {
 		return err
 	}
 	if value == "" {
-		return errors.New("empty")
+		return apperr.Invalidf("empty")
 	}
 	if !scoped {
 		return nil
@@ -166,11 +166,11 @@ func validateSecretValueLocal(name, value string) error {
 		switch key {
 		case "secret_key":
 			if !strings.HasPrefix(value, "sk_") {
-				return errors.New("invalid_format")
+				return apperr.Invalidf("invalid_format")
 			}
 		case "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous":
 			if !strings.HasPrefix(value, "whsec_") {
-				return errors.New("invalid_format")
+				return apperr.Invalidf("invalid_format")
 			}
 		}
 	}

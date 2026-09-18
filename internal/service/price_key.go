@@ -10,7 +10,9 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -68,7 +70,7 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -76,6 +78,9 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 	}
 	p, err := prices.GetCurrentByKey(ctx, tid.UUID(), key)
 	if err != nil {
+		if db.IsNotFound(err) {
+			return nil, ErrPriceKeyNotFound
+		}
 		return nil, err
 	}
 	return priceToCatalogPrice(p), nil
@@ -103,16 +108,16 @@ func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key str
 		return nil, err
 	}
 	if id.IsZero() {
-		return nil, fmt.Errorf("price_id required")
+		return nil, apperr.Invalidf("price_id required")
 	}
 	priceID := id.UUID()
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	current, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	if current.Key == key {
 		return priceToCatalogPrice(current), nil
@@ -133,7 +138,7 @@ func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key str
 		}
 	}
 	if err := prices.SetKey(ctx, priceID, key); err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	if !current.Archived {
 		if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, key, time.Now().UTC()); err != nil {
@@ -173,7 +178,7 @@ func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKe
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -184,7 +189,7 @@ func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKe
 		return nil, err
 	}
 	if len(movements) == 0 {
-		return nil, fmt.Errorf("price key %q not found", key)
+		return nil, ErrPriceKeyNotFound
 	}
 	out := make([]PriceKeyHistoryEntry, 0, len(movements))
 	for _, m := range movements {

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,16 +19,21 @@ import (
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/query"
 	log "github.com/sirupsen/logrus"
 )
 
-// Sentinel errors for subscription operations
+// Sentinel errors for subscription operations. The typed ones (#983) carry
+// the status and wire code handlers answer with.
 var (
-	ErrSubscriptionNotFound     = errors.New("subscription not found")
-	ErrSubscriptionNotActive    = errors.New("subscription is not active")
+	ErrSubscriptionNotFound  = apperr.New(http.StatusNotFound, "subscription_not_found", "subscription not found")
+	ErrSubscriptionNotActive = apperr.New(http.StatusConflict, "subscription_not_active", "subscription is not active")
+	// ErrCancelUnsupportedOnRail refuses a server-side cancel on a rail that has
+	// no cancel operation.
+	ErrCancelUnsupportedOnRail  = apperr.New(http.StatusBadRequest, "cancel_unsupported_on_rail", "cancel operation not supported for this rail")
 	ErrNotificationNotFound     = errors.New("notification not found")
 	ErrNotificationAccessDenied = errors.New("notification does not belong to user")
 
@@ -38,10 +44,10 @@ var (
 	// subscription. This used to fall through the worker's default branch into
 	// a facade with no Solana case and fail permanently, which read as a bug
 	// rather than a rail fact.
-	ErrSolanaCancelNeedsWalletSignature = errors.New(
-		"cancelling a Solana subscription requires the subscriber's wallet signature: " +
-			"POST /v1/me/subscriptions/{id}/solana-cancel-tx to build the unsigned cancel_subscription " +
-			"transaction, sign and send it from the wallet, then POST /v1/me/subscriptions/{id}/solana-cancel " +
+	ErrSolanaCancelNeedsWalletSignature = apperr.New(http.StatusBadRequest, "solana_cancel_needs_wallet_signature",
+		"cancelling a Solana subscription requires the subscriber's wallet signature: "+
+			"POST /v1/me/subscriptions/{id}/solana-cancel-tx to build the unsigned cancel_subscription "+
+			"transaction, sign and send it from the wallet, then POST /v1/me/subscriptions/{id}/solana-cancel "+
 			"with the signature to confirm and mirror it")
 )
 
@@ -307,7 +313,10 @@ func (s *UserSubscriptionService) MarkNotificationRead(ctx context.Context, user
 func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, userID string, feedback string) error {
 	subscription, err := s.SubscriptionService.GetActiveSubscription(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrSubscriptionNotFound, err)
+		if db.IsNotFound(err) {
+			return ErrSubscriptionNotFound
+		}
+		return fmt.Errorf("load active subscription: %w", err)
 	}
 
 	now := s.now()

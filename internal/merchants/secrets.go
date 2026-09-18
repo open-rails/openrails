@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -44,13 +45,13 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 		return "", err
 	}
 	if rail == "" {
-		return "", fmt.Errorf("PSP secret requires rail")
+		return "", apperr.Invalidf("PSP secret requires rail")
 	}
 	if environment == "" {
-		return "", fmt.Errorf("PSP secret environment must be live or test")
+		return "", apperr.Invalidf("PSP secret environment must be live or test")
 	}
 	if accountID == "" {
-		return "", fmt.Errorf("PSP secret requires account id")
+		return "", apperr.Invalidf("PSP secret requires account id")
 	}
 	// The prefix is part of the DURABLE canonical secret-name shape (persisted
 	// in the merchant-secret store, including HashiCorp Vault KV paths).
@@ -170,7 +171,7 @@ func NormalizePSPSecretKey(rail, key string) (string, error) {
 	if k, ok := rails.CredentialKeyFor(models.Rail(rail), key); ok {
 		return k.Name, nil
 	}
-	return "", fmt.Errorf("unknown PSP secret %s.%s", rail, key)
+	return "", apperr.Invalidf("unknown PSP secret %s.%s", rail, key)
 }
 
 func normalizeProviderSecretType(rail string) string {

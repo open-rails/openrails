@@ -2,19 +2,20 @@ package billingimport
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // ErrInvalidPSPReference is a declaration that cannot identify one of the
 // selected merchant's provider accounts. Storage/read failures are distinct.
-var ErrInvalidPSPReference = errors.New("invalid PSP reference")
+var ErrInvalidPSPReference = apperr.New(http.StatusBadRequest, "invalid_psp_reference", "invalid PSP reference")
 
 // pspResolver turns a declared PSPRef into a real openrails.psps id, against the
 // merchant's own catalog. or#893: an import that cannot attribute a row is
