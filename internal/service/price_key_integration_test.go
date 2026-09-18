@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -91,8 +92,8 @@ func TestCreatePrice_AmountEditSameKey_VersionBumpAndGrandfather(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx,
 		`SELECT price_id FROM openrails.subscriptions WHERE product_id = $1 AND rail_subscription_id LIKE 'grandfather-sub-%'`,
 		product.ID).Scan(&pinnedPriceID))
-	require.Equal(t, original.ID, pinnedPriceID)
-	pinnedPrice, err := svc.GetPrice(ctx, pinnedPriceID)
+	require.Equal(t, original.ID.UUID(), pinnedPriceID)
+	pinnedPrice, err := svc.GetPrice(ctx, openrails.PriceID(pinnedPriceID))
 	require.NoError(t, err)
 	require.EqualValues(t, 1000000, pinnedPrice.UnitAmount, "grandfathered subscription still charges the OLD amount")
 

@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
 
@@ -68,7 +70,7 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -76,6 +78,9 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 	}
 	p, err := prices.GetCurrentByKey(ctx, tid.UUID(), key)
 	if err != nil {
+		if db.IsNotFound(err) {
+			return nil, ErrPriceKeyNotFound
+		}
 		return nil, err
 	}
 	return priceToCatalogPrice(p), nil
@@ -91,7 +96,7 @@ func (s *Service) GetPriceByKey(ctx context.Context, key string) (*CatalogPrice,
 // live row already holds the target key, THAT row is archived first (the same
 // repoint invariant CreatePrice/ActivatePrice enforce), so a rename can also
 // double as a manual repoint.
-func (s *Service) SetPriceKey(ctx context.Context, priceID uuid.UUID, key string) (*CatalogPrice, error) {
+func (s *Service) SetPriceKey(ctx context.Context, id openrails.PriceID, key string) (*CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -102,16 +107,17 @@ func (s *Service) SetPriceKey(ctx context.Context, priceID uuid.UUID, key string
 	if err != nil {
 		return nil, err
 	}
-	if priceID == uuid.Nil {
-		return nil, fmt.Errorf("price_id required")
+	if id.IsZero() {
+		return nil, apperr.Invalidf("price_id required")
 	}
+	priceID := id.UUID()
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	current, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	if current.Key == key {
 		return priceToCatalogPrice(current), nil
@@ -132,7 +138,7 @@ func (s *Service) SetPriceKey(ctx context.Context, priceID uuid.UUID, key string
 		}
 	}
 	if err := prices.SetKey(ctx, priceID, key); err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 	if !current.Archived {
 		if err := prices.RecordKeyMovement(ctx, tid.UUID(), priceID, key, time.Now().UTC()); err != nil {
@@ -172,7 +178,7 @@ func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKe
 	}
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
@@ -183,7 +189,7 @@ func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKe
 		return nil, err
 	}
 	if len(movements) == 0 {
-		return nil, fmt.Errorf("price key %q not found", key)
+		return nil, ErrPriceKeyNotFound
 	}
 	out := make([]PriceKeyHistoryEntry, 0, len(movements))
 	for _, m := range movements {
@@ -194,26 +200,4 @@ func (s *Service) GetPriceKeyHistory(ctx context.Context, key string) ([]PriceKe
 		out = append(out, PriceKeyHistoryEntry{Price: *priceToCatalogPrice(p), EffectiveAt: m.EffectiveAt})
 	}
 	return out, nil
-}
-
-// ResolvePriceReference resolves a caller-supplied price identifier that may
-// be either a price UUID or a #774 price_key. Tries the UUID parse first
-// (the common, cheap case); falls back to a key lookup only when the string
-// does not parse as a UUID, so a key that happens to collide with UUID syntax
-// can never occur (uuid.Parse is total over its own format).
-func (s *Service) ResolvePriceReference(ctx context.Context, ref string) (*CatalogPrice, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return nil, fmt.Errorf("price reference required")
-	}
-	if id, err := uuid.Parse(ref); err == nil {
-		return s.GetPrice(ctx, id)
-	}
-	return s.GetPriceByKey(ctx, ref)
 }

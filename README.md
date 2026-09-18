@@ -1,6 +1,6 @@
 # OpenRails Billing Engine
 
-You're a developer, or an AI agent, who's tasked with adding payments to your app. Well you've come to the right place. You see 
+You're a developer, or an AI agent, who's tasked with adding payments to your app. Well you've come to the right place.
 
 Add payments to your application in a matter of hours or days, not months. OpenRails is perfect for you if you're building:
 
@@ -22,12 +22,14 @@ OpenRails can be run as a standalone server, or as an embedded process within yo
 
 ### How It Works
 
-Operator Side (you, the merchant):
-- Define your catalog: products, the entitlements granted by products, and prices
-- 
+Operator side (you, the merchant):
+- Declare your merchant and payment-processor accounts (a YAML manifest, or the API).
+- Declare your catalog: products, the entitlements they grant, and prices. OpenRails pushes it to the processors.
+- Call one API for admissions, credits, entitlement checks, subscriptions and invoices: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
 
-Customer Side (your users):
-- Exposes a set of routes for creating a purchase
+Customer side (your users):
+- Your frontend calls the checkout and `/v1/me/*` self-service routes directly with a short-lived token.
+- Processor webhooks land on OpenRails; it updates entitlements in your database and your app reads them.
 
 ---
 
@@ -44,8 +46,8 @@ Customer Side (your users):
 - **Dunning: capture lost revenue** — failed rebills are retried on a schedule derived
   from the billing cycle, with a staleness window that guarantees a months-old failure is
   cancelled, never surprise-charged.
-- **Payment-lifecycle emails, handled** — "your payment failed", "your card expires
-  soon", renewal and cancellation notices: templated, deduplicated (a resolved failure
+- **Payment-lifecycle emails, handled** — "your payment failed", "update your card",
+  renewal and cancellation notices: templated, deduplicated (a resolved failure
   supersedes the stale notice instead of double-sending), and branded per merchant. You
   don't build the awkward-conversation system; we are the awkward-conversation system.
 - **Higher approval rates, measurably** — network tokens, automatic account-updater
@@ -360,6 +362,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses delegated tokens.
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 - [HTTP API reference](docs/api/endpoints.md) — every route, grouped by caller class.
+- [Errors](docs/api/errors.md) and [money on the wire](docs/money-wire.md) — the error envelope, coded 402 refusals, decimal-string amounts, RFC3339 times, `GET /v1/currencies`.
 
 **Payment rails** — per-rail setup: credentials, the manifest entry, webhooks, sandbox testing:
 
@@ -388,6 +391,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 **Reference**
 
 - [Glossary](docs/glossary.md) — rails, PSPs, merchants, payers, and the rest of the vocabulary.
+- Contracts — [durable admission](docs/admission-operations.md), [client merchant binding](docs/client-merchant-binding.md), [merchant name authority](docs/merchant-name-authority.md), [provider obligations](docs/architecture/provider-obligation-contract.md), [provider object identity](docs/architecture/provider-object-identity.md), [schema baseline](docs/schema-baseline.md).
 - [Metrics & query API](docs/metrics-for-llms.md) — analytics access for dashboards and LLM agents.
 - [Contributing / hacking on OpenRails](docs/dev/README.md) — dev workflow, testing, local webhooks.
 - [Injected-code scan](docs/injection-scan.md) — the supply-chain gate every clone runs; rules, exclusions, and what to do when it fires.

@@ -68,19 +68,19 @@ func TestInvoiceClientWorkflowAcrossTransports(t *testing.T) {
 				return err
 			}))
 			profile := openrails.InvoiceProfileDTO{NetTermsDays: 7, CollectionMethod: "send_invoice", Memo: "defaults"}
-			created, err := client.EnsureCustomerInvoiceProfile(ctx, payer.String(), profile)
+			created, err := client.EnsureCustomerInvoiceProfile(ctx, openrails.CustomerID(payer), profile)
 			require.NoError(t, err)
 			require.True(t, created)
 			profile.Memo = "operator settings"
-			require.NoError(t, client.SetCustomerInvoiceProfile(ctx, payer.String(), profile))
+			require.NoError(t, client.SetCustomerInvoiceProfile(ctx, openrails.CustomerID(payer), profile))
 			// An idempotent ensure that finds the profile is a success for the
 			// caller and must not be logged by the engine as an error.
 			errorLogs.drain()
-			created, err = client.EnsureCustomerInvoiceProfile(ctx, payer.String(), openrails.InvoiceProfileDTO{NetTermsDays: 30, CollectionMethod: "send_invoice"})
+			created, err = client.EnsureCustomerInvoiceProfile(ctx, openrails.CustomerID(payer), openrails.InvoiceProfileDTO{NetTermsDays: 30, CollectionMethod: "send_invoice"})
 			require.NoError(t, err)
 			require.False(t, created)
 			require.Empty(t, errorLogs.drain(), "idempotent EnsureCustomerInvoiceProfile logged an error")
-			got, err := client.GetCustomerInvoiceProfile(ctx, payer.String())
+			got, err := client.GetCustomerInvoiceProfile(ctx, openrails.CustomerID(payer))
 			require.NoError(t, err)
 			require.Equal(t, profile, *got)
 			// Seed a real receivable via the money engine, then exercise the public
@@ -89,8 +89,7 @@ func TestInvoiceClientWorkflowAcrossTransports(t *testing.T) {
 			require.NoError(t, err)
 			invoice, err := rt.MoneyService.FinalizeInvoice(scoped, payer, "USD", time.Now().Add(-time.Hour), time.Now().Add(time.Minute))
 			require.NoError(t, err)
-			pid := payer.UUID()
-			listed, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: &pid}, 10, 0)
+			listed, total, err := client.ListMerchantInvoices(ctx, openrails.MerchantInvoiceFilter{CustomerID: openrails.CustomerID(payer)}, 10, 0)
 			require.NoError(t, err)
 			require.EqualValues(t, 1, total)
 			require.Len(t, listed, 1)

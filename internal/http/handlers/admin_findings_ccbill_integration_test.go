@@ -5,15 +5,17 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/open-rails/openrails/config"
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -95,7 +97,7 @@ func TestFindingsQueueApproveCCBillCancelOnly(t *testing.T) {
 	cancelOnly := fx.seedFinding("consistency.duplicate.ownership", "cc-cancel-"+uuid.NewString()[:8], "critical",
 		"duplicate ccbill sub; cancel it", &recommend.Recommendation{
 			Action: recommend.ActionCancelAndRefund,
-			Params: map[string]any{"subscription_id": subID.String()},
+			Params: map[string]any{"subscription_id": openrails.SubscriptionID(subID).String()},
 		})
 	rec := fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+cancelOnly.String()+"/resolve",
 		map[string]any{"outcome": "approve", "notes": "confirmed duplicate"}, cancelOnly.String())
@@ -144,7 +146,7 @@ func TestFindingsCCBillRefundRefusesBeforeCancellation(t *testing.T) {
 	subID := fx.seedActiveCCBillSubscription("sub_" + uuid.NewString())
 	paymentID := uuid.New()
 	fx.exec(`INSERT INTO openrails.payments (id,price_id,rail,transaction_id,amount,list_amount,currency,status,subscription_id,customer_id,merchant_id,money_movement,psp_id) VALUES ($1,$2,'ccbill',$3,10000000,10000000,'USD','completed',$4,$5,$6,'rail',$7)`, paymentID, fx.price, "txn_"+uuid.NewString(), subID, fx.customer, fx.merchant, fx.pspFor("ccbill"))
-	finding := fx.seedFinding("consistency.duplicate.ownership", "cc-refund-"+uuid.NewString(), "critical", "unqualified refund", &recommend.Recommendation{Action: recommend.ActionCancelAndRefund, Params: map[string]any{"subscription_id": subID.String(), "refund_payment_id": paymentID.String()}})
+	finding := fx.seedFinding("consistency.duplicate.ownership", "cc-refund-"+uuid.NewString(), "critical", "unqualified refund", &recommend.Recommendation{Action: recommend.ActionCancelAndRefund, Params: map[string]any{"subscription_id": openrails.SubscriptionID(subID).String(), "refund_payment_id": openrails.PaymentID(paymentID).String()}})
 	rec := fx.do(AdminResolveFinding, http.MethodPost, "/findings/"+finding.String()+"/resolve", map[string]any{"outcome": "approve"}, finding.String())
 	require.Equal(t, http.StatusBadRequest, rec.Code, rec.Body.String())
 	require.Contains(t, rec.Body.String(), "automatic CCBill refunds are unavailable")

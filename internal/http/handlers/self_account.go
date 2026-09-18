@@ -8,11 +8,11 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Self-service money surface: the authenticated merchant_subject reads its own
@@ -68,13 +68,13 @@ func GetMyBalance(r *httprequest.Request) {
 }
 
 type collectionPaymentMethodRequest struct {
-	Currency        string `json:"currency"`
-	PaymentMethodID string `json:"payment_method_id"`
+	Currency        string                    `json:"currency"`
+	PaymentMethodID openrails.PaymentMethodID `json:"payment_method_id"`
 }
 
 type collectionPaymentMethodResponse struct {
-	Currency        string `json:"currency"`
-	PaymentMethodID string `json:"payment_method_id"`
+	Currency        string                    `json:"currency"`
+	PaymentMethodID openrails.PaymentMethodID `json:"payment_method_id"`
 }
 
 // SetMyCollectionPaymentMethod (PUT .../collection-payment-method) selects the
@@ -96,11 +96,11 @@ func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, err.Error())
 		return
 	}
-	methodID, err := api.ParsePaymentMethodID(req.PaymentMethodID)
-	if err != nil {
+	if req.PaymentMethodID.IsZero() {
 		r.ErrorJSON(http.StatusBadRequest, "invalid payment_method_id")
 		return
 	}
+	methodID := req.PaymentMethodID.UUID()
 	svc, err := billingservice.New(r.State)
 	if err != nil {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
@@ -114,7 +114,7 @@ func SetMyCollectionPaymentMethod(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "failed to set collection payment method")
 		return
 	}
-	r.SuccessJSON(collectionPaymentMethodResponse{Currency: currency, PaymentMethodID: api.FormatPaymentMethodID(methodID)})
+	r.SuccessJSON(collectionPaymentMethodResponse{Currency: currency, PaymentMethodID: req.PaymentMethodID})
 }
 
 // GetMyAccountTransactions (GET /v1/me/transactions?currency=&limit=&offset=)

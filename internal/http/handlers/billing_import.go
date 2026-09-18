@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/internal/billingimport"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -49,25 +47,7 @@ func ImportDeclaredBilling(r *httprequest.Request) {
 		Book:       book,
 	})
 	if err != nil {
-		msg := err.Error()
-		if errors.Is(err, billingimport.ErrInvalidDeclaredInput) {
-			r.ErrorJSON(http.StatusBadRequest, msg)
-			return
-		}
-		if errors.Is(err, billingimport.ErrInvalidPSPReference) {
-			r.APIError(&api.APIError{
-				HTTPStatus: http.StatusBadRequest,
-				Type:       api.ErrorTypeInvalidRequest,
-				Code:       "invalid_psp_reference",
-				Message:    msg,
-			})
-			return
-		}
-		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") {
-			r.ErrorJSON(http.StatusBadRequest, msg)
-			return
-		}
-		r.ErrorJSON(http.StatusInternalServerError, msg)
+		writeRefusal(r, err, "billing import failed")
 		return
 	}
 	r.JSON(http.StatusOK, res)

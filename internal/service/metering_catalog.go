@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+
 	"github.com/open-rails/openrails"
 
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -108,7 +109,7 @@ func (s *Service) ListUsageMeterOverrides(
 	items := make([]UsageMeterOverrideDTO, 0, len(page.Items))
 	for _, override := range page.Items {
 		items = append(items, UsageMeterOverrideDTO{
-			CustomerID: override.CustomerID,
+			CustomerID: openrails.CustomerID(override.CustomerID),
 			Subject:    override.Subject,
 			Email:      override.Email,
 			Price:      override.Price,
@@ -144,7 +145,7 @@ func usageMeterDTO(meter money.UsageMeter) UsageMeterDTO {
 	if meter.DefaultRateCard != nil {
 		dto.DefaultRateCard = &DefaultUsageRateCardDTO{
 			ID:         meter.DefaultRateCard.ID,
-			ProductID:  meter.DefaultRateCard.ProductID,
+			ProductID:  openrails.ProductID(meter.DefaultRateCard.ProductID),
 			ProductKey: meter.DefaultRateCard.ProductKey,
 			Filter:     meter.DefaultRateCard.Filter,
 			Price:      meter.DefaultRateCard.Price,

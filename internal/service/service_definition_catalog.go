@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
@@ -82,10 +83,10 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 	req.DisplayName = strings.TrimSpace(req.DisplayName)
 	req.Description = strings.TrimSpace(req.Description)
 	if req.Key == "" {
-		return nil, fmt.Errorf("key required")
+		return nil, apperr.Invalidf("key required")
 	}
 	if req.DisplayName == "" {
-		return nil, fmt.Errorf("display_name required")
+		return nil, apperr.Invalidf("display_name required")
 	}
 
 	now := time.Now().UTC()
@@ -109,7 +110,7 @@ func (s *Service) CreateProduct(ctx context.Context, req CreateProductRequest) (
 		UpdatedAt:        now,
 	}
 	if err := products.Create(ctx, p); err != nil {
-		return nil, err
+		return nil, catalogWrite(err)
 	}
 	return productToCatalogProduct(p), nil
 }
@@ -124,7 +125,7 @@ var ErrProductTierGroupInUse = catalog.ErrProductTierGroupInUse
 // Same-field concurrent patches use last-committed-write wins.
 type UpdateProductRequest = openrails.UpdateProductRequest
 
-func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req UpdateProductRequest) (*CatalogProduct, error) {
+func (s *Service) UpdateProduct(ctx context.Context, id openrails.ProductID, req UpdateProductRequest) (*CatalogProduct, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -135,9 +136,10 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 	if err != nil {
 		return nil, err
 	}
-	if productID == uuid.Nil {
-		return nil, fmt.Errorf("product_id required")
+	if id.IsZero() {
+		return nil, apperr.Invalidf("product_id required")
 	}
+	productID := id.UUID()
 	p, err := products.UpdateDefinition(ctx, productID, catalog.ProductDefinitionUpdateParams{
 		DisplayName:      req.DisplayName,
 		Description:      req.Description,
@@ -149,7 +151,7 @@ func (s *Service) UpdateProduct(ctx context.Context, productID uuid.UUID, req Up
 		Archived:         req.Archived,
 	})
 	if err != nil {
-		return nil, err
+		return nil, productLookup(err)
 	}
 
 	// Propagate mutable Product changes to Stripe (display name + description + active).
@@ -239,7 +241,7 @@ func (s *Service) lookupStripeProductID(ctx context.Context, productID uuid.UUID
 
 func productToCatalogProduct(p *models.Product) *CatalogProduct {
 	return &CatalogProduct{
-		ID:               p.ID,
+		ID:               openrails.ProductID(p.ID),
 		Key:              p.Key,
 		DisplayName:      p.DisplayName,
 		Description:      p.Description,
@@ -330,57 +332,56 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 	if err != nil {
 		return nil, err
 	}
-	if req.ProductID == uuid.Nil {
-		return nil, fmt.Errorf("product_id required")
+	if req.ProductID.IsZero() {
+		return nil, apperr.Invalidf("product_id required")
 	}
 	// CUR-6: canonicalise at the price WRITE boundary. ValidateCurrency below
 	// is case-insensitive, so without this a caller-supplied "usd" validated
 	// fine and then failed the prices_currency_shape CHECK at INSERT.
 	req.Currency = money.NormalizeCurrency(req.Currency)
 	if req.UnitAmount < 0 {
-		return nil, fmt.Errorf("unit_amount must be non-negative")
+		return nil, apperr.Invalidf("unit_amount must be non-negative")
 	}
 	if req.Currency == "" {
-		return nil, fmt.Errorf("currency required")
+		return nil, apperr.Invalidf("currency required")
 	}
 	// #622 access window: a finite window must be positive; auto_renew needs one.
 	if req.AccessDurationHours != nil && *req.AccessDurationHours <= 0 {
-		return nil, fmt.Errorf("access_duration_hours must be positive (omit for indefinite)")
+		return nil, apperr.Invalidf("access_duration_hours must be positive (omit for indefinite)")
 	}
 	if req.AutoRenew && req.AccessDurationHours == nil {
-		return nil, fmt.Errorf("auto_renew requires a finite access_duration_hours")
+		return nil, apperr.Invalidf("auto_renew requires a finite access_duration_hours")
 	}
 	// #622 trial: both-or-neither; non-negative amount (0 = free trial); positive
 	// period; only on an auto-renewing price (there is a "then recurring" part).
 	if (req.TrialUnitAmount == nil) != (req.TrialDurationHours == nil) {
-		return nil, fmt.Errorf("trial_unit_amount and trial_duration_hours must be set together")
+		return nil, apperr.Invalidf("trial_unit_amount and trial_duration_hours must be set together")
 	}
 	if req.TrialUnitAmount != nil {
 		if *req.TrialUnitAmount < 0 {
-			return nil, fmt.Errorf("trial_unit_amount must be >= 0 (0 = free trial)")
+			return nil, apperr.Invalidf("trial_unit_amount must be >= 0 (0 = free trial)")
 		}
 		if *req.TrialDurationHours <= 0 {
-			return nil, fmt.Errorf("trial_duration_hours must be positive")
+			return nil, apperr.Invalidf("trial_duration_hours must be positive")
 		}
 		if !req.AutoRenew {
-			return nil, fmt.Errorf("trial pricing requires auto_renew")
+			return nil, apperr.Invalidf("trial pricing requires auto_renew")
 		}
 	}
 	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
-		return nil, err
+		return nil, apperr.Invalidf("%v", err)
 	}
 
-	// Validate product exists.
-	product, err := products.GetByID(ctx, req.ProductID)
+	product, err := products.GetByID(ctx, req.ProductID.UUID())
 	if err != nil {
-		return nil, fmt.Errorf("product not found")
+		return nil, productLookup(err)
 	}
 
 	// #662: the price id is a pure function of its immutable financial tuple —
 	// exactly the unique_prices_product_amount_window columns. A reprice hashes
 	// to a NEW id (the archived old row keeps its own); equal terms always hash
 	// equal, so the id can never violate that unique constraint.
-	priceID := priceDeterministicID(req.ProductID, req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
+	priceID := priceDeterministicID(req.ProductID.UUID(), req.UnitAmount, req.Currency, req.AccessDurationHours, req.AutoRenew, req.TrialUnitAmount, req.TrialDurationHours)
 
 	rails, providerStates, pending, err := s.resolveProviders(ctx, product, req, priceID)
 	if err != nil {
@@ -446,7 +447,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 		price = &models.Price{
 			ID:                  priceID,
 			MerchantID:          tid.UUID(),
-			ProductID:           req.ProductID,
+			ProductID:           req.ProductID.UUID(),
 			Archived:            req.Archived,
 			Amount:              req.UnitAmount,
 			Currency:            req.Currency,
@@ -460,7 +461,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 			UpdatedAt:           now,
 		}
 		if err := prices.Create(ctx, price); err != nil {
-			return nil, err
+			return nil, catalogWrite(err)
 		}
 	}
 
@@ -504,7 +505,7 @@ func (s *Service) CreatePrice(ctx context.Context, req CreatePriceRequest) (*Cat
 // PSP entirely, supply an empty inner map for it and set ReplacePSPLinks=true.
 type UpdatePriceRequest = openrails.UpdatePriceRequest
 
-func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req UpdatePriceRequest) (*CatalogPrice, error) {
+func (s *Service) UpdatePrice(ctx context.Context, id openrails.PriceID, req UpdatePriceRequest) (*CatalogPrice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -515,9 +516,10 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 	if err != nil {
 		return nil, err
 	}
-	if priceID == uuid.Nil {
-		return nil, fmt.Errorf("price_id required")
+	if id.IsZero() {
+		return nil, apperr.Invalidf("price_id required")
 	}
+	priceID := id.UUID()
 	// Declarative PSP link rotation. ReplacePSPLinks=true overwrites the
 	// entire psp_links map; otherwise the supplied entries are merged
 	// into the existing map (partial PATCH). Empty inner maps clear a provider.
@@ -529,7 +531,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 		// stored.
 		existing, getErr := prices.GetByID(ctx, priceID)
 		if getErr != nil {
-			return nil, getErr
+			return nil, priceLookup(getErr)
 		}
 		pctx, ctxErr := s.priceLinkContext(ctx, existing)
 		if ctxErr != nil {
@@ -567,7 +569,7 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 				}
 			}
 			if !ok {
-				return nil, fmt.Errorf("unknown PSP %q: not a rail or a declared PSP key", psp)
+				return nil, apperr.Invalidf("unknown PSP %q: not a rail or a declared PSP key", psp)
 			}
 			ids, attachErr := adapter.Attach(ctx, normalized, pctx)
 			if errors.Is(attachErr, errPendingManualLink) || errors.Is(attachErr, errRemoteWritesDisabled) {
@@ -596,17 +598,17 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 			next[psp] = ids
 		}
 		if err := prices.UpdatePSPLinks(ctx, priceID, next); err != nil {
-			return nil, err
+			return nil, priceLookup(err)
 		}
 	}
 	if req.Archived != nil {
 		if err := prices.SetArchived(ctx, priceID, *req.Archived); err != nil {
-			return nil, err
+			return nil, priceLookup(err)
 		}
 	}
 	updated, err := prices.GetByID(ctx, priceID)
 	if err != nil {
-		return nil, err
+		return nil, priceLookup(err)
 	}
 
 	// Propagate mutable changes to every attached provider via its adapter.
@@ -639,9 +641,9 @@ func (s *Service) UpdatePrice(ctx context.Context, priceID uuid.UUID, req Update
 // values.
 func priceToCatalogPrice(p *models.Price) *CatalogPrice {
 	cp := &CatalogPrice{
-		ID:                  p.ID,
+		ID:                  openrails.PriceID(p.ID),
 		Key:                 p.Key,
-		ProductID:           p.ProductID,
+		ProductID:           openrails.ProductID(p.ProductID),
 		Archived:            p.Archived,
 		UnitAmount:          p.Amount,
 		Currency:            p.Currency,

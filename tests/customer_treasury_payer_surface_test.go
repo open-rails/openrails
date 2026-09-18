@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -130,7 +132,7 @@ func TestCustomerTreasuryPayerSurface_HTTPFullLoopAndScoping(t *testing.T) {
 	// --- PUT collection-payment-method: gated by customer:billing:update and
 	// refuses a method the customer payer does not own. ---
 	resp = requestCustomerTreasuryJSON(t, srv, http.MethodPut, customerPath("/collection-payment-method"), map[string]any{
-		"currency": currency, "payment_method_id": uuid.NewString(),
+		"currency": currency, "payment_method_id": openrails.PaymentMethodID(uuid.New()).String(),
 	})
 	require.Equal(t, http.StatusBadRequest, resp.status, resp.body)
 	require.Contains(t, resp.body, "not eligible for invoice collection")
@@ -166,7 +168,7 @@ func TestCustomerTreasuryPayerSurface_PermissionSplit(t *testing.T) {
 		method, path string
 		body         any
 	}{
-		{http.MethodPut, "/collection-payment-method", map[string]any{"currency": "USD", "payment_method_id": uuid.NewString()}},
+		{http.MethodPut, "/collection-payment-method", map[string]any{"currency": "USD", "payment_method_id": openrails.PaymentMethodID(uuid.New()).String()}},
 		{http.MethodGet, "/payment-methods", nil},
 		{http.MethodPost, "/checkout", map[string]any{"payment": map[string]any{"rail": "stripe"}}},
 		{http.MethodPut, "/spend-delegations", map[string]any{"delegations": []any{}}},

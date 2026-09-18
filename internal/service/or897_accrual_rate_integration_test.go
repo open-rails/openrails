@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/modules/admission"
@@ -166,7 +167,7 @@ func TestOr897_DelinquencyGraceIsReadFromTheBoundPolicy(t *testing.T) {
 	slow := or897RatePayer(t, ctx, ms, pool)
 	fast := or897RatePayer(t, ctx, ms, pool)
 	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{
-		PolicyName: "chase_fast", CustomerID: fast.UUID().String(),
+		PolicyName: "chase_fast", CustomerID: openrails.CustomerID(fast.UUID()),
 	}))
 
 	// Identical debt, identical age: 10 days overdue.
@@ -276,7 +277,7 @@ func TestOr897_CollectionThresholdIsReadFromTheBoundPolicy(t *testing.T) {
 	billed := or897RatePayer(t, ctx, ms, pool)
 	unbilled := or897RatePayer(t, ctx, ms, pool)
 	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{
-		PolicyName: "bill_eagerly", CustomerID: billed.UUID().String(),
+		PolicyName: "bill_eagerly", CustomerID: openrails.CustomerID(billed.UUID()),
 	}))
 	t.Cleanup(func() {
 		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.invoices WHERE customer_id = ANY($1)",

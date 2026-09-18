@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
-	"github.com/open-rails/openrails/pkg/api"
 )
 
 // Active-entitlements SELF read (issue #245). #528 retired the admin
@@ -19,15 +19,16 @@ import (
 // keys). The openrails.entitlements window ledger is the source of truth.
 
 // activeEntitlement is one active entitlement window: the entitlement string
-// (lookup_key) plus its window/source fields.
+// (lookup_key) plus its window/source fields. source_id is the source's own
+// wire id (openrails.SourceRef), as on EntitlementRecord.
 type activeEntitlement struct {
 	ID         uuid.UUID                    `json:"id"`
-	CustomerID string                       `json:"customer_id"`
+	CustomerID openrails.CustomerID         `json:"customer_id"`
 	LookupKey  string                       `json:"lookup_key"`
 	StartAt    time.Time                    `json:"start_at"`
 	EndAt      *time.Time                   `json:"end_at,omitempty"`
 	SourceType models.EntitlementSourceType `json:"source_type"`
-	SourceID   *uuid.UUID                   `json:"source_id,omitempty"`
+	SourceID   string                       `json:"source_id,omitempty"`
 }
 
 // SelfGetActiveEntitlements handles the delegated self surface read. It derives
@@ -57,15 +58,18 @@ func SelfGetActiveEntitlements(r *httprequest.Request) {
 	}
 	items := make([]activeEntitlement, 0, len(windows))
 	for _, w := range windows {
-		items = append(items, activeEntitlement{
+		item := activeEntitlement{
 			ID:         w.ID,
-			CustomerID: w.CustomerID.String(),
+			CustomerID: openrails.CustomerID(w.CustomerID),
 			LookupKey:  w.Entitlement,
 			StartAt:    w.StartAt,
 			EndAt:      w.EndAt,
 			SourceType: w.SourceType,
-			SourceID:   w.SourceID,
-		})
+		}
+		if w.SourceID != nil {
+			item.SourceID = openrails.SourceRef(string(w.SourceType), w.SourceID.String())
+		}
+		items = append(items, item)
 	}
 	// Stripe-shaped list envelope: object=list, has_more, data[].
 	r.JSON(http.StatusOK, map[string]any{
@@ -93,8 +97,8 @@ type effectiveTierBody struct {
 }
 
 type effectiveTierRef struct {
-	ID  string `json:"id"`
-	Key string `json:"key"`
+	ID  openrails.ProductID `json:"id"`
+	Key string              `json:"key"`
 }
 
 // GetMyTier resolves THE effective tier for the authenticated user within one
@@ -135,7 +139,7 @@ func GetMyTier(r *httprequest.Request) {
 			DisplayName: tier.ProductDisplayName,
 			TierRank:    tier.TierRank,
 			Product: effectiveTierRef{
-				ID:  api.FormatProductID(tier.ProductID),
+				ID:  openrails.ProductID(tier.ProductID),
 				Key: tier.ProductKey,
 			},
 		}

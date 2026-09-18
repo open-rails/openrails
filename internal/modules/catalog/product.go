@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
@@ -12,10 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 // ErrProductTierGroupInUse requires an explicit product migration instead of regrouping live subscriptions.
-var ErrProductTierGroupInUse = errors.New("product tier group cannot change while subscriptions are live")
+var ErrProductTierGroupInUse = apperr.New(http.StatusConflict, "product_tier_group_in_use", "product tier group cannot change while subscriptions are live")
 
 type ProductService struct {
 	db *db.DB

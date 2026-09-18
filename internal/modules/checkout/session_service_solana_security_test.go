@@ -2,8 +2,9 @@ package checkout
 
 import (
 	"context"
-	"github.com/open-rails/openrails/internal/railresolve"
 	"testing"
+
+	"github.com/open-rails/openrails/internal/railresolve"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/config"

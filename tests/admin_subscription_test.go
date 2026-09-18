@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -123,7 +125,7 @@ func TestAdminCancelSubscriptionNotFound(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST",
-		fmt.Sprintf("/v1/merchant/subscriptions/%s/cancel", uuid.New().String()),
+		fmt.Sprintf("/v1/merchant/subscriptions/%s/cancel", openrails.SubscriptionID(uuid.New()).String()),
 		strings.NewReader(`{"reason":"regression check"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+merchantDelegatedTestToken)

@@ -32,6 +32,26 @@ type serviceDepositRequest = openrails.DepositCreditsRequest
 
 type serviceCaptureRequest = openrails.CaptureRequest
 
+// servicePayer converts a typed wire customer id to the engine's payer
+// identity; the zero id is nil (absent).
+func servicePayer(id openrails.CustomerID) *billingidentity.CustomerID {
+	if id.IsZero() {
+		return nil
+	}
+	payer := billingidentity.CustomerID(id)
+	return &payer
+}
+
+// customerIDParam reads a plain-UUID customer id from a path or query value;
+// anything unparseable is the zero id, which callers refuse.
+func customerIDParam(raw string) openrails.CustomerID {
+	id, err := openrails.ParseCustomerID(raw)
+	if err != nil {
+		return openrails.CustomerID{}
+	}
+	return id
+}
+
 func parseServiceCustomerID(raw string) (*billingidentity.CustomerID, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -145,7 +165,7 @@ func ServiceGetCreditsBalance(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(serviceBalanceResponse{
-		CustomerID:            snap.CustomerID.String(),
+		CustomerID:            openrails.CustomerID(snap.CustomerID),
 		Currency:              snap.Currency,
 		BillingMode:           snap.BillingMode,
 		BalanceAmount:         snap.BalanceAmount,
@@ -177,11 +197,11 @@ type serviceTxnResponse struct {
 }
 
 type serviceUsageRollupRequest struct {
-	CustomerID string    `json:"customer_id" binding:"required"`
-	Currency   string    `json:"currency"`
-	From       time.Time `json:"from" binding:"required"` // RFC3339, inclusive
-	To         time.Time `json:"to" binding:"required"`   // RFC3339, exclusive
-	GroupBy    string    `json:"group_by" binding:"required"`
+	CustomerID openrails.CustomerID `json:"customer_id"`
+	Currency   string               `json:"currency"`
+	From       time.Time            `json:"from" binding:"required"` // RFC3339, inclusive
+	To         time.Time            `json:"to" binding:"required"`   // RFC3339, exclusive
+	GroupBy    string               `json:"group_by" binding:"required"`
 }
 
 type serviceRecordUsageRequest = openrails.UsageReport
@@ -199,8 +219,8 @@ func ServiceRecordUsage(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusBadRequest, "amount must be >= 0")
 		return
 	}
-	payer, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil || payer == nil {
+	payer := servicePayer(req.CustomerID)
+	if payer == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
 	}
@@ -295,11 +315,7 @@ func ServiceUsageRollup(r *httprequest.Request) {
 		r.ErrorJSON(http.StatusInternalServerError, "billing service unavailable")
 		return
 	}
-	tenantSubjectID, err := parseServiceCustomerID(req.CustomerID)
-	if err != nil {
-		r.ErrorJSON(http.StatusBadRequest, err.Error())
-		return
-	}
+	tenantSubjectID := servicePayer(req.CustomerID)
 	if tenantSubjectID == nil {
 		r.ErrorJSON(http.StatusBadRequest, "customer_id required")
 		return
@@ -378,15 +394,10 @@ func ServiceDepositCredits(r *httprequest.Request) {
 		Description: description,
 	})
 	if err != nil {
-		// #483: an unknown/invalid currency is a client error (parity with local), not a 500.
-		if strings.Contains(err.Error(), "unknown currency") {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
-		}
 		if serviceIdempotencyConflict(r, err) {
 			return
 		}
-		r.ErrorJSON(http.StatusInternalServerError, "deposit failed")
+		writeRefusal(r, err, "deposit failed")
 		return
 	}
 	r.SuccessJSON(trx)
@@ -397,13 +408,13 @@ func ServiceDepositCredits(r *httprequest.Request) {
 // structural identity — unique per (merchant, customer) in the database);
 // source is a descriptive label and deliberately NOT part of the key.
 type adminGrantCreditsRequest struct {
-	Invoker     string  `json:"invoker"`
-	Currency    string  `json:"currency"`
-	Amount      int64   `json:"amount,string" binding:"required"`
-	Source      string  `json:"source"`
-	SourceID    string  `json:"source_id" binding:"required"`
-	ExpiresAt   *int64  `json:"expires_at"`
-	Description *string `json:"description"`
+	Invoker     string     `json:"invoker"`
+	Currency    string     `json:"currency"`
+	Amount      int64      `json:"amount,string" binding:"required"`
+	Source      string     `json:"source"`
+	SourceID    string     `json:"source_id" binding:"required"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	Description *string    `json:"description"`
 }
 
 // AdminGrantCredits is POST /v1/merchant/customers/{customer_id}/credits
@@ -449,7 +460,7 @@ func AdminGrantCredits(r *httprequest.Request) {
 	}
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil {
-		v := time.Unix(*req.ExpiresAt, 0).UTC()
+		v := req.ExpiresAt.UTC()
 		expiresAt = &v
 	}
 	trx, err := svc.DepositCredits(r.Request.Context(), billingservice.DepositCreditsRequest{
@@ -462,14 +473,10 @@ func AdminGrantCredits(r *httprequest.Request) {
 		Description: req.Description,
 	})
 	if err != nil {
-		if strings.Contains(err.Error(), "unknown currency") {
-			r.ErrorJSON(http.StatusBadRequest, err.Error())
-			return
-		}
 		if serviceIdempotencyConflict(r, err) {
 			return
 		}
-		r.ErrorJSON(http.StatusInternalServerError, "credit grant failed")
+		writeRefusal(r, err, "credit grant failed")
 		return
 	}
 	r.SuccessJSON(trx)

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-
-	"github.com/google/uuid"
 )
 
 type CatalogPage[T any] struct {
@@ -28,7 +26,7 @@ type ProductFilter struct {
 // live prices only; true lists archived prices only.
 type PriceFilter struct {
 	PageOptions
-	ProductID *uuid.UUID
+	ProductID ProductID
 	Archived  *bool
 	Currency  string
 	Type      string
@@ -41,8 +39,8 @@ func (c *Client) CreateProduct(ctx context.Context, request CreateProductRequest
 	}
 	return &out, nil
 }
-func (c *Client) GetProduct(ctx context.Context, id uuid.UUID) (*CatalogProduct, error) {
-	product, err := requireUUID("product_id", id)
+func (c *Client) GetProduct(ctx context.Context, id ProductID) (*CatalogProduct, error) {
+	product, err := requireTypedID("product_id", id)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +73,8 @@ func (c *Client) ListProducts(ctx context.Context, filter ProductFilter) (*Catal
 	}
 	return &out, nil
 }
-func (c *Client) UpdateProduct(ctx context.Context, id uuid.UUID, request UpdateProductRequest) (*CatalogProduct, error) {
-	product, err := requireUUID("product_id", id)
+func (c *Client) UpdateProduct(ctx context.Context, id ProductID, request UpdateProductRequest) (*CatalogProduct, error) {
+	product, err := requireTypedID("product_id", id)
 	if err != nil {
 		return nil, err
 	}
@@ -93,8 +91,8 @@ func (c *Client) CreatePrice(ctx context.Context, request CreatePriceRequest) (*
 	}
 	return &out, nil
 }
-func (c *Client) GetPrice(ctx context.Context, id uuid.UUID) (*CatalogPrice, error) {
-	price, err := requireUUID("price_id", id)
+func (c *Client) GetPrice(ctx context.Context, id PriceID) (*CatalogPrice, error) {
+	price, err := requireTypedID("price_id", id)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +120,7 @@ func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPa
 	}
 	q.Set("currency", normalizeCurrency(filter.Currency))
 	q.Set("type", filter.Type)
-	if filter.ProductID != nil {
+	if !filter.ProductID.IsZero() {
 		q.Set("product_id", filter.ProductID.String())
 	}
 	var out CatalogPage[CatalogPrice]
@@ -131,8 +129,8 @@ func (c *Client) ListPrices(ctx context.Context, filter PriceFilter) (*CatalogPa
 	}
 	return &out, nil
 }
-func (c *Client) UpdatePrice(ctx context.Context, id uuid.UUID, request UpdatePriceRequest) (*CatalogPrice, error) {
-	price, err := requireUUID("price_id", id)
+func (c *Client) UpdatePrice(ctx context.Context, id PriceID, request UpdatePriceRequest) (*CatalogPrice, error) {
+	price, err := requireTypedID("price_id", id)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +143,8 @@ func (c *Client) UpdatePrice(ctx context.Context, id uuid.UUID, request UpdatePr
 
 // SetPriceKey moves a price onto key in place. A live price already holding
 // key is archived first.
-func (c *Client) SetPriceKey(ctx context.Context, id uuid.UUID, key string) (*CatalogPrice, error) {
-	price, err := requireUUID("price_id", id)
+func (c *Client) SetPriceKey(ctx context.Context, id PriceID, key string) (*CatalogPrice, error) {
+	price, err := requireTypedID("price_id", id)
 	if err != nil {
 		return nil, err
 	}
@@ -165,20 +163,20 @@ func (c *Client) SetPriceKey(ctx context.Context, id uuid.UUID, key string) (*Ca
 
 // EnsureUsageProduct preserves an existing catalog definition and handles
 // concurrent bootstrap through the same catalog commands in every deployment.
-func (c *Client) EnsureUsageProduct(ctx context.Context, key, name string) (uuid.UUID, error) {
+func (c *Client) EnsureUsageProduct(ctx context.Context, key, name string) (ProductID, error) {
 	product, err := c.GetProductByKey(ctx, key)
 	if err == nil {
 		return product.ID, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
-		return uuid.Nil, err
+		return ProductID{}, err
 	}
 	product, err = c.CreateProduct(ctx, CreateProductRequest{Key: key, DisplayName: name})
 	if errors.Is(err, ErrConflict) {
 		product, err = c.GetProductByKey(ctx, key)
 	}
 	if err != nil {
-		return uuid.Nil, err
+		return ProductID{}, err
 	}
 	return product.ID, nil
 }

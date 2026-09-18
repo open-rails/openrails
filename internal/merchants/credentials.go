@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	"github.com/open-rails/openrails/pkg/merchant"
 	log "github.com/sirupsen/logrus"
@@ -939,7 +940,7 @@ func (s *Service) PutCredential(ctx context.Context, id merchant.ID, name, value
 	}
 	name = cleanSecretName(name)
 	if !SecretWritable(name) {
-		return Secret{}, fmt.Errorf("merchants: unknown merchant secret %q", name)
+		return Secret{}, apperr.Invalidf("merchants: unknown merchant secret %q", name)
 	}
 	if err := validateSecretValueLocal(name, value); err != nil {
 		return Secret{}, fmt.Errorf("merchants: validate merchant secret %q: %w", name, err)

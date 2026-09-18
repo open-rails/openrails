@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
@@ -33,7 +35,7 @@ func TestAdminOffChannelPaymentCreatesPaymentAndEntitlements(t *testing.T) {
 	suite.SetMockClock(fixedNow)
 
 	body, err := json.Marshal(map[string]any{
-		"price_id":          lifetimePriceID.String(),
+		"price_id":          openrails.PriceID(lifetimePriceID).String(),
 		"transaction_id":    "cash-rcpt-" + uuid.NewString()[:8],
 		"amount":            "15000000",
 		"currency":          "usd",

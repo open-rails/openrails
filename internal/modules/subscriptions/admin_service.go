@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -112,11 +113,24 @@ func (s *AdminSubscriptionService) GetAllSubscriptions(ctx context.Context, quer
 	return responses, total, nil
 }
 
-// GetSubscriptionByID retrieves a specific subscription with full details (admin)
-func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subscriptionID uuid.UUID) (*AdminSubscriptionResponse, error) {
+// requireSubscription loads a subscription or returns the typed not-found
+// refusal; raw driver errors never travel beneath it.
+func (s *AdminSubscriptionService) requireSubscription(ctx context.Context, subscriptionID uuid.UUID) (*models.Subscription, error) {
 	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
 	if err != nil {
-		return nil, fmt.Errorf("subscription not found: %w", err)
+		if db.IsNotFound(err) {
+			return nil, ErrSubscriptionNotFound
+		}
+		return nil, fmt.Errorf("load subscription %s: %w", subscriptionID, err)
+	}
+	return subscription, nil
+}
+
+// GetSubscriptionByID retrieves a specific subscription with full details (admin)
+func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subscriptionID uuid.UUID) (*AdminSubscriptionResponse, error) {
+	subscription, err := s.requireSubscription(ctx, subscriptionID)
+	if err != nil {
+		return nil, err
 	}
 
 	response := &AdminSubscriptionResponse{
@@ -151,9 +165,9 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 
 // UpdateSubscription updates a subscription (admin)
 func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subscriptionID uuid.UUID, updates map[string]any) error {
-	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
+	subscription, err := s.requireSubscription(ctx, subscriptionID)
 	if err != nil {
-		return fmt.Errorf("subscription not found: %w", err)
+		return err
 	}
 
 	// Apply allowed updates
@@ -202,13 +216,13 @@ func (s *AdminSubscriptionService) UpdateSubscription(ctx context.Context, subsc
 // execute leg confirms the NMI subscription is gone), and an ambiguous
 // provider outcome parks for verification instead of lying.
 func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess bool) error {
-	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
+	subscription, err := s.requireSubscription(ctx, subscriptionID)
 	if err != nil {
-		return fmt.Errorf("subscription not found: %w", err)
+		return err
 	}
 
 	if subscription.Status != models.StatusActive {
-		return fmt.Errorf("subscription is not active")
+		return ErrSubscriptionNotActive
 	}
 
 	now := s.now()
@@ -255,7 +269,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 	case subscription.Rail == models.RailSolana:
 		return ErrSolanaCancelNeedsWalletSignature
 	default:
-		return fmt.Errorf("cancel operation not supported for rail '%s'", subscription.Rail)
+		return fmt.Errorf("%w: %s", ErrCancelUnsupportedOnRail, subscription.Rail)
 	}
 
 	cancelType := models.CancelTypeMerchant
@@ -299,7 +313,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
-		Data:       map[string]any{"reason": string(PremiumEndReasonAdmin)},
+		Data:       openrails.NotificationData{Reason: string(PremiumEndReasonAdmin)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{
@@ -320,13 +334,13 @@ func (s *AdminSubscriptionService) ExtendSubscription(ctx context.Context, subsc
 
 // ExtendSubscriptionByDuration extends a subscription period by a duration (admin)
 func (s *AdminSubscriptionService) ExtendSubscriptionByDuration(ctx context.Context, subscriptionID uuid.UUID, duration time.Duration) error {
-	subscription, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
+	subscription, err := s.requireSubscription(ctx, subscriptionID)
 	if err != nil {
-		return fmt.Errorf("subscription not found: %w", err)
+		return err
 	}
 
 	if subscription.Status != models.StatusActive {
-		return fmt.Errorf("subscription is not active")
+		return ErrSubscriptionNotActive
 	}
 
 	if subscription.CurrentPeriodEndsAt != nil {
@@ -379,10 +393,7 @@ func (s *AdminSubscriptionService) SendManualNotification(ctx context.Context, u
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		EventType:  eventType,
-		Data: map[string]any{
-			"message": message,
-			"source":  "admin_manual",
-		},
+		Data:       openrails.NotificationData{Message: message, Source: "admin_manual"},
 	}
 
 	return s.NotificationService.Create(ctx, notification)

@@ -10,9 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -133,7 +136,7 @@ func (f *noticeWindowFixture) bump(amount int64) billingservice.CatalogPrice {
 
 func (f *noticeWindowFixture) reprice(toPrice string, effectiveAt time.Time, acknowledge bool) (int, []byte) {
 	f.t.Helper()
-	return requestJSON(f.t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/subscriptions/"+f.subID.String()+"/reprice", f.token, map[string]any{
+	return requestJSON(f.t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/subscriptions/"+openrails.SubscriptionID(f.subID).String()+"/reprice", f.token, map[string]any{
 		"to_price": toPrice, "effective_at": effectiveAt, "acknowledge_short_notice": acknowledge,
 	})
 }
@@ -153,10 +156,10 @@ func TestStandaloneMerchantRepriceNoticeWindowHTTP_IncreaseInsideWindowRefused(t
 	require.Equal(t, "reprice_notice_window_violation", envelope.Error.Code)
 
 	// Fail-closed: nothing was scheduled.
-	listStatus, listBody := requestJSON(t, http.MethodGet, f.surface.BaseURL+"/v1/merchant/reprices?subscription_id="+f.subID.String(), f.token, nil)
+	listStatus, listBody := requestJSON(t, http.MethodGet, f.surface.BaseURL+"/v1/merchant/reprices?subscription_id="+openrails.SubscriptionID(f.subID).String(), f.token, nil)
 	require.Equal(t, http.StatusOK, listStatus, string(listBody))
 	var list struct {
-		Items []*models.SubscriptionReprice `json:"items"`
+		Items []subscriptions.SubscriptionRepriceView `json:"items"`
 	}
 	require.NoError(t, json.Unmarshal(listBody, &list))
 	require.Empty(t, list.Items)
@@ -171,7 +174,7 @@ func TestStandaloneMerchantRepriceNoticeWindowHTTP_DecreaseExempt(t *testing.T) 
 
 	status, body := f.reprice(v2.Key, time.Now().UTC().Add(24*time.Hour), false)
 	require.Equal(t, http.StatusCreated, status, string(body))
-	var rr models.SubscriptionReprice
+	var rr subscriptions.SubscriptionRepriceView
 	require.NoError(t, json.Unmarshal(body, &rr))
 	require.Equal(t, models.RepriceStatusScheduled, rr.Status)
 	require.False(t, rr.AcknowledgedShortNotice, "a decrease never needs the override")
@@ -187,7 +190,7 @@ func TestStandaloneMerchantRepriceNoticeWindowHTTP_AcknowledgeOverride_AuditEvid
 
 	status, body := f.reprice(v2.Key, time.Now().UTC().Add(24*time.Hour), true)
 	require.Equal(t, http.StatusCreated, status, string(body))
-	var rr models.SubscriptionReprice
+	var rr subscriptions.SubscriptionRepriceView
 	require.NoError(t, json.Unmarshal(body, &rr))
 	require.Equal(t, models.RepriceStatusScheduled, rr.Status)
 	require.True(t, rr.AcknowledgedShortNotice, "the override must be visible on the creation response")
@@ -195,7 +198,7 @@ func TestStandaloneMerchantRepriceNoticeWindowHTTP_AcknowledgeOverride_AuditEvid
 	// Independently re-fetch — durable audit evidence, not just an echo.
 	getStatus, getBody := requestJSON(t, http.MethodGet, f.surface.BaseURL+"/v1/merchant/reprices/"+rr.ID.String(), f.token, nil)
 	require.Equal(t, http.StatusOK, getStatus, string(getBody))
-	var fetched models.SubscriptionReprice
+	var fetched subscriptions.SubscriptionRepriceView
 	require.NoError(t, json.Unmarshal(getBody, &fetched))
 	require.True(t, fetched.AcknowledgedShortNotice, "audit evidence persisted on the row, independently re-readable")
 }
@@ -213,7 +216,7 @@ func TestStandaloneMerchantRepriceNoticeWindowHTTP_MerchantConfiguredWindowRespe
 	// merchant's configured 2-day window — no acknowledge needed.
 	status, body := f.reprice(v2.Key, time.Now().UTC().Add(3*24*time.Hour), false)
 	require.Equal(t, http.StatusCreated, status, string(body))
-	var rr models.SubscriptionReprice
+	var rr subscriptions.SubscriptionRepriceView
 	require.NoError(t, json.Unmarshal(body, &rr))
 	require.False(t, rr.AcknowledgedShortNotice)
 
@@ -222,7 +225,7 @@ func TestStandaloneMerchantRepriceNoticeWindowHTTP_MerchantConfiguredWindowRespe
 	// value on every call, not a value cached at fixture setup.
 	f.setNoticeWindowDays(10)
 	sub2 := seedRepriceSubscription(t, f.ctx, f.h, f.v1.ProductID, f.v1.ID)
-	refuseStatus, refuseBody := requestJSON(t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/subscriptions/"+sub2.String()+"/reprice", f.token, map[string]any{
+	refuseStatus, refuseBody := requestJSON(t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/subscriptions/"+openrails.SubscriptionID(sub2).String()+"/reprice", f.token, map[string]any{
 		"to_price": v2.Key, "effective_at": time.Now().UTC().Add(3 * 24 * time.Hour), "acknowledge_short_notice": false,
 	})
 	require.Equal(t, http.StatusUnprocessableEntity, refuseStatus, string(refuseBody))

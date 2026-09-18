@@ -54,18 +54,18 @@ type CheckoutPSPConfig struct {
 }
 
 type CheckoutCustomerIdentity struct {
-	ID            string `json:"id"`
-	VerifiedEmail string `json:"verified_email"`
-	Username      string `json:"username"`
+	ID            CustomerID `json:"id"`
+	VerifiedEmail string     `json:"verified_email"`
+	Username      string     `json:"username"`
 }
 
 // CreateCheckoutSessionRequest creates a purchase for a merchant-owned customer.
 // IdempotencyKey must identify this checkout attempt across retries.
 type CreateCheckoutSessionRequest struct {
 	Customer       CheckoutCustomerIdentity `json:"customer"`
-	SubscriptionID string                   `json:"subscription_id,omitempty"`
-	NewPriceID     string                   `json:"new_price_id,omitempty"`
-	PriceID        string                   `json:"price_id"`
+	SubscriptionID SubscriptionID           `json:"subscription_id,omitzero"`
+	NewPriceID     PriceID                  `json:"new_price_id,omitzero"`
+	PriceID        PriceID                  `json:"price_id"`
 	Mode           string                   `json:"mode"` // "one_off" or "subscription" (optional, inferred from price)
 	Payment        CheckoutPayment          `json:"payment"`
 	Metadata       map[string]string        `json:"metadata"`
@@ -75,9 +75,9 @@ type CreateCheckoutSessionRequest struct {
 }
 
 type CheckoutPayment struct {
-	Rail            string `json:"rail"`              // "nmi", "ccbill", "solana", "stripe"
-	PaymentMethodID string `json:"payment_method_id"` // For returning customers with saved payment methods
-	PaymentToken    string `json:"payment_token"`     // For new card tokenization (NMI Collect.js)
+	Rail            string          `json:"rail"`                       // "nmi", "ccbill", "solana", "stripe"
+	PaymentMethodID PaymentMethodID `json:"payment_method_id,omitzero"` // For returning customers with saved payment methods
+	PaymentToken    string          `json:"payment_token"`              // For new card tokenization (NMI Collect.js)
 
 	// Solana-specific
 	TokenSymbol string `json:"token_symbol"` // e.g., "USDC", "SOL"
@@ -107,17 +107,17 @@ type CheckoutPayment struct {
 // currency units (micros for fiat), encoded as a decimal string over HTTP;
 // timestamps are RFC3339 instants.
 type CheckoutSession struct {
-	ID             string            `json:"id"`
+	ID             CheckoutSessionID `json:"id"`
 	Status         string            `json:"status"` // "created", "requires_action", "succeeded", "failed", "expired", "canceled"
 	Mode           string            `json:"mode"`   // "subscription", "one_off"
-	PriceID        string            `json:"price_id"`
+	PriceID        PriceID           `json:"price_id"`
 	Amount         int64             `json:"amount,string"`
 	Currency       string            `json:"currency"`
 	PaymentStatus  string            `json:"payment_status"` // "unpaid", "paid", "no_payment_required"
 	ClientSecret   *string           `json:"client_secret"`
 	URL            *string           `json:"url"` // Redirect URL for CCBill/Stripe
-	SubscriptionID *string           `json:"subscription_id"`
-	PaymentID      *string           `json:"payment_id"`
+	SubscriptionID *SubscriptionID   `json:"subscription_id"`
+	PaymentID      *PaymentID        `json:"payment_id"`
 	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
 	CreatedAt      time.Time         `json:"created_at"`
 	Metadata       map[string]string `json:"metadata"`
@@ -125,7 +125,7 @@ type CheckoutSession struct {
 }
 
 type ConfirmCheckoutSessionRequest struct {
-	CustomerID string         `json:"customer_id"`
+	CustomerID CustomerID     `json:"customer_id"`
 	Payment    ConfirmPayment `json:"payment"`
 }
 
@@ -136,10 +136,10 @@ type ConfirmPayment struct {
 }
 
 type EffectiveTier struct {
-	Group       string `json:"group"`
-	Entitlement string `json:"entitlement"`
-	DisplayName string `json:"display_name"`
-	TierRank    int    `json:"tier_rank"`
-	ProductID   string `json:"product_id"`
-	ProductKey  string `json:"product_key"`
+	Group       string    `json:"group"`
+	Entitlement string    `json:"entitlement"`
+	DisplayName string    `json:"display_name"`
+	TierRank    int       `json:"tier_rank"`
+	ProductID   ProductID `json:"product_id"`
+	ProductKey  string    `json:"product_key"`
 }

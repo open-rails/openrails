@@ -212,7 +212,7 @@ func invoicePaymentAttemptToDTO(attempt models.InvoicePaymentAttempt) InvoicePay
 		Currency:        attempt.Currency,
 		Amount:          attempt.Amount,
 		Status:          attempt.Status,
-		PaymentMethodID: attempt.PaymentMethodID,
+		PaymentMethodID: (*openrails.PaymentMethodID)(attempt.PaymentMethodID),
 		Rail:            attempt.Rail,
 		RailPaymentID:   attempt.RailPaymentID,
 		FailureCode:     attempt.FailureCode,
@@ -331,7 +331,7 @@ func (s *Service) RetryInvoiceCollectionIdempotent(ctx context.Context, payer id
 	var out *InvoiceCollectionRetryResult
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		result, err := s.moneyService().RetryInvoiceCollection(ctx, rt.IntentRunner(), payer, money.InvoiceCollectionRetryRequest{
-			InvoiceID: request.InvoiceID, IdempotencyKey: request.IdempotencyKey, PaymentMethodID: request.PaymentMethodID,
+			InvoiceID: request.InvoiceID, IdempotencyKey: request.IdempotencyKey, PaymentMethodID: request.PaymentMethodID.UUID(),
 		})
 		if err != nil {
 			return err
