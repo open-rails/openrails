@@ -32,7 +32,21 @@ func TestResultWireEncoding(t *testing.T) {
 	require.Equal(t, MoneyCell(10), measureCell(t, measureByName["net_revenue"], g))
 	require.Equal(t, int64(4), measureCell(t, measureByName["paying_customers"], g))
 	require.Equal(t, 54.5, measureCell(t, measureByName["ended_membership_days"], g))
-	require.Equal(t, leaf{n: math.MaxInt64}, leaf{n: math.MaxInt64 - 1}.add(leaf{n: 1}), "integer leaves add exactly")
+	sum, err := (leaf{n: math.MaxInt64 - 1}).add(leaf{n: 1})
+	require.NoError(t, err)
+	require.Equal(t, leaf{n: math.MaxInt64}, sum, "integer leaves add exactly")
+}
+
+func TestBalanceLeafSumBounds(t *testing.T) {
+	for _, pair := range [][2]int64{{math.MaxInt64, 1}, {math.MinInt64, -1}} {
+		_, err := (leaf{n: pair[0]}).add(leaf{n: pair[1]})
+		require.ErrorContains(t, err, "does not fit int64")
+	}
+	for _, pair := range [][2]int64{{math.MaxInt64 - 1, 1}, {math.MinInt64 + 1, -1}, {math.MinInt64, math.MaxInt64}} {
+		sum, err := (leaf{n: pair[0]}).add(leaf{n: pair[1]})
+		require.NoError(t, err)
+		require.Equal(t, pair[0]+pair[1], sum.n)
+	}
 }
 
 func measureCell(t *testing.T, m *Measure, g *group) any {
