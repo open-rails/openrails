@@ -18,10 +18,10 @@ var ErrMerchantRestoreConflict = merchants.ErrMerchantRestoreConflict
 // continues allocating its own merchant UUIDs. This registers no provider
 // accounts or credentials; ImportMerchantBilling must still require an empty book.
 func (r *Runtime) RegisterMerchantForRestore(ctx context.Context, id merchant.ID, slug string) (merchant.ID, error) {
-	if r == nil || r.emb == nil || r.emb.App() == nil || r.emb.App().Runtime == nil || r.emb.App().Runtime.DB == nil {
+	if r == nil || r.app == nil || r.app.Runtime == nil || r.app.Runtime.DB == nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: runtime database not initialized")
 	}
-	a := r.emb.App()
+	a := r.app
 	if a.ControlPlane != nil {
 		return merchant.ID{}, fmt.Errorf("openrails embed: attached control plane requires ProvisionMerchantForRestore with destination group authority")
 	}
