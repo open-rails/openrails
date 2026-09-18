@@ -194,7 +194,7 @@ CREATE TABLE IF NOT EXISTS openrails.maintenance_runs (
     error text,
     inventory_manifest jsonb,
     inventory_total_rows bigint,
-    run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' ELSE 'destructive' END) STORED NOT NULL,
+    run_class text GENERATED ALWAYS AS (CASE WHEN kind = 'reconciliation' THEN 'observation' WHEN kind = 'purge_inventory' THEN 'inventory' WHEN kind = 'billing_restore' THEN 'restore' ELSE 'destructive' END) STORED NOT NULL,
     CONSTRAINT maintenance_runs_expected_rows CHECK (expected_rows IS NULL OR expected_rows >= 0),
     CONSTRAINT maintenance_runs_status CHECK (status IN ('running','completed','failed','reversed')),
     CONSTRAINT maintenance_runs_shape CHECK ((
@@ -246,7 +246,7 @@ func TestLifecycleFixtureProviderProvenanceMatchesBaseline(t *testing.T) {
 		{"subscriptions", "psp_id uuid not null"},
 		{"payments", "constraint payments_psp_required_on_rail check (((psp_id is not null) or (rail = any (array['manual'::text, 'admin'::text]))))"},
 		{"rail_intents", "constraint rail_intents_addressed check (((psp_id is not null) or (custodian_id is not null)))"},
-		{"maintenance_runs", "run_class text generated always as (case when kind = 'reconciliation' then 'observation' when kind = 'purge_inventory' then 'inventory' else 'destructive' end) stored not null"},
+		{"maintenance_runs", "run_class text generated always as (case when kind = 'reconciliation' then 'observation' when kind = 'purge_inventory' then 'inventory' when kind = 'billing_restore' then 'restore' else 'destructive' end) stored not null"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.object, func(t *testing.T) {
