@@ -2,11 +2,12 @@ export interface CreditGrant {
   id: string
   customer_id: string
   currency: string
-  amount: number
-  spent_amount: number
-  remaining_amount: number
-  revoked_amount: number
-  expired_amount: number
+  // Native units as exact int64 decimal strings (docs/money-wire.md).
+  amount: string
+  spent_amount: string
+  remaining_amount: string
+  revoked_amount: string
+  expired_amount: string
   state: "active" | "scheduled" | "spent" | "expired" | "revoked" | "terminated"
   source_type: string
   source_id: string
@@ -30,7 +31,7 @@ export interface CreditGrantPage {
 
 export interface CreditGrantInput {
   currency: string
-  amount: number
+  amount: string
   source: "admin"
   source_id: string
   expires_at?: number
@@ -47,7 +48,7 @@ export interface CreditTransactionPage {
   transactions: {
     id: string
     customer_id: string
-    amount: number
+    amount: string
     currency: string
     transaction_type: string
     status: string

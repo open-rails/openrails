@@ -83,7 +83,7 @@ func (s *Service) GetCreditAccount(ctx context.Context, payer identity.CustomerI
 type UsageRow struct {
 	EventType   string           `json:"event_type"`
 	Currency    string           `json:"currency"`
-	TotalAmount int64            `json:"total_amount"`
+	TotalAmount int64            `json:"total_amount,string"`
 	EventCount  int64            `json:"event_count"`
 	Dimensions  map[string]int64 `json:"dimensions"`
 }
