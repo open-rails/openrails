@@ -258,11 +258,21 @@ type lazyMerchantPgxConn struct {
 // don't propagate).
 const lazyMerchantAcquireTimeout = 4 * time.Second
 
-func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgxpool.Conn, error) {
+// get returns the pinned connection, acquiring it on first use. It hands out
+// the underlying *pgx.Conn: a caller still holding it after a re-pin gets
+// "conn closed" from the dead connection, never a released pool handle.
+func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgx.Conn, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.conn != nil {
-		return l.conn, nil
+		if pinned := l.conn.Conn(); !pinned.IsClosed() || !isDetachedWrite(ctx) {
+			return pinned, nil
+		}
+		// A detached write on a pin its caller's cancellation closed
+		// (DetachedWriteContext). Releasing a closed connection destroys it
+		// and frees its pool slot before the re-acquire below.
+		l.conn.Release()
+		l.conn = nil
 	}
 	acqCtx, cancel := context.WithTimeout(ctx, lazyMerchantAcquireTimeout)
 	conn, err := l.pool.Acquire(acqCtx)
@@ -277,7 +287,7 @@ func (l *lazyMerchantPgxConn) get(ctx context.Context) (*pgxpool.Conn, error) {
 		return nil, fmt.Errorf("db: set %s on pgx merchant connection: %w", MerchantGUC, err)
 	}
 	l.conn = conn
-	return l.conn, nil
+	return conn.Conn(), nil
 }
 
 // release resets the GUC and returns the connection to the pool (no-op when
@@ -286,6 +296,13 @@ func (l *lazyMerchantPgxConn) release() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.conn == nil {
+		return
+	}
+	if l.conn.Conn().IsClosed() {
+		// A closed connection carries no session state and the pool destroys it
+		// on release; resetting it would only fail loudly.
+		l.conn.Release()
+		l.conn = nil
 		return
 	}
 	// Background context so release works even after request cancellation.
