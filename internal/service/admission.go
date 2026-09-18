@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -925,13 +926,13 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 			Dimensions: map[string]int64{wastedReportedDimension: in.Amount},
 			Metadata: map[string]any{
 				"reason":                   in.Reason,
-				"reported_amount":          in.Amount,
-				"forgiven_amount":          res.ForgivenAmount,
+				"reported_amount":          strconv.FormatInt(in.Amount, 10),
+				"forgiven_amount":          strconv.FormatInt(res.ForgivenAmount, 10),
 				"policy_currency":          payerPolicyCurrency,
-				"policy_amount":            policyAmount,
-				"policy_chargeable_amount": chargeablePolicy,
+				"policy_amount":            strconv.FormatInt(policyAmount, 10),
+				"policy_chargeable_amount": strconv.FormatInt(chargeablePolicy, 10),
 				"invoker_type":             string(identity.InvokerTypePayer),
-				"chargeable_amount":        chargeable,
+				"chargeable_amount":        strconv.FormatInt(chargeable, 10),
 			},
 		})
 		if err != nil {
@@ -966,9 +967,9 @@ func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*
 		Dimensions: map[string]int64{wastedReportedDimension: in.Amount},
 		Metadata: map[string]any{
 			"reason":          in.Reason,
-			"reported_amount": in.Amount,
+			"reported_amount": strconv.FormatInt(in.Amount, 10),
 			"policy_currency": invokerPolicyCurrency,
-			"policy_amount":   policyAmount,
+			"policy_amount":   strconv.FormatInt(policyAmount, 10),
 			"invoker_type":    strings.TrimSpace(in.InvokerType),
 		},
 	})

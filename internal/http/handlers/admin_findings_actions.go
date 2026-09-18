@@ -427,7 +427,7 @@ func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRe
 		return fmt.Errorf("refund payment %s: %w", paymentID, err)
 	}
 	result["refund_payment_id"] = openrails.PaymentID(paymentID).String()
-	result["refund_amount"] = amount
+	result["refund_amount"] = strconv.FormatInt(amount, 10)
 	if refund != nil {
 		result["refund_id"] = refund.ID.String()
 	}

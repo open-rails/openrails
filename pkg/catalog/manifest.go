@@ -87,7 +87,7 @@ func (p Product) tierRank() int {
 // version chain, independent of row identity.
 type Price struct {
 	Currency   string `json:"currency,omitempty" yaml:"currency,omitempty"`
-	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // micros (millionths of a major unit)
+	UnitAmount int64  `json:"unit_amount,string" yaml:"unit_amount"` // native units at the currency's registered scale
 
 	// Key (#774) is optional; when omitted it auto-defaults to
 	// "<product-key>-<interval>" (see billingservice.PriceIntervalLabel) as
@@ -152,6 +152,6 @@ type Price struct {
 // own price/length, then the Price's recurring terms. Requires the price's
 // auto_renew.
 type PriceTrial struct {
-	UnitAmount int64  `json:"unit_amount" yaml:"unit_amount"` // first-phase price in micros (0 = free trial)
-	Duration   string `json:"duration" yaml:"duration"`       // first-phase length
+	UnitAmount int64  `json:"unit_amount,string" yaml:"unit_amount"` // first-phase price in native units (0 = free trial)
+	Duration   string `json:"duration" yaml:"duration"`              // first-phase length
 }

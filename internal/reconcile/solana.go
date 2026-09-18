@@ -404,10 +404,10 @@ func applyDecodedSubscription(sub *RemoteSubscription, dec *subscriptions.Subscr
 		"delegatee":               dec.Delegatee.String(),
 		"payer":                   dec.Payer.String(),
 		"init_id":                 dec.InitID,
-		"amount":                  dec.Amount, // mint base units
+		"amount":                  strconv.FormatUint(dec.Amount, 10), // mint base units
 		"period_hours":            dec.PeriodHours,
 		"created_at":              dec.CreatedAt,
-		"amount_pulled_in_period": dec.AmountPulledInPeriod,
+		"amount_pulled_in_period": strconv.FormatUint(dec.AmountPulledInPeriod, 10),
 		"current_period_start_ts": dec.CurrentPeriodStartTs,
 		"expires_at_ts":           dec.ExpiresAtTs,
 	}
@@ -448,7 +448,7 @@ func (f *SolanaFetcher) applyPlanAndFiat(ctx context.Context, sub *RemoteSubscri
 			"status":       plan.Status,
 			"plan_id":      plan.PlanID,
 			"mint":         plan.Mint.String(),
-			"amount":       plan.Amount, // mint base units, NOT cents
+			"amount":       strconv.FormatUint(plan.Amount, 10), // mint base units, NOT cents
 			"period_hours": plan.PeriodHours,
 			"end_ts":       plan.EndTs,
 		}
@@ -677,7 +677,7 @@ func (f *SolanaFetcher) fetchSignatures(ctx context.Context, ref SolanaSubscript
 		case subscriptions.KindTransferSubscription:
 			txn.Type = TransactionTypeSale
 			if class.Transfer != nil {
-				raw["amount_base_units"] = class.Transfer.Amount
+				raw["amount_base_units"] = strconv.FormatUint(class.Transfer.Amount, 10)
 				raw["mint"] = class.Transfer.Mint.String()
 				if cents, ok := f.solanaFiatCentsForMint(ctx, class.Transfer.Mint.String(), class.Transfer.Amount); ok {
 					txn.AmountCents = cents
@@ -1017,7 +1017,7 @@ func (f *SolanaFetcher) buildWalletCandidate(ctx context.Context, sig solanaint.
 		if class.Transfer != nil {
 			c.transfer = walletTransfer{Mint: class.Transfer.Mint.String(), BaseUnits: class.Transfer.Amount}
 			c.hasMoney = true
-			raw["amount_base_units"] = class.Transfer.Amount
+			raw["amount_base_units"] = strconv.FormatUint(class.Transfer.Amount, 10)
 			raw["mint"] = c.transfer.Mint
 			raw["payer_wallet"] = class.Transfer.Delegator.String()
 		} else {
@@ -1056,7 +1056,7 @@ func (f *SolanaFetcher) buildWalletCandidate(ctx context.Context, sig solanaint.
 				raw["fiat_note"] = "unnormalized: native SOL needs operator pricing (no FX inside reconcile)"
 			} else {
 				raw["mint"] = t.Mint
-				raw["amount_base_units"] = t.BaseUnits
+				raw["amount_base_units"] = strconv.FormatUint(t.BaseUnits, 10)
 			}
 		} else {
 			c.moneyNote = note
