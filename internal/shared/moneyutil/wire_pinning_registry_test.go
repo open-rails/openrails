@@ -49,6 +49,7 @@ var pinnedBoundaries = map[string]string{
 	"internal/modules/webhooks/ccbill.go":             "internal/modules/webhooks/ccbill_wire_pinning_test.go",
 	"internal/service/catalog_provider_stripe.go":     "internal/modules/subscriptions/stripe_wire_pinning_test.go",
 	"internal/service/catalog_provider_nmi.go":        "internal/integrations/nmi/recurring_plan_test.go",
+	"internal/modules/dunning/freeze.go":              "internal/modules/dunning/freeze_wire_pinning_test.go",
 }
 
 // deferredBoundaries: file -> why it has no wire-pinning test yet. Recorded so

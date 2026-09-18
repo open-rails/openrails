@@ -59,6 +59,10 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	group.Handle(http.MethodGet, "/usage", h(httphandlers.GetMyUsage))
 	group.Handle(http.MethodGet, "/invoices", h(httphandlers.GetMyInvoices))
 	group.Handle(http.MethodGet, "/invoices/:id", h(httphandlers.GetMyInvoice))
+	// Customer payment recovery (#809): the payer's own attempt history and
+	// pay-now on their own invoice.
+	group.Handle(http.MethodGet, "/invoices/:id/payments", h(httphandlers.GetMyInvoicePayments))
+	group.Handle(http.MethodPost, "/invoices/:id/pay-now", h(httphandlers.PayMyInvoiceNow))
 
 	// Payment / transaction history.
 	group.Handle(http.MethodGet, "/payments", h(httphandlers.GetUserPayments))
@@ -78,6 +82,7 @@ func RegisterSelfServiceRoutes(rr router.Router, rt *app.Runtime, delegatedMW ro
 	subs.Handle(http.MethodGet, "/:id", h(httphandlers.GetSubscription))
 	subs.Handle(http.MethodPost, "/:id/cancel", h(httphandlers.CancelSubscription))
 	subs.Handle(http.MethodPost, "/:id/resume", h(httphandlers.ResumeSubscription))
+	subs.Handle(http.MethodPost, "/:id/retry-now", h(httphandlers.RetryMySubscriptionNow))
 	subs.Handle(http.MethodPost, "/:id/change-tier", h(httphandlers.ChangeTier))
 	subs.Handle(http.MethodPost, "/:id/change-tier/preview", h(httphandlers.ChangeTierPreview))
 	subs.Handle(http.MethodPut, "/:id/payment-method", h(httphandlers.UpdateSubscriptionPaymentMethod))

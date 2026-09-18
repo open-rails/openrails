@@ -67,9 +67,11 @@ type Subscription struct {
 	CancelPortalURL *string `json:"cancel_portal_url,omitempty"`
 	// Access summarizes the premium access this subscription grants; the self
 	// routes fill it.
-	Access    *SubscriptionAccess `json:"access,omitempty"`
-	CreatedAt time.Time           `json:"created_at"`
-	UpdatedAt time.Time           `json:"updated_at"`
+	Access *SubscriptionAccess `json:"access,omitempty"`
+	// Recovery is the customer's retry-now state; the self routes fill it.
+	Recovery  *PaymentRecovery `json:"recovery,omitempty"`
+	CreatedAt time.Time        `json:"created_at"`
+	UpdatedAt time.Time        `json:"updated_at"`
 }
 
 // BillingStatus is GET /v1/me/status: the customer's active subscription (the

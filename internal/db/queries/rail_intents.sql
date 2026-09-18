@@ -437,3 +437,28 @@ SELECT * FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type IN ('nmi_upgrade', 'stripe_tier_change')
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
+
+-- name: GetManualRebillByRequestKey :one
+-- Customer retry-now (#809): the rebill a payer-scoped client idempotency key
+-- started, bound through the frozen payload's request_key (unique per
+-- merchant, uq_rail_intents_request_key).
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = 'manual_rebill'
+  AND (payload ->> 'request_key') = sqlc.arg(request_key)::text;
+
+-- name: LockRecoveryRequestKey :exec
+-- Serializes customer recovery requests sharing one payer-scoped client key
+-- (#809), so the second sees the first's operation and compares requests.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 2));
+
+-- name: DatabaseNow :one
+SELECT now()::timestamptz AS now;
+
+-- name: ListRailIntentsBySubject :many
+SELECT * FROM openrails.rail_intents
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = sqlc.arg(intent_type)::text
+  AND subscription_id = sqlc.arg(subscription_id)::uuid
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::int;

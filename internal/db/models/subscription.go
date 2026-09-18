@@ -70,7 +70,11 @@ type Subscription struct {
 	LastRetryAt   *time.Time `json:"last_retry_at"`  // Date of last rebill attempt
 	RetryAttempts *int       `json:"retry_attempts"` // Number of retry attempts (nullable for new subscriptions)
 	NextRetryAt   *time.Time `json:"next_retry_at"`  // When to try next rebill
-	GraceEndsAt   *time.Time `json:"grace_ends_at"`  // Optional grace window end during dunning (rail-specific)
+	// DunningClaimedUntil is the live rebill attempt claim (#809 R4), held by
+	// a dunning pass or a customer retry-now; nil when free. Read-only here:
+	// only the claim queries write it.
+	DunningClaimedUntil *time.Time `json:"-"`
+	GraceEndsAt         *time.Time `json:"grace_ends_at"` // Optional grace window end during dunning (rail-specific)
 
 	// Cancellation information
 	CancelFeedback *string     `json:"cancel_feedback"` // User's cancellation message

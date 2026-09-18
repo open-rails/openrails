@@ -67,6 +67,65 @@ type FakeNMIGateway struct {
 	sales       []NMISale
 	attempts    int
 	enrollments []NMIEnrollment
+	// plans are the recurring subscriptions' plan amounts: a rebill sale
+	// names the subscription and NMI charges its plan.
+	plans map[string]plan
+	// hold blocks sales in flight (the charger is mid-request at the
+	// provider), so a claim the caller took is genuinely held meanwhile.
+	hold chan struct{}
+	held int
+}
+
+// HoldSales blocks every sale in flight until the returned release is called.
+// A held sale is recorded first: it landed at the provider.
+func (g *FakeNMIGateway) HoldSales() (release func()) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	hold := make(chan struct{})
+	g.hold = hold
+	var once sync.Once
+	return func() {
+		g.mu.Lock()
+		if g.hold == hold {
+			g.hold = nil
+		}
+		g.mu.Unlock()
+		once.Do(func() { close(hold) })
+	}
+}
+
+// HeldSales is the number of sales blocked in flight right now.
+func (g *FakeNMIGateway) HeldSales() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.held
+}
+
+type plan struct{ amount, currency string }
+
+// RegisterPlan records the plan amount ("12.00") and currency NMI charges
+// when a rebill names subscriptionID.
+func (g *FakeNMIGateway) RegisterPlan(subscriptionID, amount, currency string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.plans == nil {
+		g.plans = map[string]plan{}
+	}
+	g.plans[subscriptionID] = plan{amount: amount, currency: strings.ToUpper(currency)}
+}
+
+// TamperSale rewrites the recorded sale carrying orderID, modeling a provider
+// record that contradicts what was sent.
+func (g *FakeNMIGateway) TamperSale(orderID string, mutate func(*NMISale)) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for i := range g.sales {
+		if g.sales[i].OrderID == orderID {
+			mutate(&g.sales[i])
+			return true
+		}
+	}
+	return false
 }
 
 // NewFakeNMIGateway starts the gateway approving and visible. Point a runtime
@@ -171,7 +230,18 @@ func (g *FakeNMIGateway) serveSale(w http.ResponseWriter, r *http.Request) {
 		Currency:      strings.ToUpper(r.Form.Get("currency")),
 		At:            time.Now().UTC(),
 	}
+	if p, ok := g.plans[r.Form.Get("subscription_id")]; ok && sale.Amount == "" {
+		sale.Amount, sale.Currency = p.amount, p.currency
+	}
 	g.sales = append(g.sales, sale)
+	if hold := g.hold; hold != nil {
+		// Mid-request at the provider: unlock so reads can proceed, and wait.
+		g.held++
+		g.mu.Unlock()
+		<-hold
+		g.mu.Lock()
+		g.held--
+	}
 	if g.mode == NMISaleUncertain {
 		fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
 		return

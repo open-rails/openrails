@@ -1975,6 +1975,20 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		if subscription.Status == models.StatusCancelled {
 			return nil
 		}
+		if params.ForAttempt != nil || params.ForPeriodEnd != nil {
+			recorded := 0
+			if subscription.RetryAttempts != nil {
+				recorded = *subscription.RetryAttempts
+			}
+			samePeriod := params.ForPeriodEnd == nil || (subscription.CurrentPeriodEndsAt != nil && subscription.CurrentPeriodEndsAt.Unix() == params.ForPeriodEnd.Unix())
+			sameAttempt := params.ForAttempt == nil || recorded == *params.ForAttempt
+			if subscription.Status != models.StatusPastDue || !samePeriod || !sameAttempt {
+				log.WithContext(ctx).WithFields(log.Fields{
+					"subscription_id": subscription.ID, "status": subscription.Status, "retry_attempts": recorded, "for_attempt": params.ForAttempt, "for_period_end": params.ForPeriodEnd,
+				}).Info("decline for this dunning attempt already applied, or its period is over; no-op")
+				return nil
+			}
+		}
 
 		// Capture values for event logging
 		subscriptionID = subscription.ID

@@ -116,6 +116,21 @@ describe("typed ids on the wire", () => {
     expect(status.access.subscription_id).toBe(sub.id)
     expect(status.entitlements[0].source_id).toBe(sub.id)
 
+    // Customer payment recovery (#809): the recovery block names methods by
+    // their typed id, and the pay-now / retry-now results carry the same
+    // invoice and subscription shapes with a durable operation.
+    expect(sub.recovery.compatible_payment_method_ids[0]).toBe(
+      sub.payment_method_id
+    )
+    const payNow = JSON.parse(fixture("invoice_pay_now.json"))
+    expect(payNow.invoice.recovery.operation.id).toBe(payNow.operation.id)
+    expect(payNow.attempt.payment_method_id).toBe(sub.payment_method_id)
+    expect(BigInt(payNow.invoice.amount_due)).toBe(maxInt64)
+    const retryNow = JSON.parse(fixture("subscription_retry_now.json"))
+    expect(retryNow.subscription.id).toBe(sub.id)
+    expect(retryNow.payment.id).toBe(sub.payments[0].id)
+    expect(retryNow.operation.status).toBe("succeeded")
+
     const hosted = JSON.parse(fixture("hosted_checkout_session.json"))
     expect(hosted.saved_methods[0].id).toBe(sub.payment_method_id)
     expect(hosted.payment_id).toBe(sub.payments[0].id)

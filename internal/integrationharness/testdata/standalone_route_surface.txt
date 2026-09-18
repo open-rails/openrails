@@ -40,6 +40,7 @@ GET /v1/me/checkout/{id}
 GET /v1/me/entitlements/active
 GET /v1/me/invoices
 GET /v1/me/invoices/{id}
+GET /v1/me/invoices/{id}/payments
 GET /v1/me/notifications
 GET /v1/me/notifications/unread-count
 GET /v1/me/payment-methods
@@ -141,12 +142,14 @@ POST /v1/import/billing
 POST /v1/me/billing-portal
 POST /v1/me/checkout
 POST /v1/me/checkout/{id}/confirm
+POST /v1/me/invoices/{id}/pay-now
 POST /v1/me/notifications/{id}/read
 POST /v1/me/payment-methods
 POST /v1/me/subscriptions/{id}/cancel
 POST /v1/me/subscriptions/{id}/change-tier
 POST /v1/me/subscriptions/{id}/change-tier/preview
 POST /v1/me/subscriptions/{id}/resume
+POST /v1/me/subscriptions/{id}/retry-now
 POST /v1/me/subscriptions/{id}/solana-cancel
 POST /v1/me/subscriptions/{id}/solana-cancel-tx
 POST /v1/me/subscriptions/{id}/solana-tier-change
@@ -175,8 +178,10 @@ POST /v1/merchant/credits/deposit
 POST /v1/merchant/customers/entitlements:batch
 POST /v1/merchant/customers/{customer_id}/credits
 POST /v1/merchant/customers/{customer_id}/entitlements
+POST /v1/merchant/customers/{customer_id}/invoices/{id}/pay-now
 POST /v1/merchant/customers/{customer_id}/payments/off-channel
 POST /v1/merchant/customers/{customer_id}/product-access
+POST /v1/merchant/customers/{customer_id}/subscriptions/{id}/retry-now
 POST /v1/merchant/dashboard/widgets/generate
 POST /v1/merchant/findings/{id}/resolve
 POST /v1/merchant/host-events/{id}/acknowledge

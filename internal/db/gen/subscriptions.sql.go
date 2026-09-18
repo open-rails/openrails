@@ -14,29 +14,35 @@ import (
 
 const claimDunningAttempt = `-- name: ClaimDunningAttempt :execrows
 UPDATE openrails.subscriptions
-SET next_retry_at = $2::timestamptz,
-    last_retry_at = $3::timestamptz,
-    updated_at = $3::timestamptz
+SET dunning_claim_holder = $2::text,
+    dunning_claimed_until = now() + make_interval(secs => $3::int),
+    last_retry_at = $4::timestamptz,
+    updated_at = $4::timestamptz
 WHERE id = $1
-  AND merchant_id = $4
+  AND merchant_id = $5
   AND status = 'past_due'
-  AND next_retry_at IS NOT NULL AND next_retry_at <= $3::timestamptz
+  AND next_retry_at IS NOT NULL AND next_retry_at <= $4::timestamptz
+  AND (dunning_claimed_until IS NULL OR dunning_claimed_until <= now())
   AND deleted_at IS NULL
 `
 
 type ClaimDunningAttemptParams struct {
-	ID         uuid.UUID
-	LeaseUntil time.Time
-	ClaimedAt  time.Time
-	MerchantID uuid.UUID
+	ID           uuid.UUID
+	Holder       string
+	LeaseSeconds int32
+	ClaimedAt    time.Time
+	MerchantID   uuid.UUID
 }
 
-// Lease-style claim: pushes next_retry_at out so concurrent dunning runs
-// cannot double-charge; only claims a still-due past_due row.
+// The worker's rebill attempt claim (#809 R4): an explicit holder and expiry
+// on the database clock, never the schedule. Only a still-due past_due row
+// whose claim is free or expired is claimed; next_retry_at stays the
+// schedule. Release with ReleaseDunningClaim.
 func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttemptParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimDunningAttempt,
 		arg.ID,
-		arg.LeaseUntil,
+		arg.Holder,
+		arg.LeaseSeconds,
 		arg.ClaimedAt,
 		arg.MerchantID,
 	)
@@ -44,6 +50,47 @@ func (q *Queries) ClaimDunningAttempt(ctx context.Context, arg ClaimDunningAttem
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const claimSubscriptionRetryNow = `-- name: ClaimSubscriptionRetryNow :one
+UPDATE openrails.subscriptions
+SET dunning_claim_holder = $2::text,
+    dunning_claimed_until = now() + make_interval(secs => $3::int),
+    last_retry_at = now(),
+    updated_at = now()
+WHERE id = $1
+  AND merchant_id = $4
+  AND customer_id = $5
+  AND status = 'past_due'
+  AND deleted_at IS NULL
+  AND (dunning_claimed_until IS NULL OR dunning_claimed_until <= now())
+RETURNING dunning_claimed_until
+`
+
+type ClaimSubscriptionRetryNowParams struct {
+	ID           uuid.UUID
+	Holder       string
+	LeaseSeconds int32
+	MerchantID   uuid.UUID
+	CustomerID   uuid.UUID
+}
+
+// Customer retry-now (#809) takes the same rebill attempt claim the dunning
+// worker takes (ClaimDunningAttempt), ahead of any schedule: a past_due row
+// whose claim is free or expired. A live claim — the worker mid-charge or
+// another request — is refused. The schedule (next_retry_at) is untouched;
+// times are the database's.
+func (q *Queries) ClaimSubscriptionRetryNow(ctx context.Context, arg ClaimSubscriptionRetryNowParams) (*time.Time, error) {
+	row := q.db.QueryRow(ctx, claimSubscriptionRetryNow,
+		arg.ID,
+		arg.Holder,
+		arg.LeaseSeconds,
+		arg.MerchantID,
+		arg.CustomerID,
+	)
+	var dunning_claimed_until *time.Time
+	err := row.Scan(&dunning_claimed_until)
+	return dunning_claimed_until, err
 }
 
 const clearStripePaymentMethodSubscriptions = `-- name: ClearStripePaymentMethodSubscriptions :execrows
@@ -238,7 +285,7 @@ func (q *Queries) DeleteSubscription(ctx context.Context, id uuid.UUID) (int64, 
 }
 
 const getActiveSubscriptionByCustomerAt = `-- name: GetActiveSubscriptionByCustomerAt :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.status = 'active'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > $2::timestamptz)
@@ -273,6 +320,8 @@ func (q *Queries) GetActiveSubscriptionByCustomerAt(ctx context.Context, arg Get
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -293,7 +342,7 @@ func (q *Queries) GetActiveSubscriptionByCustomerAt(ctx context.Context, arg Get
 }
 
 const getLatestResumableCancelledSubscription = `-- name: GetLatestResumableCancelledSubscription :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.status = 'cancelled'
   AND (sub.current_period_ends_at IS NULL OR sub.current_period_ends_at > $2::timestamptz)
@@ -328,6 +377,8 @@ func (q *Queries) GetLatestResumableCancelledSubscription(ctx context.Context, a
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -348,7 +399,7 @@ func (q *Queries) GetLatestResumableCancelledSubscription(ctx context.Context, a
 }
 
 const getLatestSubscriptionByCustomer = `-- name: GetLatestSubscriptionByCustomer :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
@@ -376,6 +427,8 @@ func (q *Queries) GetLatestSubscriptionByCustomer(ctx context.Context, customerI
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -396,7 +449,7 @@ func (q *Queries) GetLatestSubscriptionByCustomer(ctx context.Context, customerI
 }
 
 const getLifecycleSubscriptionByCustomerAndProduct = `-- name: GetLifecycleSubscriptionByCustomerAndProduct :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.product_id = $2
   AND sub.status IN ('active', 'pending', 'past_due')
@@ -432,6 +485,8 @@ func (q *Queries) GetLifecycleSubscriptionByCustomerAndProduct(ctx context.Conte
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -452,7 +507,7 @@ func (q *Queries) GetLifecycleSubscriptionByCustomerAndProduct(ctx context.Conte
 }
 
 const getLifecycleSubscriptionByCustomerAndTierGroup = `-- name: GetLifecycleSubscriptionByCustomerAndTierGroup :one
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class FROM openrails.subscriptions sub
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.dunning_claim_holder, sub.dunning_claimed_until, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.customer_id = $1
   AND sub.status IN ('active', 'pending', 'past_due')
@@ -488,6 +543,8 @@ func (q *Queries) GetLifecycleSubscriptionByCustomerAndTierGroup(ctx context.Con
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -508,7 +565,7 @@ func (q *Queries) GetLifecycleSubscriptionByCustomerAndTierGroup(ctx context.Con
 }
 
 const getSubscriptionByCustomerAndPrice = `-- name: GetSubscriptionByCustomerAndPrice :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1 AND sub.price_id = $2
   AND sub.deleted_at IS NULL
 LIMIT 1
@@ -540,6 +597,8 @@ func (q *Queries) GetSubscriptionByCustomerAndPrice(ctx context.Context, arg Get
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -560,7 +619,7 @@ func (q *Queries) GetSubscriptionByCustomerAndPrice(ctx context.Context, arg Get
 }
 
 const getSubscriptionByID = `-- name: GetSubscriptionByID :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions WHERE id = $1
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions WHERE id = $1
   AND deleted_at IS NULL
 `
 
@@ -585,6 +644,8 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (Openra
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -605,7 +666,7 @@ func (q *Queries) GetSubscriptionByID(ctx context.Context, id uuid.UUID) (Openra
 }
 
 const getSubscriptionByIDForUpdate = `-- name: GetSubscriptionByIDForUpdate :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions WHERE id = $1
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions WHERE id = $1
   AND deleted_at IS NULL
 FOR UPDATE
 `
@@ -632,6 +693,8 @@ func (q *Queries) GetSubscriptionByIDForUpdate(ctx context.Context, id uuid.UUID
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -652,7 +715,7 @@ func (q *Queries) GetSubscriptionByIDForUpdate(ctx context.Context, id uuid.UUID
 }
 
 const getSubscriptionByPSPMetadataValue = `-- name: GetSubscriptionByPSPMetadataValue :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $2::uuid AND sub.psp_id = $3::uuid
   AND sub.rail = $1
   AND sub.gateway_response ->> $4::text = $5::text
@@ -695,6 +758,8 @@ func (q *Queries) GetSubscriptionByPSPMetadataValue(ctx context.Context, arg Get
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -715,7 +780,7 @@ func (q *Queries) GetSubscriptionByPSPMetadataValue(ctx context.Context, arg Get
 }
 
 const getSubscriptionByPSPSubID = `-- name: GetSubscriptionByPSPSubID :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $3::uuid AND sub.psp_id = $4::uuid
   AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
@@ -755,6 +820,8 @@ func (q *Queries) GetSubscriptionByPSPSubID(ctx context.Context, arg GetSubscrip
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -775,7 +842,7 @@ func (q *Queries) GetSubscriptionByPSPSubID(ctx context.Context, arg GetSubscrip
 }
 
 const getSubscriptionByPSPSubIDForUpdate = `-- name: GetSubscriptionByPSPSubIDForUpdate :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $3::uuid AND sub.psp_id = $4::uuid
   AND sub.rail = $1 AND sub.rail_subscription_id = $2
   AND sub.deleted_at IS NULL
@@ -818,6 +885,8 @@ func (q *Queries) GetSubscriptionByPSPSubIDForUpdate(ctx context.Context, arg Ge
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -838,7 +907,7 @@ func (q *Queries) GetSubscriptionByPSPSubIDForUpdate(ctx context.Context, arg Ge
 }
 
 const getUnknownSubscriptionByCustomerAndProduct = `-- name: GetUnknownSubscriptionByCustomerAndProduct :one
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.product_id = $2
   AND sub.status = 'unknown'
@@ -876,6 +945,8 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndProduct(ctx context.Context
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -896,7 +967,7 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndProduct(ctx context.Context
 }
 
 const getUnknownSubscriptionByCustomerAndTierGroup = `-- name: GetUnknownSubscriptionByCustomerAndTierGroup :one
-SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class FROM openrails.subscriptions sub
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.rail_subscription_id, sub.user_email, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.scheduled_price_id, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.dunning_claim_holder, sub.dunning_claimed_until, sub.cancelled_at, sub.cancel_type, sub.cancel_feedback, sub.entitlements_spec_snapshot, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class FROM openrails.subscriptions sub
 JOIN openrails.products prod ON prod.id = sub.product_id
 WHERE sub.customer_id = $1
   AND sub.status = 'unknown'
@@ -932,6 +1003,8 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndTierGroup(ctx context.Conte
 		&i.LastRetryAt,
 		&i.RetryAttempts,
 		&i.NextRetryAt,
+		&i.DunningClaimHolder,
+		&i.DunningClaimedUntil,
 		&i.CancelledAt,
 		&i.CancelType,
 		&i.CancelFeedback,
@@ -952,7 +1025,7 @@ func (q *Queries) GetUnknownSubscriptionByCustomerAndTierGroup(ctx context.Conte
 }
 
 const listActiveSubscriptionsByCustomer = `-- name: ListActiveSubscriptionsByCustomer :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $1::uuid
   AND sub.customer_id = $2::uuid
   AND sub.status = 'active'
@@ -992,6 +1065,8 @@ func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, arg Lis
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1019,7 +1094,7 @@ func (q *Queries) ListActiveSubscriptionsByCustomer(ctx context.Context, arg Lis
 }
 
 const listActiveSubscriptionsByPriceIDs = `-- name: ListActiveSubscriptionsByPriceIDs :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.price_id = ANY($1::uuid[]) AND sub.status = 'active'
   AND sub.deleted_at IS NULL
 `
@@ -1054,6 +1129,8 @@ func (q *Queries) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceId
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1081,7 +1158,7 @@ func (q *Queries) ListActiveSubscriptionsByPriceIDs(ctx context.Context, priceId
 }
 
 const listActiveSubscriptionsForPSP = `-- name: ListActiveSubscriptionsForPSP :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.merchant_id = $2::uuid AND sub.psp_id = $3::uuid
   AND sub.rail = $1 AND sub.status = 'active'
   AND sub.deleted_at IS NULL
@@ -1120,6 +1197,8 @@ func (q *Queries) ListActiveSubscriptionsForPSP(ctx context.Context, arg ListAct
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1186,10 +1265,11 @@ func (q *Queries) ListDueDunningMerchants(ctx context.Context, arg ListDueDunnin
 }
 
 const listDueDunningSubscriptions = `-- name: ListDueDunningSubscriptions :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.rail = ANY($1::text[])
   AND sub.status = 'past_due'
   AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= $2::timestamptz
+  AND (sub.dunning_claimed_until IS NULL OR sub.dunning_claimed_until <= now())
   AND sub.deleted_at IS NULL
 ORDER BY sub.next_retry_at, sub.id
 LIMIT $3::int
@@ -1236,6 +1316,8 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1263,7 +1345,7 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 }
 
 const listMigratableSubscriptionsByPriceID = `-- name: ListMigratableSubscriptionsByPriceID :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.price_id = $1::uuid
   AND sub.status IN ('active'::openrails.subscription_status, 'past_due'::openrails.subscription_status)
   AND sub.deleted_at IS NULL
@@ -1301,6 +1383,8 @@ func (q *Queries) ListMigratableSubscriptionsByPriceID(ctx context.Context, pric
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1328,7 +1412,7 @@ func (q *Queries) ListMigratableSubscriptionsByPriceID(ctx context.Context, pric
 }
 
 const listSubscriptionsByCustomerPaged = `-- name: ListSubscriptionsByCustomerPaged :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.customer_id = $1
   AND sub.deleted_at IS NULL
 ORDER BY sub.created_at DESC
@@ -1368,6 +1452,8 @@ func (q *Queries) ListSubscriptionsByCustomerPaged(ctx context.Context, arg List
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1395,7 +1481,7 @@ func (q *Queries) ListSubscriptionsByCustomerPaged(ctx context.Context, arg List
 }
 
 const listSubscriptionsByIDs = `-- name: ListSubscriptionsByIDs :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions WHERE id = ANY($1::uuid[])
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions WHERE id = ANY($1::uuid[])
   AND deleted_at IS NULL
 `
 
@@ -1426,6 +1512,8 @@ func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, ids []uuid.UUID) (
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1453,7 +1541,7 @@ func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, ids []uuid.UUID) (
 }
 
 const listSubscriptionsByPaymentMethodIDs = `-- name: ListSubscriptionsByPaymentMethodIDs :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE sub.payment_method_id = ANY($1::uuid[])
   AND sub.deleted_at IS NULL
 `
@@ -1485,6 +1573,8 @@ func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, payme
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1512,7 +1602,7 @@ func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, payme
 }
 
 const listSubscriptionsFiltered = `-- name: ListSubscriptionsFiltered :many
-SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
+SELECT id, price_id, product_id, status, rail, rail_subscription_id, user_email, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, scheduled_price_id, last_retry_at, retry_attempts, next_retry_at, dunning_claim_holder, dunning_claimed_until, cancelled_at, cancel_type, cancel_feedback, entitlements_spec_snapshot, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class FROM openrails.subscriptions sub
 WHERE ($1::uuid IS NULL OR sub.customer_id = $1::uuid)
   AND ($2::text IS NULL OR sub.status::text = $2::text)
   AND ($3::uuid IS NULL OR sub.price_id = $3::uuid)
@@ -1590,6 +1680,8 @@ func (q *Queries) ListSubscriptionsFiltered(ctx context.Context, arg ListSubscri
 			&i.LastRetryAt,
 			&i.RetryAttempts,
 			&i.NextRetryAt,
+			&i.DunningClaimHolder,
+			&i.DunningClaimedUntil,
 			&i.CancelledAt,
 			&i.CancelType,
 			&i.CancelFeedback,
@@ -1652,36 +1744,27 @@ func (q *Queries) MarkCancelledSubscriptionsSuperseded(ctx context.Context, arg 
 	return result.RowsAffected(), nil
 }
 
-const releaseDunningAttempt = `-- name: ReleaseDunningAttempt :execrows
+const releaseDunningClaim = `-- name: ReleaseDunningClaim :execrows
 UPDATE openrails.subscriptions
-SET next_retry_at = $1::timestamptz,
-    updated_at = $1::timestamptz
-WHERE id = $2
-  AND merchant_id = $3
-  AND status = 'past_due'
-  AND last_retry_at = $1::timestamptz
-  AND next_retry_at = $4::timestamptz
+SET dunning_claim_holder = NULL,
+    dunning_claimed_until = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND merchant_id = $2
+  AND dunning_claim_holder = $3::text
   AND deleted_at IS NULL
 `
 
-type ReleaseDunningAttemptParams struct {
-	ClaimedAt  time.Time
+type ReleaseDunningClaimParams struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	LeaseUntil time.Time
+	Holder     string
 }
 
-// A provider decline is already durable before its lifecycle transition runs.
-// If that transition rolls back, make this exact claim immediately eligible
-// for River's retry without advancing the attempt ordinal (and therefore
-// without deriving a fresh charge intent).
-func (q *Queries) ReleaseDunningAttempt(ctx context.Context, arg ReleaseDunningAttemptParams) (int64, error) {
-	result, err := q.db.Exec(ctx, releaseDunningAttempt,
-		arg.ClaimedAt,
-		arg.ID,
-		arg.MerchantID,
-		arg.LeaseUntil,
-	)
+// Releases a rebill attempt claim its holder took. The schedule was never
+// moved, so a released row that is still due is picked up again as is.
+func (q *Queries) ReleaseDunningClaim(ctx context.Context, arg ReleaseDunningClaimParams) (int64, error) {
+	result, err := q.db.Exec(ctx, releaseDunningClaim, arg.ID, arg.MerchantID, arg.Holder)
 	if err != nil {
 		return 0, err
 	}

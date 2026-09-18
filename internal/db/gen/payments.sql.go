@@ -422,6 +422,62 @@ func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, subscript
 	return i, err
 }
 
+const getLatestFailedPaymentBySubscription = `-- name: GetLatestFailedPaymentBySubscription :one
+SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM openrails.payments purch
+WHERE purch.merchant_id = $1::uuid
+  AND purch.subscription_id = $2::uuid
+  AND purch.status = 'failed'
+  AND purch.deleted_at IS NULL
+ORDER BY purch.purchased_at DESC, purch.id DESC
+LIMIT 1
+`
+
+type GetLatestFailedPaymentBySubscriptionParams struct {
+	MerchantID     uuid.UUID
+	SubscriptionID uuid.UUID
+}
+
+// Customer recovery view (#809): the newest recorded decline on the
+// subscription's rebill history.
+func (q *Queries) GetLatestFailedPaymentBySubscription(ctx context.Context, arg GetLatestFailedPaymentBySubscriptionParams) (OpenrailsPayment, error) {
+	row := q.db.QueryRow(ctx, getLatestFailedPaymentBySubscription, arg.MerchantID, arg.SubscriptionID)
+	var i OpenrailsPayment
+	err := row.Scan(
+		&i.ID,
+		&i.PriceID,
+		&i.Rail,
+		&i.TransactionID,
+		&i.Amount,
+		&i.ListAmount,
+		&i.Currency,
+		&i.Status,
+		&i.SubscriptionID,
+		&i.RefundedPaymentID,
+		&i.DiscountCode,
+		&i.DiscountReason,
+		&i.DiscountMetadata,
+		&i.EntitlementsSpecSnapshot,
+		&i.Metadata,
+		&i.PurchasedAt,
+		&i.CreatedAt,
+		&i.CardBrand,
+		&i.CardLast4,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PspID,
+		&i.AttemptKind,
+		&i.FailureCode,
+		&i.FailureReason,
+		&i.ReversalKind,
+		&i.TokenType,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.MoneyMovement,
+	)
+	return i, err
+}
+
 const getPaymentByID = `-- name: GetPaymentByID :one
 SELECT id, price_id, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, entitlements_spec_snapshot, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement FROM openrails.payments WHERE id = $1
   AND deleted_at IS NULL
