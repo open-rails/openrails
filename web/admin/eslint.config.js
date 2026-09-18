@@ -22,4 +22,24 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  // Mutation callbacks run after the request, when the selected merchant may
+  // have changed. mutations.ts must pin it with merchantQueryKeys() instead.
+  {
+    files: ["src/lib/mutations.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@/lib/queries",
+              importNames: ["queryKeys"],
+              message:
+                "Use merchantQueryKeys() so cache keys name the merchant the mutation started under.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ])
