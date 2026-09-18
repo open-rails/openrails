@@ -146,7 +146,7 @@ func newNMIReceiptEnv(t *testing.T) nmiReceiptEnv {
 	return nmiReceiptEnv{
 		collectionEnv: collectionEnv{svc: svc, db: dbi, pool: pool, payer: payer, currency: currency, method: method, invoice: invoiceID, ctx: ctx},
 		gateway:       gateway, plane: plane, runner: collectionRunner(dbi, charger, plane),
-		merchants:     msvc, vault: "vault_" + method.String(), custodian: &custodian,
+		merchants: msvc, vault: "vault_" + method.String(), custodian: &custodian,
 	}
 }
 
