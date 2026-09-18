@@ -77,6 +77,11 @@ jobs:
         run: |
           pnpm --dir tests/browser install --frozen-lockfile --ignore-scripts
           pnpm --dir tests/browser exec playwright install --with-deps chromium
+      - name: Build the admin console
+        # Browser-tagged integration contracts serve the real console from
+        # web/admin/dist. The checks job runs on a separate runner, so its
+        # build cannot be reused by this E2E job.
+        run: bash scripts/build-admin-console.sh web/admin/dist
       - run: bash scripts/check.sh e2e
 
   security:
