@@ -30,7 +30,8 @@ const (
 // Snapshot is the reviewed contract. Every section is derived from source, so
 // there is no second handwritten catalog to keep in sync.
 type Snapshot struct {
-	// API holds exported declarations of every importable non-main package.
+	// API holds exported declarations of every importable non-main package,
+	// plus internal type declarations reachable through that public surface.
 	API map[string][]string `json:"go_api"`
 	// Wire holds JSON-tagged struct shapes of non-public packages and the full
 	// source of custom JSON/text codecs in any package.
@@ -70,6 +71,8 @@ type fileFacts struct {
 	wire    []string
 	imports map[string]string
 	source  string
+	types   map[string][]reachableDeclaration
+	roots   []typeReference
 }
 
 // capturer caches facts by path and content so one process can capture several
@@ -86,6 +89,7 @@ func Capture(fsys fs.FS) ([]byte, error) { return newCapturer().capture(fsys) }
 
 func (c *capturer) capture(fsys fs.FS) ([]byte, error) {
 	out := Snapshot{API: map[string][]string{}, Wire: map[string][]string{}, Imports: map[string]map[string]string{}, Sources: map[string]string{}}
+	files := map[string]fileFacts{}
 	err := fs.WalkDir(fsys, ".", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -116,11 +120,13 @@ func (c *capturer) capture(fsys fs.FS) ([]byte, error) {
 		if facts.source != "" {
 			out.Sources[name] = facts.source
 		}
+		files[name] = facts
 		return nil
 	})
 	if err != nil {
 		return nil, err
 	}
+	captureReachableTypes(&out, files)
 	for _, section := range []map[string][]string{out.API, out.Wire} {
 		for _, declarations := range section {
 			sort.Strings(declarations)
@@ -242,8 +248,10 @@ func computeFacts(name string, body []byte) (fileFacts, error) {
 			facts.wire = append(facts.wire, declarations...)
 		}
 	}
-	if len(facts.api) > 0 || len(facts.wire) > 0 {
-		facts.imports = imports
+	facts.imports = imports
+	facts.types, facts.roots, err = declaredTypes(fset, file, facts.pkg, imports, public)
+	if err != nil {
+		return facts, err
 	}
 	return facts, nil
 }

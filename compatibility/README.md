@@ -5,7 +5,10 @@ handwritten catalog. It records:
 
 - `go_api`: exported declarations of every importable non-main package (root,
   `config`, `embed`, `permissions`, `migrations/postgres`, `pkg/...`), including
-  generic signatures, receivers, aliases, constant values and JSON tags.
+  generic signatures, receivers, aliases, constant values and JSON tags. Internal
+  types exposed through public aliases, fields or signatures are followed
+  transitively, including their exported methods; unrelated internal types and
+  implementation bodies are not frozen.
 - `wire_types`: JSON-tagged struct shapes in internal and command packages, and
   full custom JSON/text codec methods in any package.
 - `declaring_file_imports`: import paths behind the selectors above.
