@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -21,6 +23,7 @@ import (
 // provider-specific create/verify/cancel/repoint contract is qualified.
 type (
 	ProviderAccountCutoverDisposition = subscriptions.ProviderAccountCutoverDisposition
+	ProviderAccountCutoverCode        = subscriptions.ProviderAccountCutoverCode
 	ProviderAccountCutoverPlan        = subscriptions.ProviderAccountCutoverPlan
 )
 
@@ -28,14 +31,30 @@ const (
 	ProviderAccountCutoverSameAccount     = subscriptions.ProviderAccountCutoverSameAccount
 	ProviderAccountCutoverRequiresReentry = subscriptions.ProviderAccountCutoverRequiresReentry
 	ProviderAccountCutoverBlocked         = subscriptions.ProviderAccountCutoverBlocked
+
+	ProviderAccountCutoverReady                     = subscriptions.ProviderAccountCutoverReady
+	ProviderAccountCutoverIdentityMissing           = subscriptions.ProviderAccountCutoverIdentityMissing
+	ProviderAccountCutoverRailUnsupported           = subscriptions.ProviderAccountCutoverRailUnsupported
+	ProviderAccountCutoverTargetRailMismatch        = subscriptions.ProviderAccountCutoverTargetRailMismatch
+	ProviderAccountCutoverSubscriptionNotRebilling  = subscriptions.ProviderAccountCutoverSubscriptionNotRebilling
+	ProviderAccountCutoverSubscriptionNotAtProvider = subscriptions.ProviderAccountCutoverSubscriptionNotAtProvider
+	ProviderAccountCutoverTargetArchived            = subscriptions.ProviderAccountCutoverTargetArchived
+	ProviderAccountCutoverSourceNotArchived         = subscriptions.ProviderAccountCutoverSourceNotArchived
+	ProviderAccountCutoverReplacementCardRequired   = subscriptions.ProviderAccountCutoverReplacementCardRequired
+	ProviderAccountCutoverReplacementCardNotFound   = subscriptions.ProviderAccountCutoverReplacementCardNotFound
+	ProviderAccountCutoverReplacementCardNotOwned   = subscriptions.ProviderAccountCutoverReplacementCardNotOwned
+	ProviderAccountCutoverReplacementCardUnusable   = subscriptions.ProviderAccountCutoverReplacementCardUnusable
+	ProviderAccountCutoverReplacementCardPSP        = subscriptions.ProviderAccountCutoverReplacementCardPSP
+	ProviderAccountCutoverCrossAccountNotQualified  = subscriptions.ProviderAccountCutoverCrossAccountNotQualified
 )
 
 var ErrProviderAccountCutoverNotQualified = subscriptions.ErrProviderAccountCutoverNotQualified
 
 // ProviderAccountCutoverQuery names one subscriber's requested move by durable
 // identities. The source account is the subscription's own PSP. The target is
-// the replacement card's PSP when the card has already been re-entered, else
-// the named TargetPSPID; exactly one of the two is given.
+// TargetPSPID when given, else the replacement card's PSP; at least one of the
+// two is required. Give both to check a re-entered card against the intended
+// target.
 type ProviderAccountCutoverQuery struct {
 	SubscriptionID             uuid.UUID
 	ReplacementPaymentMethodID *uuid.UUID
@@ -53,7 +72,9 @@ type ProviderAccountCutoverReport struct {
 
 // PlanProviderAccountCutover resolves the subscription, the optional replacement
 // method and both PSP rows under the merchant's scope, then classifies the move
-// with subscriptions.PlanProviderAccountCutover. Read-only.
+// with subscriptions.PlanProviderAccountCutover. Read-only. A subscription or
+// target PSP the merchant does not have is an error; every readiness gap is a
+// coded plan.
 func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error) {
 	if Get(a) == nil {
 		return ProviderAccountCutoverReport{}, errors.New("no control plane attached (call Attach first)")
@@ -64,8 +85,8 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 	if merchantID.IsZero() || q.SubscriptionID == uuid.Nil {
 		return ProviderAccountCutoverReport{}, errors.New("merchant and subscription are required")
 	}
-	if (q.ReplacementPaymentMethodID == nil) == (q.TargetPSPID == nil) {
-		return ProviderAccountCutoverReport{}, errors.New("exactly one of replacement payment method or target PSP is required")
+	if q.ReplacementPaymentMethodID == nil && q.TargetPSPID == nil {
+		return ProviderAccountCutoverReport{}, errors.New("a replacement payment method or a target PSP is required")
 	}
 	report := ProviderAccountCutoverReport{SubscriptionID: q.SubscriptionID}
 	err := a.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
@@ -77,21 +98,35 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 			}
 			return fmt.Errorf("subscription %s: %w", q.SubscriptionID, err)
 		}
-		req := subscriptions.ProviderAccountCutoverRequest{SourcePSPID: sub.PspID}
+		req := subscriptions.ProviderAccountCutoverRequest{
+			Rail:                models.Rail(sub.Rail),
+			Status:              models.SubscriptionStatus(sub.Status),
+			HasRailSubscription: strings.TrimSpace(sub.RailSubscriptionID) != "",
+			SourcePSPID:         sub.PspID,
+		}
 		if q.ReplacementPaymentMethodID != nil {
+			r := &subscriptions.ProviderAccountCutoverReplacement{}
 			pm, err := dbq.GetPaymentMethodByID(ctx, *q.ReplacementPaymentMethodID)
-			if err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					return fmt.Errorf("payment method %s: not found", *q.ReplacementPaymentMethodID)
-				}
+			switch {
+			case err == nil:
+				r.Found = true
+				r.OwnedByPayer = pm.CustomerID == sub.CustomerID
+				r.PSPID = pm.PspID
+				r.Rail = models.Rail(pm.Rail)
+				r.PSPVaulted = pm.Custodian == models.CustodianPSP && strings.TrimSpace(pm.RailCustomerRef) != ""
+				r.Parked = pm.ParkedAt != nil
+				req.TargetPSPID = pm.PspID
+			case errors.Is(err, pgx.ErrNoRows):
+			default:
 				return fmt.Errorf("payment method %s: %w", *q.ReplacementPaymentMethodID, err)
 			}
-			if pm.CustomerID != sub.CustomerID {
-				return fmt.Errorf("payment method %s belongs to another customer than subscription %s", pm.ID, sub.ID)
-			}
-			req.TargetPSPID, req.ReplacementCardCollected = pm.PspID, true
-		} else {
+			req.Replacement = r
+		}
+		if q.TargetPSPID != nil {
 			req.TargetPSPID = *q.TargetPSPID
+		}
+		if req.TargetPSPID == uuid.Nil {
+			req.TargetPSPID = sub.PspID // replacement not found: its report says so
 		}
 		source, err := pspRow(ctx, dbq, merchantID, req.SourcePSPID)
 		if err != nil {
@@ -101,7 +136,8 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 		if err != nil {
 			return err
 		}
-		req.SourceArchived, req.TargetArchived = source.Archived, target.Archived
+		req.SourceArchived = source.Archived
+		req.TargetRail, req.TargetArchived = models.Rail(target.Rail), target.Archived
 		report.SourcePSPID, report.TargetPSPID = req.SourcePSPID, req.TargetPSPID
 		report.Plan = subscriptions.PlanProviderAccountCutover(req)
 		return nil
