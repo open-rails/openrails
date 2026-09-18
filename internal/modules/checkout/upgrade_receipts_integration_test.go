@@ -28,7 +28,7 @@ func (fx *upgradeAdoptFixture) upgrade(t *testing.T) (*CheckoutResponse, error) 
 }
 func (fx *upgradeAdoptFixture) operation(t *testing.T) gen.OpenrailsRailIntent {
 	t.Helper()
-	key := NMIUpgradeIdempotencyKey(fx.svc.getUpgradeIdempotencyKey(fx.req, fx.user.ID, fx.existingSub.ID, fx.newPrice.ID))
+	key := NMIUpgradeIdempotencyKey(fx.req.IdempotencyKey)
 	in, err := intents.NewStore(fx.db).GetByIdempotencyKey(fx.ctx, key)
 	require.NoError(t, err)
 	return in
@@ -219,11 +219,13 @@ func TestUpgradePublicReplayUsesFrozenReceiptAfterCatalogArchive(t *testing.T) {
 	_, err = fx.svc.TierChange(fx.ctx, request, &UserIdentity{ID: uuid.NewString()})
 	var refused *TierChangeError
 	require.ErrorAs(t, err, &refused)
-	require.Equal(t, http.StatusNotFound, refused.HTTPStatus)
+	require.Equal(t, http.StatusConflict, refused.HTTPStatus)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, refused.Code, "another customer never reads the operation")
 	request.PriceID = uuid.NewString()
 	_, err = fx.svc.TierChange(fx.ctx, request, fx.user)
 	require.ErrorAs(t, err, &refused)
 	require.Equal(t, http.StatusConflict, refused.HTTPStatus)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, refused.Code)
 	require.EqualValues(t, 1, fx.gateway.createCalls.Load())
 	require.EqualValues(t, 1, fx.gateway.saleCalls.Load())
 }
@@ -241,7 +243,7 @@ func TestUpgradeUnresolvedPredecessorRejectsASecondRequest(t *testing.T) {
 
 func TestUpgradeWireAmountsUseFrozenMicros(t *testing.T) {
 	fx := newUpgradeAdoptFixture(t)
-	key := NMIUpgradeIdempotencyKey(fx.svc.getUpgradeIdempotencyKey(fx.req, fx.user.ID, fx.existingSub.ID, fx.newPrice.ID))
+	key := NMIUpgradeIdempotencyKey(fx.req.IdempotencyKey)
 	// A sub-cent price has no exact USD rail amount: refused before any
 	// durable operation or provider request.
 	fx.newPrice.Amount = 60_125_000
@@ -405,4 +407,22 @@ func TestUpgradeSuccessorNonExecutionReleasesPredecessor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "success", response.Status)
 	require.EqualValues(t, 2, fx.gateway.createCalls.Load(), "only a definitively unexecuted enrollment permits a new operation")
+}
+
+// An NMI upgrade needs the client's Idempotency-Key too: without one it is
+// refused before any operation or provider request.
+func TestUpgradeRequiresIdempotencyKey(t *testing.T) {
+	fx := newUpgradeAdoptFixture(t)
+	fx.req.IdempotencyKey = ""
+	_, err := fx.upgrade(t)
+	var refused *TierChangeError
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, http.StatusBadRequest, refused.HTTPStatus)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyKeyRequired, refused.Code)
+	_, err = fx.svc.TierChange(fx.ctx, &TierChangeRequest{SubscriptionID: fx.existingSub.ID, PriceID: openrails.PriceID(fx.newPrice.ID).String()}, fx.user)
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyKeyRequired, refused.Code)
+	require.Zero(t, fx.gateway.createCalls.Load())
+	require.Zero(t, fx.gateway.saleCalls.Load())
+	require.Zero(t, fx.count(t, `SELECT count(*) FROM openrails.rail_intents WHERE subscription_id=$1`, fx.existingSub.ID))
 }

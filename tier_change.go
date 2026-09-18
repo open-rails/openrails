@@ -36,6 +36,12 @@ const (
 	CodeTierChangeInFlight = "tier_change_in_flight"
 	// CodeTierChangeRefused: the provider definitively refused the change.
 	CodeTierChangeRefused = "tier_change_refused"
+	// CodeTierChangeIdempotencyConflict: the Idempotency-Key already names a
+	// different tier change (another customer, subscription or target).
+	CodeTierChangeIdempotencyConflict = "tier_change_idempotency_conflict"
+	// CodeTierChangeIdempotencyKeyRequired: a tier change needs a client
+	// Idempotency-Key; it is the only way to read back a lost response.
+	CodeTierChangeIdempotencyKeyRequired = "tier_change_idempotency_key_required"
 )
 
 type TierChangePreviewResponse struct {

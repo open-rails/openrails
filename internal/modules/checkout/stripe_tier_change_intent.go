@@ -34,6 +34,12 @@ const TypeStripeTierChange = "stripe_tier_change"
 // operator resolution closes the operation.
 const stripeTierChangeReplayWindow = 23 * time.Hour
 
+// stripePaymentBehaviorPaidOrRefused is the upgrade's payment_behavior: a
+// 2xx means the change applied with its invoice paid, a 402 that nothing
+// changed (https://docs.stripe.com/api/subscriptions/update). Stripe's default,
+// allow_incomplete, would apply the change with an unpaid invoice.
+const stripePaymentBehaviorPaidOrRefused = "error_if_incomplete"
+
 // tierChangeSubjectConstraint is the one-live-tier-change-per-subscription
 // unique index shared with NMI upgrades.
 const tierChangeSubjectConstraint = "uq_rail_intents_tier_change_subscription"
@@ -64,6 +70,9 @@ type StripeTierChangePayload struct {
 	AmountDueNow       int64  `json:"amount_due_now"`
 	ProrationBehavior  string `json:"proration_behavior"`
 	BillingCycleAnchor string `json:"billing_cycle_anchor,omitempty"`
+	// PaymentBehavior is error_if_incomplete for an upgrade: Stripe either
+	// applies the change with its invoice paid or refuses it (402) unchanged.
+	PaymentBehavior string `json:"payment_behavior,omitempty"`
 	// PeriodStart/PeriodEnd: the fresh period an upgrade opens; the current
 	// period a downgrade keeps until the switch.
 	PeriodStart      time.Time `json:"period_start"`
@@ -79,6 +88,9 @@ func (p StripeTierChangePayload) validate() error {
 	case "upgrade":
 		if p.StripeItemID == "" {
 			return errors.New("frozen upgrade has no subscription item")
+		}
+		if p.PaymentBehavior != stripePaymentBehaviorPaidOrRefused {
+			return fmt.Errorf("frozen upgrade payment behavior %q is not %s", p.PaymentBehavior, stripePaymentBehaviorPaidOrRefused)
 		}
 	case "downgrade":
 	default:
@@ -306,7 +318,7 @@ func (h *StripeTierChangeIntentHandler) submitUpdate(r *stripeStepRun, step *str
 	state, err := r.stripe.ChangeSubscriptionPrice(r.ctx, subscriptions.StripePriceChangeParams{
 		SubscriptionID: r.p.StripeSubscriptionID, ItemID: r.p.StripeItemID, StripePriceID: r.p.StripePriceID,
 		InternalPriceID: r.p.PriceID.String(), Key: r.in.ID.String(),
-		ProrationBehavior: r.p.ProrationBehavior, BillingCycleAnchor: r.p.BillingCycleAnchor,
+		ProrationBehavior: r.p.ProrationBehavior, BillingCycleAnchor: r.p.BillingCycleAnchor, PaymentBehavior: r.p.PaymentBehavior,
 	})
 	return h.classify(r, stripeStepUpdate, step, err, func() error {
 		if err := state.MatchesPriceChange(r.p.StripeSubscriptionID, r.in.ID.String(), r.p.StripePriceID, r.p.PriceID.String()); err != nil {
@@ -371,7 +383,7 @@ func (h *StripeTierChangeIntentHandler) advanceUpgrade(r *stripeStepRun) intents
 			return outcome
 		}
 	}
-	if err := h.finalizeUpgrade(r.ctx, r.p); err != nil {
+	if err := h.finalizeUpgrade(r.ctx, r.p, *step.Subscription); err != nil {
 		return intents.AmbiguousWithEvidence("price change receipt retained; local commit pending: "+err.Error(), r.progress.evidence())
 	}
 	return intents.Succeeded(h.result(r.p, *r.progress))
@@ -495,7 +507,17 @@ func (h *StripeTierChangeIntentHandler) requireFrozenSubscription(ctx context.Co
 	return nil
 }
 
-func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, p StripeTierChangePayload) error {
+// finalizeUpgrade commits the upgrade from its matched receipt. The period is
+// the one Stripe opened (billing_cycle_anchor=now is Stripe's clock at
+// execution), never the enqueue-time estimate. The webhook converger may
+// have mirrored the same Stripe subscription first: a subscription already on
+// the target price is complete, and only a period older than the receipt's
+// is brought up to it.
+func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, p StripeTierChangePayload, receipt subscriptions.StripeSubscriptionState) error {
+	start, end, ok := receipt.Period()
+	if !ok {
+		return fmt.Errorf("price change receipt for %s carries no billing period", receipt.ID)
+	}
 	database := h.Checkout.SubscriptionService.Database()
 	now := h.Checkout.now().UTC()
 	return database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -504,14 +526,19 @@ func (h *StripeTierChangeIntentHandler) finalizeUpgrade(ctx context.Context, p S
 		if err != nil {
 			return err
 		}
-		if sub.PriceID == p.PriceID && sub.CurrentPeriodEndsAt != nil && sub.CurrentPeriodEndsAt.Equal(p.PeriodEnd) {
-			return nil
+		if sub.RailSubscriptionID != p.StripeSubscriptionID {
+			return fmt.Errorf("subscription %s no longer references stripe subscription %s", sub.ID, p.StripeSubscriptionID)
 		}
-		if sub.PriceID != p.OldPriceID {
-			return fmt.Errorf("subscription %s is on price %s, not the frozen predecessor %s", sub.ID, sub.PriceID, p.OldPriceID)
+		switch sub.PriceID {
+		case p.PriceID:
+			if sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.Before(end) {
+				return nil
+			}
+		case p.OldPriceID:
+			sub.PriceID, sub.ProductID, sub.ScheduledPriceID = p.PriceID, p.ProductID, nil
+		default:
+			return fmt.Errorf("subscription %s is on price %s, neither the frozen predecessor %s nor the target %s", sub.ID, sub.PriceID, p.OldPriceID, p.PriceID)
 		}
-		start, end := p.PeriodStart, p.PeriodEnd
-		sub.PriceID, sub.ProductID, sub.ScheduledPriceID = p.PriceID, p.ProductID, nil
 		sub.CurrentPeriodStartsAt, sub.CurrentPeriodEndsAt = &start, &end
 		return repo.UpdateAt(ctx, sub, now)
 	})
@@ -685,12 +712,12 @@ func (s *CheckoutService) enqueueStripeTierChange(ctx context.Context, existingS
 		return nil, errors.New("durable tier change service unavailable")
 	}
 	ctx = db.WithPSPID(ctx, existingSub.PspID)
-	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{
+	intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, intents.EnqueueParams{
 		MerchantID: existingSub.MerchantID, Provider: string(models.RailStripe), PspID: existingSub.PspID,
 		IntentType: TypeStripeTierChange, SubscriptionID: &existingSub.ID, PriceID: &payload.PriceID,
 		Payload: payload, IdempotencyKey: key, NextAttemptAt: s.now(), Origin: intents.OriginUser,
 		OriginReason: "customer tier " + payload.Action,
-	})
+	}, func(row gen.OpenrailsRailIntent) error { return stripeTierChangeOwnedBy(row, payload) })
 	var conflict *pgconn.PgError
 	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
 		return nil, s.tierChangeInFlight(ctx, existingSub.ID)
@@ -699,6 +726,20 @@ func (s *CheckoutService) enqueueStripeTierChange(ctx context.Context, existingS
 		return nil, err
 	}
 	return s.stripeTierChangeResponse(intent)
+}
+
+// stripeTierChangeOwnedBy accepts the canonical row an enqueue returned only
+// when it is this request's operation. Two requests under one merchant-scoped
+// key can both miss the replay lookup; the later enqueue then gets the
+// earlier row, which must neither run nor answer for a different customer,
+// subscription or target.
+func stripeTierChangeOwnedBy(row gen.OpenrailsRailIntent, want StripeTierChangePayload) error {
+	var got StripeTierChangePayload
+	if row.IntentType != TypeStripeTierChange || json.Unmarshal(row.Payload, &got) != nil ||
+		got.UserID != want.UserID || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID {
+		return tierChangeIdempotencyConflict()
+	}
+	return nil
 }
 
 func (s *CheckoutService) tierChangeInFlight(ctx context.Context, subscriptionID uuid.UUID) error {
@@ -729,12 +770,9 @@ func (s *CheckoutService) replayStripeTierChange(ctx context.Context, req *TierC
 	if err = json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, true, err
 	}
-	if user == nil || p.UserID != user.ID {
-		return nil, true, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "tier change not found"}
-	}
 	price := strings.TrimSpace(req.PriceID)
-	if (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.SubscriptionID) || (price != p.RequestedPrice && price != openrails.PriceID(p.PriceID).String()) {
-		return nil, true, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "tier change idempotency key belongs to a different request"}
+	if user == nil || p.UserID != user.ID || (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.SubscriptionID) || (price != p.RequestedPrice && price != openrails.PriceID(p.PriceID).String()) {
+		return nil, true, tierChangeIdempotencyConflict()
 	}
 	if in.Status == intents.StatusPending || in.Status == intents.StatusFailedRetryable {
 		if s.Intents == nil {
@@ -778,6 +816,17 @@ func (s *CheckoutService) stripeTierChangeResponse(in gen.OpenrailsRailIntent) (
 	case intents.StatusSucceeded:
 		resp.Status = "succeeded"
 		resp.Payment.TransactionID = intents.EvidenceString(in, "transaction_id")
+		// Dates come from the receipt Stripe answered with, not the estimate.
+		var progress stripeTierChangeProgress
+		_ = json.Unmarshal(in.ResultEvidence, &progress)
+		if progress.Update != nil && progress.Update.Subscription != nil {
+			if _, periodEnd, ok := progress.Update.Subscription.Period(); ok {
+				end = periodEnd
+			}
+		}
+		if progress.Phases != nil && progress.Phases.Schedule != nil && len(progress.Phases.Schedule.Phases) > 0 && progress.Phases.Schedule.Phases[0].EndDate > 0 {
+			end = time.Unix(progress.Phases.Schedule.Phases[0].EndDate, 0).UTC()
+		}
 		if p.Action == "downgrade" {
 			resp.DelayedStart = &end
 			resp.Message = fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", p.ProductName, end.Format("January 2, 2006"))

@@ -189,15 +189,6 @@ func (s *CheckoutService) getIdempotencyKey(req *CheckoutRequest, userID string,
 	}
 }
 
-// getUpgradeIdempotencyKey returns the idempotency key for an upgrade operation.
-// If client-provided key exists, use it. Otherwise generate from upgrade parameters.
-func (s *CheckoutService) getUpgradeIdempotencyKey(req *CheckoutRequest, userID string, existingSubID, newPriceID uuid.UUID) string {
-	if req.IdempotencyKey != "" {
-		return req.IdempotencyKey
-	}
-	return GenerateKeyForUpgrade(userID, existingSubID, newPriceID)
-}
-
 // CheckPurchaseEligibility determines if a user can purchase a given price.
 // This should be called BEFORE generating payment URLs or charging cards.
 //
@@ -1554,7 +1545,10 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 		return nil, errors.New("upgrade must use the predecessor's PSP account")
 	}
 	ctx = db.WithPSPID(ctx, existingSub.PspID)
-	key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(req, user.ID, existingSub.ID, newPrice.ID))
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, tierChangeKeyRequired()
+	}
+	key := NMIUpgradeIdempotencyKey(req.IdempotencyKey)
 	// Replays use the original durable payload, even if pricing or time changed.
 	database := s.SubscriptionService.Database()
 	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key)
@@ -1564,7 +1558,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 			return nil, err
 		}
 		if frozen.UserID != user.ID || frozen.OldSubscriptionID != existingSub.ID || frozen.PriceID != newPrice.ID {
-			return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "upgrade idempotency key belongs to a different request"}
+			return nil, tierChangeIdempotencyConflict()
 		}
 		return s.resumeUpgrade(ctx, prior)
 	}
@@ -1807,8 +1801,12 @@ func CalculateModelBUpgradeCharge(
 
 // ReplayTierChange answers a request whose Idempotency-Key names a durable
 // tier change (NMI upgrade or Stripe tier change) before any admission that
-// the completed change would fail. found=false when the key is new.
+// the completed change would fail. found=false when the key is new. A tier
+// change without a key is refused here, before any admission or mutation.
 func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, false, tierChangeKeyRequired()
+	}
 	if response, found, err := s.replayTierUpgrade(ctx, req, user); found || err != nil {
 		return response, found, err
 	}
@@ -2203,10 +2201,10 @@ func (s *CheckoutService) processTierChangeStripe(
 			return nil, err
 		}
 		payload.AmountDueNow, payload.ProrationBehavior, payload.BillingCycleAnchor = estimatedNow, "always_invoice", "now"
+		payload.PaymentBehavior = stripePaymentBehaviorPaidOrRefused
 		payload.PeriodStart, payload.PeriodEnd = now, now.Add(time.Duration(cycleHours)*time.Hour)
 	}
-	key := s.getUpgradeIdempotencyKey(&CheckoutRequest{IdempotencyKey: req.IdempotencyKey}, user.ID, existingSub.ID, newPrice.ID)
-	return s.enqueueStripeTierChange(ctx, existingSub, payload, StripeTierChangeIdempotencyKey(key))
+	return s.enqueueStripeTierChange(ctx, existingSub, payload, StripeTierChangeIdempotencyKey(req.IdempotencyKey))
 }
 
 // processTierChangeSolana handles recurring-Solana subscription tier changes (#272).
@@ -2331,7 +2329,7 @@ func (s *CheckoutService) processTierChangeNMI(
 	}
 
 	if action == "upgrade" {
-		key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(checkoutReq, user.ID, existingSub.ID, newPrice.ID))
+		key := NMIUpgradeIdempotencyKey(checkoutReq.IdempotencyKey)
 		in, err := intents.NewStore(s.SubscriptionService.Database()).GetByIdempotencyKey(ctx, key)
 		if err != nil {
 			return nil, err

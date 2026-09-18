@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
@@ -55,8 +56,20 @@ func (s StripeSubscriptionState) MatchesPriceChange(subscriptionID, key, stripeP
 	return nil
 }
 
+// Period is the billing period Stripe reports for the subscription (its
+// first item's current period); ok=false when the object carries none.
+func (s StripeSubscriptionState) Period() (start, end time.Time, ok bool) {
+	if s.PeriodStart <= 0 || s.PeriodEnd <= s.PeriodStart {
+		return time.Time{}, time.Time{}, false
+	}
+	return time.Unix(s.PeriodStart, 0).UTC(), time.Unix(s.PeriodEnd, 0).UTC(), true
+}
+
 // StripePriceChangeParams is one frozen subscription price change. Key is
 // the operation id: it is the Stripe idempotency key and the metadata stamp.
+// PaymentBehavior "error_if_incomplete" makes Stripe refuse (402) an update
+// whose invoice cannot be paid instead of applying it with an open invoice
+// (its default, allow_incomplete).
 type StripePriceChangeParams struct {
 	SubscriptionID     string
 	ItemID             string
@@ -65,6 +78,7 @@ type StripePriceChangeParams struct {
 	Key                string
 	ProrationBehavior  string
 	BillingCycleAnchor string
+	PaymentBehavior    string
 }
 
 func (p StripePriceChangeParams) values() url.Values {
@@ -78,6 +92,9 @@ func (p StripePriceChangeParams) values() url.Values {
 	}
 	if p.BillingCycleAnchor != "" {
 		values.Set("billing_cycle_anchor", p.BillingCycleAnchor)
+	}
+	if p.PaymentBehavior != "" {
+		values.Set("payment_behavior", p.PaymentBehavior)
 	}
 	return values
 }
@@ -122,12 +139,14 @@ func (s *StripeService) GetSubscriptionState(ctx context.Context, subscriptionID
 
 func parseStripeSubscriptionState(body []byte) (StripeSubscriptionState, error) {
 	var raw struct {
-		ID       string            `json:"id"`
-		Status   string            `json:"status"`
-		Metadata map[string]string `json:"metadata"`
-		Schedule json.RawMessage   `json:"schedule"`
-		Invoice  json.RawMessage   `json:"latest_invoice"`
-		Items    struct {
+		ID          string            `json:"id"`
+		Status      string            `json:"status"`
+		Metadata    map[string]string `json:"metadata"`
+		PeriodStart int64             `json:"current_period_start"`
+		PeriodEnd   int64             `json:"current_period_end"`
+		Schedule    json.RawMessage   `json:"schedule"`
+		Invoice     json.RawMessage   `json:"latest_invoice"`
+		Items       struct {
 			Data []struct {
 				ID    string `json:"id"`
 				Price struct {
@@ -148,9 +167,15 @@ func parseStripeSubscriptionState(body []byte) (StripeSubscriptionState, error) 
 		InternalPriceID: strings.TrimSpace(raw.Metadata["internal_price_id"]),
 		TierChangeKey:   strings.TrimSpace(raw.Metadata[StripeTierChangeKeyMetadata]),
 		ScheduleID:      stripeObjectID(raw.Schedule), LatestInvoiceID: stripeObjectID(raw.Invoice)}
+	// Current API versions report the period on the item; older ones on the
+	// subscription itself.
+	out.PeriodStart, out.PeriodEnd = raw.PeriodStart, raw.PeriodEnd
 	if len(raw.Items.Data) > 0 {
 		item := raw.Items.Data[0]
-		out.ItemID, out.PriceID, out.PeriodStart, out.PeriodEnd = strings.TrimSpace(item.ID), strings.TrimSpace(item.Price.ID), item.PeriodStart, item.PeriodEnd
+		out.ItemID, out.PriceID = strings.TrimSpace(item.ID), strings.TrimSpace(item.Price.ID)
+		if item.PeriodEnd > 0 {
+			out.PeriodStart, out.PeriodEnd = item.PeriodStart, item.PeriodEnd
+		}
 	}
 	return out, nil
 }

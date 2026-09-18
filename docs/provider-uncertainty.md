@@ -130,9 +130,12 @@ is the subscription (or schedule) Stripe answers with or that the verifier
 reads back by exact id, and it must match the frozen facts — the operation
 key, the frozen Stripe price, the frozen local price (and for a downgrade
 the frozen switch date) — before the local subscription changes; a 2xx
-object that does not match commits nothing. A lost response answers `202`
-with the operation id; the verifier reads the exact object back, and while
-Stripe still holds the key (23h) the executor replays the identical request;
+object that does not match commits nothing. The update also carries
+`payment_behavior=error_if_incomplete`, so a 2xx receipt means the change
+applied with its invoice paid and a 402 that nothing changed. A lost response
+answers `202` with the operation id; the verifier reads the exact object back,
+and while Stripe still holds the key (23h) the executor replays the identical
+request;
 after that only `intents resolve` closes it (`--receipt` is the exact
 subscription or schedule id, read back and matched; `--not-executed` is
 refused while the provider shows the change). A parsed Stripe 4xx is a
@@ -140,7 +143,13 @@ definitive refusal (coded `tier_change_refused`, a 402 keeps its decline
 code); an operator closure answers `409`. The same key replays the stored
 result byte for byte; another key while the operation is unresolved is
 refused `409 tier_change_in_flight` naming it. One unresolved tier change
-(NMI upgrade or Stripe) owns its subscription.
+(NMI upgrade or Stripe) owns its subscription. The local commit uses the
+period the receipt carries, so a webhook-first convergence (the converger
+mirrors the price before the verifier runs) settles the operation instead of
+stranding it. Every tier change requires the client's `Idempotency-Key`, and a
+key already naming a different request is refused
+(`409 tier_change_idempotency_conflict`) before that operation can run or
+answer.
 
 NMI upgrades use the same intent runner with separate write-ahead step markers
 and durable receipts for successor creation and proration. The frozen payload

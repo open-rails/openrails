@@ -32,14 +32,19 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
 // fakeStripeTier models the Stripe Billing surface a tier change touches with
 // Stripe's own semantics: the subscription object is returned in full by the
-// update that mutated it, a schedule created from a subscription attaches to
-// it and copies its current phase, and idempotency keys replay the stored
-// answer of a completed request (2xx or 4xx; a 5xx stores nothing).
+// update that mutated it (latest_invoice expanded on request), a schedule
+// created from a subscription attaches to it and copies its current phase,
+// and idempotency keys replay the stored answer of a completed request (2xx
+// or 4xx; a 5xx stores nothing). A declined payment follows
+// payment_behavior: error_if_incomplete answers 402 and changes nothing; the
+// default (allow_incomplete) applies the update, leaves the invoice open and
+// the subscription past_due, and answers 200.
 type fakeStripeTier struct {
 	mu        sync.Mutex
 	subs      map[string]*fakeStripeSub
@@ -56,6 +61,13 @@ type fakeStripeTier struct {
 	hold chan struct{}
 	// arrived is closed when a held request reached the fake.
 	arrived chan struct{}
+	// readHold blocks the next read of readHoldPath (one shot) until
+	// released; readArrived is closed when it reached the fake.
+	readHold, readArrived chan struct{}
+	readHoldPath          string
+	// executionLag is how much later than now Stripe executes a write (its
+	// billing_cycle_anchor=now is its own clock, not the enqueue time).
+	executionLag time.Duration
 }
 
 type fakeStripeSub struct {
@@ -63,6 +75,10 @@ type fakeStripeSub struct {
 	metadata            map[string]string
 	scheduleID          string
 	periodStart, period int64
+	// status is "" (active) or "past_due"; invoiceOpen marks the latest
+	// invoice unpaid.
+	status      string
+	invoiceOpen bool
 }
 
 type fakeStripeStored struct {
@@ -115,12 +131,25 @@ func (f *fakeStripeTier) sub(id string) fakeStripeSub {
 	return *f.subs[id]
 }
 
-func (f *fakeStripeTier) subJSON(s *fakeStripeSub) map[string]any {
+func (f *fakeStripeTier) subJSON(s *fakeStripeSub, expandInvoice bool) map[string]any {
 	var schedule any
 	if s.scheduleID != "" {
 		schedule = s.scheduleID
 	}
-	return map[string]any{"id": s.id, "object": "subscription", "status": "active", "metadata": s.metadata, "schedule": schedule, "latest_invoice": "in_" + s.id,
+	status := s.status
+	if status == "" {
+		status = "active"
+	}
+	var invoice any = "in_" + s.id
+	if expandInvoice {
+		invoiceStatus, paid, amountPaid, amountDue := "paid", true, int64(1000), int64(0)
+		if s.invoiceOpen {
+			invoiceStatus, paid, amountPaid, amountDue = "open", false, 0, 1000
+		}
+		invoice = map[string]any{"id": "in_" + s.id, "object": "invoice", "status": invoiceStatus, "paid": paid, "amount_paid": amountPaid, "amount_due": amountDue,
+			"currency": "usd", "created": s.periodStart, "billing_reason": "subscription_update"}
+	}
+	return map[string]any{"id": s.id, "object": "subscription", "status": status, "metadata": s.metadata, "schedule": schedule, "latest_invoice": invoice,
 		"items": map[string]any{"data": []any{map[string]any{"id": s.itemID, "price": map[string]any{"id": s.priceID}, "current_period_start": s.periodStart, "current_period_end": s.period}}}}
 }
 
@@ -132,7 +161,31 @@ func writeStripeJSON(w http.ResponseWriter, status int, v any) []byte {
 	return body
 }
 
+// holdNextRead pauses the next GET of path until the returned release is
+// called; the arrived channel closes when the request reaches the fake.
+func (f *fakeStripeTier) holdNextRead(path string) (arrived <-chan struct{}, release func()) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readHold, f.readArrived, f.readHoldPath = make(chan struct{}), make(chan struct{}), path
+	hold := f.readHold
+	return f.readArrived, func() { close(hold) }
+}
+
 func (f *fakeStripeTier) handle(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		f.mu.Lock()
+		hold, arrived := f.readHold, f.readArrived
+		if hold != nil && r.URL.Path == f.readHoldPath {
+			f.readHold, f.readArrived, f.readHoldPath = nil, nil, ""
+		} else {
+			hold = nil
+		}
+		f.mu.Unlock()
+		if hold != nil {
+			close(arrived)
+			<-hold
+		}
+	}
 	if r.Method == http.MethodPost {
 		f.mu.Lock()
 		hold, arrived := f.hold, f.arrived
@@ -153,7 +206,7 @@ func (f *fakeStripeTier) handle(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/v1/subscriptions/"):
 			if s, ok := f.subs[strings.TrimPrefix(r.URL.Path, "/v1/subscriptions/")]; ok {
-				writeStripeJSON(w, http.StatusOK, f.subJSON(s))
+				writeStripeJSON(w, http.StatusOK, f.subJSON(s, r.URL.Query().Get("expand[]") == "latest_invoice"))
 				return
 			}
 		case strings.HasPrefix(r.URL.Path, "/v1/subscription_schedules/"):
@@ -181,9 +234,13 @@ func (f *fakeStripeTier) handle(w http.ResponseWriter, r *http.Request) {
 		writeStripeJSON(w, http.StatusConflict, map[string]any{"error": map[string]any{"type": "idempotency_error", "code": "idempotency_key_in_use", "message": "There is currently another in-progress request using this Idempotency Key"}})
 		return
 	case "decline":
-		body := writeStripeJSON(w, http.StatusPaymentRequired, map[string]any{"error": map[string]any{"type": "card_error", "code": "card_declined", "decline_code": "insufficient_funds", "message": "Your card has insufficient funds."}})
-		f.responses[key] = fakeStripeStored{status: http.StatusPaymentRequired, body: body}
-		return
+		// Only an explicit error_if_incomplete turns a declined payment into
+		// a refused update; the default applies it with an open invoice.
+		if r.PostForm.Get("payment_behavior") == "error_if_incomplete" || !strings.HasPrefix(r.URL.Path, "/v1/subscriptions/") {
+			body := writeStripeJSON(w, http.StatusPaymentRequired, map[string]any{"error": map[string]any{"type": "card_error", "code": "card_declined", "decline_code": "insufficient_funds", "message": "Your card has insufficient funds."}})
+			f.responses[key] = fakeStripeStored{status: http.StatusPaymentRequired, body: body}
+			return
+		}
 	}
 	var answer map[string]any
 	switch {
@@ -204,10 +261,13 @@ func (f *fakeStripeTier) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if r.PostForm.Get("billing_cycle_anchor") == "now" {
-			s.periodStart = time.Now().Unix()
+			s.periodStart = time.Now().Add(f.executionLag).Unix()
 			s.period = s.periodStart + 30*24*3600
 		}
-		answer = f.subJSON(s)
+		if mode == "decline" {
+			s.status, s.invoiceOpen = "past_due", true
+		}
+		answer = f.subJSON(s, false)
 	case r.URL.Path == "/v1/subscription_schedules":
 		s, ok := f.subs[r.PostForm.Get("from_subscription")]
 		if !ok || s.scheduleID != "" {
@@ -341,6 +401,33 @@ func newStripeTierFixture(t *testing.T) *stripeTierFixture {
 	return fx
 }
 
+// seedCustomer gives another customer of the same merchant an active basic
+// subscription that the fake Stripe also knows.
+func (fx *stripeTierFixture) seedCustomer(t *testing.T) (*models.Subscription, *UserIdentity) {
+	t.Helper()
+	pool := fx.db.Pool()
+	userID := uuid.NewString()
+	customerID := dbtest.EnsureCustomerIDPgx(fx.ctx, t, pool, userID)
+	sfx := uuid.NewString()[:8]
+	railSub := "sub_" + sfx
+	start, end := *fx.sub.CurrentPeriodStartsAt, *fx.sub.CurrentPeriodEndsAt
+	fx.stripe.declare(railSub, "si_"+sfx, fx.basicRef, start.Unix(), end.Unix())
+	id := uuid.New()
+	_, err := pool.Exec(fx.ctx, `INSERT INTO openrails.subscriptions
+	        (id, price_id, product_id, status, rail, psp_id, rail_subscription_id,
+	         current_period_starts_at, current_period_ends_at, started_at, customer_id, merchant_id)
+	      VALUES ($1, $2, $3, 'active', 'stripe', $4, $5, $6, $7, $6, $8, $9)`,
+		id, fx.basic.ID, fx.basic.ProductID, fx.sub.PspID, railSub, start, end, customerID, dbtest.TestMerchantID.UUID())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.rail_intents WHERE subscription_id = $1", id)
+		_, _ = pool.Exec(fx.ctx, "DELETE FROM openrails.subscriptions WHERE id = $1", id)
+	})
+	sub, err := fx.svc.SubscriptionService.GetByID(fx.ctx, id)
+	require.NoError(t, err)
+	return sub, &UserIdentity{ID: userID}
+}
+
 // restart rebuilds the runner and handler: every recovery decision must come
 // from the database.
 func (fx *stripeTierFixture) restart() *intents.Runner {
@@ -408,13 +495,18 @@ func TestStripeTierChangeUpgradeReplaysStoredReceipt(t *testing.T) {
 	require.Equal(t, op.ID.String(), posts[0].form.Get("metadata[openrails_tier_change]"))
 	require.Equal(t, "always_invoice", posts[0].form.Get("proration_behavior"))
 	require.Equal(t, "now", posts[0].form.Get("billing_cycle_anchor"))
+	require.Equal(t, "error_if_incomplete", posts[0].form.Get("payment_behavior"), "a declined payment refuses the update instead of leaving an unpaid invoice")
 
-	// Local effects once: the subscription rides the new price for the frozen period.
+	// Local effects once: the subscription rides the new price for the
+	// period Stripe opened (the receipt), not the enqueue-time estimate.
 	local := fx.local(t)
 	require.Equal(t, fx.pro.ID, local.PriceID)
+	landed := fx.stripe.sub(fx.sub.RailSubscriptionID)
+	require.Equal(t, landed.periodStart, local.CurrentPeriodStartsAt.Unix())
+	require.Equal(t, landed.period, local.CurrentPeriodEndsAt.Unix())
+	require.Equal(t, landed.period, first.NextChargeDate.Unix())
 	var payload StripeTierChangePayload
 	require.NoError(t, json.Unmarshal(op.Payload, &payload))
-	require.True(t, payload.PeriodEnd.Equal(*local.CurrentPeriodEndsAt))
 	require.EqualValues(t, 30_000_000-ceilCredit(10_000_000, 25*24, 720), payload.AmountDueNow)
 	require.Equal(t, payload.AmountDueNow, first.AmountDueNow)
 
@@ -432,10 +524,12 @@ func TestStripeTierChangeUpgradeReplaysStoredReceipt(t *testing.T) {
 	var tierErr *TierChangeError
 	require.ErrorAs(t, err, &tierErr)
 	require.Equal(t, http.StatusConflict, tierErr.HTTPStatus)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, tierErr.Code)
 	// Another user cannot read the operation through the key.
 	_, err = fx.svc.TierChange(fx.ctx, &TierChangeRequest{PriceID: openrails.PriceID(fx.pro.ID).String(), SubscriptionID: fx.sub.ID, IdempotencyKey: key}, &UserIdentity{ID: uuid.NewString()})
 	require.ErrorAs(t, err, &tierErr)
-	require.Equal(t, http.StatusNotFound, tierErr.HTTPStatus)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, tierErr.Code)
+	require.NotContains(t, tierErr.Message, first.OperationID)
 	// A new key against the plan the subscription is already on is refused
 	// before Stripe is consulted.
 	_, err = fx.change("other-"+uuid.NewString()[:8], fx.pro)
@@ -757,4 +851,160 @@ func TestStripeTierChangeOperatorReleasesUnsentOperation(t *testing.T) {
 	require.Equal(t, http.StatusConflict, tierErr.HTTPStatus)
 	require.Equal(t, openrails.CodeTierChangeRefused, tierErr.Code)
 	require.Empty(t, fx.stripe.posts("/v1/subscriptions/"))
+}
+
+// Two requests under one merchant-scoped key both miss the replay lookup; B
+// pauses in its Stripe preflight while A, a different customer's change,
+// inserts and completes under the same key. B's enqueue meets A's row and is
+// refused as a key conflict: it never executes or renders A's operation.
+func TestStripeTierChangeKeyReuseDuringPreflightIsRefused(t *testing.T) {
+	fx := newStripeTierFixture(t)
+	otherSub, otherUser := fx.seedCustomer(t)
+	key := "reuse-" + uuid.NewString()[:8]
+	arrived, release := fx.stripe.holdNextRead("/v1/subscriptions/" + fx.sub.RailSubscriptionID)
+	type answer struct {
+		resp *TierChangeResponse
+		err  error
+	}
+	b := make(chan answer, 1)
+	go func() {
+		resp, err := fx.change(key, fx.pro)
+		b <- answer{resp, err}
+	}()
+	select {
+	case <-arrived:
+	case <-time.After(20 * time.Second):
+		t.Fatal("B never reached its provider preflight")
+	}
+	require.Equal(t, 0, fx.operations(t), "B passed the replay lookup before any operation existed")
+	a, err := fx.svc.TierChange(fx.ctx, &TierChangeRequest{PriceID: openrails.PriceID(fx.pro.ID).String(), SubscriptionID: otherSub.ID, IdempotencyKey: key}, otherUser)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", a.Status)
+	release()
+	got := <-b
+	require.Nil(t, got.resp, "B never receives A's result")
+	var refused *TierChangeError
+	require.ErrorAs(t, got.err, &refused)
+	require.Equal(t, http.StatusConflict, refused.HTTPStatus)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, refused.Code)
+	require.NotContains(t, refused.Message, a.OperationID)
+	require.Equal(t, fx.basic.ID, fx.local(t).PriceID)
+	require.Equal(t, fx.basicRef, fx.stripe.sub(fx.sub.RailSubscriptionID).priceID, "B's subscription was never pushed")
+	require.Len(t, fx.stripe.posts("/v1/subscriptions/"+otherSub.RailSubscriptionID), 1, "A ran once")
+	require.Equal(t, 0, fx.operations(t))
+	// The key stays A's: B's retry is refused the same way, A's replays.
+	_, err = fx.change(key, fx.pro)
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyConflict, refused.Code)
+	again, err := fx.svc.TierChange(fx.ctx, &TierChangeRequest{PriceID: openrails.PriceID(fx.pro.ID).String(), SubscriptionID: otherSub.ID, IdempotencyKey: key}, otherUser)
+	require.NoError(t, err)
+	require.Equal(t, a, again)
+}
+
+// The webhook converger can apply the upgrade first: after a lost response it
+// mirrors Stripe's subscription (target price, the period Stripe opened at
+// execution). The verifier then commits from the exact read-back receipt —
+// Stripe's period, not the enqueue-time estimate — exactly once.
+func TestStripeTierChangeWebhookFirstConvergesOnce(t *testing.T) {
+	fx := newStripeTierFixture(t)
+	fx.stripe.setMode("lostAfterLanding")
+	fx.stripe.mu.Lock()
+	fx.stripe.executionLag = 90 * time.Second
+	fx.stripe.mu.Unlock()
+	key := "hook-" + uuid.NewString()[:8]
+	pending, err := fx.change(key, fx.pro)
+	require.NoError(t, err)
+	require.Equal(t, "processing", pending.Status)
+	railSub := fx.sub.RailSubscriptionID
+	landed := fx.stripe.sub(railSub)
+	require.Equal(t, fx.proRef, landed.priceID, "the update landed at Stripe")
+
+	entSvc := entitlements.NewEntitlementService(fx.db, fx.clock)
+	paymentSvc := payments.NewPaymentService(fx.db, fx.clock)
+	notifications := subscriptions.NewNotificationService(fx.db, nil)
+	converger := &webhooks.StripeConvergeService{
+		DB: fx.db, Clock: fx.clock, Prober: &subscriptions.HTTPStripeLivenessProber{SecretKey: "sk_test_converge"},
+		PriceService: fx.svc.PriceService, ProductService: fx.svc.ProductService, SubscriptionService: fx.svc.SubscriptionService,
+		SubscriptionLifecycleService: subscriptions.NewSubscriptionLifecycleService(fx.db, fx.svc.ProductService, fx.svc.PriceService, entSvc, notifications, paymentSvc, fx.clock),
+		PaymentService:               paymentSvc, NotificationService: notifications,
+	}
+	_, err = converger.Converge(fx.ctx, railSub)
+	require.NoError(t, err)
+	require.Equal(t, fx.pro.ID, fx.local(t).PriceID, "the webhook converger applied the target price first")
+	var payload StripeTierChangePayload
+	require.NoError(t, json.Unmarshal(fx.operation(key).Payload, &payload))
+	require.NotEqual(t, landed.period, payload.PeriodEnd.Unix(), "Stripe opened its own period at execution")
+
+	resolved := fx.verifyOnce(t, key)
+	require.Equal(t, intents.StatusSucceeded, resolved.Status, "a webhook-first commit never strands the operation")
+	local := fx.local(t)
+	require.Equal(t, fx.pro.ID, local.PriceID)
+	require.Equal(t, landed.periodStart, local.CurrentPeriodStartsAt.Unix(), "the local period is the receipt's")
+	require.Equal(t, landed.period, local.CurrentPeriodEndsAt.Unix())
+	require.Len(t, fx.stripe.posts("/v1/subscriptions/"), 1)
+	done, err := fx.change(key, fx.pro)
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", done.Status)
+	require.Equal(t, pending.OperationID, done.OperationID)
+	require.Equal(t, landed.period, done.NextChargeDate.Unix(), "the answer carries Stripe's next charge date")
+	again, err := fx.change(key, fx.pro)
+	require.NoError(t, err)
+	require.Equal(t, done, again)
+	require.Equal(t, intents.StatusSucceeded, fx.verifyOnce(t, key).Status)
+	require.Equal(t, 1, fx.operations(t))
+}
+
+// Stripe's default payment_behavior (allow_incomplete) applies a price change
+// whose invoice cannot be paid and leaves the subscription past_due; the
+// upgrade therefore sends error_if_incomplete, under which the same declined
+// payment is a 402 and nothing changes.
+func TestStripeTierChangePaymentBehaviorRefusesUnpaidUpgrade(t *testing.T) {
+	fx := newStripeTierFixture(t)
+	railSub := fx.sub.RailSubscriptionID
+	itemID := fx.stripe.sub(railSub).itemID
+	stripe := &subscriptions.StripeService{Config: fx.svc.Config, Rails: fx.svc.Rails}
+	fx.stripe.setMode("decline")
+	applied, err := stripe.ChangeSubscriptionPrice(fx.ctx, subscriptions.StripePriceChangeParams{SubscriptionID: railSub, ItemID: itemID, StripePriceID: fx.proRef, InternalPriceID: fx.pro.ID.String(), Key: "default-" + uuid.NewString()[:8], ProrationBehavior: "always_invoice"})
+	require.NoError(t, err, "the default applies the change despite the declined payment")
+	require.Equal(t, "past_due", applied.Status)
+	require.Equal(t, fx.proRef, applied.PriceID)
+	fx.stripe.declare(railSub, itemID, fx.basicRef, fx.sub.CurrentPeriodStartsAt.Unix(), fx.sub.CurrentPeriodEndsAt.Unix())
+
+	fx.stripe.setMode("decline")
+	key := "unpaid-" + uuid.NewString()[:8]
+	_, err = fx.change(key, fx.pro)
+	var refused *TierChangeError
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, http.StatusPaymentRequired, refused.HTTPStatus)
+	require.Equal(t, "insufficient_funds", refused.Code)
+	posts := fx.stripe.posts("/v1/subscriptions/")
+	require.Equal(t, "error_if_incomplete", posts[len(posts)-1].form.Get("payment_behavior"))
+	require.Equal(t, fx.basicRef, fx.stripe.sub(railSub).priceID, "the refused update changed nothing at Stripe")
+	require.Empty(t, fx.stripe.sub(railSub).status)
+	require.Equal(t, fx.basic.ID, fx.local(t).PriceID)
+	require.Equal(t, intents.StatusFailedTerminal, fx.operation(key).Status)
+}
+
+// A tier change needs a client Idempotency-Key: without one it is refused
+// before any admission, provider read or operation.
+func TestStripeTierChangeRequiresIdempotencyKey(t *testing.T) {
+	fx := newStripeTierFixture(t)
+	for _, key := range []string{"", "   "} {
+		_, err := fx.change(key, fx.pro)
+		var refused *TierChangeError
+		require.ErrorAs(t, err, &refused)
+		require.Equal(t, http.StatusBadRequest, refused.HTTPStatus)
+		require.Equal(t, openrails.CodeTierChangeIdempotencyKeyRequired, refused.Code)
+	}
+	// Even a request its admission would refuse answers the missing key first.
+	_, err := fx.change("", fx.basic)
+	var refused *TierChangeError
+	require.ErrorAs(t, err, &refused)
+	require.Equal(t, openrails.CodeTierChangeIdempotencyKeyRequired, refused.Code)
+	fx.stripe.mu.Lock()
+	requests := len(fx.stripe.requests)
+	fx.stripe.mu.Unlock()
+	require.Zero(t, requests, "nothing reached Stripe")
+	require.Equal(t, 0, fx.operations(t))
+	require.Equal(t, fx.basic.ID, fx.local(t).PriceID)
 }
