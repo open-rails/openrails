@@ -72,6 +72,8 @@ func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 	host := context.WithValue(t.Context(), privateKey{}, "host-private")
 	host = requestauth.WithHostPrincipal(host, &requestauth.HostPrincipal{MerchantID: merchant.ID(uuid.New()), Permissions: []string{"platform:*"}})
 	host = billingauth.SetUserContext(host, billingauth.UserContext{UserID: uuid.NewString()})
+	// The shared Client attaches its immutable construction binding.
+	host = merchant.WithID(host, original)
 	for _, path := range []string{"/v1/merchant/ordinary", "/v1/merchant/billing-archive"} {
 		req, _ := http.NewRequestWithContext(host, http.MethodGet, "http://openrails.invalid"+path, nil)
 		resp, err := transport.RoundTrip(req)
@@ -81,22 +83,30 @@ func TestTransportMerchantAuthorityAndIsolation(t *testing.T) {
 		require.Equal(t, "ok", string(body))
 		require.NoError(t, resp.Body.Close())
 	}
-	bound = merchant.ID(uuid.New()) // live constructor binding, not cached
+	bound = merchant.ID(uuid.New()) // a changed runtime binding must refuse the original Client
 	req, _ := http.NewRequestWithContext(host, http.MethodGet, "http://openrails.invalid/ordinary", nil)
 	resp, err := transport.RoundTrip(req)
 	require.NoError(t, err)
 	_ = resp.Body.Close()
-	require.Equal(t, 3, called)
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, 2, called)
 	conflict, _ := http.NewRequestWithContext(merchant.WithID(host, original), http.MethodGet, "http://openrails.invalid/ordinary", nil)
 	resp, err = transport.RoundTrip(conflict)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusConflict, resp.StatusCode)
-	require.Equal(t, 3, called, "conflicting pin must not reach handler")
+	require.Equal(t, 2, called, "conflicting pin must not reach handler")
+	unbound, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://openrails.invalid/ordinary", nil)
+	resp, err = transport.RoundTrip(unbound)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusConflict, resp.StatusCode)
+	require.Equal(t, 2, called, "unbound calls must not reach handler")
 }
 
 func TestTransportImportCancellationClosesRequestBody(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
+	bound := merchant.ID(uuid.New())
+	ctx, cancel := context.WithCancel(merchant.WithID(t.Context(), bound))
 	defer cancel()
 	reader, writer := io.Pipe()
 	defer writer.Close()
@@ -107,7 +117,7 @@ func TestTransportImportCancellationClosesRequestBody(t *testing.T) {
 		_, err := io.Copy(io.Discard, r.Body)
 		finished <- err
 		w.WriteHeader(http.StatusBadRequest)
-	}), func() merchant.ID { return merchant.ID(uuid.New()) })
+	}), func() merchant.ID { return bound })
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/merchant/billing-archive", reader)
 	require.NoError(t, err)
 	roundTripDone := make(chan struct{})
@@ -118,7 +128,11 @@ func TestTransportImportCancellationClosesRequestBody(t *testing.T) {
 			_ = resp.Body.Close()
 		}
 	}()
-	<-started
+	select {
+	case <-started:
+	case <-roundTripDone:
+		t.Fatal("import returned before reaching its handler")
+	}
 	cancel()
 	require.Error(t, <-finished)
 	<-roundTripDone
