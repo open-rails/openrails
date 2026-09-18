@@ -18,7 +18,7 @@ to concrete code (enum, table, or manifest key).
 
 | Term | Meaning |
 |---|---|
-| Native units | Amounts are integer units at the currency's registered scale (`moneyutil` registry): micros for USD/EUR, 10^4 per yen for JPY. `moneyutil.Micros` names the 10^6 case only. |
+| Native units | Amounts are integer units at the currency's registered scale (`openrails.Currencies()` / `GET /v1/currencies`): micros for USD/EUR, 10^4 per yen for JPY; decimal strings on the wire. |
 | Money ledger | Double-entry ledger, the source of truth for money. FX inside the ledger is forbidden — no cross-currency transfers. |
 | Grant | An immutable event in the append-only grant ledger (`openrails.grants`), kind `entitlement`/`ownership`/`credit`. Revoke/expire/supersede are new events referencing the original; a credit grant IS the FIFO lot. |
 | Entitlement | A plain string (e.g. `premium`) a customer holds over time — a timeline of windows in `openrails.entitlements`, materialized from grants. See `docs/entitlements_timeline.md`. |
@@ -44,7 +44,7 @@ to concrete code (enum, table, or manifest key).
 | Term | Meaning |
 |---|---|
 | MODE 1 / MODE 2 (`merchant_source`) | Who owns merchant config. `manifest` (MODE 1): YAML-is-truth in memory, operator = merchant, reboot to change. `api` (MODE 2): no YAML — Vault + DB via API, for true multi-tenant SaaS. Orthogonal to embedded vs standalone. |
-| Embedded vs standalone | Only how the process/routes are hosted: a host app mounts OpenRails under `/billing/v1/*`, standalone serves `/v1/*`. Both run either MODE. |
+| Deployment shape | Only how the process/routes are hosted: **embedded** (a Go host runs `embed.Runtime` and mounts `/billing/v1/*`), **standalone** (`openrails run-server` serves `/v1/*`), **OpenRails-SaaS** (one hosted standalone engine, MODE 2, one merchant binding per tenant client). Any shape runs either MODE; application code uses the same `*openrails.Client` in all three. |
 | `provider_write_mode` | How much OpenRails may do against providers: `full` (normal) / `limited` (no system-initiated writes) / `readonly` (no writes). Unset defaults to `readonly` — fail closed; non-dev boot requires an explicit value. |
 | `test_mode` | Credential posture: `sandbox` or `live`, two explicit states. Sandbox attaches credential guarantees (live Stripe keys refuse boot, NMI accounts probed, CCBill sandbox URL, Solana devnet). Independent of environment — production can legitimately run sandbox rails. |
 

@@ -26,15 +26,13 @@ wire — response fields and request parameters alike (`expires_at`, `occurred_a
 `time.RFC3339Nano` and handlers accept any fractional precision. Durations stay
 integer seconds (`window_seconds`, `retry_after_seconds`) and day buckets stay
 `YYYY-MM-DD`. Missing optional timestamps are omitted; explicit nullable receipt
-fields use null.
+fields use null. Not yet moved: the epoch-seconds `created` on `Payment`,
+`PublicPrice` and the admin catalog objects (tracked with #983).
 Currency codes are the registry's uppercase ISO-4217 spelling on every wire
 surface, whatever case a request sent; requests are read case-insensitively.
 Identifiers of resource kinds `pkg/api` prefixes (`prod_`, `price_`, `sub_`,
 `pay_`, `pm_`, `cs_`) travel prefixed on every DTO that names them, and every
 operation accepts the prefixed form; customer, merchant and PSP ids are plain UUIDs.
-Counts and timestamps are not money: counts remain numbers, and invoice/receipt
-timestamps use RFC3339 with fractional seconds. Missing optional timestamps are
-omitted; explicit nullable receipt fields use null.
 
 The registry has one owner. Go consumers read it with `openrails.Currencies()`
 / `openrails.LookupCurrency(code)` (pure, no I/O); browsers fetch the same

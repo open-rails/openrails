@@ -32,8 +32,6 @@ The JPY acceptance test proves: 120000 native units = 12 JPY; a 20000-native man
 
 ## Invoice notifications
 
-Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. The first overdue transition queues `invoice_overdue` atomically. Repeating either operation does not repeat its notification. These ordinary payer notices require no business profile, onboarding, KYC or terms-acceptance record. Collection and delinquency discover work from invoices and account policy.
+Issuing a positive receivable queues `invoice_issued` in the same transaction as the invoice. The first overdue transition queues `invoice_overdue` atomically. Repeating either operation does not repeat its notification. Collection and delinquency discover work from invoices and account policy; hosts own onboarding and any further notification policy.
 
-The enterprise onboarding routes, business profiles, repeated business reminder ladder, budget-alert thresholds and suspension-recommendation product are unavailable. Hosts own onboarding and any extra notification policy. Core invoice collection, negotiated rates, invoice profiles and delinquency remain available independently.
-
-Invoice collection uses the explicit `collection_payment_method_id` for the payer and currency. There is no fallback to an automatic top-up instrument. Automatic balance refill, its safety policy/panel and self-service auto-top-up settings routes are unavailable. Fiat deposits, manual funding, invoice collection and ordinary recurring subscription payments remain available.
+Invoice collection charges only the payer's explicit `collection_payment_method_id` for that currency; there is no fallback instrument.
