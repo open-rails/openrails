@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -57,15 +58,15 @@ var ErrProviderAccountCutoverNotQualified = subscriptions.ErrProviderAccountCuto
 // two is required. Give both to check a re-entered card against the intended
 // target.
 type ProviderAccountCutoverQuery struct {
-	SubscriptionID             uuid.UUID
-	ReplacementPaymentMethodID *uuid.UUID
+	SubscriptionID             openrails.SubscriptionID
+	ReplacementPaymentMethodID *openrails.PaymentMethodID
 	TargetPSPID                *uuid.UUID
 }
 
 // ProviderAccountCutoverReport is the resolved plan with the identities it was
 // computed from. Safe to serialize into a runbook; never a completed cutover.
 type ProviderAccountCutoverReport struct {
-	SubscriptionID uuid.UUID                  `json:"subscription_id"`
+	SubscriptionID openrails.SubscriptionID   `json:"subscription_id"`
 	SourcePSPID    uuid.UUID                  `json:"source_psp_id"`
 	TargetPSPID    uuid.UUID                  `json:"target_psp_id"`
 	Plan           ProviderAccountCutoverPlan `json:"plan"`
@@ -89,13 +90,13 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 	if err := idguard.RequireMerchant("merchant_id", merchantID); err != nil {
 		return ProviderAccountCutoverReport{}, err
 	}
-	if err := idguard.Require("subscription_id", q.SubscriptionID); err != nil {
+	if err := idguard.Require("subscription_id", q.SubscriptionID.UUID()); err != nil {
 		return ProviderAccountCutoverReport{}, err
 	}
 	if err := idguard.RequireOptional("target_psp_id", q.TargetPSPID); err != nil {
 		return ProviderAccountCutoverReport{}, err
 	}
-	if err := idguard.RequireOptional("replacement_payment_method_id", q.ReplacementPaymentMethodID); err != nil {
+	if err := idguard.RequireOptional("replacement_payment_method_id", (*uuid.UUID)(q.ReplacementPaymentMethodID)); err != nil {
 		return ProviderAccountCutoverReport{}, err
 	}
 	if q.ReplacementPaymentMethodID == nil && q.TargetPSPID == nil {
@@ -104,7 +105,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 	report := ProviderAccountCutoverReport{SubscriptionID: q.SubscriptionID}
 	err := a.Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
 		dbq := a.Runtime.DB.Gen(ctx)
-		sub, err := dbq.GetSubscriptionByID(ctx, q.SubscriptionID)
+		sub, err := dbq.GetSubscriptionByID(ctx, q.SubscriptionID.UUID())
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("subscription %s: not found", q.SubscriptionID)
@@ -119,7 +120,7 @@ func PlanProviderAccountCutover(ctx context.Context, a *app.App, merchantID merc
 		}
 		if q.ReplacementPaymentMethodID != nil {
 			r := &subscriptions.ProviderAccountCutoverReplacement{}
-			pm, err := dbq.GetPaymentMethodByID(ctx, *q.ReplacementPaymentMethodID)
+			pm, err := dbq.GetPaymentMethodByID(ctx, q.ReplacementPaymentMethodID.UUID())
 			switch {
 			case err == nil:
 				r.Found = true

@@ -4,6 +4,7 @@ package controlplane_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -133,29 +134,29 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 		q    controlplane.ProviderAccountCutoverQuery
 		want want
 	}{
-		{"same account, card ready", controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, ReplacementPaymentMethodID: &homeNew},
+		{"same account, card ready", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&homeNew)},
 			want{controlplane.ProviderAccountCutoverSameAccount, controlplane.ProviderAccountCutoverReady}},
-		{"same account, no replacement card", controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &active},
+		{"same account, no replacement card", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &active},
 			want{controlplane.ProviderAccountCutoverSameAccount, controlplane.ProviderAccountCutoverReplacementCardRequired}},
-		{"same account, card on another PSP", controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &active, ReplacementPaymentMethodID: &homeOnOther},
+		{"same account, card on another PSP", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &active, ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&homeOnOther)},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverReplacementCardPSP}},
-		{"stripe subscription on its own account", controlplane.ProviderAccountCutoverQuery{SubscriptionID: stripeSub, TargetPSPID: &stripePSP},
+		{"stripe subscription on its own account", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(stripeSub), TargetPSPID: &stripePSP},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverRailUnsupported}},
-		{"ccbill subscription on its own account", controlplane.ProviderAccountCutoverQuery{SubscriptionID: ccbillSub, TargetPSPID: &ccbillPSP},
+		{"ccbill subscription on its own account", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(ccbillSub), TargetPSPID: &ccbillPSP},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverRailUnsupported}},
-		{"cancelled subscription", controlplane.ProviderAccountCutoverQuery{SubscriptionID: cancelled, ReplacementPaymentMethodID: &quitterNew},
+		{"cancelled subscription", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(cancelled), ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&quitterNew)},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverSubscriptionNotRebilling}},
-		{"archived target", controlplane.ProviderAccountCutoverQuery{SubscriptionID: drain, TargetPSPID: &archived},
+		{"archived target", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(drain), TargetPSPID: &archived},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverTargetArchived}},
-		{"another customer's card", controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, ReplacementPaymentMethodID: &stranger},
+		{"another customer's card", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&stranger)},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverReplacementCardNotOwned}},
-		{"card that does not exist", controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, ReplacementPaymentMethodID: &missing},
+		{"card that does not exist", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&missing)},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverReplacementCardNotFound}},
-		{"drain, no card yet", controlplane.ProviderAccountCutoverQuery{SubscriptionID: drain, TargetPSPID: &active},
+		{"drain, no card yet", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(drain), TargetPSPID: &active},
 			want{controlplane.ProviderAccountCutoverRequiresReentry, controlplane.ProviderAccountCutoverReplacementCardRequired}},
-		{"drain, card re-entered on the target", controlplane.ProviderAccountCutoverQuery{SubscriptionID: drain, ReplacementPaymentMethodID: &reentered},
+		{"drain, card re-entered on the target", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(drain), ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&reentered)},
 			want{controlplane.ProviderAccountCutoverRequiresReentry, controlplane.ProviderAccountCutoverCrossAccountNotQualified}},
-		{"drain, card on a different PSP than the target", controlplane.ProviderAccountCutoverQuery{SubscriptionID: drain, TargetPSPID: &active, ReplacementPaymentMethodID: &drainerOnOther},
+		{"drain, card on a different PSP than the target", controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(drain), TargetPSPID: &active, ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&drainerOnOther)},
 			want{controlplane.ProviderAccountCutoverBlocked, controlplane.ProviderAccountCutoverReplacementCardPSP}},
 	}
 	for _, tc := range cases {
@@ -163,6 +164,9 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 			report, err := cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, tc.q)
 			require.NoError(t, err)
 			require.Equal(t, tc.q.SubscriptionID, report.SubscriptionID)
+			wire, err := json.Marshal(report)
+			require.NoError(t, err)
+			require.Contains(t, string(wire), `"subscription_id":"`+tc.q.SubscriptionID.String()+`"`)
 			require.Equal(t, tc.want.disposition, report.Plan.Disposition, report.Plan.Reason)
 			require.Equal(t, tc.want.code, report.Plan.Code, report.Plan.Reason)
 			require.Equal(t, tc.want.code == controlplane.ProviderAccountCutoverReady, report.Plan.Executable)
@@ -172,7 +176,7 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 			}
 		})
 	}
-	report, err := cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: drain, ReplacementPaymentMethodID: &reentered})
+	report, err := cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(drain), ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&reentered)})
 	require.NoError(t, err)
 	require.Equal(t, archived, report.SourcePSPID)
 	require.Equal(t, active, report.TargetPSPID)
@@ -188,11 +192,11 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 		q     controlplane.ProviderAccountCutoverQuery
 		param string
 	}{
-		{"zero merchant", merchant.ID{}, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &active}, "merchant_id"},
+		{"zero merchant", merchant.ID{}, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &active}, "merchant_id"},
 		{"zero subscription", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{TargetPSPID: &active}, "subscription_id"},
-		{"zero target psp", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &zero}, "target_psp_id"},
-		{"zero replacement method", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, ReplacementPaymentMethodID: &zero}, "replacement_payment_method_id"},
-		{"neither target nor card", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home}, "target_psp_id"},
+		{"zero target psp", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &zero}, "target_psp_id"},
+		{"zero replacement method", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), ReplacementPaymentMethodID: (*openrails.PaymentMethodID)(&zero)}, "replacement_payment_method_id"},
+		{"neither target nor card", dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home)}, "target_psp_id"},
 	} {
 		t.Run("refuses "+tc.name, func(t *testing.T) {
 			_, err := cp.PlanProviderAccountCutover(ctx, tc.id, tc.q)
@@ -209,11 +213,11 @@ func TestPlanProviderAccountCutoverIsReportOnly(t *testing.T) {
 
 	// Identity errors: an unknown PSP or subscription, no target at all, and
 	// another merchant's scope.
-	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &missing})
+	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &missing})
 	require.ErrorContains(t, err, "not found")
-	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: missing, TargetPSPID: &active})
+	_, err = cp.PlanProviderAccountCutover(ctx, dbtest.TestMerchantID, controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(missing), TargetPSPID: &active})
 	require.ErrorContains(t, err, "not found")
-	_, err = cp.PlanProviderAccountCutover(ctx, merchant.ID(uuid.New()), controlplane.ProviderAccountCutoverQuery{SubscriptionID: home, TargetPSPID: &active})
+	_, err = cp.PlanProviderAccountCutover(ctx, merchant.ID(uuid.New()), controlplane.ProviderAccountCutoverQuery{SubscriptionID: openrails.SubscriptionID(home), TargetPSPID: &active})
 	require.Error(t, err, "another merchant's scope sees nothing")
 
 	require.Equal(t, before, snapshot(), "a plan never writes: subscriptions, instruments and intents are untouched")
