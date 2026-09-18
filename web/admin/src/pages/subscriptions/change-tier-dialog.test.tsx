@@ -1,4 +1,7 @@
 // @vitest-environment jsdom
+// The tier-change key lifetime, proved on the mounted dialog against the real
+// API client (#513): one reviewed change is one durable operation, and only a
+// definitive refusal may start a new one.
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import {
@@ -9,8 +12,48 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { loadBootstrap, setTokens } from "@/lib/api/client"
+import type { CatalogPrice, CatalogProduct } from "@/lib/api/types"
 import { adminQueries } from "@/lib/queries"
 import { ChangeTierDialog } from "./change-tier-dialog"
+import {
+  adminTierChangeBlockReason,
+  tierChangeOptionLabel,
+  tierChangeOptions,
+} from "./tier-change-options"
+
+const WHEN = "2026-09-18T00:00:00Z"
+const product = (
+  id: string,
+  tierRank: number,
+  overrides: Partial<CatalogProduct> = {}
+): CatalogProduct => ({
+  id,
+  key: id,
+  display_name: id,
+  description: "",
+  tier_group: "plans",
+  tier_rank: tierRank,
+  archived: false,
+  created_at: WHEN,
+  updated_at: WHEN,
+  ...overrides,
+})
+const price = (
+  id: string,
+  productId: string,
+  overrides: Partial<CatalogPrice> = {}
+): CatalogPrice => ({
+  id,
+  key: id,
+  product_id: productId,
+  archived: false,
+  currency: "USD",
+  unit_amount: "20000000",
+  auto_renew: true,
+  created_at: WHEN,
+  updated_at: WHEN,
+  ...overrides,
+})
 
 const preview = {
   object: "tier_change_preview",
@@ -37,9 +80,7 @@ const result = (status: string) =>
   )
 const decline = (code = "stripe_card_declined") =>
   Response.json(
-    {
-      error: { code, message: "The card was declined" },
-    },
+    { error: { code, message: "The card was declined" } },
     { status: 402 }
   )
 
@@ -100,37 +141,18 @@ beforeEach(async () => {
       mutations: { retry: false },
     },
   })
+  const plans = ["basic", "pro", "plus"]
   client.setQueryData(adminQueries.allProducts().queryKey, {
     total: 3,
     limit: 3,
     offset: 0,
-    items: ["basic", "pro", "plus"].map((id, tier_rank) => ({
-      id,
-      key: id,
-      description: "",
-      archived: false,
-      created_at: "2026-09-18T00:00:00Z",
-      updated_at: "2026-09-18T00:00:00Z",
-      display_name: id,
-      tier_group: "plans",
-      tier_rank,
-    })),
+    items: plans.map((id, rank) => product(id, rank)),
   })
   client.setQueryData(adminQueries.allPrices().queryKey, {
     total: 3,
     limit: 3,
     offset: 0,
-    items: ["basic", "pro", "plus"].map((id) => ({
-      id: `price-${id}`,
-      key: `price-${id}`,
-      archived: false,
-      created_at: "2026-09-18T00:00:00Z",
-      updated_at: "2026-09-18T00:00:00Z",
-      product_id: id,
-      currency: "USD",
-      unit_amount: "20000000",
-      auto_renew: true,
-    })),
+    items: plans.map((id) => price(`price-${id}`, id)),
   })
   const container = document.createElement("div")
   document.body.append(container)
@@ -162,9 +184,9 @@ afterEach(async () => {
 })
 
 function button(label: string) {
-  const found = [
-    ...document.querySelectorAll<HTMLButtonElement>("button"),
-  ].find((node) => node.textContent === label)
+  const found = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+    (node) => node.textContent === label
+  )
   expect(found, `button ${label}`).toBeDefined()
   expect(found!.disabled).toBe(false)
   return found!
@@ -281,5 +303,84 @@ describe("the mounted tier-change dialog", () => {
     await act(async () => old.resolve(Response.json(preview)))
     button("Review change")
     expect(requests).toHaveLength(0)
+  })
+})
+
+// Which tier changes the console offers at all: a pure invariant the dialog
+// cannot prove, because an option it never lists cannot be clicked.
+describe("tier change options", () => {
+  it("offers only live recurring prices in the current group and currency", () => {
+    const current = product("standard", 2)
+    expect(
+      tierChangeOptions({
+        currentProduct: current,
+        currentCurrency: "USD",
+        products: [
+          current,
+          product("basic", 1),
+          product("pro", 3),
+          product("other", 4, { tier_group: "storage" }),
+          product("archived", 5, { archived: true }),
+        ],
+        prices: [
+          price("basic-usd", "basic", { currency: "usd" }),
+          price("pro-usd", "pro"),
+          price("pro-eur", "pro", { currency: "eur" }),
+          price("pro-once", "pro", { auto_renew: false }),
+          price("other-usd", "other"),
+          price("archived-product", "archived"),
+          price("archived-price", "pro", { archived: true }),
+        ],
+      }).map(({ direction, price: candidate }) => [direction, candidate.id])
+    ).toEqual([
+      ["downgrade", "basic-usd"],
+      ["upgrade", "pro-usd"],
+    ])
+  })
+
+  it("fails closed when the current product has no tier group", () => {
+    expect(
+      tierChangeOptions({
+        currentProduct: product("standalone", 0, { tier_group: undefined }),
+        currentCurrency: "usd",
+        products: [product("other", 1, { tier_group: undefined })],
+        prices: [price("other-usd", "other")],
+      })
+    ).toEqual([])
+  })
+
+  it("distinguishes recurring variants by cadence and key", () => {
+    expect(
+      tierChangeOptionLabel({
+        direction: "upgrade",
+        product: product("pro", 3),
+        price: price("pro-monthly", "pro", { access_duration_hours: 720 }),
+      })
+    ).toBe("pro · upgrade · $20.00 every 1 month · pro-monthly")
+  })
+
+  it.each([
+    [{}, undefined],
+    [
+      { status: "cancelled" as const },
+      "Only active or past-due subscriptions can change tier",
+    ],
+    [{ scheduledPriceId: "price-next" }, "A tier change is already scheduled"],
+    [{ hasPendingReprice: true }, "A price change is already scheduled"],
+    [{ rail: "ccbill" }, "CCBill tier changes require customer self-service"],
+    [
+      { rail: "solana" },
+      "Solana tier changes require the customer's wallet signature",
+    ],
+  ])("blocks the admin workflow it cannot complete: %o", (override, reason) => {
+    expect(
+      adminTierChangeBlockReason({
+        rail: "nmi",
+        status: "active",
+        scheduledPriceId: null,
+        hasPendingReprice: false,
+        ...override,
+      })
+    ).toBe(reason)
   })
 })

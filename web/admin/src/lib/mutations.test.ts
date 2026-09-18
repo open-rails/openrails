@@ -1,1384 +1,410 @@
-import { QueryClient } from "@tanstack/react-query"
+// Every console write, driven through the real endpoint + fetch path. Each
+// case states the requests it makes and the exact cache blast radius it
+// leaves behind, and is replayed with the merchant switched mid-flight to
+// prove the refresh follows the merchant that started the write.
+import type { MutationOptions, QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { askCatalogCopilot, confirmCopilotDraft } from "@/lib/api/copilot"
-import {
-  archivePaymentProviderAccount,
-  cancelReprice,
-  cancelSubscription,
-  changeSubscriptionPaymentMethod,
-  changeSubscriptionTier,
-  createOffChannelPayment,
-  createPrice,
-  createProduct,
-  deactivatePrice,
-  deleteCustomerUsageRateOverride,
-  deleteDefaultUsageRateCard,
-  getPriceByKey,
-  getProduct,
-  grantEntitlement,
-  grantProductAccess,
-  listCustomers,
-  listPayments,
-  listSubscriptions,
-  markNotificationRead,
-  previewRepriceAllPriorVersions,
-  previewSubscriptionTierChange,
-  publishCatalog,
-  putDefaultUsageRateCard,
-  putCustomerUsageRateOverride,
-  putMerchantSettings,
-  putPaymentProvider,
-  putUsageMeter,
-  refreshCatalogDrift,
-  refundPayment,
-  repriceAllPriorVersions,
-  resolveFinding,
-  resumeSubscription,
-  revokeEntitlement,
-  revokeProductAccess,
-} from "@/lib/api/endpoints"
-import { askMetrics, generateWidget, putDashboard } from "@/lib/api/metrics"
-import { adminMutations } from "@/lib/mutations"
+import { adminMutations as M } from "@/lib/mutations"
 import { queryKeys } from "@/lib/queries"
+import {
+  calls,
+  client,
+  exec,
+  invalidated,
+  seedCache,
+  selectMerchant,
+  server,
+  type Recorded,
+  type Reply,
+} from "@/test/harness"
 
-vi.mock("@/lib/api/copilot", () => ({
-  askCatalogCopilot: vi.fn(),
-  confirmCopilotDraft: vi.fn(),
-}))
+type Go = <TData, TError, TInput, TContext>(
+  options: MutationOptions<TData, TError, TInput, TContext>,
+  input: TInput
+) => Promise<TData>
 
-vi.mock("@/lib/api/endpoints", () => ({
-  activatePrice: vi.fn(),
-  activateProduct: vi.fn(),
-  cancelReprice: vi.fn(),
-  cancelSubscription: vi.fn(),
-  changeTeamRole: vi.fn(),
-  changeSubscriptionPaymentMethod: vi.fn(),
-  changeSubscriptionTier: vi.fn(),
-  createApiKey: vi.fn(),
-  createOffChannelPayment: vi.fn(),
-  createPrice: vi.fn(),
-  createProduct: vi.fn(),
-  createWebhook: vi.fn(),
-  rotateWebhookURL: vi.fn(),
-  deactivatePrice: vi.fn(),
-  deactivateProduct: vi.fn(),
-  deleteCustomerUsageRateOverride: vi.fn(),
-  deleteDefaultUsageRateCard: vi.fn(),
-  archivePaymentProviderAccount: vi.fn(),
-  deleteWebhook: vi.fn(),
-  getCreditLimit: vi.fn(),
-  getPriceByKey: vi.fn(),
-  getProduct: vi.fn(),
-  getTrustLevel: vi.fn(),
-  grantEntitlement: vi.fn(),
-  grantProductAccess: vi.fn(),
-  inviteTeamMember: vi.fn(),
-  listCustomers: vi.fn(),
-  listPayments: vi.fn(),
-  listSubscriptions: vi.fn(),
-  markNotificationRead: vi.fn(),
-  putMerchantSettings: vi.fn(),
-  putPaymentProvider: vi.fn(),
-  previewRepriceAllPriorVersions: vi.fn(),
-  previewSubscriptionTierChange: vi.fn(),
-  publishCatalog: vi.fn(),
-  putDefaultUsageRateCard: vi.fn(),
-  putCustomerUsageRateOverride: vi.fn(),
-  removeTeamMember: vi.fn(),
-  refreshCatalogDrift: vi.fn(),
-  refundPayment: vi.fn(),
-  repriceAllPriorVersions: vi.fn(),
-  resolveFinding: vi.fn(),
-  resumeSubscription: vi.fn(),
-  revokeApiKey: vi.fn(),
-  revokeEntitlement: vi.fn(),
-  revokeProductAccess: vi.fn(),
-  revokeTeamInvite: vi.fn(),
-  setCreditLimit: vi.fn(),
-  updateProduct: vi.fn(),
-  putUsageMeter: vi.fn(),
-}))
+interface Case {
+  name: string
+  run: (queryClient: QueryClient, go: Go) => Promise<unknown>
+  calls: string[]
+  body?: unknown
+  // Cache keys the mutation captured when it was built: these follow the
+  // merchant that started the write.
+  invalidates: string[]
+  // Keys the mutation only computes in onSuccess, so they follow whichever
+  // merchant is selected when the write lands (see the note at the metering
+  // cases). Split out so the difference is stated, not hidden.
+  late?: string[]
+}
+const MAX_INT64 = "9223372036854775807"
+const customerTree = ["customer", "customer.rates"]
+const catalogTree = ["catalog", "drift", "meter", "meters"]
+const subscriptionTree = ["subscription", "subscriptions"]
 
-vi.mock("@/lib/api/metrics", () => ({
-  askMetrics: vi.fn(),
-  generateWidget: vi.fn(),
-  putDashboard: vi.fn(),
-}))
-
-const storage = (): Storage => {
-  const values = new Map<string, string>()
-  return {
-    get length() {
-      return values.size
-    },
-    clear: () => values.clear(),
-    getItem: (key) => values.get(key) ?? null,
-    key: (index) => [...values.keys()][index] ?? null,
-    removeItem: (key) => values.delete(key),
-    setItem: (key, value) => values.set(key, value),
-  }
+const price = {
+  product_id: "prod_1",
+  key: "pro-monthly",
+  unit_amount: "20000000",
+  currency: "usd",
+  auto_renew: true,
+}
+const ratePrice = {
+  model: "per_unit" as const,
+  currency: "USD",
+  per_unit: { unit_amount: "1000000", divide_by: 1 },
+}
+const rateCard = { product_id: "prod_1", filter: {}, price: ratePrice }
+const meter = {
+  event_type: "token.used",
+  value_property: "tokens",
+  aggregation: "sum" as const,
+  unit: "tokens",
+  group_by: {},
+}
+const finding = { id: "find_1", outcome: "approve" as const, notes: "verified" }
+const refund = { amount: MAX_INT64, reason: "requested", revokeAccess: true }
+const cancel = { reason: "requested", revokeAccess: true }
+const entitlement = { entitlement: "premium", hours: 48 }
+const access = { productId: "prod_1", endsAt: "2026-09-05T00:00:00.000Z" }
+const offChannel = { price_id: "price_1", transaction_id: "external-1" }
+const product = { key: "pro", display_name: "Pro", description: "" }
+const settings = { profile: { display_name: "Acme" } }
+const provider = { account_id: "gw_1", credentials: { security_key: "s" } }
+const creditLimit = { customerId: "cus_1", currency: "USD", amount: MAX_INT64 }
+const override = {
+  customerId: "cus_1",
+  meterKey: "tokens",
+  override: { price: ratePrice },
 }
 
-beforeEach(() => {
-  vi.stubGlobal("localStorage", storage())
-  vi.stubGlobal("sessionStorage", storage())
-  vi.clearAllMocks()
-  vi.mocked(putMerchantSettings).mockResolvedValue({ message: "ok" })
-  vi.mocked(putPaymentProvider).mockResolvedValue({
-    payment_provider: {} as never,
-  })
-  vi.mocked(createProduct).mockResolvedValue({} as never)
-  vi.mocked(createPrice).mockResolvedValue({} as never)
-  vi.mocked(deactivatePrice).mockResolvedValue({} as never)
-  vi.mocked(putUsageMeter).mockResolvedValue({} as never)
-  vi.mocked(putDefaultUsageRateCard).mockResolvedValue({} as never)
-  vi.mocked(putCustomerUsageRateOverride).mockResolvedValue({} as never)
-  vi.mocked(deleteCustomerUsageRateOverride).mockResolvedValue({
-    message: "ok",
-  })
-  vi.mocked(deleteDefaultUsageRateCard).mockResolvedValue(undefined)
-  vi.mocked(previewRepriceAllPriorVersions).mockResolvedValue({
-    matched: 3,
-  } as never)
-  vi.mocked(repriceAllPriorVersions).mockResolvedValue({} as never)
-  vi.mocked(cancelReprice).mockResolvedValue({ message: "ok" })
-  vi.mocked(cancelSubscription).mockResolvedValue({} as never)
-  vi.mocked(changeSubscriptionPaymentMethod).mockResolvedValue({
-    success: true,
-    message: "ok",
-  })
-  vi.mocked(resumeSubscription).mockResolvedValue({ status: "queued" })
-  vi.mocked(refundPayment).mockResolvedValue({} as never)
-  vi.mocked(resolveFinding).mockResolvedValue({} as never)
-  vi.mocked(createOffChannelPayment).mockResolvedValue({
-    payment_id: "payment-1",
-    status: "created",
-  })
-  vi.mocked(grantEntitlement).mockResolvedValue({} as never)
-  vi.mocked(grantProductAccess).mockResolvedValue({} as never)
-  vi.mocked(revokeEntitlement).mockResolvedValue({ message: "ok" })
-  vi.mocked(revokeProductAccess).mockResolvedValue({ message: "ok" })
-  vi.mocked(askCatalogCopilot).mockResolvedValue({
-    answer: "The catalog has one product.",
-    evidence: [],
-  })
-  vi.mocked(confirmCopilotDraft).mockResolvedValue({ message: "ok" })
-  vi.mocked(getPriceByKey).mockResolvedValue({
-    id: "price-1",
-    product_id: "product-1",
-  } as never)
-  vi.mocked(getProduct).mockResolvedValue({
-    id: "product-1",
-    display_name: "Pro",
-  } as never)
-  vi.mocked(publishCatalog).mockResolvedValue({ plan: {} })
-  vi.mocked(refreshCatalogDrift).mockResolvedValue({
-    new_events: 2,
-    resolved_events: 1,
-  } as never)
+// w(name, run, calls, invalidates, body?, late?) — one row per console write.
+// body is stated where the request carries money or authority; `late` names
+// keys the mutation only computes on success (see the metering rows).
+const w = (
+  name: string,
+  run: Case["run"],
+  calls: string | string[],
+  invalidates: string[],
+  body?: unknown,
+  late?: string[]
+): Case => ({
+  name,
+  run,
+  calls: typeof calls === "string" ? [calls] : calls,
+  invalidates,
+  body,
+  late,
 })
 
+const cases: Case[] = [
+  w("resolves an ops finding", (c, g) => g(M.resolveFinding(c), finding),
+    "POST /merchant/findings/find_1/resolve", ["ops"], { outcome: "approve", notes: "verified" }),
+  w("refunds a payment at the int64 boundary", (c, g) => g(M.refundPayment(c, "pay_1", "cus_1", "sub_1"), refund),
+    "POST /merchant/payments/pay_1/refunds", [...customerTree, "payment", "payments", "subscription"],
+    { amount: MAX_INT64, reason: "requested", revoke_access: true }),
+  w("cancels a subscription", (c, g) => g(M.cancelSubscription(c, "sub_1", "cus_1"), cancel),
+    "POST /merchant/subscriptions/sub_1/cancel", [...customerTree, ...subscriptionTree],
+    { reason: "requested", revoke_access: true }),
+  w("resumes a subscription", (c, g) => g(M.resumeSubscription(c, "sub_1", "cus_1"), undefined),
+    "POST /merchant/subscriptions/sub_1/resume", [...customerTree, ...subscriptionTree]),
+  w("changes the subscription payment method", (c, g) => g(M.changeSubscriptionPaymentMethod(c, "sub_1", "cus_1"), "pm_1"),
+    "PUT /merchant/subscriptions/sub_1/payment-method", [...customerTree, ...subscriptionTree],
+    { payment_method_id: "pm_1" }),
+  w("previews a tier change without touching the cache", (_c, g) => g(M.previewSubscriptionTierChange("sub_1"), "price_2"),
+    "POST /merchant/subscriptions/sub_1/change-tier/preview", [], { price_id: "price_2" }),
+  w("applies a reviewed tier change", (c, g) => g(M.changeSubscriptionTier(c, "sub_1", "cus_1"), { priceId: "price_2", idempotencyKey: "tier-key-1" }),
+    "POST /merchant/subscriptions/sub_1/change-tier",
+    [...customerTree, "payment", "payments", ...subscriptionTree], { price_id: "price_2" }),
+  w("cancels a scheduled reprice", (c, g) => g(M.cancelSubscriptionReprice(c, "sub_1"), "rep_1"),
+    "POST /merchant/reprices/rep_1/cancel", [...catalogTree, ...subscriptionTree]),
+  w("grants an entitlement", (c, g) => g(M.grantCustomerEntitlement(c, "cus_1"), entitlement),
+    "POST /merchant/customers/cus_1/entitlements", customerTree, entitlement),
+  w("revokes an entitlement", (c, g) => g(M.revokeCustomerEntitlement(c, "cus_1"), "ent_1"),
+    "DELETE /merchant/customers/cus_1/entitlements/ent_1", customerTree),
+  w("grants product access until an instant", (c, g) => g(M.grantCustomerProductAccess(c, "cus_1"), access),
+    "POST /merchant/customers/cus_1/product-access", customerTree,
+    { product_id: "prod_1", ends_at: access.endsAt }),
+  w("revokes product access", (c, g) => g(M.revokeCustomerProductAccess(c, "cus_1"), "acc_1"),
+    "DELETE /merchant/customers/cus_1/product-access/acc_1", customerTree),
+  w("records an off-channel payment", (c, g) => g(M.recordCustomerOffChannelPayment(c, "cus_1"), offChannel),
+    "POST /merchant/customers/cus_1/payments/off-channel", [...customerTree, "payment", "payments"], offChannel),
+  w("asks the catalog copilot without invalidating the catalog", (_c, g) => g(M.askCatalogCopilot(), "what do we sell?"),
+    "POST /merchant/catalog/ask", [], { question: "what do we sell?" }),
+  w("loads the live price and product behind a copilot draft", (_c, g) => g(M.loadCatalogPriceDraft(), "pro-monthly"),
+    ["GET /merchant/catalog/prices/by-key/pro-monthly", "GET /merchant/catalog/products/prod_1"], []),
+  w("publishes an applied manifest", (c, g) => g(M.publishCatalog(c), { manifest: { products: [] }, planOnly: false }),
+    "POST /merchant/catalog/publish", catalogTree,
+    { catalog: { products: [] }, insert: true, overwrite: true }),
+  w("previews a manifest without invalidating the catalog", (c, g) => g(M.publishCatalog(c), { manifest: { products: [] }, planOnly: true }),
+    "POST /merchant/catalog/publish", [], { catalog: { products: [] }, plan_only: true }),
+  w("refreshes drift alone", (c, g) => g(M.refreshCatalogDrift(c), undefined),
+    "POST /merchant/catalog/drift/refresh", ["drift"]),
+  w("creates a product", (c, g) => g(M.createProduct(c), product),
+    "POST /merchant/catalog/products", catalogTree, product),
+  w("deactivates a product", (c, g) => g(M.setProductActive(c), { id: "prod_1", active: false }),
+    "POST /merchant/catalog/products/prod_1/deactivate", catalogTree),
+  w("creates a price", (c, g) => g(M.createPrice(c), price),
+    "POST /merchant/catalog/prices", catalogTree, price),
+  w("activates a price", (c, g) => g(M.setPriceActive(c), { id: "price_1", active: true }),
+    "POST /merchant/catalog/prices/price_1/activate", catalogTree),
+  w("previews affected subscribers without writing catalog state", (_c, g) => g(M.previewPriceChange(), "pro-monthly"),
+    "GET /merchant/catalog/reprice-all-prior-versions/preview", []),
+  w("cancels a batch of reprices", (c, g) => g(M.cancelReprices(c), ["rep_1", "rep_2"]),
+    ["POST /merchant/reprices/rep_1/cancel", "POST /merchant/reprices/rep_2/cancel"], catalogTree),
+  w("stores a usage meter", (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
+    "PUT /merchant/catalog/meters/tokens", ["meter", "meters"], meter, ["meter"]),
+  w("stores a default rate card", (c, g) => g(M.putDefaultUsageRateCard(c), { key: "tokens", rateCard }),
+    "PUT /merchant/catalog/meters/tokens/rate-card", ["meter", "meters"], rateCard, ["meter"]),
+  w("removes a default rate card", (c, g) => g(M.deleteDefaultUsageRateCard(c), "tokens"),
+    "DELETE /merchant/catalog/meters/tokens/rate-card", ["meter", "meters"], undefined, ["meter"]),
+  w("stores a negotiated rate", (c, g) => g(M.putCustomerUsageRateOverride(c), override),
+    "PUT /merchant/customers/cus_1/rate-overrides/tokens", ["meter", "meters"],
+    { price: ratePrice }, [...customerTree, "dashboard", "meter"]),
+  w("removes a negotiated rate", (c, g) => g(M.deleteCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens" }),
+    "DELETE /merchant/customers/cus_1/rate-overrides/tokens", ["meter", "meters"],
+    undefined, [...customerTree, "dashboard", "meter"]),
+  w("updates settings without dropping the provider list", (c, g) => g(M.updateMerchantSettings(c), settings),
+    "PUT /merchant/settings", ["settings"], settings),
+  w("saves provider credentials", (c, g) => g(M.savePaymentProvider(c), { rail: "nmi", provider }),
+    "PUT /merchant/payment-providers/nmi", ["providers"], provider),
+  w("archives one provider account by id", (c, g) => g(M.archivePaymentProvider(c), { rail: "nmi", id: "psp_1", allowLast: true }),
+    "POST /merchant/payment-providers/nmi/accounts/psp_1/archive", ["providers"], { allow_last: true }),
+  w("sets a customer credit limit at the int64 boundary", (_c, g) => g(M.setCreditLimit(), creditLimit),
+    "PUT /merchant/credit-limit", [],
+    { customer_id: "cus_1", currency: "USD", credit_limit_amount: MAX_INT64 }),
+]
+
+let requests: Recorded[]
+let routes: Record<string, Reply>
+beforeEach(async () => {
+  routes = {
+    "/merchant/catalog/prices/by-key/pro-monthly": {
+      id: "price_1",
+      product_id: "prod_1",
+    },
+    "POST /merchant/catalog/ask": { answer: "One product.", evidence: [] },
+    "POST /merchant/notifications/note_2/read": () =>
+      new Response(null, { status: 503 }),
+  }
+  requests = await server(routes)
+})
 afterEach(() => vi.unstubAllGlobals())
 
-describe("notification mutations", () => {
-  it("marks one notification read and reconciles both notification caches", async () => {
-    const queryClient = new QueryClient()
-    const notificationsKey = queryKeys.notifications()
-    const unreadKey = [...notificationsKey, "unread-count"] as const
-    queryClient.setQueryData(notificationsKey, {
+it.each(cases)("$name", async (testCase) => {
+  const queryClient = client()
+  const seeded = [
+    ...seedCache(queryClient, "merchant-a"),
+    ...seedCache(queryClient, "merchant-b"),
+  ]
+  selectMerchant("merchant-a")
+
+  await testCase.run(queryClient, (options, input) => {
+    // The console switched merchants while the request was in flight.
+    selectMerchant("merchant-b")
+    return exec(queryClient, options, input)
+  })
+
+  expect(calls(requests)).toEqual(testCase.calls)
+  if (testCase.body) expect(requests[0].body).toEqual(testCase.body)
+  expect(invalidated(queryClient, seeded)).toEqual(
+    [
+      ...testCase.invalidates.map((name) => `merchant-a:${name}`),
+      ...(testCase.late ?? []).map((name) => `merchant-b:${name}`),
+    ].sort()
+  )
+})
+
+it("sends the selected merchant, the caller's tier key and a fresh refund key", async () => {
+  const queryClient = client()
+  selectMerchant("merchant-a")
+  const refund = { amount: "1000000", reason: "", revokeAccess: false }
+
+  await exec(
+    queryClient,
+    M.changeSubscriptionTier(queryClient, "sub_1", "cus_1"),
+    { priceId: "price_2", idempotencyKey: "tier-key-1" }
+  )
+  await exec(queryClient, M.refundPayment(queryClient, "pay_1"), refund)
+  await exec(queryClient, M.refundPayment(queryClient, "pay_1"), refund)
+
+  expect(requests[0].headers.get("X-OpenRails-Merchant")).toBe("merchant-a")
+  expect(requests[0].headers.get("Idempotency-Key")).toBe("tier-key-1")
+  // A refund is a new operation every time it is submitted.
+  const keys = requests.slice(1).map((r) => r.headers.get("Idempotency-Key"))
+  expect(keys[0]).toMatch(/^[\da-f-]{36}$/)
+  expect(keys[0]).not.toBe(keys[1])
+  expect(requests[1].body).toEqual({ amount: "1000000", revoke_access: false })
+})
+
+describe("notification read state", () => {
+  const notificationsKey = () => queryKeys.notifications()
+  const unreadKey = () => [...queryKeys.notifications(), "unread-count"]
+  const seedNotifications = (queryClient: QueryClient) => {
+    queryClient.setQueryData(notificationsKey(), {
       data: [
-        { id: "notification-1", read_at: null },
-        { id: "notification-2", read_at: null },
+        { id: "note_1", read_at: null },
+        { id: "note_2", read_at: null },
       ],
     })
-    queryClient.setQueryData(unreadKey, { unread: 2 })
-    vi.mocked(markNotificationRead).mockResolvedValueOnce({
-      id: "notification-1",
-      read: true,
-    })
+    queryClient.setQueryData(unreadKey(), { unread: 2 })
+  }
+  const readFlags = (queryClient: QueryClient) =>
+    queryClient
+      .getQueryData<{ data: { read_at: string | null }[] }>(notificationsKey())!
+      .data.map((notification) => notification.read_at !== null)
 
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.markNotificationRead(queryClient))
-      .execute("notification-1")
+  it("reconciles both caches from the ids the server accepted", async () => {
+    const queryClient = client()
+    selectMerchant("merchant-a")
+    seedNotifications(queryClient)
 
-    const notifications = queryClient.getQueryData<{
-      data: Array<{ id: string; read_at: string | null }>
-    }>(notificationsKey)
-    expect(markNotificationRead).toHaveBeenCalledWith("notification-1")
-    expect(notifications?.data[0].read_at).toEqual(expect.any(String))
-    expect(notifications?.data[1].read_at).toBeNull()
-    expect(queryClient.getQueryData(unreadKey)).toEqual({ unread: 1 })
-  })
-
-  it("updates only successfully read notifications in a partial bulk result", async () => {
-    const queryClient = new QueryClient()
-    const notificationsKey = queryKeys.notifications()
-    const unreadKey = [...notificationsKey, "unread-count"] as const
-    queryClient.setQueryData(notificationsKey, {
-      data: [
-        { id: "notification-1", read_at: null },
-        { id: "notification-2", read_at: null },
-      ],
-    })
-    queryClient.setQueryData(unreadKey, { unread: 2 })
-    vi.mocked(markNotificationRead)
-      .mockResolvedValueOnce({ id: "notification-1", read: true })
-      .mockRejectedValueOnce(new Error("unavailable"))
-
-    const readIds = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.markNotificationsRead(queryClient))
-      .execute(["notification-1", "notification-2"])
-
-    const notifications = queryClient.getQueryData<{
-      data: Array<{ id: string; read_at: string | null }>
-    }>(notificationsKey)
-    expect(readIds).toEqual(["notification-1"])
-    expect(notifications?.data[0].read_at).toEqual(expect.any(String))
-    expect(notifications?.data[1].read_at).toBeNull()
-    expect(queryClient.getQueryData(unreadKey)).toEqual({ unread: 1 })
-  })
-})
-
-describe("dashboard AI mutations", () => {
-  it("routes metrics questions through the ask endpoint", async () => {
-    const queryClient = new QueryClient()
-    vi.mocked(askMetrics).mockResolvedValueOnce({
-      answer: "Revenue increased.",
-      evidence: [],
-    })
-
-    const result = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.askMetrics())
-      .execute("How did revenue change?")
-
-    expect(result.answer).toBe("Revenue increased.")
-    expect(askMetrics).toHaveBeenCalledWith("How did revenue change?")
-  })
-
-  it("generates a widget from a prompt and optional base query", async () => {
-    const queryClient = new QueryClient()
-    const baseQuery = {
-      measures: ["revenue"],
-      range: { last: "30d" },
-    }
-    vi.mocked(generateWidget).mockResolvedValueOnce({
-      title: "Weekly revenue",
-      viz: "line",
-      query: baseQuery,
-    })
-
-    const result = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.generateDashboardWidget())
-      .execute({ prompt: "Make it weekly", baseQuery })
-
-    expect(result.title).toBe("Weekly revenue")
-    expect(generateWidget).toHaveBeenCalledWith("Make it weekly", baseQuery)
-  })
-})
-
-describe("dashboard persistence mutation", () => {
-  it("saves widgets and updates only the initiating merchant dashboard", async () => {
-    const queryClient = new QueryClient()
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
+    // note_2 is answered 503 by the harness: a partial bulk result.
+    const readIds = await exec(
+      queryClient,
+      M.markNotificationsRead(queryClient),
+      ["note_1", "note_2"]
     )
-    const dashboardAKey = queryKeys.dashboard()
-    const options = adminMutations.saveDashboard(queryClient)
-    queryClient.setQueryData(dashboardAKey, { widgets: [] })
 
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
-    )
-    const dashboardBKey = queryKeys.dashboard()
-    queryClient.setQueryData(dashboardBKey, { widgets: [] })
+    expect(readIds).toEqual(["note_1"])
+    expect(calls(requests)).toEqual([
+      "POST /merchant/notifications/note_1/read",
+      "POST /merchant/notifications/note_2/read",
+    ])
+    expect(readFlags(queryClient)).toEqual([true, false])
+    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread: 1 })
+  })
 
-    const widgets = [
-      {
-        id: "widget-1",
-        title: "Revenue",
-        viz: "stat" as const,
-        query: { measures: ["revenue"], range: { last: "30d" } },
-        grid: { x: 0, y: 0, w: 3, h: 2 },
-      },
-    ]
-    const saved = { widgets, is_default: false }
-    vi.mocked(putDashboard).mockResolvedValueOnce(saved)
+  it("marks one notification read", async () => {
+    const queryClient = client()
+    selectMerchant("merchant-a")
+    seedNotifications(queryClient)
 
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, options)
-      .execute(widgets)
+    await exec(queryClient, M.markNotificationRead(queryClient), "note_1")
 
-    expect(putDashboard).toHaveBeenCalledWith(widgets)
-    expect(queryClient.getQueryData(dashboardAKey)).toEqual(saved)
-    expect(queryClient.getQueryData(dashboardBKey)).toEqual({ widgets: [] })
+    expect(readFlags(queryClient)).toEqual([true, false])
+    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread: 1 })
   })
 })
 
-describe("customer lookup mutation", () => {
-  it("returns the first customer matching the submitted term", async () => {
-    const queryClient = new QueryClient()
-    vi.mocked(listCustomers).mockResolvedValueOnce({
-      data: [{ id: "customer-1", email: "alice@example.com" }],
+it("stores a saved dashboard on the merchant that saved it", async () => {
+  const queryClient = client()
+  const seeded = [
+    ...seedCache(queryClient, "merchant-a"),
+    ...seedCache(queryClient, "merchant-b"),
+  ]
+  const dashboard = (merchant: string) =>
+    seeded.find(([name]) => name === `${merchant}:dashboard`)![1]
+  const widgets = [
+    {
+      id: "w1",
+      title: "Revenue",
+      viz: "stat" as const,
+      query: { measures: ["revenue"], range: { last: "30d" } },
+      grid: { x: 0, y: 0, w: 3, h: 2 },
+    },
+  ]
+  const saved = { widgets, is_default: false }
+  routes["PUT /merchant/dashboard"] = saved
+  selectMerchant("merchant-a")
+  const options = M.saveDashboard(queryClient)
+  selectMerchant("merchant-b")
+
+  await exec(queryClient, options, widgets)
+
+  expect(queryClient.getQueryData(dashboard("merchant-a"))).toEqual(saved)
+  expect(queryClient.getQueryData(dashboard("merchant-b"))).toEqual({})
+})
+
+describe("list exports and lookup", () => {
+  const page = (rows: unknown[], total: number) => ({ data: rows, total })
+
+  it("walks every server page and stops on an empty one", async () => {
+    const queryClient = client()
+    selectMerchant("merchant-a")
+    const customerPages = [page([{ id: "cus_1" }], 2), page([{ id: "cus_2" }], 2)]
+    const subscriptionPages = [page([{ id: "sub_1" }], 2), page([], 2)]
+    routes["/merchant/customers"] = () => customerPages.shift()
+    routes["/merchant/subscriptions"] = () => subscriptionPages.shift()
+
+    const customers = await exec(queryClient, M.exportCustomers(), "alice")
+    const subscriptions = await exec(queryClient, M.exportSubscriptions(), {
+      status: "past_due",
+    })
+
+    expect(customers).toEqual([{ id: "cus_1" }, { id: "cus_2" }])
+    expect(subscriptions).toEqual([{ id: "sub_1" }])
+    expect(requests.map((request) => request.query)).toEqual([
+      "q=alice&limit=200&offset=0",
+      "q=alice&limit=200&offset=200",
+      "status=past_due&limit=200&offset=0",
+      "status=past_due&limit=200&offset=200",
+    ])
+  })
+
+  it("looks a customer up by the submitted term", async () => {
+    const queryClient = client()
+    selectMerchant("merchant-a")
+    routes["/merchant/customers"] = {
+      data: [{ id: "cus_1", email: "alice@example.test" }],
       total: 1,
-    } as never)
+    }
 
-    const customer = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.findCustomer())
-      .execute("alice@example.com")
+    expect(
+      await exec(queryClient, M.findCustomer(), "alice@example.test")
+    ).toEqual({ id: "cus_1", email: "alice@example.test" })
+    expect(requests[0].query).toBe("q=alice%40example.test&limit=1&offset=0")
+  })
+})
 
-    expect(customer).toEqual({
-      id: "customer-1",
-      email: "alice@example.com",
+describe("price change", () => {
+  const change = {
+    price,
+    copilotDraftId: "draft_1",
+    migration: { priceKey: "pro-monthly", effectiveAt: access.endsAt },
+  }
+  const refreshedCatalog = catalogTree.map((name) => `merchant-a:${name}`)
+
+  it("creates the replacement price before scheduling its migration", async () => {
+    const queryClient = client()
+    const seeded = seedCache(queryClient, "merchant-a")
+
+    await exec(queryClient, M.changePrice(queryClient), change)
+
+    expect(calls(requests).slice(0, 2)).toEqual([
+      "POST /merchant/catalog/prices",
+      "POST /merchant/catalog/reprice-all-prior-versions",
+    ])
+    expect(requests[1].body).toEqual({
+      price_key: "pro-monthly",
+      effective_at: access.endsAt,
     })
-    expect(listCustomers).toHaveBeenCalledWith("alice@example.com", 1, 0)
-  })
-})
-
-describe("list export mutations", () => {
-  it("exports every customer page for the current search", async () => {
-    const queryClient = new QueryClient()
-    vi.mocked(listCustomers)
-      .mockResolvedValueOnce({
-        data: [{ id: "customer-1" }],
-        total: 2,
-      } as never)
-      .mockResolvedValueOnce({
-        data: [{ id: "customer-2" }],
-        total: 2,
-      } as never)
-
-    const rows = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.exportCustomers())
-      .execute("alice")
-
-    expect(rows).toEqual([{ id: "customer-1" }, { id: "customer-2" }])
-    expect(listCustomers).toHaveBeenNthCalledWith(1, "alice", 200, 0)
-    expect(listCustomers).toHaveBeenNthCalledWith(2, "alice", 200, 200)
-  })
-
-  it("exports every subscription page with the active filters", async () => {
-    const queryClient = new QueryClient()
-    const filters = { status: "past_due", rail: "nmi" }
-    vi.mocked(listSubscriptions)
-      .mockResolvedValueOnce({
-        data: [{ id: "subscription-1" }],
-        total: 2,
-      } as never)
-      .mockResolvedValueOnce({
-        data: [{ id: "subscription-2" }],
-        total: 2,
-      } as never)
-
-    const rows = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.exportSubscriptions())
-      .execute(filters)
-
-    expect(rows).toEqual([{ id: "subscription-1" }, { id: "subscription-2" }])
-    expect(listSubscriptions).toHaveBeenNthCalledWith(1, filters, 200, 0)
-    expect(listSubscriptions).toHaveBeenNthCalledWith(2, filters, 200, 200)
-  })
-
-  it("stops payment export when the API returns an empty page", async () => {
-    const queryClient = new QueryClient()
-    const filters = { refunds_only: true, customer_id: "customer-1" }
-    vi.mocked(listPayments)
-      .mockResolvedValueOnce({
-        data: [{ id: "payment-1" }],
-        total: 2,
-      } as never)
-      .mockResolvedValueOnce({ data: [], total: 2 } as never)
-
-    const rows = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.exportPayments())
-      .execute(filters)
-
-    expect(rows).toEqual([{ id: "payment-1" }])
-    expect(listPayments).toHaveBeenNthCalledWith(1, filters, 200, 0)
-    expect(listPayments).toHaveBeenNthCalledWith(2, filters, 200, 200)
-  })
-})
-
-describe("ops mutations", () => {
-  it("resolves a finding and refreshes the ops tree", async () => {
-    const queryClient = new QueryClient()
-    const findingsKey = [
-      ...queryKeys.ops(),
-      "findings",
-      { limit: 100, offset: 0 },
-    ] as const
-    const repairAlertsKey = [
-      ...queryKeys.ops(),
-      "repair-alerts",
-      { limit: 50, offset: 0 },
-    ] as const
-    const customerKey = queryKeys.customer("customer-1")
-    queryClient.setQueryData(findingsKey, { items: [] })
-    queryClient.setQueryData(repairAlertsKey, { data: [] })
-    queryClient.setQueryData(customerKey, {})
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.resolveFinding(queryClient))
-      .execute({
-        id: "finding-1",
-        outcome: "approve",
-        notes: "verified",
-      })
-
-    expect(resolveFinding).toHaveBeenCalledWith(
-      "finding-1",
-      "approve",
-      "verified"
+    expect(invalidated(queryClient, seeded)).toEqual(refreshedCatalog)
+    // Provenance is recorded out of band; the write never waits on it.
+    await vi.waitFor(() =>
+      expect(calls(requests)).toContain("POST /merchant/catalog/copilot/confirm")
     )
-    expect(queryClient.getQueryState(findingsKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(repairAlertsKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(false)
-  })
-
-  it("keeps ops invalidation scoped to the initiating merchant", async () => {
-    const queryClient = new QueryClient()
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
-    )
-    const opsAKey = queryKeys.ops()
-    const options = adminMutations.resolveFinding(queryClient)
-    queryClient.setQueryData(opsAKey, {})
-
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
-    )
-    const opsBKey = queryKeys.ops()
-    queryClient.setQueryData(opsBKey, {})
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, options)
-      .execute({ id: "finding-1", outcome: "ignore", notes: "expected" })
-
-    expect(queryClient.getQueryState(opsAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(opsBKey)?.isInvalidated).toBe(false)
-  })
-})
-
-describe("payment mutations", () => {
-  it("refunds a payment and refreshes its related records", async () => {
-    const queryClient = new QueryClient()
-    const paymentKey = queryKeys.payment("payment-1")
-    const paymentListKey = [
-      ...queryKeys.payments(),
-      { filters: {}, limit: 50, offset: 0 },
-    ] as const
-    const customerKey = queryKeys.customer("customer-1")
-    const subscriptionKey = queryKeys.subscription("subscription-1")
-    const catalogKey = queryKeys.catalog()
-    queryClient.setQueryData(paymentKey, { id: "payment-1" })
-    queryClient.setQueryData(paymentListKey, { data: [] })
-    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
-    queryClient.setQueryData(subscriptionKey, { id: "subscription-1" })
-    queryClient.setQueryData(catalogKey, { items: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.refundPayment(
-          queryClient,
-          "payment-1",
-          "customer-1",
-          "subscription-1"
-        )
-      )
-      .execute({
-        amount: "5000000",
-        reason: "requested",
-        revokeAccess: true,
-      })
-
-    expect(refundPayment).toHaveBeenCalledWith(
-      "payment-1",
-      "5000000",
-      "requested",
-      true
-    )
-    expect(queryClient.getQueryState(paymentKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(paymentListKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(subscriptionKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(false)
-  })
-
-  it("keeps refund invalidation scoped to the initiating merchant", async () => {
-    const queryClient = new QueryClient()
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
-    )
-    const paymentAKey = queryKeys.payment("payment-1")
-    const customerAKey = queryKeys.customer("customer-1")
-    const subscriptionAKey = queryKeys.subscription("subscription-1")
-    const options = adminMutations.refundPayment(
-      queryClient,
-      "payment-1",
-      "customer-1",
-      "subscription-1"
-    )
-    queryClient.setQueryData(paymentAKey, {})
-    queryClient.setQueryData(customerAKey, {})
-    queryClient.setQueryData(subscriptionAKey, {})
-
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
-    )
-    const paymentBKey = queryKeys.payment("payment-1")
-    const customerBKey = queryKeys.customer("customer-1")
-    const subscriptionBKey = queryKeys.subscription("subscription-1")
-    queryClient.setQueryData(paymentBKey, {})
-    queryClient.setQueryData(customerBKey, {})
-    queryClient.setQueryData(subscriptionBKey, {})
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, options)
-      .execute({ amount: "5000000", reason: "", revokeAccess: false })
-
-    expect(queryClient.getQueryState(paymentAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(customerAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(subscriptionAKey)?.isInvalidated).toBe(
-      true
-    )
-    expect(queryClient.getQueryState(paymentBKey)?.isInvalidated).toBe(false)
-    expect(queryClient.getQueryState(customerBKey)?.isInvalidated).toBe(false)
-    expect(queryClient.getQueryState(subscriptionBKey)?.isInvalidated).toBe(
-      false
-    )
-  })
-})
-
-describe("subscription mutations", () => {
-  it("cancels a subscription and refreshes subscription and customer data", async () => {
-    const queryClient = new QueryClient()
-    const subscriptionKey = queryKeys.subscription("subscription-1")
-    const customerKey = queryKeys.customer("customer-1")
-    const paymentsKey = queryKeys.payments()
-    queryClient.setQueryData(subscriptionKey, { id: "subscription-1" })
-    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
-    queryClient.setQueryData(paymentsKey, { data: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.cancelSubscription(
-          queryClient,
-          "subscription-1",
-          "customer-1"
-        )
-      )
-      .execute({ reason: "requested", revokeAccess: true })
-
-    expect(cancelSubscription).toHaveBeenCalledWith(
-      "subscription-1",
-      "requested",
-      true
-    )
-    expect(queryClient.getQueryState(subscriptionKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(false)
-  })
-
-  it("routes resume and payment-method changes through their endpoints", async () => {
-    const queryClient = new QueryClient()
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.resumeSubscription(
-          queryClient,
-          "subscription-1",
-          "customer-1"
-        )
-      )
-      .execute()
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.changeSubscriptionPaymentMethod(
-          queryClient,
-          "subscription-1",
-          "customer-1"
-        )
-      )
-      .execute("payment-method-1")
-
-    expect(resumeSubscription).toHaveBeenCalledWith("subscription-1")
-    expect(changeSubscriptionPaymentMethod).toHaveBeenCalledWith(
-      "subscription-1",
-      "payment-method-1"
-    )
-  })
-
-  it("previews and applies a tier change, then refreshes affected billing data", async () => {
-    const queryClient = new QueryClient()
-    const subscriptionsKey = queryKeys.subscriptions()
-    const customerKey = queryKeys.customer("customer-1")
-    const paymentsKey = queryKeys.payments()
-    queryClient.setQueryData(subscriptionsKey, { data: [] })
-    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
-    queryClient.setQueryData(paymentsKey, { data: [] })
-    vi.mocked(previewSubscriptionTierChange).mockResolvedValue({} as never)
-    vi.mocked(changeSubscriptionTier).mockResolvedValue({} as never)
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.previewSubscriptionTierChange("subscription-1")
-      )
-      .execute("price-2")
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.changeSubscriptionTier(
-          queryClient,
-          "subscription-1",
-          "customer-1"
-        )
-      )
-      .execute({ priceId: "price-2", idempotencyKey: "tier-key-1" })
-
-    expect(previewSubscriptionTierChange).toHaveBeenCalledWith(
-      "subscription-1",
-      "price-2"
-    )
-    expect(changeSubscriptionTier).toHaveBeenCalledWith(
-      "subscription-1",
-      "price-2",
-      "tier-key-1"
-    )
-    expect(queryClient.getQueryState(subscriptionsKey)?.isInvalidated).toBe(
-      true
-    )
-    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(true)
-  })
-
-  it("cancels a scheduled reprice and refreshes subscription and catalog data", async () => {
-    const queryClient = new QueryClient()
-    const scheduledKey = [
-      ...queryKeys.subscription("subscription-1"),
-      "reprices",
-      "scheduled",
-    ] as const
-    const catalogRepricesKey = [...queryKeys.catalog(), "reprices"] as const
-    const paymentsKey = queryKeys.payments()
-    queryClient.setQueryData(scheduledKey, { items: [] })
-    queryClient.setQueryData(catalogRepricesKey, { items: [] })
-    queryClient.setQueryData(paymentsKey, { data: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.cancelSubscriptionReprice(queryClient, "subscription-1")
-      )
-      .execute("reprice-1")
-
-    expect(cancelReprice).toHaveBeenCalledWith("reprice-1")
-    expect(queryClient.getQueryState(scheduledKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(catalogRepricesKey)?.isInvalidated).toBe(
-      true
-    )
-    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(false)
-  })
-
-  it("keeps subscription invalidation scoped to the initiating merchant", async () => {
-    const queryClient = new QueryClient()
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
-    )
-    const subscriptionAKey = queryKeys.subscription("subscription-1")
-    const customerAKey = queryKeys.customer("customer-1")
-    const options = adminMutations.cancelSubscription(
-      queryClient,
-      "subscription-1",
-      "customer-1"
-    )
-    queryClient.setQueryData(subscriptionAKey, {})
-    queryClient.setQueryData(customerAKey, {})
-
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
-    )
-    const subscriptionBKey = queryKeys.subscription("subscription-1")
-    const customerBKey = queryKeys.customer("customer-1")
-    queryClient.setQueryData(subscriptionBKey, {})
-    queryClient.setQueryData(customerBKey, {})
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, options)
-      .execute({ reason: "requested", revokeAccess: false })
-
-    expect(queryClient.getQueryState(subscriptionAKey)?.isInvalidated).toBe(
-      true
-    )
-    expect(queryClient.getQueryState(customerAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(subscriptionBKey)?.isInvalidated).toBe(
-      false
-    )
-    expect(queryClient.getQueryState(customerBKey)?.isInvalidated).toBe(false)
-  })
-})
-
-describe("customer mutations", () => {
-  it("changes entitlements and refreshes only that customer tree", async () => {
-    const queryClient = new QueryClient()
-    const customerKey = queryKeys.customer("customer-1")
-    const paymentMethodsKey = [...customerKey, "payment-methods"] as const
-    const customerListKey = [
-      ...queryKeys.customers(),
-      { q: "", limit: 50, offset: 0 },
-    ] as const
-    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
-    queryClient.setQueryData(paymentMethodsKey, { data: [] })
-    queryClient.setQueryData(customerListKey, { data: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.grantCustomerEntitlement(queryClient, "customer-1")
-      )
-      .execute({ entitlement: "premium", hours: 48 })
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.revokeCustomerEntitlement(queryClient, "customer-1")
-      )
-      .execute("entitlement-1")
-
-    expect(grantEntitlement).toHaveBeenCalledWith("customer-1", "premium", 48)
-    expect(revokeEntitlement).toHaveBeenCalledWith(
-      "customer-1",
-      "entitlement-1"
-    )
-    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(paymentMethodsKey)?.isInvalidated).toBe(
-      true
-    )
-    expect(queryClient.getQueryState(customerListKey)?.isInvalidated).toBe(
-      false
-    )
-  })
-
-  it("routes product access grants and revocations through their endpoints", async () => {
-    const queryClient = new QueryClient()
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.grantCustomerProductAccess(queryClient, "customer-1")
-      )
-      .execute({
-        productId: "product-1",
-        endsAt: "2026-09-05T00:00:00.000Z",
-      })
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.revokeCustomerProductAccess(queryClient, "customer-1")
-      )
-      .execute("grant-1")
-
-    expect(grantProductAccess).toHaveBeenCalledWith(
-      "customer-1",
-      "product-1",
-      "2026-09-05T00:00:00.000Z"
-    )
-    expect(revokeProductAccess).toHaveBeenCalledWith("customer-1", "grant-1")
-  })
-
-  it("records off-channel payments and refreshes customer and payment data", async () => {
-    const queryClient = new QueryClient()
-    const customerKey = queryKeys.customer("customer-1")
-    const paymentsKey = [
-      ...queryKeys.payments(),
-      { filters: {}, limit: 50, offset: 0 },
-    ] as const
-    const subscriptionsKey = queryKeys.subscriptions()
-    queryClient.setQueryData(customerKey, { customer_id: "customer-1" })
-    queryClient.setQueryData(paymentsKey, { data: [] })
-    queryClient.setQueryData(subscriptionsKey, { data: [] })
-    const payment = {
-      price_id: "price-1",
-      transaction_id: "external-1",
-      amount: "12500000",
-    }
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.recordCustomerOffChannelPayment(
-          queryClient,
-          "customer-1"
-        )
-      )
-      .execute(payment)
-
-    expect(createOffChannelPayment).toHaveBeenCalledWith("customer-1", payment)
-    expect(queryClient.getQueryState(customerKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(paymentsKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(subscriptionsKey)?.isInvalidated).toBe(
-      false
-    )
-  })
-
-  it("keeps customer invalidation scoped to the merchant that started it", async () => {
-    const queryClient = new QueryClient()
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
-    )
-    const customerAKey = queryKeys.customer("customer-1")
-    const paymentsAKey = queryKeys.payments()
-    const options = adminMutations.recordCustomerOffChannelPayment(
-      queryClient,
-      "customer-1"
-    )
-    queryClient.setQueryData(customerAKey, {})
-    queryClient.setQueryData(paymentsAKey, {})
-
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
-    )
-    const customerBKey = queryKeys.customer("customer-1")
-    const paymentsBKey = queryKeys.payments()
-    queryClient.setQueryData(customerBKey, {})
-    queryClient.setQueryData(paymentsBKey, {})
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, options)
-      .execute({ price_id: "price-1", transaction_id: "external-1" })
-
-    expect(queryClient.getQueryState(customerAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(paymentsAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(customerBKey)?.isInvalidated).toBe(false)
-    expect(queryClient.getQueryState(paymentsBKey)?.isInvalidated).toBe(false)
-  })
-})
-
-describe("settings mutations", () => {
-  it("updates merchant settings and invalidates only their base query", async () => {
-    const queryClient = new QueryClient()
-    const settingsKey = queryKeys.settings()
-    const providersKey = [...settingsKey, "payment-providers"] as const
-    queryClient.setQueryData(settingsKey, { profile: {} })
-    queryClient.setQueryData(providersKey, { data: [] })
-
-    const settings = { profile: { display_name: "Acme" } }
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.updateMerchantSettings(queryClient))
-      .execute(settings)
-
-    expect(putMerchantSettings).toHaveBeenCalledWith(settings)
-    expect(queryClient.getQueryState(settingsKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(false)
-  })
-
-  it("invalidates the provider list after saving credentials", async () => {
-    const queryClient = new QueryClient()
-    const providersKey = [...queryKeys.settings(), "payment-providers"] as const
-    queryClient.setQueryData(providersKey, { data: [] })
-
-    const provider = {
-      account_id: "gateway-1",
-      credentials: { security_key: "secret" },
-    }
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.savePaymentProvider(queryClient))
-      .execute({ rail: "nmi", provider })
-
-    expect(putPaymentProvider).toHaveBeenCalledWith("nmi", provider)
-    expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(true)
-  })
-
-  it("archives one provider account by id and invalidates the provider list", async () => {
-    const queryClient = new QueryClient()
-    const providersKey = [...queryKeys.settings(), "payment-providers"] as const
-    queryClient.setQueryData(providersKey, { data: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.archivePaymentProvider(queryClient))
-      .execute({ rail: "nmi", id: "psp-a", allowLast: true })
-
-    expect(archivePaymentProviderAccount).toHaveBeenCalledWith(
-      "nmi",
-      "psp-a",
-      true
-    )
-    expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(true)
-  })
-
-  it("keeps invalidation scoped to the merchant that started the request", async () => {
-    const queryClient = new QueryClient()
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
-    )
-    const merchantAKey = queryKeys.settings()
-    const options = adminMutations.updateMerchantSettings(queryClient)
-    queryClient.setQueryData(merchantAKey, { profile: {} })
-
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
-    )
-    const merchantBKey = queryKeys.settings()
-    queryClient.setQueryData(merchantBKey, { profile: {} })
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, options)
-      .execute({ profile: { display_name: "Acme" } })
-
-    expect(queryClient.getQueryState(merchantAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(merchantBKey)?.isInvalidated).toBe(false)
-  })
-})
-
-describe("catalog mutations", () => {
-  it("asks the catalog copilot without invalidating catalog data", async () => {
-    const queryClient = new QueryClient()
-    const catalogKey = queryKeys.catalog()
-    queryClient.setQueryData(catalogKey, { items: [] })
-
-    const result = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.askCatalogCopilot())
-      .execute("what do we sell?")
-
-    expect(askCatalogCopilot).toHaveBeenCalledWith("what do we sell?")
-    expect(result.answer).toBe("The catalog has one product.")
-    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(false)
-  })
-
-  it("loads the live price and product for a copilot draft", async () => {
-    const queryClient = new QueryClient()
-
-    const result = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.loadCatalogPriceDraft())
-      .execute("pro-monthly")
-
-    expect(getPriceByKey).toHaveBeenCalledWith("pro-monthly")
-    expect(getProduct).toHaveBeenCalledWith("product-1")
-    expect(result.productName).toBe("Pro")
-  })
-
-  it("publishes an applied manifest and invalidates the catalog", async () => {
-    const queryClient = new QueryClient()
-    const catalogKey = queryKeys.catalog()
-    queryClient.setQueryData(catalogKey, { items: [] })
-    const manifest = { products: [] }
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.publishCatalog(queryClient))
-      .execute({ manifest, planOnly: false })
-
-    expect(publishCatalog).toHaveBeenCalledWith(manifest, {
-      insert: true,
-      overwrite: true,
+    expect(requests[2].body).toEqual({
+      draft_id: "draft_1",
+      kind: "price_change",
+      price_key: "pro-monthly",
     })
-    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
   })
 
-  it("previews a manifest without invalidating the catalog", async () => {
-    const queryClient = new QueryClient()
-    const catalogKey = queryKeys.catalog()
-    queryClient.setQueryData(catalogKey, { items: [] })
-    const manifest = { products: [] }
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.publishCatalog(queryClient))
-      .execute({ manifest, planOnly: true })
-
-    expect(publishCatalog).toHaveBeenCalledWith(manifest, { plan_only: true })
-    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(false)
-  })
-
-  it("invalidates the merchant that started a catalog publish", async () => {
-    const queryClient = new QueryClient()
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-a" })
-    )
-    const merchantAKey = queryKeys.catalog()
-    const options = adminMutations.publishCatalog(queryClient)
-    queryClient.setQueryData(merchantAKey, { items: [] })
-
-    sessionStorage.setItem(
-      "openrails.admin.tokens",
-      JSON.stringify({ access_token: "token", merchant: "merchant-b" })
-    )
-    const merchantBKey = queryKeys.catalog()
-    queryClient.setQueryData(merchantBKey, { items: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, options)
-      .execute({ manifest: { products: [] }, planOnly: false })
-
-    expect(queryClient.getQueryState(merchantAKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(merchantBKey)?.isInvalidated).toBe(false)
-  })
-
-  it("refreshes only drift queries after a scan", async () => {
-    const queryClient = new QueryClient()
-    const driftKey = [...queryKeys.catalogDrift(), { limit: 200 }] as const
-    const productsKey = [...queryKeys.catalog(), "products"] as const
-    queryClient.setQueryData(driftKey, { items: [] })
-    queryClient.setQueryData(productsKey, { items: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.refreshCatalogDrift(queryClient))
-      .execute()
-
-    expect(refreshCatalogDrift).toHaveBeenCalledOnce()
-    expect(queryClient.getQueryState(driftKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(productsKey)?.isInvalidated).toBe(false)
-  })
-
-  it("creates a copilot-drafted price and records its provenance", async () => {
-    const queryClient = new QueryClient()
-    const catalogKey = queryKeys.catalog()
-    queryClient.setQueryData(catalogKey, { items: [] })
-    const price = {
-      product_id: "product-1",
-      key: "pro-monthly",
-      unit_amount: "12000000",
-      currency: "usd",
-      auto_renew: true,
-    }
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.createCatalogDraftPrice(queryClient))
-      .execute({ draftId: "draft-1", price })
-
-    expect(createPrice).toHaveBeenCalledWith(price)
-    expect(confirmCopilotDraft).toHaveBeenCalledWith(
-      "draft-1",
-      "catalog_diff",
-      "pro-monthly"
-    )
-    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
-  })
-
-  it("creates a product and invalidates the catalog tree", async () => {
-    const queryClient = new QueryClient()
-    const productsKey = [
-      ...queryKeys.catalog(),
-      "products",
-      { limit: 1000 },
-    ] as const
-    const pricesKey = [...queryKeys.catalog(), "prices"] as const
-    queryClient.setQueryData(productsKey, { items: [] })
-    queryClient.setQueryData(pricesKey, { items: [] })
-
-    const product = {
-      key: "pro",
-      display_name: "Pro",
-      description: "Pro plan",
-    }
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.createProduct(queryClient))
-      .execute(product)
-
-    expect(createProduct).toHaveBeenCalledWith(product)
-    expect(queryClient.getQueryState(productsKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(pricesKey)?.isInvalidated).toBe(true)
-  })
-
-  it("deactivates a price through the active-state mutation", async () => {
-    const queryClient = new QueryClient()
-    const pricesKey = [...queryKeys.catalog(), "prices"] as const
-    queryClient.setQueryData(pricesKey, { items: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.setPriceActive(queryClient))
-      .execute({ id: "price-1", active: false })
-
-    expect(deactivatePrice).toHaveBeenCalledWith("price-1")
-    expect(queryClient.getQueryState(pricesKey)?.isInvalidated).toBe(true)
-  })
-
-  it("previews affected subscribers without writing catalog state", async () => {
-    const queryClient = new QueryClient()
-
-    const result = await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.previewPriceChange())
-      .execute("pro-monthly")
-
-    expect(previewRepriceAllPriorVersions).toHaveBeenCalledWith("pro-monthly")
-    expect(result).toEqual({ matched: 3 })
-  })
-
-  it("creates a replacement price before scheduling its migration", async () => {
-    const queryClient = new QueryClient()
-    const catalogKey = queryKeys.catalog()
-    queryClient.setQueryData(catalogKey, { items: [] })
-    const price = {
-      product_id: "product-1",
-      unit_amount: "20000000",
-      currency: "usd",
-      access_duration_hours: 720,
-      auto_renew: true,
-      key: "pro-monthly",
-    }
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.changePrice(queryClient))
-      .execute({
-        price,
-        copilotDraftId: "draft-1",
-        migration: {
-          priceKey: "pro-monthly",
-          effectiveAt: "2026-09-05T00:00:00.000Z",
-        },
-      })
-
-    expect(createPrice).toHaveBeenCalledWith(price)
-    expect(repriceAllPriorVersions).toHaveBeenCalledWith(
-      "pro-monthly",
-      "2026-09-05T00:00:00.000Z"
-    )
-    expect(vi.mocked(createPrice).mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(repriceAllPriorVersions).mock.invocationCallOrder[0]
-    )
-    expect(confirmCopilotDraft).toHaveBeenCalledWith(
-      "draft-1",
-      "price_change",
-      "pro-monthly"
-    )
-    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
-  })
-
-  it("refreshes catalog state when scheduling fails after price creation", async () => {
-    const queryClient = new QueryClient()
-    const catalogKey = queryKeys.catalog()
-    queryClient.setQueryData(catalogKey, { items: [] })
-    vi.mocked(repriceAllPriorVersions).mockRejectedValueOnce(
-      new Error("schedule failed")
-    )
+  it("refreshes the catalog when scheduling fails after the price was created", async () => {
+    const queryClient = client()
+    const seeded = seedCache(queryClient, "merchant-a")
+    routes["POST /merchant/catalog/reprice-all-prior-versions"] = () =>
+      Response.json({ error: { message: "schedule failed" } }, { status: 503 })
 
     await expect(
-      queryClient
-        .getMutationCache()
-        .build(queryClient, adminMutations.changePrice(queryClient))
-        .execute({
-          price: {
-            product_id: "product-1",
-            unit_amount: "20000000",
-            currency: "usd",
-            access_duration_hours: 720,
-            auto_renew: true,
-            key: "pro-monthly",
-          },
-          copilotDraftId: "draft-1",
-          migration: {
-            priceKey: "pro-monthly",
-            effectiveAt: "2026-09-05T00:00:00.000Z",
-          },
-        })
+      exec(queryClient, M.changePrice(queryClient), change)
     ).rejects.toThrow("schedule failed")
 
-    expect(confirmCopilotDraft).not.toHaveBeenCalled()
-    expect(queryClient.getQueryState(catalogKey)?.isInvalidated).toBe(true)
-  })
-
-  it("cancels all pending reprices and refreshes the catalog", async () => {
-    const queryClient = new QueryClient()
-    const repricesKey = [...queryKeys.catalog(), "reprices"] as const
-    queryClient.setQueryData(repricesKey, { items: [] })
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.cancelReprices(queryClient))
-      .execute(["reprice-1", "reprice-2"])
-
-    expect(cancelReprice).toHaveBeenCalledTimes(2)
-    expect(cancelReprice).toHaveBeenCalledWith("reprice-1")
-    expect(cancelReprice).toHaveBeenCalledWith("reprice-2")
-    expect(queryClient.getQueryState(repricesKey)?.isInvalidated).toBe(true)
-  })
-
-  it("stores a meter and refreshes the collection and its detail", async () => {
-    const queryClient = new QueryClient()
-    const metersKey = queryKeys.usageMeters()
-    const detailKey = queryKeys.usageMeter("api-tokens")
-    queryClient.setQueryData(metersKey, { items: [] })
-    queryClient.setQueryData(detailKey, { key: "api-tokens" })
-    const meter = {
-      event_type: "token.used",
-      value_property: "tokens",
-      aggregation: "sum" as const,
-      unit: "tokens",
-      group_by: {},
-    }
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.putUsageMeter(queryClient))
-      .execute({ key: "api-tokens", meter })
-
-    expect(putUsageMeter).toHaveBeenCalledWith("api-tokens", meter)
-    expect(queryClient.getQueryState(metersKey)?.isInvalidated).toBe(true)
-    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true)
-  })
-
-  it("stores and removes a default rate through the metering cache boundary", async () => {
-    const queryClient = new QueryClient()
-    const detailKey = queryKeys.usageMeter("api-tokens")
-    queryClient.setQueryData(detailKey, { key: "api-tokens" })
-    const rateCard = {
-      product_id: "product-1",
-      filter: {},
-      price: {
-        model: "per_unit" as const,
-        currency: "USD",
-        per_unit: { unit_amount: "1000000", divide_by: 1 },
-      },
-    }
-
-    await queryClient
-      .getMutationCache()
-      .build(queryClient, adminMutations.putDefaultUsageRateCard(queryClient))
-      .execute({ key: "api-tokens", rateCard })
-
-    expect(putDefaultUsageRateCard).toHaveBeenCalledWith("api-tokens", rateCard)
-    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true)
-
-    queryClient.setQueryData(detailKey, { key: "api-tokens" })
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.deleteDefaultUsageRateCard(queryClient)
-      )
-      .execute("api-tokens")
-
-    expect(deleteDefaultUsageRateCard).toHaveBeenCalledWith("api-tokens")
-    expect(queryClient.getQueryState(detailKey)?.isInvalidated).toBe(true)
-  })
-
-  it("stores and removes a negotiated rate across every affected cache", async () => {
-    const queryClient = new QueryClient()
-    const customerKey = queryKeys.customer("customer-1")
-    const ratesKey = queryKeys.customerUsageRates("customer-1")
-    const metersKey = queryKeys.usageMeters()
-    const meterKey = queryKeys.usageMeter("api-tokens")
-    const dashboardKey = queryKeys.dashboard()
-    for (const key of [
-      customerKey,
-      ratesKey,
-      metersKey,
-      meterKey,
-      dashboardKey,
-    ]) {
-      queryClient.setQueryData(key, {})
-    }
-    const override = {
-      price: {
-        model: "per_unit" as const,
-        currency: "USD",
-        per_unit: { unit_amount: "500000", divide_by: 1 },
-      },
-    }
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.putCustomerUsageRateOverride(queryClient)
-      )
-      .execute({
-        customerId: "customer-1",
-        meterKey: "api-tokens",
-        override,
-      })
-
-    expect(putCustomerUsageRateOverride).toHaveBeenCalledWith(
-      "customer-1",
-      "api-tokens",
-      override
-    )
-    for (const key of [
-      customerKey,
-      ratesKey,
-      metersKey,
-      meterKey,
-      dashboardKey,
-    ]) {
-      expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true)
-      queryClient.setQueryData(key, {})
-    }
-
-    await queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.deleteCustomerUsageRateOverride(queryClient)
-      )
-      .execute({ customerId: "customer-1", meterKey: "api-tokens" })
-
-    expect(deleteCustomerUsageRateOverride).toHaveBeenCalledWith(
-      "customer-1",
-      "api-tokens"
-    )
-    for (const key of [
-      customerKey,
-      ratesKey,
-      metersKey,
-      meterKey,
-      dashboardKey,
-    ]) {
-      expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true)
-    }
+    expect(calls(requests)).toEqual([
+      "POST /merchant/catalog/prices",
+      "POST /merchant/catalog/reprice-all-prior-versions",
+    ])
+    expect(invalidated(queryClient, seeded)).toEqual(refreshedCatalog)
   })
 })
