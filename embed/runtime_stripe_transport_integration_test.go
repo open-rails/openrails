@@ -68,8 +68,7 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 	require.NoError(t, embcp.Attach(ctx, e.app, cfg, pool))
 	provisioned, err := embcp.ProvisionMerchant(ctx, e.app, embcp.ProvisionMerchantRequest{Slug: "seam-" + sfx})
 	require.NoError(t, err)
-	// Bind the engine to its merchant — what an embedding host's provisioning
-	// does, and what makes the no-argument RunInMerchant pin below possible.
+	// Bind the engine to its merchant, as an embedding host does at startup.
 	e.app.Runtime.SetConfiguredMerchant(provisioned.MerchantID)
 
 	require.NoError(t, e.app.Runtime.EnsureMerchantsService(ctx))
@@ -84,7 +83,7 @@ func TestEmbeddedStripeTransportSeam_DrivesCatalogRailPush(t *testing.T) {
 	svc := e.svc
 
 	var price *billingservice.CatalogPrice
-	require.NoError(t, e.runInMerchant(ctx, func(mctx context.Context) error {
+	require.NoError(t, e.app.Runtime.DB.RunInMerchantScope(ctx, provisioned.MerchantID, "catalog rail push", func(mctx context.Context) error {
 		product, perr := svc.CreateProduct(mctx, billingservice.CreateProductRequest{
 			Key: "seam-prod-" + sfx, DisplayName: "Seam Product",
 		})

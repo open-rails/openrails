@@ -54,7 +54,7 @@ func TestEmbedded_DeclarePSP(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstID, secondID, "re-declaration must preserve the natural-key identity")
 
-	err = engine.runInMerchantConn(ctx, merchantResult.MerchantID, func(ctx context.Context) error {
+	err = engine.app.Runtime.DB.RunInMerchantScope(ctx, merchantResult.MerchantID, "inspect declared PSP", func(ctx context.Context) error {
 		rows, queryErr := engine.app.Runtime.DB.Gen(ctx).ListPSPsForMerchant(ctx, gen.ListPSPsForMerchantParams{
 			MerchantID: merchantResult.MerchantID.UUID(),
 		})
