@@ -189,15 +189,6 @@ func (s *CheckoutService) getIdempotencyKey(req *CheckoutRequest, userID string,
 	}
 }
 
-// getUpgradeIdempotencyKey returns the idempotency key for an upgrade operation.
-// If client-provided key exists, use it. Otherwise generate from upgrade parameters.
-func (s *CheckoutService) getUpgradeIdempotencyKey(req *CheckoutRequest, userID string, existingSubID, newPriceID uuid.UUID) string {
-	if req.IdempotencyKey != "" {
-		return req.IdempotencyKey
-	}
-	return GenerateKeyForUpgrade(userID, existingSubID, newPriceID)
-}
-
 // CheckPurchaseEligibility determines if a user can purchase a given price.
 // This should be called BEFORE generating payment URLs or charging cards.
 //
@@ -1554,7 +1545,10 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 		return nil, errors.New("upgrade must use the predecessor's PSP account")
 	}
 	ctx = db.WithPSPID(ctx, existingSub.PspID)
-	key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(req, user.ID, existingSub.ID, newPrice.ID))
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, tierChangeKeyRequired()
+	}
+	key := NMIUpgradeIdempotencyKey(req.IdempotencyKey)
 	// Replays use the original durable payload, even if pricing or time changed.
 	database := s.SubscriptionService.Database()
 	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, key)
@@ -1564,7 +1558,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 			return nil, err
 		}
 		if frozen.UserID != user.ID || frozen.OldSubscriptionID != existingSub.ID || frozen.PriceID != newPrice.ID {
-			return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "upgrade idempotency key belongs to a different request"}
+			return nil, tierChangeIdempotencyConflict()
 		}
 		return s.resumeUpgrade(ctx, prior)
 	}
@@ -1612,7 +1606,7 @@ func (s *CheckoutService) processUpgrade(ctx context.Context, req *CheckoutReque
 	payload := NMIUpgradePayload{RequestedPrice: strings.TrimSpace(req.PriceID), PSP: target.PSP, UserID: user.ID, Email: req.Email, OldSubscriptionID: existingSub.ID, OldPriceID: existingSub.PriceID, OldProviderSubscriptionID: existingSub.RailSubscriptionID, NewSubscriptionID: uuidutil.NewV7(), NewPaymentID: uuidutil.NewV7(), PriceID: newPrice.ID, ProductID: newProduct.ID, ProductName: newProduct.DisplayName, PlanID: plan, VaultID: vault, BillingID: billing, PaymentMethodID: method.ID, RecurringAmount: newPrice.Amount, ProrationAmount: amount, Currency: newPrice.Currency, PeriodStart: now, PeriodEnd: end, StartDate: startDate, RecurringAnchor: method.StoredCredentialRecurringRef, UnscheduledAnchor: method.StoredCredentialUnscheduledRef, Entitlements: models.CloneEntitlementsSpec(newProduct.EntitlementsSpec), Card: nmi.CardUserData{FirstName: ResolveCheckoutFirstName(req, user), LastName: ResolveCheckoutLastName(req), Address1: DefaultIfEmpty(req.Address1, "N/A"), City: DefaultIfEmpty(req.City, "N/A"), State: DefaultIfEmpty(req.State, "N/A"), Zip: DefaultIfEmpty(req.Zip, "00000"), Country: DefaultIfEmpty(req.Country, "US")}}
 	intent, err := s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: existingSub.MerchantID, Provider: target.Rail, PspID: existingSub.PspID, IntentType: TypeNMIUpgrade, SubscriptionID: &existingSub.ID, PriceID: &newPrice.ID, Payload: payload, IdempotencyKey: key, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "customer tier upgrade"})
 	var conflict *pgconn.PgError
-	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == "uq_rail_intents_upgrade_predecessor" {
+	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
 		// Another unresolved upgrade owns this predecessor's provider steps.
 		return nil, ErrTierChangePending
 	}
@@ -1805,10 +1799,24 @@ func CalculateModelBUpgradeCharge(
 	return firstChargeMicros, cycleHours, nil
 }
 
+// ReplayTierChange answers a request whose Idempotency-Key names a durable
+// tier change (NMI upgrade or Stripe tier change) before any admission that
+// the completed change would fail. found=false when the key is new. A tier
+// change without a key is refused here, before any admission or mutation.
+func (s *CheckoutService) ReplayTierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		return nil, false, tierChangeKeyRequired()
+	}
+	if response, found, err := s.replayTierUpgrade(ctx, req, user); found || err != nil {
+		return response, found, err
+	}
+	return s.replayStripeTierChange(ctx, req, user)
+}
+
 // TierChange processes a subscription tier change (upgrade or downgrade).
 // This is the unified entry point that routes to rail-specific implementations.
 func (s *CheckoutService) TierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
-	if response, found, err := s.replayTierUpgrade(ctx, req, user); found || err != nil {
+	if response, found, err := s.ReplayTierChange(ctx, req, user); found || err != nil {
 		return response, err
 	}
 	// 1. Parse and validate price (#774: price_id accepts a price_key too)
@@ -2099,9 +2107,10 @@ func formatMinorAmount(micros int64, currency string) string {
 	return symbol + amount
 }
 
-// processTierChangeStripe handles Stripe subscription tier changes.
-// Upgrades are processed immediately. Downgrades are scheduled for period end
-// so the user keeps access to the higher tier they already paid for.
+// processTierChangeStripe freezes a Stripe tier change and runs it as a
+// durable operation (stripe_tier_change_intent.go). Upgrades are billed
+// immediately with a reset cycle; downgrades are scheduled for period end so
+// the customer keeps the tier already paid for.
 func (s *CheckoutService) processTierChangeStripe(
 	ctx context.Context,
 	req *TierChangeRequest,
@@ -2112,173 +2121,90 @@ func (s *CheckoutService) processTierChangeStripe(
 	currentProduct *models.Product,
 	action string,
 ) (*TierChangeResponse, error) {
-	// Validate Stripe configuration
 	stripePriceID, ok := newPrice.GetStripeConfig()
 	if !ok || strings.TrimSpace(stripePriceID) == "" {
-		return nil, &TierChangeError{
-			HTTPStatus: http.StatusBadRequest,
-			Message:    "target price not configured for Stripe",
-		}
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "target price not configured for Stripe"}
 	}
 	if strings.TrimSpace(existingSub.RailSubscriptionID) == "" {
-		return nil, &TierChangeError{
-			HTTPStatus: http.StatusBadRequest,
-			Message:    "subscription missing Stripe reference",
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "subscription missing Stripe reference"}
+	}
+	currentPrice := existingSub.Price
+	if currentPrice == nil {
+		var err error
+		if currentPrice, err = s.PriceService.GetByID(ctx, existingSub.PriceID); err != nil {
+			return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "current price not found"}
 		}
 	}
-
-	if action == "downgrade" {
-		if existingSub.ScheduledPriceID != nil {
-			return &TierChangeResponse{
-				Object:  "tier_change",
-				Status:  "blocked",
-				Mode:    "tier_change",
-				Action:  action,
-				PriceID: openrails.PriceID(newPrice.ID),
-				Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
-				Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
-			}, nil
-		}
-		currentPrice := existingSub.Price
-		if currentPrice == nil {
-			var err error
-			currentPrice, err = s.PriceService.GetByID(ctx, existingSub.PriceID)
-			if err != nil {
-				return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "current price not found"}
-			}
-		}
-		currentStripePriceID, ok := currentPrice.GetStripeConfig()
-		if !ok || strings.TrimSpace(currentStripePriceID) == "" {
-			return nil, &TierChangeError{
-				HTTPStatus: http.StatusBadRequest,
-				Message:    "current price not configured for Stripe",
-			}
-		}
-		if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
-			return nil, &TierChangeError{
-				HTTPStatus: http.StatusBadRequest,
-				Message:    "subscription missing current period end",
-			}
-		}
-		currentPeriodStart := existingSub.StartedAt
-		if existingSub.CurrentPeriodStartsAt != nil && !existingSub.CurrentPeriodStartsAt.IsZero() {
-			currentPeriodStart = *existingSub.CurrentPeriodStartsAt
-		}
-
-		stripeService := &subscriptions.StripeService{Config: s.Config, Rails: s.Rails}
-		if _, err := stripeService.ScheduleSubscriptionPriceChange(ctx, existingSub.RailSubscriptionID, currentStripePriceID, stripePriceID, currentPeriodStart, *existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleDays()); err != nil {
-			return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
-		}
-
-		existingSub.ScheduledPriceID = &newPrice.ID
-		if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
-			return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to schedule downgrade"}
-		}
-
-		subID := openrails.SubscriptionID(existingSub.ID)
-		effectiveDate := existingSub.CurrentPeriodEndsAt.Format("January 2, 2006")
+	currentStripePriceID, ok := currentPrice.GetStripeConfig()
+	if !ok || strings.TrimSpace(currentStripePriceID) == "" {
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "current price not configured for Stripe"}
+	}
+	if existingSub.ScheduledPriceID != nil {
 		return &TierChangeResponse{
-			Object:           "tier_change",
-			Status:           "succeeded",
-			Mode:             "tier_change",
-			Action:           action,
-			PriceID:          openrails.PriceID(newPrice.ID),
-			Payment:          CheckoutSessionPaymentResponse{Rail: "stripe"},
-			SubscriptionID:   &subID,
-			Message:          fmt.Sprintf("Downgrade to %s scheduled. Your current plan will remain active until %s.", newProduct.DisplayName, effectiveDate),
-			DelayedStart:     existingSub.CurrentPeriodEndsAt,
-			Currency:         newPrice.Currency,
-			AmountDueNow:     0,
-			NextChargeAmount: newPrice.Amount,
-			NextChargeDate:   existingSub.CurrentPeriodEndsAt,
+			Object: "tier_change", Status: "blocked", Mode: "tier_change", Action: action,
+			PriceID: openrails.PriceID(newPrice.ID), Payment: CheckoutSessionPaymentResponse{Rail: "stripe"},
+			Message: "You already have a tier change scheduled. Please wait for the current period to end or cancel the scheduled change first.",
 		}, nil
 	}
-
-	// #268: Model B (reset-period) upgrade via Stripe.
-	//
-	// We drive Stripe to (a) reset the billing cycle to start NOW and (b)
-	// immediately collect the first charge for the fresh period:
-	//
-	//   - billing_cycle_anchor = "now"        -> resets the period to [now, now+cycle]
-	//   - proration_behavior   = "always_invoice" -> Stripe creates AND invoices
-	//     the proration right away, so the customer is charged now instead of
-	//     having the credit/charge merely sit on the next invoice.
-	//
-	// With the anchor reset, Stripe bills a fresh full period for the new price
-	// and credits the unused portion of the old price as a proration line item;
-	// the invoiced total nets to `new_full - old_unused`, i.e. the Model B first
-	// charge (matching CalculateModelBUpgradeCharge for the NMI path).
-	//
-	// ASSUMPTION / TODO(#268): Stripe computes the unused-time credit from its
-	// own clock and per-second proration, so the collected amount can differ
-	// from CalculateModelBUpgradeCharge by sub-cent/rounding and by Stripe's
-	// second- vs whole-day granularity. This is expected — Stripe is the source
-	// of truth for Stripe-billed amounts. If exact parity with the NMI math is
-	// later required, switch to an explicit invoice-item + price-update flow.
-	// Verify the live invoice amount on a real Stripe test upgrade before deploy.
-	stripeService := &subscriptions.StripeService{Config: s.Config, Rails: s.Rails}
-	itemID, err := stripeService.GetSubscriptionItemID(ctx, existingSub.RailSubscriptionID)
-	if err != nil {
-		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
-	}
-
-	// The success-toast estimate is computed BEFORE the provider write, and from
-	// the OLD price + period (the local reset below overwrites them), so it
-	// matches the preview's now-amount and so any money error — an FX crossing
-	// (#820) above all — fails before Stripe is touched.
-	stripeNow := s.now()
-	oldAmount := PriceAmountOf(existingSub.Price)
-	if existingSub.Price == nil {
-		// No old price loaded => no credit is known. Zero credit carries no
-		// currency risk; the estimate is simply the full new price.
-		oldAmount = PriceAmount{Micros: 0, Currency: newPrice.Currency}
-	}
-	estimatedNow, _, err := CalculateModelBUpgradeCharge(oldAmount, PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), stripeNow)
-	if err != nil {
+	// An unresolved tier change owns the subscription: a request under another
+	// key is pointed at it instead of reading provider state it may be moving.
+	if live, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, existingSub.ID); err == nil {
+		return nil, &TierChangeInFlightError{OperationID: live.ID}
+	} else if !db.IsNotFound(err) {
 		return nil, err
 	}
-	// Pass newPrice.ID so the subscription's metadata[internal_price_id] is
-	// rewritten to the new tier; otherwise the proration invoice and every future
-	// renewal would resolve the stale old price in the invoice.paid webhook (#268).
-	if err := stripeService.UpdateSubscriptionPrice(ctx, existingSub.RailSubscriptionID, itemID, stripePriceID, newPrice.ID.String(), "always_invoice", "now"); err != nil {
+	// The Stripe object is read once before anything is frozen: the item the
+	// change targets, and proof that Stripe bills the price the local
+	// subscription says it does. Nothing is written here.
+	stripeService := &subscriptions.StripeService{Config: s.Config, Rails: s.Rails}
+	state, found, err := stripeService.GetSubscriptionState(ctx, existingSub.RailSubscriptionID)
+	if err != nil {
 		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: err.Error()}
 	}
-
-	// Update local subscription record.
-	// #268: Model B reset the billing cycle at Stripe (anchor "now"), so reflect
-	// the fresh period [now, now+cycle] locally. Stripe webhooks remain the
-	// source of truth and will reconcile the exact period boundaries.
-	stripeCycleHours := 30 * 24
-	if ch := newPrice.RecurringCycleHours(); ch != nil {
-		stripeCycleHours = *ch
+	switch {
+	case !found:
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "stripe subscription not found"}
+	case state.ItemID == "":
+		return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "stripe subscription item not found"}
+	case state.ScheduleID != "":
+		return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "subscription is managed by a Stripe schedule; release it before changing tier"}
+	case state.PriceID != currentStripePriceID:
+		return nil, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "stripe bills a different price than the local subscription; reconcile before changing tier"}
 	}
-	stripePeriodEnd := stripeNow.Add(time.Duration(stripeCycleHours) * time.Hour)
-
-	existingSub.PriceID = newPrice.ID
-	existingSub.ProductID = newPrice.ProductID
-	existingSub.ScheduledPriceID = nil
-	existingSub.CurrentPeriodStartsAt = &stripeNow
-	existingSub.CurrentPeriodEndsAt = &stripePeriodEnd
-	if err := s.SubscriptionService.Update(ctx, existingSub); err != nil {
-		return nil, &TierChangeError{HTTPStatus: http.StatusInternalServerError, Message: "failed to update subscription"}
+	now := s.now().UTC()
+	payload := StripeTierChangePayload{
+		RequestedPrice: strings.TrimSpace(req.PriceID), UserID: user.ID, SubscriptionID: existingSub.ID,
+		StripeSubscriptionID: existingSub.RailSubscriptionID, StripeItemID: state.ItemID, Action: action,
+		OldPriceID: existingSub.PriceID, OldStripePriceID: currentStripePriceID,
+		PriceID: newPrice.ID, ProductID: newPrice.ProductID, ProductName: newProduct.DisplayName, StripePriceID: stripePriceID,
+		Currency: newPrice.Currency, RecurringAmount: newPrice.Amount,
 	}
-
-	subID := openrails.SubscriptionID(existingSub.ID)
-
-	return &TierChangeResponse{
-		Object:           "tier_change",
-		Status:           "succeeded",
-		Mode:             "tier_change",
-		Action:           action,
-		PriceID:          openrails.PriceID(newPrice.ID),
-		Payment:          CheckoutSessionPaymentResponse{Rail: "stripe"},
-		SubscriptionID:   &subID,
-		Message:          "Plan updated",
-		Currency:         newPrice.Currency,
-		AmountDueNow:     estimatedNow,
-		NextChargeAmount: newPrice.Amount,
-		NextChargeDate:   &stripePeriodEnd,
-	}, nil
+	if action == "downgrade" {
+		if existingSub.CurrentPeriodEndsAt == nil || existingSub.CurrentPeriodEndsAt.IsZero() {
+			return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "subscription missing current period end"}
+		}
+		periodStart := existingSub.StartedAt
+		if existingSub.CurrentPeriodStartsAt != nil && !existingSub.CurrentPeriodStartsAt.IsZero() {
+			periodStart = *existingSub.CurrentPeriodStartsAt
+		}
+		if !existingSub.CurrentPeriodEndsAt.After(periodStart) {
+			return nil, &TierChangeError{HTTPStatus: http.StatusBadRequest, Message: "subscription current period is not open"}
+		}
+		payload.ProrationBehavior, payload.PeriodStart, payload.PeriodEnd = "none", periodStart.UTC(), existingSub.CurrentPeriodEndsAt.UTC()
+		payload.BillingCycleDays = newPrice.RecurringCycleDays()
+	} else {
+		// #268 Model B: Stripe resets the cycle to now and invoices the
+		// proration immediately. The frozen now-amount is the local estimate
+		// (matching the preview); Stripe finalizes the exact proration.
+		estimatedNow, cycleHours, err := CalculateModelBUpgradeCharge(PriceAmountOf(currentPrice), PriceAmountOf(newPrice), existingSub.CurrentPeriodEndsAt, newPrice.RecurringCycleHours(), now)
+		if err != nil {
+			return nil, err
+		}
+		payload.AmountDueNow, payload.ProrationBehavior, payload.BillingCycleAnchor = estimatedNow, "always_invoice", "now"
+		payload.PaymentBehavior = stripePaymentBehaviorPaidOrRefused
+		payload.PeriodStart, payload.PeriodEnd = now, now.Add(time.Duration(cycleHours)*time.Hour)
+	}
+	return s.enqueueStripeTierChange(ctx, existingSub, payload, StripeTierChangeIdempotencyKey(req.IdempotencyKey))
 }
 
 // processTierChangeSolana handles recurring-Solana subscription tier changes (#272).
@@ -2403,7 +2329,7 @@ func (s *CheckoutService) processTierChangeNMI(
 	}
 
 	if action == "upgrade" {
-		key := NMIUpgradeIdempotencyKey(s.getUpgradeIdempotencyKey(checkoutReq, user.ID, existingSub.ID, newPrice.ID))
+		key := NMIUpgradeIdempotencyKey(checkoutReq.IdempotencyKey)
 		in, err := intents.NewStore(s.SubscriptionService.Database()).GetByIdempotencyKey(ctx, key)
 		if err != nil {
 			return nil, err

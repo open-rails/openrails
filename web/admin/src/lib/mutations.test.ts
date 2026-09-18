@@ -661,7 +661,7 @@ describe("subscription mutations", () => {
           "customer-1"
         )
       )
-      .execute("price-2")
+      .execute({ priceId: "price-2", idempotencyKey: "tier-key-1" })
 
     expect(previewSubscriptionTierChange).toHaveBeenCalledWith(
       "subscription-1",
@@ -669,7 +669,8 @@ describe("subscription mutations", () => {
     )
     expect(changeSubscriptionTier).toHaveBeenCalledWith(
       "subscription-1",
-      "price-2"
+      "price-2",
+      "tier-key-1"
     )
     expect(queryClient.getQueryState(subscriptionsKey)?.isInvalidated).toBe(
       true

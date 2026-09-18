@@ -23,7 +23,26 @@ type TierChangeResponse struct {
 	AmountDueNow     int64      `json:"amount_due_now,string"`
 	NextChargeAmount int64      `json:"next_charge_amount,string"`
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
+	// OperationID names the durable provider operation behind a Stripe tier
+	// change. A "processing" answer (HTTP 202) carries it while the provider
+	// outcome is unresolved; the same Idempotency-Key replays the stored result.
+	OperationID string `json:"operation_id,omitempty"`
 }
+
+// Tier-change refusals carry these StatusError.Code values.
+const (
+	// CodeTierChangeInFlight: another unresolved tier change owns the
+	// subscription; metadata.operation_id names it.
+	CodeTierChangeInFlight = "tier_change_in_flight"
+	// CodeTierChangeRefused: the provider definitively refused the change.
+	CodeTierChangeRefused = "tier_change_refused"
+	// CodeTierChangeIdempotencyConflict: the Idempotency-Key already names a
+	// different tier change (another customer, subscription or target).
+	CodeTierChangeIdempotencyConflict = "tier_change_idempotency_conflict"
+	// CodeTierChangeIdempotencyKeyRequired: a tier change needs a client
+	// Idempotency-Key; it is the only way to read back a lost response.
+	CodeTierChangeIdempotencyKeyRequired = "tier_change_idempotency_key_required"
+)
 
 type TierChangePreviewResponse struct {
 	Object           string     `json:"object"` // "tier_change_preview"

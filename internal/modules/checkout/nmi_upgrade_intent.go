@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -478,12 +477,9 @@ func (s *CheckoutService) replayTierUpgrade(ctx context.Context, req *TierChange
 	if err = json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, true, err
 	}
-	if user == nil || p.UserID != user.ID {
-		return nil, true, &TierChangeError{HTTPStatus: http.StatusNotFound, Message: "upgrade not found"}
-	}
 	price := strings.TrimSpace(req.PriceID)
-	if (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.OldSubscriptionID) || (price != p.RequestedPrice && price != openrails.PriceID(p.PriceID).String()) {
-		return nil, true, &TierChangeError{HTTPStatus: http.StatusConflict, Message: "upgrade idempotency key belongs to a different request"}
+	if user == nil || p.UserID != user.ID || (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.OldSubscriptionID) || (price != p.RequestedPrice && price != openrails.PriceID(p.PriceID).String()) {
+		return nil, true, tierChangeIdempotencyConflict()
 	}
 	if _, err = s.resumeUpgrade(ctx, in); err != nil {
 		return nil, true, err
