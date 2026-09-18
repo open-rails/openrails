@@ -17,11 +17,13 @@ type FleetMerchantFunnel struct {
 	ActiveRevenue int64 `json:"active_revenue"`
 }
 
-// FleetCurrencyRevenue is one currency's settled window volume, in MICROS.
+// FleetCurrencyRevenue is one currency's settled window volume. SettledAmount
+// is in the currency's native units (docs/money-wire.md) and travels as an
+// exact decimal string.
 type FleetCurrencyRevenue struct {
 	Currency      string `json:"currency"`
 	Payments      int64  `json:"payments"`
-	SettledAmount int64  `json:"settled_amount_micros"`
+	SettledAmount int64  `json:"settled_amount,string"`
 }
 
 // FleetRailHealth is one rail's completed/failed/chargeback split across the
@@ -34,11 +36,13 @@ type FleetRailHealth struct {
 	Chargebacks int64  `json:"chargebacks"`
 }
 
-// FleetMRR is one currency's monthly-normalized recurring run-rate, in MICROS.
+// FleetMRR is one currency's monthly-normalized recurring run-rate.
+// MonthlyAmount is in the currency's native units and travels as an exact
+// decimal string.
 type FleetMRR struct {
 	Currency      string `json:"currency"`
 	Subscriptions int64  `json:"subscriptions"`
-	MonthlyAmount int64  `json:"monthly_amount_micros"`
+	MonthlyAmount int64  `json:"monthly_amount,string"`
 }
 
 // FleetSnapshot is one operator snapshot of the hosted fleet.

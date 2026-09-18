@@ -42,7 +42,7 @@ const (
 // product X?" and powers purchased-library views without walking payment history.
 //
 // It is DISTINCT from openrails.entitlements (feature access). A product may carry
-// EntitlementsSpec and/or CreditsSpec AND produce a grant.
+// EntitlementsSpec and produce a grant.
 type ProductAccessGrant struct {
 	ID uuid.UUID `json:"id"`
 

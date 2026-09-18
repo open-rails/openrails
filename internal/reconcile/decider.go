@@ -12,7 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/destructive"
 	"github.com/open-rails/openrails/internal/modules/collection"
-	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -681,7 +680,6 @@ type LifecycleDecisionApplier struct {
 func NewDecisionApplier(database *db.DB, deferDelete subscriptions.DeferredDeleteScheduler, clocks ...clockwork.Clock) *LifecycleDecisionApplier {
 	clock := timeutil.FirstClock(clocks...)
 	lc := subscriptions.NewSubscriptionLifecycleService(database, nil, nil, nil, nil, nil, nil, clock)
-	lc.SetCreditGranter(money.NewMoneyService(database, clock))
 	if deferDelete != nil {
 		lc.SetDeferredDeleteScheduler(deferDelete)
 	}
@@ -693,7 +691,6 @@ func NewDecisionApplier(database *db.DB, deferDelete subscriptions.DeferredDelet
 func (a *LifecycleDecisionApplier) SetClock(clock clockwork.Clock) {
 	a.clock = timeutil.FirstClock(clock)
 	a.LC.SetClock(a.clock)
-	a.LC.SetCreditGranter(money.NewMoneyService(a.DB, a.clock))
 }
 
 func (a *LifecycleDecisionApplier) ApplyDecision(ctx context.Context, subscriptionID uuid.UUID, d Decision) (bool, error) {

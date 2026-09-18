@@ -48,9 +48,6 @@ const (
 	RoundDown   = pricing.RoundDown
 )
 
-// QuoteUnitsForSpend re-exports the leaf quoter for catalog API consumers.
-var QuoteUnitsForSpend = pricing.QuoteUnitsForSpend
-
 // Meter aggregations. Union of OpenMeter and Lago minus AVG and weighted_sum:
 // counters use sum/count; point-in-time gauges use max/min/latest/unique_count;
 // time-weighted "gauge" usage (GiB-months) is modeled as sum of host-emitted
@@ -148,7 +145,7 @@ func validateAllowance(where string, a *Allowance) error {
 	return pricing.ValidateAllowance(where, a)
 }
 
-// validateRateCardModel validates the #638 rate-card and #639 credit-purchase
+// validateRateCardModel validates the rate-card
 // additions on every product. Called from Manifest.validate after meters and
 // products are normalized.
 func (m *Manifest) validateRateCardModel() error {

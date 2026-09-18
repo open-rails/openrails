@@ -141,15 +141,7 @@ func (m *Manifest) validate() error {
 	if len(m.TierGroups) == 0 {
 		return errors.New("catalog manifest must define products")
 	}
-	creditBalances, err := m.validateCreditBalances()
-	if err != nil {
-		return err
-	}
 	if err := m.validateMeters(); err != nil {
-		return err
-	}
-	usageLimitKeys, err := m.validateUsageLimits()
-	if err != nil {
 		return err
 	}
 
@@ -174,13 +166,10 @@ func (m *Manifest) validate() error {
 		requireTierRank := len(group.Products) > 1 && group.Key != "default" && !strings.HasPrefix(group.Key, "usage-")
 		for pi := range group.Products {
 			product := &group.Products[pi]
-			if err := m.validateProduct(group.Key, product, productKeys, requireTierRank, creditBalances); err != nil {
+			if err := m.validateProduct(group.Key, product, productKeys, requireTierRank); err != nil {
 				return err
 			}
 		}
-	}
-	if err := m.validateProductBenefitRefs(productKeys, usageLimitKeys); err != nil {
-		return err
 	}
 	if err := m.validateRateCardModel(); err != nil {
 		return err
@@ -188,7 +177,7 @@ func (m *Manifest) validate() error {
 	return nil
 }
 
-func (m *Manifest) validateProduct(groupKey string, product *Product, productKeys map[string]struct{}, requireTierRank bool, creditBalances map[string]CreditBalance) error {
+func (m *Manifest) validateProduct(groupKey string, product *Product, productKeys map[string]struct{}, requireTierRank bool) error {
 	product.Key = normalizeSlug(product.Key)
 	if product.Key == "" {
 		return fmt.Errorf("tier group %q has a product without a key", groupKey)
@@ -204,45 +193,25 @@ func (m *Manifest) validateProduct(groupKey string, product *Product, productKey
 	if requireTierRank && product.TierRank == nil {
 		return fmt.Errorf("product %q tier_rank is required when tier group %q has multiple products", product.Key, groupKey)
 	}
-	if err := validateCredits(product.Key, product.Credits, creditBalances); err != nil {
-		return err
-	}
 
 	// A price's identity is its financial substance — exactly the DB's
 	// unique_prices_product_amount_window key. There is no price slug to dedup
 	// on, and providers are NOT part of identity (the constraint forbids two
 	// prices that differ only by provider).
 	priceTerms := map[string]struct{}{}
-	offerTerms := map[string]struct{}{}
 	for pri := range product.Prices {
 		price := &product.Prices[pri]
 		if err := m.validatePrice(*product, price, pri); err != nil {
 			return err
 		}
-		if product.isCreditTopUp() {
-			if err := validateCreditTopUpOffer(product.Key, price, pri); err != nil {
-				return err
-			}
-			for _, key := range topUpOfferKeys(*price) {
-				if _, ok := offerTerms[key]; ok {
-					return fmt.Errorf("product %q declares duplicate top-up offer for %s", product.Key, key)
-				}
-				offerTerms[key] = struct{}{}
-			}
+		key := priceTermsKey(*price)
+		if _, ok := priceTerms[key]; ok {
+			return fmt.Errorf("product %q declares duplicate price terms %s", product.Key, PriceLabel(product.Key, *price))
 		}
-		if !product.isCreditTopUp() {
-			key := priceTermsKey(*price)
-			if _, ok := priceTerms[key]; ok {
-				return fmt.Errorf("product %q declares duplicate price terms %s", product.Key, PriceLabel(product.Key, *price))
-			}
-			priceTerms[key] = struct{}{}
-		}
+		priceTerms[key] = struct{}{}
 	}
 	if err := validateProductCapabilities(product); err != nil {
 		return err
-	}
-	if product.isCreditTopUp() && len(product.Prices) == 0 {
-		return fmt.Errorf("product %q credit top-up requires prices", product.Key)
 	}
 	return nil
 }
@@ -263,7 +232,7 @@ func (m *Manifest) normalizeProducts() error {
 			// give it its own singleton group keyed by product key so it needs no
 			// tier_group and never shares tier exclusivity with a sibling resource.
 			// planProduct persists its tier_group as NULL.
-			if len(p.RateCards) > 0 || p.isCreditTopUp() {
+			if len(p.RateCards) > 0 {
 				group = "usage:" + normalizeSlug(p.Key)
 			} else {
 				group = "default"
@@ -280,88 +249,7 @@ func (m *Manifest) normalizeProducts() error {
 	return nil
 }
 
-func (m *Manifest) validateCreditBalances() (map[string]CreditBalance, error) {
-	out := map[string]CreditBalance{}
-	for i := range m.CreditBalances {
-		b := &m.CreditBalances[i]
-		b.Key = normalizeSlug(b.Key)
-		if b.Key == "" {
-			return nil, fmt.Errorf("credit_balances #%d key is required", i+1)
-		}
-		if _, ok := out[b.Key]; ok {
-			return nil, fmt.Errorf("duplicate credit balance key %q", b.Key)
-		}
-		if !validCreditUnit(b.Unit) {
-			return nil, fmt.Errorf("credit balance %q has invalid unit %q", b.Key, b.Unit)
-		}
-		b.Unit = normalizeCreditUnit(b.Unit)
-		if strings.TrimSpace(b.ExpiresDefault) != "" {
-			if _, err := ParseDurationSpec(b.ExpiresDefault); err != nil {
-				return nil, fmt.Errorf("credit balance %q expires_default: %w", b.Key, err)
-			}
-		}
-		out[b.Key] = *b
-	}
-	return out, nil
-}
-
-func validateCredits(productKey string, credits []CreditGrant, balances map[string]CreditBalance) error {
-	seen := map[string]struct{}{}
-	for i := range credits {
-		credit := &credits[i]
-		credit.Key = normalizeSlug(credit.Key)
-		if credit.Key == "" {
-			return fmt.Errorf("product %q has credit with empty key", productKey)
-		}
-		if _, ok := seen[credit.Key]; ok {
-			return fmt.Errorf("product %q has duplicate credit %q", productKey, credit.Key)
-		}
-		seen[credit.Key] = struct{}{}
-		balance, ok := balances[credit.Key]
-		if !ok {
-			return fmt.Errorf("product %q credit %q references unknown credit balance", productKey, credit.Key)
-		}
-		credit.Unit = balance.Unit
-		if credit.Amount != nil && *credit.Amount <= 0 {
-			return fmt.Errorf("product %q credit %q amount must be positive", productKey, credit.Key)
-		}
-		credit.ExpiryHours = nil
-		expires := strings.TrimSpace(credit.Expires)
-		if expires == "" {
-			expires = strings.TrimSpace(balance.ExpiresDefault)
-		}
-		if expires != "" {
-			hours, err := durationSpecHours(expires)
-			if err != nil {
-				return fmt.Errorf("product %q credit %q expires: %w", productKey, credit.Key, err)
-			}
-			credit.ExpiryHours = &hours
-		}
-		switch strings.TrimSpace(credit.Cadence) {
-		case "", "once", "per_renewal":
-		default:
-			return fmt.Errorf("product %q credit %q cadence must be once or per_renewal", productKey, credit.Key)
-		}
-	}
-	return nil
-}
-
-func (p Product) isCreditTopUp() bool {
-	if len(p.Credits) != 1 {
-		return false
-	}
-	return p.Credits[0].Amount == nil
-}
-
 func validateProductCapabilities(product *Product) error {
-	if product.isCreditTopUp() {
-		if strings.TrimSpace(product.TierGroup) != "" || product.TierRank != nil {
-			return fmt.Errorf("product %q credit top-up must not set tier_group/tier_rank", product.Key)
-		}
-		if len(product.RateCards) > 0 {
-			return fmt.Errorf("product %q credit top-up must not set rate_cards", product.Key)
-		}
-	}
 	if len(product.RateCards) > 0 && (strings.TrimSpace(product.TierGroup) != "" || product.TierRank != nil) {
 		return fmt.Errorf("product %q usage/rate-card product must not set tier_group/tier_rank", product.Key)
 	}
@@ -377,11 +265,6 @@ func validateProductCapabilities(product *Product) error {
 			return fmt.Errorf("product %q membership tier requires a recurring price", product.Key)
 		}
 	}
-	for _, credit := range product.Credits {
-		if credit.Amount == nil && !product.isCreditTopUp() {
-			return fmt.Errorf("product %q credit %q amount is required unless it is a credit top-up", product.Key, credit.Key)
-		}
-	}
 	return nil
 }
 
@@ -392,13 +275,6 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int) error {
 	}
 	if !validPriceCurrency(price.Currency) {
 		return fmt.Errorf("product %q price #%d currency must be an ISO money currency", product.Key, idx+1)
-	}
-	if price.Model != "" {
-		price.PSPs = normalizePSPs(price.PSPs)
-		return nil
-	}
-	if price.Flat != nil || price.PerUnit != nil || price.Tiered != nil || price.Package != nil {
-		return fmt.Errorf("product %q price #%d charge-model block requires model", product.Key, idx+1)
 	}
 	if price.UnitAmount < 0 {
 		return fmt.Errorf("product %q price #%d unit_amount must be non-negative", product.Key, idx+1)
@@ -465,55 +341,6 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int) error {
 	return nil
 }
 
-func validateCreditTopUpOffer(productKey string, price *Price, idx int) error {
-	where := fmt.Sprintf("product %q top-up price #%d", productKey, idx+1)
-	if price.UnitAmount != 0 || price.Duration != "" || price.AutoRenew || price.Trial != nil {
-		return fmt.Errorf("%s must use typed charge-model fields, not fixed price fields", where)
-	}
-	if len(price.PSPLinks) > 0 {
-		return fmt.Errorf("%s provider_links are not supported for credit top-ups", where)
-	}
-	if price.InputMin < 0 || price.InputMax < 0 {
-		return fmt.Errorf("%s input_min/input_max must be >= 0", where)
-	}
-	if price.InputMax > 0 && price.InputMin > price.InputMax {
-		return fmt.Errorf("%s input_min %d exceeds input_max %d", where, price.InputMin, price.InputMax)
-	}
-	rp := price.ratePrice()
-	if err := validateRatePrice(where, &rp); err != nil {
-		return err
-	}
-	switch rp.Model {
-	case ModelPerUnit:
-		if rp.PerUnit.Matrix != nil {
-			return fmt.Errorf("%s matrix pricing is not supported for credit top-ups", where)
-		}
-	case ModelTiered:
-		if rp.Tiered.Mode != TierModeGraduated {
-			return fmt.Errorf("%s tiered price must use graduated mode (volume is not invertible, see #640)", where)
-		}
-	default:
-		return fmt.Errorf("%s price model must be per_unit or graduated tiered, got %q", where, rp.Model)
-	}
-	*price = price.withRatePrice(rp)
-	return nil
-}
-
-func topUpOfferKeys(price Price) []string {
-	providers := price.PSPs
-	if len(providers) == 0 {
-		providers = []string{""}
-	}
-	keys := make([]string, 0, len(providers))
-	for _, provider := range providers {
-		keys = append(keys, strings.ToLower(price.Currency)+"|"+strings.ToLower(strings.TrimSpace(provider)))
-	}
-	return keys
-}
-
-// validateMeters normalizes the meter registry. or#893: aggregation is the ONE
-// meter shape — the #599 kind: counter|gauge lane is gone, so every meter must
-// declare how its events aggregate.
 func (m *Manifest) validateMeters() error {
 	seen := map[string]struct{}{}
 	for i := range m.Meters {
@@ -543,70 +370,6 @@ func (m *Manifest) validateMeters() error {
 	return nil
 }
 
-func (m *Manifest) validateUsageLimits() (map[string]struct{}, error) {
-	out := map[string]struct{}{}
-	for i := range m.UsageLimits {
-		limit := &m.UsageLimits[i]
-		limit.Key = normalizeSlug(limit.Key)
-		limit.Measure = normalizeSlug(limit.Measure)
-		if limit.Key == "" {
-			return nil, fmt.Errorf("usage_limit #%d key is required", i+1)
-		}
-		if _, ok := out[limit.Key]; ok {
-			return nil, fmt.Errorf("duplicate usage_limit key %q", limit.Key)
-		}
-		if limit.Measure == "" {
-			return nil, fmt.Errorf("usage_limit %q measure is required", limit.Key)
-		}
-		if len(limit.Windows) == 0 {
-			return nil, fmt.Errorf("usage_limit %q must define windows", limit.Key)
-		}
-		seenWindows := map[string]struct{}{}
-		for wi := range limit.Windows {
-			w := &limit.Windows[wi]
-			w.Window = strings.ToLower(strings.TrimSpace(w.Window))
-			if _, err := ParseDurationSpec(w.Window); err != nil {
-				return nil, fmt.Errorf("usage_limit %q window: %w", limit.Key, err)
-			}
-			if w.Amount <= 0 {
-				return nil, fmt.Errorf("usage_limit %q window %q amount must be positive", limit.Key, w.Window)
-			}
-			if _, ok := seenWindows[w.Window]; ok {
-				return nil, fmt.Errorf("usage_limit %q has duplicate window %q", limit.Key, w.Window)
-			}
-			seenWindows[w.Window] = struct{}{}
-		}
-		out[limit.Key] = struct{}{}
-	}
-	return out, nil
-}
-
-func (m *Manifest) validateProductBenefitRefs(productKeys, usageLimitKeys map[string]struct{}) error {
-	for gi := range m.TierGroups {
-		for pi := range m.TierGroups[gi].Products {
-			product := &m.TierGroups[gi].Products[pi]
-			for i, key := range product.UsageLimits {
-				key = normalizeSlug(key)
-				product.UsageLimits[i] = key
-				if _, ok := usageLimitKeys[key]; !ok {
-					return fmt.Errorf("product %q references unknown usage_limit %q", product.Key, key)
-				}
-			}
-			for i, key := range product.Includes {
-				key = normalizeSlug(key)
-				product.Includes[i] = key
-				if _, ok := productKeys[key]; !ok {
-					return fmt.Errorf("product %q includes unknown product %q", product.Key, key)
-				}
-				if key == product.Key {
-					return fmt.Errorf("product %q cannot include itself", product.Key)
-				}
-			}
-		}
-	}
-	return nil
-}
-
 func validLedgerCurrency(value string) bool {
 	value = normalizeCurrency(value)
 	if value == "CUSTOM" {
@@ -624,30 +387,6 @@ func validLedgerCurrency(value string) bool {
 		}
 	}
 	return true
-}
-
-// normalizeCreditUnit canonicalises a credit-balance unit. An UNQUALIFIED unit
-// is a built-in currency and becomes UPPER case, because it can be written into
-// a ledger `currency` column (money.DepositCatalogCreditPurchase) where the
-// 0020 shape CHECK requires it. A QUALIFIED `slug/name` custom unit stays lower
-// — its slug half is a merchant slug.
-func normalizeCreditUnit(value string) string {
-	v := strings.TrimSpace(value)
-	if v == "" {
-		return ""
-	}
-	if strings.Contains(v, "/") {
-		return strings.ToLower(v)
-	}
-	return strings.ToUpper(v)
-}
-
-func validCreditUnit(value string) bool {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if left, right, ok := strings.Cut(value, "/"); ok {
-		return normalizeSlug(left) == left && normalizeSlug(right) == right
-	}
-	return validLedgerCurrency(value) || normalizeSlug(value) == value
 }
 
 func validPriceCurrency(value string) bool {

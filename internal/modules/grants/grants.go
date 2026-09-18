@@ -4,8 +4,7 @@
 //   - derive-1 (Grant / Revoke / Expire / Supersede) appends immutable grant
 //     events; it is the SOLE writer of openrails.grants.
 //   - derive-2 (Materialize) folds the grant log into projections: entitlement
-//     windows in openrails.entitlements, credit lots as #512 ledger deposits, and
-//     derived ownership grants for catalog bundle includes.
+//     windows in openrails.entitlements and credit lots as ledger deposits.
 //
 // Grants are immutable: revoke/expire/supersede are NEW events referencing the
 // original. A credit grant carries the lot amount+currency and IS the FIFO lot.
@@ -14,18 +13,15 @@ package grants
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Kind is what a grant confers.
@@ -185,8 +181,8 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 }
 
 // MaterializeGrant projects a single grant event (derive-2): entitlement windows
-// for entitlement grants, a #512 deposit for credit grants, and child ownership
-// grants for catalog bundle includes. Terminated grants have their projection retracted.
+// for entitlement grants and a deposit for credit grants. Ownership grants
+// are read directly. Terminated grants have their projection retracted.
 // entitlementSourceType bridges the grant source vocabulary (purchase/
 // subscription/admin/grace) to the entitlements table's vocabulary
 // (subscription/one_off/admin/grace): a `purchase`-sourced grant projects an
@@ -205,9 +201,6 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 	terminated, err := l.q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{MerchantID: l.merchant, GrantID: g.ID})
 	if err != nil {
 		return fmt.Errorf("grants: termination check: %w", err)
-	}
-	if err := l.materializeUsageLimitBindings(ctx, g, terminated); err != nil {
-		return err
 	}
 
 	switch Kind(g.Kind) {
@@ -311,148 +304,11 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.OpenrailsGrant) err
 		return nil
 
 	case Ownership:
-		return l.materializeOwnershipIncludes(ctx, g, terminated)
+		return nil
 
 	default:
 		return fmt.Errorf("grants: unknown kind %q", g.Kind)
 	}
-}
-
-func (l *Ledger) materializeUsageLimitBindings(ctx context.Context, g gen.OpenrailsGrant, terminated bool) error {
-	if g.ProductID == nil {
-		return nil
-	}
-	if terminated {
-		return l.q.RevokeProductUsageLimitBindingsByGrant(ctx, gen.RevokeProductUsageLimitBindingsByGrantParams{
-			MerchantID: l.merchant,
-			GrantID:    g.ID,
-			RevokedAt:  l.now(),
-		})
-	}
-	specs, err := l.q.ListProductUsageLimitSpecs(ctx, gen.ListProductUsageLimitSpecsParams{
-		MerchantID: l.merchant,
-		ProductID:  *g.ProductID,
-	})
-	if err != nil {
-		return fmt.Errorf("grants: list product usage limits for %s: %w", g.ID, err)
-	}
-	for _, spec := range specs {
-		exists, err := l.q.ProductUsageLimitBindingExistsForGrant(ctx, gen.ProductUsageLimitBindingExistsForGrantParams{
-			MerchantID:    l.merchant,
-			GrantID:       g.ID,
-			UsageLimitKey: spec.UsageLimitKey,
-		})
-		if err != nil {
-			return fmt.Errorf("grants: usage-limit binding lookup %q: %w", spec.UsageLimitKey, err)
-		}
-		if exists {
-			continue
-		}
-		grantID := g.ID
-		if err := l.q.CreateProductUsageLimitBinding(ctx, gen.CreateProductUsageLimitBindingParams{
-			ID:            uuidutil.NewV7(),
-			MerchantID:    l.merchant,
-			CustomerID:    g.CustomerID,
-			UsageLimitKey: spec.UsageLimitKey,
-			Measure:       spec.Measure,
-			Windows:       spec.Windows,
-			GrantID:       &grantID,
-			StartsAt:      g.StartsAt,
-			EndsAt:        g.EndsAt,
-		}); err != nil {
-			return fmt.Errorf("grants: materialize usage-limit binding %q: %w", spec.UsageLimitKey, err)
-		}
-	}
-	return nil
-}
-
-func (l *Ledger) materializeOwnershipIncludes(ctx context.Context, g gen.OpenrailsGrant, terminated bool) error {
-	if g.ProductID == nil {
-		return nil
-	}
-	included, err := l.q.ListIncludedProductIDs(ctx, gen.ListIncludedProductIDsParams{
-		MerchantID: l.merchant,
-		ProductID:  *g.ProductID,
-	})
-	if err != nil {
-		return fmt.Errorf("grants: list included products for %s: %w", g.ID, err)
-	}
-	for _, productID := range included {
-		if terminated {
-			if err := l.revokeIncludedOwnership(ctx, g, productID); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := l.grantIncludedOwnership(ctx, g, productID); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (l *Ledger) grantIncludedOwnership(ctx context.Context, parent gen.OpenrailsGrant, productID uuid.UUID) error {
-	sourceID := includedOwnershipSourceID(parent.ID, productID)
-	_, err := l.q.GetOwnershipGrantBySourceID(ctx, gen.GetOwnershipGrantBySourceIDParams{
-		MerchantID: l.merchant,
-		CustomerID: parent.CustomerID,
-		ProductID:  productID,
-		SourceID:   sourceID,
-	})
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("grants: lookup included ownership %s: %w", productID, err)
-	}
-	_, err = l.Grant(ctx, GrantInput{
-		Customer: parent.CustomerID,
-		Product:  &productID,
-		Kind:     Ownership,
-		Source:   SourceType(parent.SourceType),
-		SourceID: sourceID,
-		Payment:  parent.PaymentID,
-		StartsAt: parent.StartsAt,
-		EndsAt:   parent.EndsAt,
-	})
-	if err != nil {
-		return fmt.Errorf("grants: materialize included ownership %s: %w", productID, err)
-	}
-	return nil
-}
-
-func (l *Ledger) revokeIncludedOwnership(ctx context.Context, parent gen.OpenrailsGrant, productID uuid.UUID) error {
-	sourceID := includedOwnershipSourceID(parent.ID, productID)
-	child, err := l.q.GetOwnershipGrantBySourceID(ctx, gen.GetOwnershipGrantBySourceIDParams{
-		MerchantID: l.merchant,
-		CustomerID: parent.CustomerID,
-		ProductID:  productID,
-		SourceID:   sourceID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("grants: lookup included ownership %s for revoke: %w", productID, err)
-	}
-	childTerminated, err := l.q.IsGrantTerminated(ctx, gen.IsGrantTerminatedParams{
-		MerchantID: l.merchant,
-		GrantID:    child.ID,
-	})
-	if err != nil {
-		return fmt.Errorf("grants: included ownership termination check %s: %w", child.ID, err)
-	}
-	if childTerminated {
-		return nil
-	}
-	if _, err := l.Revoke(ctx, child.ID, "bundle_parent_revoked"); err != nil {
-		return fmt.Errorf("grants: revoke included ownership %s: %w", child.ID, err)
-	}
-	return nil
-}
-
-func includedOwnershipSourceID(parentGrantID, productID uuid.UUID) string {
-	return "include:" + parentGrantID.String() + ":" + productID.String()
 }
 
 // clawbackRevokedCredit retracts a revoked credit lot's UNSPENT remainder via a
@@ -552,7 +408,7 @@ func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUI
 }
 
 // UngrantedGrantablePayments returns completed, positive, one-off payments for a
-// product that PROMISES grants (non-empty entitlements/credits spec) yet produced
+// product that PROMISES grants (non-empty entitlements) yet produced
 // NO grant — the spec-aware detection behind `derive.grant.missing` (grant tier,
 // #511). Empty-spec products / pure fees are never flagged. Surface-only.
 func (l *Ledger) UngrantedGrantablePayments(ctx context.Context, customer *uuid.UUID) ([]gen.ListUngrantedGrantablePaymentsRow, error) {

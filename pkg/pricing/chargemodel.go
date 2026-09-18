@@ -77,7 +77,7 @@ type ChargeTier struct {
 // Rate computes the cost in micros for `quantity` units under the charge model.
 // quantity must be >= 0. The
 // function is non-decreasing in quantity for flat/per_unit/package/graduated, so
-// it is safely invertible (see QuoteUnitsForSpend); volume is NOT (tier cliffs).
+// cumulative band charges are monotonic; volume rates may have tier cliffs.
 func (cm ChargeModel) Rate(quantity int64) (int64, error) {
 	if quantity < 0 {
 		return 0, fmt.Errorf("quantity must be >= 0")
@@ -224,50 +224,4 @@ func mulDivRound(a, b, denom int64, mode string) (int64, error) {
 		return 0, fmt.Errorf("rated amount overflows int64")
 	}
 	return q.Int64(), nil
-}
-
-// QuoteUnitsForSpend returns the largest unit quantity whose cost is <= spend
-// micros, plus that cost. It binary-searches Rate(), so it inverts ANY
-// non-decreasing charge model (per_unit / graduated / package) without hand-coded
-// tier inversion — this is the credit-purchase "enter $ -> credits" direction.
-// It FLOORS units (never grants more value than paid). Volume mode is not
-// monotonic at tier cliffs and must not be used here (see #640); callers building
-// a credit_purchase price are validated to graduated/per_unit.
-func QuoteUnitsForSpend(spend int64, cm ChargeModel) (units int64, cost int64, err error) {
-	if spend < 0 {
-		return 0, 0, fmt.Errorf("spend must be >= 0")
-	}
-	// Grow an upper bound until its cost exceeds the budget.
-	lo, hi := int64(0), int64(1)
-	for {
-		c, err := cm.Rate(hi)
-		if err != nil {
-			return 0, 0, err
-		}
-		if c > spend {
-			break
-		}
-		lo = hi
-		if hi > (int64(1)<<62)/2 {
-			break // pathological: free or near-free units; cap the search
-		}
-		hi *= 2
-	}
-	for lo < hi {
-		mid := lo + (hi-lo+1)/2
-		c, err := cm.Rate(mid)
-		if err != nil {
-			return 0, 0, err
-		}
-		if c <= spend {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
-	}
-	cost, err = cm.Rate(lo)
-	if err != nil {
-		return 0, 0, err
-	}
-	return lo, cost, nil
 }

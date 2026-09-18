@@ -236,37 +236,6 @@ func TestGrants_Ownership(t *testing.T) {
 	require.Equal(t, 0, liveOwnershipCount(t, ctx, pool, merchantID, customer, product), "not owned after revoke")
 }
 
-func TestGrants_OwnershipIncludes(t *testing.T) {
-	l, pool, ctx, customer, bundle, merchantID := testGrants(t)
-	childA := uuid.New()
-	childB := uuid.New()
-	_, err := pool.Exec(ctx, `INSERT INTO openrails.products (id, key, display_name, merchant_id) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)`,
-		childA, "included-a-"+short(), "Included A", merchantID,
-		childB, "included-b-"+short(), "Included B", merchantID)
-	require.NoError(t, err)
-	_, err = pool.Exec(ctx, `INSERT INTO openrails.product_includes (merchant_id, product_id, included_product_id) VALUES ($1, $2, $3), ($1, $2, $4)`,
-		merchantID, bundle, childA, childB)
-	require.NoError(t, err)
-
-	g, err := l.Grant(ctx, grants.GrantInput{
-		Customer: customer, Product: &bundle, Kind: grants.Ownership, Source: grants.Purchase, SourceID: "pay_" + short(),
-	})
-	require.NoError(t, err)
-	require.NoError(t, l.MaterializeGrant(ctx, g))
-	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childA))
-	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childB))
-
-	require.NoError(t, l.MaterializeGrant(ctx, g))
-	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childA), "replay must not duplicate included ownership")
-	require.Equal(t, 1, liveOwnershipCount(t, ctx, pool, merchantID, customer, childB), "replay must not duplicate included ownership")
-
-	_, err = l.Revoke(ctx, g.ID, "refund")
-	require.NoError(t, err)
-	require.NoError(t, l.MaterializeGrant(ctx, g))
-	require.Equal(t, 0, liveOwnershipCount(t, ctx, pool, merchantID, customer, childA))
-	require.Equal(t, 0, liveOwnershipCount(t, ctx, pool, merchantID, customer, childB))
-}
-
 // The grant ledger is append-only at the role level (SELECT,INSERT only).
 func TestGrants_AppendOnly(t *testing.T) {
 	l, _, ctx, customer, product, merchantID := testGrants(t)

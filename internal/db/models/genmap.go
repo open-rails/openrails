@@ -132,9 +132,6 @@ func PaymentFromGen(p gen.OpenrailsPayment) (*Payment, error) {
 	if err := FromJSONB(p.EntitlementsSpecSnapshot, &m.EntitlementsSpecSnapshot, "payments.entitlements_spec_snapshot"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(p.CreditsSpecSnapshot, &m.CreditsSpecSnapshot, "payments.credits_spec_snapshot"); err != nil {
-		return nil, err
-	}
 	return m, nil
 }
 
@@ -185,9 +182,6 @@ func ProductFromGen(p gen.OpenrailsProduct) (*Product, error) {
 	if err := FromJSONB(p.EntitlementsSpec, &m.EntitlementsSpec, "products.entitlements_spec"); err != nil {
 		return nil, err
 	}
-	if err := FromJSONB(p.CreditsSpec, &m.CreditsSpec, "products.credits_spec"); err != nil {
-		return nil, err
-	}
 	return m, nil
 }
 
@@ -225,9 +219,6 @@ func SubscriptionFromGen(s gen.OpenrailsSubscription) (*Subscription, error) {
 		m.CancelType = &ct
 	}
 	if err := FromJSONB(s.EntitlementsSpecSnapshot, &m.EntitlementsSpecSnapshot, "subscriptions.entitlements_spec_snapshot"); err != nil {
-		return nil, err
-	}
-	if err := FromJSONB(s.CreditsSpecSnapshot, &m.CreditsSpecSnapshot, "subscriptions.credits_spec_snapshot"); err != nil {
 		return nil, err
 	}
 	return m, nil

@@ -399,13 +399,12 @@ func (suite *TestContainerSuite) upsertProduct(ctx context.Context, p *models.Pr
 	suite.t.Helper()
 	_, err := suite.Pool.Exec(ctx, `
 			INSERT INTO openrails.products (
-				id, key, display_name, description, entitlements_spec, credits_spec,
+				id, key, display_name, description, entitlements_spec,
 				tier_group, tier_rank, archived, created_at, updated_at, merchant_id
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (id) DO UPDATE SET `+onConflictSet,
 		p.ID, p.Key, p.DisplayName, p.Description,
 		suite.mustJSONB(p.EntitlementsSpec, len(p.EntitlementsSpec) == 0),
-		suite.mustJSONB(p.CreditsSpec, len(p.CreditsSpec) == 0),
 		p.TierGroup, p.TierRank, p.Archived, p.CreatedAt, p.UpdatedAt,
 		dbtest.TestMerchantID.UUID())
 	require.NoError(suite.t, err, "Failed to seed product %s", p.Key)

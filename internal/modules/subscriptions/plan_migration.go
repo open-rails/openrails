@@ -582,7 +582,6 @@ func (s *PlanMigrationService) applyImmediately(ctx context.Context, sub *models
 	sub.PriceID = target.ID
 	sub.ProductID = target.ProductID
 	sub.EntitlementsSpecSnapshot = models.CloneEntitlementsSpec(targetProduct.EntitlementsSpec)
-	sub.CreditsSpecSnapshot = models.CloneCreditsSpec(targetProduct.CreditsSpec)
 	if err := s.reprice.subscriptions.Update(ctx, sub); err != nil {
 		return fmt.Errorf("apply immediately: %w", err)
 	}

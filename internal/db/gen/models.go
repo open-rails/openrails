@@ -183,30 +183,6 @@ type OpenrailsBillingPolicyBinding struct {
 	UpdatedAt  time.Time
 }
 
-type OpenrailsCatalogCreditBalance struct {
-	MerchantID   uuid.UUID
-	Key          string
-	Unit         string
-	ExpiresHours *int32
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
-type OpenrailsCatalogCreditPurchasePrice struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	ProductID  uuid.UUID
-	Ordinal    int32
-	CreditKey  string
-	Currency   string
-	Rails      []string
-	InputMin   int64
-	InputMax   int64
-	Price      []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
 type OpenrailsCatalogDriftEvent struct {
 	ID                    uuid.UUID
 	PspID                 *uuid.UUID
@@ -255,17 +231,6 @@ type OpenrailsCatalogRateCard struct {
 	UpdatedAt   time.Time
 	// #798 negotiated per-payer override: when set, this card replaces the merchant-default card for the same meter_key when rating that payer.
 	CustomerID *uuid.UUID
-}
-
-// #594 catalog usage-limit registry. Durable config only; Redis/Garnet owns request-time counters.
-type OpenrailsCatalogUsageLimit struct {
-	MerchantID uuid.UUID
-	Key        string
-	// Host-reported event stream key composed into admission policy; not a money meter.
-	Measure   string
-	Windows   []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 type OpenrailsCheckoutSession struct {
@@ -345,18 +310,6 @@ type OpenrailsCustodyMigration struct {
 	Outcome   string
 	Reason    string
 	CreatedAt time.Time
-}
-
-// Merchant-owned custom credit identities and scales. Financial rows reference credit:<id>; external names resolve through the current merchant namespace.
-type OpenrailsCustomCreditType struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Name       string
-	// Minor-unit scale for presentation (10^decimals minor units per major unit). Storage is always integer minor units.
-	Decimals  int32
-	Active    bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
 }
 
 // OpenRails payable identity. Customer identity is merchant_id plus the host/AuthKit stable UUID subject; id is that payable UUID. issuer is audit/last-seen source only.
@@ -871,7 +824,6 @@ type OpenrailsPayment struct {
 	DiscountReason           *string
 	DiscountMetadata         []byte
 	EntitlementsSpecSnapshot []byte
-	CreditsSpecSnapshot      []byte
 	Metadata                 []byte
 	PurchasedAt              time.Time
 	CreatedAt                time.Time
@@ -997,8 +949,6 @@ type OpenrailsProduct struct {
 	DisplayName      string
 	Description      *string
 	EntitlementsSpec []byte
-	// Bundled promo credits spec (amount, expiry, cadence) for subscriptions
-	CreditsSpec []byte
 	// Semantic group name for mutually-exclusive products (e.g., "premium"). Products in same group require upgrade/downgrade, not parallel ownership.
 	TierGroup *string
 	// Tier ranking within group. Higher = more premium. Used to determine upgrade (higher rank) vs downgrade (lower rank) direction.
@@ -1007,38 +957,6 @@ type OpenrailsProduct struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
-}
-
-// #611 catalog bundle includes: parent product grants/owns included catalog products when materialized.
-type OpenrailsProductInclude struct {
-	MerchantID        uuid.UUID
-	ProductID         uuid.UUID
-	IncludedProductID uuid.UUID
-	CreatedAt         time.Time
-}
-
-// #617 catalog product usage-limit memberships. Grants materialize these into customer product_usage_limit_bindings.
-type OpenrailsProductUsageLimit struct {
-	MerchantID    uuid.UUID
-	ProductID     uuid.UUID
-	UsageLimitKey string
-	CreatedAt     time.Time
-}
-
-// #594 materialized product-derived usage-limit bindings. Loaded into admission policy; live counters stay in Redis.
-type OpenrailsProductUsageLimitBinding struct {
-	ID            uuid.UUID
-	MerchantID    uuid.UUID
-	CustomerID    uuid.UUID
-	UsageLimitKey string
-	Measure       string
-	Windows       []byte
-	GrantID       *uuid.UUID
-	StartsAt      time.Time
-	EndsAt        *time.Time
-	RevokedAt     *time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
 }
 
 // Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement.
@@ -1315,7 +1233,6 @@ type OpenrailsSubscription struct {
 	CancelType               *string
 	CancelFeedback           *string
 	EntitlementsSpecSnapshot []byte
-	CreditsSpecSnapshot      []byte
 	GatewayResponse          []byte
 	CreatedAt                time.Time
 	UpdatedAt                time.Time

@@ -42,10 +42,6 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 	if err != nil {
 		return gen.CreateSubscriptionParams{}, err
 	}
-	credSnap, err := models.ToJSONB(s.CreditsSpecSnapshot)
-	if err != nil {
-		return gen.CreateSubscriptionParams{}, err
-	}
 	var priceID *uuid.UUID
 	if s.PriceID != uuid.Nil {
 		priceID = &s.PriceID
@@ -62,7 +58,6 @@ func subscriptionInsertParams(s *models.Subscription) (gen.CreateSubscriptionPar
 		PriceID:                  priceID,
 		ScheduledPriceID:         s.ScheduledPriceID,
 		EntitlementsSpecSnapshot: entSnap,
-		CreditsSpecSnapshot:      credSnap,
 		Status:                   string(s.Status),
 		PspID:                    s.PspID,
 		StartedAt:                s.StartedAt,
@@ -153,10 +148,6 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 	if err != nil {
 		return err
 	}
-	credSnap, err := models.ToJSONB(s.CreditsSpecSnapshot)
-	if err != nil {
-		return err
-	}
 	var priceID *uuid.UUID
 	if s.PriceID != uuid.Nil {
 		priceID = &s.PriceID
@@ -171,7 +162,6 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		PriceID:                  priceID,
 		ProductID:                s.ProductID,
 		EntitlementsSpecSnapshot: entSnap,
-		CreditsSpecSnapshot:      credSnap,
 		Status:                   gen.OpenrailsSubscriptionStatus(s.Status),
 		StartedAt:                s.StartedAt,
 		EndedAt:                  s.EndedAt,

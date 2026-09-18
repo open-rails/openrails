@@ -287,7 +287,6 @@ func productToAPIObject(p *models.Product) api.ProductObject {
 		Name:             p.DisplayName,
 		Description:      p.Description,
 		EntitlementsSpec: p.EntitlementsSpec,
-		CreditsSpec:      creditsSpecToAPIObject(p.CreditsSpec),
 		TierGroup:        p.TierGroup,
 		TierRank:         p.TierRank,
 		Active:           p.IsPurchasable(),
@@ -295,22 +294,6 @@ func productToAPIObject(p *models.Product) api.ProductObject {
 		Created:          api.ToUnix(p.CreatedAt),
 		Updated:          api.ToUnix(p.UpdatedAt),
 	}
-}
-
-func creditsSpecToAPIObject(specs models.CreditsSpec) map[string]api.CreditGrantSpecObject {
-	if len(specs) == 0 {
-		return nil
-	}
-	out := make(map[string]api.CreditGrantSpecObject, len(specs))
-	for creditType, spec := range specs {
-		out[creditType] = api.CreditGrantSpecObject{
-			Unit:        spec.Unit,
-			Amount:      spec.Amount,
-			ExpiryHours: spec.ExpiryHours,
-			Cadence:     string(spec.Cadence),
-		}
-	}
-	return out
 }
 
 // UserAccessGrant summarizes how the user currently has premium access (subscription vs one-off entitlement).

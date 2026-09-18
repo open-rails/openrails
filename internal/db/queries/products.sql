@@ -3,12 +3,12 @@
 -- name: CreateProduct :execrows
 INSERT INTO openrails.products (
     id, merchant_id, key, display_name, description, entitlements_spec,
-    credits_spec, tier_group, tier_rank, archived, created_at, updated_at
+    tier_group, tier_rank, archived, created_at, updated_at
 ) VALUES (
     $1,
     sqlc.arg(merchant_id)::uuid,
     $2, $3, sqlc.narg(description), sqlc.narg(entitlements_spec),
-    sqlc.narg(credits_spec), sqlc.narg(tier_group),
+    sqlc.narg(tier_group),
     COALESCE(NULLIF(sqlc.arg(tier_rank)::int, 0), 0),
     sqlc.arg(archived)::boolean,
     COALESCE(NULLIF(sqlc.arg(created_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
@@ -48,7 +48,6 @@ UPDATE openrails.products SET
     display_name = COALESCE(sqlc.narg(display_name)::text, display_name),
     description = CASE WHEN sqlc.arg(set_description)::boolean THEN NULLIF(sqlc.narg(description)::text, '') ELSE description END,
     entitlements_spec = CASE WHEN sqlc.arg(set_entitlements)::boolean THEN sqlc.narg(entitlements_spec)::jsonb ELSE entitlements_spec END,
-    credits_spec = CASE WHEN sqlc.arg(set_credits)::boolean THEN sqlc.narg(credits_spec)::jsonb ELSE credits_spec END,
     tier_group = CASE WHEN sqlc.arg(set_tier_group)::boolean THEN sqlc.narg(tier_group)::text ELSE tier_group END,
     tier_rank = COALESCE(sqlc.narg(tier_rank)::int, tier_rank),
     archived = COALESCE(sqlc.narg(archived)::boolean, archived),
