@@ -71,7 +71,7 @@ const (
 	// operation ended: not_executed (provider-confirmed) or
 	// instrument_changed (refused before submission).
 	collectionEvidenceFailureCodeNotExecuted = "not_executed_code"
-	collectionEvidenceSubmittedAt   = "submitted_at"
+	collectionEvidenceSubmittedAt            = "submitted_at"
 	// collectionEvidenceContradiction retains a provider object found under
 	// this operation's identity that is NOT the frozen charge. Nothing settles
 	// from it and non-execution can no longer be attested: an operator must
