@@ -89,7 +89,7 @@ const QueueBilling = riverjobs.QueueBilling
 // InvoiceSweepArgs is the invoice job OpenRails schedules on the billing queue
 // (daily period finalize, hourly collection, 30-day monthly-floor collection),
 // as public River job args so a host that owns the fleet (RiverFromHost) can
-// insert one run itself: `jobs.Insert(ctx, embedded.InvoiceSweepArgs{
+// insert one run itself: `jobs.Insert(ctx, embed.InvoiceSweepArgs{
 // FinalizePreviousMonth: true}, nil)` finalizes every payer's previous period
 // now, worked by the same InvoiceWorker on the same registry. Every run is
 // idempotent, so an extra run never double-bills. This is the only engine
