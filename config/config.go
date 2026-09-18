@@ -275,7 +275,7 @@ type ProviderSandboxConfig struct {
 	// hostnames, even "localhost", are refused because locality must not
 	// depend on a resolver. Env: PROVIDER_SANDBOX_NMI_GATEWAY_URL.
 	NMIGatewayURL string `koanf:"nmi_gateway_url,omitempty"`
-	// StripeAPIURL replaces the Stripe API root under the same sandbox-only,
+	// StripeAPIURL replaces the process-wide Stripe API root under the same sandbox-only,
 	// literal-loopback rule. The readonly guard and pinned API version still
 	// apply. Env: PROVIDER_SANDBOX_STRIPE_API_URL.
 	StripeAPIURL string `koanf:"stripe_api_url,omitempty"`

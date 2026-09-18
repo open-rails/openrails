@@ -16,6 +16,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/open-rails/openrails/config"
@@ -115,9 +116,15 @@ func SetIdempotencyKey(req *http.Request, key string) {
 	req.Header.Set(IdempotencyKeyHeader, key)
 }
 
-// baseTransportOverride, when non-nil, replaces http.DefaultTransport UNDER the
-// guard (readonly + version pinning still apply). nil in production.
-var baseTransportOverride http.RoundTripper
+// Test transports replace http.DefaultTransport UNDER the guard. A baseline
+// belongs to a direct test; scoped entries belong to runtime lifetimes.
+var transportOverrides struct {
+	sync.RWMutex
+	base   http.RoundTripper
+	scoped []*scopedTransport
+}
+
+type scopedTransport struct{ transport http.RoundTripper }
 
 // SetBaseTransport installs rt as the base RoundTripper every Stripe request
 // travels on, UNDER the choke-point guard — readonly enforcement and the
@@ -127,13 +134,42 @@ var baseTransportOverride http.RoundTripper
 // This is a TEST seam, deliberately NOT behind a build tag (#814): an embedding
 // host cannot compile internal/ test-tagged code, so an integration-first host
 // had no way to drive a rail-push path against a fake Stripe. The supported
-// entry point is embedded.Options.StripeTransport, which calls this; hosts
+// entry point is embed.Options.StripeTransport; hosts
 // never reach the choke point directly.
 //
 // Process-global and not safe for parallel use — the integration suite runs
 // serially (-p 1 -parallel 1).
 func SetBaseTransport(rt http.RoundTripper) {
-	baseTransportOverride = rt
+	transportOverrides.Lock()
+	defer transportOverrides.Unlock()
+	transportOverrides.base = rt
+}
+
+// InstallBaseTransport gives a runtime ownership of one process-wide test
+// override. Releasing it never clears another live runtime's override or
+// resurrects a previously closed one. It does not provide per-runtime routing:
+// sandbox requests in one process still share the latest active test seam.
+func InstallBaseTransport(rt http.RoundTripper) func() {
+	entry := &scopedTransport{transport: rt}
+	transportOverrides.Lock()
+	transportOverrides.scoped = append(transportOverrides.scoped, entry)
+	transportOverrides.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			transportOverrides.Lock()
+			defer transportOverrides.Unlock()
+			for i, active := range transportOverrides.scoped {
+				if active == entry {
+					copy(transportOverrides.scoped[i:], transportOverrides.scoped[i+1:])
+					last := len(transportOverrides.scoped) - 1
+					transportOverrides.scoped[last] = nil
+					transportOverrides.scoped = transportOverrides.scoped[:last]
+					break
+				}
+			}
+		})
+	}
 }
 
 // HostRewriteTransport sends every request to target regardless of the
@@ -157,8 +193,13 @@ func (h hostRewriteTransport) RoundTrip(req *http.Request) (*http.Response, erro
 }
 
 func defaultBaseTransport() http.RoundTripper {
-	if baseTransportOverride != nil {
-		return baseTransportOverride
+	transportOverrides.RLock()
+	defer transportOverrides.RUnlock()
+	if n := len(transportOverrides.scoped); n > 0 {
+		return transportOverrides.scoped[n-1].transport
+	}
+	if transportOverrides.base != nil {
+		return transportOverrides.base
 	}
 	return http.DefaultTransport
 }

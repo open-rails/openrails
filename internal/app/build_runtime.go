@@ -358,12 +358,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			runtime.RailPaymentMethodService.NMIEndpointOverride = gateway
 		}
 	}
-	// A declared loopback Stripe API is installed under the choke point, so
-	// every Stripe request of this process reaches it through the readonly
-	// guard and the version pin.
-	if api := cfg.SandboxStripeAPIURL(); api != "" {
-		stripeapi.SetBaseTransport(stripeapi.HostRewriteTransport(api))
-	}
 	runtime.SolanaRPCResolver = solanaRPCResolver
 	// #817: decimals come from the SPL mint on-chain, read through the same
 	// per-merchant chain reader and cached (mint decimals are immutable).
@@ -460,6 +454,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
+
+	// Install only after runtime construction succeeds. The runtime releases
+	// its sandbox lease on Close, including a later embedded-construction failure.
+	if api := cfg.SandboxStripeAPIURL(); api != "" {
+		runtime.releaseStripeTransport = stripeapi.InstallBaseTransport(stripeapi.HostRewriteTransport(api))
+	}
 
 	return runtime, nil
 }

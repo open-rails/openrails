@@ -134,6 +134,8 @@ var pendingNumericMoney = map[string]string{
 
 	"invoices.go:InvoiceDTO.Tax tax": notMoneyTaxFacts,
 
+	"internal/modules/subscriptions/stripe_tier_change.go:func parseStripeScheduleState.Price price": notHTTPProviderWire,
+
 	"invoices.go:InvoiceProfileDTO.Tax tax": notMoneyTaxFacts,
 
 	"pkg/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
