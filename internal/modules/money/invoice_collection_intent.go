@@ -39,17 +39,22 @@ const TypeInvoiceCollection = "invoice_collection"
 
 // InvoiceCollectionPayload freezes the charge before submission. The amount
 // is the invoice's amount_due at enqueue, in native precision and rail minor
-// units; replays never recalculate it.
+// units; replays never recalculate it. Instrument freezes the method's
+// account and custody: submission requires the method to still match it, and
+// verification and operator resolution judge receipts only against it.
+// payment_method_id also pins the method against custody remap while the
+// operation is unresolved (or#297).
 type InvoiceCollectionPayload struct {
-	InvoiceID       uuid.UUID       `json:"invoice_id"`
-	CustomerID      uuid.UUID       `json:"customer_id"`
-	AttemptID       uuid.UUID       `json:"attempt_id"`
-	PaymentMethodID uuid.UUID       `json:"payment_method_id"`
-	Rail            string          `json:"rail"`
-	Currency        string          `json:"currency"`
-	Amount          int64           `json:"amount"`
-	AmountMinor     moneyutil.Cents `json:"amount_minor"`
-	Description     string          `json:"description"`
+	InvoiceID       uuid.UUID            `json:"invoice_id"`
+	CustomerID      uuid.UUID            `json:"customer_id"`
+	AttemptID       uuid.UUID            `json:"attempt_id"`
+	PaymentMethodID uuid.UUID            `json:"payment_method_id"`
+	Rail            string               `json:"rail"`
+	Instrument      CollectionInstrument `json:"instrument"`
+	Currency        string               `json:"currency"`
+	Amount          int64                `json:"amount"`
+	AmountMinor     moneyutil.Cents      `json:"amount_minor"`
+	Description     string               `json:"description"`
 }
 
 // Evidence keys retained on the operation.
@@ -61,6 +66,10 @@ const (
 	collectionEvidenceFailureCode   = "failure_code"
 	collectionEvidenceFailureMsg    = "failure_message"
 	collectionEvidenceNotExecuted   = "not_executed"
+	// collectionEvidenceFailureCodeNotExecuted says why a never-charged
+	// operation ended: not_executed (provider-confirmed) or
+	// instrument_changed (refused before submission).
+	collectionEvidenceFailureCodeNotExecuted = "not_executed_code"
 	collectionEvidenceSubmittedAt   = "submitted_at"
 	// collectionEvidenceContradiction retains a provider object found under
 	// this operation's identity that is NOT the frozen charge. Nothing settles
@@ -106,8 +115,14 @@ func decodeInvoiceCollectionPayload(intent gen.OpenrailsRailIntent) (InvoiceColl
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode invoice collection payload: %w", err)
 	}
-	if p.InvoiceID == uuid.Nil || p.CustomerID == uuid.Nil || p.AttemptID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
+	if p.InvoiceID == uuid.Nil || p.CustomerID == uuid.Nil || p.AttemptID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Rail == "" || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
 		return p, errors.New("invoice collection payload is incomplete")
+	}
+	if err := p.Instrument.validate(); err != nil {
+		return p, fmt.Errorf("invoice collection payload: %w", err)
+	}
+	if intent.PspID == nil || *intent.PspID != p.Instrument.PSPID {
+		return p, errors.New("invoice collection payload's provider account is not the operation's")
 	}
 	return p, nil
 }
@@ -140,6 +155,11 @@ func (h *InvoiceCollectionHandler) Execute(ctx context.Context, intent gen.Openr
 		return intents.Parked("invoice collection charger not wired")
 	}
 	prepared, err := h.Charger.Prepare(ctx, h.chargeRequest(intent, p))
+	if errors.Is(err, ErrCollectionInstrumentChanged) {
+		// Nothing was sent and the frozen instrument is gone: release the
+		// invoice so the next attempt freezes the method as it now is.
+		return h.finalizeNotExecuted(ctx, intent, p, "instrument_changed", err.Error())
+	}
 	if err != nil {
 		// Nothing reached the provider: park without consuming the attempt.
 		return intents.Parked("collection not armed: " + err.Error())
@@ -169,6 +189,7 @@ func (h *InvoiceCollectionHandler) chargeRequest(intent gen.OpenrailsRailIntent,
 		Currency:        p.Currency,
 		IdempotencyKey:  intent.ID.String(),
 		Description:     p.Description,
+		Instrument:      p.Instrument,
 	}
 }
 
@@ -243,11 +264,7 @@ func (h *InvoiceCollectionHandler) Verify(ctx context.Context, intent gen.Openra
 	if h.Verifier == nil {
 		return intents.Ambiguous("no collection verifier wired; exact receipt required")
 	}
-	method, err := h.DB.Gen(ctx).GetPaymentMethodByID(ctx, p.PaymentMethodID)
-	if err != nil {
-		return intents.Ambiguous("load payment method: " + err.Error())
-	}
-	res, err := h.Verifier.VerifyCollectionCharge(ctx, method, receiptExpectation(intent, p))
+	res, err := h.Verifier.VerifyCollectionCharge(ctx, receiptExpectation(intent, p))
 	if errors.Is(err, nmi.ErrReceiptMismatch) {
 		return contradicted(err)
 	}
@@ -286,21 +303,17 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if h.Verifier == nil {
 		return intents.Outcome{}, errors.New("no collection verifier wired")
 	}
-	method, err := h.DB.Gen(ctx).GetPaymentMethodByID(ctx, p.PaymentMethodID)
-	if err != nil {
-		return intents.Outcome{}, fmt.Errorf("load payment method: %w", err)
-	}
 	expect := receiptExpectation(intent, p)
 	if resolution.NotExecuted {
 		if contradiction := intents.EvidenceString(intent, collectionEvidenceContradiction); contradiction != "" {
 			return intents.Outcome{}, intents.RejectResolution("provider evidence contradicts this operation (%s); non-execution cannot be attested, repair from the provider record", contradiction)
 		}
-		if err := h.Verifier.ConfirmCollectionNotExecuted(ctx, method, expect); err != nil {
+		if err := h.Verifier.ConfirmCollectionNotExecuted(ctx, expect); err != nil {
 			return intents.Outcome{}, intents.RejectResolution("%v", err)
 		}
-		return h.finalizeNotExecuted(ctx, intent, p), nil
+		return h.finalizeProviderNotExecuted(ctx, intent, p), nil
 	}
-	res, err := h.Verifier.ConfirmCollectionReceipt(ctx, method, resolution.ProviderReference, expect)
+	res, err := h.Verifier.ConfirmCollectionReceipt(ctx, resolution.ProviderReference, expect)
 	if err != nil {
 		return intents.Outcome{}, intents.RejectResolution("%v", err)
 	}
@@ -317,9 +330,13 @@ func contradicted(err error) intents.Outcome {
 }
 
 // receiptExpectation is the frozen operation every provider receipt must
-// match: its provider identity and the amount and currency frozen at enqueue.
+// match: its provider identity, the instrument, amount and currency frozen at
+// enqueue. Nothing in it is read from the method's current row.
 func receiptExpectation(intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload) CollectionReceiptExpectation {
-	return CollectionReceiptExpectation{OperationKey: intent.ID.String(), Amount: p.AmountMinor, Currency: p.Currency}
+	return CollectionReceiptExpectation{
+		MerchantID: intent.MerchantID, CustomerID: p.CustomerID, OperationKey: intent.ID.String(),
+		Rail: p.Rail, Instrument: p.Instrument, Amount: p.AmountMinor, Currency: p.Currency,
+	}
 }
 
 // ResolveUnsent releases a pending operation that never reached the provider:
@@ -337,7 +354,7 @@ func (h *InvoiceCollectionHandler) ResolveUnsent(ctx context.Context, intent gen
 	if intents.EvidenceString(intent, collectionEvidenceSubmittedAt) != "" {
 		return intents.Outcome{}, intents.RejectResolution("operation %s crossed its submission fence; only its verifier or an unknown-state resolution can close it", intent.ID)
 	}
-	return h.finalizeNotExecuted(ctx, intent, p), nil
+	return h.finalizeProviderNotExecuted(ctx, intent, p), nil
 }
 
 // finalizeFromEvidence retries local effects for an answer the operation
@@ -351,7 +368,8 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 		return h.finalizeSettle(ctx, intent, p, rail, receipt, intents.EvidenceString(intent, collectionEvidenceExternalID), true), true
 	}
 	if intents.EvidenceString(intent, collectionEvidenceNotExecuted) != "" {
-		return h.finalizeNotExecuted(ctx, intent, p), true
+		code := intents.EvidenceString(intent, collectionEvidenceFailureCodeNotExecuted)
+		return h.finalizeNotExecuted(ctx, intent, p, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg)), true
 	}
 	if code := intents.EvidenceString(intent, collectionEvidenceFailureCode); code != "" {
 		return h.finalizeRefusal(ctx, intent, p, rail, code, intents.EvidenceString(intent, collectionEvidenceFailureMsg), ""), true
@@ -511,10 +529,20 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 	return intents.TerminalWithEvidence("collection refused: "+failureCode, evidence)
 }
 
-// finalizeNotExecuted records provider-confirmed non-execution: the attempt
-// fails without a decline and the invoice is due again immediately.
-func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload) intents.Outcome {
-	evidence := map[string]any{collectionEvidenceNotExecuted: true, collectionEvidenceDeclined: false}
+// finalizeProviderNotExecuted records provider-confirmed non-execution.
+func (h *InvoiceCollectionHandler) finalizeProviderNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload) intents.Outcome {
+	return h.finalizeNotExecuted(ctx, intent, p, "", "")
+}
+
+// finalizeNotExecuted records a collection that provably never charged: the
+// attempt fails without a decline and the invoice is due again immediately.
+// code/reason default to provider-confirmed non-execution.
+func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, intent gen.OpenrailsRailIntent, p InvoiceCollectionPayload, code, reason string) intents.Outcome {
+	if code == "" {
+		code, reason = "not_executed", "provider confirmed the collection was not executed"
+	}
+	evidence := map[string]any{collectionEvidenceNotExecuted: true, collectionEvidenceDeclined: false,
+		collectionEvidenceFailureCodeNotExecuted: code, collectionEvidenceFailureMsg: reason}
 	now := h.now()
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -528,7 +556,6 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 		case "settled":
 			return fmt.Errorf("attempt %s already settled; non-execution contradicts a recorded charge", attempt.ID)
 		}
-		code, reason := "not_executed", "provider confirmed the collection was not executed"
 		if _, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
 			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
 			Rail: optionalRail(p.Rail), FailureCode: &code, FailureReason: &code, FailureMessage: &reason, Now: now,
@@ -541,7 +568,7 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 	if err != nil {
 		return intents.AmbiguousWithEvidence("non-execution confirmed, but local release failed: "+err.Error(), evidence)
 	}
-	return intents.TerminalWithEvidence("provider confirmed the collection was not executed", evidence)
+	return intents.TerminalWithEvidence(reason, evidence)
 }
 
 // invoiceCycleHours is the invoice's own billing cycle for the dunning

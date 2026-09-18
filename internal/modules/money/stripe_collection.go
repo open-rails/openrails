@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -39,7 +41,7 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Openra
 	if err := moneyutil.ValidateCurrency(req.Currency); err != nil {
 		return nil, fmt.Errorf("stripe collection: refusing to charge without an established currency: %w", err)
 	}
-	customerID, err := a.stripeCustomerID(ctx, method)
+	customerID, err := a.stripeCustomerID(ctx, method.MerchantID, method.CustomerID)
 	if err != nil {
 		return nil, err
 	}
@@ -88,16 +90,16 @@ func (a *StripeCollectionAdapter) Prepare(ctx context.Context, method gen.Openra
 	}), nil
 }
 
-func (a *StripeCollectionAdapter) stripeCustomerID(ctx context.Context, method gen.OpenrailsPaymentMethod) (string, error) {
-	customerID, err := a.DB.Gen(ctx).GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
-		MerchantID: method.MerchantID,
-		CustomerID: method.CustomerID,
+func (a *StripeCollectionAdapter) stripeCustomerID(ctx context.Context, merchantID, customerID uuid.UUID) (string, error) {
+	account, err := a.DB.Gen(ctx).GetRailCustomerAccountIDForMerchant(ctx, gen.GetRailCustomerAccountIDForMerchantParams{
+		MerchantID: merchantID,
+		CustomerID: customerID,
 		Rail:       string(models.RailStripe),
 	})
 	if err != nil {
 		return "", fmt.Errorf("load stripe customer mapping: %w", err)
 	}
-	return customerID, nil
+	return account, nil
 }
 
 // stripeDefinitiveRefusal classifies a Stripe error answer. A 4xx other than
