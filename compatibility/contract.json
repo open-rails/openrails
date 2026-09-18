@@ -1128,7 +1128,7 @@
       "type checkoutSaleIdempotencyResult struct {\n\tTransactionID string    `json:\"transaction_id\"`\n\tPaymentID     uuid.UUID `json:\"payment_id\"`\n\tDelayedStart  *string   `json:\"delayed_start,omitempty\"`\n}",
       "type checkoutSessionIdempotencyResult struct {\n\tRequestFingerprint string                   `json:\"request_fingerprint\"`\n\tResponse           *CheckoutSessionResponse `json:\"response\"`\n}",
       "type nmiUpgradeProgress struct {\n\tSuccessor *nmiUpgradeStep `json:\"successor,omitempty\"`\n\tProration *nmiUpgradeStep `json:\"proration,omitempty\"`\n}",
-      "type nmiUpgradeStep struct {\n\tSubmittedAt time.Time                    `json:\"submitted_at\"`\n\tEnrollment  *nmi.AddSubscriptionResponse `json:\"enrollment,omitempty\"`\n\tSale        *nmi.SaleResponse            `json:\"sale,omitempty\"`\n\tRefusal     string                       `json:\"refusal,omitempty\"`\n\n\tResolution map[string]any `json:\"resolution,omitempty\"`\n}",
+      "type nmiUpgradeStep struct {\n\tSubmittedAt time.Time                    `json:\"submitted_at\"`\n\tEnrollment  *nmi.AddSubscriptionResponse `json:\"enrollment,omitempty\"`\n\tSale        *nmi.SaleResponse            `json:\"sale,omitempty\"`\n\tRefusal     string                       `json:\"refusal,omitempty\"`\n\n\tRefusalCode   string `json:\"refusal_code,omitempty\"`\n\tRefusalStatus int    `json:\"refusal_status,omitempty\"`\n\n\tResolution map[string]any `json:\"resolution,omitempty\"`\n}",
       "type stripeTierChangeProgress struct {\n\tUpdate   *stripeTierChangeStep `json:\"update,omitempty\"`\n\tSchedule *stripeTierChangeStep `json:\"schedule,omitempty\"`\n\tPhases   *stripeTierChangeStep `json:\"phases,omitempty\"`\n}",
       "type stripeTierChangeStep struct {\n\tSubmittedAt   time.Time                              `json:\"submitted_at\"`\n\tSubscription  *subscriptions.StripeSubscriptionState `json:\"subscription,omitempty\"`\n\tSchedule      *subscriptions.StripeScheduleState     `json:\"schedule,omitempty\"`\n\tRefusal       string                                 `json:\"refusal,omitempty\"`\n\tRefusalCode   string                                 `json:\"refusal_code,omitempty\"`\n\tRefusalStatus int                                    `json:\"refusal_status,omitempty\"`\n\tResolution    map[string]any                         `json:\"resolution,omitempty\"`\n}",
       "type subscriptionIdempotencyResult struct {\n\tSubscriptionID string  `json:\"subscription_id\"`\n\tTransactionID  string  `json:\"transaction_id\"`\n\tDelayedStart   *string `json:\"delayed_start,omitempty\"`\n}"
@@ -2714,6 +2714,7 @@
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
       "intents": "github.com/open-rails/openrails/internal/intents",
       "json": "encoding/json",
       "models": "github.com/open-rails/openrails/internal/db/models",

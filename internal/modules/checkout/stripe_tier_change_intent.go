@@ -40,10 +40,6 @@ const stripeTierChangeReplayWindow = 23 * time.Hour
 // allow_incomplete, would apply the change with an unpaid invoice.
 const stripePaymentBehaviorPaidOrRefused = "error_if_incomplete"
 
-// tierChangeSubjectConstraint is the one-live-tier-change-per-subscription
-// unique index shared with NMI upgrades.
-const tierChangeSubjectConstraint = "uq_rail_intents_tier_change_subscription"
-
 func StripeTierChangeIdempotencyKey(key string) string {
 	return TypeStripeTierChange + ":" + strings.TrimSpace(key)
 }
@@ -717,7 +713,7 @@ func (s *CheckoutService) enqueueStripeTierChange(ctx context.Context, existingS
 		IntentType: TypeStripeTierChange, SubscriptionID: &existingSub.ID, PriceID: &payload.PriceID,
 		Payload: payload, IdempotencyKey: key, NextAttemptAt: s.now(), Origin: intents.OriginUser,
 		OriginReason: "customer tier " + payload.Action,
-	}, func(row gen.OpenrailsRailIntent) error { return stripeTierChangeOwnedBy(row, payload) })
+	}, func(row gen.OpenrailsRailIntent) error { return tierChangeOwnedBy(row, payload.subject()) })
 	var conflict *pgconn.PgError
 	if errors.As(err, &conflict) && conflict.Code == "23505" && conflict.ConstraintName == tierChangeSubjectConstraint {
 		return nil, s.tierChangeInFlight(ctx, existingSub.ID)
@@ -725,81 +721,11 @@ func (s *CheckoutService) enqueueStripeTierChange(ctx context.Context, existingS
 	if err != nil {
 		return nil, err
 	}
-	return s.stripeTierChangeResponse(intent)
+	return tierChangeResponse(intent)
 }
 
-// stripeTierChangeOwnedBy accepts the canonical row an enqueue returned only
-// when it is this request's operation. Two requests under one merchant-scoped
-// key can both miss the replay lookup; the later enqueue then gets the
-// earlier row, which must neither run nor answer for a different customer,
-// subscription or target.
-func stripeTierChangeOwnedBy(row gen.OpenrailsRailIntent, want StripeTierChangePayload) error {
-	var got StripeTierChangePayload
-	if row.IntentType != TypeStripeTierChange || json.Unmarshal(row.Payload, &got) != nil ||
-		got.UserID != want.UserID || got.SubscriptionID != want.SubscriptionID || got.PriceID != want.PriceID {
-		return tierChangeIdempotencyConflict()
-	}
-	return nil
-}
-
-func (s *CheckoutService) tierChangeInFlight(ctx context.Context, subscriptionID uuid.UUID) error {
-	live, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, subscriptionID)
-	if err != nil {
-		return ErrTierChangePending
-	}
-	return &TierChangeInFlightError{OperationID: live.ID}
-}
-
-// replayStripeTierChange answers a request whose idempotency key names an
-// existing Stripe tier change: the stored result, or the live operation. It
-// precedes catalog and subscription admission because the subscription has
-// already moved once the operation succeeded.
-func (s *CheckoutService) replayStripeTierChange(ctx context.Context, req *TierChangeRequest, user *UserIdentity) (*TierChangeResponse, bool, error) {
-	if strings.TrimSpace(req.IdempotencyKey) == "" || s.SubscriptionService == nil {
-		return nil, false, nil
-	}
-	store := intents.NewStore(s.SubscriptionService.Database())
-	in, err := store.GetByIdempotencyKey(ctx, StripeTierChangeIdempotencyKey(req.IdempotencyKey))
-	if db.IsNotFound(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	var p StripeTierChangePayload
-	if err = json.Unmarshal(in.Payload, &p); err != nil {
-		return nil, true, err
-	}
-	price := strings.TrimSpace(req.PriceID)
-	if user == nil || p.UserID != user.ID || (req.SubscriptionID != uuid.Nil && req.SubscriptionID != p.SubscriptionID) || (price != p.RequestedPrice && price != openrails.PriceID(p.PriceID).String()) {
-		return nil, true, tierChangeIdempotencyConflict()
-	}
-	if in.Status == intents.StatusPending || in.Status == intents.StatusFailedRetryable {
-		if s.Intents == nil {
-			return nil, true, ErrCheckoutProcessing
-		}
-		// The upsert never refreshes a frozen tier change; this only claims
-		// and runs the committed row.
-		ctx = db.WithPSPID(ctx, derefUUID(in.PspID))
-		if in, err = s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: derefUUID(in.PspID), SubscriptionID: in.SubscriptionID, PriceID: in.PriceID, IntentType: TypeStripeTierChange, Payload: p, IdempotencyKey: in.IdempotencyKey, NextAttemptAt: s.now(), Origin: intents.OriginUser, OriginReason: "resume tier " + p.Action}); err != nil {
-			return nil, true, err
-		}
-	}
-	response, err := s.stripeTierChangeResponse(in)
-	return response, true, err
-}
-
-func derefUUID(id *uuid.UUID) uuid.UUID {
-	if id == nil {
-		return uuid.Nil
-	}
-	return *id
-}
-
-// stripeTierChangeResponse renders the operation's durable state: the stored
-// receipt, its definitive refusal, or a processing answer naming the
-// operation while the provider outcome is unresolved.
-func (s *CheckoutService) stripeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
+// stripeTierChangeResponse renders a Stripe tier change (tierChangeResponse).
+func stripeTierChangeResponse(in gen.OpenrailsRailIntent) (*TierChangeResponse, error) {
 	var p StripeTierChangePayload
 	if err := json.Unmarshal(in.Payload, &p); err != nil {
 		return nil, err
@@ -833,36 +759,17 @@ func (s *CheckoutService) stripeTierChangeResponse(in gen.OpenrailsRailIntent) (
 		} else {
 			resp.Message = "Plan updated"
 		}
+		return resp, nil
 	case intents.StatusFailedTerminal:
-		return nil, stripeTierChangeRefusal(in)
-	default:
-		resp.Status = "processing"
-		resp.Message = "Tier change is being confirmed with the provider; retry with the same Idempotency-Key to read the result"
-	}
-	return resp, nil
-}
-
-// stripeTierChangeRefusal renders a terminal operation: Stripe's own 402
-// keeps its decline code, another Stripe refusal is a 400, and an
-// operator-attested non-execution is a 409 (the change did not happen; a new
-// request needs a new key).
-func stripeTierChangeRefusal(in gen.OpenrailsRailIntent) error {
-	var progress stripeTierChangeProgress
-	_ = json.Unmarshal(in.ResultEvidence, &progress)
-	refusal := &TierChangeError{HTTPStatus: http.StatusConflict, Code: openrails.CodeTierChangeRefused, Message: "tier change was not executed"}
-	if in.LastFailureReason != nil && *in.LastFailureReason != "" {
-		refusal.Message = *in.LastFailureReason
-	}
-	step := progress.refused()
-	switch {
-	case step == nil || step.RefusalStatus == 0:
-	case step.RefusalStatus == http.StatusPaymentRequired:
-		refusal.HTTPStatus = http.StatusPaymentRequired
-		if step.RefusalCode != "" {
-			refusal.Code = step.RefusalCode
+		// Stripe's own 402 keeps its decline code; another Stripe refusal is
+		// a 400; an operator closure is a 409.
+		var progress stripeTierChangeProgress
+		_ = json.Unmarshal(in.ResultEvidence, &progress)
+		if step := progress.refused(); step != nil {
+			return nil, tierChangeRefused(in, step.RefusalStatus, step.RefusalCode)
 		}
+		return nil, tierChangeRefused(in, 0, "")
 	default:
-		refusal.HTTPStatus = http.StatusBadRequest
+		return tierChangeProcessing(resp)
 	}
-	return refusal
 }

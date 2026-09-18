@@ -149,4 +149,8 @@ proof that this operation created it. Proration can recover through its stable
 account-scoped order reference. Both receipts commit the local subscription
 swap, payment, access effects and predecessor delete intent atomically. A
 parsed proration refusal preserves the old subscription and queues a durable
-delete for the unpaid successor. See [upgrade recovery](architecture/upgrade-recovery.md).
+delete for the unpaid successor. The route answers exactly as for a Stripe tier
+change: `202` with the operation id while unresolved, the stored result under
+the same key, `409 tier_change_in_flight` under another key, and a coded
+`tier_change_refused` (a card decline keeps its code) once terminal. See
+[upgrade recovery](architecture/upgrade-recovery.md).
