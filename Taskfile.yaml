@@ -43,6 +43,7 @@ tasks:
       - bash scripts/pre_push_test.sh
       - bash scripts/test_integration_test.sh
       - bash scripts/e2e_dump_local_test.sh
+      - bash scripts/go-test-gate_test.sh
 
   ci-local:
     desc: Run the local Go/shared gates used by CI (database required)
@@ -187,7 +188,7 @@ tasks:
         fi
       - '{{.SQLC}} generate'
       - '{{.SQLC}} vet'
-      - CGO_ENABLED=1 go test ./internal/db/sqlaudit/ -run TestQueryAudit -count=1
+      - CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
 
   sqlc-generate-check:
     desc: Regenerate sqlc bindings and fail when the working tree differs
@@ -206,6 +207,11 @@ tasks:
       SQLC_DATABASE_URL:
         sh: 'if [ -n "${SQLC_DATABASE_URL:-}" ]; then echo "$SQLC_DATABASE_URL"; else scripts/sqlc-vet-db.sh; fi'
     cmds:
+      # Every -run gate below goes through scripts/go-test-gate.sh, which fails
+      # when the pattern, the build tags or a t.Skip left the gate testing
+      # nothing. Prove the guard still detects that before trusting it (this is
+      # the only required-CI task that runs it).
+      - bash scripts/go-test-gate_test.sh
       # TestQueryAudit below SKIPS (and reports ok) when SQLC_DATABASE_URL is
       # empty. Every other step in this chain errors loudly without it, so an
       # empty value would silently degrade this gate to "everything but the
@@ -221,9 +227,10 @@ tasks:
       # Efficiency+safety gate: EXPLAIN every query, walk the plan, apply rules.
       # CGO_ENABLED=1 is mandatory, not incidental: sqlaudit is `//go:build cgo`
       # (pg_query_go links the real Postgres parser) so that CGO_ENABLED=0
-      # builds of ./... stay green — without it the gate would silently match no
-      # packages and pass.
-      - CGO_ENABLED=1 go test ./internal/db/sqlaudit/ -run TestQueryAudit -count=1
+      # builds of ./... stay green — without it the gate would match no test
+      # files. go-test-gate.sh now turns that (or#1013) into a hard failure
+      # instead of an "ok ... [no test files]" pass.
+      - CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ TestQueryAudit
       - bash scripts/sql-lint.sh
       - bash scripts/migration-lint.sh
 
@@ -289,7 +296,7 @@ tasks:
         if [ -n "${QUERY_TEST_DATABASE_URL:-}" ]; then
           export OPENRAILS_TEST_DB_URL="$QUERY_TEST_DATABASE_URL"
         fi
-        go test -tags=integration -count=1 ./internal/db/querytest -run 'TestQueryContracts'
+        bash scripts/go-test-gate.sh ./internal/db/querytest TestQueryContracts -tags=integration
 
   test-query-perf:
     desc: Run large-seed query plan/perf checks against a migrated Postgres
@@ -298,7 +305,7 @@ tasks:
         if [ -n "${QUERY_TEST_DATABASE_URL:-}" ]; then
           export OPENRAILS_TEST_DB_URL="$QUERY_TEST_DATABASE_URL"
         fi
-        go test -tags=integration -count=1 ./internal/db/querytest -run 'TestQueryPerf'
+        bash scripts/go-test-gate.sh ./internal/db/querytest TestQueryPerf -tags=integration
 
   fmt:
     desc: Format code
