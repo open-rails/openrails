@@ -6,6 +6,8 @@ import (
 	"io"
 	"strconv"
 	"strings"
+
+	"github.com/open-rails/openrails/internal/cardguard"
 )
 
 type jsonRule func(any) bool
@@ -251,42 +253,13 @@ func readJSON(d *json.Decoder, depth int) (any, error) {
 }
 
 func safeText(s string) bool {
-	if uuidPattern.MatchString(s) {
-		return true
-	}
 	if strings.Contains(s, "-----BEGIN ") || strings.Contains(s, "sk_live_") || strings.Contains(s, "sk_test_") {
 		return false
 	}
-	// Refuse PAN-shaped free text as well as explicit card fields. This can
-	// conservatively refuse a numeric provider handle; it never exports it.
-	var digits []byte
-	check := func() bool {
-		if len(digits) < 13 || len(digits) > 19 {
-			return true
-		}
-		sum := 0
-		for i, b := range digits {
-			x := int(b - '0')
-			if (len(digits)-i)%2 == 0 {
-				x *= 2
-				if x > 9 {
-					x -= 9
-				}
-			}
-			sum += x
-		}
-		return sum%10 != 0
-	}
-	for i := 0; i < len(s); i++ {
-		b := s[i]
-		if b >= '0' && b <= '9' {
-			digits = append(digits, b)
-		} else if b != ' ' && b != '-' {
-			if !check() {
-				return false
-			}
-			digits = nil
-		}
-	}
-	return check()
+	// One card detector for the whole product (internal/cardguard). The archive
+	// used to carry its own Luhn scan, which read a UUID's dashes as card
+	// formatting and therefore needed shape exemptions to stay usable — the
+	// exemptions are what made it diverge. It can conservatively refuse a
+	// numeric provider handle; it never exports one.
+	return !cardguard.ContainsPAN(s)
 }
