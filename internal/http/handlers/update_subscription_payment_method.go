@@ -148,6 +148,16 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 			writePaymentMethodPSPMismatch(r)
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 			r.ErrorJSON(http.StatusNotFound, "Payment method not found")
+		case errors.Is(err, openrails.ErrInvalid):
+			// A coded refusal from the durable seam (a zero/blank identifier)
+			// keeps its code and param instead of becoming a 500.
+			var se *openrails.StatusError
+			errors.As(err, &se)
+			refusal := api.NewAPIError(http.StatusBadRequest, se.Type, se.Code, se.Message)
+			if se.Param != nil {
+				refusal = refusal.WithParam(*se.Param)
+			}
+			r.APIError(refusal)
 		default:
 			r.InternalError("Failed to update payment method", err)
 		}

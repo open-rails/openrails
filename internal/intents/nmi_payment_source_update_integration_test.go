@@ -16,6 +16,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -320,6 +321,89 @@ func TestNMIPaymentSourceUpdateIntent_ProducerRereadsTargetUnderLock(t *testing.
 	require.ErrorIs(t, err, subscriptions.ErrPaymentMethodProviderAccountMismatch)
 	require.Zero(t, fx.gateway.updateCalls.Load())
 	require.Zero(t, fx.intentCount(t))
+}
+
+// A zero identifier is refused with the coded invalid-parameter envelope
+// before the row lock: no provider traffic, no durable intent, never a
+// "not found" lookup.
+func TestNMIPaymentSourceUpdateIntent_ZeroIdentifiersRefusedBeforeAnyLookup(t *testing.T) {
+	fx := newPaymentSourceSwapFixture(t)
+	sub, err := subscriptions.NewSubscriptionRepo(fx.db).GetByID(fx.ctx, fx.sub.ID)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name   string
+		param  string
+		mutate func(*models.Subscription, *models.PaymentMethod)
+	}{
+		{"zero subscription id", "subscription_id", func(s *models.Subscription, _ *models.PaymentMethod) { s.ID = uuid.Nil }},
+		{"zero subscription psp", "subscription.psp_id", func(s *models.Subscription, _ *models.PaymentMethod) { s.PspID = uuid.Nil }},
+		{"zero payment method id", "payment_method_id", func(_ *models.Subscription, p *models.PaymentMethod) { p.ID = uuid.Nil }},
+		{"zero payment method psp", "payment_method.psp_id", func(_ *models.Subscription, p *models.PaymentMethod) { p.PspID = uuid.Nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, pm := *sub, *fx.newPM
+			tt.mutate(&s, &pm)
+			_, err := fx.through.ExecutePaymentSourceUpdate(fx.ctx, &s, &pm, OriginUser, "zero id test")
+			require.ErrorIs(t, err, openrails.ErrInvalid)
+			var se *openrails.StatusError
+			require.ErrorAs(t, err, &se)
+			require.Equal(t, "invalid_param", se.Code)
+			require.NotNil(t, se.Param)
+			require.Equal(t, tt.param, *se.Param)
+			require.NotErrorIs(t, err, paymentmethods.ErrPaymentMethodNotFound, "a zero id is invalid, never a missing row")
+			require.Zero(t, fx.gateway.updateCalls.Load())
+			require.Zero(t, fx.intentCount(t), "a refused request leaves no durable intent")
+		})
+	}
+	// A zero merchant scope is refused too (the ambient scope resolves first,
+	// so this one surfaces as the missing-merchant refusal).
+	_, err = fx.through.ExecutePaymentSourceUpdate(merchant.WithID(context.Background(), merchant.ID{}), sub, fx.newPM, OriginUser, "zero merchant")
+	require.Error(t, err)
+	require.Zero(t, fx.gateway.updateCalls.Load())
+	require.Zero(t, fx.intentCount(t))
+}
+
+// A frozen payload carrying a zero identifier fails closed in the executor
+// exactly like a missing one: terminal, zero provider writes.
+func TestNMIPaymentSourceUpdateIntent_ZeroIdentifierInFrozenPayloadIsTerminal(t *testing.T) {
+	zero := uuid.Nil
+	tests := []struct {
+		name   string
+		break_ func(*NMIPaymentSourceUpdatePayload)
+	}{
+		{"zero target psp", func(p *NMIPaymentSourceUpdatePayload) { p.NewPspID = uuid.Nil }},
+		{"zero target method", func(p *NMIPaymentSourceUpdatePayload) { p.NewPaymentMethodID = uuid.Nil }},
+		{"zero old method", func(p *NMIPaymentSourceUpdatePayload) { p.OldPaymentMethodID = &zero }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := newPaymentSourceSwapFixture(t)
+			oldID, subID := fx.oldPM.ID, fx.sub.ID
+			payload := NMIPaymentSourceUpdatePayload{
+				UserID: fx.sub.CustomerID.String(), RailSubscriptionID: fx.sub.RailSubscriptionID,
+				NewPaymentMethodID: fx.newPM.ID, NewRailCustomerRef: fx.newPM.RailCustomerRef, NewPspID: fx.pspID,
+				OldPaymentMethodID: &oldID, OldRailCustomerRef: fx.oldPM.RailCustomerRef,
+			}
+			tt.break_(&payload)
+			_, err := NewStore(fx.db).Enqueue(fx.ctx, EnqueueParams{
+				MerchantID: dbtest.TestMerchantID.UUID(), Provider: "mobius", PspID: fx.pspID,
+				IntentType: TypeNMIPaymentSourceUpdate, SubscriptionID: &subID, Payload: payload,
+				IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(subID, fx.newPM.RailCustomerRef, 0),
+				NextAttemptAt:  time.Now().UTC().Add(-time.Minute),
+				Origin:         OriginUser, OriginReason: "zero payload id test",
+			})
+			require.NoError(t, err)
+
+			_, err = fx.runner.RunExecuteOnce(fx.ctx)
+			require.NoError(t, err)
+			status, _ := fx.latestIntent(t)
+			require.Equal(t, StatusFailedTerminal, status)
+			require.Zero(t, fx.gateway.updateCalls.Load(), "a malformed payload never reaches the provider")
+			require.Equal(t, fx.oldPM.ID, fx.localPaymentMethodID(t))
+		})
+	}
 }
 
 // R3's reproduction on PR #488, now the regression: a same-PSP swap goes
