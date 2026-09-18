@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "description": "Embeddable hosted checkout components for OpenRails.",
   "type": "module",
-  "license": "FSL-1.1-ALv2",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/open-rails/openrails-checkout.git"
