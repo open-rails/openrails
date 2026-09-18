@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { askCatalogCopilot, confirmCopilotDraft } from "@/lib/api/copilot"
 import {
+  archivePaymentProviderAccount,
   cancelReprice,
   cancelSubscription,
   changeSubscriptionPaymentMethod,
@@ -64,7 +65,7 @@ vi.mock("@/lib/api/endpoints", () => ({
   deactivateProduct: vi.fn(),
   deleteCustomerUsageRateOverride: vi.fn(),
   deleteDefaultUsageRateCard: vi.fn(),
-  deletePaymentProvider: vi.fn(),
+  archivePaymentProviderAccount: vi.fn(),
   deleteWebhook: vi.fn(),
   getCreditLimit: vi.fn(),
   getPriceByKey: vi.fn(),
@@ -926,6 +927,24 @@ describe("settings mutations", () => {
       .execute({ rail: "nmi", provider })
 
     expect(putPaymentProvider).toHaveBeenCalledWith("nmi", provider)
+    expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(true)
+  })
+
+  it("archives one provider account by id and invalidates the provider list", async () => {
+    const queryClient = new QueryClient()
+    const providersKey = [...queryKeys.settings(), "payment-providers"] as const
+    queryClient.setQueryData(providersKey, { data: [] })
+
+    await queryClient
+      .getMutationCache()
+      .build(queryClient, adminMutations.archivePaymentProvider(queryClient))
+      .execute({ rail: "nmi", id: "psp-a", allowLast: true })
+
+    expect(archivePaymentProviderAccount).toHaveBeenCalledWith(
+      "nmi",
+      "psp-a",
+      true
+    )
     expect(queryClient.getQueryState(providersKey)?.isInvalidated).toBe(true)
   })
 

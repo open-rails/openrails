@@ -619,12 +619,19 @@ export const dryRunCheckoutRouting = (
     signal,
   })
 
-export const deletePaymentProvider = (rail: string, environment?: string) =>
+// archivePaymentProviderAccount (#655) archives exactly this account by its
+// immutable id, without contacting the provider. The rail's last active
+// account is refused (409 provider_account_last_active) unless allowLast.
+export const archivePaymentProviderAccount = (
+  rail: string,
+  id: string,
+  allowLast = false
+) =>
   api<{ payment_provider: PaymentProviderConfig }>(
-    `/merchant/payment-providers/${rail}`,
+    `/merchant/payment-providers/${rail}/accounts/${id}/archive`,
     {
-      method: "DELETE",
-      query: environment ? { environment } : undefined,
+      method: "POST",
+      body: allowLast ? { allow_last: true } : {},
     }
   )
 
