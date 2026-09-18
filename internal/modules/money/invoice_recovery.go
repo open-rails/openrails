@@ -3,6 +3,7 @@ package money
 import (
 	"context"
 	"fmt"
+	safecast "github.com/ccoveille/go-safecast/v2"
 	"strings"
 
 	"github.com/google/uuid"
@@ -79,11 +80,16 @@ func (s *MoneyService) InvoiceRecovery(ctx context.Context, payer identity.Custo
 		ids = append(ids, invoice.ID)
 	}
 	q := s.db.Gen(ctx)
-	counts, err := q.CountInvoicePaymentAttemptsByPayerForInvoices(ctx, gen.CountInvoicePaymentAttemptsByPayerForInvoicesParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceIds: ids, RowLimit: int32(len(ids))})
+	// ids is bounded by the invoice page above; the cast never truncates.
+	rowLimit, err := safecast.Convert[int32](len(ids))
+	if err != nil {
+		return nil, fmt.Errorf("invoice page too large: %w", err)
+	}
+	counts, err := q.CountInvoicePaymentAttemptsByPayerForInvoices(ctx, gen.CountInvoicePaymentAttemptsByPayerForInvoicesParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceIds: ids, RowLimit: rowLimit})
 	if err != nil {
 		return nil, fmt.Errorf("count invoice attempts: %w", err)
 	}
-	failures, err := q.ListLatestFailedInvoicePaymentAttemptsByPayer(ctx, gen.ListLatestFailedInvoicePaymentAttemptsByPayerParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceIds: ids, RowLimit: int32(len(ids))})
+	failures, err := q.ListLatestFailedInvoicePaymentAttemptsByPayer(ctx, gen.ListLatestFailedInvoicePaymentAttemptsByPayerParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceIds: ids, RowLimit: rowLimit})
 	if err != nil {
 		return nil, fmt.Errorf("list failed invoice attempts: %w", err)
 	}

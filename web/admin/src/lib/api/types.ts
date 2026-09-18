@@ -53,7 +53,7 @@ export interface RawSubscription {
 export interface RawPrice {
   id: string
   product_id?: string
-  unit_amount?: MoneyAmount
+  unit_amount?: string
   currency?: string
   archived?: boolean
   // Key (#774): the durable, movable-pointer handle for this price's
