@@ -53,7 +53,10 @@ jobs:
       redis:
         image: redis:7-alpine
         ports: [6379:6379]
-        options: --health-cmd 'redis-cli ping' --health-interval 5s --health-timeout 5s --health-retries 10
+        # The service-container action passes this through to `docker create`;
+        # keep the health command as one executable so Docker does not parse a
+        # shell-quoted string as part of the image reference.
+        options: --health-cmd redis-cli --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       OPENRAILS_TEST_DB_DSN: postgres://admin:test_password@127.0.0.1:5432/openrails_test?sslmode=disable
       OPENRAILS_TEST_REDIS_ADDR: 127.0.0.1:6379
