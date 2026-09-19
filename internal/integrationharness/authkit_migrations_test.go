@@ -22,5 +22,5 @@ func applyAuthKitMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 	migrator, err := migratekit.NewPostgresFromPGXPool(pool, "authkit")
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, migrator.Close()) })
-	require.NoError(t, migrator.WithSchema(schema).ApplyMigrations(ctx, migrations))
+	require.NoError(t, migrator.WithSchema(schema, "profiles").ApplyMigrations(ctx, migrations))
 }

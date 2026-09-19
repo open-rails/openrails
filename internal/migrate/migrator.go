@@ -64,7 +64,7 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("authkit: create migrator: %w", err)
 	}
 	defer func() { _ = authMigrator.Close() }()
-	if err := authMigrator.WithSchema("profiles").ApplyMigrations(ctx, authMigrations); err != nil {
+	if err := authMigrator.WithSchema("profiles", "profiles").ApplyMigrations(ctx, authMigrations); err != nil {
 		return fmt.Errorf("authkit: apply migrations: %w", err)
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
