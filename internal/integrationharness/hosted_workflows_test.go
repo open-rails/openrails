@@ -19,13 +19,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authhttp"
-	"github.com/open-rails/authkit/authkitmigrate"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/authkit/jwtkit"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/dbtest"
 	embcp "github.com/open-rails/openrails/internal/operator"
 	"github.com/open-rails/openrails/internal/testauth"
 	"github.com/open-rails/openrails/permissions"
@@ -133,7 +133,7 @@ func newHostedIssuer(t *testing.T, h *Harness) *hostedIssuer {
 	t.Cleanup(issuer.Close)
 	issuerURL := "http://" + issuer.Listener.Addr().String()
 	schema := "hosted_issuer_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	require.NoError(t, authkitmigrate.New(h.sharedPool(), &authkitmigrate.Config{Schema: schema}).Migrate(ctx))
+	dbtest.ApplyAuthKitMigrations(t, ctx, h.sharedPool(), schema)
 	signer, err := jwtkit.NewRSASigner(2048, "hosted-issuer")
 	require.NoError(t, err)
 	engine, err := authcore.New(authcore.Config{
@@ -146,6 +146,7 @@ func newHostedIssuer(t *testing.T, h *Harness) *hostedIssuer {
 		return authkit.DelegationGrant{Permissions: []string{permissions.MerchantAll}}, nil
 	}})
 	require.NoError(t, err)
+	t.Cleanup(engine.Close)
 	svc, err := authhttp.New(engine, authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true})
 	require.NoError(t, err)
 	t.Cleanup(svc.Close)

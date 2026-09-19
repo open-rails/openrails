@@ -12,7 +12,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
-	"github.com/open-rails/authkit/authkitmigrate"
+	authpostgres "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -50,12 +50,11 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 
 	// ---------- 1. AuthKit Migrations (profiles schema) ----------
 	log.Info("Running AuthKit migrations (profiles schema)...")
-	authPool, err := db.NewPGXPoolWithRetry(ctx, cfg.DB.GetConnectionString())
+	authMigrations, err := migratekit.LoadFromFS(authpostgres.FS)
 	if err != nil {
-		return fmt.Errorf("authkit: create pgx pool: %w", err)
+		return fmt.Errorf("authkit: load migrations: %w", err)
 	}
-	defer authPool.Close()
-	if err := authkitmigrate.New(authPool, &authkitmigrate.Config{}).Migrate(ctx); err != nil {
+	if err := migratekit.NewPostgres(sqlDB, "authkit").WithSchema("profiles").ApplyMigrations(ctx, authMigrations); err != nil {
 		return fmt.Errorf("authkit: apply migrations: %w", err)
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
@@ -92,7 +91,7 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	if err := assertNoOrphanedMigrations(ctx, m, schema, migrations); err != nil {
 		return err
 	}
-	// ApplyMigrations now calls Setup() automatically within the lock
+	// ApplyMigrations initializes the migration tracker automatically.
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
 	}
@@ -245,8 +244,9 @@ func rewriteMigrationsSchema(migrations []migratekit.Migration, schema string) [
 }
 
 // ensurePostgresBootstrap creates the OpenRails schema (configurable via
-// db.schema, default `openrails` — #165/#471), shared extensions, and the
-// migration tracking table. schema is a pre-validated SQL identifier
+// db.schema, default `openrails` — #165/#471) and shared extensions. migratekit
+// owns its ledger and creates it before applying AuthKit migrations.
+// schema is a pre-validated SQL identifier
 // (config.validateSchema), so it is safe to interpolate. CREATE SCHEMA IF NOT
 // EXISTS is a no-op when the host already owns the schema.
 func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) error {
@@ -259,14 +259,6 @@ func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) err
 	_, err := db.ExecContext(ctx, fmt.Sprintf(`
 		CREATE SCHEMA IF NOT EXISTS %s;
 		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
-		CREATE TABLE IF NOT EXISTS public.migrations (
-			id BIGSERIAL PRIMARY KEY,
-			app TEXT NOT NULL,
-			database TEXT NOT NULL,
-			name TEXT NOT NULL,
-			migrated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			UNIQUE(app, database, name)
-		);
 	`, schema))
 	return err
 }

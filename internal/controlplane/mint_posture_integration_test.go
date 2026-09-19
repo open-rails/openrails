@@ -47,6 +47,7 @@ func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 		cp, err := New(ctx, cfg, pool, WithRedis(rdb))
 		require.NoError(t, err, "a DECLARED verify-only posture must boot even outside development")
 		require.NotNil(t, cp)
+		t.Cleanup(cp.Close)
 	})
 
 	t.Run("dev + no key + mint_disabled unset still boots on the ephemeral dev key path", func(t *testing.T) {
@@ -57,5 +58,6 @@ func TestNew_VerifyOnlyMustBeDeclared(t *testing.T) {
 		cp, err := New(ctx, cfg, pool)
 		require.NoError(t, err, "development must keep booting without a declared posture (#748 scopes the hard failure to non-development)")
 		require.NotNil(t, cp)
+		t.Cleanup(cp.Close)
 	})
 }

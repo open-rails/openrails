@@ -1020,10 +1020,6 @@ func TestDiffTaxonomy(t *testing.T) {
 
 // --- engine semantics ---------------------------------------------------------
 
-// #665: a completed provider section's coverage is a pull proof; failed or
-// breaker-aborted sections prove nothing (their coverage must never feed the
-// confirmed-absence gate).
-
 func TestIntentAnnotationForRecordedDelete(t *testing.T) {
 	ctx := context.Background()
 	local := &fakeLocal{}

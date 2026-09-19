@@ -88,6 +88,7 @@ func (c *ControlPlane) MerchantGroupSearchResolver() merchants.GroupSearchResolv
 		if err != nil {
 			return nil, err
 		}
+		defer directory.Close()
 		return (merchantNameAuthority{groups: directory}).SearchGroups(ctx, query, afterName, afterID, limit)
 	}
 }

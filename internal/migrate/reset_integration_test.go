@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/dbtest"
 	"github.com/open-rails/openrails/internal/migrate"
 )
@@ -42,25 +44,31 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	target, err := pgx.Connect(ctx, targetDSN)
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, target.Close(context.Background())) })
+	// Exercise the standalone bootstrap SQL followed by the real migrator, not
+	// a handwritten ledger fixture. Re-running startup must be an exact no-op.
+	bootstrap, err := os.ReadFile("../../migrations/bootstrap/0001_postgres_init.sql")
+	require.NoError(t, err)
+	_, err = target.Exec(ctx, string(bootstrap))
+	require.NoError(t, err)
+	cfg := &config.Config{Env: "dev", DB: &config.DBConfig{URL: targetDSN}}
+	require.NoError(t, migrate.RunPostgres(ctx, cfg))
+	require.NoError(t, migrate.RunPostgres(ctx, cfg))
+	status, err := migrate.InspectPostgres(ctx, cfg)
+	require.NoError(t, err)
+	require.True(t, status.Exact, status.Report())
 	_, err = target.Exec(ctx, `
-		CREATE SCHEMA openrails;
-		CREATE TABLE public.migrations (
-			app text NOT NULL,
-			database text NOT NULL,
-			schema text NOT NULL,
-			name text NOT NULL
-		);
-		INSERT INTO public.migrations (app, database, schema, name) VALUES
-			('openrails', 'postgres', 'openrails', '1'),
-			('openrails', 'postgres', 'another_schema', 'keep-schema'),
-			('another_app', 'postgres', 'openrails', 'keep-app');
+		INSERT INTO public.migrations (app, database, schema, sequence) VALUES
+			('openrails', 'postgres', 'openrails', 10),
+			('openrails', 'postgres', 'openrails', 2),
+			('openrails', 'postgres', 'another_schema', 1),
+			('another_app', 'postgres', 'openrails', 1);
 	`)
 	require.NoError(t, err)
 
 	plan, err := migrate.PlanEmbeddedReset(ctx, targetDSN)
 	require.NoError(t, err)
 	require.True(t, plan.SchemaExists)
-	require.Equal(t, []string{"1"}, plan.LedgerRows)
+	require.Equal(t, []string{"1", "2", "10"}, plan.LedgerRows)
 	require.NotContains(t, plan.Report(), "admin_password")
 
 	_, err = migrate.ApplyEmbeddedReset(ctx, targetDSN, "other:5432/db",
@@ -83,12 +91,18 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 	result, err := migrate.ApplyEmbeddedReset(ctx, targetDSN, plan.Target,
 		migrate.EmbeddedResetConfirmation(plan.Target))
 	require.NoError(t, err)
-	require.Equal(t, int64(1), result.DeletedLedgerRows)
+	require.Equal(t, int64(3), result.DeletedLedgerRows)
 	require.NoError(t, target.QueryRow(ctx, `SELECT to_regnamespace('openrails') IS NOT NULL`).Scan(&schemaExists))
 	require.False(t, schemaExists)
 	var retained int
 	require.NoError(t, target.QueryRow(ctx, `SELECT count(*) FROM public.migrations`).Scan(&retained))
-	require.Equal(t, 2, retained, "reset must preserve other apps and schemas")
+	require.Equal(t, 3, retained, "reset must preserve AuthKit and the other app/schema rows")
+	// Resetting billing leaves its sibling identity schema intact and allows
+	// the standalone startup path to rebuild only OpenRails.
+	require.NoError(t, migrate.RunPostgres(ctx, cfg))
+	status, err = migrate.InspectPostgres(ctx, cfg)
+	require.NoError(t, err)
+	require.True(t, status.Exact, status.Report())
 }
 
 func dsnWithDatabase(t *testing.T, dsn, database string) string {

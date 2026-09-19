@@ -22,11 +22,14 @@ func openCLINameDirectory(ctx context.Context, cfg *config.Config) (*merchants.S
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	close := func() { _ = database.Close() }
 	groups, err := authcore.NewGroupDirectory(database.Pool(), "")
 	if err != nil {
-		close()
+		_ = database.Close()
 		return nil, nil, nil, err
+	}
+	close := func() {
+		groups.Close()
+		_ = database.Close()
 	}
 	authority := controlplane.MerchantNameAuthority(groups)
 	directory, err := merchants.NewDirectoryService(database.DataPool())

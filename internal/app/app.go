@@ -46,7 +46,8 @@ type App struct {
 // SetControlPlane attaches the OpenRails-owned AuthKit control plane built by the
 // opt-in/standalone path (#284). cp is the concrete *controlplane.ControlPlane
 // (kept as `any` here so the core stays AuthKit-free); ownedPool, when non-nil,
-// is an OpenRails-owned pgx pool whose lifecycle App.Close manages.
+// is an OpenRails-owned pgx pool whose lifecycle App.Close manages. The control
+// plane itself is owned by App even when the caller supplies a borrowed pool.
 func (a *App) SetControlPlane(cp any, ownedPool *pgxpool.Pool) {
 	if a == nil {
 		return
@@ -166,6 +167,10 @@ func (a *App) Close(ctx context.Context) error {
 	if a.stopRedisMonitor != nil {
 		a.stopRedisMonitor()
 	}
+	if cp, ok := a.ControlPlane.(interface{ Close() }); ok {
+		cp.Close()
+	}
+	a.ControlPlane = nil
 	if a.controlPlanePool != nil {
 		a.controlPlanePool.Close()
 		a.controlPlanePool = nil

@@ -70,6 +70,7 @@ func TestNew_HostedStagingWithRedis_Succeeds(t *testing.T) {
 	)
 	require.NoError(t, err, "hosted control plane in a non-development environment must boot when Redis is wired")
 	require.NotNil(t, cp)
+	t.Cleanup(cp.Close)
 }
 
 // TestNew_HostedStagingWithoutRedis_FailsNamingRedis is the mirror: before
@@ -131,6 +132,7 @@ func TestProductionClientIPPosture(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.NotNil(t, cp)
+			t.Cleanup(cp.Close)
 		})
 	}
 }

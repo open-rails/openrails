@@ -7,14 +7,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
-	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -81,21 +79,8 @@ func newBootstrapTestPool(t *testing.T) *pgxpool.Pool {
 
 func applyBootstrapTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	// Apply AuthKit profiles.* schema in filename order, then openrails.merchants.
-	entries, err := authpgmigrations.FS.ReadDir(".")
-	require.NoError(t, err)
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		b, rerr := authpgmigrations.FS.ReadFile(name)
-		require.NoError(t, rerr)
-		_, eerr := pool.Exec(ctx, string(b))
-		require.NoErrorf(t, eerr, "apply authkit migration %s", name)
-	}
-	_, err = pool.Exec(ctx, minimalMerchantsDDL)
+	dbtest.ApplyAuthKitMigrations(t, ctx, pool, "profiles")
+	_, err := pool.Exec(ctx, minimalMerchantsDDL)
 	require.NoError(t, err)
 	dbtest.EnsureTestMerchant(ctx, t, pool)
 }
@@ -125,6 +110,7 @@ func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	}
 	cp, err := New(context.Background(), cfg, pool)
 	require.NoError(t, err)
+	t.Cleanup(cp.Close)
 	require.NotNil(t, cp)
 	return cp
 }

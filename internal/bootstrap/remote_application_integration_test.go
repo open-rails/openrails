@@ -37,6 +37,7 @@ func TestMerchantRemoteApplicationTrustSourcesIntegration(t *testing.T) {
 	rdb, _ := dbtest.SharedRedisClient(t)
 	cp, err := controlplane.New(ctx, cfg, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
+	t.Cleanup(cp.Close)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
 	jwksIssuer := "https://merchant-jwks-" + suffix + ".example"

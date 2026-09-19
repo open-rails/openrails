@@ -336,7 +336,7 @@ func authKeysPath(cfg *config.Config) string {
 //
 // The control plane is mandatory in standalone mode (#469): every input is
 // required and a failure here is a boot failure, never a silent downgrade.
-func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Option) (*ControlPlane, error) {
+func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Option) (_ *ControlPlane, retErr error) {
 	if cfg == nil || cfg.Auth == nil {
 		return nil, errors.New("controlplane: auth.issuer is required (the control plane is mandatory in standalone mode, #469)")
 	}
@@ -512,6 +512,11 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit client: %w", err)
 	}
+	defer func() {
+		if retErr != nil {
+			authClient.Close()
+		}
+	}()
 	if options.merchantCreation != nil {
 		// ak#263 prerequisite (or#914): the generated POST /merchant creates
 		// groups parented at ROOT, and unlike Bootstrap/ProvisionMerchant the
@@ -526,6 +531,11 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	if err != nil {
 		return nil, fmt.Errorf("controlplane: build authkit service: %w", err)
 	}
+	defer func() {
+		if retErr != nil {
+			authSvc.Close()
+		}
+	}()
 
 	authSvc.Verifier().WithLiveness(authClient)
 
@@ -570,6 +580,22 @@ func New(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool, opts ...Op
 	}
 
 	return cp2, nil
+}
+
+// Close releases the HTTP adapter and schema-bound AuthKit pool created by New.
+// The host pool supplied to New remains owned by the caller.
+func (c *ControlPlane) Close() {
+	if c == nil {
+		return
+	}
+	if c.authSvc != nil {
+		c.authSvc.Close()
+		c.authSvc = nil
+	}
+	if c.authClient != nil {
+		c.authClient.Close()
+		c.authClient = nil
+	}
 }
 
 // Core returns the underlying AuthKit core service used for in-process

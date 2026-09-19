@@ -181,20 +181,20 @@ func inspectEmbeddedReset(ctx context.Context, conn resetQuerier, target string)
 		return plan, nil
 	}
 	rows, err := conn.Query(ctx,
-		`SELECT name FROM public.migrations
+		`SELECT sequence FROM public.migrations
 		  WHERE app = $1 AND database = 'postgres' AND schema = $2
-		  ORDER BY length(name), name`,
+		  ORDER BY sequence`,
 		config.MigratekitApp, embeddedResetSchema)
 	if err != nil {
 		return plan, fmt.Errorf("read openrails migration ledger: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var sequence int64
+		if err := rows.Scan(&sequence); err != nil {
 			return plan, fmt.Errorf("scan openrails migration ledger: %w", err)
 		}
-		plan.LedgerRows = append(plan.LedgerRows, name)
+		plan.LedgerRows = append(plan.LedgerRows, strconv.FormatInt(sequence, 10))
 	}
 	if err := rows.Err(); err != nil {
 		return plan, fmt.Errorf("iterate openrails migration ledger: %w", err)

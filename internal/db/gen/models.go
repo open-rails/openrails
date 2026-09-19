@@ -103,15 +103,6 @@ func (ns NullOpenrailsSubscriptionStatus) Value() (driver.Value, error) {
 	return string(ns.OpenrailsSubscriptionStatus), nil
 }
 
-type Migration struct {
-	ID         int64
-	App        string
-	Database   string
-	Name       string
-	Schema     string
-	MigratedAt time.Time
-}
-
 // or#795: one batch account-updater cycle for one custodian. Written BEFORE the provider is touched and kept until the results are folded, so a worker restart between submit and ingest RESUMES POLLING the recorded job instead of resubmitting a paid batch. The membership is recorded verbatim; the result vocabulary is counted verbatim.
 type OpenrailsAccountUpdaterBatch struct {
 	ID          uuid.UUID

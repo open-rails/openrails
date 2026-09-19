@@ -78,10 +78,8 @@ done
 # migrations, because 0007+ GRANT on schema profiles — loading it afterwards
 # fails the whole build at 0007 with "schema profiles does not exist".
 psql_file "$VET_URL" internal/db/schema/profiles_shim.sql 1>&2
-# Migration prefixes are fixed-width, so byte-order is version-order and works
-# on both GNU and macOS/BSD sort (which has no -V flag).
-for f in $(ls migrations/postgres/*.up.sql | LC_ALL=C sort); do
-    psql_file "$VET_URL" "$f" -1 1>&2
-done
+# Use the same runner as application startup so migratekit owns its tracker DDL.
+go run github.com/open-rails/migratekit/cmd/migratekit apply \
+    -dsn "$VET_URL" -app openrails -schema openrails -dir migrations/postgres 1>&2
 
 printf '%s\n' "$VET_URL"

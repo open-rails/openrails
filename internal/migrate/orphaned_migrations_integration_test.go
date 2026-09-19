@@ -39,7 +39,7 @@ const orphanedSchema = "openrails" // the production default; the stacks' schema
 func seedAppliedMigration(t *testing.T, sqlDB *sql.DB, name string) {
 	t.Helper()
 	_, err := sqlDB.ExecContext(context.Background(),
-		`INSERT INTO public.migrations (app, database, name, schema) VALUES ($1, 'postgres', $2, $3)
+		`INSERT INTO public.migrations (app, database, sequence, schema) VALUES ($1, 'postgres', $2, $3)
 		 ON CONFLICT DO NOTHING`,
 		config.MigratekitApp, name, orphanedSchema)
 	require.NoError(t, err)
@@ -59,7 +59,7 @@ func TestRunPostgres_RefusesOrphanedMigrations(t *testing.T) {
 	t.Cleanup(func() {
 		for _, n := range orphans {
 			_, _ = sqlDB.ExecContext(context.Background(),
-				`DELETE FROM public.migrations WHERE app = $1 AND database = 'postgres' AND schema = $2 AND name = $3`,
+				`DELETE FROM public.migrations WHERE app = $1 AND database = 'postgres' AND schema = $2 AND sequence = $3`,
 				config.MigratekitApp, orphanedSchema, n)
 		}
 	})

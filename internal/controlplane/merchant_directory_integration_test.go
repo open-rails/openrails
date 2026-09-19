@@ -25,6 +25,7 @@ func TestListActiveMerchantIDs(t *testing.T) {
 		Auth: &config.AuthConfig{Issuer: "https://openrails.test", MintDisabled: true, DirectPeerIP: true},
 	}, super, WithRedis(rdb))
 	require.NoError(t, err)
+	t.Cleanup(cp.Close)
 
 	suffix := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	activeA, activeB, deleted := uuid.New(), uuid.New(), uuid.New()
