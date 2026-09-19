@@ -164,7 +164,9 @@ func integrationTestExists(t *testing.T, fsys fs.FS, dir, name string) bool {
 }
 
 // requiresIntegrationTag reports whether the file builds with the runner's
-// integration tag and not without it.
+// integration tag and not without it. Browser is an orthogonal opt-in used by
+// the same E2E runner; evaluate it as enabled while still requiring integration
+// to be the tag that changes the file's build decision.
 func requiresIntegrationTag(file *ast.File) bool {
 	for _, group := range file.Comments {
 		if group.Pos() > file.Package {
@@ -180,7 +182,7 @@ func requiresIntegrationTag(file *ast.File) bool {
 			}
 			with := func(integration bool) bool {
 				return expr.Eval(func(tag string) bool {
-					return (integration && tag == "integration") || tag == runtime.GOOS || tag == runtime.GOARCH || tag == "unix"
+					return (integration && tag == "integration") || tag == "browser" || tag == "provider_qualification" || tag == runtime.GOOS || tag == runtime.GOARCH || tag == "unix"
 				})
 			}
 			return with(true) && !with(false)

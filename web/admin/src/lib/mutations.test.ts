@@ -23,9 +23,6 @@ type Case = [
   calls: string | string[],
   invalidates: string[],
   body?: unknown,
-  // Keys the mutation only computes in onSuccess, so they follow whichever
-  // merchant is selected when the write lands.
-  late?: string[],
 ]
 
 const customerTree = ["customer", "customer.rates"]
@@ -93,15 +90,15 @@ const cases: Case[] = [
   ["cancels a batch of reprices", (c, g) => g(M.cancelReprices(c), ["rep_1", "rep_2"]),
     ["POST /merchant/reprices/rep_1/cancel", "POST /merchant/reprices/rep_2/cancel"], catalogTree],
   ["stores a usage meter", (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
-    "PUT /merchant/catalog/meters/tokens", meterTree, meter, ["meter"]],
+    "PUT /merchant/catalog/meters/tokens", meterTree, meter],
   ["stores a default rate card", (c, g) => g(M.putDefaultUsageRateCard(c), { key: "tokens", rateCard }),
-    "PUT /merchant/catalog/meters/tokens/rate-card", meterTree, rateCard, ["meter"]],
+    "PUT /merchant/catalog/meters/tokens/rate-card", meterTree, rateCard],
   ["removes a default rate card", (c, g) => g(M.deleteDefaultUsageRateCard(c), "tokens"),
-    "DELETE /merchant/catalog/meters/tokens/rate-card", meterTree, undefined, ["meter"]],
+    "DELETE /merchant/catalog/meters/tokens/rate-card", meterTree],
   ["stores a negotiated rate", (c, g) => g(M.putCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens", override: { price: ratePrice } }),
-    "PUT /merchant/customers/cus_1/rate-overrides/tokens", meterTree, { price: ratePrice }, [...customerTree, "dashboard", "meter"]],
+    "PUT /merchant/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"], { price: ratePrice }],
   ["removes a negotiated rate", (c, g) => g(M.deleteCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens" }),
-    "DELETE /merchant/customers/cus_1/rate-overrides/tokens", meterTree, undefined, [...customerTree, "dashboard", "meter"]],
+    "DELETE /merchant/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"]],
   ["updates settings without dropping the provider list", (c, g) => g(M.updateMerchantSettings(c), { profile: { display_name: "Acme" } }),
     "PUT /merchant/settings", ["settings"]],
   ["saves provider credentials", (c, g) => g(M.savePaymentProvider(c), { rail: "nmi", provider: { account_id: "gw_1" } }),
@@ -123,7 +120,7 @@ beforeEach(async () => {
 })
 afterEach(() => vi.unstubAllGlobals())
 
-it.each(cases)("%s", async (_name, run, expected, invalidates, body, late) => {
+it.each(cases)("%s", async (_name, run, expected, invalidates, body) => {
   const queryClient = client()
   const seeded = [...seedCache(queryClient, "merchant-a"), ...seedCache(queryClient, "merchant-b")]
   selectMerchant("merchant-a")
@@ -134,7 +131,7 @@ it.each(cases)("%s", async (_name, run, expected, invalidates, body, late) => {
   expect(calls(requests)).toEqual(typeof expected === "string" ? [expected] : expected)
   if (body) expect(requests[0].body).toEqual(body)
   expect(invalidated(queryClient, seeded)).toEqual(
-    [...invalidates.map((n) => `merchant-a:${n}`), ...(late ?? []).map((n) => `merchant-b:${n}`)].sort()
+    invalidates.map((n) => `merchant-a:${n}`).sort()
   )
 })
 
