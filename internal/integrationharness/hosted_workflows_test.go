@@ -19,7 +19,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authhttp"
-	"github.com/open-rails/authkit/authkitmigrate"
 	authcore "github.com/open-rails/authkit/embedded"
 	"github.com/open-rails/authkit/jwtkit"
 	"github.com/stretchr/testify/require"
@@ -133,7 +132,7 @@ func newHostedIssuer(t *testing.T, h *Harness) *hostedIssuer {
 	t.Cleanup(issuer.Close)
 	issuerURL := "http://" + issuer.Listener.Addr().String()
 	schema := "hosted_issuer_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	require.NoError(t, authkitmigrate.New(h.sharedPool(), &authkitmigrate.Config{Schema: schema}).Migrate(ctx))
+	applyAuthKitMigrations(t, ctx, h.sharedPool(), schema)
 	signer, err := jwtkit.NewRSASigner(2048, "hosted-issuer")
 	require.NoError(t, err)
 	engine, err := authcore.New(authcore.Config{

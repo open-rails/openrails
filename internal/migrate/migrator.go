@@ -12,7 +12,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib" // database/sql driver "pgx"
 
-	"github.com/open-rails/authkit/authkitmigrate"
+	authpostgres "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/open-rails/migratekit"
 	"github.com/open-rails/openrails/config"
 	"github.com/open-rails/openrails/internal/db"
@@ -55,7 +55,16 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("authkit: create pgx pool: %w", err)
 	}
 	defer authPool.Close()
-	if err := authkitmigrate.New(authPool, &authkitmigrate.Config{}).Migrate(ctx); err != nil {
+	authMigrations, err := migratekit.LoadFromFS(authpostgres.FS)
+	if err != nil {
+		return fmt.Errorf("authkit: load migrations: %w", err)
+	}
+	authMigrator, err := migratekit.NewPostgresFromPGXPool(authPool, "authkit")
+	if err != nil {
+		return fmt.Errorf("authkit: create migrator: %w", err)
+	}
+	defer func() { _ = authMigrator.Close() }()
+	if err := authMigrator.WithSchema("profiles").ApplyMigrations(ctx, authMigrations); err != nil {
 		return fmt.Errorf("authkit: apply migrations: %w", err)
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
@@ -92,7 +101,7 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	if err := assertNoOrphanedMigrations(ctx, m, schema, migrations); err != nil {
 		return err
 	}
-	// ApplyMigrations now calls Setup() automatically within the lock
+	// ApplyMigrations initializes the migration tracker automatically.
 	if err := m.ApplyMigrations(ctx, migrations); err != nil {
 		return fmt.Errorf("openrails: apply migrations: %w", err)
 	}
