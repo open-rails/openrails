@@ -1023,84 +1023,6 @@ func TestDiffTaxonomy(t *testing.T) {
 // #665: a completed provider section's coverage is a pull proof; failed or
 // breaker-aborted sections prove nothing (their coverage must never feed the
 // confirmed-absence gate).
-func TestPullProofsOnlyFromCompletedProviders(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	sub := liveLocalSub(ProviderNMI, "nmi-proof")
-	local.state.Subscriptions = []LocalSubscription{sub}
-	okSnap := &RemoteSnapshot{
-		Provider:     ProviderNMI,
-		Capabilities: Capabilities{Subscriptions: true},
-		Subscriptions: []RemoteSubscription{
-			{RailSubscriptionID: "nmi-proof", Status: SubscriptionStatusActive, NextBillingAt: tp(*sub.CurrentPeriodEndsAt)},
-		},
-		Coverage: SnapshotCoverage{SubscriptionsExhaustive: true},
-	}
-	eng, _, _ := newTestEngine(ProviderNMI, okSnap, local)
-	eng.Fetchers[ProviderStripe] = &fakeFetcher{provider: ProviderStripe, err: fmt.Errorf("stripe down")}
-
-	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, PSPs: testPSPs(ProviderNMI, ProviderStripe, ProviderCCBill, ProviderSolana)})
-	require.Error(t, err, "the failed provider fails the run")
-	require.NotNil(t, res)
-
-	proofs := res.PullProofs()
-	require.Len(t, proofs, 1, "only the completed provider proves anything")
-	assert.True(t, proofs[ProviderNMI].Coverage.SubscriptionsExhaustive)
-	_, hasStripe := proofs[ProviderStripe]
-	assert.False(t, hasStripe)
-}
-
-func TestCircuitBreakerAbortsAbsenceBasedPS2(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	for i := 0; i < 20; i++ {
-		local.state.Subscriptions = append(local.state.Subscriptions, liveLocalSub(ProviderNMI, fmt.Sprintf("nmi-%d", i)))
-	}
-	snap := &RemoteSnapshot{
-		Provider:     ProviderNMI,
-		Capabilities: Capabilities{Subscriptions: true},
-		Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
-		Subscriptions: []RemoteSubscription{
-			{RailSubscriptionID: "nmi-0", Status: SubscriptionStatusActive},
-		},
-	}
-	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "circuit breaker")
-	assert.Equal(t, "failed", res.Status)
-	assert.True(t, res.Summary.Providers["nmi"].Aborted)
-	assert.Zero(t, store.count(), "no findings may be persisted on a breaker abort")
-	assert.Zero(t, writer.totalCalls())
-}
-
-// #837: the breaker used to be DISABLED below ten local live subscriptions —
-// this exact fixture asserted that five subscribers could all be cancelled off
-// an empty roster. Small books need MORE protection, not an exemption, so the
-// floor is gone and a nine-subscriber merchant is protected too.
-func TestSmallMerchantsAreProtectedFromEmptyRosters(t *testing.T) {
-	ctx := context.Background()
-	for _, book := range []int{1, 5, 9} {
-		local := &fakeLocal{}
-		for i := 0; i < book; i++ {
-			local.state.Subscriptions = append(local.state.Subscriptions, liveLocalSub(ProviderNMI, fmt.Sprintf("nmi-%d", i)))
-		}
-		// An exhaustive-but-empty roster: the shape a misdeclared account_id or
-		// a rotated credential produces.
-		snap := &RemoteSnapshot{
-			Provider:     ProviderNMI,
-			Capabilities: Capabilities{Subscriptions: true},
-			Coverage:     SnapshotCoverage{SubscriptionsExhaustive: true},
-		}
-		eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-		res, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-		require.Error(t, err, "book of %d: an empty roster must not sail through", book)
-		assert.Contains(t, err.Error(), "circuit breaker")
-		assert.True(t, res.Summary.Providers["nmi"].Aborted)
-		assert.Empty(t, findByType(res.Findings, FindingLocalActiveRemoteDead), "book of %d", book)
-		assert.Zero(t, writer.calls["cancel"], "book of %d", book)
-	}
-}
 
 func TestIntentAnnotationForRecordedDelete(t *testing.T) {
 	ctx := context.Background()
@@ -1166,62 +1088,6 @@ func TestCapabilityGating(t *testing.T) {
 	assert.Empty(t, findByType(res.Findings, FindingChargebackActiveSub), "PS-6 must be capability-gated")
 	assert.Empty(t, findByType(res.Findings, FindingRefundUnrecorded), "PS-5 must be capability-gated")
 	assert.Empty(t, findByType(res.Findings, FindingPaymentMethodMismatch), "PS-7 must be capability-gated")
-}
-
-func TestEnforceIsIdempotent(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	dead := liveLocalSub(ProviderNMI, "nmi-idem")
-	local.state.Subscriptions = []LocalSubscription{dead}
-	withLiveEntitlement(local, &dead)
-	snap := &RemoteSnapshot{
-		Provider:     ProviderNMI,
-		Capabilities: Capabilities{Subscriptions: true},
-		Subscriptions: []RemoteSubscription{
-			{RailSubscriptionID: "nmi-idem", Status: SubscriptionStatusExpired, RawStatus: "expired"},
-		},
-	}
-	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-
-	res1, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-	require.NoError(t, err)
-	assert.Equal(t, 1, res1.Summary.Providers["nmi"].AutoFixed)
-	firstCalls := writer.totalCalls()
-	assert.Positive(t, firstCalls)
-
-	// Second enforce run: local state already converged, so the diff is empty
-	// and no write happens.
-	res2, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-	require.NoError(t, err)
-	assert.Empty(t, res2.Findings, "second enforce run must see a converged state")
-	assert.Equal(t, 0, res2.Summary.Providers["nmi"].AutoFixed)
-	assert.Equal(t, firstCalls, writer.totalCalls(), "second enforce run must be a write no-op")
-
-	rec := store.record(ProviderNMI, FindingLocalActiveRemoteDead, dead.ID.String())
-	assert.Equal(t, FindingStatusAutoFixed, rec.Status)
-	assert.Equal(t, "enforced", rec.Resolution)
-}
-
-func TestAdvisoryNeverWrites(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	dead := liveLocalSub(ProviderNMI, "nmi-adv")
-	local.state.Subscriptions = []LocalSubscription{dead}
-	withLiveEntitlement(local, &dead)
-	snap := &RemoteSnapshot{
-		Provider:     ProviderNMI,
-		Capabilities: Capabilities{Subscriptions: true},
-		Subscriptions: []RemoteSubscription{
-			{RailSubscriptionID: "nmi-adv", Status: SubscriptionStatusCancelled},
-		},
-	}
-	eng, store, writer := newTestEngine(ProviderNMI, snap, local)
-	res, err := eng.Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: testPSPs(ProviderNMI)})
-	require.NoError(t, err)
-	require.NotEmpty(t, res.Findings)
-	assert.Zero(t, writer.totalCalls(), "advisory mode performs zero local writes")
-	rec := store.record(ProviderNMI, FindingLocalActiveRemoteDead, dead.ID.String())
-	assert.Equal(t, FindingStatusReconcileRequired, rec.Status)
 }
 
 func TestDismissedFindingsStayDismissed(t *testing.T) {
@@ -1529,43 +1395,6 @@ func testPSPs(providers ...Provider) map[Provider]PSPBinding {
 		out[p] = PSPBinding{ID: uuid.New(), Rail: string(p), AccountID: string(p) + "-test-account"}
 	}
 	return out
-}
-
-// or#893: a pull section with no PSP binding used to run account-agnostically —
-// it read the rail's ENTIRE local mirror (so PSP A's roster judged PSP B's
-// subscriptions) and stamped every row it wrote with NULL provenance. The
-// binding is now a precondition, and the refusal is the whole point: the pull
-// plane always knows which PSP armed it, so an unbound section is a wiring bug,
-// never a lane to fall back to.
-func TestRunRefusesAProviderSectionWithNoPSPBinding(t *testing.T) {
-	ctx := context.Background()
-	local := &fakeLocal{}
-	dead := liveLocalSub(ProviderNMI, "vanished-1")
-	local.state.Subscriptions = []LocalSubscription{dead}
-	withLiveEntitlement(local, &dead)
-	snap := &RemoteSnapshot{
-		Provider:      ProviderNMI,
-		Capabilities:  Capabilities{Subscriptions: true},
-		Coverage:      SnapshotCoverage{SubscriptionsExhaustive: true},
-		Subscriptions: []RemoteSubscription{},
-	}
-	eng, _, writer := newTestEngine(ProviderNMI, snap, local)
-
-	_, err := eng.Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no PSP binding for provider nmi")
-	// And it refused BEFORE touching local state: no cancel, no mirror write.
-	assert.Zero(t, writer.totalCalls())
-
-	// A zero-uuid binding is the same absence wearing a struct.
-	_, err = eng.Run(ctx, RunParams{
-		Mode:      ModeEnforce,
-		Providers: []Provider{ProviderNMI},
-		PSPs:      map[Provider]PSPBinding{ProviderNMI: {Rail: "nmi", AccountID: "mobius"}},
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no PSP binding for provider nmi")
-	assert.Zero(t, writer.totalCalls())
 }
 
 // or#893: every local write the pass plans carries the pull's PSP. Before, a

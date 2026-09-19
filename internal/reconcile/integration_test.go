@@ -167,200 +167,214 @@ func reconcileSnapshot(t *testing.T, ctx context.Context, appDB *db.DB, seeded s
 }
 
 func TestReconcileEngineIntegration(t *testing.T) {
-	appDB := startReconcilePostgres(t)
-	// Own merchant: the finding counts below are exact, so nothing another test
-	// seeded may be in scope (see newReconcileMerchant).
-	mid := newReconcileMerchant(t, appDB)
-	baseCtx := merchant.WithID(context.Background(), mid)
+	for name, remoteStatus := range map[string]SubscriptionStatus{"absent": "", "cancelled": SubscriptionStatusCancelled, "expired": SubscriptionStatusExpired} {
+		t.Run(name, func(t *testing.T) {
+			appDB := startReconcilePostgres(t)
+			// Own merchant: the finding counts below are exact, so nothing another test
+			// seeded may be in scope (see newReconcileMerchant).
+			mid := newReconcileMerchant(t, appDB)
+			baseCtx := merchant.WithID(context.Background(), mid)
 
-	psp := seedTestPSPBindingFor(t, appDB, baseCtx, mid.UUID(), "nmi")
-	var seeded seededState
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID(), psp.ID)
-		return nil
-	}))
+			psp := seedTestPSPBindingFor(t, appDB, baseCtx, mid.UUID(), "nmi")
+			var seeded seededState
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				seeded = seedReconcileFixtures(t, ctx, appDB, mid.UUID(), psp.ID)
+				return nil
+			}))
 
-	store := &PGStore{DB: appDB}
-	newEngine := func(snap *RemoteSnapshot) *Engine {
-		return &Engine{
-			Fetchers:  map[Provider]RailFetcher{ProviderNMI: &fakeFetcher{provider: ProviderNMI, snap: snap}},
-			Store:     store,
-			Local:     &PGLocalStateLoader{DB: appDB},
-			Writer:    &PGLocalWriter{DB: appDB},
-			Decisions: NewDecisionApplier(appDB, nil),
-			// or#859: an enforce pass with no run record refuses.
-			Runs: &PGDestructiveRunRecorder{DB: appDB},
-		}
-	}
+			store := &PGStore{DB: appDB}
+			newEngine := func(snap *RemoteSnapshot) *Engine { return newPGReconcileEngine(appDB, snap) }
 
-	var snap *RemoteSnapshot
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		snap = reconcileSnapshot(t, ctx, appDB, seeded)
-		return nil
-	}))
+			var snap *RemoteSnapshot
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				snap = reconcileSnapshot(t, ctx, appDB, seeded)
+				if remoteStatus != "" {
+					var deadID string
+					require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT rail_subscription_id FROM openrails.subscriptions WHERE id=$1`, seeded.subDead).Scan(&deadID))
+					snap.Subscriptions = append(snap.Subscriptions, RemoteSubscription{RailSubscriptionID: deadID, Status: remoteStatus, RawStatus: string(remoteStatus)})
+				}
+				return nil
+			}))
 
-	// ---- advisory: findings persisted, zero local writes -------------------
-	var advisory *RunResult
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
-		advisory = res
-		return err
-	}))
-	require.NotNil(t, advisory)
-	assert.Equal(t, "completed", advisory.Status)
+			beforeAdvisory := reconcileBillingState(t, appDB, baseCtx)
+			// ---- advisory: findings persisted, zero local writes -------------------
+			var advisory *RunResult
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
+				advisory = res
+				return err
+			}))
+			require.NotNil(t, advisory)
+			assert.Equal(t, "completed", advisory.Status)
 
-	byType := map[FindingType]int{}
-	for _, f := range advisory.Findings {
-		byType[f.Type]++
-	}
-	assert.Equal(t, 3, byType[FindingRemoteSubMissingLocal], "PS-1: ghost + the two unmatched duplicates")
-	assert.Equal(t, 1, byType[FindingLocalActiveRemoteDead], "PS-2 absent subscription")
-	assert.Equal(t, 1, byType[FindingChargeMissingLocal], "PS-4 missing charge")
-	assert.Equal(t, 1, byType[FindingDuplicateSubscriptions], "PS-8 remote duplicates")
-
-	// Advisory persisted the run + findings...
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		run, err := store.GetRun(ctx, advisory.RunID)
-		require.NoError(t, err)
-		assert.Equal(t, "completed", run.Status)
-		assert.NotEmpty(t, run.Summary)
-
-		open, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi"})
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, len(open), 4)
-		return nil
-	}))
-
-	// ...but wrote nothing to billing state.
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		var status string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&status))
-		assert.Equal(t, "active", status, "advisory must not cancel anything")
-		var n int
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id LIKE 'itxn-%'`).Scan(&n))
-		assert.Zero(t, n, "advisory must not backfill payments")
-		return nil
-	}))
-
-	// ---- enforce: local state converges, findings auto_fixed ---------------
-	var enforce *RunResult
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
-		enforce = res
-		return err
-	}))
-	assert.Equal(t, "completed", enforce.Status)
-	assert.GreaterOrEqual(t, enforce.Summary.Providers["nmi"].AutoFixed, 2, "PS-2 + PS-4 applied")
-
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		// PS-2: subDead cancelled locally with cancel_type=expired, retry
-		// schedule cleared, entitlement revoked.
-		var status, cancelType string
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT status::text, COALESCE(cancel_type, '') FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).
-			Scan(&status, &cancelType))
-		assert.Equal(t, "cancelled", status)
-		assert.Equal(t, "expired", cancelType)
-
-		// #665 decider semantics (ResolveCancelled): access is revoked AS-OF the
-		// period end — the paid-for window is honored, never cut short by a
-		// provider-side death mid-period. The seeded window already ends at the
-		// period end, so nothing is stamped early and nothing survives past it.
-		var revokedAt, entEndAt *time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT revoked_at, end_at FROM openrails.entitlements WHERE id = $1`, seeded.entDeadID).Scan(&revokedAt, &entEndAt))
-		assert.Nil(t, revokedAt, "paid-for window is honored: no early revoke on a provider-dead cancel")
-		require.NotNil(t, entEndAt)
-		var deadPeriodEnd time.Time
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&deadPeriodEnd))
-		assert.False(t, entEndAt.After(deadPeriodEnd), "no access beyond the paid-for period")
-
-		// PS-4: the missing charge is backfilled, deduped identity.
-		var amount int64
-		var subjectID uuid.UUID
-		require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
-			`SELECT amount, customer_id FROM openrails.payments WHERE rail = 'nmi' AND transaction_id LIKE 'itxn-%'`).
-			Scan(&amount, &subjectID))
-		assert.Equal(t, int64(9_990_000), amount)
-		assert.Equal(t, seeded.subjectID, subjectID)
-
-		// PS-1 + PS-8 hold in the admin queue, never auto-applied.
-		queue, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", OnlyAdminQueue: true})
-		require.NoError(t, err)
-		queueTypes := map[FindingType]bool{}
-		for _, f := range queue {
-			queueTypes[f.Type] = true
-			assert.Equal(t, FindingStatusAdminRequired, f.Status)
-		}
-		assert.True(t, queueTypes[FindingRemoteSubMissingLocal], "PS-1 in admin queue")
-		assert.True(t, queueTypes[FindingDuplicateSubscriptions], "PS-8 in admin queue")
-		return nil
-	}))
-
-	// ---- rerun enforce: stable -----------------------------------------------
-	var rerun *RunResult
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
-		rerun = res
-		return err
-	}))
-	assert.Equal(t, "completed", rerun.Status)
-	assert.Zero(t, rerun.Summary.Providers["nmi"].AutoFixed, "second enforce run must be a no-op")
-	rerunTypes := map[FindingType]int{}
-	for _, f := range rerun.Findings {
-		rerunTypes[f.Type]++
-	}
-	assert.Zero(t, rerunTypes[FindingLocalActiveRemoteDead], "PS-2 converged")
-	assert.Zero(t, rerunTypes[FindingChargeMissingLocal], "PS-4 converged")
-	assert.Equal(t, 3, rerunTypes[FindingRemoteSubMissingLocal], "PS-1 persists for the admin")
-	assert.Equal(t, 1, rerunTypes[FindingDuplicateSubscriptions], "PS-8 persists for the admin")
-
-	// Identity is stable: the PS-1 records update in place instead of
-	// duplicating rows.
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		all, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingRemoteSubMissingLocal)})
-		require.NoError(t, err)
-		require.Len(t, all, 3, "three PS-1 identities (ghost + two unmatched duplicates), one row each")
-		var ghost *FindingRecord
-		for i := range all {
-			assert.Equal(t, &advisory.RunID, all[i].FirstSeenRun, "three runs, one row per identity")
-			assert.Equal(t, &rerun.RunID, all[i].LastSeenRun, "three runs, one row per identity")
-			if strings.HasPrefix(all[i].SubjectKey, "ghost-") {
-				ghost = &all[i]
+			byType := map[FindingType]int{}
+			for _, f := range advisory.Findings {
+				byType[f.Type]++
 			}
-		}
-		require.NotNil(t, ghost)
-		assert.Equal(t, &advisory.RunID, ghost.FirstSeenRun)
-		assert.Equal(t, &rerun.RunID, ghost.LastSeenRun)
+			assert.Equal(t, 3, byType[FindingRemoteSubMissingLocal], "PS-1: ghost + the two unmatched duplicates")
+			assert.Equal(t, 1, byType[FindingLocalActiveRemoteDead], "PS-2 dead remote subscription")
+			assert.Equal(t, 1, byType[FindingChargeMissingLocal], "PS-4 missing charge")
+			assert.Equal(t, 1, byType[FindingDuplicateSubscriptions], "PS-8 remote duplicates")
 
-		// Ack/dismiss lifecycle.
-		ok, err := store.AckFinding(ctx, ghost.ID, "imported by hand")
-		require.NoError(t, err)
-		assert.True(t, ok)
-		acked, err := store.GetFinding(ctx, ghost.ID)
-		require.NoError(t, err)
-		assert.Equal(t, FindingStatusFixed, acked.Status)
-		assert.Equal(t, "admin_fixed", acked.Resolution)
-		assert.Equal(t, "imported by hand", acked.Notes)
-		return nil
-	}))
+			// Advisory persisted the run + findings...
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				run, err := store.GetRun(ctx, advisory.RunID)
+				require.NoError(t, err)
+				assert.Equal(t, "completed", run.Status)
+				assert.NotEmpty(t, run.Summary)
 
-	// ---- drift vanishes: auto-resolve ---------------------------------------
-	fixedSnap := *snap
-	fixedSnap.Subscriptions = snap.Subscriptions[:1] // ghosts + dups disappear
-	require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
-		res, err := newEngine(&fixedSnap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, res.Summary.Providers["nmi"].AutoResolved, int64(1), "PS-8 vanished")
+				open, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi"})
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, len(open), 4)
+				pending, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingLocalActiveRemoteDead)})
+				require.NoError(t, err)
+				require.Len(t, pending, 1)
+				require.Equal(t, FindingStatusReconcileRequired, pending[0].Status)
+				return nil
+			}))
 
-		dups, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingDuplicateSubscriptions)})
-		require.NoError(t, err)
-		require.Len(t, dups, 1)
-		assert.Equal(t, FindingStatusFixed, dups[0].Status)
-		assert.Equal(t, "auto_vanished", dups[0].Resolution)
-		return nil
-	}))
+			// ...but wrote nothing to billing state.
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				var status string
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT status::text FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&status))
+				assert.Equal(t, "active", status, "advisory must not cancel anything")
+				var n int
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.payments WHERE transaction_id LIKE 'itxn-%'`).Scan(&n))
+				assert.Zero(t, n, "advisory must not backfill payments")
+				return nil
+			}))
+
+			require.Equal(t, beforeAdvisory, reconcileBillingState(t, appDB, baseCtx), "advisory must preserve the entire billing book")
+
+			// ---- enforce: local state converges, findings auto_fixed ---------------
+			var enforce *RunResult
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
+				enforce = res
+				return err
+			}))
+			assert.Equal(t, "completed", enforce.Status)
+			assert.GreaterOrEqual(t, enforce.Summary.Providers["nmi"].AutoFixed, 2, "PS-2 + PS-4 applied")
+
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				// PS-2: subDead cancelled locally with cancel_type=expired, retry
+				// schedule cleared, entitlement revoked.
+				var status, cancelType string
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+					`SELECT status::text, COALESCE(cancel_type, '') FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).
+					Scan(&status, &cancelType))
+				assert.Equal(t, "cancelled", status)
+				assert.Equal(t, "expired", cancelType)
+				fixed, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingLocalActiveRemoteDead)})
+				require.NoError(t, err)
+				require.Len(t, fixed, 1)
+				require.Equal(t, FindingStatusAutoFixed, fixed[0].Status)
+				require.Equal(t, "enforced", fixed[0].Resolution)
+
+				// #665 decider semantics (ResolveCancelled): access is revoked AS-OF the
+				// period end — the paid-for window is honored, never cut short by a
+				// provider-side death mid-period. The seeded window already ends at the
+				// period end, so nothing is stamped early and nothing survives past it.
+				var revokedAt, entEndAt *time.Time
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+					`SELECT revoked_at, end_at FROM openrails.entitlements WHERE id = $1`, seeded.entDeadID).Scan(&revokedAt, &entEndAt))
+				assert.Nil(t, revokedAt, "paid-for window is honored: no early revoke on a provider-dead cancel")
+				require.NotNil(t, entEndAt)
+				var deadPeriodEnd time.Time
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+					`SELECT current_period_ends_at FROM openrails.subscriptions WHERE id = $1`, seeded.subDead).Scan(&deadPeriodEnd))
+				assert.False(t, entEndAt.After(deadPeriodEnd), "no access beyond the paid-for period")
+
+				// PS-4: the missing charge is backfilled, deduped identity.
+				var amount int64
+				var subjectID uuid.UUID
+				require.NoError(t, appDB.Qx(ctx).QueryRow(ctx,
+					`SELECT amount, customer_id FROM openrails.payments WHERE rail = 'nmi' AND transaction_id LIKE 'itxn-%'`).
+					Scan(&amount, &subjectID))
+				assert.Equal(t, int64(9_990_000), amount)
+				assert.Equal(t, seeded.subjectID, subjectID)
+
+				// PS-1 + PS-8 hold in the admin queue, never auto-applied.
+				queue, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", OnlyAdminQueue: true})
+				require.NoError(t, err)
+				queueTypes := map[FindingType]bool{}
+				for _, f := range queue {
+					queueTypes[f.Type] = true
+					assert.Equal(t, FindingStatusAdminRequired, f.Status)
+				}
+				assert.True(t, queueTypes[FindingRemoteSubMissingLocal], "PS-1 in admin queue")
+				assert.True(t, queueTypes[FindingDuplicateSubscriptions], "PS-8 in admin queue")
+				return nil
+			}))
+
+			afterEnforce := reconcileBillingState(t, appDB, baseCtx)
+			// ---- rerun enforce: stable -----------------------------------------------
+			var rerun *RunResult
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				res, err := newEngine(snap).Run(ctx, RunParams{Mode: ModeEnforce, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
+				rerun = res
+				return err
+			}))
+			assert.Equal(t, "completed", rerun.Status)
+			assert.Zero(t, rerun.Summary.Providers["nmi"].AutoFixed, "second enforce run must be a no-op")
+			rerunTypes := map[FindingType]int{}
+			for _, f := range rerun.Findings {
+				rerunTypes[f.Type]++
+			}
+			assert.Zero(t, rerunTypes[FindingLocalActiveRemoteDead], "PS-2 converged")
+			assert.Zero(t, rerunTypes[FindingChargeMissingLocal], "PS-4 converged")
+			assert.Equal(t, 3, rerunTypes[FindingRemoteSubMissingLocal], "PS-1 persists for the admin")
+			assert.Equal(t, 1, rerunTypes[FindingDuplicateSubscriptions], "PS-8 persists for the admin")
+
+			require.Equal(t, afterEnforce, reconcileBillingState(t, appDB, baseCtx), "an unchanged replay must not rewrite billing rows")
+
+			// Identity is stable: the PS-1 records update in place instead of
+			// duplicating rows.
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				all, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingRemoteSubMissingLocal)})
+				require.NoError(t, err)
+				require.Len(t, all, 3, "three PS-1 identities (ghost + two unmatched duplicates), one row each")
+				var ghost *FindingRecord
+				for i := range all {
+					assert.Equal(t, &advisory.RunID, all[i].FirstSeenRun, "three runs, one row per identity")
+					assert.Equal(t, &rerun.RunID, all[i].LastSeenRun, "three runs, one row per identity")
+					if strings.HasPrefix(all[i].SubjectKey, "ghost-") {
+						ghost = &all[i]
+					}
+				}
+				require.NotNil(t, ghost)
+				assert.Equal(t, &advisory.RunID, ghost.FirstSeenRun)
+				assert.Equal(t, &rerun.RunID, ghost.LastSeenRun)
+
+				// Ack/dismiss lifecycle.
+				ok, err := store.AckFinding(ctx, ghost.ID, "imported by hand")
+				require.NoError(t, err)
+				assert.True(t, ok)
+				acked, err := store.GetFinding(ctx, ghost.ID)
+				require.NoError(t, err)
+				assert.Equal(t, FindingStatusFixed, acked.Status)
+				assert.Equal(t, "admin_fixed", acked.Resolution)
+				assert.Equal(t, "imported by hand", acked.Notes)
+				return nil
+			}))
+
+			// ---- drift vanishes: auto-resolve ---------------------------------------
+			fixedSnap := *snap
+			fixedSnap.Subscriptions = snap.Subscriptions[:1] // ghosts + dups disappear
+			require.NoError(t, appDB.RunInMerchantConn(baseCtx, func(ctx context.Context) error {
+				res, err := newEngine(&fixedSnap).Run(ctx, RunParams{Mode: ModeAdvisory, Providers: []Provider{ProviderNMI}, PSPs: map[Provider]PSPBinding{ProviderNMI: psp}})
+				require.NoError(t, err)
+				assert.GreaterOrEqual(t, res.Summary.Providers["nmi"].AutoResolved, int64(1), "PS-8 vanished")
+
+				dups, err := store.ListFindings(ctx, FindingFilter{Provider: "nmi", Type: string(FindingDuplicateSubscriptions)})
+				require.NoError(t, err)
+				require.Len(t, dups, 1)
+				assert.Equal(t, FindingStatusFixed, dups[0].Status)
+				assert.Equal(t, "auto_vanished", dups[0].Resolution)
+				return nil
+			}))
+		})
+	}
 }
 
 // TestReconcileMaterializeIntegration proves the PS-1 materialization end to
