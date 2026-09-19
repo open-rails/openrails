@@ -64,7 +64,7 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 		return fmt.Errorf("authkit: create migrator: %w", err)
 	}
 	defer func() { _ = authMigrator.Close() }()
-	if err := authMigrator.WithSchema("profiles", "profiles").ApplyMigrations(ctx, authMigrations); err != nil {
+	if err := authMigrator.WithSchema("profiles").ApplyMigrations(ctx, authMigrations); err != nil {
 		return fmt.Errorf("authkit: apply migrations: %w", err)
 	}
 	log.Info("✓ AuthKit migrations completed successfully")
@@ -254,9 +254,10 @@ func rewriteMigrationsSchema(migrations []migratekit.Migration, schema string) [
 }
 
 // ensurePostgresBootstrap creates the OpenRails schema (configurable via
-// db.schema, default `openrails` — #165/#471), shared extensions, and the
-// migration tracking table. schema is a pre-validated SQL identifier
-// (config.validateSchema), so it is safe to interpolate. CREATE SCHEMA IF NOT
+// db.schema, default `openrails` — #165/#471) and shared extensions.
+// Migratekit alone owns the migration tracking tables. schema is a validated
+// SQL identifier (config.validateSchema), so it is safe to interpolate.
+// CREATE SCHEMA IF NOT
 // EXISTS is a no-op when the host already owns the schema.
 func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) error {
 	if db == nil {
@@ -268,14 +269,6 @@ func ensurePostgresBootstrap(ctx context.Context, db *sql.DB, schema string) err
 	_, err := db.ExecContext(ctx, fmt.Sprintf(`
 		CREATE SCHEMA IF NOT EXISTS %s;
 		CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
-		CREATE TABLE IF NOT EXISTS public.migrations (
-			id BIGSERIAL PRIMARY KEY,
-			app TEXT NOT NULL,
-			database TEXT NOT NULL,
-			name TEXT NOT NULL,
-			migrated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			UNIQUE(app, database, name)
-		);
 	`, schema))
 	return err
 }

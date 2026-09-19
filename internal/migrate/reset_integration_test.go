@@ -48,12 +48,12 @@ func TestEmbeddedResetIsTransactionalAndLedgerScoped(t *testing.T) {
 			app text NOT NULL,
 			database text NOT NULL,
 			schema text NOT NULL,
-			name text NOT NULL
+			sequence bigint NOT NULL
 		);
-		INSERT INTO public.migrations (app, database, schema, name) VALUES
-			('openrails', 'postgres', 'openrails', '1'),
-			('openrails', 'postgres', 'another_schema', 'keep-schema'),
-			('another_app', 'postgres', 'openrails', 'keep-app');
+		INSERT INTO public.migrations (app, database, schema, sequence) VALUES
+			('openrails', 'postgres', 'openrails', 1),
+			('openrails', 'postgres', 'another_schema', 2),
+			('another_app', 'postgres', 'openrails', 3);
 	`)
 	require.NoError(t, err)
 

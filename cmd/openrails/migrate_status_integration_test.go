@@ -42,7 +42,7 @@ func TestMigrateStatusReportsContentDriftAndExitsNonzero(t *testing.T) {
 
 	_, err = database.Exec(ctx,
 		`UPDATE public.migrations SET content_sha256 = $1
-		  WHERE app = $2 AND database = 'postgres' AND schema = $3 AND name = '1'`,
+		  WHERE app = $2 AND database = 'postgres' AND schema = $3 AND sequence = 1`,
 		"mismatched-body", config.MigratekitApp, schema)
 	require.NoError(t, err)
 
