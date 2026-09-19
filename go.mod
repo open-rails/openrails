@@ -26,7 +26,7 @@ require (
 	github.com/moby/moby/api v1.54.2
 	github.com/moby/moby/client v0.4.1
 	github.com/open-rails/authkit v0.106.1
-	github.com/open-rails/migratekit v1.1.1
+	github.com/open-rails/migratekit v1.9.1
 	github.com/pganalyze/pg_query_go/v6 v6.2.2
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/riverqueue/river v0.47.0

@@ -9,6 +9,7 @@ checks() {
   # observe (business-time injection, raw SQL, and migration lock hazards).
   bash scripts/check_business_time_test.sh
   bash scripts/check_business_time.sh
+  bash scripts/go-test-gate_test.sh
   bash scripts/scan-injected-code.sh --all
   unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
   if [[ -n "$unformatted" ]]; then
@@ -53,7 +54,7 @@ e2e() {
   "$sqlc_bin" generate
   "$sqlc_bin" vet
   git diff --exit-code -- internal/db/gen
-  CGO_ENABLED=1 go test ./internal/db/sqlaudit/ -run '^TestQueryAudit$' -count=1
+  CGO_ENABLED=1 bash scripts/go-test-gate.sh ./internal/db/sqlaudit/ '^TestQueryAudit$'
   bash scripts/sql-lint.sh
   bash scripts/migration-lint.sh
   go run ./scripts/contracts -workflows

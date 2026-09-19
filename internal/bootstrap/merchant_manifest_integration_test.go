@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,7 +18,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	authpgmigrations "github.com/open-rails/authkit/migrations/postgres"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -783,23 +781,8 @@ func newExternalMerchantManifestTestPool(t *testing.T, ctx context.Context, admi
 
 func applyMerchantManifestTestSchema(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	entries, err := authpgmigrations.FS.ReadDir(".")
-	require.NoError(t, err)
-	names := make([]string, 0, len(entries))
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		if !strings.HasSuffix(name, ".up.sql") {
-			continue
-		}
-		b, rerr := authpgmigrations.FS.ReadFile(name)
-		require.NoError(t, rerr)
-		_, eerr := pool.Exec(ctx, string(b))
-		require.NoErrorf(t, eerr, "apply authkit migration %s", name)
-	}
-	_, err = pool.Exec(ctx, merchantManifestSchemaDDL)
+	dbtest.ApplyAuthKitMigrations(t, ctx, pool, "profiles")
+	_, err := pool.Exec(ctx, merchantManifestSchemaDDL)
 	require.NoError(t, err)
 
 	// Replay the baseline objects whose exact shape matters to this harness:

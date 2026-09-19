@@ -1,6 +1,6 @@
 //go:build integration
 
-package integrationharness
+package dbtest
 
 import (
 	"context"
@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// applyAuthKitMigrations runs AuthKit's embedded migration source through
+// ApplyAuthKitMigrations runs AuthKit's embedded migration source through
 // migratekit directly. The dedicated adapter handle keeps migration session
 // settings away from the harness' application pool.
-func applyAuthKitMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema string) {
+func ApplyAuthKitMigrations(t *testing.T, ctx context.Context, pool *pgxpool.Pool, schema string) {
 	t.Helper()
 	migrations, err := migratekit.LoadFromFS(authpostgres.FS)
 	require.NoError(t, err)

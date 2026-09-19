@@ -63,10 +63,10 @@ func startRLSPostgres(t *testing.T) (superDSN, appDSN string, ctx context.Contex
 
 	authMigrations, err := migratekit.LoadFromFS(authpgmigrations.FS)
 	require.NoError(t, err)
-	require.NoError(t, migratekit.NewPostgres(sqlDB, "authkit").ApplyMigrations(ctx, authMigrations))
+	require.NoError(t, migratekit.NewPostgres(sqlDB, "authkit").WithSchema("profiles").ApplyMigrations(ctx, authMigrations))
 	migrations, err := migratekit.LoadFromFS(postgresmigrations.FS)
 	require.NoError(t, err)
-	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp)
+	m := migratekit.NewPostgres(sqlDB, config.MigratekitApp).WithSchema(config.DefaultSchema)
 	require.NoError(t, m.ApplyMigrations(ctx, migrations))
 
 	// Production attaches LOGIN + a password to the app role out of band; do that
