@@ -34,7 +34,7 @@ func TestAuthKitRefreshCookieSurvivesBillingWrapper(t *testing.T) {
 	cfg := &config.Config{Env: "dev", APIURL: origin, Auth: &config.AuthConfig{Issuer: origin, KeysPath: t.TempDir()}}
 	cp, err := controlplane.New(ctx, cfg, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
-	t.Cleanup(cp.AuthService().Close)
+	t.Cleanup(cp.Close)
 	mount, err := authhttp.MountHandler(cp.AuthService(), authhttp.MountOptions{APIPrefix: ControlPlaneAuthPrefix, Groups: cp.MountedRouteGroups(), RefreshCookie: true})
 	require.NoError(t, err)
 	mux := http.NewServeMux()

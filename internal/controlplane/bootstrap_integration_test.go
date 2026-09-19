@@ -110,6 +110,7 @@ func newTestControlPlane(t *testing.T, pool *pgxpool.Pool) *ControlPlane {
 	}
 	cp, err := New(context.Background(), cfg, pool)
 	require.NoError(t, err)
+	t.Cleanup(cp.Close)
 	require.NotNil(t, cp)
 	return cp
 }

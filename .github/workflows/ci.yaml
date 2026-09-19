@@ -49,7 +49,9 @@ jobs:
   e2e:
     name: End-to-end
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # Leave room for browser/build/SQLC setup before the Go test process's own
+    # 25-minute timeout, so a stalled test can report its goroutine stacks.
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18-alpine
@@ -92,6 +94,14 @@ jobs:
         # build cannot be reused by this E2E job.
         run: bash scripts/build-admin-console.sh web/admin/dist
       - run: bash scripts/check.sh e2e
+      - name: Retain workflow test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: workflow-test-events-${{ github.run_attempt }}
+          path: .reports/v1-workflows.jsonl
+          if-no-files-found: warn
+          retention-days: 7
 
   security:
     name: Required Security

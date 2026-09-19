@@ -40,6 +40,7 @@ func TestFleetAggregatesUnderTheEnforcingRole(t *testing.T) {
 	rdb, _ := dbtest.SharedRedisClient(t)
 	cp, err := New(ctx, cfg, appPool, WithRedis(rdb))
 	require.NoError(t, err)
+	t.Cleanup(cp.Close)
 
 	sfx := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
 	mid := uuid.New()

@@ -65,6 +65,7 @@ func newDelegationHTTPFixture(t *testing.T, h *Harness) *delegationHTTPFixture {
 		return authkit.DelegationGrant{Permissions: []string{permissions.MerchantAll}}, nil
 	}})
 	require.NoError(t, err)
+	t.Cleanup(engine.Close)
 	svc, err := authhttp.New(engine, authhttp.Config{DirectPeerIP: true, DisableRateLimiting: true})
 	require.NoError(t, err)
 	t.Cleanup(svc.Close)

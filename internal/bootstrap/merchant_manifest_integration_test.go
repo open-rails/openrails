@@ -847,6 +847,7 @@ func newMerchantManifestControlPlane(t *testing.T, pool *pgxpool.Pool) *controlp
 	rdb, _ := dbtest.SharedRedisClient(t)
 	cp, err := controlplane.New(context.Background(), cfg, pool, controlplane.WithRedis(rdb))
 	require.NoError(t, err)
+	t.Cleanup(cp.Close)
 	require.NotNil(t, cp)
 	return cp
 }

@@ -35,6 +35,7 @@ func resolveCLIMerchant(ctx context.Context, database *db.DB, slug string) (merc
 	if err != nil {
 		return merchant.ID{}, err
 	}
+	defer groups.Close()
 	directory, err := merchants.NewDirectoryService(database.DataPool())
 	if err != nil {
 		return merchant.ID{}, err

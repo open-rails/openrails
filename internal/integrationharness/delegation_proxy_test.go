@@ -75,6 +75,7 @@ func TestDelegationProxyStorageAndMerchantAdmission(t *testing.T) {
 		Registration: authcore.RegistrationConfig{Verification: authkit.RegistrationVerificationNone},
 	}, authcore.Deps{Postgres: h.sharedPool(), Redis: denied})
 	require.NoError(t, err)
+	t.Cleanup(blocked.Close)
 	verify.WithDPoP(blocked.ClaimDPoPProof, target)(cp.DelegatedVerifier())
 	status, headers := request(external)
 	require.Equal(t, 503, status)

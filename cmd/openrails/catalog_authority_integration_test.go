@@ -30,6 +30,7 @@ func TestCLICatalogNamespacesStaySeparate(t *testing.T) {
 		Ephemeral: authcore.EphemeralConfig{AllowMemory: true},
 	}, authcore.Deps{Postgres: admin})
 	require.NoError(t, err)
+	t.Cleanup(core.Close)
 	require.NoError(t, core.SeedPermissionGroupContainment(ctx))
 	_, err = core.EnsureRootGroup(ctx)
 	require.NoError(t, err)
