@@ -417,7 +417,13 @@ func MerchantPinnedDSN(t *testing.T, merchantID uuid.UUID) string {
 	require.NoError(t, err, "parse shared app dsn")
 	q := u.Query()
 	q.Set("options", "-c app.merchant_id="+merchantID.String())
-	u.RawQuery = q.Encode()
+	// pgx 5.11 follows PostgreSQL URI semantics and treats a literal `+` in
+	// a query value as a plus sign. url.Values.Encode uses `+` for spaces,
+	// which would send the invalid GUC name `+app.merchant_id`. Preserve the
+	// space as %20 in this startup option.
+	rawQuery := q.Encode()
+	rawQuery = strings.Replace(rawQuery, "options=-c+", "options=-c%20", 1)
+	u.RawQuery = rawQuery
 	return u.String()
 }
 
