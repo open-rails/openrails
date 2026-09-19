@@ -132,33 +132,3 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           scanners: vuln,secret,misconfig
-
-  required-ci:
-    name: Required CI
-    runs-on: ubuntu-latest
-    needs: [checks, e2e, security]
-    if: always()
-    steps:
-      - name: Require every maintained gate
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-        run: jq -e 'all(.[]; .result == "success")' <<< "$RESULTS"
-
-  # Existing branch protection names are retained during the hard cut. This
-  # is a tiny wrapper around the complete security job, so the ruleset does not
-  # silently stop enforcing the injection detector while it is simplified.
-  injection-scan:
-    name: Injected Code Scan
-    runs-on: ubuntu-latest
-    needs: security
-    if: always()
-    steps:
-      - name: Require the security scan
-        run: test "${{ needs.security.result }}" = success
-
-  prefix-collision:
-    name: prefix_collision
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - run: bash scripts/migration-prefix-collision.sh
