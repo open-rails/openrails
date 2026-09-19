@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -429,56 +430,32 @@ func TestLoad_EnvTrimming(t *testing.T) {
 	assert.Equal(t, "pass", cfg.DB.Password)
 }
 
-func TestIsTestMode(t *testing.T) {
-	t.Run("defaults to live credentials when unset", func(t *testing.T) {
-		assert.False(t, (&Config{}).IsTestMode())
-	})
-
-	t.Run("test_mode=sandbox is sandbox", func(t *testing.T) {
-		assert.True(t, (&Config{TestMode: CredentialPostureSandbox}).IsTestMode())
-	})
-
-	t.Run("orthogonal to provider_write_mode", func(t *testing.T) {
-		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsTestMode())
-		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeLimited}).IsTestMode())
-		assert.False(t, (&Config{ProviderWriteMode: ProviderWriteModeReadOnly}).IsTestMode())
-		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureSandbox}).IsTestMode())
-		assert.True(t, (&Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: CredentialPostureSandbox}).IsTestMode())
-	})
+func TestCredentialAndWritePostures(t *testing.T) {
+	for _, posture := range []CredentialPosture{"", CredentialPostureLive, CredentialPostureSandbox} {
+		for _, mode := range []struct {
+			raw               string
+			limited, readonly bool
+		}{
+			{"", true, true}, {ProviderWriteModeFull, false, false}, {ProviderWriteModeLimited, true, false},
+			{ProviderWriteModeReadOnly, true, true}, {" Limited ", true, false}, {"redaonly", true, true},
+		} {
+			t.Run(string(posture)+"/"+mode.raw, func(t *testing.T) {
+				cfg := &Config{TestMode: posture, ProviderWriteMode: mode.raw}
+				require.Equal(t, posture == CredentialPostureSandbox, cfg.IsTestMode())
+				require.Equal(t, mode.limited, cfg.IsLimitedMode())
+				require.Equal(t, mode.readonly, cfg.IsProviderReadOnly())
+			})
+		}
+	}
+	for _, mode := range []string{"redaonly", "test", "production"} {
+		require.ErrorContains(t, Validate(&Config{ProviderWriteMode: mode}), "must be one of full, limited, readonly")
+	}
 }
 
 func TestIsDev(t *testing.T) {
-	// SEC-18: unset is NOT development. The permissive posture must be declared.
-	t.Run("returns false for empty env", func(t *testing.T) {
-		cfg := &Config{Env: ""}
-		assert.False(t, cfg.IsDev())
-	})
-
-	t.Run("returns true for dev", func(t *testing.T) {
-		cfg := &Config{Env: "dev"}
-		assert.True(t, cfg.IsDev())
-	})
-
-	t.Run("returns true for development", func(t *testing.T) {
-		cfg := &Config{Env: "development"}
-		assert.True(t, cfg.IsDev())
-	})
-
-	t.Run("returns false for prod", func(t *testing.T) {
-		cfg := &Config{Env: "prod"}
-		assert.False(t, cfg.IsDev())
-	})
-
-	t.Run("returns false for production", func(t *testing.T) {
-		cfg := &Config{Env: "production"}
-		assert.False(t, cfg.IsDev())
-	})
-
-	t.Run("is case sensitive (expects lowercase)", func(t *testing.T) {
-		// IsDev expects lowercase env values
-		cfg := &Config{Env: "DEV"}
-		assert.False(t, cfg.IsDev(), "uppercase DEV is not recognized as dev")
-	})
+	for _, env := range []string{"", "dev", "development", "prod", "production", "DEV"} {
+		require.Equal(t, env == "dev" || env == "development", (&Config{Env: env}).IsDev(), env)
+	}
 }
 
 func TestProductionTestModeValidation(t *testing.T) {
@@ -630,77 +607,33 @@ func stripeTestModeConfig(secretKey string, testMode bool) (*Config, PSPSet) {
 }
 
 func TestValidateStripeKeyForTestMode(t *testing.T) {
-	// Standard secret keys (sk_*)
-	t.Run("sk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("sk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "live key in test env must refuse to boot")
-	})
-
-	t.Run("sk_test_ + test_mode=true allowed", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("sk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "sk_test_abc123", rails["stripe"].Stripe.SecretKey, "test key in test env should be kept")
-	})
-
-	t.Run("sk_test_ + test_mode=false is a hard error in development", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("sk_test_abc123", false)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "sk_test_abc123", rails["stripe"].Stripe.SecretKey, "failed validation must not mutate the rail")
-	})
-
-	t.Run("sk_test_ + test_mode=false outside development is a hard error (#748)", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("sk_test_abc123", false)
-		cfg.Env = "production"
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "test key under live mode must refuse to boot outside development")
-		assert.Equal(t, "sk_test_abc123", rails["stripe"].Stripe.SecretKey, "a hard-failed validation must not silently mutate the config")
-	})
-
-	t.Run("sk_live_ + test_mode=false allowed", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("sk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "sk_live_abc123", rails["stripe"].Stripe.SecretKey, "live key in live env should be kept")
-	})
-
-	// Restricted keys (rk_*) — these must be classified the same as sk_* keys.
-	t.Run("rk_live_ + test_mode=true is a hard error (#347)", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("rk_live_abc123", true)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "restricted live key in test env must refuse to boot")
-	})
-
-	t.Run("rk_test_ + test_mode=true allowed", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("rk_test_abc123", true)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "rk_test_abc123", rails["stripe"].Stripe.SecretKey, "restricted test key in test env should be kept")
-	})
-
-	t.Run("rk_test_ + test_mode=false is a hard error in development", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("rk_test_abc123", false)
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "rk_test_abc123", rails["stripe"].Stripe.SecretKey, "failed validation must not mutate the rail")
-	})
-
-	t.Run("rk_test_ + test_mode=false outside development is a hard error (#748)", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("rk_test_abc123", false)
-		cfg.Env = "production"
-		assert.Error(t, validateStripeKeyForTestMode(cfg, rails), "restricted test key under live mode must refuse to boot outside development")
-	})
-
-	t.Run("rk_live_ + test_mode=false allowed", func(t *testing.T) {
-		cfg, rails := stripeTestModeConfig("rk_live_abc123", false)
-		assert.NoError(t, validateStripeKeyForTestMode(cfg, rails))
-		assert.Equal(t, "rk_live_abc123", rails["stripe"].Stripe.SecretKey, "restricted live key in live env should be kept")
-	})
-
-	t.Run("validates every stripe rail", func(t *testing.T) {
-		cfg := &Config{Env: "development", ProviderWriteMode: ProviderWriteModeFull, TestMode: CredentialPostureLive}
-		rails := PSPSet{
-			"stripe_primary":  {Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_primary"}},
-			"stripe_archived": {Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}},
+	// Restricted keys and secret keys follow the same credential-posture rules,
+	// including outside development. Refusal must not rewrite credentials.
+	for _, prefix := range []string{"sk", "rk"} {
+		for _, env := range []string{"development", "production"} {
+			for _, keyMode := range []string{"test", "live"} {
+				for _, sandbox := range []bool{true, false} {
+					key := prefix + "_" + keyMode + "_abc123"
+					t.Run(env+"/"+key+"/"+strconv.FormatBool(sandbox), func(t *testing.T) {
+						cfg, rails := stripeTestModeConfig(key, sandbox)
+						cfg.Env = env
+						err := validateStripeKeyForTestMode(cfg, rails)
+						if sandbox == (keyMode == "test") {
+							require.NoError(t, err)
+						} else {
+							require.Error(t, err)
+						}
+						require.Equal(t, key, rails["stripe"].Stripe.SecretKey)
+					})
+				}
+			}
 		}
-		require.Error(t, validateStripeKeyForTestMode(cfg, rails))
-		require.Equal(t, "sk_live_primary", rails["stripe_primary"].Stripe.SecretKey)
-		require.Equal(t, "sk_test_legacy", rails["stripe_archived"].Stripe.SecretKey)
-	})
+	}
+	cfg, rails := stripeTestModeConfig("sk_live_primary", false)
+	rails["stripe_archived"] = &PSPConfig{Rail: models.RailStripe, Archived: true, Stripe: &StripeRailConfig{SecretKey: "sk_test_legacy"}}
+	require.Error(t, validateStripeKeyForTestMode(cfg, rails), "archived accounts must also match the declared posture")
+	require.Equal(t, "sk_live_primary", rails["stripe"].Stripe.SecretKey)
+	require.Equal(t, "sk_test_legacy", rails["stripe_archived"].Stripe.SecretKey)
 }
 
 func TestActiveRailByType(t *testing.T) {
@@ -883,72 +816,34 @@ func TestSolanaRPCProviderValidation(t *testing.T) {
 // TestWebhookSecretRequiredOutsideDev verifies that a missing webhook_signing_secret is a
 // hard boot error in production but only a warning in development.
 func TestWebhookSecretRequiredOutsideDev(t *testing.T) {
-	prodCfg := func() *Config {
-		cfg := GetDefaultBillingConfig()
-		cfg.Env = "production"
-		return cfg
-	}
-	devCfg := func() *Config {
-		cfg := GetDefaultBillingConfig() // Env: "development" → isDev=true
-		cfg.TestMode = CredentialPostureSandbox
-		return cfg
-	}
-
-	tests := []struct {
-		name      string
-		cfg       *Config
-		rail      *PSPConfig
-		wantError bool
-	}{
-		// Stripe: missing webhook_signing_secret
-		{
-			name:      "stripe/missing webhook_signing_secret in dev → no error",
-			cfg:       devCfg(),
-			rail:      &PSPConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_test_dummy", WebhookSigningSecret: ""}},
-			wantError: false,
-		},
-		{
-			name:      "stripe/missing webhook_signing_secret in prod → error",
-			cfg:       prodCfg(),
-			rail:      &PSPConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSigningSecret: ""}},
-			wantError: true,
-		},
-		{
-			name:      "stripe/present webhook_signing_secret in prod → no error",
-			cfg:       prodCfg(),
-			rail:      &PSPConfig{Rail: models.RailStripe, Stripe: &StripeRailConfig{SecretKey: "sk_live_dummy", WebhookSigningSecret: "whsec_test_dummy"}},
-			wantError: false,
-		},
-		// NMI: missing webhook_signing_secret (security_key also required outside dev)
-		{
-			name:      "nmi/missing webhook_signing_secret in dev → no error",
-			cfg:       devCfg(),
-			rail:      &PSPConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: ""}},
-			wantError: false,
-		},
-		{
-			name:      "nmi/missing webhook_signing_secret in prod → error",
-			cfg:       prodCfg(),
-			rail:      &PSPConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: ""}},
-			wantError: true,
-		},
-		{
-			name:      "nmi/present webhook_signing_secret in prod → no error",
-			cfg:       prodCfg(),
-			rail:      &PSPConfig{Rail: models.RailNMI, NMI: &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: "whsec_test_dummy"}},
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateRailSet(tt.cfg, PSPSet{"p": tt.rail})
-			if tt.wantError {
-				require.Error(t, err)
-			} else {
-				require.NoError(t, err)
+	for _, rail := range []models.Rail{models.RailStripe, models.RailNMI} {
+		for _, env := range []string{"development", "production"} {
+			for _, secret := range []string{"", "whsec_test_dummy"} {
+				t.Run(string(rail)+"/"+env+"/"+secret, func(t *testing.T) {
+					cfg := GetDefaultBillingConfig()
+					cfg.Env = env
+					if cfg.IsDev() {
+						cfg.TestMode = CredentialPostureSandbox
+					}
+					psp := &PSPConfig{Rail: rail}
+					if rail == models.RailStripe {
+						key := "sk_live_dummy"
+						if cfg.IsDev() {
+							key = "sk_test_dummy"
+						}
+						psp.Stripe = &StripeRailConfig{SecretKey: key, WebhookSigningSecret: secret}
+					} else {
+						psp.NMI = &NMIRailConfig{SecurityKey: "sec_dummy", WebhookSigningSecret: secret}
+					}
+					err := ValidateRailSet(cfg, PSPSet{"p": psp})
+					if env == "production" && secret == "" {
+						require.Error(t, err)
+					} else {
+						require.NoError(t, err)
+					}
+				})
 			}
-		})
+		}
 	}
 }
 
@@ -1016,41 +911,6 @@ func TestLoad_DBSchemaEnv(t *testing.T) {
 	})
 }
 
-func TestOperatingModes(t *testing.T) {
-	// unset: FAIL CLOSED to readonly (Paul 2026-07-02) — provider writes need an
-	// explicit full|limited; test_mode defaults off
-	require.True(t, (&Config{}).IsLimitedMode())
-	require.True(t, (&Config{}).IsProviderReadOnly())
-	require.False(t, (&Config{}).IsTestMode())
-
-	require.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsLimitedMode())
-	require.False(t, (&Config{ProviderWriteMode: ProviderWriteModeFull}).IsProviderReadOnly())
-
-	limited := &Config{ProviderWriteMode: ProviderWriteModeLimited}
-	require.True(t, limited.IsLimitedMode())
-	require.False(t, limited.IsProviderReadOnly())
-
-	ro := &Config{ProviderWriteMode: ProviderWriteModeReadOnly}
-	require.True(t, ro.IsLimitedMode())
-	require.True(t, ro.IsProviderReadOnly())
-
-	// mode is pure behavior: test_mode does not change the behavior gates
-	roSandbox := &Config{ProviderWriteMode: ProviderWriteModeReadOnly, TestMode: CredentialPostureSandbox}
-	require.True(t, roSandbox.IsLimitedMode())
-	require.True(t, roSandbox.IsProviderReadOnly())
-
-	// case/space tolerant; unknown fail-closes to readonly pre-validation (a
-	// typo must never run with full behavior) and is rejected by Validate
-	require.True(t, (&Config{ProviderWriteMode: " Limited "}).IsLimitedMode())
-	require.True(t, (&Config{ProviderWriteMode: "redaonly"}).IsProviderReadOnly())
-	require.Error(t, Validate(&Config{ProviderWriteMode: "redaonly"}))
-
-	// hard cut (#355): the old mode values are gone, not aliased
-	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: "test"}), "must be one of full, limited, readonly")
-	require.ErrorContains(t, Validate(&Config{ProviderWriteMode: "production"}), "must be one of full, limited, readonly")
-
-}
-
 func TestFlexiblePortRange(t *testing.T) {
 	// #349: int16 wrapped every kernel-ephemeral port (>=32768) negative.
 	var p FlexiblePort
@@ -1098,54 +958,23 @@ func TestRateLimitsPartialOverrideKeepsDefaults(t *testing.T) {
 }
 
 func TestValidateEncryption(t *testing.T) {
-	valid32Key := base64.StdEncoding.EncodeToString(make([]byte, 32))
-	valid16Key := base64.StdEncoding.EncodeToString(make([]byte, 16))
-
-	tests := []struct {
+	for _, tc := range []struct {
 		name      string
 		cfg       *EncryptionConfig
 		wantError string
 	}{
-		{
-			name:      "nil config — encryption disabled, no error",
-			cfg:       nil,
-			wantError: "",
-		},
-		{
-			name:      "empty MasterKey — encryption disabled, no error",
-			cfg:       &EncryptionConfig{MasterKey: ""},
-			wantError: "",
-		},
-		{
-			name:      "whitespace-only MasterKey — treated as empty, no error",
-			cfg:       &EncryptionConfig{MasterKey: "   "},
-			wantError: "",
-		},
-		{
-			name:      "valid 32-byte base64 key — no error",
-			cfg:       &EncryptionConfig{MasterKey: valid32Key},
-			wantError: "",
-		},
-		{
-			name:      "non-base64 string — error",
-			cfg:       &EncryptionConfig{MasterKey: "not!base64!"},
-			wantError: "must be valid base64",
-		},
-		{
-			name:      "valid base64 of wrong length (16 bytes) — error",
-			cfg:       &EncryptionConfig{MasterKey: valid16Key},
-			wantError: "must decode to 32 bytes",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateEncryption(tt.cfg)
-			if tt.wantError == "" {
-				assert.NoError(t, err)
+		{"nil", nil, ""}, {"empty", &EncryptionConfig{}, ""},
+		{"whitespace", &EncryptionConfig{MasterKey: "   "}, ""},
+		{"32 bytes", &EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 32))}, ""},
+		{"invalid base64", &EncryptionConfig{MasterKey: "not!base64!"}, "must be valid base64"},
+		{"16 bytes", &EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 16))}, "must decode to 32 bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateEncryption(tc.cfg)
+			if tc.wantError == "" {
+				require.NoError(t, err)
 			} else {
-				assert.Error(t, err)
-				assert.ErrorContains(t, err, tt.wantError)
+				require.ErrorContains(t, err, tc.wantError)
 			}
 		})
 	}
