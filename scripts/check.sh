@@ -7,6 +7,7 @@ checks() {
   # Keep the source-level safety checks in the compact entrypoint. These are
   # cheap and catch regressions that a build or an end-to-end journey cannot
   # observe (business-time injection, raw SQL, and migration lock hazards).
+  bash scripts/migration-prefix-collision.sh
   bash scripts/check_business_time_test.sh
   bash scripts/check_business_time.sh
   bash scripts/go-test-gate_test.sh
