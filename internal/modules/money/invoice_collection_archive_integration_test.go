@@ -100,6 +100,11 @@ func testInvoiceCollectionArchive(t *testing.T, resolution string) {
 	require.Equal(t, original.Status, operation.Status)
 	require.JSONEq(t, string(original.Payload), string(operation.Payload))
 	require.JSONEq(t, string(original.ResultEvidence), string(operation.ResultEvidence))
+	receipt, found, err := intents.LoadCollectedReceipt(operation)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.NoError(t, receipt.Validate(operation))
+
 	var settled, transfers int
 	require.NoError(t, target.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.invoice_payments WHERE invoice_id=$1 AND status='settled'`, e.invoice).Scan(&settled))
 	require.NoError(t, target.Qx(ctx).QueryRow(ctx, `SELECT count(*) FROM openrails.ledger_transfers WHERE customer_id=$1 AND transfer_type='owed_payment'`, e.payer.UUID()).Scan(&transfers))

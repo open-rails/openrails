@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -110,7 +111,7 @@ func (f *fakeCharger) Prepare(_ context.Context, req money.ChargeRequest) (money
 		if f.lostResponse {
 			return money.ChargeResult{}, &nmi.TransportAmbiguousError{Err: errors.New("timeout after send")}
 		}
-		return money.ChargeResult{TransactionID: txn}, nil
+		return money.ChargeResult{TransactionID: txn, ExternalInvoiceID: "in_" + req.IdempotencyKey}, nil
 	}), nil
 }
 
@@ -211,6 +212,9 @@ func collectionRunnerClock(dbi *db.DB, charger money.Charger, verifier money.Col
 }
 
 func collectionRunnerFull(dbi *db.DB, charger money.Charger, verifier money.CollectionVerifier, cfg *config.Config, clock clockwork.Clock) *intents.Runner {
+	if verifier == nil {
+		verifier, _ = charger.(money.CollectionVerifier)
+	}
 	return &intents.Runner{
 		Store:    intents.NewStore(dbi),
 		Registry: intents.NewRegistry(money.NewInvoiceCollectionHandler(dbi, charger, verifier, cfg, clock)),
@@ -280,11 +284,11 @@ func latestBlockExpiry(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pa
 
 // frozenInstrumentOf is what an operation freezes for a saved method: every
 // charge states the instrument it was armed against.
-func frozenInstrumentOf(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pm uuid.UUID) money.CollectionInstrument {
+func frozenInstrumentOf(t *testing.T, pool *pgxpool.Pool, ctx context.Context, pm uuid.UUID) charge.FrozenInstrument {
 	t.Helper()
 	row, err := gen.New(pool).GetPaymentMethodByID(ctx, pm)
 	require.NoError(t, err)
-	return money.CollectionInstrumentOf(row)
+	return charge.FreezeInstrument(row)
 }
 
 func seedPaymentMethod(t *testing.T, pool *pgxpool.Pool, ctx context.Context, payer identity.CustomerID, rail string) uuid.UUID {
@@ -341,6 +345,9 @@ func seedPaymentMethodRow(t *testing.T, pool *pgxpool.Pool, ctx context.Context,
 	}
 	_, err := gen.New(pool).CreatePaymentMethod(ctx, params)
 	require.NoError(t, err)
+	if rail == "stripe" {
+		seedRailCustomer(t, pool, ctx, payer, rail, "cus_"+payer.UUID().String())
+	}
 	if rails.IsNMI(models.Rail(rail)) {
 		dbtest.SeedNMIStoredCredentialRefs(ctx, t, pool, pm)
 	}
@@ -443,7 +450,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 		IdempotencyKey:  "instrument-moved",
 		Instrument:      moved,
 	})
-	require.ErrorIs(t, err, money.ErrCollectionInstrumentChanged)
+	require.ErrorIs(t, err, charge.ErrInstrumentChanged)
 	require.Len(t, adapter.charges, 1, "a changed instrument must not dispatch")
 
 	_, err = ch.Prepare(ctx, money.ChargeRequest{

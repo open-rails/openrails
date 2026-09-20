@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"strings"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
@@ -82,18 +84,21 @@ type CollectionVerifyResult struct {
 // consulted, so an instrument that changed after submission cannot change
 // which receipt settles the charge.
 type CollectionReceiptExpectation struct {
-	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
-	OperationKey string
-	Rail         string
-	Instrument   CollectionInstrument
-	Amount       moneyutil.Cents
-	Currency     string
+	MerchantID          uuid.UUID
+	CustomerID          uuid.UUID
+	OperationKey        string
+	ProviderCustomerRef string
+	Rail                string
+	Instrument          charge.FrozenInstrument
+	Amount              moneyutil.Cents
+	Currency            string
 }
 
 // CollectionVerifier answers the reconciliation reads for one collection
 // operation. Implemented by the store-armed credential plane; faked in tests.
 type CollectionVerifier interface {
+	ReadCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, reference string) (intents.CollectedReceipt, bool, error)
+
 	// VerifyCollectionCharge looks for this operation's settled charge at the
 	// provider (NMI-family order reference search) and reads it back through
 	// the same exact match operator resolution uses. Supported=false for rails
@@ -276,7 +281,7 @@ func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, providerRe
 	if key == "" || expect.Amount <= 0 || strings.TrimSpace(expect.Currency) == "" {
 		return CollectionVerifyResult{}, errors.New("collection receipt expectation is incomplete")
 	}
-	if err := expect.Instrument.validate(); err != nil {
+	if err := expect.Instrument.Validate(); err != nil {
 		return CollectionVerifyResult{}, err
 	}
 	txnID, found, err := client.FindSuccessfulSaleByOrderID(ctx, key)
@@ -293,7 +298,7 @@ func nmiCollectionReceipt(ctx context.Context, client *nmi.NMIClient, providerRe
 	if providerReference != "" && txnID != providerReference {
 		return CollectionVerifyResult{}, fmt.Errorf("transaction %s is not the successful sale for order %s", providerReference, key)
 	}
-	if expect.Instrument.custodianHeld() {
+	if expect.Instrument.CustodianHeld() {
 		err = client.ConfirmApprovedUnvaultedSale(ctx, txnID, expect.Amount, expect.Currency)
 	} else {
 		err = client.ConfirmApprovedSale(ctx, txnID, expect.Instrument.RailCustomerRef, expect.Amount, expect.Currency)
@@ -315,11 +320,10 @@ func (b *MerchantCollectionAdapterBuilder) ConfirmCollectionNotExecuted(ctx cont
 		if err != nil {
 			return err
 		}
-		customerID, err := NewStripeCollectionAdapter(b.DB, service).stripeCustomerID(ctx, expect.MerchantID, expect.CustomerID)
-		if err != nil {
-			return err
+		if expect.ProviderCustomerRef == "" {
+			return errors.New("no frozen Stripe customer for collection cleanup")
 		}
-		return service.CleanupCollection(ctx, customerID, expect.OperationKey)
+		return service.CleanupCollection(ctx, expect.ProviderCustomerRef, expect.OperationKey)
 	}
 	res, err := b.VerifyCollectionCharge(ctx, expect)
 	if errors.Is(err, nmi.ErrReceiptMismatch) {
@@ -384,19 +388,7 @@ func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, sv
 	if err != nil {
 		return nil, err
 	}
-	service := &subscriptions.StripeService{
-		Config: b.Config,
-		// The store-resolved account IS the source here; hand StripeService a
-		// fixed single-account view so its ctx-time resolution can't drift
-		// from the scope this adapter was armed for.
-		Rails: railresolve.FixedSet{
-			string(models.RailStripe): {
-				Rail:      models.RailStripe,
-				AccountID: scope.AccountID,
-				Stripe:    &config.StripeRailConfig{SecretKey: secretKey},
-			},
-		},
-	}
+	service := subscriptions.NewAccountStripeService(b.Config, mid.UUID(), scope.ID, scope.AccountID, secretKey)
 	if b.Endpoints.StripeBaseURL != "" {
 		service.SetBaseURLForTest(b.Endpoints.StripeBaseURL)
 	}
@@ -479,4 +471,32 @@ func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Co
 		return "", fmt.Errorf("merchant %s custodian %s: secret %s is empty", mid.String(), custodian.Key, ref.Name)
 	}
 	return value, nil
+}
+
+// ReadCollectionReceipt resolves the immutable accepted account before reading
+// provider facts. A boolean reconciliation result cannot settle a collection.
+func (b *MerchantCollectionAdapterBuilder) ReadCollectionReceipt(ctx context.Context, in gen.OpenrailsRailIntent, reference string) (intents.CollectedReceipt, bool, error) {
+	p, err := intents.DecodeInvoiceCollectionPayload(in)
+	if err != nil {
+		return intents.CollectedReceipt{}, false, err
+	}
+	if p.Rail != "stripe" {
+		return intents.ReadNMICollectionReceipt(ctx, in, b, reference)
+	}
+	svc := b.merchants()
+	if svc == nil {
+		return intents.CollectedReceipt{}, false, errors.New("Stripe collection plane is not armed")
+	}
+	scope, ok, err := b.resolveScope(ctx, svc, merchant.ID(in.MerchantID), p.Rail, in.PspID)
+	if err != nil {
+		return intents.CollectedReceipt{}, false, err
+	}
+	if !ok {
+		return intents.CollectedReceipt{}, false, errors.New("accepted Stripe account cannot be armed")
+	}
+	service, err := b.stripeService(ctx, svc, merchant.ID(in.MerchantID), scope)
+	if err != nil {
+		return intents.CollectedReceipt{}, false, err
+	}
+	return intents.ReadStripeCollectionReceipt(ctx, in, service, reference)
 }

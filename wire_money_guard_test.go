@@ -49,7 +49,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/service/spend.go:CreditAccountSnapshot.OutstandingOwedAmount outstanding_owed_amount":                                                  notHTTPInternalRow,
 	"internal/service/host_events.go:func ListHostEvents.AmountFloor amount_floor":                                                                   notHTTPStoredPayload,
 	"internal/service/host_events.go:func ListHostEvents.OverdueAmount overdue_amount":                                                               notHTTPStoredPayload,
-	"internal/modules/money/invoice_collection_intent.go:InvoiceCollectionPayload.Amount amount":                                                     notHTTPIntentPayload,
+	"internal/intents/collection_payload.go:InvoiceCollectionPayload.Amount amount":                                                                  notHTTPIntentPayload,
 	"embed/river.go:InvoiceSweepArgs.CollectionThresholdAmount collection_threshold_amount":                                                          notHTTPJobArgs,
 	"internal/db/models/billing_policy.go:BillingPolicy.AccrualRateCapPerHour accrual_rate_cap_per_hour":                                             notHTTPStorageRow,
 	"internal/db/models/billing_policy.go:BillingPolicy.CollectionThresholdAmount collection_threshold_amount":                                       notHTTPStorageRow,

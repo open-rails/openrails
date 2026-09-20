@@ -142,7 +142,7 @@ func (f *fakeStripe) handle(w http.ResponseWriter, r *http.Request) {
 			}
 			f.pending = nil
 		}
-		f.invoices[id] = map[string]any{"id": id, "status": "draft", "amount_due": total, "amount_paid": int64(0), "currency": "usd",
+		f.invoices[id] = map[string]any{"id": id, "customer": r.Form.Get("customer"), "default_payment_method": r.Form.Get("default_payment_method"), "status": "draft", "amount_due": total, "amount_paid": int64(0), "currency": "usd",
 			"metadata": map[string]string{"openrails_collection_key": r.Form.Get("metadata[openrails_collection_key]")}}
 		body, _ = json.Marshal(f.invoices[id])
 	case strings.HasSuffix(r.URL.Path, "/finalize"):
@@ -199,6 +199,14 @@ func (f *fakeStripe) handle(w http.ResponseWriter, r *http.Request) {
 
 func (f *fakeStripe) handleGet(w http.ResponseWriter, r *http.Request) {
 	switch {
+	case strings.HasPrefix(r.URL.Path, "/v1/charges/"):
+		id := strings.TrimPrefix(r.URL.Path, "/v1/charges/ch_")
+		inv, ok := f.invoices[id]
+		if !ok || inv["status"] != "paid" {
+			w.WriteHeader(404)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "ch_" + id, "invoice": id, "customer": inv["customer"], "payment_method": inv["default_payment_method"], "amount_captured": inv["amount_paid"], "currency": inv["currency"], "status": "succeeded", "paid": true, "captured": true})
 	case r.URL.Path == "/v1/invoices":
 		data := make([]map[string]any, 0, len(f.invoices))
 		for _, inv := range f.invoices {

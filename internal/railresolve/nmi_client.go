@@ -90,6 +90,9 @@ func (a *NMIArmer) ResolveScope(ctx context.Context, mid merchant.ID, rail strin
 		if err != nil {
 			return merchants.PSPScope{}, false, fmt.Errorf("load stamped PSP: %w", err)
 		}
+		if row.MerchantID != mid.UUID() {
+			return merchants.PSPScope{}, false, errors.New("stamped provider account belongs to another merchant")
+		}
 		if !rails.SameRail(models.Rail(row.Rail), models.Rail(rail)) {
 			return merchants.PSPScope{}, false, fmt.Errorf("stamped PSP %s is on rail %s, not %s", row.ID, row.Rail, rail)
 		}
@@ -106,7 +109,7 @@ func (a *NMIArmer) NMIClient(ctx context.Context, mid merchant.ID, scope merchan
 		return nil, err
 	}
 	webhookSecret, _, _ := a.Secret(ctx, mid, scope, "webhook_signing_secret")
-	client, err := nmi.NewClient(scope.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, WebhookSecret: webhookSecret}, a.testMode())
+	client, err := nmi.NewAccountClient(mid.UUID(), scope.ID, scope.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, WebhookSecret: webhookSecret}, a.testMode())
 	if err != nil {
 		return nil, fmt.Errorf("build store-armed NMI client: %w", err)
 	}

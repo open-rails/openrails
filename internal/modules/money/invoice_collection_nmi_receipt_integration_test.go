@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,7 +31,9 @@ import (
 // uses to bind an operator receipt: Direct Post sale (always an uncertain
 // 421 here), the Query API order search, and the v5 exact payment read.
 type fakeNMIReceiptGateway struct {
-	mu sync.Mutex
+	queryStarted chan struct{}
+	queryGate    chan struct{}
+	mu           sync.Mutex
 	// saleForOrder is what the order-reference search returns per order id.
 	saleForOrder map[string]string
 	// payments is the v5 read per transaction id.
@@ -74,6 +77,11 @@ func newFakeNMIReceiptGateway(t *testing.T) (*fakeNMIReceiptGateway, *httptest.S
 			}
 			fmt.Fprint(w, "response=3&responsetext=Communication+error&response_code=421")
 			return
+		}
+		if gate := f.queryGate; gate != nil {
+			f.queryGate = nil
+			close(f.queryStarted)
+			<-gate
 		}
 		if txn, ok := f.saleForOrder[r.Form.Get("order_id")]; ok {
 			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>%s</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, txn, r.Form.Get("order_id"))
@@ -180,9 +188,9 @@ func (e nmiReceiptEnv) methodRow(t *testing.T) gen.OpenrailsPaymentMethod {
 }
 
 // frozenInstrument is the instrument the live operation froze at enqueue.
-func (e nmiReceiptEnv) frozenInstrument(t *testing.T) money.CollectionInstrument {
+func (e nmiReceiptEnv) frozenInstrument(t *testing.T) charge.FrozenInstrument {
 	t.Helper()
-	var payload money.InvoiceCollectionPayload
+	var payload intents.InvoiceCollectionPayload
 	require.NoError(t, json.Unmarshal(latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Payload, &payload))
 	return payload.Instrument
 }
