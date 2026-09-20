@@ -392,9 +392,10 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 			if err != nil {
 				return err
 			}
-			if method.StoredCredentialUnscheduledRef != "" && method.StoredCredentialUnscheduledRef != transactionID {
-				return errors.New("approved collection anchor conflicts with the current instrument agreement")
-			}
+			// Another already-submitted initial CIT on this same instrument may
+			// have settled first. Its write-once agreement does not invalidate
+			// this operation's qualified payment. Compare the frozen instrument
+			// without that newly established anchor; capture below preserves it.
 			method.StoredCredentialUnscheduledRef = ""
 			if err := p.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
 				return err
