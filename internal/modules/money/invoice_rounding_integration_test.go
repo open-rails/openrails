@@ -47,7 +47,7 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			require.NoError(t, err)
 			_, err = pool.Exec(ctx, `INSERT INTO openrails.psps(merchant_id,id,rail,environment,account_id) VALUES($1,$2,'nmi','test',$3)`, mid.UUID(), psp, account)
 			require.NoError(t, err)
-			_, err = pool.Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id) VALUES($1,$2,$3,$4,'nmi',$5,'billing','initial')`, mid.UUID(), method, payer.UUID(), psp, "vault_"+method.String())
+			_, err = pool.Exec(ctx, `INSERT INTO openrails.payment_methods(merchant_id,id,customer_id,psp_id,rail,rail_customer_ref,rail_method_ref,initial_transaction_id,stored_credential_unscheduled_ref) VALUES($1,$2,$3,$4,'nmi',$5,'billing','initial','approved-unscheduled')`, mid.UUID(), method, payer.UUID(), psp, "vault_"+method.String())
 			require.NoError(t, err)
 			secret, err := merchants.PSPSecretName("nmi", "test", account, "security_key")
 			require.NoError(t, err)
