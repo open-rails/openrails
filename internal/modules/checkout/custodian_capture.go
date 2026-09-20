@@ -8,9 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/mail"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -151,6 +153,24 @@ func sameCaptureAccount(a, b models.CheckoutCapture) bool {
 	return a.MerchantID == b.MerchantID && a.PSPID == b.PSPID && a.CustodianID == b.CustodianID && a.AccountID == b.AccountID && a.Environment == b.Environment && a.ProfileID == b.ProfileID && a.PublicAPIKey == b.PublicAPIKey && a.APIBaseURL == b.APIBaseURL && a.SDKURL == b.SDKURL
 }
 
+// Contact data satisfies the vendor's customer schema. It never selects an
+// account: only authenticated merchant/payer ids derive the exact reference.
+func captureContact(req *CheckoutSessionCreateRequest, user *UserIdentity) (string, string, error) {
+	name := strings.TrimSpace(user.Username)
+	if name == "" {
+		name = strings.TrimSpace(req.Payment.NameOnCard)
+	}
+	email := strings.TrimSpace(req.Payment.Email)
+	if user.Email != nil && strings.TrimSpace(*user.Email) != "" {
+		email = strings.TrimSpace(*user.Email)
+	}
+	address, err := mail.ParseAddress(email)
+	if name == "" || len(name) > 200 || strings.IndexFunc(name, unicode.IsControl) >= 0 || len(email) > 320 || err != nil || address.Name != "" || address.Address != email || cardguard.ContainsPAN(name) || cardguard.ContainsPAN(email) {
+		return "", "", fmt.Errorf("%w: capture requires a valid contact email and name", ErrCheckoutSessionValidation)
+	}
+	return name, email, nil
+}
+
 func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, req *CheckoutSessionCreateRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	if err := rejectCheckoutSessionPAN(req); err != nil {
 		return nil, err
@@ -161,11 +181,14 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	payment := req.Payment
 	payment.PSPID = uuid.Nil
 	payment.Rail = ""
+	payment.Email = ""
+	payment.NameOnCard = ""
 	if payment != (CheckoutSessionPaymentRequest{}) || req.PriceID != "" || req.SubscriptionID != "" || req.NewPriceID != "" || req.SuccessURL != "" || req.CancelURL != "" || (req.Payment.Rail != "" && req.Payment.Rail != "nmi") {
 		return nil, fmt.Errorf("%w: setup accepts no purchase, token or redirect fields", ErrCheckoutSessionValidation)
 	}
-	if user.Email == nil || strings.TrimSpace(*user.Email) == "" || strings.TrimSpace(user.Username) == "" {
-		return nil, fmt.Errorf("%w: capture requires verified customer email and name", ErrCheckoutSessionValidation)
+	name, email, err := captureContact(req, user)
+	if err != nil {
+		return nil, err
 	}
 	customer, err := customerIDFromUser(user.ID)
 	if err != nil {
@@ -177,10 +200,9 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	}
 	canonical := *req
 	canonical.Payment.Rail = "nmi"
-	baseFingerprint := checkoutSessionRequestFingerprintForRail(&canonical, user, "nmi")
-	body, _ := json.Marshal([]any{baseFingerprint, user.Username, user.Email})
-	bodyDigest := sha256.Sum256(body)
-	fingerprint := hex.EncodeToString(bodyDigest[:])
+	canonical.Payment.Email = email
+	canonical.Payment.NameOnCard = name
+	fingerprint := checkoutSessionRequestFingerprintForRail(&canonical, user, "nmi")
 	id := captureSessionID(owner, customer, req.IdempotencyKey)
 	session, err := s.repo.GetByID(ctx, id)
 	if err == nil {
@@ -238,7 +260,7 @@ func (s *CheckoutSessionService) createPaymentMethodSetup(ctx context.Context, r
 	if !s.now().Before(accepted.ExpiresAt) {
 		return s.renderPaymentMethodSetup(ctx, session)
 	}
-	vendorCustomer, err := client.EnsureCustomer(ctx, captureCustomerReference(owner, customer), user.Username, *user.Email)
+	vendorCustomer, err := client.EnsureCustomer(ctx, captureCustomerReference(owner, customer), name, email)
 	if err != nil {
 		return nil, ErrCheckoutCaptureUnavailable
 	}

@@ -268,6 +268,23 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 			require.Equal(t, 1, methods)
 			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT (SELECT count(*) FROM openrails.payments WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM openrails.subscriptions WHERE merchant_id=$1 AND customer_id=$2)+(SELECT count(*) FROM openrails.ledger_accounts WHERE merchant_id=$1 AND customer_id=$2)`, mid.UUID(), req.Customer.ID.UUID()).Scan(&financial))
 			require.Zero(t, financial)
+			beforeDelete := g.count()
+			_, err = client.DeletePaymentMethod(ctx, req.Customer.ID, *completed.PaymentMethodID)
+			var refusal *openrails.StatusError
+			require.ErrorAs(t, err, &refusal)
+			require.Equal(t, "payment_method_delete_unsupported", refusal.Code)
+			require.Equal(t, beforeDelete, g.count())
+			// The local history can outlive a method, e.g. after a qualified
+			// custodian removal/retirement. This is not a live vendor delete.
+			require.NoError(t, surface.App().Runtime.DB.RunInMerchantConn(merchant.WithID(ctx, mid), func(scoped context.Context) error {
+				return surface.App().Runtime.PaymentMethodService.Delete(scoped, completed.PaymentMethodID.UUID())
+			}))
+			historical, err := client.ConfirmCheckoutSession(ctx, created.ID, confirm)
+			require.NoError(t, err)
+			require.Equal(t, completed.PaymentMethodID, historical.PaymentMethodID)
+			require.Nil(t, historical.Capture)
+			require.NoError(t, h.sharedPool().QueryRow(ctx, `SELECT count(*) FROM openrails.payment_methods WHERE merchant_id=$1 AND customer_id=$2`, mid.UUID(), req.Customer.ID.UUID()).Scan(&methods))
+			require.Zero(t, methods, "terminal replay must not recreate a removed method")
 		})
 	}
 	t.Run("lost caller response then cold runtime", func(t *testing.T) {
@@ -314,6 +331,42 @@ func TestHyperSwitchCaptureSetupWorkflow(t *testing.T) {
 		require.Equal(t, a.session.Capture, got.Capture)
 	})
 
+	t.Run("contact email never selects a customer identity", func(t *testing.T) {
+		firstReq := request()
+		firstReq.Customer.VerifiedEmail = ""
+		firstReq.Customer.Username = ""
+		firstReq.Payment.Email = "same-address@example.test"
+		firstReq.Payment.NameOnCard = "First Contact"
+		first, err := remote.CreateCheckoutSession(ctx, firstReq)
+		require.NoError(t, err)
+		changed := firstReq
+		changed.Payment.Email = "another-address@example.test"
+		_, err = remote.CreateCheckoutSession(ctx, changed)
+		require.ErrorIs(t, err, openrails.ErrConflict)
+		resumed, err := remote.GetCheckoutSession(ctx, firstReq.Customer.ID, first.ID)
+		require.NoError(t, err)
+		require.Equal(t, first.Capture, resumed.Capture)
+		otherReq := request()
+		otherReq.Customer.VerifiedEmail = ""
+		otherReq.Customer.Username = ""
+		otherReq.Payment.Email = firstReq.Payment.Email
+		otherReq.Payment.NameOnCard = "Other Contact"
+		other, err := remote.CreateCheckoutSession(ctx, otherReq)
+		require.NoError(t, err)
+		require.NotEqual(t, first.Capture.CustomerID, other.Capture.CustomerID)
+		_, err = remote.ConfirmCheckoutSession(ctx, other.ID, openrails.ConfirmCheckoutSessionRequest{CustomerID: otherReq.Customer.ID, Payment: openrails.ConfirmPayment{Capture: &openrails.CustodianCaptureReference{CustodianID: custodian, SessionID: other.Capture.SessionID, Token: g.complete(first.Capture.SessionID)}}})
+		require.Error(t, err)
+		preferred := request()
+		preferred.Payment.Email = "ignored@example.test"
+		preferred.Payment.NameOnCard = "Ignored Contact"
+		original, err := remote.CreateCheckoutSession(ctx, preferred)
+		require.NoError(t, err)
+		preferred.Payment.Email = "other-ignored@example.test"
+		preferred.Payment.NameOnCard = "Also Ignored"
+		replay, err := remote.CreateCheckoutSession(ctx, preferred)
+		require.NoError(t, err)
+		require.Equal(t, original.Capture, replay.Capture, "verified host contact determines the effective fingerprint")
+	})
 	t.Run("unpatched deployment cannot issue browser authority", func(t *testing.T) {
 		for _, mode := range []string{"stock", "missing", "disabled"} {
 			g.mu.Lock()

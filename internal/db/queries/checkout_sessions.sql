@@ -156,13 +156,13 @@ RETURNING *;
 
 -- name: CountInvalidCheckoutCaptureReferences :one
 -- Terminal replay retains the original capture authority even after a later
--- legitimate instrument remap. The attached local method must still be owned
--- by this payer; it need not still use the historical custodian/PSP.
+-- legitimate instrument remap. A still-present method must belong to this payer; its legitimate later
+-- deletion leaves historical replay intact and does not recreate the method.
 SELECT count(*) FROM openrails.checkout_sessions cs
 WHERE cs.merchant_id=sqlc.arg(merchant_id)::uuid AND cs.mode='payment_method'
 AND (
  NOT EXISTS(SELECT 1 FROM openrails.custodians c WHERE c.merchant_id=cs.merchant_id AND c.id::text=cs.rail_state#>>'{capture,custodian_id}' AND c.kind='hyperswitch' AND c.account_id=cs.rail_state#>>'{capture,account_id}')
- OR (cs.status='succeeded' AND NOT EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id=cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
+ OR (cs.status='succeeded' AND EXISTS(SELECT 1 FROM openrails.payment_methods pm WHERE pm.merchant_id=cs.merchant_id AND pm.customer_id<>cs.customer_id AND pm.id::text=cs.rail_state#>>'{capture,payment_method_id}'))
 );
 
 -- name: GetCheckoutCaptureAccountsForShare :one
