@@ -29,10 +29,11 @@ func TestBillingImportHTTP(t *testing.T) {
 	ctx := context.Background()
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
+	owned := surface.ProvisionOwnedMerchant("billing-import-" + uuid.NewString()[:8])
 	pool := h.Pool()
 
 	sfx := strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
-	merchantID := dbtest.TestMerchantID.UUID()
+	merchantID := owned.MerchantID.UUID()
 	prod, price := uuid.New(), uuid.New()
 	cActive, cCancelled := uuid.New(), uuid.New()
 
@@ -112,7 +113,7 @@ func TestBillingImportHTTP(t *testing.T) {
 					PaidThrough: &paidThrough, Evidence: evidence,
 				}},
 			}
-			status, body := requestJSON(t, http.MethodPost, importURL, surface.Token, candidate)
+			status, body := requestJSON(t, http.MethodPost, importURL, owned.APIKey, candidate)
 			require.Equalf(t, http.StatusBadRequest, status, "PAN import refusal: %s", body)
 			var envelope struct {
 				Error struct{ Type, Code, Message string }
@@ -129,7 +130,7 @@ func TestBillingImportHTTP(t *testing.T) {
 	})
 
 	t.Run("authenticated import lands the book", func(t *testing.T) {
-		status, body := requestJSON(t, http.MethodPost, importURL, surface.Token, book)
+		status, body := requestJSON(t, http.MethodPost, importURL, owned.APIKey, book)
 		require.Equalf(t, http.StatusOK, status, "import: %s", string(body))
 		var res importResult
 		require.NoError(t, json.Unmarshal(body, &res))
@@ -154,7 +155,7 @@ func TestBillingImportHTTP(t *testing.T) {
 	})
 
 	t.Run("re-import is idempotent", func(t *testing.T) {
-		status, body := requestJSON(t, http.MethodPost, importURL, surface.Token, book)
+		status, body := requestJSON(t, http.MethodPost, importURL, owned.APIKey, book)
 		require.Equalf(t, http.StatusOK, status, "re-import: %s", string(body))
 		var res importResult
 		require.NoError(t, json.Unmarshal(body, &res))
@@ -173,7 +174,7 @@ func TestBillingImportHTTP(t *testing.T) {
 	})
 
 	t.Run("read-only credential is rejected", func(t *testing.T) {
-		ro := surface.MintAPIKey(dbtest.TestMerchantSlug, "imp-ro-"+sfx,
+		ro := surface.MintAPIKey(owned.MerchantSlug, "imp-ro-"+sfx,
 			[]string{controlplane.PermMerchantSubscriptionsRead, controlplane.PermMerchantCatalogRead})
 		status, body := requestJSON(t, http.MethodPost, importURL, ro, book)
 		require.Equalf(t, http.StatusForbidden, status, "read-only key: %s", string(body))
@@ -197,13 +198,13 @@ func TestBillingImportHTTP(t *testing.T) {
 	})
 
 	t.Run("malformed as_of is a 400", func(t *testing.T) {
-		status, _ := requestJSON(t, http.MethodPost, importURL, surface.Token,
+		status, _ := requestJSON(t, http.MethodPost, importURL, owned.APIKey,
 			json.RawMessage(`{"as_of":"not-a-timestamp","subscriptions":[]}`))
 		require.Equal(t, http.StatusBadRequest, status)
 	})
 
 	t.Run("missing as_of is a 400 in the Stripe envelope", func(t *testing.T) {
-		status, body := requestJSON(t, http.MethodPost, importURL, surface.Token,
+		status, body := requestJSON(t, http.MethodPost, importURL, owned.APIKey,
 			json.RawMessage(`{"subscriptions":[]}`))
 		require.Equal(t, http.StatusBadRequest, status)
 		var envelope struct {
