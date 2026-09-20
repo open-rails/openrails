@@ -25,17 +25,20 @@ func TestMerchantPinnedDSNEncodesStartupOptionSpace(t *testing.T) {
 }
 
 func TestReplaceDSNDatabaseTargetsOwnedDatabase(t *testing.T) {
-	for name, original := range map[string]string{
-		"URL":           "postgres://test:secret@localhost/original?sslmode=disable",
-		"URL overrides": "postgresql://test:secret@localhost/original?sslmode=disable&dbname=foreign&dbname=another",
-		"keyword":       "host=localhost user=test password='test secret' dbname=original sslmode=disable",
+	for name, tc := range map[string]struct{ dsn, password string }{
+		"URL":              {"postgres://test:secret@localhost/original?sslmode=disable", "secret"},
+		"URL overrides":    {"postgresql://test:secret@localhost/original?sslmode=disable&dbname=foreign&dbname=another", "secret"},
+		"keyword":          {"host=localhost user=test password='test secret' dbname=original sslmode=disable", "test secret"},
+		"quoted database":  {"host=localhost user=test password='test secret' dbname='original database' sslmode=disable", "test secret"},
+		"password content": {"host=localhost user=test password='test  dbname=foreign secret' dbname=original sslmode=disable", "test  dbname=foreign secret"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rewritten, err := replaceDSNDatabase(original, "owned_fixture")
+			rewritten, err := replaceDSNDatabase(tc.dsn, "owned_fixture")
 			require.NoError(t, err)
 			cfg, err := pgx.ParseConfig(rewritten)
 			require.NoError(t, err)
 			require.Equal(t, "owned_fixture", cfg.Database)
+			require.Equal(t, tc.password, cfg.Password)
 		})
 	}
 }

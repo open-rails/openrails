@@ -260,17 +260,9 @@ func replaceDSNDatabase(dsn, dbName string) (string, error) {
 		u.RawQuery = query.Encode()
 		return u.String(), nil
 	}
-	// key=value form: drop any existing dbname and append the new one.
-	fields := strings.Fields(dsn)
-	out := make([]string, 0, len(fields)+1)
-	for _, f := range fields {
-		if strings.HasPrefix(f, "dbname=") {
-			continue
-		}
-		out = append(out, f)
-	}
-	out = append(out, "dbname="+dbName)
-	return strings.Join(out, " "), nil
+	// pgx takes the last keyword value. Keep the original quoting and spacing;
+	// dbName is the generated identifier owned by this test process.
+	return dsn + " dbname=" + dbName, nil
 }
 
 func bootstrapAndMigrate(ctx context.Context, dsn string) error {
