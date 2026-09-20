@@ -762,8 +762,12 @@ func TestChargeOutstanding_WithStripeAdapter_DeclineRecordsFailure(t *testing.T)
 		key := r.Form.Get("metadata[openrails_collection_key]")
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/invoices":
-			// The refusal cleanup reads back what the operation left at Stripe.
-			_, _ = w.Write([]byte(`{"data":[{"id":"in_openrails_decline","status":"open","amount_paid":0,"currency":"usd","metadata":{"openrails_collection_key":"` + declineKey.Load().(string) + `"}}],"has_more":false}`))
+			// The refusal cleanup reads back the completed void as well as the original open invoice.
+			status := "open"
+			if voided.Load() {
+				status = "void"
+			}
+			_, _ = fmt.Fprintf(w, `{"data":[{"id":"in_openrails_decline","status":%q,"amount_paid":0,"currency":"usd","metadata":{"openrails_collection_key":%q}}],"has_more":false}`, status, declineKey.Load().(string))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/invoiceitems":
 			_, _ = w.Write([]byte(`{"data":[],"has_more":false}`))
 		case r.URL.Path == "/v1/invoices":
