@@ -81,11 +81,12 @@ func TestMerchantDashboard(t *testing.T) {
 	h := New(t, ctx)
 	surface := h.StartStandalone("usd")
 
-	aRW := surface.MintAPIKey(dbtest.TestMerchantSlug, "dash-a-rw-"+uuid.NewString(),
+	a := surface.ProvisionOwnedMerchant("dasha" + strings.ReplaceAll(uuid.NewString(), "-", ""))
+	aRW := surface.MintAPIKey(a.MerchantSlug, "dash-a-rw-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantMetricsRead, controlplane.PermMerchantDashboardUpdate})
 	// metrics:read + catalog:read maps onto the VIEWER catalog role (support
 	// carries dashboard:update; viewer must not).
-	aRO := surface.MintAPIKey(dbtest.TestMerchantSlug, "dash-a-ro-"+uuid.NewString(),
+	aRO := surface.MintAPIKey(a.MerchantSlug, "dash-a-ro-"+uuid.NewString(),
 		[]string{controlplane.PermMerchantMetricsRead, controlplane.PermMerchantCatalogRead})
 	b := surface.ProvisionOwnedMerchant("dashb" + strings.ReplaceAll(uuid.NewString(), "-", ""))
 	bRW := surface.MintAPIKey(b.MerchantSlug, "dash-b-rw-"+uuid.NewString(),
@@ -220,7 +221,7 @@ func TestMerchantDashboard(t *testing.T) {
 
 		// Two isolated rows exist for real (super pool sees both).
 		var rows int
-		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.dashboard_configs`).Scan(&rows))
+		require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM openrails.dashboard_configs WHERE merchant_id=ANY($1::uuid[])`, []uuid.UUID{a.MerchantID.UUID(), b.MerchantID.UUID()}).Scan(&rows))
 		require.Equal(t, 2, rows)
 	})
 

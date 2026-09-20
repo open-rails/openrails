@@ -108,10 +108,14 @@ func (h *ManualRebillHandler) Execute(ctx context.Context, in gen.OpenrailsRailI
 	if !first {
 		return h.Verify(ctx, in)
 	}
+	posture := charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)
+	if p.Initiator == charge.InitiatorCustomer {
+		posture = charge.RecurringReuse(p.Instrument.StoredCredentialRecurringRef)
+	}
 	response, err := client.AttemptManualRebill(ctx, nmi.ManualRebillParams{
 		VaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef,
 		SubscriptionID: p.RailSubscriptionID, OrderID: p.OrderReference, PONumber: p.OrderReference,
-		StoredCredential: nmidirect.StoredCredentialFor(charge.RecurringMIT(p.Instrument.StoredCredentialRecurringRef)),
+		StoredCredential: nmidirect.StoredCredentialFor(posture),
 	})
 	if err != nil {
 		return Ambiguous("rebill submission requires verification: " + err.Error())

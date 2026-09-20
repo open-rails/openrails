@@ -364,7 +364,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	})
 
 	frozen := frozenInstrumentOf(t, pool, ctx, pm)
-	res, err := chargeThrough(ctx, ch, money.ChargeRequest{
+	res, err := chargeThrough(ctx, ch, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           payer,
 		Invoker:         payer.UUID().String(),
@@ -384,7 +384,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	require.Equal(t, pm, adapter.charges[0].PaymentMethodID)
 
 	otherPayer := identity.CustomerIDFromString(uuid.NewString())
-	_, err = ch.Prepare(ctx, money.ChargeRequest{
+	_, err = ch.Prepare(ctx, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           otherPayer,
 		PaymentMethodID: pm,
@@ -395,7 +395,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	require.ErrorContains(t, err, "another customer")
 	require.Len(t, adapter.charges, 1, "scope failure must not dispatch")
 
-	_, err = ch.Prepare(ctx, money.ChargeRequest{
+	_, err = ch.Prepare(ctx, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      uuid.New(),
 		Payer:           payer,
 		PaymentMethodID: pm,
@@ -410,7 +410,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	// the operation froze it. The charge is refused BEFORE the provider.
 	moved := frozen
 	moved.RailCustomerRef = "vault_moved"
-	_, err = ch.Prepare(ctx, money.ChargeRequest{
+	_, err = ch.Prepare(ctx, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           payer,
 		PaymentMethodID: pm,
@@ -422,7 +422,7 @@ func TestScopedCharger_ValidatesPaymentMethodScopeAndDispatches(t *testing.T) {
 	require.ErrorIs(t, err, charge.ErrInstrumentChanged)
 	require.Len(t, adapter.charges, 1, "a changed instrument must not dispatch")
 
-	_, err = ch.Prepare(ctx, money.ChargeRequest{
+	_, err = ch.Prepare(ctx, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           payer,
 		PaymentMethodID: pm,
@@ -441,7 +441,7 @@ func TestScopedCharger_RejectsUnsupportedRail(t *testing.T) {
 		string(models.RailCCBill): &fakeCollectionAdapter{},
 	})
 
-	_, err := ch.Prepare(ctx, money.ChargeRequest{
+	_, err := ch.Prepare(ctx, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           payer,
 		PaymentMethodID: pm,
@@ -483,7 +483,7 @@ func TestScopedCharger_NMIAdapterCollectsThroughGateway(t *testing.T) {
 		string(models.RailNMI): client,
 	}))
 
-	res, err := chargeThrough(ctx, ch, money.ChargeRequest{
+	res, err := chargeThrough(ctx, ch, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           payer,
 		Invoker:         payer.UUID().String(),
@@ -519,7 +519,7 @@ func TestScopedCharger_NMIAdapterDeclineReturnsStructuredFailure(t *testing.T) {
 		string(models.RailNMI): client,
 	}))
 
-	res, err := chargeThrough(ctx, ch, money.ChargeRequest{
+	res, err := chargeThrough(ctx, ch, money.ChargeRequest{Initiator: charge.InitiatorMerchant,
 		MerchantID:      dbtest.TestMerchantID.UUID(),
 		Payer:           payer,
 		PaymentMethodID: pm,
@@ -592,7 +592,7 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 		string(models.RailNMI): client,
 	}))
 
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, standaloneCollectionReader{nmi: receiptFixtureNMI{client: client, request: money.ChargeRequest{MerchantID: dbtest.TestMerchantID.UUID(), Instrument: instrument}}}), 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, standaloneCollectionReader{nmi: receiptFixtureNMI{client: client, request: money.ChargeRequest{Initiator: charge.InitiatorMerchant, MerchantID: dbtest.TestMerchantID.UUID(), Instrument: instrument}}}), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	select {

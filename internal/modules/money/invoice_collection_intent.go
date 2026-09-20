@@ -154,6 +154,7 @@ func (h *InvoiceCollectionHandler) chargeRequest(intent gen.OpenrailsRailIntent,
 		IdempotencyKey:      intent.ID.String(),
 		Description:         p.Description,
 		Instrument:          p.Instrument,
+		Initiator:           p.Initiator,
 		ProviderCustomerRef: p.ProviderCustomerRef,
 	}
 }
@@ -373,6 +374,7 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: intent.MerchantID, ID: p.CustomerID}); err != nil {
 			return err
 		}
+
 		attempt, err := q.GetInvoicePaymentAttempt(ctx, gen.GetInvoicePaymentAttemptParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID})
 		if err != nil {
 			return fmt.Errorf("load attempt: %w", err)
@@ -382,6 +384,25 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 			return complete()
 		case "failed":
 			return fmt.Errorf("attempt %s already failed; a confirmed charge %s needs repair", attempt.ID, transactionID)
+		}
+		// An approved initial customer-present charge establishes the agreement
+		// only from retained provider custody and in the settlement transaction.
+		if p.Initiator == charge.InitiatorCustomer && p.Instrument.StoredCredentialUnscheduledRef == "" {
+			method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: intent.MerchantID, ID: p.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			// Another already-submitted initial CIT on this same instrument may
+			// have settled first. Its write-once agreement does not invalidate
+			// this operation's qualified payment. Compare the frozen instrument
+			// without that newly established anchor; capture below preserves it.
+			method.StoredCredentialUnscheduledRef = ""
+			if err := p.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
+				return err
+			}
+			if _, err := q.CaptureStoredCredentialRef(ctx, gen.CaptureStoredCredentialRefParams{MerchantID: intent.MerchantID, ID: p.PaymentMethodID, Agreement: string(charge.AgreementUnscheduled), Ref: transactionID}); err != nil {
+				return err
+			}
 		}
 		applied, err := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, Snapshot: p.Amount, Now: now})
 		if err != nil {

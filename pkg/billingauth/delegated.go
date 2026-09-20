@@ -7,6 +7,21 @@ import (
 	"strings"
 )
 
+// DelegatedCredentialClassAttribute is the reserved signed delegated-token
+// attribute carrying issuer-verified interaction provenance.
+const DelegatedCredentialClassAttribute = "openrails_credential_class"
+
+// CredentialClass is provenance supplied by a trusted verifier. An automation
+// credential can authorize ordinary self reads but does not itself establish
+// customer interaction for customer-present payment commands.
+type CredentialClass string
+
+const (
+	CredentialClassUnknown     CredentialClass = ""
+	CredentialClassUserSession CredentialClass = "user_session"
+	CredentialClassAutomation  CredentialClass = "automation"
+)
+
 // DelegatedPrincipal is the resolved identity a host supplies for the
 // browser-direct self-service and merchant surfaces (/v1/me/* and
 // /v1/merchant/*, issue #339). It is the framework-neutral counterpart of the
@@ -22,6 +37,9 @@ import (
 // host-supplied principal; a principal with an empty/invalid merchant or
 // subject is rejected with 401 (fail closed).
 type DelegatedPrincipal struct {
+	// CredentialClass is derived from verified credentials, never a request
+	// header or body. Unknown keeps existing self reads but cannot authorize CIT.
+	CredentialClass CredentialClass
 	// MerchantID is the resolved OpenRails merchant id in UUID string form
 	// (REQUIRED). The mapping from the host's credential to this merchant is
 	// per-deployment configuration owned by the host — explicit, never inferred.
@@ -85,7 +103,7 @@ var ErrDelegatedPrincipalInvalid = errors.New("delegated principal requires an e
 // a non-empty merchant id and subject. (Merchant-id FORMAT and the permission
 // catalog are enforced by the adapting middleware, which owns those types.)
 func (p *DelegatedPrincipal) Validate() error {
-	if p == nil || strings.TrimSpace(p.MerchantID) == "" || strings.TrimSpace(p.SubjectID) == "" {
+	if p == nil || strings.TrimSpace(p.MerchantID) == "" || strings.TrimSpace(p.SubjectID) == "" || (p.CredentialClass != CredentialClassUnknown && p.CredentialClass != CredentialClassUserSession && p.CredentialClass != CredentialClassAutomation) {
 		return ErrDelegatedPrincipalInvalid
 	}
 	return nil

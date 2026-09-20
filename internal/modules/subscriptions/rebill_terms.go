@@ -21,15 +21,17 @@ const TypeManualRebill = "manual_rebill"
 // confirmed charge buys. OrderReference identifies this attempt, not every
 // attempt in a period; a different attempt's receipt cannot settle this one.
 type ManualRebillPayload struct {
-	Renewal            RenewalTerms            `json:"renewal"`
-	PaymentMethodID    uuid.UUID               `json:"payment_method_id"`
-	Instrument         charge.FrozenInstrument `json:"instrument"`
-	Rail               string                  `json:"rail"`
-	RailSubscriptionID string                  `json:"rail_subscription_id"`
-	OrderReference     string                  `json:"order_reference"`
-	Attempt            int                     `json:"attempt"`
-	FailureCount       int                     `json:"failure_count"`
-	AmountMinor        moneyutil.Cents         `json:"amount_minor,string"`
+	Initiator                charge.Initiator        `json:"initiator"`
+	RequestedPaymentMethodID *uuid.UUID              `json:"requested_payment_method_id,omitempty"`
+	Renewal                  RenewalTerms            `json:"renewal"`
+	PaymentMethodID          uuid.UUID               `json:"payment_method_id"`
+	Instrument               charge.FrozenInstrument `json:"instrument"`
+	Rail                     string                  `json:"rail"`
+	RailSubscriptionID       string                  `json:"rail_subscription_id"`
+	OrderReference           string                  `json:"order_reference"`
+	Attempt                  int                     `json:"attempt"`
+	FailureCount             int                     `json:"failure_count"`
+	AmountMinor              moneyutil.Cents         `json:"amount_minor,string"`
 }
 
 func ManualRebillIdempotencyKey(subscriptionID uuid.UUID, periodEnd time.Time, rail string, attempt int) string {
@@ -59,7 +61,19 @@ func DecodeManualRebillPayload(in gen.OpenrailsRailIntent) (ManualRebillPayload,
 		return p, errors.New("rebill instrument or recurring agreement is incomplete")
 	}
 	key := ManualRebillIdempotencyKey(p.Renewal.SubscriptionID, p.Renewal.PeriodStart, p.Rail, p.Attempt)
-	if in.IdempotencyKey != key || p.OrderReference != RebillOrderReference(key) {
+	switch p.Initiator {
+	case charge.InitiatorMerchant:
+		if in.Origin != "system" || p.RequestedPaymentMethodID != nil || in.IdempotencyKey != key {
+			return p, errors.New("scheduled rebill identity contradicts accepted terms")
+		}
+	case charge.InitiatorCustomer:
+		if in.Origin != "user" || in.Actor == nil || *in.Actor != p.Renewal.CustomerID.String() || !charge.CustomerPaymentKeyValid(TypeManualRebill, p.Renewal.CustomerID, in.IdempotencyKey) || (p.RequestedPaymentMethodID != nil && *p.RequestedPaymentMethodID != p.PaymentMethodID) {
+			return p, errors.New("customer rebill identity contradicts accepted terms")
+		}
+	default:
+		return p, errors.New("rebill initiation is not established")
+	}
+	if p.OrderReference != RebillOrderReference(in.IdempotencyKey) {
 		return p, errors.New("rebill identity does not name the accepted period and attempt")
 	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Renewal.Currency, p.Renewal.Amount)

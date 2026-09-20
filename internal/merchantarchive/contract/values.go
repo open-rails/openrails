@@ -143,7 +143,10 @@ func ValidateValues(p Profile, values []*string) error {
 			id, _ := uuid.Parse(field("id"))
 			merchant, _ := uuid.Parse(field("merchant_id"))
 			psp, _ := uuid.Parse(field("psp_id"))
-			row := gen.OpenrailsRailIntent{ID: id, MerchantID: merchant, PspID: &psp, Rail: field("rail"), IntentType: *typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status"), IdempotencyKey: field("idempotency_key")}
+			row := gen.OpenrailsRailIntent{ID: id, MerchantID: merchant, PspID: &psp, Rail: field("rail"), IntentType: *typ, Payload: []byte(field("payload")), ResultEvidence: []byte(field("result_evidence")), Status: field("status"), Origin: field("origin"), IdempotencyKey: field("idempotency_key")}
+			if actor := field("actor"); actor != "" {
+				row.Actor = &actor
+			}
 			if id, err := uuid.Parse(field("subscription_id")); err == nil {
 				row.SubscriptionID = &id
 			}

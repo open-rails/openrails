@@ -6,9 +6,10 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -25,6 +26,7 @@ import (
 )
 
 var (
+	ErrCustomerPaymentUnsupported      = errors.New("customer-present payment is not supported for this rail")
 	ErrInvoiceNotRetryable             = errors.New("invoice is not retryable")
 	ErrCollectionPaymentMethodRequired = errors.New("collection payment method required")
 	ErrCollectionPaymentMethodInvalid  = errors.New("collection payment method invalid")
@@ -40,9 +42,10 @@ type InvoiceCollectionRetryRequest struct {
 }
 
 type InvoiceCollectionRetryResult struct {
-	Invoice  *models.Invoice
-	Attempt  models.InvoicePaymentAttempt
-	Replayed bool
+	Invoice   *models.Invoice
+	Attempt   models.InvoicePaymentAttempt
+	Replayed  bool
+	Operation gen.OpenrailsRailIntent
 }
 
 // ListInvoicePaymentAttempts returns one payer-owned invoice's collection
@@ -261,6 +264,16 @@ func (s *MoneyService) ChargeOutstanding(ctx context.Context, runner *intents.Ru
 // operation's durable state without another provider charge; a different
 // method under the same key is a conflict.
 func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request InvoiceCollectionRetryRequest) (*InvoiceCollectionRetryResult, error) {
+	return s.retryInvoiceCollection(ctx, runner, payer, request, charge.InitiatorMerchant)
+}
+
+// PayInvoiceNow is called only by the verified-payer command handler. Its
+// customer-present posture is frozen in the accepted operation, not a body flag.
+func (s *MoneyService) PayInvoiceNow(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request InvoiceCollectionRetryRequest) (*InvoiceCollectionRetryResult, error) {
+	return s.retryInvoiceCollection(ctx, runner, payer, request, charge.InitiatorCustomer)
+}
+
+func (s *MoneyService) retryInvoiceCollection(ctx context.Context, runner *intents.Runner, payer identity.CustomerID, request InvoiceCollectionRetryRequest, initiator charge.Initiator) (*InvoiceCollectionRetryResult, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -282,9 +295,14 @@ func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *inten
 		return nil, err
 	}
 	key := invoiceRetryOperationKey(request.InvoiceID, request.IdempotencyKey)
+	origin, reason := intents.OriginAdmin, "manual invoice collection retry"
+	if initiator == charge.InitiatorCustomer {
+		key = charge.CustomerPaymentKey(TypeInvoiceCollection, payer.UUID(), request.IdempotencyKey)
+		origin, reason = intents.OriginUser, "verified customer invoice payment"
+	}
 	pm := request.PaymentMethodID
 	intentID, replayed, err := s.enqueueInvoiceCollection(ctx, payer, request.InvoiceID, invoiceCollectionEnqueue{
-		manual: true, paymentMethodID: &pm, operationKey: key, origin: intents.OriginAdmin, originReason: "manual invoice collection retry",
+		manual: true, paymentMethodID: &pm, operationKey: key, origin: origin, originReason: reason, initiator: initiator,
 	})
 	if err != nil {
 		return nil, err
@@ -292,7 +310,8 @@ func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *inten
 	if intentID == uuid.Nil {
 		return nil, ErrInvoiceNotRetryable
 	}
-	if _, err := runner.ExecuteByID(ctx, intentID); err != nil {
+	operation, err := runner.ExecuteByID(ctx, intentID)
+	if err != nil {
 		return nil, fmt.Errorf("retry invoice collection: %w", err)
 	}
 	loadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
@@ -307,7 +326,7 @@ func (s *MoneyService) RetryInvoiceCollection(ctx context.Context, runner *inten
 	if err != nil {
 		return nil, fmt.Errorf("load invoice retry outcome: %w", err)
 	}
-	return &InvoiceCollectionRetryResult{Invoice: invoice, Attempt: invoicePaymentAttemptFromGen(attemptRow), Replayed: replayed}, nil
+	return &InvoiceCollectionRetryResult{Invoice: invoice, Attempt: invoicePaymentAttemptFromGen(attemptRow), Replayed: replayed, Operation: operation}, nil
 }
 
 // invoiceRetryOperationKey binds one client retry key to one invoice.
@@ -345,6 +364,7 @@ func scheduledInvoiceCollectionEligible(invoice *models.Invoice, minThreshold in
 }
 
 type invoiceCollectionEnqueue struct {
+	initiator       charge.Initiator
 	minThreshold    int64
 	manual          bool
 	paymentMethodID *uuid.UUID
@@ -366,6 +386,9 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		return uuid.Nil, false, err
 	}
 	now := s.now()
+	if opts.initiator == "" {
+		opts.initiator = charge.InitiatorMerchant
+	}
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		row, err := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: invoiceID})
@@ -387,7 +410,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 				if err != nil {
 					return err
 				}
-				if frozen.InvoiceID != invoiceID || frozen.CustomerID != payer.UUID() || opts.paymentMethodID == nil || frozen.PaymentMethodID != *opts.paymentMethodID {
+				if frozen.InvoiceID != invoiceID || frozen.CustomerID != payer.UUID() || opts.paymentMethodID == nil || frozen.PaymentMethodID != *opts.paymentMethodID || frozen.Initiator != opts.initiator {
 					return ErrInvoiceRetryIdempotencyConflict
 				}
 				intentID, replayed = prior.ID, true
@@ -409,6 +432,9 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		eligible := scheduledInvoiceCollectionEligible(invoice, opts.minThreshold, now)
 		if opts.manual {
 			eligible = invoiceCollectionRetryable(invoice)
+			if opts.initiator == charge.InitiatorCustomer {
+				eligible = invoice.CollectionIntentID == nil && invoice.AmountDue > 0 && (invoice.Status == "open" || invoice.Status == "past_due" || invoice.Status == "uncollectible")
+			}
 		}
 		if !eligible {
 			return nil
@@ -447,16 +473,33 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		intent, err := intents.NewStore(s.db.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
 			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: method.PspID, IntentType: TypeInvoiceCollection,
 			Payload: intents.InvoiceCollectionPayload{
-				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID,
+				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID, Initiator: opts.initiator,
 				Rail: normalizeRail(method.Rail), Instrument: charge.FreezeInstrument(*method),
 				Currency: invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
 				ProviderCustomerRef: providerCustomerRef,
 				Description:         fmt.Sprintf("invoice %s", invoiceID),
 			},
 			IdempotencyKey: key, NextAttemptAt: now, Origin: opts.origin, OriginReason: opts.originReason,
+			Actor: func() string {
+				if opts.initiator == charge.InitiatorCustomer {
+					return payer.UUID().String()
+				}
+				return ""
+			}(),
 		})
 		if err != nil {
 			return fmt.Errorf("enqueue invoice collection: %w", err)
+		}
+		canonical, err := intents.DecodeInvoiceCollectionPayload(intent)
+		if err != nil {
+			return err
+		}
+		if canonical.InvoiceID != invoiceID || canonical.CustomerID != payer.UUID() || canonical.PaymentMethodID != method.ID || canonical.Initiator != opts.initiator {
+			return ErrInvoiceRetryIdempotencyConflict
+		}
+		if canonical.AttemptID != attemptID {
+			intentID, replayed = intent.ID, true
+			return nil
 		}
 		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
 			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
@@ -520,6 +563,9 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 	}
 	if descriptor, ok := rails.Lookup(models.Rail(method.Rail)); !ok || !descriptor.SupportsChargeSavedMethod {
 		return nil, ErrCollectionPaymentMethodInvalid
+	}
+	if opts.initiator == charge.InitiatorCustomer && (!rails.IsNMI(models.Rail(method.Rail)) || method.Custodian != models.CustodianPSP) {
+		return nil, ErrCustomerPaymentUnsupported
 	}
 	return &method, nil
 }
