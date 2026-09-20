@@ -55,7 +55,7 @@ VALUES ($1, $2, 'Sidecar Product', $3)`, productID, productKey, merchantID)
 				"per_unit":{"divide_by":3600,"matrix":{"dimension":"size_slug","cells":{"s-1vcpu-1gb":{"unit_amount":"8930","maximum_amount":"6000000"}}}}
 			}`),
 		}},
-	}))
+	}, CatalogMutationOptions{Insert: true, Overwrite: true, Prune: true}))
 
 	var eventType, groupBy, priceCurrency string
 	require.NoError(t, pool.QueryRow(ctx, `

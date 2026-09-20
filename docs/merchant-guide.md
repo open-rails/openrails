@@ -34,6 +34,32 @@ application reads a user's entitlement timeline for access decisions, *not*
 subscription rows. Subscriptions produce entitlement windows; so do one-off purchases,
 admin grants, and grace. See [Entitlements](#entitlements).
 
+### Publishing through the Go Client
+
+Use the same `Client.PublishCatalog(ctx, openrails.CatalogPublishRequest{...})`
+call for an embedded runtime or a remote server. Its `Catalog` is a
+`catalog.Manifest` from `pkg/catalog`; the request carries products, prices,
+meters and rate cards together. The HTTP operation is
+`POST /v1/merchant/catalog/publish`, with the existing catalog-update permission.
+
+With no mutation flags, publishing only returns a plan. `Insert` adds absent
+entries, `Overwrite` edits existing entries, and `Prune` removes omitted meter
+and rate-card definitions and archives omitted entries in declared product groups.
+The flags compose; preview has no separate wire flag. A merchant declaration
+never replaces customer-specific rate-card overrides. A definition still used by
+an override cannot be pruned until that dependency is removed.
+
+`CatalogPlan.MetersChanged` and `RateCardsChanged` identify differences in those
+billing definitions; `HasChanges()` includes them as well as product/price changes.
+Equivalent defaults and collection ordering are quiet. Rate-card ordinals are
+positions within each product's `rate_cards` list, so changing that order changes
+the declaration's slots. The response plan describes the full difference before
+mutation; the flags choose which parts to apply.
+
+For manifest-owned bootstrap, `Runtime.PushCatalog` uses this same complete
+publishing operation. The catalog parser remains public; planner callbacks and
+execution adapters are internal implementation details.
+
 ### Authoring the catalog
 
 The manifest is `catalogs:` → one entry per merchant → `products:` (plus optional

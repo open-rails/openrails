@@ -206,7 +206,7 @@ func (m *Manifest) validateProduct(groupKey string, product *Product, productKey
 		}
 		key := priceTermsKey(*price)
 		if _, ok := priceTerms[key]; ok {
-			return fmt.Errorf("product %q declares duplicate price terms %s", product.Key, PriceLabel(product.Key, *price))
+			return fmt.Errorf("product %q declares duplicate price terms %s", product.Key, fmt.Sprintf("#%d", pri+1))
 		}
 		priceTerms[key] = struct{}{}
 	}
@@ -322,7 +322,7 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int) error {
 		for provider := range price.PSPLinks {
 			key := strings.ToLower(strings.TrimSpace(provider))
 			if _, ok := declared[key]; !ok {
-				return fmt.Errorf("product %q price %s: psp_links.%s requires psps to include %q", product.Key, PriceLabel(product.Key, *price), provider, key)
+				return fmt.Errorf("product %q price %s: psp_links.%s requires psps to include %q", product.Key, fmt.Sprintf("#%d", idx+1), provider, key)
 			}
 		}
 	}
@@ -334,7 +334,7 @@ func (m *Manifest) validatePrice(product Product, price *Price, idx int) error {
 		if provider == "solana" {
 			if _, ok := stablecoinCurrencies[price.Currency]; !ok {
 				return fmt.Errorf("product %q price %s: solana requires a stablecoin currency (USD/USDC/USDG), got %q",
-					product.Key, PriceLabel(product.Key, *price), price.Currency)
+					product.Key, fmt.Sprintf("#%d", idx+1), price.Currency)
 			}
 		}
 	}

@@ -23,10 +23,7 @@ type catalogWorkflow struct {
 	token    string
 }
 
-type catalogPublishResult struct {
-	Plan   *catalog.ApplyPlan   `json:"plan"`
-	Result *catalog.ApplyResult `json:"result"`
-}
+type catalogPublishResult = openrails.CatalogPublishResponse
 
 func newCatalogWorkflow(t *testing.T) (*Harness, catalogWorkflow) {
 	t.Helper()
@@ -37,11 +34,13 @@ func newCatalogWorkflow(t *testing.T) (*Harness, catalogWorkflow) {
 	return h, catalogWorkflow{surface, merchant, surface.Client(openrails.WithAPIKey(token), openrails.WithMerchantID(merchant.MerchantID)), token}
 }
 
-func (f catalogWorkflow) publish(t *testing.T, manifest catalog.Manifest, options catalog.ApplyOptions) catalogPublishResult {
+func (f catalogWorkflow) publish(t *testing.T, manifest catalog.Manifest, options openrails.CatalogPublishRequest) catalogPublishResult {
 	t.Helper()
-	status, raw := requestJSON(t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/catalog/publish", f.token, map[string]any{"catalog": manifest, "insert": options.Insert, "overwrite": options.Overwrite, "prune": options.Prune})
-	require.Equal(t, http.StatusOK, status, string(raw))
-	return decodeCatalogPublish(t, raw)
+	options.Catalog = manifest
+	out, err := f.client.PublishCatalog(t.Context(), options)
+	require.NoError(t, err)
+	require.NotNil(t, out.Plan)
+	return *out
 }
 
 func decodeCatalogPublish(t *testing.T, raw []byte) catalogPublishResult {
@@ -59,28 +58,28 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		return catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{Key: "premium", DisplayName: "Premium", Description: "Original", TierGroup: "memberships", TierRank: intPtr(1), Entitlements: []string{"premium"}, Prices: []catalog.Price{{Currency: "USD", UnitAmount: amount, Duration: "30d", AutoRenew: true}}}}}
 	}
 	t.Run("plan_and_apply", func(t *testing.T) {
-		planned := f.publish(t, manifest(10_000_000), catalog.ApplyOptions{})
+		planned := f.publish(t, manifest(10_000_000), openrails.CatalogPublishRequest{})
 		require.Nil(t, planned.Result)
-		require.Equal(t, 1, countProductActions(planned.Plan, catalog.ProductCreate))
-		require.Equal(t, 1, countPriceActions(planned.Plan, catalog.PriceCreate))
+		require.Equal(t, 1, countProductActions(planned.Plan, openrails.CatalogProductCreate))
+		require.Equal(t, 1, countPriceActions(planned.Plan, openrails.CatalogPriceCreate))
 		page, err := f.client.ListProducts(ctx, openrails.ProductFilter{})
 		require.NoError(t, err)
 		require.Empty(t, page.Items)
-		applied := f.publish(t, manifest(10_000_000), catalog.ApplyOptions{Insert: true})
+		applied := f.publish(t, manifest(10_000_000), openrails.CatalogPublishRequest{Insert: true})
 		require.Equal(t, 1, applied.Result.ProductsCreated)
 		require.Equal(t, 1, applied.Result.PricesCreated)
-		require.False(t, f.publish(t, manifest(10_000_000), catalog.ApplyOptions{}).Plan.HasChanges())
+		require.False(t, f.publish(t, manifest(10_000_000), openrails.CatalogPublishRequest{}).Plan.HasChanges())
 		changed := manifest(10_000_000)
 		changed.Products[0].DisplayName = "Premium updated"
 		changed.Products[0].TierRank = intPtr(2)
 		changed.Products[0].Description = "Updated description"
 		changed.Products[0].Entitlements = []string{"premium", "feature"}
-		unchanged := f.publish(t, changed, catalog.ApplyOptions{Insert: true})
+		unchanged := f.publish(t, changed, openrails.CatalogPublishRequest{Insert: true})
 		require.Zero(t, unchanged.Result.ProductsUpdated)
 		product, err := f.client.GetProductByKey(ctx, "premium")
 		require.NoError(t, err)
 		require.Equal(t, "Premium", product.DisplayName)
-		updated := f.publish(t, changed, catalog.ApplyOptions{Overwrite: true})
+		updated := f.publish(t, changed, openrails.CatalogPublishRequest{Overwrite: true})
 		require.Equal(t, 1, updated.Result.ProductsUpdated)
 		require.Zero(t, updated.Result.PricesCreated)
 		product, err = f.client.GetProductByKey(ctx, "premium")
@@ -118,7 +117,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			}
 			return prices
 		}
-		all := catalog.ApplyOptions{Insert: true, Overwrite: true, Prune: true}
+		all := openrails.CatalogPublishRequest{Insert: true, Overwrite: true, Prune: true}
 		result := f.publish(t, manifest(12_000_000), all)
 		require.Equal(t, 1, result.Result.PricesCreated)
 		require.Equal(t, 1, result.Result.PricesArchived)
@@ -182,7 +181,9 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			})
 			assertCatalogUnknownField(t, status, raw, field)
 		}
-		status, raw := requestJSON(t, http.MethodPatch, path+"/"+product.ID.String(), f.token, map[string]any{"display_name": 7})
+		status, raw := requestJSON(t, http.MethodPost, f.surface.BaseURL+"/v1/merchant/catalog/publish", f.token, map[string]any{"catalog": manifest(12_000_000), "plan_only": true})
+		assertCatalogUnknownField(t, status, raw, "plan_only")
+		status, raw = requestJSON(t, http.MethodPatch, path+"/"+product.ID.String(), f.token, map[string]any{"display_name": 7})
 		require.Equal(t, http.StatusBadRequest, status, string(raw))
 		require.Contains(t, string(raw), `"code":"invalid_param"`)
 		require.Contains(t, string(raw), `"param":"display_name"`)
@@ -204,12 +205,12 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		desired.Products[0].DisplayName = "Overwrite applies"
 		desired.Products[0].Prices = append(desired.Products[0].Prices, catalog.Price{Currency: "USD", UnitAmount: 100_000_000, Duration: "365d", AutoRenew: true})
 		desired.Products = append(desired.Products, catalog.Product{Key: "new-plan", DisplayName: "New plan", TierGroup: group, TierRank: intPtr(2), Prices: []catalog.Price{{Currency: "USD", UnitAmount: 1_000_000, Duration: "30d", AutoRenew: true}}})
-		planned := f.publish(t, desired, catalog.ApplyOptions{})
+		planned := f.publish(t, desired, openrails.CatalogPublishRequest{})
 		require.Nil(t, planned.Result)
-		require.Equal(t, 1, countProductActions(planned.Plan, catalog.ProductCreate))
-		require.Equal(t, 1, countPriceActions(planned.Plan, catalog.PriceActivate))
-		require.Equal(t, 1, countPriceActions(planned.Plan, catalog.PriceArchive))
-		result := f.publish(t, desired, catalog.ApplyOptions{Overwrite: true}).Result
+		require.Equal(t, 1, countProductActions(planned.Plan, openrails.CatalogProductCreate))
+		require.Equal(t, 1, countPriceActions(planned.Plan, openrails.CatalogPriceActivate))
+		require.Equal(t, 1, countPriceActions(planned.Plan, openrails.CatalogPriceArchive))
+		result := f.publish(t, desired, openrails.CatalogPublishRequest{Overwrite: true}).Result
 		require.Equal(t, 1, result.ProductsUpdated)
 		require.Equal(t, 1, result.PricesActivated)
 		require.Zero(t, result.ProductsCreated)
@@ -224,7 +225,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, activeYear.Archived)
 		desired.Products[0].DisplayName = "Insert and prune cannot overwrite"
-		result = f.publish(t, desired, catalog.ApplyOptions{Prune: true}).Result
+		result = f.publish(t, desired, openrails.CatalogPublishRequest{Prune: true}).Result
 		require.Equal(t, 1, result.ProductsArchived)
 		require.Equal(t, 1, result.PricesArchived)
 		require.Zero(t, result.ProductsCreated)
@@ -237,7 +238,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.True(t, retiredPrice.Archived)
 		_, err = f.client.GetProductByKey(ctx, "new-plan")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
-		result = f.publish(t, desired, catalog.ApplyOptions{Insert: true}).Result
+		result = f.publish(t, desired, openrails.CatalogPublishRequest{Insert: true}).Result
 		require.Equal(t, 1, result.ProductsCreated)
 		require.Equal(t, 1, result.PricesCreated)
 		require.Zero(t, result.ProductsUpdated)
@@ -248,31 +249,26 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Equal(t, "Overwrite applies", premium.DisplayName)
 	})
 
-	t.Run("additive_plan_and_financial_matching", func(t *testing.T) {
+	t.Run("financial_matching", func(t *testing.T) {
 		m := manifest(12_000_000)
 		m.Products[0].Prices[0].PSPs = []string{"stripe", "nmi"}
 		require.NoError(t, m.Validate())
 		// Provider attachment is not price identity. No provider write is made
 		// here: the real API supplies current rows to the production planner.
-		plan, err := catalog.PlanWithOptions(ctx, catalogClientApplier{f.client}, &m, catalog.PlanOptions{})
-		require.NoError(t, err)
-		require.Equal(t, 1, countPriceActions(plan, catalog.PriceUnchanged))
-		require.Zero(t, countPriceActions(plan, catalog.PriceCreate))
-		require.Zero(t, countPriceActions(plan, catalog.PriceArchive))
-		for _, group := range plan.Groups {
-			require.Empty(t, group.RemovedProducts, "additive plans retain omitted products")
-		}
+		plan := f.publish(t, m, openrails.CatalogPublishRequest{}).Plan
+		require.Equal(t, 1, countPriceActions(plan, openrails.CatalogPriceUnchanged))
+		require.Zero(t, countPriceActions(plan, openrails.CatalogPriceCreate))
 	})
 
 	t.Run("provider_choices_survive_read_only_plan", func(t *testing.T) {
 		m := catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{Key: "provider-plan", DisplayName: "Provider plan", TierGroup: "provider-plans", Prices: []catalog.Price{{Currency: "USD", UnitAmount: 23_000_000, Duration: "30d", AutoRenew: true, PSPs: []string{"stripe", "ccbill"}}}}}}
-		plan := f.publish(t, m, catalog.ApplyOptions{}).Plan
+		plan := f.publish(t, m, openrails.CatalogPublishRequest{}).Plan
 		require.Len(t, plan.Groups, 1)
 		require.Len(t, plan.Groups[0].Products, 1)
 		product := plan.Groups[0].Products[0]
-		require.Equal(t, catalog.ProductCreate, product.Action)
+		require.Equal(t, openrails.CatalogProductCreate, product.Action)
 		require.Len(t, product.Prices, 1)
-		require.Equal(t, catalog.PriceCreate, product.Prices[0].Action)
+		require.Equal(t, openrails.CatalogPriceCreate, product.Prices[0].Action)
 		require.Equal(t, []string{"stripe", "ccbill"}, product.Prices[0].CreateReq.PSPs)
 		_, err := f.client.GetProductByKey(ctx, "provider-plan")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
@@ -304,7 +300,7 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 			{Key: "intro-free", Currency: "USD", UnitAmount: 15_000_000, Duration: "30d", AutoRenew: true, Trial: &catalog.PriceTrial{UnitAmount: 0, Duration: "7d"}},
 			{Key: "intro-flat", Currency: "USD", UnitAmount: 15_000_000, Duration: "30d", AutoRenew: true},
 		}}}}
-		result := f.publish(t, m, catalog.ApplyOptions{Insert: true}).Result
+		result := f.publish(t, m, openrails.CatalogPublishRequest{Insert: true}).Result
 		require.Equal(t, 3, result.PricesCreated, "trial terms distinguish otherwise identical recurring amounts")
 		ids := map[string]openrails.PriceID{}
 		for _, tc := range []struct {
@@ -326,20 +322,20 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		}
 		require.NotEqual(t, ids["intro-free"], ids["intro-flat"])
 		m.Products[0].Prices[2].Key = "intro-renamed"
-		planned := f.publish(t, m, catalog.ApplyOptions{}).Plan
-		require.Equal(t, 3, countPriceActions(planned, catalog.PriceUnchanged))
+		planned := f.publish(t, m, openrails.CatalogPublishRequest{}).Plan
+		require.Equal(t, 3, countPriceActions(planned, openrails.CatalogPriceUnchanged))
 		require.True(t, planned.HasChanges(), "relabel is a change without new substance")
-		f.publish(t, m, catalog.ApplyOptions{Overwrite: true})
+		f.publish(t, m, openrails.CatalogPublishRequest{Overwrite: true})
 		renamed, err := f.client.GetPriceByKey(ctx, "intro-renamed")
 		require.NoError(t, err)
 		require.Equal(t, ids["intro-flat"], renamed.ID)
 		_, err = f.client.GetPriceByKey(ctx, "intro-flat")
 		require.ErrorIs(t, err, openrails.ErrNotFound)
-		require.False(t, f.publish(t, m, catalog.ApplyOptions{}).Plan.HasChanges())
+		require.False(t, f.publish(t, m, openrails.CatalogPublishRequest{}).Plan.HasChanges())
 	})
 	t.Run("archived_declarations", func(t *testing.T) {
 		m := catalog.Manifest{Version: catalog.SupportedVersion, Products: []catalog.Product{{Key: "historical", DisplayName: "Historical", TierGroup: "history", Archived: true, Prices: []catalog.Price{{Currency: "USD", UnitAmount: 1_000_000, Duration: "30d", AutoRenew: true, Archived: true}}}}}
-		f.publish(t, m, catalog.ApplyOptions{Insert: true})
+		f.publish(t, m, openrails.CatalogPublishRequest{Insert: true})
 		product, err := f.client.GetProductByKey(ctx, "historical")
 		require.NoError(t, err)
 		require.True(t, product.Archived)
@@ -348,10 +344,10 @@ func TestMerchantCatalogWorkflow(t *testing.T) {
 		require.Len(t, prices.Items, 1)
 		price := prices.Items[0]
 		require.True(t, price.Archived)
-		require.False(t, f.publish(t, m, catalog.ApplyOptions{}).Plan.HasChanges(), "archived price is matched, not recreated")
+		require.False(t, f.publish(t, m, openrails.CatalogPublishRequest{}).Plan.HasChanges(), "archived price is matched, not recreated")
 		m.Products[0].Archived = false
 		m.Products[0].Prices[0].Archived = false
-		result := f.publish(t, m, catalog.ApplyOptions{Overwrite: true}).Result
+		result := f.publish(t, m, openrails.CatalogPublishRequest{Overwrite: true}).Result
 		require.Equal(t, 1, result.ProductsUpdated)
 		require.Equal(t, 1, result.PricesActivated)
 		require.Zero(t, result.PricesCreated)
