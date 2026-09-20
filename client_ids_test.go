@@ -154,6 +154,8 @@ func TestClientRefusesEmptyIdentifiersBeforeIO(t *testing.T) {
 		"ListProductAccess":           func() error { _, err := c.ListProductAccess(ctx, CustomerID{}); return err },
 		"HasProductAccess subject":    func() error { _, err := c.HasProductAccess(ctx, CustomerID{}, ProductID(uuid.New())); return err },
 		"HasProductAccess product":    func() error { _, err := c.HasProductAccess(ctx, customer, ProductID{}); return err },
+		"GetCustomerBillingPolicy":    func() error { _, err := c.GetCustomerBillingPolicy(ctx, CustomerID{}); return err },
+		"SetCustomerBillingPolicy":    func() error { _, err := c.SetCustomerBillingPolicy(ctx, CustomerID{}, nil); return err },
 		"SetCustomerSpendDelegations": func() error { return c.SetCustomerSpendDelegations(ctx, CustomerID{}, nil) },
 		"EnsureCustomer":              func() error { _, err := c.EnsureCustomer(ctx, CustomerID{}); return err },
 		"GetProduct":                  func() error { _, err := c.GetProduct(ctx, ProductID{}); return err },

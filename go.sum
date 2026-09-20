@@ -246,8 +246,8 @@ github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 h1:yf
 github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729/go.mod h1:hVoHR2EVESiICEMbg137etN/Lx+lSrHPTD39Z/uE+2s=
 github.com/onsi/gomega v1.10.1 h1:o0+MgICZLuZ7xjH7Vx6zS/zcu93/BEp1VwkIW1mEXCE=
 github.com/onsi/gomega v1.10.1/go.mod h1:iN09h71vgCQne3DLsj+A5owkum+a2tYe+TOCB1ybHNo=
-github.com/open-rails/authkit v0.108.1 h1:W45A77ibz0rbpMRurUqh01pPzlUtrj5hjWRHGOLyn6g=
-github.com/open-rails/authkit v0.108.1/go.mod h1:/C202YAYHaDJN7Cu71Obu78vcS4Ileo9HhHLdutRhYM=
+github.com/open-rails/authkit v0.108.2 h1:7Oiv0Ba0JK0+gAXUszVa7HxoZsXKbDQysZOno96Kl4o=
+github.com/open-rails/authkit v0.108.2/go.mod h1:/C202YAYHaDJN7Cu71Obu78vcS4Ileo9HhHLdutRhYM=
 github.com/open-rails/migratekit v1.0.4 h1:i/azuFFLY3Si5nUz3hKAIqngynAGa5TIMUe+GDFS6pU=
 github.com/open-rails/migratekit v1.0.4/go.mod h1:ONDMUycRcwAB+eKlPvho6mnNAZf9gf9+yqwCKDRuO9g=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=

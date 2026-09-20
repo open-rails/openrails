@@ -46,8 +46,10 @@ var pinnedBoundaries = map[string]string{
 	"internal/intents/manual_rebill_payload.go":     "internal/intents/manual_rebill_finalize_integration_test.go",
 	"internal/intents/manual_rebill_preparation.go": "internal/intents/manual_rebill_finalize_integration_test.go",
 
-	"internal/modules/subscriptions/renewal_terms.go":         "internal/modules/subscriptions/renewal_terms_integration_test.go",
-	"internal/modules/subscriptions/plan_migration_nmi.go":    "internal/modules/subscriptions/plan_migration_nmi_integration_test.go",
+	"internal/modules/subscriptions/renewal_terms.go":      "internal/modules/subscriptions/renewal_terms_integration_test.go",
+	"internal/modules/subscriptions/plan_migration_nmi.go": "internal/modules/subscriptions/plan_migration_nmi_integration_test.go",
+	// Cutover sends a plan ID; its HTTP fixture pins the exact provider amount.
+	"internal/intents/nmi_provider_cutover.go":                "internal/integrationharness/provider_cutover_http_test.go",
 	"internal/intents/collection_payload.go":                  "internal/modules/money/invoice_rounding_integration_test.go",
 	"internal/modules/money/invoice_collection.go":            "internal/modules/money/invoice_rounding_integration_test.go",
 	"internal/modules/checkout/nmi_upgrade_intent.go":         "internal/modules/checkout/upgrade_receipts_integration_test.go",

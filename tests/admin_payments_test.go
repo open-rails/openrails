@@ -249,12 +249,14 @@ func TestAdminListPayments(t *testing.T) {
 		require.GreaterOrEqual(t, len(data), 2)
 
 		// Verify ascending order by amount
-		var prevAmount int64 = -1000000
-		for _, p := range data {
+		var prevAmount int64
+		for i, p := range data {
 			payment := p.(map[string]interface{})
 			amount, err := strconv.ParseInt(payment["amount"].(string), 10, 64)
 			require.NoError(t, err)
-			assert.GreaterOrEqual(t, amount, prevAmount, "Amounts should be in ascending order")
+			if i > 0 {
+				assert.GreaterOrEqual(t, amount, prevAmount, "Amounts should be in ascending order")
+			}
 			prevAmount = amount
 		}
 	})

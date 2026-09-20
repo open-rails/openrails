@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/config"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
@@ -22,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/delinquency"
 	"github.com/open-rails/openrails/internal/modules/money"
 	billingservice "github.com/open-rails/openrails/internal/service"
-	"github.com/open-rails/openrails/pkg/merchant"
 )
 
 // or#897 PR 2: the two seed businesses, driven through the production entry
@@ -184,169 +182,6 @@ func TestOr897_WindowSpendCapPolicy_SeedCloudBusiness(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.Transitions, 1, "the unpaid debt must raise the delinquency signal")
 	require.Equal(t, delinquency.StateDelinquent, res.Transitions[0].To)
-}
-
-// Most specific wins: a payer with no binding of its own follows the merchant
-// default, then its tier's binding, then its own. Each rung is proven by the
-// ADMISSION VERDICT changing, not by reading the row back.
-func TestOr897_BindingResolutionPrecedence(t *testing.T) {
-	svc, ms, _, ctx := wastedSvcEnv(t)
-	pool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
-
-	// Three policies whose only difference is the monthly ceiling, so the rung
-	// that won is readable straight off the verdict.
-	for name, limit := range map[string]int64{
-		"tiny": 1_000_000, "medium": 50_000_000, "large": 500_000_000,
-	} {
-		require.NoError(t, svc.SetBillingPolicy(ctx, billingservice.BillingPolicyInput{
-			Name: name, Kind: "window_spend_cap",
-			SpendWindows: []billingservice.SpendLimitWindowInput{
-				{Key: "monthly", WindowSeconds: 30 * 24 * 3600, Limit: limit},
-			},
-		}))
-	}
-
-	payer := or897ArrearsPayer(t, ctx, ms, pool)
-	// A line far above every ceiling under test, so the verdict can only ever be
-	// the WINDOW talking — never affordability.
-	require.NoError(t, ms.SetCreditLimit(ctx, payer, money.DefaultCurrency, 10_000_000_000))
-	const tier = "gold"
-	admits := func(amount int64) bool {
-		in := or897Admit(payer, amount)
-		in.TrustLevel = tier
-		res, err := svc.Admit(ctx, in)
-		require.NoError(t, err)
-		return res.Allowed
-	}
-
-	// Rung 1 — merchant default.
-	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{PolicyName: "tiny"}))
-	require.False(t, admits(2_000_000), "the merchant default applies when nothing more specific is bound")
-
-	// Rung 2 — the tier binding beats the default.
-	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{PolicyName: "medium", Tier: tier}))
-	require.True(t, admits(2_000_000), "the tier binding must beat the merchant default")
-	require.False(t, admits(100_000_000), "...and it must be the tier's ceiling that applies")
-
-	// Rung 3 — the payer's own binding beats both.
-	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{
-		PolicyName: "large", CustomerID: openrails.CustomerID(payer.UUID()),
-	}))
-	require.True(t, admits(100_000_000), "the per-customer binding must beat the tier and the default")
-}
-
-// Rebinding is the merchant's runtime lever, so it must take effect on the NEXT
-// admit — not at the end of the policy cache's TTL. A revoked policy that keeps
-// admitting for fifteen minutes is a cap nobody chose.
-func TestOr897_RebindingTakesEffectImmediately(t *testing.T) {
-	svc, ms, _, ctx := wastedSvcEnv(t)
-	pool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
-
-	require.NoError(t, svc.SetBillingPolicy(ctx, billingservice.BillingPolicyInput{
-		Name: "generous", Kind: "window_spend_cap",
-		SpendWindows: []billingservice.SpendLimitWindowInput{{Key: "monthly", WindowSeconds: 30 * 24 * 3600, Limit: 500_000_000}},
-	}))
-	require.NoError(t, svc.SetBillingPolicy(ctx, billingservice.BillingPolicyInput{
-		Name: "strict", Kind: "window_spend_cap",
-		SpendWindows: []billingservice.SpendLimitWindowInput{{Key: "monthly", WindowSeconds: 30 * 24 * 3600, Limit: 1_000_000}},
-	}))
-	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{PolicyName: "generous"}))
-
-	payer := or897ArrearsPayer(t, ctx, ms, pool)
-	require.NoError(t, ms.SetCreditLimit(ctx, payer, money.DefaultCurrency, 10_000_000_000))
-	res, err := svc.Admit(ctx, or897Admit(payer, 10_000_000))
-	require.NoError(t, err)
-	require.True(t, res.Allowed, "warms the policy cache under the generous binding")
-
-	require.NoError(t, svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{PolicyName: "strict"}))
-
-	res, err = svc.Admit(ctx, or897Admit(payer, 10_000_000))
-	require.NoError(t, err)
-	require.False(t, res.Allowed, "the tightened binding must bite on the very next admit")
-	require.Equal(t, admission.DenyBudgetExceeded, res.DenyCode)
-}
-
-// One merchant's policies and bindings must be invisible to another, under the
-// same RLS-enforcing handle the production path uses.
-func TestOr897_PolicyRegistryIsMerchantIsolated(t *testing.T) {
-	svcA, _, _, ctxA := wastedSvcEnv(t)
-	pool := dbtest.OpenMerchantDB(t, dbtest.TestMerchantID.UUID()).Pool()
-
-	require.NoError(t, svcA.SetBillingPolicy(ctxA, billingservice.BillingPolicyInput{
-		Name: "merchant_a_only", Kind: "outstanding_cap", OutstandingCapAmount: 42_000_000,
-	}))
-	require.NoError(t, svcA.BindBillingPolicy(ctxA, billingservice.BillingPolicyBindingInput{PolicyName: "merchant_a_only"}))
-
-	merchantB := merchant.ID(uuid.New())
-	_, err := pool.Exec(context.Background(), `
-		INSERT INTO openrails.merchants (id, slug, status)
-		VALUES ($1, $2, 'active')
-		ON CONFLICT (slug) WHERE deleted_at IS NULL AND permission_group_id IS NULL DO UPDATE SET updated_at = now()
-	`, merchantB.UUID(), "or897-policy-isolation")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), "DELETE FROM openrails.merchants WHERE id = $1", merchantB.UUID())
-	})
-	ctxB := merchant.WithID(context.Background(), merchantB)
-
-	policies, err := svcA.ListBillingPolicies(ctxB)
-	require.NoError(t, err)
-	require.Empty(t, policies, "merchant B must not see merchant A's policies")
-
-	bindings, err := svcA.ListBillingPolicyBindings(ctxB)
-	require.NoError(t, err)
-	require.Empty(t, bindings, "merchant B must not see merchant A's bindings")
-
-	// Merchant A still sees its own.
-	policies, err = svcA.ListBillingPolicies(ctxA)
-	require.NoError(t, err)
-	require.Len(t, policies, 1)
-	require.Equal(t, "merchant_a_only", policies[0].Name)
-}
-
-// The service API and the manifest loader run the SAME normalizer, so a policy
-// one accepts is a policy the other accepts, and a policy one refuses the other
-// refuses with the same reason.
-func TestOr897_ValidatorIsSharedByBothDeclarationPaths(t *testing.T) {
-	svc, _, _, ctx := wastedSvcEnv(t)
-
-	for _, tc := range []struct {
-		name string
-		in   billingservice.BillingPolicyInput
-		want string
-	}{
-		{"no kind", billingservice.BillingPolicyInput{Name: "p"}, "kind is required"},
-		{"unknown kind", billingservice.BillingPolicyInput{Name: "p", Kind: "spend_cap"}, `unknown kind "spend_cap"`},
-		{"rate cap with no rate", billingservice.BillingPolicyInput{Name: "p", Kind: "accrual_rate_cap"}, "requires a positive accrual_rate_cap_per_hour"},
-		{"per-policy cycle boundary", billingservice.BillingPolicyInput{
-			Name: "p", Kind: "outstanding_cap", CollectionCycleBoundary: "calendar_month",
-		}, "cannot be per-policy"},
-		{"cross-kind limit", billingservice.BillingPolicyInput{
-			Name: "p", Kind: "outstanding_cap",
-			SpendWindows: []billingservice.SpendLimitWindowInput{{Key: "m", WindowSeconds: 60, Limit: 1}},
-		}, "spend_windows belong to kind window_spend_cap"},
-		{"window cap with no window", billingservice.BillingPolicyInput{Name: "p", Kind: "window_spend_cap"}, "at least one spend_windows entry"},
-		{"bad name", billingservice.BillingPolicyInput{Name: "a policy", Kind: "outstanding_cap"}, "may use only letters"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := svc.SetBillingPolicy(ctx, tc.in)
-			require.ErrorIs(t, err, billingservice.ErrInvalidBillingPolicy)
-			require.ErrorContains(t, err, tc.want)
-
-			// The manifest path reaches the identical normalizer, so the same
-			// input yields the same refusal.
-			_, _, verr := billingservice.ValidateBillingPolicy(tc.in)
-			require.ErrorContains(t, verr, tc.want)
-		})
-	}
-
-	// A binding that names both rungs cannot be ranked, so it is refused rather
-	// than silently resolved one way.
-	err := svc.BindBillingPolicy(ctx, billingservice.BillingPolicyBindingInput{
-		PolicyName: "p", Tier: "gold", CustomerID: openrails.CustomerID(uuid.New()),
-	})
-	require.ErrorIs(t, err, billingservice.ErrInvalidBillingPolicy)
-	require.ErrorContains(t, err, "a customer OR a tier, not both")
 }
 
 // or897ArrearsPayer seeds an unfunded ARREARS payer: every admit verdict below

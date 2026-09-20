@@ -504,7 +504,11 @@ type BillingPolicyInput = openrails.BillingPolicyInput
 // BillingPolicyBindingInput points one rung at a policy name (or#897). Set
 // CustomerID for the per-customer rung, Tier for the per-tier rung, neither for
 // the merchant default — never both.
-type BillingPolicyBindingInput = openrails.BillingPolicyBindingInput
+type BillingPolicyBindingInput struct {
+	PolicyName string
+	CustomerID openrails.CustomerID
+	Tier       string
+}
 
 // DefaultInvokerWastedWindows is the flat delegated-invoker wasted-spend default:
 // invokers aren't trusted (an account mints unlimited invokers), so the
@@ -1186,7 +1190,7 @@ func (s *Service) ListBillingPolicies(ctx context.Context) ([]BillingPolicyInput
 // ListBillingPolicyBindings returns the DECLARATIVE bindings — the merchant
 // default and the per-tier rungs. Per-customer bindings are runtime segmentation
 // state and are never enumerated (that read would scale with customers).
-func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]BillingPolicyBindingInput, error) {
+func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]openrails.BillingPolicyBindingInput, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -1200,12 +1204,9 @@ func (s *Service) ListBillingPolicyBindings(ctx context.Context) ([]BillingPolic
 	if err != nil {
 		return nil, err
 	}
-	out := make([]BillingPolicyBindingInput, 0, len(rows))
+	out := make([]openrails.BillingPolicyBindingInput, 0, len(rows))
 	for _, r := range rows {
-		b := BillingPolicyBindingInput{PolicyName: r.PolicyName, Tier: r.Tier}
-		if r.CustomerID != nil {
-			b.CustomerID = openrails.CustomerID(*r.CustomerID)
-		}
+		b := openrails.BillingPolicyBindingInput{PolicyName: r.PolicyName, Tier: r.Tier}
 		out = append(out, b)
 	}
 	return out, nil

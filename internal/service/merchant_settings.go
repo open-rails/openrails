@@ -65,9 +65,6 @@ func (s *Service) normalizeMerchantSettings(ctx context.Context, in openrails.Me
 	}
 	bound := make(map[string]bool)
 	for _, binding := range in.BillingPolicyBindings {
-		if !binding.CustomerID.IsZero() {
-			return doc, fmt.Errorf("customer bindings are runtime state, outside merchant settings")
-		}
 		binding.Tier = strings.TrimSpace(binding.Tier)
 		binding.PolicyName = strings.TrimSpace(binding.PolicyName)
 		if _, exists := doc.policies[binding.PolicyName]; !exists {
