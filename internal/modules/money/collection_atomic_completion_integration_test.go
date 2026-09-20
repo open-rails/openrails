@@ -5,7 +5,10 @@ package money_test
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/dbtest"
@@ -103,4 +106,58 @@ func TestCollectionRefusalOutboxAndTerminalCommitTogether(t *testing.T) {
 			require.Len(t, e.gateway.sentOrderIDs(), 1, "the parsed refusal replays locally without another provider charge")
 		})
 	}
+}
+
+func TestConcurrentCollectionCompletionReplaysOneTerminalResult(t *testing.T) {
+	e := nmiReceiptScenario(t)
+	e.gateway.orderSale(e.op.String(), "concurrent-charge")
+	e.gateway.payment("concurrent-charge", e.vault, "0.05", e.currency)
+	operation := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	receipt, found, err := e.plane.ReadCollectionReceipt(e.ctx, operation, "concurrent-charge")
+	require.NoError(t, err)
+	require.True(t, found)
+	_, err = intents.NewStore(e.db).RetainCollectedReceipt(e.ctx, operation, receipt)
+	require.NoError(t, err)
+	operation = latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	handler := money.NewInvoiceCollectionHandler(e.db, nil, e.plane, fullModeConfig(), nil)
+	results := make(chan intents.Outcome, 2)
+	for range 2 {
+		go func() { results <- handler.Verify(e.ctx, operation) }()
+	}
+	for range 2 {
+		outcome := <-results
+		require.Equal(t, intents.OutcomeSucceeded, outcome.Class, outcome.Reason)
+	}
+	require.Equal(t, intents.StatusSucceeded, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+	e.requireSettledOnce(t)
+	require.Len(t, e.gateway.sentOrderIDs(), 1)
+}
+
+func TestCollectionCompletionRejectsNonExecutionUnderItsTransactionLock(t *testing.T) {
+	e := nmiReceiptScenario(t)
+	e.gateway.orderSale(e.op.String(), "known-charge")
+	e.gateway.payment("known-charge", e.vault, "0.05", e.currency)
+	operation := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	receipt, found, err := e.plane.ReadCollectionReceipt(e.ctx, operation, "known-charge")
+	require.NoError(t, err)
+	require.True(t, found)
+	_, err = intents.NewStore(e.db).RetainCollectedReceipt(e.ctx, operation, receipt)
+	require.NoError(t, err)
+	// Bypass the earlier handler check deliberately: the transaction's terminal
+	// gate itself must reject refusal and roll back all preceding local effects.
+	err = e.db.MerchantTx(e.ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE openrails.invoices SET status='voided',amount_due=0,collection_intent_id=NULL WHERE id=$1`, e.invoice); err != nil {
+			return err
+		}
+		return intents.NewStore(e.db.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, operation, intents.TerminalWithEvidence("not executed", map[string]any{"not_executed": true}), time.Now())
+	})
+	require.ErrorContains(t, err, "qualified collected payment cannot become nonexecution")
+	invoice := e.invoiceRow(t)
+	require.EqualValues(t, 50000, invoice.AmountDue)
+	require.NotNil(t, invoice.CollectionIntentID)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+	dueNow(t, e.pool, e.ctx, e.op)
+	_, err = e.runner.RunVerifyOnce(e.ctx)
+	require.NoError(t, err)
+	e.requireSettledOnce(t)
 }
