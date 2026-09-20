@@ -130,11 +130,11 @@ func (t schemaTx) Begin(ctx context.Context) (pgx.Tx, error) {
 	return schemaTx{Tx: inner, rw: t.rw}, nil
 }
 
-// wrapTx returns tx unchanged when the rewriter is inactive, else a schema-
-// rewriting wrapper. Callers keep committing/rolling back the wrapper (it
-// delegates those to the underlying tx).
+// wrapTx retains the configured schema even when it is canonical and needs no
+// SQL rewrite. NewWithPgxTx must distinguish that transaction from a raw host
+// transaction, whose schema defaults to billing. Commit/Rollback still delegate.
 func (r schemaRewriter) wrapTx(tx pgx.Tx) pgx.Tx {
-	if !r.active || tx == nil {
+	if tx == nil {
 		return tx
 	}
 	return schemaTx{Tx: tx, rw: r}

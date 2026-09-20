@@ -20,6 +20,7 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/open-rails/openrails/config"
+	"github.com/open-rails/openrails/internal/db"
 )
 
 // Fresh databases prove the consumer entrypoint owns its catalog and grants only
@@ -151,6 +152,20 @@ func TestApplyMigrationsFreshOwnershipAndSchemas(t *testing.T) {
 			t.Cleanup(func() { require.NoError(t, rt.Close(context.Background())) })
 			require.Equal(t, tc.host, rt.HasExternalRiverClient())
 			require.Equal(t, tc.billing, rt.app.Runtime.DB.DataPool().Schema())
+			// A nested service reconstructing DB from a library transaction must
+			// retain its schema, including canonical openrails (an identity rewrite).
+			// Only one billing namespace exists in each fresh database, so a wrong
+			// default cannot silently pass through a duplicate fixture schema.
+			tx, err := rt.app.Runtime.DB.DataPool().Begin(ctx)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback(context.Background()) }()
+			bound := db.NewWithPgxTx(tx)
+			_, err = bound.Qx(ctx).Exec(ctx, `INSERT INTO openrails.merchants(id,slug) VALUES(gen_random_uuid(),'transaction-schema-proof')`)
+			require.NoError(t, err)
+			var relation string
+			require.NoError(t, bound.Qx(ctx).QueryRow(ctx, `SELECT tableoid::regclass::text FROM openrails.merchants WHERE slug='transaction-schema-proof'`).Scan(&relation))
+			require.Equal(t, tc.billing+".merchants", relation)
+			require.NoError(t, tx.Rollback(ctx))
 			require.NoError(t, rt.app.Runtime.InitRiver(ctx))
 			require.Equal(t, tc.jobs, rt.app.Runtime.RiverClient.Schema())
 			require.Equal(t, tc.jobs, rt.app.Runtime.RiverProducer.Schema())
