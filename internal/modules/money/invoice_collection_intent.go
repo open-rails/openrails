@@ -86,7 +86,10 @@ func (h *InvoiceCollectionHandler) now() time.Time { return h.Clock.Now().UTC() 
 
 // PrunePolicy keeps the frozen payload: a client retry key replays against
 // the operation's identity (invoice, customer, payment method) after success.
-func (h *InvoiceCollectionHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, false }
+func (h *InvoiceCollectionHandler) PrunePolicy() (keepPayload, keepEvidence bool) { return true, true }
+
+// Terminal state is committed with the local invoice/ledger/outbox effects.
+func (h *InvoiceCollectionHandler) CommitsTerminalOutcome() bool { return true }
 
 // CheckRelevance: a collection operation is never superseded. The invoice's
 // pointer blocks every competing mutation while the operation lives, and a
@@ -275,7 +278,7 @@ func (h *InvoiceCollectionHandler) Resolve(ctx context.Context, intent gen.Openr
 	if !found {
 		return intents.Outcome{}, intents.RejectResolution("provider object is not this operation's settled charge")
 	}
-	return h.finalizeSettle(ctx, intent, receipt, true), nil
+	return h.finalizeSettle(ctx, intent, receipt), nil
 }
 
 // contradicted keeps an operation unknown when the provider holds an object
@@ -315,7 +318,7 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 	if receipt, found, err := intents.LoadCollectedReceipt(intent); err != nil {
 		return intents.Ambiguous("stored receipt rejected: " + err.Error()), true
 	} else if found {
-		return h.finalizeSettle(ctx, intent, receipt, true), true
+		return h.finalizeSettle(ctx, intent, receipt), true
 	}
 	if candidate, found, err := intents.LoadCollectionCandidate(intent); err != nil {
 		return intents.Ambiguous(err.Error()), true
@@ -341,7 +344,7 @@ func (h *InvoiceCollectionHandler) finalizeFromEvidence(ctx context.Context, int
 // key), attempt settled, invoice released — all or nothing. A local failure
 // retains the receipt on the operation for the verifier and keeps the
 // invoice pointed at it.
-func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.OpenrailsRailIntent, receipt intents.CollectedReceipt, verified bool) intents.Outcome {
+func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent gen.OpenrailsRailIntent, receipt intents.CollectedReceipt) intents.Outcome {
 	p, err := intents.DecodeInvoiceCollectionPayload(intent)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
@@ -351,13 +354,16 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		return intents.Ambiguous("retain qualified receipt before local settlement: " + err.Error())
 	}
 	transactionID, externalInvoiceID, rail := retained.TransactionID(), retained.ExternalInvoiceID(), p.Rail
-	evidence := map[string]any{collectionEvidenceTransactionID: transactionID, collectionEvidenceRail: rail}
+	evidence := map[string]any{collectionEvidenceTransactionID: transactionID, collectionEvidenceRail: rail, "verified_existing": true}
 	if ext := strings.TrimSpace(externalInvoiceID); ext != "" {
 		evidence[collectionEvidenceExternalID] = ext
 	}
 	now := h.now()
 	err = h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		complete := func() error {
+			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.Succeeded(evidence), now)
+		}
 		chargedAmount, err := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
 		if err != nil || chargedAmount < p.Amount {
 			return fmt.Errorf("collection charge does not cover the frozen invoice amount")
@@ -373,7 +379,7 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		}
 		switch attempt.Status {
 		case "settled":
-			return nil
+			return complete()
 		case "failed":
 			return fmt.Errorf("attempt %s already failed; a confirmed charge %s needs repair", attempt.ID, transactionID)
 		}
@@ -436,13 +442,10 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 		if released != 1 {
 			return fmt.Errorf("invoice %s no longer names this operation; confirmed charge %s needs repair", p.InvoiceID, transactionID)
 		}
-		return nil
+		return complete()
 	})
 	if err != nil {
 		return intents.AmbiguousWithEvidence("collection charged, but local settlement failed: "+err.Error(), evidence)
-	}
-	if verified {
-		evidence["verified_existing"] = true
 	}
 	return intents.Succeeded(evidence)
 }
@@ -463,13 +466,16 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 	var invoice *models.Invoice
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		complete := func() error {
+			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence("collection refused: "+failureCode, evidence), now)
+		}
 		attempt, err := q.GetInvoicePaymentAttempt(ctx, gen.GetInvoicePaymentAttemptParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID})
 		if err != nil {
 			return fmt.Errorf("load attempt: %w", err)
 		}
 		switch attempt.Status {
 		case "failed":
-			return nil
+			return complete()
 		case "settled":
 			return fmt.Errorf("attempt %s already settled; refusal contradicts a recorded charge", attempt.ID)
 		}
@@ -505,14 +511,16 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 		if updated != 1 {
 			return errors.New("record collection failure: invoice no longer names this operation")
 		}
-		return nil
+		if err := queueInvoiceCollectionOutcome(ctx, h.DB.NewWithPgxTx(tx), invoice, action, failureCode, now); err != nil {
+			return err
+		}
+		return complete()
 	})
 	if err != nil {
 		return intents.AmbiguousWithEvidence("collection refused, but local record failed: "+err.Error(), evidence)
 	}
 	if invoice != nil {
 		logInvoiceDeclineDecision(ctx, p.InvoiceID, rail, &failureCode, action)
-		h.notifyInvoiceCollectionOutcome(ctx, invoice, action, failureCode, now)
 	}
 	return intents.TerminalWithEvidence("collection refused: "+failureCode, evidence)
 }
@@ -534,13 +542,16 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 	now := h.now()
 	err := h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
+		complete := func() error {
+			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence(reason, evidence), now)
+		}
 		attempt, err := q.GetInvoicePaymentAttempt(ctx, gen.GetInvoicePaymentAttemptParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID})
 		if err != nil {
 			return fmt.Errorf("load attempt: %w", err)
 		}
 		switch attempt.Status {
 		case "failed":
-			return nil
+			return complete()
 		case "settled":
 			return fmt.Errorf("attempt %s already settled; non-execution contradicts a recorded charge", attempt.ID)
 		}
@@ -550,8 +561,14 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 		}); err != nil {
 			return err
 		}
-		_, err = q.ReleaseInvoiceCollection(ctx, gen.ReleaseInvoiceCollectionParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID, NextAttemptAt: &now, Now: now})
-		return err
+		released, err := q.ReleaseInvoiceCollection(ctx, gen.ReleaseInvoiceCollectionParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID, NextAttemptAt: &now, Now: now})
+		if err != nil {
+			return err
+		}
+		if released != 1 {
+			return errors.New("invoice is no longer owned by this collection")
+		}
+		return complete()
 	})
 	if err != nil {
 		return intents.AmbiguousWithEvidence("non-execution confirmed, but local release failed: "+err.Error(), evidence)
@@ -594,10 +611,9 @@ func logInvoiceDeclineDecision(ctx context.Context, invoiceID uuid.UUID, rail st
 	}
 }
 
-// notifyInvoiceCollectionOutcome is the or#870 notification ladder shaped for
-// an invoice: one rung per bucket, never an access effect. Notification
-// failure never fails collection.
-func (h *InvoiceCollectionHandler) notifyInvoiceCollectionOutcome(ctx context.Context, invoice *models.Invoice, action collection.Action, failureCode string, now time.Time) {
+// queueInvoiceCollectionOutcome records the notification in the same domain
+// transaction; no external message is sent here.
+func queueInvoiceCollectionOutcome(ctx context.Context, database *db.DB, invoice *models.Invoice, action collection.Action, failureCode string, now time.Time) error {
 	amountDue := invoice.AmountDue
 	data := openrails.NotificationData{
 		InvoiceID: invoice.ID, Currency: invoice.Currency, AmountDue: &amountDue,
@@ -619,10 +635,7 @@ func (h *InvoiceCollectionHandler) notifyInvoiceCollectionOutcome(ctx context.Co
 		data.NextAttemptAt = &next
 	}
 	notification := &models.NotificationQueue{ID: uuidutil.NewV7(), CustomerID: invoice.CustomerID, EventType: eventType, Data: data, CreatedAt: now}
-	if err := subscriptions.NewNotificationQueueRepo(h.DB).Create(ctx, notification); err != nil {
-		log.WithContext(ctx).WithError(err).WithFields(log.Fields{"invoice_id": invoice.ID, "customer_id": invoice.CustomerID, "event_type": eventType}).
-			Error("failed to queue invoice collection notification")
-	}
+	return subscriptions.NewNotificationQueueRepo(database).Create(ctx, notification)
 }
 
 func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.OpenrailsRailIntent, reference string) intents.Outcome {
@@ -639,5 +652,5 @@ func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.
 	if !found {
 		return intents.Ambiguous("no exact provider receipt; no automatic resend")
 	}
-	return h.finalizeSettle(ctx, in, receipt, true)
+	return h.finalizeSettle(ctx, in, receipt)
 }

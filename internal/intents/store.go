@@ -320,7 +320,7 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 		}
 		ev = b
 	}
-	return one(s.db.Gen(ctx).MarkRailIntentSucceeded(ctx, gen.MarkRailIntentSucceededParams{
+	return oneTerminal(s.db.Gen(ctx).MarkRailIntentSucceeded(ctx, gen.MarkRailIntentSucceededParams{
 		ID: id, Now: now.UTC(), ResultEvidence: ev,
 	}))
 }
@@ -536,7 +536,7 @@ func (s *Store) MarkFailedTerminal(ctx context.Context, id uuid.UUID, reason str
 		}
 		ev = b
 	}
-	return one(s.db.Gen(ctx).MarkRailIntentFailedTerminal(ctx, gen.MarkRailIntentFailedTerminalParams{
+	return oneTerminal(s.db.Gen(ctx).MarkRailIntentFailedTerminal(ctx, gen.MarkRailIntentFailedTerminalParams{
 		ID: id, Reason: &reason, ResultEvidence: ev,
 	}))
 }
@@ -551,6 +551,18 @@ func (s *Store) MarkSuperseded(ctx context.Context, id uuid.UUID, reason string)
 	return one(s.db.Gen(ctx).MarkRailIntentSuperseded(ctx, gen.MarkRailIntentSupersededParams{
 		ID: id, Reason: &reason,
 	}))
+}
+
+// Terminal transitions must actually commit one row; a stale or prohibited
+// update is not a successful operation and must not trigger result pruning.
+func oneTerminal(rows int64, err error) error {
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return errors.New("intent terminal transition did not commit")
+	}
+	return nil
 }
 
 // one normalizes :execrows transitions: 0 rows means the row raced into a

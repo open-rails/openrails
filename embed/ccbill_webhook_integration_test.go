@@ -173,29 +173,36 @@ func assertCCBillSubscriptionActive(t *testing.T, ctx context.Context, mid merch
 	require.Equal(t, "active", status)
 }
 
-// cleanupCCBillWebhookMerchant deletes under the merchant's own scope — an
-// unpinned DELETE matches zero rows under RLS and leaks every fixture row into
-// the shared database without erroring.
+// Cleanup uses the fixture-only administrator because immutable grants deny
+// app-role DELETE. Every statement still selects this test's exact merchant;
+// the runtime and all behavioral assertions continue using the RLS app role.
 func cleanupCCBillWebhookMerchant(t *testing.T, mid merchant.ID) {
 	t.Helper()
-	appDB := dbtest.OpenMerchantDB(t, mid.UUID())
+	appDB := dbtest.OpenAppDB(t, dbtest.SharedSuperuserDSN(t))
 	t.Cleanup(func() {
 		pool := appDB.Pool()
 		for _, stmt := range []string{
 			`DELETE FROM openrails.webhook_events WHERE merchant_id = $1`,
 			`DELETE FROM openrails.entitlements WHERE merchant_id = $1`,
-			`DELETE FROM openrails.access_windows WHERE merchant_id = $1`,
-			`DELETE FROM openrails.payments WHERE merchant_id = $1`,
 			`DELETE FROM openrails.checkout_sessions WHERE merchant_id = $1`,
+			`DELETE FROM openrails.payments WHERE merchant_id = $1`,
 			`DELETE FROM openrails.subscriptions WHERE merchant_id = $1`,
+			`DELETE FROM openrails.notifications WHERE merchant_id = $1`,
+			`DELETE FROM openrails.grants WHERE merchant_id = $1`,
 			`DELETE FROM openrails.customers WHERE merchant_id = $1`,
+			`DELETE FROM openrails.price_key_movements WHERE merchant_id = $1`,
+			`DELETE FROM openrails.price_psp_bindings WHERE merchant_id = $1`,
 			`DELETE FROM openrails.prices WHERE merchant_id = $1`,
 			`DELETE FROM openrails.products WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchant_secrets WHERE merchant_id = $1`,
 			`DELETE FROM openrails.psps WHERE merchant_id = $1`,
 			`DELETE FROM openrails.merchants WHERE id = $1`,
 		} {
-			_, _ = pool.Exec(context.Background(), stmt, mid.UUID())
+			deleted, err := pool.Exec(context.Background(), stmt, mid.UUID())
+			require.NoError(t, err, "clean owned merchant fixture: %s", stmt)
+			if stmt == `DELETE FROM openrails.merchants WHERE id = $1` {
+				require.EqualValues(t, 1, deleted.RowsAffected(), "owned merchant was actually removed")
+			}
 		}
 	})
 }

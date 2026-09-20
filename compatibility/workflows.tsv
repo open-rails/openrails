@@ -6,21 +6,21 @@
 # saas = the shared multi-merchant engine behind the real hosted control plane
 # (integrationharness.StartHosted, the openrails-saas engine shape); providers are
 # loopback fakes, never live PSPs.
-purchase_recovery	embedded	./embed	TestCommerceClientCheckoutAndTier/embedded	retained	CCBill form signed locally; no provider call
+purchase_recovery	embedded	./embed	TestClientCatalogAndAccessWorkflow/embedded/checkout	retained	CCBill form signed locally; no provider call
 purchase_recovery	embedded	./embed	TestRecoveryClientAcrossTransports/embedded	retained	NMI rows seeded; no provider call
 purchase_recovery	embedded	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/embedded	retained	One application program: checkout, subscription cancel/resume, invoice remittance
-purchase_recovery	standalone	./embed	TestCommerceClientCheckoutAndTier/remote	retained	CCBill form signed locally; no provider call
+purchase_recovery	standalone	./embed	TestClientCatalogAndAccessWorkflow/standalone/checkout	retained	CCBill form signed locally; no provider call
 purchase_recovery	standalone	./embed	TestRecoveryClientAcrossTransports/standalone	retained	NMI rows seeded; no provider call
 purchase_recovery	standalone	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/standalone_http	retained	Same program over the real standalone server and API key
-purchase_recovery	saas	./embed	TestCommerceClientCheckoutAndTier/saas	retained	Owner-provisioned merchant on the shared engine behind the hosted control plane; owner-minted API key; CCBill form signed locally
+purchase_recovery	saas	./embed	TestClientCatalogAndAccessWorkflow/saas/checkout	retained	Owner-provisioned merchant on the shared engine behind the hosted control plane; owner-minted API key; CCBill form signed locally
 purchase_recovery	saas	./embed	TestRecoveryClientAcrossTransports/saas	retained	Hosted merchant, owner-minted API key; NMI rows seeded; no provider call
 purchase_recovery	saas	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/saas_http	retained	Same program, hosted merchant over HTTP with an owner-minted API key
 purchase_recovery	saas	./examples/billingapp	TestBillingApplicationRunsUnchangedAcrossDeployments/saas_engine	retained	Same program, the host's in-process Client for a second hosted merchant
-metered_billing	embedded	./embed	TestMeteringClientRatesIntoInvoice/embedded	retained	Usage rated into invoice; finalized through the service, no collection
-metered_billing	embedded	./embed	TestInvoiceClientWorkflowAcrossTransports/embedded	retained	Receivable seeded by accrual, not usage
-metered_billing	standalone	./embed	TestMeteringClientRatesIntoInvoice/standalone	retained	Usage rated into invoice; finalized through the service, no collection
-metered_billing	standalone	./embed	TestInvoiceClientWorkflowAcrossTransports/standalone	retained	Receivable seeded by accrual, not usage
-metered_billing	saas	./embed	TestMeteringClientRatesIntoInvoice/saas	retained	Hosted merchant, owner-minted API key; usage rated into invoice; finalized through the hosted engine's service, no collection
+metered_billing	embedded	./embed	TestClientAccountAndUsageWorkflow/embedded/metering	retained	Usage rated into invoice; finalized through the service, no collection
+metered_billing	embedded	./embed	TestClientAccountAndUsageWorkflow/embedded/invoice	retained	Receivable seeded by accrual, not usage
+metered_billing	standalone	./embed	TestClientAccountAndUsageWorkflow/standalone/metering	retained	Usage rated into invoice; finalized through the service, no collection
+metered_billing	standalone	./embed	TestClientAccountAndUsageWorkflow/standalone/invoice	retained	Receivable seeded by accrual, not usage
+metered_billing	saas	./embed	TestClientAccountAndUsageWorkflow/saas/metering	retained	Hosted merchant, owner-minted API key; usage rated into invoice; finalized through the hosted engine's service, no collection
 merchant_isolation	embedded	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients
 merchant_isolation	embedded	./internal/service	TestAdmissionClientRecoveryAndCaptureReceipt/embedded	retained	Other merchant cannot capture, release or extend a hold
 merchant_isolation	standalone	./internal/integrationharness	TestOneSubjectHasIndependentMerchantBillingThroughBothClients	retained	One subject funds two merchants through embedded and standalone clients

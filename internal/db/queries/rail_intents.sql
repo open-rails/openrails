@@ -198,7 +198,8 @@ SET status = 'succeeded',
     last_failure_reason = NULL,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
+WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+  AND intent_type <> 'invoice_collection';
 
 -- name: MarkRailIntentFailedRetryable :execrows
 UPDATE openrails.rail_intents
@@ -228,7 +229,8 @@ SET status = 'failed_terminal',
     result_evidence = CASE WHEN result_evidence ? 'qualified_receipt' THEN COALESCE(sqlc.narg(result_evidence)::jsonb, '{}'::jsonb) || jsonb_build_object('qualified_receipt', result_evidence->'qualified_receipt') ELSE sqlc.narg(result_evidence)::jsonb END,
     claimed_until = NULL,
     updated_at = now()
-WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify');
+WHERE id = sqlc.arg(id) AND status IN ('in_flight', 'unknown_needs_verify')
+  AND intent_type <> 'invoice_collection';
 
 -- Park: the attempt was deliberately NOT made (mode gate, kill switch,
 -- unconfigured client). The intent goes back to pending with the reason
@@ -437,6 +439,27 @@ SELECT * FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type IN ('nmi_upgrade', 'stripe_tier_change')
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
+
+-- name: LockRailIntentForCollectionCompletion :one
+-- Call after acquiring the domain's payer/invoice locks, matching admission's
+-- invoice-before-operation order.
+SELECT * FROM openrails.rail_intents
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = 'invoice_collection'
+FOR UPDATE;
+
+-- name: CompleteRailIntentCollection :execrows
+-- The caller owns the row lock and commits this transition with local effects.
+UPDATE openrails.rail_intents
+SET status = sqlc.arg(status)::text,
+    result_evidence = sqlc.arg(evidence)::jsonb,
+    last_failure_reason = NULLIF(sqlc.arg(reason)::text, ''),
+    executed_at = CASE WHEN sqlc.arg(status)::text = 'succeeded' THEN sqlc.arg(now)::timestamptz ELSE executed_at END,
+    claimed_until = NULL,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND intent_type = 'invoice_collection'
+  AND status IN ('in_flight', 'unknown_needs_verify');
 
 -- name: RetainRailIntentCollectedReceipt :execrows
 -- Custody binds immutable provider facts to the accepted operation. A repeated
