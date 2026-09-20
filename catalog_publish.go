@@ -153,7 +153,8 @@ func (plan *CatalogPlan) HasChanges() bool {
 // classes. Insert adds absent entries; Overwrite edits existing entries; Prune
 // removes omitted meters/rate cards and archives omitted catalog entries. With
 // no flags it only returns the plan. Customer-specific rate-card overrides are
-// never replaced by a merchant declaration.
+// never replaced by a merchant declaration. Provider failures or concurrent
+// changes can leave partial progress; a subsequent publish computes a new plan.
 func (c *Client) PublishCatalog(ctx context.Context, request CatalogPublishRequest) (*CatalogPublishResponse, error) {
 	var out CatalogPublishResponse
 	if err := c.do(ctx, http.MethodPost, "/v1/merchant/catalog/publish", request, &out); err != nil {

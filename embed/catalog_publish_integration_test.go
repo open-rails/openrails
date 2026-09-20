@@ -3,6 +3,8 @@
 package embed_test
 
 import (
+	"fmt"
+	"github.com/google/uuid"
 	"testing"
 
 	"github.com/open-rails/openrails"
@@ -117,6 +119,83 @@ func TestClientCatalogPublishingWorkflow(t *testing.T) {
 			require.ErrorIs(t, err, openrails.ErrNotFound)
 			publish(openrails.CatalogPublishRequest{Insert: true})
 			require.False(t, publish(all).Plan.HasChanges())
+			// Existing negotiated pricing is a fixture, because its operator
+			// setter is internal; the publish and usage paths below are public.
+			customer, err := client.EnsureCustomer(t.Context(), openrails.CustomerID(uuid.New()))
+			require.NoError(t, err)
+			declaration.Meters = append(declaration.Meters, catalog.Meter{Key: "protected-override", Aggregation: catalog.AggCount}, catalog.Meter{Key: "protected-history", Aggregation: catalog.AggCount})
+			declaration.Products[0].RateCards = append(declaration.Products[0].RateCards, catalog.RateCard{Meter: "protected-override", Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 3}}})
+			publish(all)
+			pool := h.MerchantPool(d.mid.UUID())
+			overrideID := uuid.New()
+			_, err = pool.Exec(t.Context(), `INSERT INTO openrails.catalog_rate_cards(id,merchant_id,customer_id,ordinal,meter_key,payment_term,price,allowance) VALUES($1,$2,$3,1,'protected-override','in_arrears','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"2"}}'::jsonb,'{"included":20}'::jsonb)`, overrideID, d.mid.UUID(), customer.ID.UUID())
+			require.NoError(t, err)
+			override := func() string {
+				t.Helper()
+				var value string
+				require.NoError(t, pool.QueryRow(t.Context(), `SELECT row_to_json(card)::text FROM openrails.catalog_rate_cards card WHERE merchant_id=$1 AND id=$2`, d.mid.UUID(), overrideID).Scan(&value))
+				return value
+			}
+			originalOverride := override()
+			require.NoError(t, client.RecordUsage(t.Context(), openrails.UsageReport{CustomerID: customer.ID, Invoker: customer.ID.String(), Currency: "USD", EventType: "protected-history", Source: "catalog-prune", SourceID: uuid.NewString()}))
+			for _, scenario := range []string{"protected-override", "protected-history", "history-edit", "card-only-prune", "override-currency"} {
+				t.Run(scenario, func(t *testing.T) {
+					key := scenario
+					if scenario == "history-edit" {
+						key = "protected-history"
+					}
+					if scenario == "card-only-prune" || scenario == "override-currency" {
+						key = "protected-override"
+					}
+					removeMeter := scenario == "protected-override" || scenario == "protected-history"
+					removeCard := removeMeter || scenario == "card-only-prune"
+					wantCode := "meter_in_use"
+					if scenario == "card-only-prune" {
+						wantCode = "rate_card_has_overrides"
+					}
+					if scenario == "override-currency" {
+						wantCode = "rate_card_currency_mismatch"
+					}
+					desired := declaration
+					desired.Meters = nil
+					for _, meter := range declaration.Meters {
+						if scenario == "history-edit" && meter.Key == key {
+							meter.Unit = "must not reinterpret history"
+						}
+						if !removeMeter || meter.Key != key {
+							desired.Meters = append(desired.Meters, meter)
+						}
+					}
+					desired.Products = append([]catalog.Product(nil), declaration.Products...)
+					desired.Products[0].DisplayName = "Must not apply before refusal"
+					desired.Products[0].RateCards = nil
+					for _, card := range declaration.Products[0].RateCards {
+						if scenario == "override-currency" && card.Meter == key {
+							card.Price.Currency = "EUR"
+						}
+						if !removeCard || card.Meter != key {
+							desired.Products[0].RateCards = append(desired.Products[0].RateCards, card)
+						}
+					}
+					_, err := client.PublishCatalog(t.Context(), openrails.CatalogPublishRequest{Catalog: desired, Overwrite: true, Prune: true})
+					var apiErr *openrails.StatusError
+					require.ErrorAs(t, err, &apiErr)
+					require.Equal(t, 409, apiErr.Status)
+					require.Equal(t, wantCode, apiErr.Code)
+					product, err := client.GetProductByKey(t.Context(), "usage")
+					require.NoError(t, err)
+					require.Equal(t, "Usage", product.DisplayName, "predictable refusal precedes product edits")
+					detail, err := client.GetUsageMeter(t.Context(), key)
+					require.NoError(t, err)
+					if key == "protected-history" {
+						require.True(t, detail.HasActivity)
+					} else {
+						require.EqualValues(t, 1, detail.OverrideCount)
+					}
+					require.Equal(t, originalOverride, override(), fmt.Sprintf("%s must preserve the exact override row", key))
+				})
+			}
+
 		})
 	}
 }

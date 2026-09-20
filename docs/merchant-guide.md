@@ -46,8 +46,15 @@ With no mutation flags, publishing only returns a plan. `Insert` adds absent
 entries, `Overwrite` edits existing entries, and `Prune` removes omitted meter
 and rate-card definitions and archives omitted entries in declared product groups.
 The flags compose; preview has no separate wire flag. A merchant declaration
-never replaces customer-specific rate-card overrides. A definition still used by
-an override cannot be pruned until that dependency is removed.
+never replaces customer-specific rate-card overrides. A meter with recorded usage
+or a customer override cannot be pruned; publication returns an actionable
+`409 meter_in_use`. Default-card override and allowance-source protections also
+apply. Predictable refusals are checked before product/provider changes and
+checked again in the billing transaction.
+
+Catalog publication can make partial progress when a provider call fails or state
+changes after preflight. Product, price and provider operations commit separately. Inspect the next plan and publish again
+after resolving the refusal.
 
 `CatalogPlan.MetersChanged` and `RateCardsChanged` identify differences in those
 billing definitions; `HasChanges()` includes them as well as product/price changes.

@@ -24,7 +24,7 @@ func Publish(ctx context.Context, svc *service.Service, req openrails.CatalogPub
 	if err != nil {
 		return nil, err
 	}
-	planned.MetersChanged, planned.RateCardsChanged, err = svc.PlanCatalogBilling(ctx, billing)
+	planned.MetersChanged, planned.RateCardsChanged, err = svc.PlanCatalogBilling(ctx, billing, service.CatalogMutationOptions{Insert: req.Insert, Overwrite: req.Overwrite, Prune: req.Prune})
 	if err != nil {
 		return nil, fmt.Errorf("plan catalog billing: %w", err)
 	}

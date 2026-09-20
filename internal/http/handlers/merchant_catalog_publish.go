@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/catalogpublish"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/service"
 	"net/http"
 )
 
@@ -19,7 +21,11 @@ func MerchantPublishCatalog(r *httprequest.Request) {
 	}
 	response, err := catalogpublish.Publish(r.Request.Context(), svc, req)
 	if err != nil {
-		writeCatalogError(r, err)
+		if errors.Is(err, service.ErrMeterInUse) || errors.Is(err, service.ErrRateCardHasOverrides) || errors.Is(err, service.ErrAllowanceSourceInUse) || errors.Is(err, service.ErrRateCardCurrencyMismatch) || errors.Is(err, service.ErrAllowanceSourceInvalid) {
+			writeMeteringError(r, err)
+		} else {
+			writeCatalogError(r, err)
+		}
 		return
 	}
 	r.JSON(http.StatusOK, response)

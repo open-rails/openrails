@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/pkg/merchant"
 	"github.com/open-rails/openrails/pkg/pricing"
 )
@@ -46,7 +47,7 @@ type SyncCatalogSidecarsRequest struct {
 // CatalogMutationOptions are the same three mutation classes as catalog publish.
 type CatalogMutationOptions struct{ Insert, Overwrite, Prune bool }
 
-func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSidecarsRequest) (bool, bool, error) {
+func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSidecarsRequest, opts CatalogMutationOptions) (bool, bool, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return false, false, err
@@ -60,16 +61,25 @@ func (s *Service) PlanCatalogBilling(ctx context.Context, desired SyncCatalogSid
 	if err != nil {
 		return false, false, err
 	}
-	var current SyncCatalogSidecarsRequest
-	err = dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		current, err = readCatalogBilling(ctx, tx, tid.UUID())
-		return err
-	})
-	if err != nil {
+	if err := normalizeCatalogBilling(&desired); err != nil {
 		return false, false, err
 	}
-	if err := normalizeCatalogBilling(&desired); err != nil {
+	var current SyncCatalogSidecarsRequest
+	err = dbi.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		if opts.Insert || opts.Overwrite || opts.Prune {
+			var locked uuid.UUID
+			if err := tx.QueryRow(ctx, `SELECT id FROM openrails.merchants WHERE id=$1 FOR UPDATE`, tid.UUID()).Scan(&locked); err != nil {
+				return err
+			}
+		}
+		var err error
+		current, err = readCatalogBilling(ctx, tx, tid.UUID())
+		if err != nil {
+			return err
+		}
+		return checkCatalogBillingChanges(ctx, tx, tid.UUID(), current, mergeCatalogBilling(current, desired, opts))
+	})
+	if err != nil {
 		return false, false, err
 	}
 	return !reflect.DeepEqual(current.Meters, desired.Meters), !sameCatalogCards(current.RateCards, desired.RateCards), nil
@@ -104,6 +114,9 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 			return err
 		}
 		next := mergeCatalogBilling(current, desired, opts)
+		if err := checkCatalogBillingChanges(ctx, tx, merchantID, current, next); err != nil {
+			return err
+		}
 		// A product excluded by Insert=false was deliberately not created by the
 		// product phase. Its declared cards cannot be inserted either.
 		cards := next.RateCards[:0]
@@ -171,6 +184,76 @@ func (s *Service) SyncCatalogSidecars(ctx context.Context, desired SyncCatalogSi
 		}
 		return nil
 	})
+}
+
+// Called before product/provider changes and again inside the write transaction.
+// The first check rejects predictable failures; the second closes concurrent
+// usage/override races without holding database locks during provider requests.
+func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, current, next SyncCatalogSidecarsRequest) error {
+	currentMeters := make(map[string]CatalogMeterSpec)
+	nextMeters := make(map[string]CatalogMeterSpec)
+	for _, m := range current.Meters {
+		currentMeters[m.Key] = m
+	}
+	for _, m := range next.Meters {
+		nextMeters[m.Key] = m
+	}
+	for _, m := range current.Meters {
+		if _, keep := nextMeters[m.Key]; !keep {
+			if err := money.CheckCatalogMeterChange(ctx, tx, merchantID, m.Key, nil); err != nil {
+				return err
+			}
+		}
+	}
+	for _, m := range next.Meters {
+		if old, ok := currentMeters[m.Key]; ok && reflect.DeepEqual(old, m) {
+			continue
+		}
+		replacement := pricing.Meter{Key: m.Key, EventType: m.EventType, ValueProperty: m.ValueProperty, Aggregation: m.Aggregation, Unit: m.Unit, GroupBy: m.GroupBy}
+		if err := money.CheckCatalogMeterChange(ctx, tx, merchantID, m.Key, &replacement); err != nil {
+			return err
+		}
+	}
+	currentCards := make(map[string]CatalogRateCardSpec)
+	nextCards := make(map[string]CatalogRateCardSpec)
+	for _, c := range current.RateCards {
+		if c.MeterKey != "" {
+			currentCards[c.MeterKey] = c
+		}
+	}
+	for _, c := range next.RateCards {
+		if c.MeterKey != "" {
+			nextCards[c.MeterKey] = c
+		}
+	}
+	for _, currentCard := range current.RateCards {
+		key := currentCard.MeterKey
+		if key == "" {
+			continue
+		}
+		if _, keep := nextCards[key]; !keep {
+			if err := money.CheckCatalogRateCardChange(ctx, tx, merchantID, key, nil); err != nil {
+				return err
+			}
+		}
+	}
+	for _, c := range next.RateCards {
+		key := c.MeterKey
+		if key == "" {
+			continue
+		}
+		if old, ok := currentCards[key]; ok && sameCatalogCards([]CatalogRateCardSpec{old}, []CatalogRateCardSpec{c}) {
+			continue
+		}
+		var price pricing.RatePrice
+		if err := json.Unmarshal(c.Price, &price); err != nil {
+			return err
+		}
+		if err := money.CheckCatalogRateCardChange(ctx, tx, merchantID, key, &price); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func readCatalogBilling(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) (SyncCatalogSidecarsRequest, error) {
