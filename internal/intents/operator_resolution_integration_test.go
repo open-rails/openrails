@@ -57,6 +57,8 @@ func TestNMIRefundUnknownResolvesOnlyFromExactReceipt(t *testing.T) {
 	fake.refunded.Store(true)
 	ctx := dbtest.WithTestMerchant(context.Background())
 
+	_, err = runner.Resolve(ctx, row.ID, Resolution{Step: "target", Abandon: true, Actor: "ops", Reason: "cutover-only compensation"})
+	require.ErrorIs(t, err, ErrResolutionUnsupported, "abandonment must not reach refund handlers")
 	_, err = runner.Resolve(ctx, row.ID, Resolution{Step: "anchor", BillingAnchor: time.Now().Add(time.Hour), Actor: "ops", Reason: "cutover-only decision"})
 	require.ErrorIs(t, err, ErrResolutionUnsupported, "billing-anchor authorization must not reach other handlers")
 	_, err = runner.Resolve(ctx, row.ID, Resolution{ProviderReference: "txn_refund_1", Reason: "provider dashboard"})
