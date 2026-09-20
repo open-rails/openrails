@@ -18,7 +18,7 @@ import (
 
 func TestCollectionSettlementAndTerminalCommitTogether(t *testing.T) {
 	e := newNMIReceiptEnv(t)
-	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, e.method)
+	_, err := e.pool.Exec(e.ctx, `UPDATE billing.payment_methods SET stored_credential_unscheduled_ref='' WHERE id=$1`, e.method)
 	require.NoError(t, err)
 	accepted, err := e.svc.PayInvoiceNow(e.ctx, e.runner, e.payer, money.InvoiceCollectionRetryRequest{InvoiceID: e.invoice, PaymentMethodID: e.method, IdempotencyKey: uuid.NewString()})
 	require.NoError(t, err)
@@ -28,12 +28,12 @@ func TestCollectionSettlementAndTerminalCommitTogether(t *testing.T) {
 	e.gateway.payment("atomic-charge", e.vault, "0.05", e.currency)
 	admin := dbtest.SharedSuperuserPGXPool(t)
 	trigger := "atomic_terminal_" + uuid.NewString()[:8]
-	_, err = admin.Exec(e.ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+	_, err = admin.Exec(e.ctx, fmt.Sprintf(`CREATE FUNCTION billing.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF NEW.id='%s'::uuid AND NEW.status='succeeded' THEN RAISE EXCEPTION 'injected terminal commit failure'; END IF;
- RETURN NEW; END $$; CREATE TRIGGER %s BEFORE UPDATE ON openrails.rail_intents FOR EACH ROW EXECUTE FUNCTION openrails.%s()`, trigger, e.op, trigger, trigger))
+ RETURN NEW; END $$; CREATE TRIGGER %s BEFORE UPDATE ON billing.rail_intents FOR EACH ROW EXECUTE FUNCTION billing.%s()`, trigger, e.op, trigger, trigger))
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_, _ = admin.Exec(context.WithoutCancel(e.ctx), "DROP FUNCTION IF EXISTS openrails."+trigger+"() CASCADE")
+		_, _ = admin.Exec(context.WithoutCancel(e.ctx), "DROP FUNCTION IF EXISTS billing."+trigger+"() CASCADE")
 	})
 	dueNow(t, e.pool, e.ctx, e.op)
 	stats, err := e.runner.RunVerifyOnce(e.ctx)
@@ -49,7 +49,7 @@ func TestCollectionSettlementAndTerminalCommitTogether(t *testing.T) {
 	_, found, err := intents.LoadCollectedReceipt(latestCollectionIntent(t, e.pool, e.ctx, e.invoice))
 	require.NoError(t, err)
 	require.True(t, found)
-	_, err = admin.Exec(e.ctx, "DROP FUNCTION openrails."+trigger+"() CASCADE")
+	_, err = admin.Exec(e.ctx, "DROP FUNCTION billing."+trigger+"() CASCADE")
 	require.NoError(t, err)
 	// The provider is no longer available to recovery; receipt custody suffices.
 	e.gateway.mu.Lock()
@@ -74,7 +74,7 @@ func TestCollectionRefusalOutboxAndTerminalCommitTogether(t *testing.T) {
 			e := newNMIReceiptEnv(t)
 			e.gateway.saleResponse = "response=2&responsetext=DECLINED&response_code=201"
 			initialNotifications := 0
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM openrails.notifications WHERE customer_id=$1`, e.payer.UUID()).Scan(&initialNotifications))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.notifications WHERE customer_id=$1`, e.payer.UUID()).Scan(&initialNotifications))
 
 			admin := dbtest.SharedSuperuserPGXPool(t)
 			trigger := "atomic_refusal_" + uuid.NewString()[:8]
@@ -84,12 +84,12 @@ func TestCollectionRefusalOutboxAndTerminalCommitTogether(t *testing.T) {
 				event = "UPDATE"
 				condition = fmt.Sprintf("NEW.intent_type='invoice_collection' AND NEW.payload->>'invoice_id'='%s' AND NEW.status='failed_terminal'", e.invoice)
 			}
-			_, err := admin.Exec(e.ctx, fmt.Sprintf(`CREATE FUNCTION openrails.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+			_, err := admin.Exec(e.ctx, fmt.Sprintf(`CREATE FUNCTION billing.%s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
  IF %s THEN RAISE EXCEPTION 'injected refusal completion failure'; END IF;
- RETURN NEW; END $$; CREATE TRIGGER %s BEFORE %s ON openrails.%s FOR EACH ROW EXECUTE FUNCTION openrails.%s()`, trigger, condition, trigger, event, table, trigger))
+ RETURN NEW; END $$; CREATE TRIGGER %s BEFORE %s ON billing.%s FOR EACH ROW EXECUTE FUNCTION billing.%s()`, trigger, condition, trigger, event, table, trigger))
 			require.NoError(t, err)
 			t.Cleanup(func() {
-				_, _ = admin.Exec(context.WithoutCancel(e.ctx), "DROP FUNCTION IF EXISTS openrails."+trigger+"() CASCADE")
+				_, _ = admin.Exec(context.WithoutCancel(e.ctx), "DROP FUNCTION IF EXISTS billing."+trigger+"() CASCADE")
 			})
 			_, err = e.svc.ChargeOutstanding(e.ctx, e.runner, 0)
 			require.NoError(t, err)
@@ -99,9 +99,9 @@ func TestCollectionRefusalOutboxAndTerminalCommitTogether(t *testing.T) {
 			require.Equal(t, []string{"attempted"}, e.attemptStatuses(t))
 			require.EqualValues(t, 0, e.invoiceRow(t).CollectionFailureCount)
 			var notifications int
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM openrails.notifications WHERE customer_id=$1`, e.payer.UUID()).Scan(&notifications))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.notifications WHERE customer_id=$1`, e.payer.UUID()).Scan(&notifications))
 			require.Equal(t, initialNotifications, notifications)
-			_, err = admin.Exec(e.ctx, "DROP FUNCTION openrails."+trigger+"() CASCADE")
+			_, err = admin.Exec(e.ctx, "DROP FUNCTION billing."+trigger+"() CASCADE")
 			require.NoError(t, err)
 			dueNow(t, e.pool, e.ctx, e.op)
 			stats, err := e.runner.RunVerifyOnce(e.ctx)
@@ -109,7 +109,7 @@ func TestCollectionRefusalOutboxAndTerminalCommitTogether(t *testing.T) {
 			require.Equal(t, 1, stats.Terminal)
 			require.Equal(t, intents.StatusFailedTerminal, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
 			require.Equal(t, []string{"failed"}, e.attemptStatuses(t))
-			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM openrails.notifications WHERE customer_id=$1`, e.payer.UUID()).Scan(&notifications))
+			require.NoError(t, e.pool.QueryRow(e.ctx, `SELECT count(*) FROM billing.notifications WHERE customer_id=$1`, e.payer.UUID()).Scan(&notifications))
 			require.Equal(t, initialNotifications+1, notifications)
 			require.Len(t, e.gateway.sentOrderIDs(), 1, "the parsed refusal replays locally without another provider charge")
 		})
@@ -156,7 +156,7 @@ func TestCollectionCompletionRejectsNonExecutionUnderItsTransactionLock(t *testi
 	// Bypass the earlier handler check deliberately: the transaction's terminal
 	// gate itself must reject refusal and roll back all preceding local effects.
 	err = e.db.MerchantTx(e.ctx, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `UPDATE openrails.invoices SET status='voided',amount_due=0,collection_intent_id=NULL WHERE id=$1`, e.invoice); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE billing.invoices SET status='voided',amount_due=0,collection_intent_id=NULL WHERE id=$1`, e.invoice); err != nil {
 			return err
 		}
 		return intents.NewStore(e.db.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, operation, intents.TerminalWithEvidence("not executed", map[string]any{"not_executed": true}), time.Now())
