@@ -175,7 +175,10 @@ func planProduct(ctx context.Context, applier Applier, m *Manifest, group TierGr
 	if err != nil && !errors.Is(err, openrails.ErrNotFound) {
 		return nil, fmt.Errorf("look up catalog product %q: %w", product.Key, err)
 	}
-	if err != nil || existing == nil {
+	if err == nil && existing == nil {
+		return nil, fmt.Errorf("look up catalog product %q returned no result", product.Key)
+	}
+	if err != nil {
 		// Only an absent product authorizes a create plan. A failed read does
 		// not establish absence and must not produce a successful plan.
 		pp.Action = ProductCreate

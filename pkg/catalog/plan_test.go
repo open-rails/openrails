@@ -575,9 +575,12 @@ func (a productLookupFailure) GetProductByKey(context.Context, string) (*billing
 	return nil, a.err
 }
 func TestPlanPropagatesOperationalProductLookupFailure(t *testing.T) {
-	for _, cause := range []error{errors.New("database unavailable"), errors.New("provider lookup failed")} {
-		_, err := Plan(context.Background(), productLookupFailure{newFakeApplier(), cause}, loadFrom(t, planManifest))
-		if !errors.Is(err, cause) {
+	for _, cause := range []error{nil, errors.New("database unavailable"), errors.New("provider lookup failed")} {
+		plan, err := Plan(context.Background(), productLookupFailure{newFakeApplier(), cause}, loadFrom(t, planManifest))
+		if err == nil || plan != nil {
+			t.Fatalf("incomplete read became successful create plan: %v", plan)
+		}
+		if cause != nil && !errors.Is(err, cause) {
 			t.Fatalf("operational lookup failure became a create plan: %v", err)
 		}
 		if errors.Is(err, openrails.ErrInvalid) || errors.Is(err, openrails.ErrNotFound) {
