@@ -20,6 +20,7 @@ import (
 	corecp "github.com/open-rails/openrails/internal/controlplane"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/operator"
+	"github.com/open-rails/openrails/internal/providerqualification"
 	"github.com/open-rails/openrails/pkg/billingauth"
 	"github.com/open-rails/openrails/pkg/merchant"
 )
@@ -319,4 +320,22 @@ func (c *ControlPlane) CompletePendingMerchantRetirements(ctx context.Context, l
 // both PSP rows and writes nothing.
 func (c *ControlPlane) PlanProviderAccountCutover(ctx context.Context, id merchant.ID, q ProviderAccountCutoverQuery) (ProviderAccountCutoverReport, error) {
 	return operator.PlanProviderAccountCutover(ctx, c.app, id, q)
+}
+
+// ProviderCutoverQualification identifies external proof for one immutable
+// provider account; it is never inferred from a credential probe.
+type ProviderCutoverQualification = providerqualification.Record
+
+const NMIProviderCutoverContract = providerqualification.NMIContract
+
+var (
+	ErrProviderCutoverQualificationInvalid = providerqualification.ErrInvalid
+	ErrProviderCutoverAccountNotFound      = providerqualification.ErrNotFound
+)
+
+// SetProviderCutoverQualification records external qualification on an existing
+// PSP. Nil revokes. Revocation waits for the local HTTP call to return; it
+// cannot cancel a request already sent. Later dispatches must qualify again.
+func (c *ControlPlane) SetProviderCutoverQualification(ctx context.Context, merchantID merchant.ID, pspID uuid.UUID, qualification *ProviderCutoverQualification) error {
+	return operator.SetProviderCutoverQualification(ctx, c.app, merchantID, pspID, qualification)
 }

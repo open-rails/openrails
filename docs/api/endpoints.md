@@ -135,6 +135,9 @@ scoped to the token's subject — no `:user_id` appears in any path.
 |---|---|---|
 | GET | `/v1/me/subscriptions` | Subscription history as the shared `Subscription` shape (typed ids, `price.unit_amount` string, `scheduled_price`/`scheduled_product`, `card`, `cancel_portal_url`, `access`). Query: `status` (`pending`,`active`,`past_due`,`cancelled`,`all`), `limit`, `offset` |
 | GET | `/v1/me/subscriptions/{id}` | One subscription, same shape (404 if not the caller's); `{id}` is the listed `sub_…` id |
+| POST | `/v1/me/subscriptions/{id}/provider-cutover/preview` | Validate a replacement card on an active NMI account without mutations |
+| POST | `/v1/me/subscriptions/{id}/provider-cutover` | Durable account cutover; Idempotency-Key plus target_payment_method_id and expected source/target PSP IDs |
+| GET | `/v1/me/subscriptions/{id}/provider-cutover` | Read one cutover using idempotency_key; 404 for another customer's subscription |
 | POST | `/v1/me/subscriptions/{id}/cancel` | Cancel. Body `{ "feedback": "..." }` (4-500 chars, required). Returns `202 { "status": "queued" }` on EVERY rail — the cancel is recorded locally and the remote cancel executes as a durable intent (CCBill included; the old portal-only 422 is retired) |
 | POST | `/v1/me/subscriptions/{id}/resume` | Resume a cancelled subscription on a reversible rail before period end. `202 { "status": "queued" }`; 400 with a specific reason otherwise |
 | POST | `/v1/me/subscriptions/{id}/change-tier` | Unified upgrade/downgrade. Body `{ "price_id": "..." }` (same tier group). See below |
@@ -365,6 +368,9 @@ Full request and state-transition details are in
 | GET | `/v1/merchant/reprices/batches` | `merchant:subscriptions:read` | Bulk reprice batches for a price key |
 | GET | `/v1/merchant/reprices/{id}` | `merchant:subscriptions:read` | One reprice |
 | POST | `/v1/merchant/reprices/{id}/cancel` | `merchant:subscriptions:update` | Cancel a pending reprice |
+| POST | `/v1/merchant/subscriptions/{id}/provider-cutover/preview` | `merchant:subscriptions:read` | Validate per-user account cutover |
+| POST | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:update` | Execute or resume the original durable cutover |
+| GET | `/v1/merchant/subscriptions/{id}/provider-cutover` | `merchant:subscriptions:read` | Read cutover by idempotency_key |
 | POST | `/v1/merchant/plan-migrations` | `merchant:subscriptions:update` | Cross-product bulk plan retirement (plan A → plan B) |
 | POST | `/v1/merchant/plan-migrations/preview` | `merchant:subscriptions:read` | Dry-run preview |
 | GET | `/v1/merchant/plan-migrations/{id}` | `merchant:subscriptions:read` | One migration |
