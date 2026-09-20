@@ -5,7 +5,6 @@ import (
 	"database/sql"
 
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -80,7 +79,10 @@ func RunPostgres(ctx context.Context, cfg *config.Config) error {
 	// (config.DefaultSchema, "openrails"). When a host configures a different
 	// schema, relocate every qualifier before applying — search_path alone can't
 	// move hard-qualified DDL (#471).
-	migrations = rewriteMigrationsSchema(migrations, schema)
+	migrations, err = rewriteMigrationsSchema(migrations, schema)
+	if err != nil {
+		return err
+	}
 
 	// config.MigratekitApp is migratekit's app/tracking key
 	// (public.migrations.app), independent of the schema (#471 renamed it from
@@ -211,36 +213,6 @@ func sortMigrationNames(names []string) {
 		}
 		return names[i] < names[j]
 	})
-}
-
-// schemaWordRe matches the default schema name (config.DefaultSchema) as a whole
-// word. The trailing \b means it does NOT match the unprivileged role name
-// `openrails_app` (the underscore is a word character, so there is no boundary),
-// while it DOES match both the `openrails.<table>` qualifier (the dot is a
-// boundary) and bare schema-DDL references (`CREATE SCHEMA openrails`,
-// `GRANT ... ON SCHEMA openrails`, `ALTER DEFAULT PRIVILEGES IN SCHEMA openrails`).
-var schemaWordRe = regexp.MustCompile(`\b` + regexp.QuoteMeta(config.DefaultSchema) + `\b`)
-
-// rewriteMigrationsSchema relocates every reference to the default schema in the
-// migration DDL to the configured schema — both the hard-qualified
-// `openrails.<table>` prefixes and the bare schema-name references in CREATE
-// SCHEMA / GRANT ... ON SCHEMA / ALTER DEFAULT PRIVILEGES IN SCHEMA. It is a
-// no-op when the schema is empty or already the default, so the common path pays
-// nothing and runs the SQL verbatim. schema is a pre-validated SQL identifier
-// (config.validateSchema), so the substitution can't inject anything unsafe.
-//
-// Prose/comments in the DDL say "OpenRails" (capitalized) or "billing-namespace"
-// (the domain noun), neither of which the lowercase whole-word match touches.
-func rewriteMigrationsSchema(migrations []migratekit.Migration, schema string) []migratekit.Migration {
-	if schema == "" || schema == config.DefaultSchema {
-		return migrations
-	}
-	out := make([]migratekit.Migration, len(migrations))
-	for i, mig := range migrations {
-		mig.Content = schemaWordRe.ReplaceAllString(mig.Content, schema)
-		out[i] = mig
-	}
-	return out
 }
 
 // ensurePostgresBootstrap creates the OpenRails schema (configurable via
