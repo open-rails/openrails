@@ -36,6 +36,7 @@ type treasuryWorkflow struct {
 	surface    *integrationharness.Surface
 	merchant   integrationharness.OwnedMerchant
 	client     *openrails.Client
+	embedded   *openrails.Client
 	issuer     *integrationharness.DelegatedIssuer
 	hostURL    string
 	hostPolicy *sync.Map
@@ -57,6 +58,8 @@ func newTreasuryWorkflow(t *testing.T) treasuryWorkflow {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, host.Close(context.Background())) })
 	app.HostGraph(host).Runtime.SetConfiguredMerchant(owned.MerchantID)
+	embeddedClient, err := host.Client(openrails.WithCurrency("USD"))
+	require.NoError(t, err)
 	policy := new(sync.Map)
 	bridge, err := orauthkit.NewDelegatedAuthenticator(embcp.Get(surface.App()).AuthService().Verifier(), owned.MerchantID.String(),
 		orauthkit.WithMerchantSlug(owned.MerchantSlug),
@@ -74,7 +77,7 @@ func newTreasuryWorkflow(t *testing.T) treasuryWorkflow {
 	hostServer := httptest.NewServer(handler)
 	t.Cleanup(hostServer.Close)
 	return treasuryWorkflow{
-		hostURL: hostServer.URL, hostPolicy: policy,
+		hostURL: hostServer.URL, hostPolicy: policy, embedded: embeddedClient,
 		surface: surface, merchant: owned,
 		client: surface.Client(openrails.WithAPIKey(owned.APIKey), openrails.WithMerchantID(owned.MerchantID)),
 		issuer: surface.RegisterDelegatedIssuer("treasury-issuer-"+uuid.NewString()[:8], owned.MerchantSlug),
@@ -144,6 +147,9 @@ func TestTreasuryAuthorityAndMoneyWorkflow(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, status, string(raw), "the bridge must retain the verified subject")
 	t.Run("payer_scopes", func(t *testing.T) { checkTreasuryScopes(t, f) })
 	t.Run("admin_grants", func(t *testing.T) { checkTreasuryAdminGrant(t, f) })
+	t.Run("money", func(t *testing.T) { checkTreasuryMoney(t, f) })
+	t.Run("deposit_terms", func(t *testing.T) { checkTreasuryDepositTerms(t, f) })
+	t.Run("usage_invoice", func(t *testing.T) { checkTreasuryUsageInvoice(t, f) })
 }
 
 func workflowObject(t *testing.T, raw []byte) map[string]any {
