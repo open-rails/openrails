@@ -164,3 +164,34 @@ func TestQualifiedCollectionReceiptCustody(t *testing.T) {
 	require.Equal(t, retained.TransactionID(), same.TransactionID(), "terminal equal receipt replays")
 	require.Len(t, e.gateway.sentOrderIDs(), 1)
 }
+
+// This drives custody through the real verifier rather than calling the store:
+// deleting the handler's custody write must strand the second pass offline.
+func TestInvoiceCollectionRetainsReceiptBeforeLocalFailure(t *testing.T) {
+	e := nmiReceiptScenario(t)
+	e.gateway.orderSale(e.op.String(), "before-local-write")
+	e.gateway.payment("before-local-write", e.vault, "0.05", e.currency)
+	_, err := e.pool.Exec(e.ctx, `UPDATE openrails.invoices SET status='voided',amount_due=0 WHERE id=$1`, e.invoice)
+	require.NoError(t, err)
+	dueNow(t, e.pool, e.ctx, e.op)
+	_, err = e.runner.RunVerifyOnce(e.ctx)
+	require.NoError(t, err)
+	operation := latestCollectionIntent(t, e.pool, e.ctx, e.invoice)
+	require.Equal(t, intents.StatusUnknownNeedsVerify, operation.Status)
+	receipt, found, err := intents.LoadCollectedReceipt(operation)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "before-local-write", receipt.TransactionID())
+	e.gateway.mu.Lock()
+	e.gateway.saleForOrder = map[string]string{}
+	e.gateway.payments = map[string]map[string]any{}
+	e.gateway.mu.Unlock()
+	_, err = e.pool.Exec(e.ctx, `UPDATE openrails.invoices SET status='open',amount_due=50000 WHERE id=$1`, e.invoice)
+	require.NoError(t, err)
+	dueNow(t, e.pool, e.ctx, e.op)
+	_, err = e.runner.RunVerifyOnce(e.ctx)
+	require.NoError(t, err)
+	require.Equal(t, intents.StatusSucceeded, latestCollectionIntent(t, e.pool, e.ctx, e.invoice).Status)
+	e.requireSettledOnce(t)
+	require.Len(t, e.gateway.sentOrderIDs(), 1)
+}

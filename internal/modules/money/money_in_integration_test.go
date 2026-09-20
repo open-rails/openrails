@@ -4,6 +4,7 @@ package money_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -584,28 +585,46 @@ func TestChargeOutstanding_WithNMIAdapter_SettlesInvoiceThroughGateway(t *testin
 	require.NoError(t, err)
 
 	seen := make(chan string, 1)
+	chargedOrder := ""
 	// #297: the invoice collection is a merchant-initiated stored-credential
 	// charge on classic Direct Post.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			require.Equal(t, "test-security-key", r.Header.Get("Authorization"))
+			require.Equal(t, "/payments/txn_nmi_invoice_settled", r.URL.Path)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "txn_nmi_invoice_settled", "object": "transaction", "response": "1", "amount": "0.05", "currency": "USD", "customer_vault_id": "vault_" + pm.String(), "actions": []map[string]any{{"type": "sale", "amount": "0.05", "success": true}}})
+			return
+		}
+		require.NoError(t, r.ParseForm())
+		if r.Form.Get("order_id") != "" {
+			require.Equal(t, chargedOrder, r.Form.Get("order_id"))
+			fmt.Fprintf(w, `<nm_response><transaction><transaction_id>txn_nmi_invoice_settled</transaction_id><order_id>%s</order_id><action><action_type>sale</action_type><success>1</success></action></transaction></nm_response>`, chargedOrder)
+			return
+		}
+
 		require.NoError(t, r.ParseForm())
 		require.Equal(t, "sale", r.Form.Get("type"))
 		require.Equal(t, "vault_"+pm.String(), r.Form.Get("customer_vault_id"))
 		require.Equal(t, "0.05", r.Form.Get("amount"))
 		require.Equal(t, "merchant", r.Form.Get("initiated_by"))
 		require.Equal(t, "used", r.Form.Get("stored_credential_indicator"))
-		seen <- r.Form.Get("orderid")
+		chargedOrder = r.Form.Get("orderid")
+		seen <- chargedOrder
 		_, _ = w.Write([]byte("response=1&responsetext=SUCCESS&authcode=OK&transactionid=txn_nmi_invoice_settled&response_code=100"))
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := nmi.NewClient(string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
+	instrument := frozenInstrumentOf(t, pool, ctx, pm)
+	client, err := nmi.NewAccountClient(dbtest.TestMerchantID.UUID(), instrument.PSPID, string(models.RailNMI), &config.NMIProviderSettings{SecurityKey: "test-security-key"}, false)
 	require.NoError(t, err)
 	client.DirectPostURL = server.URL
+	client.QueryURL = server.URL
+	client.V5BaseURL = server.URL
 	ch := money.NewScopedCharger(dbi, money.NewNMICollectionAdapters(map[string]*nmi.NMIClient{
 		string(models.RailNMI): client,
 	}))
 
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, standaloneCollectionReader{nmi: receiptFixtureNMI{client: client, request: money.ChargeRequest{MerchantID: dbtest.TestMerchantID.UUID(), Instrument: instrument}}}), 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	select {
@@ -655,9 +674,16 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer sk_test_invoice", r.Header.Get("Authorization"))
 		require.NoError(t, r.ParseForm())
-		calls = append(calls, r.URL.Path)
-		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if r.Method != http.MethodGet {
+			calls = append(calls, r.URL.Path)
+			keys = append(keys, r.Header.Get("Idempotency-Key"))
+		}
 		switch r.URL.Path {
+		case "/v1/invoices/in_openrails_invoice":
+			_, _ = w.Write([]byte(`{"id":"in_openrails_invoice","status":"paid","amount_paid":5,"currency":"usd","customer":"cus_openrails_invoice","payment_intent":"pi_openrails_invoice","charge":"ch_openrails_invoice","metadata":{"openrails_collection_key":"` + collectionKey + `"}}`))
+		case "/v1/charges/ch_openrails_invoice":
+			_, _ = w.Write([]byte(`{"id":"ch_openrails_invoice","status":"succeeded","amount_captured":5,"currency":"usd","customer":"cus_openrails_invoice","payment_method":"pm_openrails_invoice","payment_intent":"pi_openrails_invoice","paid":true,"captured":true}`))
+
 		case "/v1/invoiceitems":
 			require.Equal(t, "cus_openrails_invoice", r.Form.Get("customer"))
 			require.Equal(t, "in_openrails_invoice", r.Form.Get("invoice"))
@@ -686,18 +712,14 @@ func TestChargeOutstanding_WithStripeAdapter_SettlesInvoiceThroughStripeServer(t
 	}))
 	t.Cleanup(server.Close)
 
-	stripeSvc := &subscriptions.StripeService{
-		Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull},
-		Rails: railresolve.FixedSet{
-			"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_invoice"}},
-		},
-	}
+	instrument := frozenInstrumentOf(t, pool, ctx, pm)
+	stripeSvc := subscriptions.NewAccountStripeService(&config.Config{ProviderWriteMode: config.ProviderWriteModeFull}, dbtest.TestMerchantID.UUID(), instrument.PSPID, "fixture", "sk_test_invoice")
 	stripeSvc.SetBaseURLForTest(server.URL)
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailStripe): money.NewStripeCollectionAdapter(dbi, stripeSvc),
 	})
 
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, standaloneCollectionReader{stripe: stripeSvc})
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
@@ -858,7 +880,7 @@ func TestChargeOutstanding_WithScopedCharger_SettlesInvoiceAndRecordsRail(t *tes
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailNMI): adapter,
 	})
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, adapter)
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
@@ -913,7 +935,7 @@ func TestChargeOutstanding_WithScopedCharger_DeclineRecordsFailureMetadata(t *te
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailNMI): adapter,
 	})
-	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, nil), 0)
+	n, err := svc.ChargeOutstanding(ctx, collectionRunner(dbi, ch, adapter), 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
 	require.Len(t, adapter.charges, 1)
@@ -957,7 +979,7 @@ func TestChargeOutstanding_WithScopedCharger_PrepareFailureParksWithoutProviderT
 	ch := money.NewScopedCharger(dbi, map[string]money.CollectionAdapter{
 		string(models.RailNMI): adapter,
 	})
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, adapter)
 	n, err := svc.ChargeOutstanding(ctx, runner, 0)
 	require.NoError(t, err)
 	require.Equal(t, 0, n)
@@ -1031,7 +1053,7 @@ func TestInvoiceWorker_UsesMerchantInvoiceThresholds(t *testing.T) {
 		}
 		return n
 	}
-	runner := collectionRunner(dbi, ch, nil)
+	runner := collectionRunner(dbi, ch, adapter)
 	err = riverjobs.InvoiceWorker{DB: dbi, Money: svc, Intents: runner}.Work(ctx, &river.Job[riverjobs.InvoiceArgs]{
 		Args: riverjobs.InvoiceArgs{Collect: true},
 	})

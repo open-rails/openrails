@@ -97,7 +97,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if err := req.Instrument.Validate(); err != nil {
 		return nil, err
 	}
-	if err := req.Instrument.Matches(method); err != nil {
+	if err := req.Instrument.Matches(method, charge.AgreementUnscheduled); err != nil {
 		return nil, err
 	}
 

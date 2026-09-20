@@ -131,7 +131,7 @@ func (r CollectedReceipt) Validate(in gen.OpenrailsRailIntent) error {
 		if err := facts.MatchesOperation(in.ID.String(), p.AmountMinor, p.Currency); err != nil {
 			return err
 		}
-		if !facts.ChargePaid || !facts.ChargeCaptured || facts.ChargeStatus != "succeeded" || facts.ChargedAmount != int64(p.AmountMinor) || facts.ChargeCurrency != p.Currency || facts.ChargeCustomerID != p.ProviderCustomerRef {
+		if facts.ChargeID == "" || !facts.ChargePaid || !facts.ChargeCaptured || facts.ChargeStatus != "succeeded" || facts.ChargedAmount != int64(p.AmountMinor) || facts.ChargeCurrency != p.Currency || facts.ChargeCustomerID != p.ProviderCustomerRef {
 			return errors.New("Stripe captured charge does not match frozen collection")
 		}
 		if facts.InvoiceID == "" || facts.CustomerID != p.ProviderCustomerRef || facts.PaymentMethodID != p.Instrument.RailMethodRef {
@@ -157,11 +157,7 @@ func (r CollectedReceipt) TransactionID() string {
 		return r.data.NMI.TransactionID
 	}
 	if s := r.data.Stripe; s != nil {
-		for _, id := range []string{s.ChargeID, s.PaymentIntentID, s.InvoiceID} {
-			if id != "" {
-				return id
-			}
-		}
+		return s.ChargeID
 	}
 	return ""
 }
@@ -238,6 +234,20 @@ func (s *Store) RetainCollectedReceipt(ctx context.Context, in gen.OpenrailsRail
 		return CollectedReceipt{}, err
 	}
 	if result.RowsAffected() != 1 {
+		terminal, err := s.Get(ctx, in.ID)
+		if err != nil {
+			return CollectedReceipt{}, err
+		}
+		if terminal.Status == StatusSucceeded {
+			same, found, err := LoadCollectedReceipt(terminal)
+			if err != nil {
+				return CollectedReceipt{}, err
+			}
+			sameRaw, _ := json.Marshal(same.data)
+			if found && bytes.Equal(sameRaw, raw) {
+				return same, same.Validate(in)
+			}
+		}
 		return CollectedReceipt{}, errors.New("receipt custody refused stale, terminal, changed or conflicting operation")
 	}
 	persisted, err := s.Get(ctx, in.ID)

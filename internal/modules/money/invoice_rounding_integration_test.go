@@ -27,6 +27,7 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 		failSettlement                 bool
 	}{
 		{"exact", "USD", "3.00", 3_000_000, 3_000_000, 0, false},
+		{"fractional yen", "JPY", "4.00", 30_001, 40_000, 9_999, false},
 		{"fractional dollar", "USD", "3.01", 3_000_001, 3_010_000, 9_999, false},
 		{"fractional amount with rollback", "USD", "4.01", 4_004_999, 4_010_000, 5_001, true},
 		{"rounding overflow", "USD", "", math.MaxInt64, 0, 0, false},
@@ -59,6 +60,12 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 			require.NoError(t, err)
 			invoice, err := svc.FinalizeInvoice(ctx, payer, tc.currency, time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 			require.NoError(t, err)
+			t.Cleanup(func() {
+				// Fleet-worker tests share this package database. The deliberate overflow
+				// refusal is not scheduled work for a later, unrelated test's worker.
+				_, err := pool.Exec(context.WithoutCancel(ctx), `UPDATE openrails.invoices SET collection_method='send_invoice' WHERE merchant_id=$1 AND id=$2`, mid.UUID(), invoice.ID)
+				require.NoError(t, err)
+			})
 			gateway, server := newFakeNMIReceiptGateway(t)
 			plane := &money.MerchantCollectionAdapterBuilder{Config: storeCollectionTestConfig(), DB: database, MerchantsFn: func() *merchants.Service { return msvc },
 				Endpoints: money.CollectionEndpoints{NMIDirectPostURL: server.URL, NMIQueryURL: server.URL, NMIV5BaseURL: server.URL}}
@@ -78,6 +85,11 @@ func TestInvoiceCollectionRoundingConservesCustomerFunds(t *testing.T) {
 				})
 			}
 			n, err := svc.ChargeOutstanding(ctx, runner, 0)
+			if tc.charged != 0 {
+				require.Equal(t, []string{tc.providerAmount}, gateway.saleAmounts)
+				require.Equal(t, []string{tc.currency}, gateway.saleCurrencies)
+			}
+
 			if tc.charged == 0 {
 				require.ErrorContains(t, err, "rounded charge is not representable")
 				require.Zero(t, n)

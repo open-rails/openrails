@@ -101,10 +101,14 @@ func SaleForm(req charge.Request, src Source, gw GatewayConfig, cryptogram *basi
 		return nil, err
 	}
 
+	amount, err := nmi.WireAmount(req.AmountMinor, currency)
+	if err != nil {
+		return nil, err
+	}
 	values := url.Values{
 		"type":         {"sale"},
 		"security_key": {gw.SecurityKey},
-		"amount":       {nmi.WireAmount(req.AmountMinor)},
+		"amount":       {amount},
 		"currency":     {currency},
 	}
 	if desc := strings.TrimSpace(req.Description); desc != "" {
