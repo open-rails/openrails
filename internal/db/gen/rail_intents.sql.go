@@ -1233,6 +1233,87 @@ func (q *Queries) RenewRailIntentClaim(ctx context.Context, arg RenewRailIntentC
 	return result.RowsAffected(), nil
 }
 
+const retainRailIntentCollectedReceipt = `-- name: RetainRailIntentCollectedReceipt :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
+        || jsonb_build_object('qualified_receipt', $1::jsonb),
+    updated_at = now()
+WHERE id = $2::uuid
+  AND merchant_id = $3::uuid
+  AND psp_id = $4::uuid
+  AND intent_type = $5::text
+  AND payload = $6::jsonb
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')
+       OR result_evidence->'qualified_receipt' = $1::jsonb)
+`
+
+type RetainRailIntentCollectedReceiptParams struct {
+	Receipt    []byte
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	IntentType string
+	Payload    []byte
+}
+
+// Custody binds immutable provider facts to the accepted operation. A repeated
+// identical receipt succeeds; a conflicting receipt or terminal row never changes.
+func (q *Queries) RetainRailIntentCollectedReceipt(ctx context.Context, arg RetainRailIntentCollectedReceiptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retainRailIntentCollectedReceipt,
+		arg.Receipt,
+		arg.ID,
+		arg.MerchantID,
+		arg.PspID,
+		arg.IntentType,
+		arg.Payload,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const retainRailIntentCollectionCandidate = `-- name: RetainRailIntentCollectionCandidate :execrows
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
+        || jsonb_build_object('collection_candidate', $1::jsonb),
+    updated_at = now()
+WHERE id = $2::uuid
+  AND merchant_id = $3::uuid
+  AND psp_id = $4::uuid
+  AND intent_type = $5::text
+  AND payload = $6::jsonb
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'collection_candidate')
+       OR result_evidence->'collection_candidate' = $1::jsonb)
+`
+
+type RetainRailIntentCollectionCandidateParams struct {
+	Candidate  []byte
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	PspID      uuid.UUID
+	IntentType string
+	Payload    []byte
+}
+
+// A possible provider reference is a candidate only; it never proves payment.
+func (q *Queries) RetainRailIntentCollectionCandidate(ctx context.Context, arg RetainRailIntentCollectionCandidateParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retainRailIntentCollectionCandidate,
+		arg.Candidate,
+		arg.ID,
+		arg.MerchantID,
+		arg.PspID,
+		arg.IntentType,
+		arg.Payload,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const supersedeRailIntentsBySubject = `-- name: SupersedeRailIntentsBySubject :execrows
 
 UPDATE openrails.rail_intents

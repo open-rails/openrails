@@ -437,3 +437,34 @@ SELECT * FROM openrails.rail_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
   AND intent_type IN ('nmi_upgrade', 'stripe_tier_change')
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
+
+-- name: RetainRailIntentCollectedReceipt :execrows
+-- Custody binds immutable provider facts to the accepted operation. A repeated
+-- identical receipt succeeds; a conflicting receipt or terminal row never changes.
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
+        || jsonb_build_object('qualified_receipt', sqlc.arg(receipt)::jsonb),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid
+  AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND psp_id = sqlc.arg(psp_id)::uuid
+  AND intent_type = sqlc.arg(intent_type)::text
+  AND payload = sqlc.arg(payload)::jsonb
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'qualified_receipt')
+       OR result_evidence->'qualified_receipt' = sqlc.arg(receipt)::jsonb);
+
+-- name: RetainRailIntentCollectionCandidate :execrows
+-- A possible provider reference is a candidate only; it never proves payment.
+UPDATE openrails.rail_intents
+SET result_evidence = COALESCE(result_evidence, '{}'::jsonb)
+        || jsonb_build_object('collection_candidate', sqlc.arg(candidate)::jsonb),
+    updated_at = now()
+WHERE id = sqlc.arg(id)::uuid
+  AND merchant_id = sqlc.arg(merchant_id)::uuid
+  AND psp_id = sqlc.arg(psp_id)::uuid
+  AND intent_type = sqlc.arg(intent_type)::text
+  AND payload = sqlc.arg(payload)::jsonb
+  AND status IN ('in_flight', 'unknown_needs_verify')
+  AND (NOT (COALESCE(result_evidence, '{}'::jsonb) ? 'collection_candidate')
+       OR result_evidence->'collection_candidate' = sqlc.arg(candidate)::jsonb);

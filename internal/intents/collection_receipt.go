@@ -227,16 +227,11 @@ func (s *Store) RetainCollectedReceipt(ctx context.Context, in gen.OpenrailsRail
 		return retained, retained.Validate(in)
 	}
 
-	result, err := s.db.Qx(ctx).Exec(ctx, `UPDATE openrails.rail_intents
- SET result_evidence=coalesce(result_evidence,'{}'::jsonb)||jsonb_build_object('qualified_receipt',$2::jsonb),updated_at=now()
- WHERE id=$1 AND merchant_id=$3 AND psp_id=$4 AND intent_type=$5
- AND payload=$6::jsonb
- AND status IN ('in_flight','unknown_needs_verify')
- AND (NOT (coalesce(result_evidence,'{}'::jsonb) ? 'qualified_receipt') OR result_evidence->'qualified_receipt'=$2::jsonb)`, in.ID, raw, in.MerchantID, in.PspID, in.IntentType, in.Payload)
+	result, err := s.db.Gen(ctx).RetainRailIntentCollectedReceipt(ctx, gen.RetainRailIntentCollectedReceiptParams{ID: in.ID, MerchantID: in.MerchantID, PspID: *in.PspID, IntentType: in.IntentType, Payload: in.Payload, Receipt: raw})
 	if err != nil {
 		return CollectedReceipt{}, err
 	}
-	if result.RowsAffected() != 1 {
+	if result != 1 {
 		terminal, err := s.Get(ctx, in.ID)
 		if err != nil {
 			return CollectedReceipt{}, err
@@ -292,15 +287,11 @@ func (s *Store) RetainCollectionCandidate(ctx context.Context, in gen.OpenrailsR
 	}
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
-	result, err := s.db.Qx(ctx).Exec(ctx, `UPDATE openrails.rail_intents
- SET result_evidence=coalesce(result_evidence,'{}'::jsonb)||jsonb_build_object('collection_candidate',$2::jsonb),updated_at=now()
- WHERE id=$1 AND merchant_id=$3 AND psp_id=$4 AND intent_type=$5 AND payload=$6::jsonb
- AND status IN ('in_flight','unknown_needs_verify')
- AND (NOT(coalesce(result_evidence,'{}'::jsonb) ? 'collection_candidate') OR result_evidence->'collection_candidate'=$2::jsonb)`, in.ID, raw, in.MerchantID, in.PspID, in.IntentType, in.Payload)
+	result, err := s.db.Gen(ctx).RetainRailIntentCollectionCandidate(ctx, gen.RetainRailIntentCollectionCandidateParams{ID: in.ID, MerchantID: in.MerchantID, PspID: *in.PspID, IntentType: in.IntentType, Payload: in.Payload, Candidate: raw})
 	if err != nil {
 		return err
 	}
-	if result.RowsAffected() != 1 {
+	if result != 1 {
 		return errors.New("candidate custody refused stale or conflicting operation")
 	}
 	return nil
