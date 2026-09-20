@@ -41,9 +41,9 @@ type ClaimDueRailIntentsParams struct {
 	BatchSize  int64
 }
 
-// =====================================================================
+// ============================================================================
 // Executor / verifier claims (single-executor lease, SKIP LOCKED)
-// =====================================================================
+// ============================================================================
 // Claims due executable intents: pending/failed_retryable whose
 // next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
 // (crashed executor; per-type semantics make the reclaim safe). Never claims
@@ -351,9 +351,9 @@ type CountDestructiveIntentsByActorSinceParams struct {
 	Since       time.Time
 }
 
-// =====================================================================
+// ============================================================================
 // #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
-// =====================================================================
+// ============================================================================
 // The durable rail_intents ledger IS the counter (#674): every destructive
 // user/admin op posts a row BEFORE it executes, so a rolling-hour COUNT over
 // created_at is the burst gauge. Counts by CREATION (created_at), not execution:
@@ -430,9 +430,9 @@ type CountDestructiveRailIntentsExecutedSinceParams struct {
 	Since       time.Time
 }
 
-// =====================================================================
+// ============================================================================
 // #679 destructive-volume circuit breaker
-// =====================================================================
+// ============================================================================
 // Destructive intents that REACHED the provider in the rolling window:
 // succeeded rows count by executed_at; unresolved attempt outcomes
 // (unknown_needs_verify / failed_*) count by their last transition. in_flight
@@ -558,9 +558,9 @@ type EnqueueRailIntentParams struct {
 // cross-merchant: there is no privileged pool, so they fan out over the
 // merchants a 0022 SECURITY DEFINER work queue names and run each pass inside
 // that merchant's own pinned scope (or#862).
-// =====================================================================
+// ============================================================================
 // Enqueue (effectively-once per logical intent)
-// =====================================================================
+// ============================================================================
 // Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
 // status:
 //
@@ -715,9 +715,9 @@ const getRailIntent = `-- name: GetRailIntent :one
 SELECT id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id, payload, idempotency_key, status, attempts, next_attempt_at, claimed_until, origin, origin_reason, actor, last_failure_reason, expires_at, result_evidence, created_at, executed_at, updated_at, psp_id, destructive_run_id, destructive_run_class, custodian_id FROM openrails.rail_intents WHERE id = $1
 `
 
-// =====================================================================
+// ============================================================================
 // Reads
-// =====================================================================
+// ============================================================================
 func (q *Queries) GetRailIntent(ctx context.Context, id uuid.UUID) (OpenrailsRailIntent, error) {
 	row := q.db.QueryRow(ctx, getRailIntent, id)
 	var i OpenrailsRailIntent
@@ -859,9 +859,9 @@ type ListDueRailIntentMerchantsParams struct {
 	MerchantLimit int32
 }
 
-// =====================================================================
+// ============================================================================
 // or#862: deployment-wide executor / verifier fan-out
-// =====================================================================
+// ============================================================================
 // CROSS-MERCHANT: the merchants the executor pass must visit, through migration
 // 0022's SECURITY DEFINER reader. The executor used to run ClaimDue on a bare
 // River job context; rail_intents FORCEs RLS, so with no app.merchant_id the
@@ -1008,9 +1008,9 @@ type ListStuckRailIntentsParams struct {
 	VerifyCutoff time.Time
 }
 
-// =====================================================================
+// ============================================================================
 // Reconcile (#107 PS-10): stuck-intent detection
-// =====================================================================
+// ============================================================================
 // Non-terminal intents that have sat in the ledger beyond the reconcile
 // engine's hardcoded stuck thresholds: pending/failed_retryable older than the
 // action cutoff (24h), in_flight/unknown_needs_verify older than the verify
@@ -1180,9 +1180,9 @@ type MarkRailIntentSucceededParams struct {
 	ID             uuid.UUID
 }
 
-// =====================================================================
+// ============================================================================
 // Outcome transitions (always release the lease)
-// =====================================================================
+// ============================================================================
 func (q *Queries) MarkRailIntentSucceeded(ctx context.Context, arg MarkRailIntentSucceededParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markRailIntentSucceeded, arg.Now, arg.ResultEvidence, arg.ID)
 	if err != nil {
@@ -1419,9 +1419,9 @@ type SupersedeRailIntentsBySubjectParams struct {
 	SubscriptionID *uuid.UUID
 }
 
-// =====================================================================
+// ============================================================================
 // Supersede-by-subject + relevance-window expiry
-// =====================================================================
+// ============================================================================
 // Supersedes every live intent of one type for one subscription (e.g. a
 // resume superseding the pending deferred delete). in_flight rows are left to
 // their executor: its per-type relevance check re-verifies before acting, so
