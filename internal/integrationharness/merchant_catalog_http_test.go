@@ -945,6 +945,9 @@ func (a httpCatalogApplier) GetProductByKey(_ context.Context, key string) (*bil
 	if status == http.StatusNotFound {
 		return nil, fmt.Errorf("product not found: %s", key)
 	}
+	if status == http.StatusNotFound {
+		return nil, openrails.ErrNotFound
+	}
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("get product by key: status %d: %s", status, string(body))
 	}

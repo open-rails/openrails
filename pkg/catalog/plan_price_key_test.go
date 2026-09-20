@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -24,6 +25,9 @@ products:
 	_, err := Plan(context.Background(), newFakeApplier(), m)
 	if err == nil {
 		t.Fatal("expected a collision error, got nil")
+	}
+	if !errors.Is(err, openrails.ErrInvalid) {
+		t.Fatalf("collision must be a typed input refusal: %v", err)
 	}
 	if !strings.Contains(err.Error(), "ambiguous-monthly") || !strings.Contains(err.Error(), "disambiguate") {
 		t.Fatalf("error should name the colliding key and ask for disambiguation, got: %v", err)
@@ -95,5 +99,21 @@ products:
 	}
 	if got := f.relabeledPrices[pp.Prices[0].ExistingID]; got != "renamed-pro-monthly" {
 		t.Fatalf("SetPriceKey not called with the new key: %+v", f.relabeledPrices)
+	}
+}
+
+func TestPlanRejectsInvalidDurationsAsInput(t *testing.T) {
+	for _, trial := range []bool{false, true} {
+		m := loadFrom(t, planManifest)
+		price := &m.TierGroups[0].Products[0].Prices[0]
+		if trial {
+			price.Trial = &PriceTrial{Duration: "not-a-duration"}
+		} else {
+			price.Duration = "not-a-duration"
+		}
+		_, err := Plan(context.Background(), newFakeApplier(), m)
+		if !errors.Is(err, openrails.ErrInvalid) {
+			t.Fatalf("invalid duration must be caller input: %v", err)
+		}
 	}
 }

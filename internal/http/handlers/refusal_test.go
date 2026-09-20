@@ -71,6 +71,7 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		err   error
 		want  observedRefusal
 	}{
+		{"catalog plan input", writeCatalog, apperr.Invalidf("price key needs disambiguation").WithParam("key"), observedRefusal{400, "invalid_param", "key"}},
 		{"catalog product not found", writeCatalog, billingservice.ErrProductNotFound, observedRefusal{404, "product_not_found", ""}},
 		{"catalog price not found", writeCatalog, billingservice.ErrPriceNotFound, observedRefusal{404, "price_not_found", ""}},
 		{"catalog price key not found", writeCatalog, billingservice.ErrPriceKeyNotFound, observedRefusal{404, "price_key_not_found", ""}},
@@ -120,6 +121,8 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 			for _, err := range []error{
 				errors.New(`ERROR: duplicate key value violates unique constraint "x" (SQLSTATE 23505)`),
 				errors.New("product not found"),
+				errors.New("catalog database private detail"),
+				errors.New("catalog provider private detail"),
 				errors.New("subscription is not active"),
 				errors.New("account_id required and invalid and unknown"),
 				errors.New("money: unknown currency \"XXX\""),
