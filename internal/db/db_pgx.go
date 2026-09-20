@@ -153,7 +153,7 @@ func (d *DB) RunInTx(ctx context.Context, fn func(ctx context.Context, tx pgx.Tx
 		return err
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
-	if err := fn(ctx, tx); err != nil {
+	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -176,7 +176,7 @@ func (d *DB) MerchantTx(ctx context.Context, fn func(ctx context.Context, tx pgx
 	if err := setMerchantLocalGUCPgx(ctx, tx, id); err != nil {
 		return err
 	}
-	if err := fn(ctx, tx); err != nil {
+	if err := fn(transactionContext(ctx), tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -232,7 +232,7 @@ func (d *DB) BindMerchantTx(ctx context.Context, tx pgx.Tx, id merchant.ID) (con
 		}
 	}
 	ctx = merchant.WithID(ctx, id)
-	return ctx, d.NewWithPgxTx(tx), nil
+	return transactionContext(ctx), d.NewWithPgxTx(tx), nil
 }
 
 // lazyMerchantPgxConn is the request's merchant-scoped connection, acquired
