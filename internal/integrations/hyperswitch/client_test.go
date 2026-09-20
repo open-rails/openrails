@@ -58,7 +58,7 @@ func TestCaptureClientBindsTokenOnlyWorkflow(t *testing.T) {
 			if raw.Load() {
 				extra = `,"raw_payment_method_data":{"card":{"card_number":"must-not-consume-raw-data"}}`
 			}
-			_, _ = fmt.Fprintf(w, `{"id":"permanent-method-A","merchant_id":%q,"customer_id":"vendor-customer-A","storage_type":"persistent","payment_method_data":{"card":{"last4_digits":"1111","expiry_month":"12","expiry_year":"2030"}}%s}`, merchant, extra)
+			_, _ = fmt.Fprintf(w, `{"id":"permanent-method-A","merchant_id":%q,"customer_id":"vendor-customer-A","storage_type":"persistent","payment_method_data":{"card":{"last4_digits":"1111","expiry_month":"12","expiry_year":"2030","card_network":"Visa"}}%s}`, merchant, extra)
 		default:
 			t.Errorf("unexpected vendor path %s", r.URL.Path)
 			w.WriteHeader(404)

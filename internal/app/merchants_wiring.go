@@ -81,6 +81,9 @@ func (r *Runtime) ArmMerchantsService(svc *merchants.Service, store merchants.Me
 	if r.AlertService != nil {
 		r.AlertService.SetMerchantSecretStore(svc.Secrets())
 	}
+	if r.CheckoutSessionService != nil {
+		r.CheckoutSessionService.SetMerchantSecretStore(store)
+	}
 	if r.CheckoutService != nil {
 		r.CheckoutService.SetMerchantSecretStore(store)
 		r.CheckoutService.SetPSPSecretResolver(svc)

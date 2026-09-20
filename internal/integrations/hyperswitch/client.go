@@ -7,9 +7,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -19,6 +22,7 @@ var (
 	ErrUnavailable = errors.New("hyperswitch request unavailable or unqualified")
 	ErrUnknown     = errors.New("hyperswitch mutation outcome unknown")
 	ErrBinding     = errors.New("hyperswitch resource binding mismatch")
+	ErrReadOnly    = errors.New("hyperswitch provider writes are disabled")
 )
 
 // Secret is intentionally redacted from fmt/debug output. JSON decoding is
@@ -31,11 +35,13 @@ func (Secret) GoString() string { return "[redacted]" }
 type Config struct {
 	BaseURL, MerchantID, ProfileID string
 	APIKey                         Secret
+	ReadOnly                       bool
 }
 type Client struct {
 	base                  string
 	merchantID, profileID string
 	key                   Secret
+	readOnly              bool
 	http                  *http.Client
 }
 
@@ -46,10 +52,13 @@ func New(cfg Config) (*Client, error) {
 	if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") || cfg.MerchantID == "" || cfg.ProfileID == "" || cfg.APIKey == "" {
 		return nil, ErrBinding
 	}
-	return &Client{base: strings.TrimRight(cfg.BaseURL, "/"), merchantID: cfg.MerchantID, profileID: cfg.ProfileID, key: cfg.APIKey, http: &http.Client{Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
+	return &Client{base: strings.TrimRight(cfg.BaseURL, "/"), merchantID: cfg.MerchantID, profileID: cfg.ProfileID, key: cfg.APIKey, readOnly: cfg.ReadOnly, http: &http.Client{Timeout: 25 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}, nil
 }
 
 func (c *Client) call(ctx context.Context, method, path string, input, output any) error {
+	if c.readOnly && method != http.MethodGet {
+		return ErrReadOnly
+	}
 	var data []byte
 	var err error
 	if input != nil {
@@ -233,10 +242,44 @@ func (c *Client) GetMethod(ctx context.Context, token, customer string) (Method,
 	}
 	var out Method
 	err := c.call(ctx, http.MethodGet, "/v2/payment-methods/"+url.PathEscape(token)+"?fetch_raw_detail=false&force_sync=false", nil, &out)
-	if err == nil && (out.ID == "" || out.MerchantID != c.merchantID || out.CustomerID != customer || out.StorageType != "persistent" || out.Data.Card == nil) {
+	if err == nil && (!safeIdentifier(out.ID) || out.MerchantID != c.merchantID || out.CustomerID != customer || out.StorageType != "persistent" || !out.validMaskedCard()) {
 		err = ErrBinding
 	}
 	return out, err
+}
+
+// Identifiers are opaque; only bounded printable text without card material is
+// allowed to cross this masked metadata boundary.
+func safeIdentifier(value string) bool {
+	if value == "" || len(value) > 256 || strings.TrimSpace(value) != value || cardguard.ContainsPAN(value) {
+		return false
+	}
+	for _, r := range value {
+		if r < 0x21 || r > 0x7e {
+			return false
+		}
+	}
+	return true
+}
+func (m Method) validMaskedCard() bool {
+	card := m.Data.Card
+	if card == nil || len(card.Last4) != 4 || len(card.Month) < 1 || len(card.Month) > 2 || len(card.Year) != 4 {
+		return false
+	}
+	for _, value := range []string{card.Last4, card.Month, card.Year} {
+		for _, r := range value {
+			if r < '0' || r > '9' {
+				return false
+			}
+		}
+	}
+	month, _ := strconv.Atoi(card.Month)
+	year, _ := strconv.Atoi(card.Year)
+	return month >= 1 && month <= 12 && year >= 2000 && safeIdentifier(card.Brand)
+}
+func (m Method) MaskedExpiry() string {
+	month, _ := strconv.Atoi(m.Data.Card.Month)
+	return fmt.Sprintf("%02d/%s", month, m.Data.Card.Year[2:])
 }
 
 // CheckProxyContract refuses stock/missing/disabled proxy deployments before

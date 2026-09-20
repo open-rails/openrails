@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -19,6 +20,7 @@ import (
 )
 
 type checkoutSessionPaymentParams struct {
+	PSPID uuid.UUID `json:"psp_id,omitzero"`
 	// Rail is the PSP the caller wants (the #848 selector). OPTIONAL since
 	// or#288: omitting it hands the choice to the merchant's routing policy.
 	Rail            string `json:"rail,omitempty" binding:"omitempty"`
@@ -46,7 +48,7 @@ type checkoutSessionCreateRequest struct {
 	// solana_tier_change it is optional (cancel uses the subscription's current
 	// price; tier-change uses new_price_id).
 	PriceID        string                       `json:"price_id,omitempty" binding:"omitempty"`
-	Mode           string                       `json:"mode,omitempty" binding:"omitempty,oneof=one_off subscription solana_cancel solana_tier_change"`
+	Mode           string                       `json:"mode,omitempty" binding:"omitempty,oneof=one_off subscription solana_cancel solana_tier_change payment_method"`
 	Payment        checkoutSessionPaymentParams `json:"payment" binding:"required"`
 	Metadata       map[string]string            `json:"metadata,omitempty"`
 	IdempotencyKey string                       `json:"-"`
@@ -69,13 +71,15 @@ type checkoutSessionCreateRequest struct {
 
 type checkoutSessionConfirmRequest struct {
 	Payment struct {
-		Rail      string `json:"rail" binding:"required,oneof=solana"`
-		Signature string `json:"signature,omitempty"`
-		Wallet    string `json:"wallet,omitempty"`
+		Capture   *openrails.CustodianCaptureReference `json:"capture,omitempty"`
+		Rail      string                               `json:"rail,omitempty" binding:"omitempty,oneof=solana nmi"`
+		Signature string                               `json:"signature,omitempty"`
+		Wallet    string                               `json:"wallet,omitempty"`
 	} `json:"payment" binding:"required"`
 }
 
 func CreateCheckoutSession(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	var req checkoutSessionCreateRequest
 	if !r.BindJSON(&req) {
 		return
@@ -92,13 +96,13 @@ func CreateCheckoutSession(r *httprequest.Request) {
 	// The pre-gate checks a NAMED PSP. An omitted selector is the routing
 	// request (or#288) — there is nothing to pre-gate, and routing itself fails
 	// closed when no PSP can serve the price.
-	if strings.TrimSpace(req.Payment.Rail) != "" {
+	if req.Mode != "payment_method" && strings.TrimSpace(req.Payment.Rail) != "" {
 		if err := checkoutRailUsable(r, req.Payment.Rail); err != nil {
 			r.ErrorJSON(http.StatusBadRequest, err.Error())
 			return
 		}
 	}
-	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
+	req.IdempotencyKey = r.Header("Idempotency-Key")
 	e2eRunID := strings.TrimSpace(r.Header("X-E2E-Run-ID"))
 	if e2eRunID != "" {
 		if req.Metadata == nil {
@@ -108,7 +112,7 @@ func CreateCheckoutSession(r *httprequest.Request) {
 			req.Metadata["e2e_run_id"] = e2eRunID
 		}
 	}
-	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
+	svcReq := &checkout.CheckoutSessionCreateRequest{PriceID: req.PriceID, Mode: req.Mode, SubscriptionID: req.SubscriptionID, NewPriceID: req.NewPriceID, SuccessURL: req.SuccessURL, CancelURL: req.CancelURL, Metadata: req.Metadata, IdempotencyKey: req.IdempotencyKey, Payment: checkout.CheckoutSessionPaymentRequest{PSPID: req.Payment.PSPID, Rail: req.Payment.Rail, PaymentMethodID: req.Payment.PaymentMethodID, PaymentToken: req.Payment.PaymentToken, TokenSymbol: req.Payment.TokenSymbol, Flow: req.Payment.Flow, Wallet: req.Payment.Wallet, Email: req.Payment.Email, NameOnCard: req.Payment.NameOnCard, FirstName: req.Payment.FirstName, LastName: req.Payment.LastName, Address1: req.Payment.Address1, City: req.Payment.City, State: req.Payment.State, Zip: req.Payment.Zip, Country: req.Payment.Country, LastFour: req.Payment.LastFour, CardType: req.Payment.CardType, ExpiryDate: req.Payment.ExpiryDate}}
 	resp, err := r.State.CheckoutSessionService.CreateSession(r.Request.Context(), svcReq, user)
 	if err != nil {
 		log.WithError(err).WithField("request_id", r.RequestID()).Error("Failed to create checkout session")
@@ -151,6 +155,7 @@ func checkoutRailUsable(r *httprequest.Request, rail string) error {
 }
 
 func GetCheckoutSession(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
@@ -180,6 +185,7 @@ func GetCheckoutSession(r *httprequest.Request) {
 }
 
 func ConfirmCheckoutSession(r *httprequest.Request) {
+	r.SetHeader("Cache-Control", "no-store")
 	sessionID := strings.TrimSpace(r.Param("id"))
 	if sessionID == "" {
 		r.ErrorJSON(http.StatusBadRequest, "id is required")
@@ -204,7 +210,7 @@ func ConfirmCheckoutSession(r *httprequest.Request) {
 		return
 	}
 	parsedID := typedParsedID.UUID()
-	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
+	svcReq := &checkout.CheckoutSessionConfirmRequest{Payment: checkout.CheckoutSessionConfirmPayment{Capture: req.Payment.Capture, Rail: req.Payment.Rail, Signature: req.Payment.Signature, Wallet: req.Payment.Wallet}}
 	resp, err := r.State.CheckoutSessionService.ConfirmSession(r.Request.Context(), parsedID, svcReq, user)
 	if err != nil {
 		writeCheckoutSessionError(r, err, checkoutSessionErrorContext{
@@ -272,6 +278,8 @@ func writeCheckoutSessionError(r *httprequest.Request, err error, ectx checkoutS
 		return
 	}
 	switch {
+	case errors.Is(err, checkout.ErrCheckoutCaptureUnavailable):
+		r.APIError(api.NewAPIError(http.StatusServiceUnavailable, api.ErrorTypeAPI, "custodian_capture_unavailable", "custodian capture is unavailable"))
 	case errors.Is(err, checkout.ErrCheckoutSessionNotFound):
 		r.ErrorJSON(http.StatusNotFound, err.Error())
 	case errors.Is(err, checkout.ErrCheckoutSessionForbidden):

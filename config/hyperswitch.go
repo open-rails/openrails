@@ -19,6 +19,9 @@ func validateHyperSwitch(cfg *Config) error {
 	if cfg == nil || cfg.HyperSwitch == nil {
 		return nil
 	}
+	if cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "" {
+		return fmt.Errorf("hyperswitch capture requires encryption.master_key for temporary session custody")
+	}
 	for key, raw := range map[string]string{"api_base_url": cfg.HyperSwitch.APIBaseURL, "sdk_url": cfg.HyperSwitch.SDKURL} {
 		u, err := url.Parse(strings.TrimSpace(raw))
 		if err != nil || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "https" && u.Scheme != "http") {

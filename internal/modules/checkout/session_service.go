@@ -21,9 +21,11 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -128,6 +130,8 @@ type solanaTransactionService interface {
 }
 
 type CheckoutSessionService struct {
+	captureSecrets           merchants.MerchantSecretReader
+	captureEncryption        captureEncryption
 	db                       *db.DB
 	repo                     *CheckoutSessionRepo
 	priceService             *catalog.PriceService
@@ -328,6 +332,9 @@ func (s *CheckoutSessionService) CreateSession(ctx context.Context, req *Checkou
 	}
 	if req == nil {
 		return nil, fmt.Errorf("%w: request is required", ErrCheckoutSessionValidation)
+	}
+	if req.Mode == string(models.CheckoutSessionModePaymentMethod) {
+		return s.createPaymentMethodSetup(ctx, req, user)
 	}
 	if err := s.requireProviderWrites(); err != nil {
 		return nil, err
@@ -577,6 +584,9 @@ func (s *CheckoutSessionService) createSessionWithValidation(ctx context.Context
 	if pspID == uuid.Nil {
 		return nil, fmt.Errorf("%w: no PSP is armed for rail %q", ErrCheckoutSessionValidation, rail)
 	}
+	if req.Payment.PSPID != uuid.Nil && req.Payment.PSPID != pspID {
+		return nil, fmt.Errorf("%w: PSP assertion does not match selected account", ErrCheckoutSessionValidation)
+	}
 	ctx = db.WithPSPID(ctx, pspID)
 	price = priceForCheckoutTarget(price, decision.Target)
 
@@ -730,12 +740,18 @@ func equalOptionalUUID(left, right *uuid.UUID) bool {
 func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.UUID, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
-		return nil, ErrCheckoutSessionNotFound
+		if db.IsNotFound(err) {
+			return nil, ErrCheckoutSessionNotFound
+		}
+		return nil, err
 	}
 	if user == nil || strings.TrimSpace(user.ID) == "" || session.CustomerID.String() != user.ID {
 		return nil, ErrCheckoutSessionForbidden
 	}
 
+	if session.Mode == models.CheckoutSessionModePaymentMethod {
+		return s.renderPaymentMethodSetup(ctx, session)
+	}
 	if s.isExpired(session) && !s.isTerminal(session.Status) {
 		session.Status = models.CheckoutSessionStatusExpired
 		session.UpdatedAt = s.now()
@@ -750,12 +766,18 @@ func (s *CheckoutSessionService) GetSession(ctx context.Context, sessionID uuid.
 func (s *CheckoutSessionService) ConfirmSession(ctx context.Context, sessionID uuid.UUID, req *CheckoutSessionConfirmRequest, user *UserIdentity) (*CheckoutSessionResponse, error) {
 	session, err := s.repo.GetByID(ctx, sessionID)
 	if err != nil {
-		return nil, ErrCheckoutSessionNotFound
+		if db.IsNotFound(err) {
+			return nil, ErrCheckoutSessionNotFound
+		}
+		return nil, err
 	}
 	if user == nil || strings.TrimSpace(user.ID) == "" || session.CustomerID.String() != user.ID {
 		return nil, ErrCheckoutSessionForbidden
 	}
 
+	if session.Mode == models.CheckoutSessionModePaymentMethod {
+		return s.confirmPaymentMethodSetup(ctx, session, req)
+	}
 	if s.isTerminal(session.Status) {
 		if session.Status == models.CheckoutSessionStatusSucceeded {
 			transactionID := ""
@@ -2232,6 +2254,15 @@ func (s *CheckoutSessionService) MarkExpired(ctx context.Context, sessionID uuid
 	}
 	if s.isTerminal(session.Status) {
 		return nil
+	}
+
+	if session.Mode == models.CheckoutSessionModePaymentMethod {
+		owner, err := merchant.Require(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = s.db.Gen(ctx).ExpireCheckoutSessionByID(ctx, gen.ExpireCheckoutSessionByIDParams{ID: sessionID, MerchantID: owner.UUID(), Now: s.now()})
+		return err
 	}
 
 	session.Status = models.CheckoutSessionStatusExpired

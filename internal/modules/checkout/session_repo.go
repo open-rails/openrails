@@ -109,6 +109,14 @@ func (r *CheckoutSessionRepo) GetByID(ctx context.Context, id uuid.UUID) (*model
 }
 
 func (r *CheckoutSessionRepo) Update(ctx context.Context, session *models.CheckoutSession) error {
+	if err := session.ValidateTerms(); err != nil {
+		return err
+	}
+	// Setup bindings and secret erasure have dedicated conditional writes.
+	// Generic checkout progress must not replace accepted capture authority.
+	if session.Mode == models.CheckoutSessionModePaymentMethod {
+		return fmt.Errorf("payment-method setup requires captured completion or expiry")
+	}
 	meta, fields, state, err := checkoutSessionJSONB(session)
 	if err != nil {
 		return err

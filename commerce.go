@@ -159,6 +159,9 @@ type CustodianCaptureReference struct {
 	Token       string    `json:"token"`
 }
 
+func (CustodianCaptureReference) String() string   { return "[private custodian capture reference]" }
+func (CustodianCaptureReference) GoString() string { return "[private custodian capture reference]" }
+
 // CustodianCaptureAction initializes vendor-owned browser fields. Its scoped
 // authorization is private, short lived, and never a shared cache/log value.
 type CustodianCaptureAction struct {
