@@ -90,6 +90,9 @@ products:
 	if pp.Prices[0].Action != PriceUnchanged {
 		t.Fatalf("substance unchanged -> want PriceUnchanged, got %s", pp.Prices[0].Action)
 	}
+	if !plan.HasChanges() {
+		t.Fatal("a key-only relabel must be reported as a change")
+	}
 	if pp.Prices[0].Key != "renamed-pro-monthly" {
 		t.Fatalf("expected relabel signal to the new key, got %q", pp.Prices[0].Key)
 	}

@@ -514,7 +514,7 @@ func (plan *ApplyPlan) HasChanges() bool {
 				return true
 			}
 			for _, price := range pp.Prices {
-				if price.Action != PriceUnchanged || len(price.PSPLinks) > 0 {
+				if price.Action != PriceUnchanged || price.Key != "" || len(price.PSPLinks) > 0 {
 					return true
 				}
 			}
